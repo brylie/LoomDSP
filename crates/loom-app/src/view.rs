@@ -16,11 +16,16 @@ use std::time::Instant;
 
 impl App {
     pub(crate) fn view(&self) -> Element<'_, Message> {
-        let mut canvas = PatchCanvas::new(&self.scene, &self.selection, Message::Canvas)
-            .values(&self.values)
-            .window_drag_line(self.gestures.assign_drag().is_some())
-            .traces(&self.traces)
-            .activity(self.carrying.iter().map(|output| (output.module.0, output.port)))
+        let mut canvas = PatchCanvas::new(&self.session.scene, &self.session.selection, Message::Canvas)
+            .values(&self.session.values)
+            .window_drag_line(self.session.gestures.assign_drag().is_some())
+            .traces(&self.session.traces)
+            .activity(
+                self.session
+                    .carrying
+                    .iter()
+                    .map(|output| (output.module.0, output.port)),
+            )
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
             .interactive(self.input_owner() == crate::input_owner::InputOwner::Canvas)
@@ -29,9 +34,11 @@ impl App {
             .text_field_keys(self.text_focus.any)
             .text_field_keeps_tab(self.tab_moves_between_fields())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
-            .matrix_escape(self.matrix_has_keys() && self.matrix.edit.is_none() && self.matrix.add.is_none())
+            .matrix_escape(
+                self.matrix_has_keys() && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
+            )
             .animate(self.animating)
-            .learn(self.learn.shown());
+            .learn(self.session.learn.shown());
         if let Some(still) = self.still {
             canvas = canvas.still(still);
         }
@@ -53,9 +60,9 @@ impl App {
         // (its camera) in the same place in the widget tree. Tested by
         // `ui_test::tests::the_camera_survives_opening_the_browser`.
         let mut layers = stack![main];
-        if let Some(drag) = self.gestures.assign_drag()
+        if let Some(drag) = self.session.gestures.assign_drag()
             && let Some(at) = drag.at
-            && let Some(port) = self.scene.port(drag.from)
+            && let Some(port) = self.session.scene.port(drag.from)
         {
             layers = layers.push(DragLine::new(drag.start, at, port.colour, drag.zoom));
         }
@@ -153,8 +160,12 @@ impl App {
             button(label("Add module")).on_press(Message::OpenBrowser),
             "Or press A over the canvas, or double-click empty canvas",
         );
-        let hold = button(label(if self.holding { "Release note" } else { "Hold note" }))
-            .on_press_maybe(self.midi.as_ref().map(|_| Message::HoldNote));
+        let hold = button(label(if self.session.engine.holding {
+            "Release note"
+        } else {
+            "Hold note"
+        }))
+        .on_press_maybe(self.session.engine.midi.as_ref().map(|_| Message::HoldNote));
         // Disabled controls say why (visual-system.md, Status messages).
         let hold: Element<'static, Message> = match self.hold_hover() {
             Some(reason) => tip(hold, reason),
@@ -172,14 +183,14 @@ impl App {
             ),
         ];
         let edit = row![
-            self.history_button("Undo", "Undo", self.edits.history.undo_step(), Message::Undo),
-            self.history_button("Redo", "Redo", self.edits.history.redo_step(), Message::Redo),
+            self.history_button("Undo", "Undo", self.session.edits.history.undo_step(), Message::Undo),
+            self.history_button("Redo", "Redo", self.session.edits.history.redo_step(), Message::Redo),
         ];
         let setup = row![
             // Primary only while learning: a mode that is on.
             button(label("MIDI learn"))
                 .on_press(Message::Learn(learn::Message::Toggle))
-                .style(if self.learn.is_on() {
+                .style(if self.session.learn.is_on() {
                     style::primary
                 } else {
                     style::secondary
@@ -212,7 +223,7 @@ impl App {
 
     /// Hold note's hover text: why it is disabled, if it is.
     pub(crate) fn hold_hover(&self) -> Option<&'static str> {
-        self.midi.is_none().then_some(HOLD_DISABLED)
+        self.session.engine.midi.is_none().then_some(HOLD_DISABLED)
     }
 
     /// Recent's hover text, which says why while it is disabled.
@@ -250,9 +261,9 @@ impl App {
     pub(crate) fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
-            &self.patch_info.authors,
-            self.gestures.drop_row(),
-            self.gestures.assign_drag().is_some() && !self.learn.is_on(),
+            &self.session.patch_info.authors,
+            self.session.gestures.drop_row(),
+            self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on(),
         )
     }
 
@@ -271,17 +282,18 @@ impl App {
         let panel = match self.right_tab {
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
-                self.matrix
-                    .model(self.controller.graph(), &self.selection, self.right_tab),
-                &self.matrix,
-                self.controller.graph(),
+                self.session
+                    .matrix
+                    .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
+                &self.session.matrix,
+                self.session.controller.graph(),
             ),
         };
         column![tabs, panel].width(280).height(Length::Fill).into()
     }
 
     pub(crate) fn stats_bar(&self) -> Element<'_, Message> {
-        let graph = self.controller.graph();
+        let graph = self.session.controller.graph();
         let frames = if self.measuring {
             self.meter.stats().summary()
         } else {
@@ -292,7 +304,9 @@ impl App {
         // The snapshot reads the same model, so the two cannot disagree.
         let stats = self.stats_model();
         let audio: Element<'_, Message> = if stats.playing {
-            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(self.stream.load().0)));
+            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(
+                self.session.engine.stream.load().0,
+            )));
             let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
                 .color(severity_colour(self.alerts.dropout_severity(Instant::now())));
             let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
@@ -302,7 +316,7 @@ impl App {
                         .color(severity_colour(alerts::Severity::Warning)),
                 );
             }
-            let engine = self.controller.stats();
+            let engine = self.session.controller.stats();
             if stats.output_silenced {
                 items = items.push(output_warning(
                     "Output: bad samples silenced",
@@ -349,7 +363,7 @@ impl App {
         };
         // A word, so it reads without colour, and it stays whatever the
         // status says: in learn mode screen controls do not change values.
-        let learning = self.learn.is_on().then(|| bar_text("Learning"));
+        let learning = self.session.learn.is_on().then(|| bar_text("Learning"));
         let mut bar = row![].spacing(16).align_y(iced::Alignment::Center);
         if self.dev_tools {
             bar = bar

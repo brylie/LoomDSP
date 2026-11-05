@@ -71,7 +71,7 @@ fn the_chooser_sets_its_target() {
     let _ = app.update(AppMessage::Licence(Message::Answer(Answer::GiveUp)));
     let _ = app.update(AppMessage::Licence(Message::Use));
     assert!(app.overlays.chooser.is_none());
-    assert_eq!(app.document.info().license.as_deref(), Some("CC0-1.0"));
+    assert_eq!(app.session.document.info().license.as_deref(), Some("CC0-1.0"));
     assert!(app.unsaved());
 
     let _ = app.update(AppMessage::PatchInfo(crate::patch_info::Message::ChooseLicence));
@@ -86,7 +86,7 @@ fn the_chooser_sets_its_target() {
     };
     let _ = app.update(AppMessage::Key(escape));
     assert!(app.overlays.chooser.is_none());
-    assert_eq!(app.document.info().license.as_deref(), Some("CC0-1.0"));
+    assert_eq!(app.session.document.info().license.as_deref(), Some("CC0-1.0"));
 
     let _ = app.update(AppMessage::Preferences(crate::settings::Message::ChooseLicence));
     assert_eq!(

@@ -45,7 +45,7 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
     // The same app laid out by the test harness, to find the buttons
     // by their text. A new patch has nothing to undo.
     let mut ui = crate::ui_test::Ui::with_app(app);
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert!(ui.app.session.edits.history.undo_step().is_none());
     let width = crate::WINDOW.width as usize;
     let mut fill = |label: &str| {
         let text = ui.text(label).unwrap_or_else(|| panic!("no `{label}` button"));
@@ -76,7 +76,7 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
     // A checkbox keeps its status the same way: an assignment that is
     // on fills its box, left of its source, with the primary colour.
     let mut app = example_app("modulation.ron");
-    app.selection.insert(4);
+    app.session.selection.insert(4);
     let pixels = render_window(&app).expect("the renderer used above");
     let mut ui = crate::ui_test::Ui::with_app(app);
     let source = ui.text("LFO #5: Out").expect("the LFO assignment's source");
@@ -106,8 +106,8 @@ fn a_window_drag_draws_over_the_inspector() {
         index: 0,
         output: true,
     };
-    assert!(app.scene.port(from).is_some());
-    app.gestures.drag(crate::gestures::AssignDrag {
+    assert!(app.session.scene.port(from).is_some());
+    app.session.gestures.drag(crate::gestures::AssignDrag {
         from,
         start: Point::new(900.0, 400.0),
         at: Some(Point::new(1250.0, 150.0)),
@@ -127,12 +127,13 @@ fn a_window_drag_draws_over_the_inspector() {
 #[test]
 fn pointer_and_center_find_lights_and_meters() {
     let mut app = crate::App::new(crate::tests::app_args());
-    let env = app.controller.add_module("loom.env.envelope").unwrap().0;
-    let meter = app.controller.add_module("loom.display.meter").unwrap().0;
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap().0;
+    let meter = app.session.controller.add_module("loom.display.meter").unwrap().0;
     app.commit();
     let named = |s: String| s.parse::<Named>().unwrap();
-    let bounds = |module: u32, widget: usize| app.scene.module(module).unwrap().widget_bounds(widget).unwrap();
+    let bounds = |module: u32, widget: usize| app.session.scene.module(module).unwrap().widget_bounds(widget).unwrap();
     let light = app
+        .session
         .controller
         .graph()
         .node(ModuleId(env))
@@ -143,11 +144,26 @@ fn pointer_and_center_find_lights_and_meters() {
         .iter()
         .position(|w| w.binds("level"))
         .unwrap();
-    let point = find_point(&app.controller, &app.scene, &named(format!("{env}:level"))).unwrap();
+    let point = find_point(
+        &app.session.controller,
+        &app.session.scene,
+        &named(format!("{env}:level")),
+    )
+    .unwrap();
     assert_eq!(point, bounds(env, light).center());
-    let point = find_point(&app.controller, &app.scene, &named(format!("{meter}:display:out"))).unwrap();
+    let point = find_point(
+        &app.session.controller,
+        &app.session.scene,
+        &named(format!("{meter}:display:out")),
+    )
+    .unwrap();
     assert_eq!(point, bounds(meter, 0).center());
-    let port = find_point(&app.controller, &app.scene, &named(format!("{meter}:out"))).unwrap();
+    let port = find_point(
+        &app.session.controller,
+        &app.session.scene,
+        &named(format!("{meter}:out")),
+    )
+    .unwrap();
     assert_ne!(port, bounds(meter, 0).center(), "without the prefix, the output");
 }
 

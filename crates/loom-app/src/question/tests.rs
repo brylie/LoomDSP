@@ -10,7 +10,7 @@ use iced::keyboard::{Key, Modifiers, key::Named};
 fn changed() -> Ui {
     let mut app = app();
     app.edit(|app| {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
     assert!(app.unsaved());
@@ -30,12 +30,12 @@ fn answer(ui: &mut Ui, answer: Answer) {
 
 /// How many modules the patch has.
 fn modules(app: &App) -> usize {
-    app.controller.graph().nodes().count()
+    app.session.controller.graph().nodes().count()
 }
 
 /// Selects the patch's first module, so that F1 has help to open.
 fn select_a_module(ui: &mut Ui) {
-    let (id, _) = ui.app.controller.graph().nodes().next().expect("a module");
+    let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
     ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(vec![id.0])));
     ui.redraw();
 }
@@ -92,7 +92,7 @@ fn each_way_of_dropping_the_patch_asks() {
     assert_eq!(fake::asked(), Vec::new(), "no picker before the answer");
     answer(&mut ui, Answer::DontSave);
     assert!(matches!(fake::asked().as_slice(), [Asked::Open(_)]));
-    assert_eq!(ui.app.document.file(), Some(other.as_path()));
+    assert_eq!(ui.app.session.document.file(), Some(other.as_path()));
     fake::answer_open(None);
 
     // Closing the window.
@@ -223,7 +223,7 @@ fn save_as_asks_about_replace_and_goes_no_further() {
     answer(&mut ui, Answer::Replace);
     assert!(!ui.app.unsaved());
     assert!(!ui.app.quit);
-    assert_eq!(ui.app.document.file(), Some(dir.0.join("foo.ron").as_path()));
+    assert_eq!(ui.app.session.document.file(), Some(dir.0.join("foo.ron").as_path()));
 }
 
 /// Tab and the arrow keys move the highlight and wrap around, Enter gives it,
@@ -279,15 +279,15 @@ fn a_focused_field_gets_nothing() {
     let mut ui = changed();
     ui.focus(crate::patch_info::TAG_INPUT);
     ui.typewrite("a");
-    let draft = ui.app.patch_info.tag_draft.clone();
+    let draft = ui.app.session.patch_info.tag_draft.clone();
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     ui.typewrite("drone");
-    assert_eq!(ui.app.patch_info.tag_draft, draft);
+    assert_eq!(ui.app.session.patch_info.tag_draft, draft);
     assert!(ui.app.overlays.question.is_some());
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
     assert!(ui.app.overlays.question.is_none(), "Enter answered the question");
-    assert!(ui.app.document.info().tags.is_empty(), "and added no tag");
+    assert!(ui.app.session.document.info().tags.is_empty(), "and added no tag");
 }
 
 /// What would change the patch or open something behind the question does
@@ -297,13 +297,13 @@ fn shortcuts_do_nothing_behind_the_question() {
     let mut ui = changed();
     select_a_module(&mut ui);
     let count = modules(&ui.app);
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     let before = model(&ui);
     ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
     assert_eq!(modules(&ui.app), count, "undo did nothing");
-    assert_eq!(ui.app.edits.history.len(), steps);
+    assert_eq!(ui.app.session.edits.history.len(), steps);
     ui.tap(Key::Character("n".into()), Modifiers::COMMAND);
     assert_eq!(modules(&ui.app), count, "New did nothing");
     ui.tap(Key::Named(Named::Backspace), Modifiers::empty());
@@ -392,7 +392,7 @@ fn rows_still_reach_a_browser_under_the_question() {
     let _ = app.rig.store.save(preferences);
     let _ = app.update(AppMessage::File(FileAction::Browse));
     app.edit(|app| {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
     let _ = app.update(AppMessage::File(FileAction::Close));

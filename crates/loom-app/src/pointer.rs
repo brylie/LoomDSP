@@ -722,7 +722,7 @@ impl App {
         }
         let typed = inner.seen.as_ref()?.typed.as_ref()?;
         let target = crate::targets::name(
-            self.controller.graph(),
+            self.session.controller.graph(),
             crate::targets::Part::Control(typed.module, typed.widget),
         )?;
         Some(TypedFieldState {
@@ -740,7 +740,7 @@ impl App {
             return None;
         }
         let seen = inner.seen.clone().unwrap_or_default();
-        let graph = self.controller.graph();
+        let graph = self.session.controller.graph();
         let part = |part| crate::targets::name(graph, part);
         let port = |p: PortRef| part(crate::targets::Part::Port(p));
         let widget = |module: u32, widget: usize| {
@@ -784,7 +784,7 @@ impl App {
                 target: module.to_string(),
             }),
             Hit::Cable(index) => {
-                let cable = self.scene.cables().get(index)?;
+                let cable = self.session.scene.cables().get(index)?;
                 Some(HoverState::Cable {
                     from: port(PortRef {
                         module: cable.from.0,

@@ -357,15 +357,15 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     drop(ui);
     let (scene, shown) = shown(
         options,
-        &mut app.controller,
-        &app.positions,
-        &app.sizes,
+        &mut app.session.controller,
+        &app.session.positions,
+        &app.session.sizes,
         canvas.bounds.size(),
     )?;
-    app.scene = scene;
-    app.gestures.show_depth(shown.dragging);
+    app.session.scene = scene;
+    app.session.gestures.show_depth(shown.dragging);
     app.refresh_values();
-    app.selection.extend(shown.selected);
+    app.session.selection.extend(shown.selected);
     app.still = Some(shown.still);
 
     let pixels = draw_window(&app, &mut renderer, logical, options.scale);

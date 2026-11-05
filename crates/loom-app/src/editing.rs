@@ -128,7 +128,7 @@ impl App {
     pub(crate) fn tab_fields(&self) -> &'static [&'static str] {
         if self.overlays.patches().is_some() {
             &crate::patches::TEXT_FIELDS
-        } else if self.no_overlay() && self.right_tab == RightTab::Inspector && self.selection.is_empty() {
+        } else if self.no_overlay() && self.right_tab == RightTab::Inspector && self.session.selection.is_empty() {
             &crate::patch_info::TEXT_FIELDS
         } else {
             &[]
@@ -151,8 +151,8 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     pub(crate) fn begin_edit(&mut self) {
-        let (controller, positions, sizes) = (&self.controller, &self.positions, &self.sizes);
-        self.edits.begin(controller.has_uncommitted_changes(), || {
+        let (controller, positions, sizes) = (&self.session.controller, &self.session.positions, &self.session.sizes);
+        self.session.edits.begin(controller.has_uncommitted_changes(), || {
             undo::Snapshot::take_with_sizes(controller, positions, sizes)
         });
     }
@@ -160,18 +160,19 @@ impl App {
     /// Ends the recording and adds a step if the patch changed.
     pub(crate) fn record(&mut self) {
         // A command's name is for this step only, also when no step is made.
-        let step_name = self.step_name.take();
-        let (controller, positions, sizes) = (&self.controller, &self.positions, &self.sizes);
-        self.edits.record(step_name, || {
+        let step_name = self.session.step_name.take();
+        let (controller, positions, sizes) = (&self.session.controller, &self.session.positions, &self.session.sizes);
+        self.session.edits.record(step_name, || {
             undo::Snapshot::take_with_sizes(controller, positions, sizes)
         });
     }
 
     /// Closes the open gesture, of either kind, and records it.
     pub(crate) fn end_gesture(&mut self) {
-        let step_name = self.step_name.take();
-        let (controller, positions, sizes) = (&self.controller, &self.positions, &self.sizes);
-        self.edits
+        let step_name = self.session.step_name.take();
+        let (controller, positions, sizes) = (&self.session.controller, &self.session.positions, &self.session.sizes);
+        self.session
+            .edits
             .end_gesture(controller.has_uncommitted_changes(), step_name, || {
                 undo::Snapshot::take_with_sizes(controller, positions, sizes)
             });
@@ -182,14 +183,14 @@ impl App {
     pub(crate) fn edit(&mut self, change: impl FnOnce(&mut Self)) {
         self.begin_edit();
         change(self);
-        if !self.edits.gesture_open() {
+        if !self.session.edits.gesture_open() {
             self.record();
         }
     }
 
     /// Closes an inspector slider or a released arrow group before another action.
     pub(crate) fn close_slider_gesture(&mut self) {
-        if self.edits.slider_gesture_open() {
+        if self.session.edits.slider_gesture_open() {
             self.end_gesture();
         }
         self.close_pending_arrow_group();
@@ -197,68 +198,69 @@ impl App {
 
     /// Records a released arrow edit before an action outside the canvas.
     pub(crate) fn close_pending_arrow_group(&mut self) {
-        if self.arrow_group_pending {
-            self.arrow_group_pending = false;
-            self.arrow_group_closed = true;
+        if self.session.arrow_group_pending {
+            self.session.arrow_group_pending = false;
+            self.session.arrow_group_closed = true;
             self.end_gesture();
         }
     }
 
     pub(crate) fn undo(&mut self) {
         self.close_slider_gesture();
-        if !self.edits.gesture_open() {
+        if !self.session.edits.gesture_open() {
             self.step(false);
         }
     }
 
     pub(crate) fn redo(&mut self) {
         self.close_slider_gesture();
-        if !self.edits.gesture_open() {
+        if !self.session.edits.gesture_open() {
             self.step(true);
         }
     }
 
     /// Undoes (`forward` false) or redoes the next step.
     pub(crate) fn step(&mut self, forward: bool) {
-        self.gestures.clear_label();
+        self.session.gestures.clear_label();
         let step = if forward {
-            self.edits.history.redo_step()
+            self.session.edits.history.redo_step()
         } else {
-            self.edits.history.undo_step()
+            self.session.edits.history.undo_step()
         };
         let Some(step) = step.cloned() else { return };
         let verb = if forward { "Redo" } else { "Undo" };
-        if let Err(why) = undo::check(&step, forward, &self.controller) {
+        if let Err(why) = undo::check(&step, forward, &self.session.controller) {
             self.alerts
                 .warn(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
             return;
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
-        self.learn.disarm();
+        self.session.learn.disarm();
         let applied = undo::apply_with_sizes(
             &step,
             forward,
-            &mut self.controller,
-            &mut self.positions,
-            &mut self.sizes,
+            &mut self.session.controller,
+            &mut self.session.positions,
+            &mut self.session.sizes,
         );
         match applied {
             Ok(()) => {
                 if forward {
-                    self.edits.history.redone();
+                    self.session.edits.history.redone();
                 } else {
-                    self.edits.history.undone();
+                    self.session.edits.history.undone();
                 }
                 // What the step touched, if it still exists, is selected.
                 let touched: BTreeSet<u32> = step
                     .touched_modules()
-                    .filter(|&id| self.controller.graph().node(ModuleId(id)).is_some())
+                    .filter(|&id| self.session.controller.graph().node(ModuleId(id)).is_some())
                     .collect();
                 if !touched.is_empty() {
-                    self.selection = touched;
+                    self.session.selection = touched;
                 }
-                self.selection
-                    .retain(|&id| self.controller.graph().node(ModuleId(id)).is_some());
+                self.session
+                    .selection
+                    .retain(|&id| self.session.controller.graph().node(ModuleId(id)).is_some());
                 if self.commit() {
                     self.alerts.say(format!("{verb}: {}", step.name()));
                 } else {
@@ -271,7 +273,7 @@ impl App {
                 }
             }
             Err(e) => {
-                self.edits.history.clear();
+                self.session.edits.history.clear();
                 self.commit();
                 self.alerts.error(
                     alerts::Cause::Other,
@@ -287,18 +289,18 @@ impl App {
         self.keep_run_state();
         // Probes follow the graph: a removed module loses its probes.
         self.sync_live();
-        let sent = match self.controller.commit() {
+        let sent = match self.session.controller.commit() {
             Ok(_) => {
-                self.retry_commit = false;
+                self.session.retry_commit = false;
                 self.report();
-                self.edits.committed(true);
+                self.session.edits.committed(true);
                 true
             }
             Err(e) => {
                 self.commit_failed(&e);
                 // The controller stays dirty, so the next commit retries the
                 // change; until then the history cannot be trusted.
-                self.edits.committed(false);
+                self.session.edits.committed(false);
                 false
             }
         };
@@ -313,15 +315,15 @@ impl App {
     /// engine plays), and lost history stays lost after a retry works, so
     /// those are kept.
     pub(crate) fn commit_failed(&mut self, error: &LoomError) {
-        self.retry_commit = matches!(error, LoomError::QueueFull);
-        let history = &self.edits.history;
+        self.session.retry_commit = matches!(error, LoomError::QueueFull);
+        let history = &self.session.edits.history;
         let lost_history = history.undo_step().is_some() || history.redo_step().is_some();
         let message = if lost_history {
             format!("{error}; undo history cleared")
         } else {
             error.to_string()
         };
-        if self.retry_commit && !lost_history {
+        if self.session.retry_commit && !lost_history {
             self.alerts.warn(message);
         } else {
             self.alerts.error(alerts::Cause::Other, message);
@@ -332,9 +334,9 @@ impl App {
     /// status bar then holds the error.
     pub(crate) fn delete_modules(&mut self, ids: &[u32]) -> bool {
         for id in ids {
-            if self.controller.remove_module(ModuleId(*id)).is_ok() {
-                self.positions.remove(id);
-                self.selection.remove(id);
+            if self.session.controller.remove_module(ModuleId(*id)).is_ok() {
+                self.session.positions.remove(id);
+                self.session.selection.remove(id);
             }
         }
         self.commit()
@@ -377,9 +379,13 @@ impl App {
     /// The selected modules, or `None` and a status bar note when nothing
     /// is selected.
     pub(crate) fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
-        let group =
-            clipboard::Group::from_selection(self.controller.graph(), &self.positions, &self.selection, incoming)
-                .with_sizes(&self.sizes);
+        let group = clipboard::Group::from_selection(
+            self.session.controller.graph(),
+            &self.session.positions,
+            &self.session.selection,
+            incoming,
+        )
+        .with_sizes(&self.session.sizes);
         if group.is_empty() {
             self.alerts.warn(format!("Nothing selected to {verb}"));
             return None;
@@ -398,12 +404,12 @@ impl App {
     pub(crate) fn cut(&mut self) -> Option<String> {
         // Like undo, these commands wait for a drag to finish.
         self.close_slider_gesture();
-        if self.edits.gesture_open() {
+        if self.session.edits.gesture_open() {
             return None;
         }
         let group = self.selected_group("cut", false)?;
-        let ids: Vec<u32> = self.selection.iter().copied().collect();
-        self.step_name = Some(format!("cut {}", group.describe()));
+        let ids: Vec<u32> = self.session.selection.iter().copied().collect();
+        self.session.step_name = Some(format!("cut {}", group.describe()));
         self.edit(|app| {
             if app.delete_modules(&ids) {
                 app.alerts.say(format!("Cut {}", group.describe()));
@@ -415,14 +421,14 @@ impl App {
     /// Pastes clipboard text with its top-left corner at a world point.
     pub(crate) fn paste(&mut self, world: Point, text: Option<String>) {
         self.close_slider_gesture();
-        if self.edits.gesture_open() {
+        if self.session.edits.gesture_open() {
             return;
         }
         let Some(text) = text else {
             self.alerts.warn(clipboard::NOTHING_TO_PASTE.to_string());
             return;
         };
-        match clipboard::Group::from_text(&text, self.controller.registry()) {
+        match clipboard::Group::from_text(&text, self.session.controller.registry()) {
             Ok(group) => {
                 let at = browser::snap(world);
                 self.add_group(&group, (at.x, at.y), "paste", "Pasted");
@@ -435,7 +441,7 @@ impl App {
     /// assignments.
     pub(crate) fn duplicate(&mut self) {
         self.close_slider_gesture();
-        if self.edits.gesture_open() {
+        if self.session.edits.gesture_open() {
             return;
         }
         let Some(group) = self.selected_group("duplicate", true) else {
@@ -449,27 +455,29 @@ impl App {
     /// Adds a group as one step and selects it, or changes nothing and says
     /// why.
     pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: (f32, f32), verb: &str, done: &str) {
-        if let Err(why) = group.check(&self.controller) {
+        if let Err(why) = group.check(&self.session.controller) {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
             return;
         }
-        self.step_name = Some(format!("{verb} {}", group.describe()));
-        self.edit(|app| match group.add(&mut app.controller, &mut app.positions, origin) {
-            Ok(ids) => {
-                group.apply_sizes(&ids, &mut app.sizes);
-                app.selection = ids.into_iter().collect();
-                if app.commit() {
-                    app.alerts.say(format!("{done} {}", group.describe()));
+        self.session.step_name = Some(format!("{verb} {}", group.describe()));
+        self.edit(
+            |app| match group.add(&mut app.session.controller, &mut app.session.positions, origin) {
+                Ok(ids) => {
+                    group.apply_sizes(&ids, &mut app.session.sizes);
+                    app.session.selection = ids.into_iter().collect();
+                    if app.commit() {
+                        app.alerts.say(format!("{done} {}", group.describe()));
+                    }
                 }
-            }
-            Err(e) => {
-                // The rollback freed the new modules' slots. Only a commit
-                // hands them back, so the next paste has room.
-                app.commit();
-                app.alerts.warn(format!("Cannot {verb}: {e}"));
-            }
-        });
+                Err(e) => {
+                    // The rollback freed the new modules' slots. Only a commit
+                    // hands them back, so the next paste has room.
+                    app.commit();
+                    app.alerts.warn(format!("Cannot {verb}: {e}"));
+                }
+            },
+        );
         // `record` clears it, but an edit inside a gesture does not record.
-        self.step_name = None;
+        self.session.step_name = None;
     }
 }

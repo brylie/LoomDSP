@@ -145,7 +145,7 @@ fn a_script_takes_values_from_the_environment() {
     assert_eq!(replies.len(), 1);
     assert_eq!(replies[0]["ok"], json!(true), "{}", replies[0]);
     assert_eq!(replies[0]["vars"], json!({"LOOM_TEST_VALUE": "800"}));
-    let cutoff = app.controller.graph().node(ModuleId(4)).unwrap().params[0];
+    let cutoff = app.session.controller.graph().node(ModuleId(4)).unwrap().params[0];
     assert!((cutoff - 800.0).abs() < 0.01, "cutoff is {cutoff}");
 }
 
@@ -214,7 +214,7 @@ fn commands_change_the_app_as_the_ui_would() {
     });
 
     assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), Ok(Map::new()));
-    assert_eq!(app.selection, [4].into());
+    assert_eq!(app.session.selection, [4].into());
     assert!(run(&mut app, r#"{"cmd": "select", "modules": [99]}"#).is_err());
 
     let set = run(
@@ -223,7 +223,10 @@ fn commands_change_the_app_as_the_ui_would() {
     )
     .unwrap();
     assert_eq!(set["value"], json!(800.0));
-    assert_eq!(app.controller.graph().node(ModuleId(4)).unwrap().params[0], 800.0);
+    assert_eq!(
+        app.session.controller.graph().node(ModuleId(4)).unwrap().params[0],
+        800.0
+    );
     let set = run(
         &mut app,
         r#"{"cmd": "set", "module": 4, "param": "cutoff", "position": 0}"#,
@@ -240,7 +243,7 @@ fn commands_change_the_app_as_the_ui_would() {
     // Each set is one undo step, as a knob turn.
     let undone = run(&mut app, r#"{"cmd": "undo"}"#).unwrap();
     assert!(undone["redo"].is_string(), "{undone:?}");
-    let cutoff = app.controller.graph().node(ModuleId(4)).unwrap().params[0];
+    let cutoff = app.session.controller.graph().node(ModuleId(4)).unwrap().params[0];
     assert_eq!(cutoff, 800.0);
 
     let snapshot = run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap();
@@ -261,7 +264,7 @@ fn commands_change_the_app_as_the_ui_would() {
         run(&mut app, r#"{"cmd": "cc", "controller": 3, "value": 99}"#),
         Ok(Map::new())
     );
-    let seen = app.controller.last_control_change().unwrap();
+    let seen = app.session.controller.last_control_change().unwrap();
     assert_eq!((seen.control.controller, seen.value), (3, 99));
 
     let added = run(&mut app, r#"{"cmd": "add", "kind": "loom.filter.svf@1"}"#).unwrap();
@@ -280,17 +283,18 @@ fn commands_change_the_app_as_the_ui_would() {
         run(&mut app, &format!(r#"{{"cmd": "remove", "modules": [{module}]}}"#)),
         Ok(Map::new())
     );
-    assert!(app.controller.graph().node(ModuleId(module as u32)).is_none());
+    assert!(app.session.controller.graph().node(ModuleId(module as u32)).is_none());
 
     // `probe` adds a scope fed by the output, as the probe menu does.
     let scope = run(&mut app, r#"{"cmd": "probe", "from": "3:out", "kind": "scope"}"#).unwrap();
     let scope = ModuleId(scope["module"].as_u64().unwrap() as u32);
     assert_eq!(
-        app.controller.graph().node(scope).unwrap().descriptor.id,
+        app.session.controller.graph().node(scope).unwrap().descriptor.id,
         "loom.display.scope"
     );
     assert!(
-        app.controller
+        app.session
+            .controller
             .graph()
             .cables()
             .any(|(from, to)| from.module == ModuleId(3) && to.module == scope)
@@ -301,7 +305,7 @@ fn commands_change_the_app_as_the_ui_would() {
             .contains("not scope or meter")
     );
     assert_eq!(run(&mut app, r#"{"cmd": "undo"}"#).map(|_| ()), Ok(()));
-    assert!(app.controller.graph().node(scope).is_none());
+    assert!(app.session.controller.graph().node(scope).is_none());
 
     assert_eq!(run(&mut app, r#"{"cmd": "quit"}"#), Ok(Map::new()));
     assert!(app.quit);
@@ -324,7 +328,7 @@ fn a_script_maps_a_control_in_learn_mode() {
             .contains("press `learn` first")
     );
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
-    assert!(app.learn.is_on());
+    assert!(app.session.learn.is_on());
     assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), ok);
     assert_eq!(run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#), ok);
     let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
@@ -334,11 +338,14 @@ fn a_script_maps_a_control_in_learn_mode() {
     // parameter has learned it, so turning learn mode off next cannot
     // lose the mapping.
     assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 21, "value": 64}"#), ok);
-    assert!(app.learn.armed().is_none(), "the armed parameter learned the control");
+    assert!(
+        app.session.learn.armed().is_none(),
+        "the armed parameter learned the control"
+    );
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
-    assert!(!app.learn.is_on());
+    assert!(!app.session.learn.is_on());
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "hold"}"#), ok);
-    assert!(app.holding);
+    assert!(app.session.engine.holding);
 
     let row = &run(&mut app, r#"{"cmd": "snapshot"}"#).unwrap()["snapshot"]["inspector"]["module"]["params"][0];
     let mapping = row["mapping"].as_str().unwrap_or_default();
@@ -463,6 +470,7 @@ fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
         ok
     );
     let knob = app
+        .session
         .controller
         .graph()
         .node(ModuleId(4))
@@ -496,8 +504,8 @@ fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
     );
     let ghost = f32::from(far) / 127.0;
     assert_eq!(row["mapping_options"]["ghost"].as_f64().unwrap() as f32, ghost, "{row}");
-    assert_eq!(app.values.get(4, knob).unwrap().ghost, Some(ghost));
-    assert!(app.values.get(4, knob).unwrap().position as f64 == start);
+    assert_eq!(app.session.values.get(4, knob).unwrap().ghost, Some(ghost));
+    assert!(app.session.values.get(4, knob).unwrap().position as f64 == start);
 
     // Across to the other side: it catches, with no ghost and a new value.
     assert_eq!(
@@ -515,8 +523,8 @@ fn a_waiting_pickup_shows_a_ghost_until_it_catches() {
         "{row}"
     );
     assert!(row["mapping_options"]["ghost"].is_null(), "{row}");
-    assert_eq!(app.values.get(4, knob).unwrap().ghost, None);
-    assert_eq!(app.values.get(4, knob).unwrap().position, position);
+    assert_eq!(app.session.values.get(4, knob).unwrap().ghost, None);
+    assert_eq!(app.session.values.get(4, knob).unwrap().position, position);
     assert!(
         crate::learn::INTERVAL <= Duration::from_millis(15),
         "the criterion's poll"
@@ -531,6 +539,7 @@ fn a_row_with_no_slider_shows_no_ghost() {
     let mut app = app_with_mapped_cutoff();
     let ok = Ok(Map::new());
     let (module, index) = app
+        .session
         .controller
         .graph()
         .nodes()
@@ -543,7 +552,8 @@ fn a_row_with_no_slider_shows_no_ghost() {
             (node.descriptor.params[index].normalize(node.params[index]) < 0.5).then_some((id, index))
         })
         .expect("a parameter with choice names, in its lower half");
-    app.controller
+    app.session
+        .controller
         .map_midi_with(
             loom_core::MidiControl {
                 channel: 0,
@@ -563,7 +573,7 @@ fn a_row_with_no_slider_shows_no_ghost() {
     // One buffer for the engine to take the new mapping, as `cc` waits for.
     assert_eq!(run(&mut app, r#"{"cmd": "cc", "controller": 22, "value": 127}"#), ok);
     assert!(
-        app.learn.ghosts().shown().contains_key(&(module.0, index)),
+        app.session.learn.ghosts().shown().contains_key(&(module.0, index)),
         "the pickup is waiting and its hardware moved"
     );
     let row =
@@ -603,9 +613,10 @@ fn sample_follows_a_live_value_frame_by_frame() {
     // frame count does not depend on how fast this machine draws. A
     // held envelope stands in for a played note, which needs audio.
     let (mut app, env) = held_envelope();
-    let filter = app.controller.add_module("loom.filter.svf").unwrap();
+    let filter = app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     let resonance = app
+        .session
         .controller
         .graph()
         .node(filter)
@@ -657,10 +668,10 @@ fn sample_follows_a_live_value_frame_by_frame() {
 #[test]
 fn sample_reads_the_named_value_of_a_two_value_widget() {
     let (mut app, env) = held_envelope();
-    let pad = app.controller.add_module("test.panel").unwrap();
-    app.controller.set_param_named(pad, "pad_x", 0.2).unwrap();
+    let pad = app.session.controller.add_module("test.panel").unwrap();
+    app.session.controller.set_param_named(pad, "pad_x", 0.2).unwrap();
     app.commit();
-    let node = app.controller.graph().node(pad).unwrap();
+    let node = app.session.controller.graph().node(pad).unwrap();
     let pad_x = node.descriptor.param_index("pad_x").unwrap();
     let y_position = node
         .spec(node.descriptor.param_index("pad_y").unwrap())
@@ -728,12 +739,12 @@ fn removing_the_sampled_module_ends_the_sample() {
 /// light and output move. Returns the app and the envelope's ID.
 fn held_envelope() -> (App, u32) {
     let mut app = App::new(crate::tests::app_args());
-    let gate = app.controller.add_module("loom.math.constant").unwrap();
-    app.controller.set_param_named(gate, "value", 1.0).unwrap();
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
-    app.controller.set_param_named(env, "decay", 0.3).unwrap();
-    app.controller.set_param_named(env, "sustain", 0.2).unwrap();
-    app.controller.connect_named(gate, "out", env, "gate").unwrap();
+    let gate = app.session.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller.set_param_named(gate, "value", 1.0).unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
+    app.session.controller.set_param_named(env, "decay", 0.3).unwrap();
+    app.session.controller.set_param_named(env, "sustain", 0.2).unwrap();
+    app.session.controller.connect_named(gate, "out", env, "gate").unwrap();
     app.commit();
     (app, env.0)
 }
@@ -759,7 +770,7 @@ fn run_playing(app: &mut App, line: &str) -> Answer {
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
     let _ = app.control(call);
-    let sound = (app.controller.config().sample_rate * TEST_FRAME.as_secs_f32()).round() as usize;
+    let sound = (app.session.controller.config().sample_rate * TEST_FRAME.as_secs_f32()).round() as usize;
     let mut now = Instant::now();
     // Enough frames for the longest `sample` in these tests.
     for _ in 0..500 {
@@ -863,7 +874,7 @@ fn the_open_command_opens_an_example_as_a_copy() {
     let path = examples.join("subtractive.ron");
     let line = serde_json::json!({ "cmd": "open", "path": path }).to_string();
     run(&mut app, &line).unwrap();
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
 }
 
@@ -965,6 +976,7 @@ fn pointer_ui() -> crate::ui_test::Ui {
     ui.app.pointer = crate::pointer::Pointer::new(true);
     let resonance = ui
         .app
+        .session
         .controller
         .graph()
         .node(ModuleId(4))
@@ -1017,7 +1029,7 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
 #[test]
 fn a_script_reads_the_typed_field_from_the_snapshot() {
     let mut ui = typing_ui();
-    let id = ui.app.controller.add_module("loom.filter.svf").unwrap();
+    let id = ui.app.session.controller.add_module("loom.filter.svf").unwrap();
     ui.app.commit();
     let _ = ui.app.update(Message::SelectModule(id.0));
     ui.redraw();
@@ -1078,13 +1090,14 @@ fn a_script_hovers_pins_a_badge_and_unpins_it_with_escape() {
 #[test]
 fn a_script_drags_a_range_arc() {
     let mut ui = pointer_ui();
-    let depth = |ui: &crate::ui_test::Ui| ui.app.controller.graph().assignments().next().unwrap().1.depth;
-    let resonance = |ui: &crate::ui_test::Ui| ui.app.controller.graph().node(ModuleId(4)).unwrap().params[1];
+    let depth = |ui: &crate::ui_test::Ui| ui.app.session.controller.graph().assignments().next().unwrap().1.depth;
+    let resonance = |ui: &crate::ui_test::Ui| ui.app.session.controller.graph().node(ModuleId(4)).unwrap().params[1];
     let (before, value) = (depth(&ui), resonance(&ui));
     // On the ring beside the knob: its centre is a grid step below the
     // top of its cell, and the ring is about 12 units out.
     let index = ui
         .app
+        .session
         .controller
         .graph()
         .node(ModuleId(4))
@@ -1094,6 +1107,7 @@ fn a_script_drags_a_range_arc() {
         .unwrap();
     let widget = ui
         .app
+        .session
         .controller
         .graph()
         .node(ModuleId(4))
@@ -1105,7 +1119,7 @@ fn a_script_drags_a_range_arc() {
         .position(|w| w.binds("resonance"))
         .unwrap();
     assert_eq!(index, 1);
-    let rect = ui.app.scene.module(4).unwrap().widget_bounds(widget).unwrap();
+    let rect = ui.app.session.scene.module(4).unwrap().widget_bounds(widget).unwrap();
     let ring = Point::new(rect.center_x() + 12.0, rect.y + loom_canvas::GRID - 1.0);
     let from = ui.canvas().to_window(ring);
     let line = format!(
@@ -1128,7 +1142,7 @@ fn a_script_drags_a_range_arc() {
 #[test]
 fn a_script_drags_an_output_onto_a_control() {
     let mut ui = pointer_ui();
-    let count = |ui: &crate::ui_test::Ui| ui.app.controller.graph().assignments().count();
+    let count = |ui: &crate::ui_test::Ui| ui.app.session.controller.graph().assignments().count();
     let before = count(&ui);
     run_ui(&mut ui, r#"{"cmd": "press", "target": "7:out"}"#).unwrap();
     run_ui(&mut ui, r#"{"cmd": "hover", "target": "4:cutoff"}"#).unwrap();
@@ -1158,12 +1172,12 @@ fn a_script_drags_an_output_onto_an_inspector_row() {
     let _ = ui.app.update(Message::SelectModule(4));
     ui.redraw();
     let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
-    let before = ui.app.controller.graph().assignments().count();
+    let before = ui.app.session.controller.graph().assignments().count();
     let command = serde_json::json!({"cmd": "drag", "from": "7:out", "to": [row.x, row.y]}).to_string();
     run_ui(&mut ui, &command).unwrap();
-    assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before + 1);
     run_ui(&mut ui, r#"{"cmd": "undo"}"#).unwrap();
-    assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
 }
 
 /// A real button let go while a script drag runs: the drag
@@ -1301,7 +1315,7 @@ fn the_snapshot_names_what_the_pointer_is_on_and_does() {
         json!({"kind": "knob", "target": "4:cutoff"})
     );
     run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
-    let tile = ui.app.scene.module(4).unwrap().bounds();
+    let tile = ui.app.session.scene.module(4).unwrap().bounds();
     let title = ui
         .canvas()
         .to_window(Point::new(tile.x + tile.width * 0.5, tile.y + 6.0));
@@ -1554,13 +1568,13 @@ fn typed_text_becomes_one_key_per_character() {
 #[test]
 fn a_key_no_widget_takes_reaches_the_app() {
     let mut ui = pointer_ui();
-    assert!(ui.app.edits.history.undo_step().is_some());
-    let before = ui.app.controller.graph().assignments().count();
+    assert!(ui.app.session.edits.history.undo_step().is_some());
+    let before = ui.app.session.controller.graph().assignments().count();
     assert_eq!(
         run_ui(&mut ui, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),
         Ok(Map::new())
     );
-    assert_eq!(ui.app.controller.graph().assignments().count(), before - 1);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before - 1);
 }
 
 /// Bad pointer commands get an error, and nothing stays held.
@@ -1599,8 +1613,8 @@ fn pointer_commands_refuse_what_they_cannot_aim_at() {
 #[test]
 fn locate_finds_lights_and_meters() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let env = ui.app.controller.add_module("loom.env.envelope").unwrap().0;
-    let meter = ui.app.controller.add_module("loom.display.meter").unwrap().0;
+    let env = ui.app.session.controller.add_module("loom.env.envelope").unwrap().0;
+    let meter = ui.app.session.controller.add_module("loom.display.meter").unwrap().0;
     ui.app.commit();
     ui.redraw();
     let found = Found {
@@ -1611,6 +1625,7 @@ fn locate_finds_lights_and_meters() {
     let centre = |module: u32, widget: usize| {
         view.to_window(
             ui.app
+                .session
                 .scene
                 .module(module)
                 .unwrap()
@@ -1622,6 +1637,7 @@ fn locate_finds_lights_and_meters() {
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
     let light = ui
         .app
+        .session
         .controller
         .graph()
         .node(ModuleId(env))
@@ -1767,7 +1783,7 @@ fn preferences_commands_change_what_the_window_shows() {
     );
 
     let reply = run(&mut app, r#"{"cmd": "output_safety", "mode": "clean"}"#).unwrap();
-    assert_eq!(app.stream.output_safety(), OutputSafety::Clean);
+    assert_eq!(app.session.engine.stream.output_safety(), OutputSafety::Clean);
     assert!(
         reply["playing"].as_str().unwrap().starts_with("Playing on"),
         "{reply:?}"
@@ -1781,9 +1797,13 @@ fn preferences_commands_change_what_the_window_shows() {
     assert_eq!(reply["inputs"], json!(["Keys", "Pad"]));
     assert!(run(&mut app, r#"{"cmd": "midi", "input": "Drums", "on": true}"#).is_err());
 
-    assert!(!app.controller.graph().is_empty());
+    assert!(!app.session.controller.graph().is_empty());
     assert_eq!(run(&mut app, r#"{"cmd": "new"}"#), Ok(Map::new()));
-    assert_eq!(app.controller.graph().len(), 1, "only the new patch's Transport");
+    assert_eq!(
+        app.session.controller.graph().len(),
+        1,
+        "only the new patch's Transport"
+    );
     assert!(fake.is_open("Keys"), "New keeps the MIDI inputs");
 }
 
@@ -1799,7 +1819,7 @@ fn audio_is_refused_with_no_device() {
     let error = run(&mut app, r#"{"cmd": "audio", "rate": 48000}"#).unwrap_err();
     assert!(error.contains("--fake-audio"), "{error}");
     assert!(run(&mut app, r#"{"cmd": "output_safety", "mode": "off"}"#).is_ok());
-    assert_eq!(app.stream.output_safety(), OutputSafety::Off);
+    assert_eq!(app.session.engine.stream.output_safety(), OutputSafety::Off);
 }
 
 /// A device can start, call back a few times, and then stop with no
@@ -1970,7 +1990,7 @@ fn open_and_save_failures_answer_with_the_reason() {
 #[test]
 fn a_script_types_an_exact_value() {
     let mut ui = crate::ui_test::Ui::open("sine.ron");
-    let id = ui.app.controller.add_module("test.panel").unwrap();
+    let id = ui.app.session.controller.add_module("test.panel").unwrap();
     ui.app.refresh();
     ui.step(&[]);
     let _ = ui.app.update(Message::SelectModule(id.0));
@@ -1982,7 +2002,7 @@ fn a_script_types_an_exact_value() {
     for key in ["4", "4", "0", "enter"] {
         run_ui(&mut ui, &format!(r#"{{"cmd": "key", "key": "{key}"}}"#)).unwrap();
     }
-    let node = ui.app.controller.graph().node(id).unwrap();
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     assert_eq!(node.params[node.descriptor.param_index("cutoff").unwrap()], 440.0);
 }
 
@@ -1991,7 +2011,7 @@ fn scripted_with_changes() -> App {
     let mut app = App::new(crate::tests::app_args());
     app.control.push(Listener::Script(PathBuf::from("unused")));
     app.edit(|app| {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
     assert!(app.unsaved());
@@ -2104,7 +2124,7 @@ fn scripted_with_a_file(name: &str) -> (App, crate::recovery::tests::TempDir, Pa
     let line = serde_json::json!({ "cmd": "open", "path": file }).to_string();
     run(&mut app, &line).unwrap();
     app.edit(|app| {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
     (app, dir, folder)
@@ -2120,7 +2140,7 @@ fn a_failed_scripted_save_answer_is_an_error() {
     assert!(error.starts_with("Could not save"), "{error}");
     assert_eq!(error, app.alerts.status());
     assert!(app.unsaved());
-    assert!(app.document.file().is_some(), "New did not run");
+    assert!(app.session.document.file().is_some(), "New did not run");
 }
 
 /// A Replace answer whose write fails replies with the reason too, and its
@@ -2148,7 +2168,7 @@ fn a_scripted_save_answer_that_writes_replies_ok() {
         std::fs::read_to_string(folder.join("mine.ron")).unwrap(),
         "Patch(version: 1)"
     );
-    assert_eq!(app.document.file(), None, "New ran");
+    assert_eq!(app.session.document.file(), None, "New ran");
     assert!(!app.unsaved());
 }
 
@@ -2213,7 +2233,7 @@ fn the_audio_field_reports_the_input_stream() {
     let input = |app: &mut App| run(app, r#"{"cmd": "snapshot"}"#).unwrap()["audio"]["input"].clone();
     assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
 
-    let module = app.controller.add_module("loom.io.audio-in").unwrap();
+    let module = app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     app.sync_audio_input();
     assert_eq!(input(&mut app), json!({"device": "Fake Mic", "state": "open"}));
@@ -2224,7 +2244,7 @@ fn the_audio_field_reports_the_input_stream() {
     fake.input_permission_denied.set(false);
     app.sync_audio_input();
 
-    app.controller.remove_module(module).unwrap();
+    app.session.controller.remove_module(module).unwrap();
     assert!(app.commit());
     app.sync_audio_input();
     assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));

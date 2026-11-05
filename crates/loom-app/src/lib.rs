@@ -59,6 +59,7 @@ mod recovery;
 mod scene;
 mod screenshot;
 mod script_vars;
+mod session;
 mod settings;
 mod snapshot;
 mod spectrum;
@@ -75,12 +76,10 @@ mod xy;
 
 use clap::Parser;
 use iced::{Color, Point, Size, Task, Theme};
-use live::Live;
-use loom_canvas::{CanvasEvent, PanelValues, Scene};
+use loom_canvas::CanvasEvent;
 use loom_core::{
     AssignmentId, Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId,
 };
-use loom_host_desktop::{CallbackStats, SharedMidi};
 use loom_patch::Patch;
 use matrix::{Event as MatrixEvent, Tab as RightTab};
 use modulation::PolarityChoice;
@@ -684,10 +683,6 @@ impl Message {
     }
 }
 
-/// Each placeholder's position in its file, if it had one, and the position it
-/// was first shown at. While it stays there, saving writes the original.
-type UnknownPositions = BTreeMap<u32, (Option<(f32, f32)>, (f32, f32))>;
-
 /// What the player asks of the patch file. Each can ask about unsaved
 /// changes first (`docs/design/files.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -707,59 +702,16 @@ pub(crate) enum FileAction {
 }
 
 struct App {
-    controller: Controller,
-    /// A full command queue left fresh modules staged for a later commit.
-    retry_commit: bool,
-    positions: BTreeMap<u32, (f32, f32)>,
-    /// Original placeholder positions and their initial displayed positions.
-    unknown_positions: UnknownPositions,
-    /// Saved tile dimensions in grid units, keyed by module ID.
-    sizes: BTreeMap<u32, (u8, u8)>,
-    scene: Scene,
-    /// The mode values the scene was built with (ADR-0030). A change
-    /// rebuilds the scene, so hidden controls follow the mode.
-    mode_key: Vec<(u32, usize, i64)>,
-    /// Modulation gestures in progress: the Add modulation list, an output
-    /// dragged onto the inspector, an arc drag, a placeholder label.
-    gestures: gestures::Gestures,
-    /// Live values of panel controls and lights, apart from the scene so a
-    /// knob turn does not rebuild tiles or cables.
-    values: PanelValues,
-    /// Text typed in an inspector value field, not committed yet.
-    value_draft: Option<controls::ValueDraft>,
-    /// Which text field has focus. While one does, the canvas leaves the keys
-    /// to it. Kept from the widget tree, because a text field does not say when
-    /// it loses focus.
-    text_focus: editing::TextFocus,
-    /// Last brightness of each light, by module and widget.
-    lights: BTreeMap<lights::Light, f32>,
-    /// True when the last commit had a cable on the Transport's `run`
-    /// input. When the cable goes, the Run toggle takes the state the input
-    /// left (clock.md, Starting and stopping).
-    run_driven: bool,
-    /// Latest level of each meter probe.
-    meter_levels: std::collections::HashMap<ProbeId, live::Level>,
-    /// Each meter's clip light and peak hold. By widget, not by probe, because
-    /// a probe goes away with the meter on screen (`clip.rs`).
-    clip_holds: clip::ClipHolds,
-    /// The traces of the scopes on screen (`docs/design/panels.md`, Drawing
-    /// the scope trace).
-    traces: loom_canvas::ScopeTraces,
-    /// Outputs carrying a signal (`docs/design/panels.md`, Signal activity
-    /// on ports).
-    carrying: BTreeSet<OutputRef>,
-    /// True while the canvas draws full scope traces (close zoom), false
-    /// when it draws only their level.
-    full_traces: bool,
-    /// Modules whose lights or meters are on screen, as the canvas reports.
-    visible_displays: Vec<u32>,
-    selection: BTreeSet<u32>,
-    /// The patch's file, title, saved state, and recovery copy.
-    document: document::Document,
+    /// The open patch. New and Open replace it whole.
+    session: session::PatchSession,
     /// The recovery folder and the examples folder, for the whole run.
     run_files: document::RunFiles,
     /// Which tab the right panel shows. It stays when the patch changes.
     right_tab: RightTab,
+    /// Which text field has focus. While one does, the canvas leaves the keys
+    /// to it. Kept from the widget tree, because a text field does not say when
+    /// it loses focus.
+    text_focus: editing::TextFocus,
     /// Counts the engines built. Background watchers restart when it changes.
     generation: u64,
     /// The `test.` modules are loaded (`--test-modules`).
@@ -767,26 +719,14 @@ struct App {
     /// Set when the app should exit after this update.
     quit: bool,
     theme: Theme,
-    /// The output stream or idle engine, its counters, and how this run
-    /// plays.
-    stream: stream::Stream,
-    /// Meter and scope data from the engine, drained on the telemetry
-    /// thread so the queues never fill.
-    monitor: monitor::Monitor,
-    live: Live,
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
     /// The status line, the stats bar's warnings, and problems reported once.
     alerts: alerts::Alerts,
-    /// Note input shared by every MIDI port and the "Hold note" button.
-    midi: Option<SharedMidi>,
-    holding: bool,
     /// Every registered module, for the browser.
     modules: Vec<&'static ModuleDescriptor>,
     /// What is open over the canvas.
     overlays: overlays::Overlays,
-    /// Patch info's fields being typed in (`docs/design/patch-metadata.md`).
-    patch_info: patch_info::State,
     /// Files of a drop being collected, for a moment after the first.
     drops: Vec<PathBuf>,
     /// Counts openings of the patches browser, so files read for an
@@ -808,31 +748,14 @@ struct App {
     /// The control channel's pointer and its events on their way to the
     /// view (`pointer.rs`).
     pointer: pointer::Pointer,
-    /// The stream and its callback count at the last control `snapshot`,
-    /// for its `advanced` field.
-    control_seen: Option<(Arc<CallbackStats>, u64)>,
     measuring: bool,
     animating: bool,
     /// The status bar shows the developer tools: `--dev`, or a measuring
     /// flag (visual-system.md, Status bar).
     dev_tools: bool,
-    /// MIDI learn mode, the armed parameter, and what the canvas shows.
-    learn: learn::Learn,
-    /// Undo and redo (`docs/design/undo.md`): the history, and the edit
-    /// or gesture being recorded.
-    edits: edits::Edits,
-    /// An arrow key was released and its undo group may still grow.
-    arrow_group_pending: bool,
-    /// A toolbar or inspector action closed that group before its canvas timer.
-    arrow_group_closed: bool,
-    /// The matrix's filters, selection, and pending edit, for this patch.
-    matrix: matrix::State,
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
     still: Option<loom_canvas::Still>,
-    /// The name for the step the edit in progress makes, when a command
-    /// names it (cut, paste, duplicate) rather than what changed.
-    step_name: Option<String>,
     /// An undo (`false`) or redo (`true`) shortcut waiting for the check
     /// that no text field has focus.
     history_key: Option<bool>,
@@ -855,7 +778,7 @@ struct Loaded {
     telemetry: loom_core::Telemetry,
     positions: BTreeMap<u32, (f32, f32)>,
     /// Original and displayed placeholder positions for lossless saving.
-    unknown_positions: UnknownPositions,
+    unknown_positions: session::UnknownPositions,
     /// Tile dimensions carried with the patch between sessions.
     sizes: BTreeMap<u32, (u8, u8)>,
     /// The patch's name and metadata (patch-metadata.md).
@@ -872,16 +795,16 @@ struct Loaded {
 impl App {
     /// The patch as it would be saved now.
     fn current_patch(&self) -> Patch {
-        let mut patch = Patch::from_graph(self.document.name(), self.controller.graph());
-        patch.set_metadata(self.document.info().clone());
+        let mut patch = Patch::from_graph(self.session.document.name(), self.session.controller.graph());
+        patch.set_metadata(self.session.document.info().clone());
         for m in &mut patch.modules {
-            m.position = self.positions.get(&m.id).map(|&(x, y)| (x.round(), y.round()));
-            if let Some((original, initial)) = self.unknown_positions.get(&m.id)
-                && self.positions.get(&m.id) == Some(initial)
+            m.position = self.session.positions.get(&m.id).map(|&(x, y)| (x.round(), y.round()));
+            if let Some((original, initial)) = self.session.unknown_positions.get(&m.id)
+                && self.session.positions.get(&m.id) == Some(initial)
             {
                 m.position = *original;
             }
-            m.size = self.sizes.get(&m.id).copied();
+            m.size = self.session.sizes.get(&m.id).copied();
         }
         patch
     }
@@ -894,7 +817,7 @@ impl App {
             return;
         }
         let current = self.current_patch();
-        for report in self.run_files.autosave(&mut self.document, now, current) {
+        for report in self.run_files.autosave(&mut self.session.document, now, current) {
             self.autosave_report(report);
         }
     }
@@ -926,12 +849,12 @@ impl App {
     /// command queue when no device plays, and edits would fail once it is
     /// full (#220). It renders no audio, so lights and meters stay still.
     fn drain_idle_engine(&mut self) {
-        if let Some(engine) = self.stream.idle_mut() {
+        if let Some(engine) = self.session.engine.stream.idle_mut() {
             engine.apply_pending();
         }
         // What the engine handed back is freed here, after any message,
         // rather than on a timer that would wake an idle app (#90).
-        self.controller.collect_garbage();
+        self.session.controller.collect_garbage();
     }
 
     /// Runs the engine for `frames` frames on silent buffers, as an audio
@@ -940,7 +863,12 @@ impl App {
     /// the engine gives the same output at any block size.
     fn process(&mut self, frames: usize) {
         const CHUNK: usize = 4096;
-        let engine = self.stream.idle_mut().expect("an audio device plays the engine");
+        let engine = self
+            .session
+            .engine
+            .stream
+            .idle_mut()
+            .expect("an audio device plays the engine");
         let (mut left, mut right) = (vec![0.0; CHUNK], vec![0.0; CHUNK]);
         let mut remaining = frames;
         while remaining > 0 {
@@ -952,12 +880,12 @@ impl App {
 
     /// Rebuilds the scene after the graph changed.
     fn refresh(&mut self) {
-        layout::auto_layout(&self.controller, &mut self.positions);
-        self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
-        self.mode_key = scene::mode_key(&self.controller);
+        layout::auto_layout(&self.session.controller, &mut self.session.positions);
+        self.session.scene = scene::build(&self.session.controller, &self.session.positions, &self.session.sizes);
+        self.session.mode_key = scene::mode_key(&self.session.controller);
         self.refresh_values();
         self.refresh_learn();
-        self.matrix.reconcile(self.controller.graph());
+        self.session.matrix.reconcile(self.session.controller.graph());
     }
 
     /// Rebuilds the control, light, and meter values. Only changed values
@@ -965,29 +893,42 @@ impl App {
     fn refresh_values(&mut self) {
         // A mode change shows or hides controls, which changes the panel
         // (ADR-0030). Rare: a mode click, never a knob turn.
-        let mode_key = scene::mode_key(&self.controller);
-        if mode_key != self.mode_key {
-            self.scene = scene::build(&self.controller, &self.positions, &self.sizes);
-            self.mode_key = mode_key;
+        let mode_key = scene::mode_key(&self.session.controller);
+        if mode_key != self.session.mode_key {
+            self.session.scene = scene::build(&self.session.controller, &self.session.positions, &self.session.sizes);
+            self.session.mode_key = mode_key;
         }
         let mut shown: scene::ShownValues = self
+            .session
             .lights
             .iter()
             .map(|(&light, &level)| (light, (level, 0.0, None)))
             .collect();
-        let modules: Vec<u32> = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
-        for (widget, output) in scene::meter_outputs(&self.controller, &modules) {
+        let modules: Vec<u32> = self.session.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        for (widget, output) in scene::meter_outputs(&self.session.controller, &modules) {
             let level = self
+                .session
+                .engine
                 .live
                 .probe(output)
-                .and_then(|probe| self.meter_levels.get(&probe))
+                .and_then(|probe| self.session.meter_levels.get(&probe))
                 .copied()
                 .unwrap_or_default();
             shown.insert(widget, (level.rms, level.peak, level.right));
         }
-        let dragging = self.gestures.depth_target();
-        scene::update_panel_values_dragging(&mut self.values, &self.controller, &shown, &self.clip_holds, dragging);
-        scene::set_ghosts(&mut self.values, &self.controller, self.learn.ghosts().shown());
+        let dragging = self.session.gestures.depth_target();
+        scene::update_panel_values_dragging(
+            &mut self.session.values,
+            &self.session.controller,
+            &shown,
+            &self.session.clip_holds,
+            dragging,
+        );
+        scene::set_ghosts(
+            &mut self.session.values,
+            &self.session.controller,
+            self.session.learn.ghosts().shown(),
+        );
         // A scope's window or trigger may have changed.
         self.publish_watch();
     }
@@ -995,7 +936,7 @@ impl App {
     /// Takes the latest dropout count for the stats bar warning. Runs on
     /// every tick and, in Measure mode, on every frame.
     fn update_dropouts(&mut self, now: Instant) {
-        if let Some(stats) = self.stream.stats() {
+        if let Some(stats) = self.session.engine.stream.stats() {
             let s = stats.snapshot();
             self.alerts.note_dropouts(s.overruns + s.stream_errors, now);
         }
@@ -1012,11 +953,11 @@ impl App {
     /// The outputs of the meters and level histories on screen: each needs a
     /// meter probe.
     fn metered_outputs(&self) -> BTreeSet<OutputRef> {
-        scene::meter_outputs(&self.controller, &self.visible_displays)
+        scene::meter_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
             .map(|(_, output)| output)
             .chain(
-                scene::history_outputs(&self.controller, &self.visible_displays)
+                scene::history_outputs(&self.session.controller, &self.session.visible_displays)
                     .into_iter()
                     .map(|history| history.output),
             )
@@ -1027,26 +968,34 @@ impl App {
     /// displays on screen, and tells the telemetry thread what to read.
     /// Call it before a commit.
     fn sync_live(&mut self) {
-        let graph = self.controller.graph();
-        self.clip_holds
+        let graph = self.session.controller.graph();
+        self.session
+            .clip_holds
             .retain(|module, _| graph.node(ModuleId(module)).is_some());
         let wanted = self.metered_outputs();
-        self.live.sync(&mut self.controller, &wanted);
-        let scopes: BTreeSet<OutputRef> = scene::scope_outputs(&self.controller, &self.visible_displays)
-            .into_iter()
-            .map(|scope| scope.output)
-            .chain(
-                scene::spectrum_outputs(&self.controller, &self.visible_displays)
-                    .into_iter()
-                    .map(|spectrum| spectrum.output),
-            )
-            .collect();
-        self.live.sync_scopes(&mut self.controller, &scopes);
-        let pairs: Vec<_> = scene::xy_outputs(&self.controller, &self.visible_displays)
+        self.session.engine.live.sync(&mut self.session.controller, &wanted);
+        let scopes: BTreeSet<OutputRef> =
+            scene::scope_outputs(&self.session.controller, &self.session.visible_displays)
+                .into_iter()
+                .map(|scope| scope.output)
+                .chain(
+                    scene::spectrum_outputs(&self.session.controller, &self.session.visible_displays)
+                        .into_iter()
+                        .map(|spectrum| spectrum.output),
+                )
+                .collect();
+        self.session
+            .engine
+            .live
+            .sync_scopes(&mut self.session.controller, &scopes);
+        let pairs: Vec<_> = scene::xy_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
             .map(|scope| (scope.x, scope.y, scope.y_input))
             .collect();
-        self.live.sync_pairs(&mut self.controller, &pairs);
+        self.session
+            .engine
+            .live
+            .sync_pairs(&mut self.session.controller, &pairs);
         self.publish_watch();
     }
 
@@ -1057,13 +1006,13 @@ impl App {
         let meters = self
             .metered_outputs()
             .into_iter()
-            .filter_map(|output| self.live.probe(output))
+            .filter_map(|output| self.session.engine.live.probe(output))
             .collect();
-        let rate = self.monitor.sample_rate();
-        let scopes = scene::scope_outputs(&self.controller, &self.visible_displays)
+        let rate = self.session.engine.monitor.sample_rate();
+        let scopes = scene::scope_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
             .filter_map(|scope| {
-                let probe = self.live.scope_probe(scope.output)?;
+                let probe = self.session.engine.live.scope_probe(scope.output)?;
                 let want = monitor::ScopeWant {
                     window: (scope.window * rate).round().max(1.0) as usize,
                     trigger: scope.trigger,
@@ -1072,21 +1021,21 @@ impl App {
                 Some((probe, want))
             })
             .collect();
-        let histories = scene::history_outputs(&self.controller, &self.visible_displays)
+        let histories = scene::history_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
-            .filter_map(|history| Some((self.live.probe(history.output)?, history.window)))
+            .filter_map(|history| Some((self.session.engine.live.probe(history.output)?, history.window)))
             .collect();
-        let spectra = scene::spectrum_outputs(&self.controller, &self.visible_displays)
+        let spectra = scene::spectrum_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
             .filter_map(|spectrum| {
                 let want = monitor::SpectrumWant {
                     tilt: spectrum.tilt,
                     hold: spectrum.hold,
                 };
-                Some((self.live.scope_probe(spectrum.output)?, want))
+                Some((self.session.engine.live.scope_probe(spectrum.output)?, want))
             })
             .collect();
-        let xy = scene::xy_outputs(&self.controller, &self.visible_displays)
+        let xy = scene::xy_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
             .filter_map(|scope| {
                 let want = monitor::XyWant {
@@ -1094,11 +1043,13 @@ impl App {
                     range: scope.range,
                     rotate: scope.rotate,
                 };
-                Some((self.live.pair_probe(scope.x, scope.y)?, want))
+                Some((self.session.engine.live.pair_probe(scope.x, scope.y)?, want))
             })
             .collect();
-        let activity = self.live.activity_probes().collect();
-        self.carrying.retain(|output| self.live.probe(*output).is_some());
+        let activity = self.session.engine.live.activity_probes().collect();
+        self.session
+            .carrying
+            .retain(|output| self.session.engine.live.probe(*output).is_some());
         let list = monitor::WatchList {
             meters,
             activity,
@@ -1107,36 +1058,39 @@ impl App {
             spectra,
             xy,
             peak_resets: self.peak_resets(),
-            full_traces: self.full_traces,
+            full_traces: self.session.full_traces,
         };
-        if self.monitor.watched() != list {
-            self.monitor.watch(list);
+        if self.session.engine.monitor.watched() != list {
+            self.session.engine.monitor.watch(list);
         }
         // A display that left the screen, or lost its probe, keeps no trace.
-        let shown: BTreeSet<(u32, usize)> = scene::scope_outputs(&self.controller, &self.visible_displays)
-            .into_iter()
-            .filter(|scope| self.live.scope_probe(scope.output).is_some())
-            .map(|scope| scope.widget)
-            .chain(
-                scene::history_outputs(&self.controller, &self.visible_displays)
-                    .into_iter()
-                    .filter(|history| self.live.probe(history.output).is_some())
-                    .map(|history| history.widget),
-            )
-            .chain(
-                scene::spectrum_outputs(&self.controller, &self.visible_displays)
-                    .into_iter()
-                    .filter(|spectrum| self.live.scope_probe(spectrum.output).is_some())
-                    .map(|spectrum| spectrum.widget),
-            )
-            .chain(
-                scene::xy_outputs(&self.controller, &self.visible_displays)
-                    .into_iter()
-                    .filter(|scope| self.live.pair_probe(scope.x, scope.y).is_some())
-                    .map(|scope| scope.widget),
-            )
-            .collect();
-        self.traces.retain(|module, widget| shown.contains(&(module, widget)));
+        let shown: BTreeSet<(u32, usize)> =
+            scene::scope_outputs(&self.session.controller, &self.session.visible_displays)
+                .into_iter()
+                .filter(|scope| self.session.engine.live.scope_probe(scope.output).is_some())
+                .map(|scope| scope.widget)
+                .chain(
+                    scene::history_outputs(&self.session.controller, &self.session.visible_displays)
+                        .into_iter()
+                        .filter(|history| self.session.engine.live.probe(history.output).is_some())
+                        .map(|history| history.widget),
+                )
+                .chain(
+                    scene::spectrum_outputs(&self.session.controller, &self.session.visible_displays)
+                        .into_iter()
+                        .filter(|spectrum| self.session.engine.live.scope_probe(spectrum.output).is_some())
+                        .map(|spectrum| spectrum.widget),
+                )
+                .chain(
+                    scene::xy_outputs(&self.session.controller, &self.session.visible_displays)
+                        .into_iter()
+                        .filter(|scope| self.session.engine.live.pair_probe(scope.x, scope.y).is_some())
+                        .map(|scope| scope.widget),
+                )
+                .collect();
+        self.session
+            .traces
+            .retain(|module, widget| shown.contains(&(module, widget)));
     }
 
     /// Gives each new trace from the telemetry thread to the widgets that show
@@ -1145,7 +1099,7 @@ impl App {
         for (probe, trace) in traces {
             for &((module, widget), showing) in shown {
                 if showing == Some(probe) {
-                    self.traces.set(module, widget, trace.clone());
+                    self.session.traces.set(module, widget, trace.clone());
                 }
             }
         }
@@ -1156,9 +1110,9 @@ impl App {
         if traces.is_empty() {
             return;
         }
-        let shown: Vec<_> = scene::scope_outputs(&self.controller, &self.visible_displays)
+        let shown: Vec<_> = scene::scope_outputs(&self.session.controller, &self.session.visible_displays)
             .iter()
-            .map(|scope| (scope.widget, self.live.scope_probe(scope.output)))
+            .map(|scope| (scope.widget, self.session.engine.live.scope_probe(scope.output)))
             .collect();
         self.give_traces(traces, &shown);
     }
@@ -1167,9 +1121,9 @@ impl App {
     /// meters that show it, so it changes with any reset of one of them.
     fn peak_resets(&self) -> std::collections::HashMap<ProbeId, u64> {
         let mut resets = std::collections::HashMap::new();
-        for (widget, output) in scene::meter_outputs(&self.controller, &self.visible_displays) {
-            if let Some(probe) = self.live.probe(output) {
-                *resets.entry(probe).or_default() += self.clip_holds.resets(widget);
+        for (widget, output) in scene::meter_outputs(&self.session.controller, &self.session.visible_displays) {
+            if let Some(probe) = self.session.engine.live.probe(output) {
+                *resets.entry(probe).or_default() += self.session.clip_holds.resets(widget);
             }
         }
         resets
@@ -1184,15 +1138,15 @@ impl App {
             return;
         }
         let resets = self.peak_resets();
-        let meters = scene::meter_outputs(&self.controller, &self.visible_displays);
+        let meters = scene::meter_outputs(&self.session.controller, &self.session.visible_displays);
         let mut changed = false;
         for (probe, news) in peaks {
             if resets.get(&probe).copied().unwrap_or(0) != news.after {
                 continue;
             }
             for &(widget, output) in &meters {
-                if self.live.probe(output) == Some(probe) {
-                    changed |= self.clip_holds.take(widget, news);
+                if self.session.engine.live.probe(output) == Some(probe) {
+                    changed |= self.session.clip_holds.take(widget, news);
                 }
             }
         }
@@ -1205,9 +1159,9 @@ impl App {
     /// telemetry thread to report peaks again from here.
     pub(crate) fn reset_clip(&mut self, meter: (u32, usize), hold_too: bool) {
         if hold_too {
-            self.clip_holds.reset(meter);
+            self.session.clip_holds.reset(meter);
         } else {
-            self.clip_holds.clear_light(meter);
+            self.session.clip_holds.clear_light(meter);
         }
         self.publish_watch();
         self.refresh_values();
@@ -1218,9 +1172,9 @@ impl App {
         if histories.is_empty() {
             return;
         }
-        let shown: Vec<_> = scene::history_outputs(&self.controller, &self.visible_displays)
+        let shown: Vec<_> = scene::history_outputs(&self.session.controller, &self.session.visible_displays)
             .iter()
-            .map(|history| (history.widget, self.live.probe(history.output)))
+            .map(|history| (history.widget, self.session.engine.live.probe(history.output)))
             .collect();
         self.give_traces(histories, &shown);
     }
@@ -1230,9 +1184,9 @@ impl App {
         if traces.is_empty() {
             return;
         }
-        let shown: Vec<_> = scene::xy_outputs(&self.controller, &self.visible_displays)
+        let shown: Vec<_> = scene::xy_outputs(&self.session.controller, &self.session.visible_displays)
             .iter()
-            .map(|scope| (scope.widget, self.live.pair_probe(scope.x, scope.y)))
+            .map(|scope| (scope.widget, self.session.engine.live.pair_probe(scope.x, scope.y)))
             .collect();
         self.give_traces(traces, &shown);
     }
@@ -1243,9 +1197,9 @@ impl App {
         if spectra.is_empty() {
             return;
         }
-        let shown: Vec<_> = scene::spectrum_outputs(&self.controller, &self.visible_displays)
+        let shown: Vec<_> = scene::spectrum_outputs(&self.session.controller, &self.session.visible_displays)
             .iter()
-            .map(|spectrum| (spectrum.widget, self.live.scope_probe(spectrum.output)))
+            .map(|spectrum| (spectrum.widget, self.session.engine.live.scope_probe(spectrum.output)))
             .collect();
         self.give_traces(spectra, &shown);
     }
@@ -1255,15 +1209,15 @@ impl App {
     fn sync_probes(&mut self) {
         self.sync_live();
         // Probe IDs are never reused, so a level of a removed probe is dead.
-        let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
-        self.meter_levels.retain(|probe, _| live.contains(probe));
-        if let Err(e) = self.controller.commit() {
+        let live: std::collections::HashSet<ProbeId> = self.session.engine.live.probes().collect();
+        self.session.meter_levels.retain(|probe, _| live.contains(probe));
+        if let Err(e) = self.session.controller.commit() {
             self.alerts.warn(e.to_string());
         }
     }
 
     fn report(&mut self) {
-        let report = self.controller.last_report();
+        let report = self.session.controller.last_report();
         let inserted = report.inserted_delays().count();
         self.alerts.say(match report.loops.len() {
             0 => "no feedback loops".to_string(),
@@ -1345,7 +1299,7 @@ impl App {
         self.send_pending_safety();
         if !message.keeps_patch() {
             // It may have changed the patch: autosave looks again.
-            self.document.may_have_changed();
+            self.session.document.may_have_changed();
         }
         let was_open = self.overlays.browser().is_some();
         let was_help_open = self.overlays.help.is_some();
@@ -1426,7 +1380,7 @@ impl App {
         // The audio callback, or the idle engine above, makes room for the
         // staged modules. Tick messages keep this retry moving even without
         // another edit from the player.
-        if self.retry_commit {
+        if self.session.retry_commit {
             self.commit();
             self.drain_idle_engine();
         }
@@ -1503,10 +1457,10 @@ impl App {
     /// it, as one undo step.
     fn add_module(&mut self, descriptor: &'static ModuleDescriptor, world: Point) {
         self.close_slider_gesture();
-        self.edit(|app| match app.controller.add_module(descriptor.id) {
+        self.edit(|app| match app.session.controller.add_module(descriptor.id) {
             Ok(id) => {
-                app.positions.insert(id.0, (world.x, world.y));
-                app.selection = BTreeSet::from([id.0]);
+                app.session.positions.insert(id.0, (world.x, world.y));
+                app.session.selection = BTreeSet::from([id.0]);
                 app.commit();
             }
             Err(e) => app.alerts.warn(format!("Could not add {}: {e}", descriptor.name)),
@@ -1521,7 +1475,7 @@ impl App {
                 .warn(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
             return;
         };
-        let tiles: Vec<iced::Rectangle> = self.scene.modules().iter().map(|m| m.bounds()).collect();
+        let tiles: Vec<iced::Rectangle> = self.session.scene.modules().iter().map(|m| m.bounds()).collect();
         let corner = probe_menu::place(descriptor, world, &tiles);
         let source = OutputRef {
             module: ModuleId(output.module),
@@ -1530,6 +1484,7 @@ impl App {
         // The output may be gone: the control channel can remove its module
         // while the menu is open.
         let exists = self
+            .session
             .controller
             .graph()
             .node(source.module)
@@ -1539,29 +1494,29 @@ impl App {
             return;
         }
         self.close_slider_gesture();
-        self.step_name = Some(probe.verb().to_string());
+        self.session.step_name = Some(probe.verb().to_string());
         self.edit(|app| {
-            let id = match app.controller.add_module(descriptor.id) {
+            let id = match app.session.controller.add_module(descriptor.id) {
                 Ok(id) => id,
                 Err(e) => {
                     app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                     return;
                 }
             };
-            if let Err(e) = app.controller.connect(source, InputRef { module: id, port: 0 }) {
+            if let Err(e) = app.session.controller.connect(source, InputRef { module: id, port: 0 }) {
                 // A probe that is not connected shows nothing: take it back,
                 // so the edit makes no step.
-                let _ = app.controller.remove_module(id);
+                let _ = app.session.controller.remove_module(id);
                 app.commit();
                 app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                 return;
             }
-            app.positions.insert(id.0, (corner.x, corner.y));
-            app.selection = BTreeSet::from([id.0]);
+            app.session.positions.insert(id.0, (corner.x, corner.y));
+            app.session.selection = BTreeSet::from([id.0]);
             app.commit();
         });
         // `record` clears it, but an edit inside a gesture does not record.
-        self.step_name = None;
+        self.session.step_name = None;
     }
 
     /// The messages that return no task. Called from [`update`](Self::update),
@@ -1587,12 +1542,13 @@ impl App {
                         .browser()
                         .and_then(browser::Browser::highlighted)
                         .or_else(|| {
-                            (self.overlays.browser().is_none() && self.selection.len() == 1)
+                            (self.overlays.browser().is_none() && self.session.selection.len() == 1)
                                 .then(|| {
-                                    self.selection
+                                    self.session
+                                        .selection
                                         .iter()
                                         .next()
-                                        .and_then(|id| self.controller.graph().node(ModuleId(*id)))
+                                        .and_then(|id| self.session.controller.graph().node(ModuleId(*id)))
                                         .map(|node| node.descriptor)
                                 })
                                 .flatten()
@@ -1607,7 +1563,7 @@ impl App {
                 }
             }
             Message::ResetClip(id) => {
-                let meters = scene::meter_outputs(&self.controller, &[id]);
+                let meters = scene::meter_outputs(&self.session.controller, &[id]);
                 for (meter, _) in meters {
                     self.reset_clip(meter, true);
                 }
@@ -1615,6 +1571,7 @@ impl App {
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
                 self.overlays.help = self
+                    .session
                     .controller
                     .graph()
                     .node(ModuleId(id))
@@ -1670,20 +1627,20 @@ impl App {
             }
             Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
-            Message::UnknownLabelDraft { module, value } => self.gestures.draft_label(module, value),
+            Message::UnknownLabelDraft { module, value } => self.session.gestures.draft_label(module, value),
             Message::UnknownLabelApply { module } => {
-                if let Some(value) = self.gestures.take_label(module) {
+                if let Some(value) = self.session.gestures.take_label(module) {
                     let label = (!value.is_empty()).then_some(value);
                     self.edit(|app| {
-                        if app.controller.set_unknown_label(ModuleId(module), label) {
+                        if app.session.controller.set_unknown_label(ModuleId(module), label) {
                             app.refresh();
                         }
                     });
                 }
             }
             Message::DropRow(row) => {
-                let allowed = !self.learn.is_on();
-                self.gestures.hover_row(row, allowed);
+                let allowed = !self.session.learn.is_on();
+                self.session.gestures.hover_row(row, allowed);
             }
             Message::Param {
                 module,
@@ -1691,6 +1648,7 @@ impl App {
                 position,
             } => {
                 let value = self
+                    .session
                     .controller
                     .graph()
                     .node(ModuleId(module))
@@ -1702,6 +1660,7 @@ impl App {
             }
             Message::ParamValue { module, index, value } => {
                 let value = self
+                    .session
                     .controller
                     .graph()
                     .node(ModuleId(module))
@@ -1713,6 +1672,7 @@ impl App {
             }
             Message::Choice { module, index, choice } => {
                 let value = self
+                    .session
                     .controller
                     .graph()
                     .node(ModuleId(module))
@@ -1729,10 +1689,10 @@ impl App {
             Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::SliderReleased => self.close_slider_gesture(),
             Message::AddModulation { module, index } => {
-                self.gestures.toggle_adding((module, index));
+                self.session.gestures.toggle_adding((module, index));
             }
             Message::Assign { source, module, index } => {
-                self.gestures.close_adding();
+                self.session.gestures.close_adding();
                 self.close_slider_gesture();
                 self.edit(|app| app.assign(source, ModuleId(module), index));
             }
@@ -1740,9 +1700,9 @@ impl App {
                 // Like a parameter slider: the first change opens the
                 // gesture, and letting go closes it, so one drag is one step.
                 self.close_pending_arrow_group();
-                self.edits.start_slider_gesture();
+                self.session.edits.start_slider_gesture();
                 self.begin_edit();
-                if let Err(e) = self.controller.set_assignment_depth(id, depth) {
+                if let Err(e) = self.session.controller.set_assignment_depth(id, depth) {
                     self.alerts.warn(e.to_string());
                 }
                 self.refresh_values();
@@ -1750,7 +1710,7 @@ impl App {
             Message::Polarity { id, choice } => {
                 self.close_slider_gesture();
                 self.edit(|app| {
-                    if let Err(e) = app.controller.set_assignment_polarity(id, choice.polarity()) {
+                    if let Err(e) = app.session.controller.set_assignment_polarity(id, choice.polarity()) {
                         app.alerts.warn(e.to_string());
                     }
                     app.refresh_values();
@@ -1759,20 +1719,20 @@ impl App {
             Message::Enabled { id, enabled } => {
                 self.close_slider_gesture();
                 self.edit(|app| {
-                    if let Err(e) = app.controller.set_assignment_enabled(id, enabled) {
+                    if let Err(e) = app.session.controller.set_assignment_enabled(id, enabled) {
                         app.alerts.warn(e.to_string());
                     } else {
-                        app.scene.set_modulation_enabled(id.0, enabled);
+                        app.session.scene.set_modulation_enabled(id.0, enabled);
                     }
                     app.refresh_values();
                 });
             }
             Message::Unassign(id) => {
                 self.close_slider_gesture();
-                self.edit(|app| match app.controller.remove_assignment(id) {
+                self.edit(|app| match app.session.controller.remove_assignment(id) {
                     Ok(removed) => {
                         app.commit();
-                        let graph = app.controller.graph();
+                        let graph = app.session.controller.graph();
                         app.alerts.say(format!(
                             "Removed modulation from {} to {}",
                             modulation::source_name(graph, removed.source),
@@ -1783,8 +1743,8 @@ impl App {
                 });
             }
             Message::SelectModule(id) => {
-                if self.controller.graph().node(ModuleId(id)).is_some() {
-                    self.selection = BTreeSet::from([id]);
+                if self.session.controller.graph().node(ModuleId(id)).is_some() {
+                    self.session.selection = BTreeSet::from([id]);
                 }
             }
             Message::Undo => self.undo(),
@@ -1794,11 +1754,11 @@ impl App {
             Message::DismissError(cause) => self.alerts.dismiss(cause),
             Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {
-                if let Some(midi) = &self.midi {
-                    self.holding = !self.holding;
+                if let Some(midi) = &self.session.engine.midi {
+                    self.session.engine.holding = !self.session.engine.holding;
                     loom_host_desktop::send_midi(
                         midi,
-                        if self.holding {
+                        if self.session.engine.holding {
                             MidiEvent::note_on(0, 0, 57, 100)
                         } else {
                             MidiEvent::note_off(0, 0, 57)
@@ -1824,19 +1784,19 @@ impl App {
             Message::BenchDone => self.quit = true,
             Message::Frame(now) => {
                 self.meter.record(now);
-                scene::update_live_values(&mut self.values, &self.controller);
-                self.controller.collect_garbage();
+                scene::update_live_values(&mut self.session.values, &self.session.controller);
+                self.session.controller.collect_garbage();
                 self.update_dropouts(now);
             }
             Message::LiveFrame => {
-                scene::update_live_values(&mut self.values, &self.controller);
+                scene::update_live_values(&mut self.session.values, &self.session.controller);
                 if !self.rig.input.feedback_warned() && self.rig.input.port().is_some() {
                     self.sync_audio_input();
                 }
             }
             Message::Autosave => self.autosave(Instant::now()),
             Message::Tick => {
-                self.controller.collect_garbage();
+                self.session.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
             }
             Message::AudioPoll => self.poll_audio(),
@@ -1855,20 +1815,21 @@ impl App {
                 silenced,
                 clipped,
             }) => {
-                self.stream.set_load(peak, max);
+                self.session.engine.stream.set_load(peak, max);
                 self.alerts.note_dropouts(dropouts, at);
                 self.alerts.set_output_warnings(silenced, clipped);
             }
             Message::Audio(audio_watch::Event::Stalled { callbacks, advanced }) => {
                 // Time the stall from when the watcher last saw a callback,
                 // as a poll on this thread would have.
-                self.stream.watcher_saw(callbacks, advanced);
+                self.session.engine.stream.watcher_saw(callbacks, advanced);
                 self.poll_audio();
             }
             Message::Meters(levels) => {
                 // A reading may arrive after its probe was removed.
-                let live: std::collections::HashSet<ProbeId> = self.live.probes().collect();
-                self.meter_levels
+                let live: std::collections::HashSet<ProbeId> = self.session.engine.live.probes().collect();
+                self.session
+                    .meter_levels
                     .extend(levels.into_iter().filter(|(probe, _)| live.contains(probe)));
                 self.refresh_values();
             }
@@ -1879,11 +1840,11 @@ impl App {
                 self.take_xy(update.xy);
                 self.take_peaks(update.peaks);
                 for (probe, carrying) in update.activity {
-                    if let Some(output) = self.live.output_of(probe) {
+                    if let Some(output) = self.session.engine.live.output_of(probe) {
                         if carrying {
-                            self.carrying.insert(output);
+                            self.session.carrying.insert(output);
                         } else {
-                            self.carrying.remove(&output);
+                            self.session.carrying.remove(&output);
                         }
                     }
                 }
@@ -1892,34 +1853,34 @@ impl App {
                 }
             }
             Message::Lights(readings) => {
-                self.lights.extend(readings);
+                self.session.lights.extend(readings);
                 self.sync_audio_input();
                 self.refresh_values();
             }
             Message::Learn(message) => self.learn_message(message),
             Message::Unmap { module, index } => {
                 self.close_slider_gesture();
-                self.edit(|app| match app.controller.unmap_midi(ModuleId(module), index) {
+                self.edit(|app| match app.session.controller.unmap_midi(ModuleId(module), index) {
                     Ok(Some(mapping)) => {
                         app.commit();
                         app.alerts.say(format!(
                             "Removed {} from {}",
                             mapping.control,
-                            learn::param_name(&app.controller, (module, index))
+                            learn::param_name(&app.session.controller, (module, index))
                         ));
                     }
                     Ok(None) => {}
                     Err(e) => app.alerts.warn(e.to_string()),
                 });
             }
-            Message::MidiOptionsRows { module, index } => self.learn.toggle_options((module, index)),
+            Message::MidiOptionsRows { module, index } => self.session.learn.toggle_options((module, index)),
             Message::MidiOptions { module, index, options } => self.set_midi_options(module, index, options),
             Message::MidiRangeText {
                 module,
                 index,
                 low,
                 high,
-            } => self.learn.set_range_draft(Some(learn::RangeDraft {
+            } => self.session.learn.set_range_draft(Some(learn::RangeDraft {
                 param: (module, index),
                 low,
                 high,
@@ -1948,7 +1909,7 @@ impl App {
             Message::Key(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
-            }) if self.learn.is_on() => self.stop_learning(),
+            }) if self.session.learn.is_on() => self.stop_learning(),
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if modifiers.command() => {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
@@ -1987,19 +1948,20 @@ impl App {
     /// drives `run`, the input decides, so Space changes nothing. Without a
     /// Transport, it starts or stops the engine's transport directly.
     fn toggle_run(&mut self) {
-        let Some((transport, index)) = transport_run(&self.controller) else {
-            let running = !self.controller.transport().running;
-            if let Err(e) = self.controller.set_running(running) {
+        let Some((transport, index)) = transport_run(&self.session.controller) else {
+            let running = !self.session.controller.transport().running;
+            if let Err(e) = self.session.controller.set_running(running) {
                 self.alerts.warn(e.to_string());
             }
             return;
         };
-        if run_is_driven(&self.controller) {
+        if run_is_driven(&self.session.controller) {
             self.alerts
                 .warn("Run follows the cable on the Transport's run input".to_string());
             return;
         }
         let on = self
+            .session
             .controller
             .graph()
             .node(transport)
@@ -2011,14 +1973,15 @@ impl App {
     /// gone, the transport stays as the input left it, and the Run toggle
     /// takes that state, so it shows the truth and works again.
     fn keep_run_state(&mut self) {
-        let driven = run_is_driven(&self.controller);
-        if self.run_driven
+        let driven = run_is_driven(&self.session.controller);
+        if self.session.run_driven
             && !driven
-            && let Some((transport, index)) = transport_run(&self.controller)
-            && let Some(running) = transport_running(&self.controller)
+            && let Some((transport, index)) = transport_run(&self.session.controller)
+            && let Some(running) = transport_running(&self.session.controller)
         {
             let value = if running { 1.0 } else { 0.0 };
             if self
+                .session
                 .controller
                 .graph()
                 .node(transport)
@@ -2027,7 +1990,7 @@ impl App {
                 self.set_param(transport.0, index, value);
             }
         }
-        self.run_driven = driven;
+        self.session.run_driven = driven;
     }
 }
 

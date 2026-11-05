@@ -574,7 +574,7 @@ impl App {
     /// focus, and no overlay has the input.
     pub(crate) fn matrix_has_keys(&self) -> bool {
         self.right_tab == Tab::Matrix
-            && self.matrix.focused
+            && self.session.matrix.focused
             && self.input_owner() == crate::input_owner::InputOwner::Canvas
     }
 
@@ -587,15 +587,22 @@ impl App {
                 key: keyboard::Key::Named(keyboard::key::Named::Enter),
                 ..
             }
-        ) && self.matrix.edit.is_none()
-            && self.matrix.cell == Column::Depth;
+        ) && self.session.matrix.edit.is_none()
+            && self.session.matrix.cell == Column::Depth;
         self.matrix_key(key);
         let scroll = if self.matrix_has_keys() {
             reveal_selected()
         } else {
             iced::Task::none()
         };
-        if open_depth && self.matrix.edit.as_ref().is_some_and(|e| e.column == Column::Depth) {
+        if open_depth
+            && self
+                .session
+                .matrix
+                .edit
+                .as_ref()
+                .is_some_and(|e| e.column == Column::Depth)
+        {
             iced::Task::batch([scroll, crate::editing::focus_text_field("matrix-depth")])
         } else {
             scroll
@@ -607,9 +614,9 @@ impl App {
         if self.right_tab != Tab::Matrix {
             return None;
         }
-        let id = self.matrix.selected?;
-        let a = self.controller.graph().assignment(id)?;
-        let descriptor = self.controller.graph().node(a.target)?.descriptor;
+        let id = self.session.matrix.selected?;
+        let a = self.session.controller.graph().assignment(id)?;
+        let descriptor = self.session.controller.graph().node(a.target)?.descriptor;
         let name = descriptor.params.get(a.param)?.name;
         Some(loom_canvas::ModulationView {
             id: id.0,
@@ -629,30 +636,30 @@ impl App {
         match event {
             Event::Tab(tab) => {
                 self.right_tab = tab;
-                self.matrix.focused = tab == Tab::Matrix;
-                self.matrix.edit = None;
-                self.matrix.add = None;
+                self.session.matrix.focused = tab == Tab::Matrix;
+                self.session.matrix.edit = None;
+                self.session.matrix.add = None;
             }
             Event::SortBy(column) => {
                 // A new column starts ascending; the same one keeps its
                 // direction.
-                let reverse = self.matrix.sort.is_some_and(|(c, r)| Some(c) == column && r);
-                self.matrix.sort = column.map(|c| (c, reverse));
+                let reverse = self.session.matrix.sort.is_some_and(|(c, r)| Some(c) == column && r);
+                self.session.matrix.sort = column.map(|c| (c, reverse));
             }
             Event::ReverseSort => {
-                if let Some((_, reverse)) = &mut self.matrix.sort {
+                if let Some((_, reverse)) = &mut self.session.matrix.sort {
                     *reverse = !*reverse;
                 }
             }
             Event::Filter(filter) => {
-                self.matrix.filter = filter;
-                self.matrix.focused = false;
+                self.session.matrix.filter = filter;
+                self.session.matrix.focused = false;
             }
-            Event::SelectedOnly(value) => self.matrix.selected_only = value,
+            Event::SelectedOnly(value) => self.session.matrix.selected_only = value,
             Event::Select(id, column) => self.matrix_select(id, column),
             Event::Edit(id, column) => self.matrix_begin_edit(id, column),
             Event::DepthText(s) => {
-                if let Some(e) = &mut self.matrix.edit {
+                if let Some(e) = &mut self.session.matrix.edit {
                     e.depth = s;
                 }
             }
@@ -662,7 +669,7 @@ impl App {
             Event::Target(id, target) => self.matrix_retarget(id, None, Some((target.module, target.param))),
             Event::Polarity(id, choice) => {
                 self.handle(Message::Polarity { id, choice });
-                self.matrix.edit = None;
+                self.session.matrix.edit = None;
             }
             Event::Enabled(id, enabled) => {
                 self.matrix_select(id, Column::On);
@@ -670,47 +677,47 @@ impl App {
             }
             Event::Remove(id) => {
                 self.handle(Message::Unassign(id));
-                self.matrix.reconcile(self.controller.graph());
+                self.session.matrix.reconcile(self.session.controller.graph());
             }
             Event::AddOpen => {
                 // Pressing Add again keeps what the open form has picked.
-                self.matrix.add.get_or_insert_with(Add::default);
-                self.matrix.focused = true;
-                self.matrix.cell = Column::Source;
+                self.session.matrix.add.get_or_insert_with(Add::default);
+                self.session.matrix.focused = true;
+                self.session.matrix.cell = Column::Source;
             }
             Event::AddSource(source) => {
-                if let Some(add) = &mut self.matrix.add {
+                if let Some(add) = &mut self.session.matrix.add {
                     add.source = Some(source);
                 }
             }
             Event::AddTarget(target) => {
-                if let Some(add) = &mut self.matrix.add {
+                if let Some(add) = &mut self.session.matrix.add {
                     add.target = Some(target);
                 }
             }
             Event::AddApply => self.matrix_add(),
             Event::Apply => self.matrix_apply(),
             Event::Cancel => {
-                self.matrix.edit = None;
-                self.matrix.add = None;
+                self.session.matrix.edit = None;
+                self.session.matrix.add = None;
             }
         }
     }
 
     /// Selects a row and its target module, leaving the badge pin alone.
     fn matrix_select(&mut self, id: AssignmentId, column: Column) {
-        if let Some(a) = self.controller.graph().assignment(id) {
-            self.matrix.selected = Some(id);
-            self.matrix.cell = column;
-            self.matrix.focused = true;
-            self.selection = std::collections::BTreeSet::from([a.target.0]);
+        if let Some(a) = self.session.controller.graph().assignment(id) {
+            self.session.matrix.selected = Some(id);
+            self.session.matrix.cell = column;
+            self.session.matrix.focused = true;
+            self.session.selection = std::collections::BTreeSet::from([a.target.0]);
         }
     }
 
     /// Opens an editor with the current value as its draft.
     fn matrix_begin_edit(&mut self, id: AssignmentId, column: Column) {
         self.matrix_select(id, column);
-        let Some(a) = self.controller.graph().assignment(id).copied() else {
+        let Some(a) = self.session.controller.graph().assignment(id).copied() else {
             return;
         };
         if column == Column::On {
@@ -718,11 +725,11 @@ impl App {
             return;
         }
         let choice = match column {
-            Column::Source => sources(self.controller.graph())
+            Column::Source => sources(self.session.controller.graph())
                 .iter()
                 .position(|s| s.output == a.source)
                 .unwrap_or(0),
-            Column::Target => targets(self.controller.graph())
+            Column::Target => targets(self.session.controller.graph())
                 .iter()
                 .position(|t| (t.module, t.param) == (a.target, a.param))
                 .unwrap_or(0),
@@ -733,7 +740,7 @@ impl App {
             },
             _ => 0,
         };
-        self.matrix.edit = Some(Edit {
+        self.session.matrix.edit = Some(Edit {
             id,
             column,
             depth: String::new(),
@@ -743,12 +750,13 @@ impl App {
 
     /// Applies a source or target change as a single undoable graph edit.
     fn matrix_retarget(&mut self, id: AssignmentId, source: Option<OutputRef>, target: Option<(ModuleId, usize)>) {
-        let Some(old) = self.controller.graph().assignment(id).copied() else {
+        let Some(old) = self.session.controller.graph().assignment(id).copied() else {
             return;
         };
         let source = source.unwrap_or(old.source);
         let (module, param) = target.unwrap_or((old.target, old.param));
         if self
+            .session
             .controller
             .graph()
             .assignments()
@@ -756,27 +764,27 @@ impl App {
         {
             self.alerts.warn(format!(
                 "{} already modulates {}",
-                modulation::source_name(self.controller.graph(), source),
-                modulation::target_name(self.controller.graph(), module, param)
+                modulation::source_name(self.session.controller.graph(), source),
+                modulation::target_name(self.session.controller.graph(), module, param)
             ));
             return;
         }
         self.close_slider_gesture();
         self.edit(
-            |app| match app.controller.retarget_assignment(id, source, module, param) {
+            |app| match app.session.controller.retarget_assignment(id, source, module, param) {
                 Ok(()) => {
                     app.commit();
                 }
                 Err(e) => app.alerts.warn(e.to_string()),
             },
         );
-        self.matrix.edit = None;
-        self.matrix_select(id, self.matrix.cell);
+        self.session.matrix.edit = None;
+        self.matrix_select(id, self.session.matrix.cell);
     }
 
     /// Creates the two picked endpoints with the normal app assignment path.
     fn matrix_add(&mut self) {
-        let Some(add) = self.matrix.add.as_ref() else {
+        let Some(add) = self.session.matrix.add.as_ref() else {
             return;
         };
         let (Some(source), Some(target)) = (&add.source, &add.target) else {
@@ -786,12 +794,12 @@ impl App {
         let (source, module, param) = (source.output, target.module, target.param);
         self.close_slider_gesture();
         self.edit(|app| app.assign(source, module, param));
-        self.matrix.add = None;
+        self.session.matrix.add = None;
     }
 
     /// Commits a typed depth or a keyboard-selected source, target, or polarity.
     fn matrix_apply(&mut self) {
-        let Some(edit) = self.matrix.edit.clone() else {
+        let Some(edit) = self.session.matrix.edit.clone() else {
             return;
         };
         match edit.column {
@@ -800,23 +808,23 @@ impl App {
                 Some(depth) => {
                     self.handle(Message::Depth { id: edit.id, depth });
                     self.handle(Message::SliderReleased);
-                    self.matrix.edit = None;
+                    self.session.matrix.edit = None;
                 }
                 None => self.alerts.warn("Depth must be between -100% and 100%".to_string()),
             },
             Column::Source => {
-                if let Some(source) = sources(self.controller.graph()).get(edit.choice) {
+                if let Some(source) = sources(self.session.controller.graph()).get(edit.choice) {
                     self.matrix_retarget(edit.id, Some(source.output), None);
                 }
             }
             Column::Target => {
-                if let Some(target) = targets(self.controller.graph()).get(edit.choice) {
+                if let Some(target) = targets(self.session.controller.graph()).get(edit.choice) {
                     self.matrix_retarget(edit.id, None, Some((target.module, target.param)));
                 }
             }
             Column::Polarity => {
-                if let Some(a) = self.controller.graph().assignment(edit.id) {
-                    let own = modulation::source_polarity(self.controller.graph(), a.source);
+                if let Some(a) = self.session.controller.graph().assignment(edit.id) {
+                    let own = modulation::source_polarity(self.session.controller.graph(), a.source);
                     self.matrix_event(Event::Polarity(edit.id, PolarityChoice::options(own)[edit.choice]));
                 }
             }
@@ -840,27 +848,27 @@ impl App {
             return;
         }
         if key == keyboard::Key::Named(Named::Escape) {
-            if self.matrix.edit.is_some() || self.matrix.add.is_some() {
+            if self.session.matrix.edit.is_some() || self.session.matrix.add.is_some() {
                 self.matrix_event(Event::Cancel);
             } else {
-                self.matrix.focused = false;
+                self.session.matrix.focused = false;
             }
             return;
         }
         if key == keyboard::Key::Named(Named::Tab) {
-            self.matrix.focused = false;
-            self.matrix.edit = None;
+            self.session.matrix.focused = false;
+            self.session.matrix.edit = None;
             return;
         }
-        if let Some(add) = self.matrix.add.as_mut() {
-            let options_sources = sources(self.controller.graph());
-            let options_targets = targets(self.controller.graph());
+        if let Some(add) = self.session.matrix.add.as_mut() {
+            let options_sources = sources(self.session.controller.graph());
+            let options_targets = targets(self.session.controller.graph());
             match key {
-                keyboard::Key::Named(Named::ArrowLeft) => self.matrix.cell = Column::Source,
-                keyboard::Key::Named(Named::ArrowRight) => self.matrix.cell = Column::Target,
+                keyboard::Key::Named(Named::ArrowLeft) => self.session.matrix.cell = Column::Source,
+                keyboard::Key::Named(Named::ArrowRight) => self.session.matrix.cell = Column::Target,
                 keyboard::Key::Named(Named::ArrowDown | Named::ArrowUp) => {
                     let down = key == keyboard::Key::Named(Named::ArrowDown);
-                    if self.matrix.cell == Column::Source && !options_sources.is_empty() {
+                    if self.session.matrix.cell == Column::Source && !options_sources.is_empty() {
                         let next = add
                             .source
                             .as_ref()
@@ -893,12 +901,12 @@ impl App {
             }
             return;
         }
-        if let Some(edit) = &mut self.matrix.edit {
+        if let Some(edit) = &mut self.session.matrix.edit {
             match key {
                 keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown) if edit.column != Column::Depth => {
                     let len = match edit.column {
-                        Column::Source => sources(self.controller.graph()).len(),
-                        Column::Target => targets(self.controller.graph()).len(),
+                        Column::Source => sources(self.session.controller.graph()).len(),
+                        Column::Target => targets(self.session.controller.graph()).len(),
                         Column::Polarity => 3,
                         _ => 0,
                     };
@@ -916,9 +924,11 @@ impl App {
             return;
         }
         let model = self
+            .session
             .matrix
-            .model(self.controller.graph(), &self.selection, self.right_tab);
+            .model(self.session.controller.graph(), &self.session.selection, self.right_tab);
         let Some(i) = self
+            .session
             .matrix
             .selected
             .and_then(|id| model.rows.iter().position(|r| r.id == id.0))
@@ -935,18 +945,21 @@ impl App {
                 } else {
                     i.saturating_sub(1)
                 };
-                self.matrix_select(AssignmentId(model.rows[next].id), self.matrix.cell);
+                self.matrix_select(AssignmentId(model.rows[next].id), self.session.matrix.cell);
             }
             keyboard::Key::Named(Named::ArrowLeft | Named::ArrowRight) => {
-                let i = Column::ALL.iter().position(|&c| c == self.matrix.cell).unwrap_or(0);
-                self.matrix.cell = Column::ALL[if key == keyboard::Key::Named(Named::ArrowRight) {
+                let i = Column::ALL
+                    .iter()
+                    .position(|&c| c == self.session.matrix.cell)
+                    .unwrap_or(0);
+                self.session.matrix.cell = Column::ALL[if key == keyboard::Key::Named(Named::ArrowRight) {
                     (i + 1).min(4)
                 } else {
                     i.saturating_sub(1)
                 }];
             }
             keyboard::Key::Named(Named::Enter) => {
-                self.matrix_begin_edit(AssignmentId(model.rows[i].id), self.matrix.cell)
+                self.matrix_begin_edit(AssignmentId(model.rows[i].id), self.session.matrix.cell)
             }
             keyboard::Key::Named(Named::Delete) => self.matrix_event(Event::Remove(AssignmentId(model.rows[i].id))),
             _ => {}

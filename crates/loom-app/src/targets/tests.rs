@@ -4,9 +4,9 @@ use super::*;
 /// on its output, whose meter shares the name `out` with the output.
 fn patch() -> (crate::App, u32, u32) {
     let mut app = crate::App::new(crate::tests::app_args());
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
-    let meter = app.controller.add_module("loom.display.meter").unwrap();
-    app.controller.connect_named(env, "out", meter, "in").unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
+    let meter = app.session.controller.add_module("loom.display.meter").unwrap();
+    app.session.controller.connect_named(env, "out", meter, "in").unwrap();
     app.commit();
     (app, env.0, meter.0)
 }
@@ -17,7 +17,7 @@ fn patch() -> (crate::App, u32, u32) {
 #[test]
 fn names_find_parameters_ports_then_lights_and_meters() {
     let (app, env, meter) = patch();
-    let graph = app.controller.graph();
+    let graph = app.session.controller.graph();
     assert!(matches!(find(graph, env, "attack"), Ok(Part::Control(..))));
     assert!(matches!(
         find(graph, env, "gate"),
@@ -47,7 +47,7 @@ fn names_find_parameters_ports_then_lights_and_meters() {
     assert_eq!(name(graph, badge), Some(format!("{env}:badge:out")));
     // No assignment, so no badge is drawn.
     assert!(
-        world_bounds(&app.scene, &app.values, badge)
+        world_bounds(&app.session.scene, &app.session.values, badge)
             .unwrap_err()
             .contains("no badge")
     );
@@ -63,11 +63,11 @@ fn every_part_of_every_module_round_trips_through_its_name() {
     let mut app = crate::App::new(crate::tests::app_args());
     for descriptor in loom_modules::ALL {
         // A new patch has its one Transport already.
-        let id = match app.controller.add_module(descriptor.id) {
+        let id = match app.session.controller.add_module(descriptor.id) {
             Err(loom_core::LoomError::SecondTransport(existing)) => existing.0,
             added => added.unwrap().0,
         };
-        let graph = app.controller.graph();
+        let graph = app.session.controller.graph();
         let mut parts = Vec::new();
         for (index, widget) in descriptor.panel.widgets.iter().enumerate() {
             parts.push(if widget.is_control() {
@@ -102,8 +102,8 @@ fn every_part_of_every_module_round_trips_through_its_name() {
 #[test]
 fn prefixes_and_errors() {
     let mut app = crate::App::new(crate::tests::app_args());
-    let svf = app.controller.add_module("loom.filter.svf").unwrap().0;
-    let graph = app.controller.graph();
+    let svf = app.session.controller.add_module("loom.filter.svf").unwrap().0;
+    let graph = app.session.controller.graph();
     assert!(matches!(find(graph, svf, "cutoff"), Ok(Part::Control(..))));
     let input = find(graph, svf, "input:cutoff").unwrap();
     assert!(matches!(input, Part::Port(PortRef { output: false, .. })));
@@ -126,6 +126,13 @@ fn prefixes_and_errors() {
     };
     assert_eq!(name(graph, Part::Port(gone)), None);
     // Not on the canvas: the scene has no module 999.
-    assert!(world_bounds(&app.scene, &app.values, Part::Control(999, 0)).is_err());
-    assert!(world_bounds(&app.scene, &app.values, Part::Port(PortRef { module: 999, ..gone })).is_err());
+    assert!(world_bounds(&app.session.scene, &app.session.values, Part::Control(999, 0)).is_err());
+    assert!(
+        world_bounds(
+            &app.session.scene,
+            &app.session.values,
+            Part::Port(PortRef { module: 999, ..gone })
+        )
+        .is_err()
+    );
 }

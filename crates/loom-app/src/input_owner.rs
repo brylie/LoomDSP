@@ -190,7 +190,7 @@ impl App {
             matrix: self.matrix_has_keys(),
             browser: self.input_owner() == InputOwner::Browser,
             patches: self.input_owner() == InputOwner::Patches,
-            value_draft: self.value_draft.is_some(),
+            value_draft: self.session.value_draft.is_some(),
         }
     }
 

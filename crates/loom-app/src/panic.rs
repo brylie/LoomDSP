@@ -31,9 +31,9 @@ impl App {
     /// module, and fades back in. The Hold note button lets go too, since
     /// its note is released.
     pub(crate) fn panic(&mut self) {
-        match self.controller.panic() {
+        match self.session.controller.panic() {
             Ok(()) => {
-                self.holding = false;
+                self.session.engine.holding = false;
                 self.alerts
                     .say("Panic: every note released and every module reset.".to_string());
             }
@@ -45,7 +45,7 @@ impl App {
     /// engine, because the trigger belongs to the rig, not to one engine.
     pub(crate) fn send_panic_trigger(&mut self) {
         let trigger = self.rig.store.saved().panic.map(PanicPref::trigger);
-        if let Err(e) = self.controller.set_panic_trigger(trigger) {
+        if let Err(e) = self.session.controller.set_panic_trigger(trigger) {
             self.alerts.warn(format!("Panic: {e}"));
         }
     }
@@ -58,8 +58,8 @@ impl App {
             self.alerts.say("Panic: learn cancelled.".to_string());
             return;
         }
-        let cc = self.controller.last_control_change().map(|seen| seen.serial);
-        let note = self.controller.last_note_on().map(|seen| seen.serial);
+        let cc = self.session.controller.last_control_change().map(|seen| seen.serial);
+        let note = self.session.controller.last_note_on().map(|seen| seen.serial);
         self.rig.panic_learn = Some(cc.max(note).unwrap_or(0));
         self.alerts
             .say("Panic: move a control or press a pad to set the trigger.".to_string());
@@ -72,6 +72,7 @@ impl App {
             return false;
         };
         let cc = self
+            .session
             .controller
             .last_control_change()
             .filter(|seen| seen.serial > since)
@@ -82,6 +83,7 @@ impl App {
                 )
             });
         let note = self
+            .session
             .controller
             .last_note_on()
             .filter(|seen| seen.serial > since)

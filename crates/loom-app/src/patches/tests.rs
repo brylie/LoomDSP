@@ -134,8 +134,8 @@ fn browse_opens_patches_in_the_app() {
     let _ = app.update(AppMessage::Patches(Message::Search("bass".into())));
     let _ = app.update(AppMessage::Patches(Message::Submit));
     assert!(app.overlays.patches().is_none());
-    assert_eq!(app.document.name(), "Bass");
-    assert_eq!(app.document.file(), Some(dir.join("live/bass.ron").as_path()));
+    assert_eq!(app.session.document.name(), "Bass");
+    assert_eq!(app.session.document.file(), Some(dir.join("live/bass.ron").as_path()));
     let _ = std::fs::remove_dir_all(dir);
 }
 

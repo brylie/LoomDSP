@@ -89,7 +89,7 @@ pub struct PatchRows {
 impl App {
     /// Patch info for the inspector.
     pub(crate) fn patch_rows(&self) -> PatchRows {
-        let info = self.document.info();
+        let info = self.session.document.info();
         let licence = Licence::of(info.license.as_deref());
         let (licence_summary, licence_url) = match &licence {
             Licence::None => (None, None),
@@ -100,8 +100,8 @@ impl App {
             name: self.patch_name(),
             authors: info.authors.clone(),
             tags: info.tags.clone(),
-            tag_draft: self.patch_info.tag_draft.clone(),
-            tag_note: self.patch_info.tag_note.clone(),
+            tag_draft: self.session.patch_info.tag_draft.clone(),
+            tag_note: self.session.patch_info.tag_note.clone(),
             licence: licence.short(),
             licence_summary,
             licence_url,
@@ -114,39 +114,39 @@ impl App {
         match message {
             Message::Authors(action) => {
                 let edits = action.is_edit();
-                self.patch_info.authors.perform(action);
+                self.session.patch_info.authors.perform(action);
                 if edits {
-                    let authors = metadata::tidy_authors(self.patch_info.authors.text().lines());
-                    if authors != self.document.info().authors {
-                        self.document.edit_info(|info| info.authors = authors);
+                    let authors = metadata::tidy_authors(self.session.patch_info.authors.text().lines());
+                    if authors != self.session.document.info().authors {
+                        self.session.document.edit_info(|info| info.authors = authors);
                     }
                 }
             }
             Message::TagDraft(text) => {
-                self.patch_info.tag_note = None;
+                self.session.patch_info.tag_note = None;
                 // Each comma ends a tag; the rest stays in the field.
                 let mut parts: Vec<&str> = text.split(',').collect();
                 let rest = parts.pop().unwrap_or_default().to_string();
                 for part in parts {
                     self.add_tag(part);
                 }
-                self.patch_info.tag_draft = rest;
+                self.session.patch_info.tag_draft = rest;
             }
             Message::TagSubmit => {
-                let draft = std::mem::take(&mut self.patch_info.tag_draft);
-                self.patch_info.tag_note = None;
+                let draft = std::mem::take(&mut self.session.patch_info.tag_draft);
+                self.session.patch_info.tag_note = None;
                 self.add_tag(&draft);
             }
             Message::RemoveTag(index) => {
-                if index < self.document.info().tags.len() {
-                    self.document.edit_info(|info| {
+                if index < self.session.document.info().tags.len() {
+                    self.session.document.edit_info(|info| {
                         info.tags.remove(index);
                     });
-                    self.patch_info.tag_note = None;
+                    self.session.patch_info.tag_note = None;
                 }
             }
             Message::ChooseLicence => {
-                let current = self.document.info().license.clone();
+                let current = self.session.document.info().license.clone();
                 self.overlays.chooser = Some(licence_chooser::Chooser::open(
                     licence_chooser::Target::Patch,
                     current.as_deref(),
@@ -161,11 +161,11 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
-        let mut tags = self.document.info().tags.clone();
+        let mut tags = self.session.document.info().tags.clone();
         match metadata::add_tag(&mut tags, text) {
-            Ok(Some(_)) => self.document.edit_info(|info| info.tags = tags),
+            Ok(Some(_)) => self.session.document.edit_info(|info| info.tags = tags),
             Ok(None) => {}
-            Err(e) => self.patch_info.tag_note = Some(e.to_string()),
+            Err(e) => self.session.patch_info.tag_note = Some(e.to_string()),
         }
     }
 }

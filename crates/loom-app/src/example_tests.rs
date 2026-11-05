@@ -76,7 +76,7 @@ fn an_example_opens_as_a_clean_untitled_copy() {
     let examples = Examples::new("example-copy");
     let mut app = app_with(examples.example());
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert!(!app.unsaved());
 
     let _ = app.update(Message::File(crate::FileAction::Close));
@@ -98,7 +98,7 @@ fn a_marked_release_example_is_a_copy_without_a_known_folder() {
     fake::use_examples(None);
 
     let app = app_with(example);
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
     assert!(!app.unsaved());
 }
@@ -125,7 +125,7 @@ fn saving_an_example_asks_for_a_place_and_keeps_the_example() {
     press_save(&mut ui);
     assert_eq!(fake::asked().len(), 1);
     assert!(mine.is_file());
-    assert_eq!(ui.app.document.file(), Some(mine.as_path()));
+    assert_eq!(ui.app.session.document.file(), Some(mine.as_path()));
     assert_eq!(ui.app.ui_snapshot().title, "mine.ron - LoomDSP");
     assert_eq!(examples.example_text(), before, "the example keeps its comments");
     assert_eq!(examples.files(), vec!["subtractive.ron".to_string()]);
@@ -144,7 +144,7 @@ fn opening_an_example_from_a_file_gives_a_copy() {
     let examples = Examples::new("example-open");
     let mut app = tests::app();
     app.open_path(&examples.example());
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
 
     turn_knob(&mut app);
@@ -168,7 +168,7 @@ fn a_folder_named_examples_elsewhere_is_not_a_copy() {
     fs::copy(examples.example(), &set).unwrap();
 
     let mut ui = Ui::with_app(app_with(set.clone()));
-    assert_eq!(ui.app.document.file(), Some(set.as_path()));
+    assert_eq!(ui.app.session.document.file(), Some(set.as_path()));
     assert_eq!(ui.app.ui_snapshot().title, "set.ron - LoomDSP");
     turn_knob(&mut ui.app);
     press_save(&mut ui);
@@ -199,7 +199,8 @@ fn an_example_copy_saves_into_the_library() {
     assert_eq!(fake::asked(), [Asked::Save(Some(library.join("subtractive.ron")))]);
     // A current file named without a folder, as `loom-app foo.ron` gives,
     // still starts at that file, not in the library.
-    app.document
+    app.session
+        .document
         .saved(PathBuf::from("foo.ron"), loom_patch::Patch::new("Foo"));
     assert!(!app.save_as());
     assert_eq!(fake::asked(), [Asked::Save(Some(PathBuf::from("foo.ron")))]);

@@ -5,7 +5,7 @@
 use crate::live::Live;
 use crate::{
     App, Args, Loaded, Source, alerts, bench, devices, document, edits, files, gestures, layout, learn, matrix,
-    monitor, pointer, recovery, registry, run_is_driven, scene, settings, stream,
+    monitor, pointer, recovery, registry, run_is_driven, scene, session, settings, stream,
 };
 use iced::{Color, Theme};
 use loom_canvas::PanelValues;
@@ -126,7 +126,7 @@ impl App {
         app.run_files.set_examples(files::fake::examples());
         #[cfg(not(test))]
         app.run_files.set_examples(files::bundled_examples());
-        app.run_files.copy_if_example(&mut app.document);
+        app.run_files.copy_if_example(&mut app.session.document);
         // The compile report gives way to anything that needs reading.
         let mut keep = !status.is_empty();
         if keep {
@@ -155,9 +155,9 @@ impl App {
     /// Sets up a patch restored from a recovery copy (autosave.md, After a
     /// restore): marked unsaved, with its file only if that is unchanged.
     pub(crate) fn restored(&mut self, state: recovery::FileState, orphan: recovery::Orphan, args: &Args) {
-        self.document.restore(state);
+        self.session.document.restore(state);
         // Nothing on disk holds this patch.
-        self.edits.history.clear();
+        self.session.edits.history.clear();
         let when = recovery::local_time(orphan.written());
         self.alerts.say(match args.source() {
             Source::File(path) => format!(
@@ -166,7 +166,7 @@ impl App {
             ),
             _ => format!("Restored unsaved changes from {when}."),
         });
-        for note in self.document.load_notes() {
+        for note in self.session.document.load_notes() {
             if note.contains("not in this version:") {
                 self.alerts.append_warning(&format!(" {note}"));
             }
@@ -241,39 +241,60 @@ impl App {
         // The loaded patch may already have a cable on run, before any
         // commit of the app's own (#413 review).
         let run_driven = run_is_driven(&controller);
-        let mut app = Self {
+        let session = session::PatchSession {
             controller,
             retry_commit: false,
             positions,
             unknown_positions,
             sizes,
-            mode_key,
-            scene,
+            selection: BTreeSet::new(),
+            document: document::Document::new(info, file, stamp, load_notes),
+            patch_info: crate::patch_info::State::new(&Metadata::default()),
+            edits: edits::Edits::default(),
+            arrow_group_pending: false,
+            arrow_group_closed: false,
+            step_name: None,
             gestures: gestures::Gestures::default(),
-            values,
             value_draft: None,
-            text_focus: crate::editing::TextFocus::default(),
-            lights: BTreeMap::new(),
+            learn: learn::Learn::default(),
+            matrix: matrix::State::default(),
             run_driven,
+            scene,
+            mode_key,
+            values,
+            lights: BTreeMap::new(),
             meter_levels: std::collections::HashMap::new(),
             clip_holds: crate::clip::ClipHolds::default(),
             traces: loom_canvas::ScopeTraces::new(),
             carrying: BTreeSet::new(),
             full_traces: true,
             visible_displays: Vec::new(),
-            selection: BTreeSet::new(),
-            document: document::Document::new(info, file, stamp, load_notes),
+            engine: session::EngineLink {
+                stream: stream::Stream::new(
+                    audio,
+                    idle_engine,
+                    audio_name,
+                    sample_rate,
+                    stream::Playback::from_flags(args.no_audio, args.fake_audio),
+                    args.output_safety.unwrap_or(rig.store.saved().output_safety),
+                ),
+                monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
+                live: {
+                    let mut live = Live::showing_activity();
+                    live.set_activity(rig.store.saved().show_activity);
+                    live
+                },
+                midi,
+                holding: false,
+                control_seen: None,
+            },
+        };
+        let mut app = Self {
+            session,
             run_files: document::RunFiles::default(),
             right_tab: matrix::Tab::default(),
+            text_focus: crate::editing::TextFocus::default(),
             generation,
-            stream: stream::Stream::new(
-                audio,
-                idle_engine,
-                audio_name,
-                sample_rate,
-                stream::Playback::from_flags(args.no_audio, args.fake_audio),
-                args.output_safety.unwrap_or(rig.store.saved().output_safety),
-            ),
             test_modules: args.test_modules,
             quit: false,
             theme: Theme::custom(
@@ -287,15 +308,7 @@ impl App {
                     danger: Color::from_rgb8(0xE0, 0x4F, 0x4F),
                 },
             ),
-            monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
-            live: {
-                let mut live = Live::showing_activity();
-                live.set_activity(rig.store.saved().show_activity);
-                live
-            },
             rig,
-            midi,
-            holding: false,
             alerts: alerts::Alerts::with_notes(status),
             // The app's tests load the test modules but never list them.
             modules: if args.test_modules {
@@ -304,7 +317,6 @@ impl App {
                 loom_modules::registry().iter().collect()
             },
             overlays: Default::default(),
-            patch_info: crate::patch_info::State::new(&Metadata::default()),
             drops: Vec::new(),
             patches_open: 0,
             browser_key: 0,
@@ -314,17 +326,10 @@ impl App {
             control: args.control.listeners(),
             control_pending: Vec::new(),
             pointer: pointer::Pointer::new(!args.control.listeners().is_empty()),
-            control_seen: None,
             measuring: args.bench.redraws(),
             animating: args.bench.bench,
             dev_tools: args.dev || args.bench.reporter().is_some(),
-            learn: learn::Learn::default(),
-            edits: edits::Edits::default(),
-            arrow_group_pending: false,
-            arrow_group_closed: false,
-            matrix: matrix::State::default(),
             still: None,
-            step_name: None,
             history_key: None,
         };
         if let Some(stopped) = recording_stopped {
@@ -342,12 +347,12 @@ impl App {
         if fresh {
             let saved = app.rig.store.saved();
             let (author, licence) = (saved.author.clone(), saved.licence.clone());
-            app.document.start_new(&author, licence.as_deref());
+            app.session.document.start_new(&author, licence.as_deref());
         }
-        app.patch_info = crate::patch_info::State::new(app.document.info());
+        app.session.patch_info = crate::patch_info::State::new(app.session.document.info());
         // A patch just loaded is the one on disk.
-        app.edits.history.mark_saved();
-        app.document.mark_loaded(app.current_patch());
+        app.session.edits.history.mark_saved();
+        app.session.document.mark_loaded(app.current_patch());
         if app.alerts.status().is_empty() {
             app.report();
         }

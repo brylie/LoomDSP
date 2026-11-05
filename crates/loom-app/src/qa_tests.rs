@@ -144,7 +144,7 @@ impl<'a> Setup<'a> {
         };
         let app = App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(host.clone())));
         assert!(tape.is_playing(), "the patch plays: {}", app.alerts.status());
-        if let Some(stats) = app.stream.stats() {
+        if let Some(stats) = app.session.engine.stream.stats() {
             let dev = app.rig.playing.as_ref().map(|p| p.device.clone()).unwrap_or_default();
             host.active_stats.borrow_mut().push((dev, stats.clone()));
         }
@@ -161,7 +161,7 @@ impl Run {
     /// Presses Hold note.
     fn hold(&mut self) {
         let _ = self.app.update(Message::HoldNote);
-        assert!(self.app.holding, "the note is held");
+        assert!(self.app.session.engine.holding, "the note is held");
     }
 
     /// Opens an example patch, as File > Open does.
@@ -524,25 +524,28 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     }
     .start();
 
-    assert!(run.app.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_playing());
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
 
     // 1. Unplug Fake B
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing(), "stream stopped immediately");
-    assert!(run.app.stream.is_idle(), "engine preserved on idle");
+    assert!(
+        !run.app.session.engine.stream.is_playing(),
+        "stream stopped immediately"
+    );
+    assert!(run.app.session.engine.stream.is_idle(), "engine preserved on idle");
     assert_eq!(
         run.app.alerts.status(),
         "Audio: \"Fake B\" was lost: it was unplugged. Plug it in again, or choose another device in Preferences."
     );
 
     // 2. Edits made while lost are kept and status bar continues to display the lost device message
-    let initial_modules = run.app.controller.graph().len();
+    let initial_modules = run.app.session.controller.graph().len();
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
     run.app.add_module(constant, iced::Point::new(50.0, 50.0));
-    assert_eq!(run.app.controller.graph().len(), initial_modules + 1);
+    assert_eq!(run.app.session.controller.graph().len(), initial_modules + 1);
     assert_eq!(
         run.app.alerts.status(),
         "no feedback loops",
@@ -558,7 +561,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     let now = Instant::now() + Duration::from_secs(1);
     run.app.check_audio(now);
 
-    assert!(run.app.stream.is_playing(), "reconnected to Fake B");
+    assert!(run.app.session.engine.stream.is_playing(), "reconnected to Fake B");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
     assert_eq!(run.app.alerts.status(), "Audio: \"Fake B\" is back.");
     assert!(run.app.alerts.kept().is_empty(), "sound is back");
@@ -577,14 +580,14 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
 fn a_lost_system_default_switches_to_the_new_default_immediately() {
     let mut run = Setup::new("lost-default", PatchFrom::Example("sine.ron")).start();
 
-    assert!(run.app.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_playing());
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake A");
 
     // Remove Fake A, leaving Fake B as new default
     run.host.remove_device("Fake A");
     run.app.check_audio(Instant::now());
 
-    assert!(run.app.stream.is_playing(), "switched to new default");
+    assert!(run.app.session.engine.stream.is_playing(), "switched to new default");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
     assert_eq!(
         run.app.alerts.status(),
@@ -607,7 +610,7 @@ fn choosing_another_device_in_preferences_while_lost_switches_and_saves() {
     // Lose Fake B
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_some());
 
     // Switch to Fake A in Preferences
@@ -615,7 +618,7 @@ fn choosing_another_device_in_preferences_while_lost_switches_and_saves() {
     run.app
         .preferences(Prefs::Audio(Change::Device(DeviceChoice::Named("Fake A".into()))));
 
-    assert!(run.app.stream.is_playing(), "now playing on Fake A");
+    assert!(run.app.session.engine.stream.is_playing(), "now playing on Fake A");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake A");
     assert!(run.app.rig.lost_audio.is_none(), "lost audio state cleared");
     assert!(run.app.alerts.kept().is_empty(), "the player chose a device");
@@ -634,14 +637,17 @@ fn a_silent_stall_is_treated_as_audio_device_loss() {
     }
     .start();
 
-    assert!(run.app.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_playing());
 
     // Advance time by 2 seconds with no callbacks advancing
     let later = Instant::now() + Duration::from_secs(2);
     run.app.check_audio(later);
 
-    assert!(!run.app.stream.is_playing(), "stall stopped audio stream");
-    assert!(run.app.stream.is_idle(), "engine preserved on idle");
+    assert!(
+        !run.app.session.engine.stream.is_playing(),
+        "stall stopped audio stream"
+    );
+    assert!(run.app.session.engine.stream.is_idle(), "engine preserved on idle");
     assert_eq!(
         run.app.alerts.status(),
         "Audio: \"Fake B\" was lost: the device stopped calling back. Plug it in again, or choose another device in Preferences."
@@ -671,7 +677,7 @@ fn external_sample_rate_change_rebuilds_engine_at_new_rate() {
     let later = Instant::now() + Duration::from_secs(2);
     run.app.check_audio(later);
 
-    assert!(run.app.stream.is_playing(), "audio continues playing");
+    assert!(run.app.session.engine.stream.is_playing(), "audio continues playing");
     assert_eq!(run.app.rig.playing.as_ref().unwrap().rate, 96_000);
     assert_eq!(
         run.app.alerts.status(),
@@ -692,8 +698,8 @@ fn a_dead_stream_error_does_not_rebuild_twice() {
     run.host.emit_lost("Fake B");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing());
-    assert!(run.app.stream.is_idle());
+    assert!(!run.app.session.engine.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_idle());
     let gen_after_first = run.app.generation;
 
     // Check again immediately with same stats
@@ -714,7 +720,7 @@ fn ten_consecutive_failed_reopens_stops_retrying() {
     // Lose Fake B
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
 
     // Fake B comes back, but fails to start
     run.host.add_device(fake::device("Fake B"));
@@ -730,7 +736,7 @@ fn ten_consecutive_failed_reopens_stops_retrying() {
         run.app.alerts.status(),
         "Audio: could not reopen \"Fake B\": the stream did not start. Choose a device in Preferences."
     );
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
 
     // Subsequent checks do not retry
     now += Duration::from_secs(1);
@@ -752,7 +758,7 @@ fn lost_system_default_reopen_failure_retries_and_stops() {
     run.host.remove_device("Fake A");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_some());
 
     let mut now = Instant::now();
@@ -765,7 +771,7 @@ fn lost_system_default_reopen_failure_retries_and_stops() {
         run.app.alerts.status(),
         "Audio: could not reopen \"Fake A\": the stream did not start. Choose a device in Preferences."
     );
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
 
     // Subsequent checks do not retry
     now += Duration::from_secs(1);
@@ -789,7 +795,7 @@ fn lost_named_device_open_failure_retries_and_stops() {
     // Lose Fake B
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
 
     // Fake B comes back, but fails to open
     run.host.add_device(fake::device("Fake B"));
@@ -805,7 +811,7 @@ fn lost_named_device_open_failure_retries_and_stops() {
         run.app.alerts.status(),
         "Audio: could not reopen \"Fake B\": the device is busy. Choose a device in Preferences."
     );
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
 }
 
 /// When SystemDefault is lost and no output devices exist, it keeps watching without counting attempts.
@@ -818,7 +824,7 @@ fn lost_system_default_with_no_devices_continues_watching() {
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_some());
 
     // 12 seconds pass with no output device: attempts must stay 0
@@ -833,7 +839,7 @@ fn lost_system_default_with_no_devices_continues_watching() {
     run.host.add_device(fake::device("USB DAC"));
     now += Duration::from_secs(1);
     run.app.check_audio(now);
-    assert!(run.app.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_none());
     assert_eq!(
         run.app.alerts.status(),
@@ -851,7 +857,7 @@ fn lost_system_default_failing_to_reopen_stops_after_ten_attempts() {
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_some());
 
     // A broken device is plugged in and becomes the default
@@ -868,7 +874,7 @@ fn lost_system_default_failing_to_reopen_stops_after_ten_attempts() {
         run.app.alerts.status(),
         "Audio: could not reopen \"Fake A\": the device is busy. Choose a device in Preferences."
     );
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
 }
 
 /// When SystemDefault is lost and a replacement device appears later, check_audio reconnects.
@@ -881,7 +887,7 @@ fn lost_system_default_reconnects_when_device_appears() {
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_some());
 
     // Add a new device; it becomes the default
@@ -890,7 +896,7 @@ fn lost_system_default_reconnects_when_device_appears() {
     let now = Instant::now() + Duration::from_secs(2);
     run.app.check_audio(now);
 
-    assert!(run.app.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_none());
     assert_eq!(
         run.app.alerts.status(),
@@ -908,7 +914,7 @@ fn lost_system_default_records_open_error() {
     run.host.remove_device("Fake B");
     run.app.check_audio(Instant::now());
 
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_some());
 
     // Add a broken device
@@ -918,7 +924,7 @@ fn lost_system_default_records_open_error() {
     let now = Instant::now() + Duration::from_secs(2);
     run.app.check_audio(now);
 
-    assert!(!run.app.stream.is_playing());
+    assert!(!run.app.session.engine.stream.is_playing());
     let lost = run.app.rig.lost_audio.as_ref().unwrap();
     assert_eq!(lost.attempts, 1);
     assert_eq!(lost.last_error.as_deref(), Some("the device is busy"));
@@ -988,14 +994,17 @@ fn a_new_patch_stays_idle_while_a_named_output_is_lost() {
     let starts = run.tape.stream_starts().len();
 
     assert!(run.app.replace(Source::Empty));
-    assert!(!run.app.stream.is_playing(), "Fake A does not stand in");
+    assert!(!run.app.session.engine.stream.is_playing(), "Fake A does not stand in");
     assert!(run.app.rig.lost_audio.is_some(), "still waiting");
     assert_eq!(run.app.alerts.top_kept().unwrap().cause, alerts::Cause::AudioOutput);
     assert_eq!(run.tape.stream_starts().len(), starts);
 
     run.host.add_device(fake::device("Fake B"));
     run.app.check_audio(Instant::now() + Duration::from_secs(2));
-    assert!(run.app.stream.is_playing(), "it comes back on the new patch");
+    assert!(
+        run.app.session.engine.stream.is_playing(),
+        "it comes back on the new patch"
+    );
     assert_eq!(run.app.rig.playing.as_ref().unwrap().device, "Fake B");
     assert!(run.app.alerts.kept().is_empty());
 }
@@ -1012,7 +1021,7 @@ fn a_new_patch_ends_the_loss_of_a_system_default() {
     run.host.add_device(fake::device("USB DAC"));
 
     assert!(run.app.replace(Source::Empty));
-    assert!(run.app.stream.is_playing());
+    assert!(run.app.session.engine.stream.is_playing());
     assert!(run.app.rig.lost_audio.is_none());
     assert!(run.app.alerts.kept().is_empty());
     let starts = run.tape.stream_starts().len();

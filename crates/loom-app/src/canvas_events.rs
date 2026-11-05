@@ -10,13 +10,14 @@ use loom_core::{InputRef, ModuleId, OutputRef};
 impl App {
     pub(crate) fn canvas_event(&mut self, event: CanvasEvent) {
         if event == CanvasEvent::PointerDown {
-            self.matrix.focused = false;
-            self.matrix.edit = None;
-            self.matrix.add = None;
+            self.session.matrix.focused = false;
+            self.session.matrix.edit = None;
+            self.session.matrix.add = None;
             return;
         }
         let is_unknown = |id: u32| {
-            self.controller
+            self.session
+                .controller
                 .graph()
                 .node(ModuleId(id))
                 .is_some_and(|node| node.unknown.is_some())
@@ -29,10 +30,10 @@ impl App {
         };
         if forbidden {
             self.alerts.warn("Cannot connect to an unknown module");
-            self.gestures.cancel_drag();
+            self.session.gestures.cancel_drag();
             return;
         }
-        let edits = undo::is_edit(&self.controller, &event);
+        let edits = undo::is_edit(&self.session.controller, &event);
         if edits {
             self.close_slider_gesture();
             self.edit(|app| app.apply_canvas_event(event));
@@ -45,11 +46,13 @@ impl App {
         match event {
             CanvasEvent::PointerDown => {}
             CanvasEvent::AssignDrag { from, start, at, zoom } => {
-                self.gestures.drag(gestures::AssignDrag { from, start, at, zoom });
+                self.session
+                    .gestures
+                    .drag(gestures::AssignDrag { from, start, at, zoom });
             }
             CanvasEvent::AssignDrop { from, at } => {
-                let landed = at.is_some() && !self.learn.is_on();
-                if let Some((module, index)) = self.gestures.finish_drag(from, landed) {
+                let landed = at.is_some() && !self.session.learn.is_on();
+                if let Some((module, index)) = self.session.gestures.finish_drag(from, landed) {
                     let source = OutputRef {
                         module: ModuleId(from.module),
                         port: from.index,
@@ -57,47 +60,47 @@ impl App {
                     self.assign(source, ModuleId(module), index);
                 }
             }
-            CanvasEvent::AssignCancel => self.gestures.cancel_drag(),
+            CanvasEvent::AssignCancel => self.session.gestures.cancel_drag(),
             CanvasEvent::GestureStart => {
                 self.close_slider_gesture();
-                self.edits.start_gesture();
+                self.session.edits.start_gesture();
                 self.begin_edit();
             }
             CanvasEvent::GestureEnd => {
-                if self.gestures.end_depth() {
+                if self.session.gestures.end_depth() {
                     self.refresh_values();
                 }
                 self.end_gesture();
             }
-            CanvasEvent::ArrowGroupPending => self.arrow_group_pending = true,
+            CanvasEvent::ArrowGroupPending => self.session.arrow_group_pending = true,
             CanvasEvent::ArrowGroupResumed => {
-                self.arrow_group_pending = false;
-                if self.arrow_group_closed {
+                self.session.arrow_group_pending = false;
+                if self.session.arrow_group_closed {
                     self.close_slider_gesture();
-                    self.edits.start_gesture();
+                    self.session.edits.start_gesture();
                     self.begin_edit();
-                    self.arrow_group_closed = false;
+                    self.session.arrow_group_closed = false;
                 }
             }
             CanvasEvent::ArrowGroupEnd => {
-                self.arrow_group_pending = false;
-                if !self.arrow_group_closed {
+                self.session.arrow_group_pending = false;
+                if !self.session.arrow_group_closed {
                     self.end_gesture();
                 }
-                self.arrow_group_closed = false;
+                self.session.arrow_group_closed = false;
             }
-            CanvasEvent::Select(ids) => self.selection = ids.into_iter().collect(),
+            CanvasEvent::Select(ids) => self.session.selection = ids.into_iter().collect(),
             CanvasEvent::Move { ids, delta } => {
                 for id in &ids {
-                    if let Some(p) = self.positions.get_mut(id) {
+                    if let Some(p) = self.session.positions.get_mut(id) {
                         p.0 += delta.x;
                         p.1 += delta.y;
                     }
                 }
-                self.scene.move_modules(&ids, delta);
+                self.session.scene.move_modules(&ids, delta);
             }
             CanvasEvent::Resize { module, size } => {
-                if let Some(tile) = self.scene.module(module).filter(|tile| tile.is_growable()) {
+                if let Some(tile) = self.session.scene.module(module).filter(|tile| tile.is_growable()) {
                     let min = tile.minimum_size();
                     let min_w = (min.width / loom_canvas::GRID).ceil() as u8;
                     let min_h = (min.height / loom_canvas::GRID).ceil() as u8;
@@ -108,9 +111,9 @@ impl App {
                     );
                     if size != current {
                         if size == (min_w, min_h) {
-                            self.sizes.remove(&module);
+                            self.session.sizes.remove(&module);
                         } else {
-                            self.sizes.insert(module, size);
+                            self.session.sizes.insert(module, size);
                         }
                         self.refresh();
                     }
@@ -125,7 +128,7 @@ impl App {
                     module: ModuleId(to.module),
                     port: to.index,
                 };
-                match self.controller.connect(output, input) {
+                match self.session.controller.connect(output, input) {
                     Ok(_) => {
                         self.commit();
                     }
@@ -138,7 +141,7 @@ impl App {
                 widget,
                 part,
             } => {
-                if let Some((index, _, _)) = scene::control_part(&self.controller, module, widget, part) {
+                if let Some((index, _, _)) = scene::control_part(&self.session.controller, module, widget, part) {
                     let source = OutputRef {
                         module: ModuleId(from.module),
                         port: from.index,
@@ -158,7 +161,7 @@ impl App {
                     module: ModuleId(port.module),
                     port: port.index,
                 };
-                if self.controller.disconnect(input).is_ok() {
+                if self.session.controller.disconnect(input).is_ok() {
                     self.commit();
                 }
             }
@@ -168,13 +171,13 @@ impl App {
                 part,
                 position,
             } => {
-                if let Some((index, kind, spec)) = scene::control_part(&self.controller, module, widget, part) {
+                if let Some((index, kind, spec)) = scene::control_part(&self.session.controller, module, widget, part) {
                     let value = scene::control_value(kind, &spec, position);
                     self.set_param(module, index, value);
                 }
             }
             CanvasEvent::TypedValue { module, widget, text } => {
-                if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
+                if let Some((index, _, _)) = scene::control_param(&self.session.controller, module, widget) {
                     // The canvas checked the text before it sent it.
                     if let Err(why) = self.apply_typed_value(module, index, &text) {
                         self.alerts.warn(why);
@@ -198,7 +201,8 @@ impl App {
                     std::slice::from_ref(&part)
                 };
                 for &part in parts {
-                    if let Some((index, _, spec)) = scene::control_part(&self.controller, module, widget, part) {
+                    if let Some((index, _, spec)) = scene::control_part(&self.session.controller, module, widget, part)
+                    {
                         self.set_param(module, index, spec.default);
                     }
                 }
@@ -206,12 +210,12 @@ impl App {
             CanvasEvent::Learn { module, widget } => {
                 // One press cannot say which of two values the player means
                 // (midi-learn.md, Making a mapping).
-                let two = scene::control_param(&self.controller, module, widget)
+                let two = scene::control_param(&self.session.controller, module, widget)
                     .is_some_and(|(_, kind, _)| kind.is_two_numbers());
                 if two {
                     self.alerts
                         .say("This control has two values. Arm each one in the inspector.".to_string());
-                } else if let Some((index, _, _)) = scene::control_param(&self.controller, module, widget) {
+                } else if let Some((index, _, _)) = scene::control_param(&self.session.controller, module, widget) {
                     self.arm((module, index));
                 }
             }
@@ -248,12 +252,12 @@ impl App {
             CanvasEvent::ClearClip { module, widget } => self.reset_clip((module, widget), false),
             CanvasEvent::ResetMeter { module, widget } => self.reset_clip((module, widget), true),
             CanvasEvent::VisibleDisplays(ids) => {
-                self.visible_displays = ids;
+                self.session.visible_displays = ids;
                 self.sync_probes();
                 self.refresh_values();
             }
             CanvasEvent::TraceDetail(full) => {
-                self.full_traces = full;
+                self.session.full_traces = full;
                 self.publish_watch();
             }
             CanvasEvent::ToggleRun => self.toggle_run(),

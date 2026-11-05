@@ -292,12 +292,12 @@ fn display<S: serde::Serializer>(value: &impl std::fmt::Display, s: S) -> Result
 impl App {
     /// The inspector's content for the current selection.
     pub(crate) fn inspector_model(&self) -> Inspector {
-        let graph = self.controller.graph();
-        let mut selected = self.selection.iter();
+        let graph = self.session.controller.graph();
+        let mut selected = self.session.selection.iter();
         let id = match (selected.next(), selected.next()) {
             (None, _) => return Inspector::Patch(self.patch_rows()),
             (Some(&id), None) => id,
-            (Some(_), Some(_)) => return Inspector::Several(self.selection.len()),
+            (Some(_), Some(_)) => return Inspector::Several(self.session.selection.len()),
         };
         let Some(node) = graph.node(ModuleId(id)) else {
             return Inspector::Empty;
@@ -332,6 +332,7 @@ impl App {
                 id,
                 kind: unknown.kind.clone(),
                 label: self
+                    .session
                     .gestures
                     .label_draft(id)
                     .map_or_else(|| unknown.label.clone().unwrap_or_default(), str::to_string),
@@ -370,7 +371,7 @@ impl App {
                     .midi_mapping_of(ModuleId(id), index)
                     .map(|(_, m)| m.control.to_string());
                 let mapping_options = graph.midi_mapping_of(ModuleId(id), index).map(|(_, m)| {
-                    let draft = self.learn.range_draft((id, index));
+                    let draft = self.session.learn.range_draft((id, index));
                     MappingRow {
                         mode: mode_name(m.options.mode),
                         encoding: encoding_of(m.options.mode).map(encoding_name),
@@ -378,23 +379,24 @@ impl App {
                         high: draft.map_or_else(|| m.options.high.to_string(), |d| d.high.clone()),
                         range_error: draft.and_then(|d| d.error.clone()),
                         invert: m.options.invert,
-                        open: self.learn.options_open((id, index)),
+                        open: self.session.learn.options_open((id, index)),
                         // Only a slider has a travel to mark, and a learn
                         // mode row has no slider (midi-learn.md, Mapping modes).
                         ghost: self
+                            .session
                             .learn
                             .ghosts()
                             .shown()
                             .get(&(id, index))
                             .copied()
-                            .filter(|_| spec.options.choices.is_empty() && !self.learn.is_on()),
+                            .filter(|_| spec.options.choices.is_empty() && !self.session.learn.is_on()),
                         options: m.options,
                     }
                 });
-                let mode = if self.learn.is_on() {
+                let mode = if self.session.learn.is_on() {
                     // In learn mode a row arms its parameter, and its value
                     // does not change (midi-learn.md).
-                    let armed = self.learn.is_armed((id, index));
+                    let armed = self.session.learn.is_armed((id, index));
                     let detail = match (armed, &mapping) {
                         (true, _) => "Waiting for MIDI...".to_string(),
                         (false, Some(control)) => control.clone(),
@@ -407,7 +409,7 @@ impl App {
                         step: param::slider_step(spec),
                         control: ParamControl::of(spec, value),
                         assignments: self.assignment_rows(id, index),
-                        adding: (self.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
+                        adding: (self.session.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
                     }
                 };
                 let unused = (!d.is_shown(index, &node.params)).then(|| {
@@ -427,7 +429,12 @@ impl App {
                 });
                 let shown = param::format(spec, value);
                 let field = (matches!(mode, ParamMode::Edit { .. }) && spec.options.choices.is_empty()).then(|| {
-                    match self.value_draft.as_ref().filter(|d| d.module == id && d.index == index) {
+                    match self
+                        .session
+                        .value_draft
+                        .as_ref()
+                        .filter(|d| d.module == id && d.index == index)
+                    {
                         Some(draft) => ValueField {
                             text: draft.text.clone(),
                             error: draft.error.clone(),
@@ -490,7 +497,7 @@ impl App {
     /// The assignments on a parameter, in engine order
     /// (`docs/design/modulation.md`, Seeing assignments).
     fn assignment_rows(&self, module: u32, index: usize) -> Vec<AssignmentRow> {
-        let graph = self.controller.graph();
+        let graph = self.session.controller.graph();
         modulation::on_param(graph, ModuleId(module), index)
             .into_iter()
             .map(|(id, a)| {
@@ -511,7 +518,7 @@ impl App {
     /// Every output at this patch level, for **Add modulation**. One that
     /// already drives the parameter cannot be picked.
     fn sources(&self, module: u32, index: usize) -> Vec<SourceRow> {
-        let graph = self.controller.graph();
+        let graph = self.session.controller.graph();
         modulation::sources(graph)
             .into_iter()
             .map(|source| SourceRow {
@@ -526,7 +533,7 @@ impl App {
     /// assignments that are off say "off", so the state does not rest on
     /// colour alone.
     fn drives(&self, module: u32) -> Vec<DrivesGroup> {
-        let graph = self.controller.graph();
+        let graph = self.session.controller.graph();
         let Some(node) = graph.node(ModuleId(module)) else {
             return Vec::new();
         };

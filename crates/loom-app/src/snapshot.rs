@@ -375,8 +375,8 @@ impl App {
     /// True when the output feeding this input carries a signal: an input
     /// shows its source's activity.
     fn input_carrying(&self, module: u32, index: usize) -> bool {
-        self.controller.graph().cables().any(|(from, to)| {
-            to.module == loom_core::ModuleId(module) && to.port == index && self.carrying.contains(&from)
+        self.session.controller.graph().cables().any(|(from, to)| {
+            to.module == loom_core::ModuleId(module) && to.port == index && self.session.carrying.contains(&from)
         })
     }
 
@@ -385,24 +385,24 @@ impl App {
     /// messages the window uses. With no window to say what is on screen,
     /// every module counts as shown.
     pub(crate) fn run_engine(&mut self, frames: usize) {
-        self.visible_displays = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        self.session.visible_displays = self.session.controller.graph().nodes().map(|(id, _)| id.0).collect();
         // Meters and scopes need their probes before the engine runs.
         self.sync_probes();
         let window = frames.min(SCOPE_WINDOW);
         self.process(frames - window);
         // The meters show the end of the run, and the scopes its last
         // second: earlier telemetry is dropped.
-        let _ = self.monitor.take_telemetry();
-        let _ = self.monitor.take_pairs();
-        let watch = self.monitor.watched();
-        let rate = self.monitor.sample_rate();
+        let _ = self.session.engine.monitor.take_telemetry();
+        let _ = self.session.engine.monitor.take_pairs();
+        let watch = self.session.engine.monitor.watched();
+        let rate = self.session.engine.monitor.sample_rate();
         let mut scopes: std::collections::HashMap<loom_core::ProbeId, crate::live::ScopeTrace> = watch
             .scopes
             .keys()
             .map(|&probe| (probe, crate::live::ScopeTrace::new(rate)))
             .collect();
         // The queues are read after every block, so they never fill.
-        let block = self.controller.config().max_block;
+        let block = self.session.controller.config().max_block;
         let mut histories: std::collections::HashMap<loom_core::ProbeId, crate::history::LevelHistory> = watch
             .histories
             .iter()
@@ -424,8 +424,8 @@ impl App {
         while remaining > 0 {
             let n = remaining.min(block);
             self.process(n);
-            let (meters, chunks) = self.monitor.take_telemetry();
-            for chunk in self.monitor.take_pairs() {
+            let (meters, chunks) = self.session.engine.monitor.take_telemetry();
+            for chunk in self.session.engine.monitor.take_pairs() {
                 if let Some(trace) = xy.get_mut(&chunk.probe) {
                     trace.push(&chunk);
                 }
@@ -509,19 +509,19 @@ impl App {
     /// The stats bar's audio numbers. `App::stats_bar` draws them and the
     /// snapshot holds them.
     pub(crate) fn stats_model(&self) -> Stats {
-        let engine = self.controller.stats();
+        let engine = self.session.controller.stats();
         let telemetry_dropped = engine.dropped_meters.load(std::sync::atomic::Ordering::Relaxed)
             + engine.dropped_scope.load(std::sync::atomic::Ordering::Relaxed)
             + engine.dropped_pairs.load(std::sync::atomic::Ordering::Relaxed);
-        let (playing, load, max_load) = match self.stream.stats() {
+        let (playing, load, max_load) = match self.session.engine.stream.stats() {
             Some(stats) => {
                 let s = stats.snapshot();
-                (true, s.last_load, self.stream.load().1)
+                (true, s.last_load, self.session.engine.stream.load().1)
             }
             None => (false, 0.0, 0.0),
         };
         Stats {
-            label: self.stream.label().to_string(),
+            label: self.session.engine.stream.label().to_string(),
             playing,
             load,
             max_load,
@@ -536,6 +536,7 @@ impl App {
     /// What the user sees now.
     pub(crate) fn ui_snapshot(&self) -> UiSnapshot {
         let tiles = self
+            .session
             .scene
             .modules()
             .iter()
@@ -577,12 +578,12 @@ impl App {
                                 }))
                                 .cloned(),
                             centre: m.output_position(index).into(),
-                            carrying: self.carrying.contains(&loom_core::OutputRef {
+                            carrying: self.session.carrying.contains(&loom_core::OutputRef {
                                 module: loom_core::ModuleId(m.id),
                                 port: index,
                             }),
                             badge: p.badge,
-                            badge_bounds: self.scene.badge_bounds(m.id, index).map(Rect::from),
+                            badge_bounds: self.session.scene.badge_bounds(m.id, index).map(Rect::from),
                         })
                         .collect(),
                     widgets: m
@@ -591,7 +592,7 @@ impl App {
                         .iter()
                         .enumerate()
                         .map(|(index, w)| {
-                            let value = self.values.get(m.id, index).cloned().unwrap_or_default();
+                            let value = self.session.values.get(m.id, index).cloned().unwrap_or_default();
                             Widget {
                                 label: w.label.clone(),
                                 shown: cut.get(&TextKind::Caption(index)).cloned(),
@@ -612,7 +613,7 @@ impl App {
                                     modulation: second.modulation.into(),
                                     live: second.live,
                                 }),
-                                trace: self.traces.get(m.id, index).map(TraceShown::from),
+                                trace: self.session.traces.get(m.id, index).map(TraceShown::from),
                             }
                         })
                         .collect(),
@@ -621,7 +622,7 @@ impl App {
             .collect();
         // The canvas skips cables to modules or ports it does not have.
         let end = |module: u32, output: bool, index: usize| {
-            let point = self.scene.port_position(PortRef { module, output, index })?;
+            let point = self.session.scene.port_position(PortRef { module, output, index })?;
             Some(CableEnd {
                 module,
                 index,
@@ -629,6 +630,7 @@ impl App {
             })
         };
         let cables = self
+            .session
             .scene
             .cables()
             .iter()
@@ -644,10 +646,10 @@ impl App {
             status: self.alerts.status().to_string(),
             status_severity: self.alerts.severity(),
             errors: self.alerts.kept().to_vec(),
-            learning: self.learn.is_on(),
-            undo: self.edits.history.undo_step().map(|s| s.name().to_string()),
-            redo: self.edits.history.redo_step().map(|s| s.name().to_string()),
-            selection: self.selection.iter().copied().collect(),
+            learning: self.session.learn.is_on(),
+            undo: self.session.edits.history.undo_step().map(|s| s.name().to_string()),
+            redo: self.session.edits.history.redo_step().map(|s| s.name().to_string()),
+            selection: self.session.selection.iter().copied().collect(),
             port_hit_radius: PORT_HIT_RADIUS,
             tiles,
             cables,
@@ -656,8 +658,9 @@ impl App {
             recent: self.overlays.recent_rows().cloned(),
             question: self.overlays.question.as_ref().map(crate::question::Question::model),
             matrix: self
+                .session
                 .matrix
-                .model(self.controller.graph(), &self.selection, self.right_tab),
+                .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
             typed_field: self.typed_field_state(),
@@ -684,13 +687,13 @@ pub fn headless(args: &Args) -> Result<App, String> {
         false,
     );
     for &id in &args.select {
-        if app.controller.graph().node(loom_core::ModuleId(id)).is_none() {
+        if app.session.controller.graph().node(loom_core::ModuleId(id)).is_none() {
             return Err(format!("no module {id} in the patch"));
         }
-        app.selection.insert(id);
+        app.session.selection.insert(id);
     }
     if args.show_help {
-        if app.selection.len() != 1 {
+        if app.session.selection.len() != 1 {
             return Err("--show-help needs exactly one selected module".to_string());
         }
         app.handle(crate::Message::ShowHelp);

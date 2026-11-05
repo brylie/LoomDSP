@@ -91,6 +91,7 @@ pub(super) fn port(app: &App, text: &str, output: bool) -> Result<PortRef, Strin
         return Err(format!("`{text}` is not MODULE:PORT"));
     };
     let node = app
+        .session
         .controller
         .graph()
         .node(ModuleId(module))
@@ -124,14 +125,15 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rectangle, Strin
     };
     let view = found.canvas.as_ref().ok_or("the window has no patch canvas")?;
     let tile = app
+        .session
         .scene
         .module(module)
         .ok_or_else(|| format!("no module {module} on the canvas"))?;
     let Some(name) = name else {
         return Ok(to_window(view, tile.bounds()));
     };
-    let part = crate::targets::find(app.controller.graph(), module, name)?;
-    let world = crate::targets::world_bounds(&app.scene, &app.values, part)?;
+    let part = crate::targets::find(app.session.controller.graph(), module, name)?;
+    let world = crate::targets::world_bounds(&app.session.scene, &app.session.values, part)?;
     Ok(to_window(view, world))
 }
 
@@ -225,7 +227,8 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
         "panic" => (Message::Panic, None),
         "undo" => (
             Message::Undo,
-            app.edits
+            app.session
+                .edits
                 .history
                 .undo_step()
                 .is_none()
@@ -233,7 +236,8 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
         ),
         "redo" => (
             Message::Redo,
-            app.edits
+            app.session
+                .edits
                 .history
                 .redo_step()
                 .is_none()

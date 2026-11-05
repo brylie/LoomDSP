@@ -454,6 +454,7 @@ impl Ui {
     fn port(&mut self, module: u32, name: &str, output: bool) -> Point {
         let node = self
             .app
+            .session
             .controller
             .graph()
             .node(ModuleId(module))
@@ -468,6 +469,7 @@ impl Ui {
             .unwrap_or_else(|| panic!("module {module} has no port `{name}`"));
         let world = self
             .app
+            .session
             .scene
             .port_position(PortRef { module, output, index })
             .expect("the scene has every port in the graph");
@@ -499,8 +501,10 @@ impl Ui {
             module,
             name: param.to_string(),
         };
-        let (_, widget) = screenshot::find_control(&self.app.controller, &target).unwrap_or_else(|e| panic!("{e}"));
+        let (_, widget) =
+            screenshot::find_control(&self.app.session.controller, &target).unwrap_or_else(|e| panic!("{e}"));
         self.app
+            .session
             .scene
             .module(module)
             .and_then(|m| m.widget_bounds(widget))

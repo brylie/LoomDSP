@@ -23,11 +23,11 @@ impl App {
         };
         // The audio numbers and stalled callbacks are read on a thread,
         // which wakes the UI only when the stats bar changes (#90).
-        let audio_watch = match self.stream.stats() {
+        let audio_watch = match self.session.engine.stream.stats() {
             Some(stats) => Subscription::run_with(
                 audio_watch::Watch {
                     stats: stats.clone(),
-                    engine: self.controller.stats().clone(),
+                    engine: self.session.controller.stats().clone(),
                 },
                 audio_watch::stream,
             )
@@ -35,7 +35,7 @@ impl App {
             None => Subscription::none(),
         };
         let input_watch = self.rig.input.open().map(|(input, tracker)| {
-            let stats = self.controller.stats().clone();
+            let stats = self.session.controller.stats().clone();
             let tracker = tracker.clone();
             Subscription::run_with(
                 input_watch::Watch {
@@ -51,16 +51,17 @@ impl App {
                     list: self.rig.host.audio_input_lister(),
                     permission_denied: self.rig.host.audio_input_permission_checker(),
                     active: self
+                        .session
                         .controller
                         .graph()
                         .nodes()
                         .filter_map(|(id, node)| {
                             (node.descriptor.id == "loom.io.audio-in")
-                                .then(|| self.controller.display_source(id, 0))
+                                .then(|| self.session.controller.display_source(id, 0))
                                 .flatten()
                         })
                         .collect(),
-                    displays: self.controller.display_reader(),
+                    displays: self.session.controller.display_reader(),
                 },
                 input_watch::stream,
             )
@@ -70,14 +71,15 @@ impl App {
         // assignment that is on follows them every frame.
         // Without audio the engine does not run, so nothing moves.
         let live = if !self.measuring
-            && self.stream.is_playing()
-            && self.controller.graph().assignments().any(|(_, a)| a.enabled)
+            && self.session.engine.stream.is_playing()
+            && self.session.controller.graph().assignments().any(|(_, a)| a.enabled)
         {
             iced::window::frames().map(|_| Message::LiveFrame)
         } else {
             Subscription::none()
         };
-        let telemetry = Subscription::run_with(self.monitor.clone(), monitor::stream).map(Message::Telemetry);
+        let telemetry =
+            Subscription::run_with(self.session.engine.monitor.clone(), monitor::stream).map(Message::Telemetry);
         let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
         let control = self
             .control
@@ -91,7 +93,7 @@ impl App {
             );
         // The autosave timer runs only while a copy may be due: once the
         // copy matches the patch, an idle app ticks no more (#90).
-        let autosave = if self.run_files.autosave_due(&self.document) {
+        let autosave = if self.run_files.autosave_due(&self.session.document) {
             iced::time::every(recovery::TICK).map(|_| Message::Autosave)
         } else {
             Subscription::none()
@@ -119,8 +121,11 @@ impl App {
         // While audio plays, the audio watcher reports stalled callbacks.
         // Once a device is lost, reconnection is tried by polling four
         // times a second (device-changes.md, Audio device loss).
-        let waiting_for_input = self.rig.input.port().is_none() && self.stream.is_playing() && self.input_wanted();
-        let audio_poll = if !self.stream.without_device() && (!self.stream.is_playing() || waiting_for_input) {
+        let waiting_for_input =
+            self.rig.input.port().is_none() && self.session.engine.stream.is_playing() && self.input_wanted();
+        let audio_poll = if !self.session.engine.stream.without_device()
+            && (!self.session.engine.stream.is_playing() || waiting_for_input)
+        {
             iced::time::every(Duration::from_millis(250)).map(|_| Message::AudioPoll)
         } else {
             Subscription::none()
@@ -153,16 +158,16 @@ impl App {
     /// update: mapped parameters to follow, or learn mode waiting for MIDI.
     /// Also the app's input listeners.
     pub(crate) fn midi_watch(&self) -> Subscription<Message> {
-        let mapped = self.controller.graph().midi_mappings().next().is_some();
-        let watch = (mapped || self.learn.is_on() || self.rig.panic_learn.is_some()).then(|| {
+        let mapped = self.session.controller.graph().midi_mappings().next().is_some();
+        let watch = (mapped || self.session.learn.is_on() || self.rig.panic_learn.is_some()).then(|| {
             let watch = learn::Watch {
-                reader: self.controller.midi_reader(),
+                reader: self.session.controller.midi_reader(),
                 generation: self.generation,
             };
             Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
         });
         // Runs only while a ghost mark shows, so an idle app stays idle.
-        let ghosts = (!self.learn.ghosts().shown().is_empty())
+        let ghosts = (!self.session.learn.ghosts().shown().is_empty())
             .then(|| iced::time::every(learn::GHOST_CHECK).map(|_| Message::MidiGhosts));
         let input = [self.input_subscription(), always_subscription()];
         // The timer runs only while a drop is being collected, so an idle
@@ -192,8 +197,9 @@ impl App {
     /// The lights on screen and where their values live, or `None` when
     /// there are none.
     pub(crate) fn watched_lights(&self) -> Option<lights::Watch> {
-        let graph = self.controller.graph();
+        let graph = self.session.controller.graph();
         let (lights, (ranges, readouts)): (Vec<_>, (Vec<_>, Vec<_>)) = self
+            .session
             .visible_displays
             .iter()
             .filter_map(|&id| Some((id, graph.node(ModuleId(id))?.descriptor)))
@@ -204,12 +210,12 @@ impl App {
                 })
             })
             .filter_map(|(light, display, range, readout)| {
-                let source = self.controller.display_source(ModuleId(light.0), display)?;
+                let source = self.session.controller.display_source(ModuleId(light.0), display)?;
                 Some(((light, source), (range, readout)))
             })
             .unzip();
         (!lights.is_empty()).then(|| lights::Watch {
-            reader: self.controller.display_reader(),
+            reader: self.session.controller.display_reader(),
             readouts,
             lights,
             ranges,

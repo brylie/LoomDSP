@@ -58,20 +58,20 @@ fn audio_input_follows_module_lifecycle() {
     };
     let mut app = start(args(&dir), &fake);
     assert_eq!(fake.input_opens.get(), 0);
-    let first = app.controller.add_module("loom.io.audio-in").unwrap();
+    let first = app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_opens.get(), 1);
     // The running input must also be included when subscriptions are built.
     let _ = app.subscription();
     let tracker = app.rig.input.open().unwrap().1.clone();
-    let second = app.controller.add_module("loom.io.audio-in").unwrap();
+    let second = app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_opens.get(), 1);
     assert!(std::sync::Arc::ptr_eq(&tracker, app.rig.input.open().unwrap().1));
-    app.controller.remove_module(first).unwrap();
+    app.session.controller.remove_module(first).unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_closes.get(), 0);
-    app.controller.remove_module(second).unwrap();
+    app.session.controller.remove_module(second).unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_closes.get(), 1);
     assert!(fake.input_writer.borrow().is_none());
@@ -85,9 +85,9 @@ fn denied_audio_input_does_not_stop_the_patch() {
     let fake = two_devices();
     *fake.input_error.borrow_mut() = Some(InputError::PermissionDenied);
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
-    assert!(app.stream.is_playing());
+    assert!(app.session.engine.stream.is_playing());
     assert!(app.alerts.status().contains("microphone was denied"));
     app.alerts.say("other status");
     app.rig.input.forget_attempt();
@@ -105,13 +105,13 @@ fn permission_denied_after_input_opens_is_reported() {
         devices: vec!["Mic".into()],
     };
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert!(app.rig.input.port().is_some());
     fake.input_permission_denied.set(true);
     app.sync_audio_input();
     assert!(app.rig.input.port().is_none());
-    assert!(app.stream.is_playing());
+    assert!(app.session.engine.stream.is_playing());
     assert!(app.alerts.status().contains("microphone was denied"));
     app.alerts.say("other status");
     app.sync_audio_input();
@@ -139,17 +139,21 @@ fn unavailable_input_keeps_other_audio_playing() {
         let mut options = args(&dir);
         options.output_safety = Some(OutputSafety::Off);
         let mut app = start(options, &fake);
-        let input = app.controller.add_module("loom.io.audio-in").unwrap();
-        let output = app.controller.add_module("loom.io.audio-out").unwrap();
-        let constant = app.controller.add_module("loom.math.constant").unwrap();
-        let other_output = app.controller.add_module("loom.io.audio-out").unwrap();
-        app.controller.set_param_named(constant, "value", 0.2).unwrap();
-        app.controller.connect_named(input, "out", output, "in").unwrap();
-        app.controller
+        let input = app.session.controller.add_module("loom.io.audio-in").unwrap();
+        let output = app.session.controller.add_module("loom.io.audio-out").unwrap();
+        let constant = app.session.controller.add_module("loom.math.constant").unwrap();
+        let other_output = app.session.controller.add_module("loom.io.audio-out").unwrap();
+        app.session.controller.set_param_named(constant, "value", 0.2).unwrap();
+        app.session
+            .controller
+            .connect_named(input, "out", output, "in")
+            .unwrap();
+        app.session
+            .controller
             .connect_named(constant, "out", other_output, "in")
             .unwrap();
         assert!(app.commit());
-        assert!(app.stream.is_playing());
+        assert!(app.session.engine.stream.is_playing());
         assert!(app.rig.input.port().is_none());
         assert!(app.alerts.status().contains(if denied {
             "microphone was denied"
@@ -157,7 +161,7 @@ fn unavailable_input_keeps_other_audio_playing() {
             "no audio input"
         }));
         tape.step(1024);
-        assert_eq!(app.controller.display(input, 0), Some(0.0));
+        assert_eq!(app.session.controller.display(input, 0), Some(0.0));
         assert_eq!(tape.left()[1023], 0.2);
         assert_eq!(tape.right()[1023], 0.2);
         app.alerts.say("other status");
@@ -177,7 +181,7 @@ fn failed_audio_input_reopens() {
         devices: vec!["Microphone".into()],
     };
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
     let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
@@ -216,7 +220,7 @@ fn input_recovery_preserves_other_status_and_permission_latch() {
     };
     fake.input_permission_denied.set(true);
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert!(app.alerts.status().contains("microphone was denied"));
     app.alerts.say("newer message");
@@ -251,7 +255,7 @@ fn permission_denial_after_a_device_error_and_failure_after_recovery_are_reporte
     };
     *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(app.alerts.status(), "Audio input: audio error: device busy.");
 
@@ -289,7 +293,7 @@ fn named_audio_input_waits_for_its_return() {
         devices: vec!["Microphone".into(), "Other".into()],
     };
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     *fake.audio_inputs.borrow_mut() = devices::Inputs {
         default: Some("Other".into()),
@@ -317,7 +321,7 @@ fn missing_saved_input_falls_back_without_saving() {
         devices: vec!["Microphone".into()],
     };
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(app.rig.input.port().unwrap().name(), "Microphone");
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Named("Missing".into()));
@@ -346,7 +350,7 @@ fn audio_input_flags_do_not_change_saved_choice() {
             options.devices.input = Some("chosen".into());
         }
         let mut app = start(options, &fake);
-        app.controller.add_module("loom.io.audio-in").unwrap();
+        app.session.controller.add_module("loom.io.audio-in").unwrap();
         assert!(app.commit());
         if disabled {
             assert!(app.rig.input.port().is_none());
@@ -378,9 +382,12 @@ fn audio_input_plays_through_the_fake_host() {
     let mut options = args(&dir);
     options.output_safety = Some(OutputSafety::Off);
     let mut app = start(options, &fake);
-    let input = app.controller.add_module("loom.io.audio-in").unwrap();
-    let output = app.controller.add_module("loom.io.audio-out").unwrap();
-    app.controller.connect_named(input, "out", output, "in").unwrap();
+    let input = app.session.controller.add_module("loom.io.audio-in").unwrap();
+    let output = app.session.controller.add_module("loom.io.audio-out").unwrap();
+    app.session
+        .controller
+        .connect_named(input, "out", output, "in")
+        .unwrap();
     assert!(app.commit());
     {
         let mut writer = fake.input_writer.borrow_mut();
@@ -563,7 +570,7 @@ fn same_audio_input_and_output_show_feedback_note() {
         devices: vec!["Fake A".into()],
     };
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     app.preferences(Message::Open);
     let mut ui = crate::ui_test::Ui::with_app(app);
@@ -587,13 +594,13 @@ fn audio_input_choice_is_saved_without_restarting_output() {
         devices: vec!["Microphone".into()],
     };
     let mut app = start(args(&dir), &fake);
-    let module = app.controller.add_module("loom.io.audio-in").unwrap();
+    let module = app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     app.preferences(Message::Input(InputChoice::Off));
     assert_eq!(fake.input_closes.get(), 1);
     assert_eq!(app.rig.store.saved().audio.input, InputChoice::Off);
-    assert!(app.stream.is_playing());
-    app.controller.remove_module(module).unwrap();
+    assert!(app.session.engine.stream.is_playing());
+    app.session.controller.remove_module(module).unwrap();
     assert!(app.commit());
     assert!(
         std::fs::read_to_string(dir.join(FILE_NAME))
@@ -611,10 +618,10 @@ fn no_saved_devices_play_on_the_defaults_with_every_midi_input() {
     ));
     let app = start(args(&dir), &fake);
     assert_eq!(fake.opened(), ["Fake A"]);
-    assert_eq!(app.stream.sample_rate(), 48_000.0);
-    assert!(app.stream.is_playing());
+    assert_eq!(app.session.engine.stream.sample_rate(), 48_000.0);
+    assert!(app.session.engine.stream.is_playing());
     assert!(fake.is_open("Keys") && fake.is_open("Pad"));
-    assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
+    assert_eq!(app.session.controller.config().output_safety, OutputSafety::LowLatency);
     assert!(!dir.join(FILE_NAME).exists(), "starting writes nothing");
     assert_eq!(
         app.playing_line(),
@@ -663,7 +670,7 @@ fn a_rate_the_device_does_not_offer_plays_at_its_default() {
     let text = "(audio: (sample_rate: Hz(96000)))";
     let path = write(&dir, text);
     let app = start(args(&dir), &two_devices());
-    assert_eq!(app.stream.sample_rate(), 48_000.0);
+    assert_eq!(app.session.engine.stream.sample_rate(), 48_000.0);
     assert!(
         app.alerts.status().contains("does not offer 96000 Hz. Using 48000 Hz."),
         "{}",
@@ -680,36 +687,41 @@ fn a_rate_change_keeps_the_patch_and_its_history() {
     for x in [100.0, 200.0, 300.0] {
         app.add_module(constant, iced::Point::new(x, 100.0));
     }
-    app.controller.set_tempo(90.0).unwrap();
-    let before = undo::Snapshot::take(&app.controller, &app.positions);
-    let ids: Vec<_> = app.controller.graph().nodes().map(|(id, _)| id).collect();
-    assert_eq!(app.edits.history.len(), 3);
+    app.session.controller.set_tempo(90.0).unwrap();
+    let before = undo::Snapshot::take(&app.session.controller, &app.session.positions);
+    let ids: Vec<_> = app.session.controller.graph().nodes().map(|(id, _)| id).collect();
+    assert_eq!(app.session.edits.history.len(), 3);
     assert!(app.unsaved());
 
     change(&mut app, Change::Rate(RateChoice::Hz(44_100)));
-    assert_eq!(app.controller.config().sample_rate, 44_100.0);
-    assert_eq!(app.stream.sample_rate(), 44_100.0);
+    assert_eq!(app.session.controller.config().sample_rate, 44_100.0);
+    assert_eq!(app.session.engine.stream.sample_rate(), 44_100.0);
     assert_eq!(
         app.rig.last_stop,
         Some(true),
         "the old engine faded out before it stopped"
     );
     assert_eq!(
-        app.controller.graph().nodes().map(|(id, _)| id).collect::<Vec<_>>(),
+        app.session
+            .controller
+            .graph()
+            .nodes()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>(),
         ids
     );
     assert!(
         undo::diff(
             &before,
-            &undo::Snapshot::take(&app.controller, &app.positions),
+            &undo::Snapshot::take(&app.session.controller, &app.session.positions),
             &BTreeSet::new()
         )
         .is_none(),
         "the same patch"
     );
-    assert_eq!(app.edits.history.len(), 3);
+    assert_eq!(app.session.edits.history.len(), 3);
     assert!(app.unsaved());
-    assert_eq!(app.controller.transport().tempo, 90.0);
+    assert_eq!(app.session.controller.transport().tempo, 90.0);
     assert_eq!(
         crate::preferences::load(&dir.join(FILE_NAME))
             .preferences
@@ -720,7 +732,7 @@ fn a_rate_change_keeps_the_patch_and_its_history() {
     // The undo history still applies to the new engine.
     app.undo();
     // Two constants and the patch's Transport.
-    assert_eq!(app.controller.graph().len(), 3);
+    assert_eq!(app.session.controller.graph().len(), 3);
 
     // Picking it again does nothing.
     let generation = app.generation;
@@ -738,7 +750,7 @@ fn a_device_that_fails_to_open_leaves_the_old_one_playing() {
     let generation = app.generation;
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(app.generation, generation);
-    assert!(app.stream.is_playing());
+    assert!(app.session.engine.stream.is_playing());
     assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
@@ -756,14 +768,14 @@ fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
     let mut app = start(args(&dir), &fake);
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
     app.add_module(constant, iced::Point::new(100.0, 100.0));
-    let modules = app.controller.graph().len();
+    let modules = app.session.controller.graph().len();
 
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(fake.opened(), ["Fake A", "Fake B", "Fake A"], "back to the old device");
-    assert!(app.stream.is_playing(), "sound is still playing");
+    assert!(app.session.engine.stream.is_playing(), "sound is still playing");
     assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
-    assert_eq!(app.controller.graph().len(), modules, "with the same patch");
-    assert_eq!(app.edits.history.len(), 1);
+    assert_eq!(app.session.controller.graph().len(), modules, "with the same patch");
+    assert_eq!(app.session.edits.history.len(), 1);
     assert!(fake.is_open("Keys"));
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
@@ -781,7 +793,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
     fake.wont_start.borrow_mut().extend(["Fake A".into(), "Fake B".into()]);
     let fake = Rc::new(fake);
     let mut app = start(args(&dir), &fake);
-    assert!(app.stream.is_playing());
+    assert!(app.session.engine.stream.is_playing());
 
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(
@@ -789,7 +801,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
         ["Fake A", "Fake B", "Fake A"],
         "it tried the old device again"
     );
-    assert!(!app.stream.is_playing(), "audio is off");
+    assert!(!app.session.engine.stream.is_playing(), "audio is off");
     assert!(app.rig.playing.is_none());
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
@@ -799,10 +811,10 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
 
     // The failed stream took its engine; an idle one takes its place,
     // so edits still work, well past the queue's size (#220).
-    assert!(app.stream.is_idle());
+    assert!(app.session.engine.stream.is_idle());
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
     app.add_module(constant, iced::Point::new(100.0, 100.0));
-    let id = *app.selection.first().unwrap();
+    let id = *app.session.selection.first().unwrap();
     for i in 0..2_000 {
         let _ = app.update(crate::Message::Param {
             module: id,
@@ -851,8 +863,9 @@ fn turning_an_input_off_releases_its_notes_and_is_saved() {
     let mut app = start(args(&dir), &fake);
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
     app.add_module(note, iced::Point::new(100.0, 100.0));
-    let id = *app.selection.iter().next().unwrap();
+    let id = *app.session.selection.iter().next().unwrap();
     let gate = app
+        .session
         .controller
         .graph()
         .node(loom_core::ModuleId(id))
@@ -862,7 +875,7 @@ fn turning_an_input_off_releases_its_notes_and_is_saved() {
         .unwrap();
     let wait_for = |app: &App, value: f32| {
         for _ in 0..200 {
-            if app.controller.display(loom_core::ModuleId(id), gate) == Some(value) {
+            if app.session.controller.display(loom_core::ModuleId(id), gate) == Some(value) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -883,7 +896,7 @@ fn turning_an_input_off_releases_its_notes_and_is_saved() {
     );
     fake.play("Keys", &[0x90, 62, 100]);
     assert!(wait_for(&app, 1.0), "the other input still plays");
-    assert!(app.stream.is_playing(), "audio did not stop");
+    assert!(app.session.engine.stream.is_playing(), "audio did not stop");
 }
 
 /// The panic trigger (panic.md, MIDI trigger): Learn takes the next
@@ -897,8 +910,9 @@ fn a_learned_panic_trigger_is_saved_and_runs_panic() {
     let mut app = start(args(&dir), &fake);
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
     app.add_module(note, iced::Point::new(100.0, 100.0));
-    let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+    let id = loom_core::ModuleId(*app.session.selection.iter().next().unwrap());
     let gate = app
+        .session
         .controller
         .graph()
         .node(id)
@@ -909,7 +923,7 @@ fn a_learned_panic_trigger_is_saved_and_runs_panic() {
     let wait_for = |app: &App, value: f32| {
         (0..400).any(|_| {
             std::thread::sleep(Duration::from_millis(5));
-            app.controller.display(id, gate) == Some(value)
+            app.session.controller.display(id, gate) == Some(value)
         })
     };
 
@@ -920,7 +934,7 @@ fn a_learned_panic_trigger_is_saved_and_runs_panic() {
     assert!(
         (0..400).any(|_| {
             std::thread::sleep(Duration::from_millis(5));
-            app.controller.last_control_change().is_some()
+            app.session.controller.last_control_change().is_some()
         }),
         "the control change reached the engine"
     );
@@ -949,12 +963,12 @@ fn note_app(dir: &std::path::Path, fake: &Rc<Fake>) -> (App, impl Fn(&App, f32) 
     let mut app = start(args(dir), fake);
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
     app.add_module(note, iced::Point::new(100.0, 100.0));
-    let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+    let id = loom_core::ModuleId(*app.session.selection.iter().next().unwrap());
     let gate = note.display_index("gate").unwrap();
     let wait_for = move |app: &App, value: f32| {
         (0..400).any(|_| {
             std::thread::sleep(Duration::from_millis(5));
-            app.controller.display(id, gate) == Some(value)
+            app.session.controller.display(id, gate) == Some(value)
         })
     };
     (app, wait_for)
@@ -1000,7 +1014,7 @@ fn an_input_unplugged_releases_its_notes_and_comes_back() {
     assert!(wait_for(&app, 0.0), "the held note is released");
     assert_eq!(app.alerts.status(), "MIDI: \"Keys\" disconnected.");
     assert!(!fake.is_open("Keys"));
-    assert!(app.stream.is_playing(), "the app keeps playing");
+    assert!(app.session.engine.stream.is_playing(), "the app keeps playing");
 
     fake.plug("Keys");
     app.poll_midi();
@@ -1150,7 +1164,7 @@ fn the_panic_section_learns_and_cancels() {
     assert!(
         (0..400).any(|_| {
             std::thread::sleep(Duration::from_millis(5));
-            app.controller.last_note_on().is_some()
+            app.session.controller.last_note_on().is_some()
         }),
         "the note reached the engine"
     );
@@ -1200,8 +1214,9 @@ fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
 
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
     app.add_module(note, iced::Point::new(100.0, 100.0));
-    let id = loom_core::ModuleId(*app.selection.iter().next().unwrap());
+    let id = loom_core::ModuleId(*app.session.selection.iter().next().unwrap());
     let gate = app
+        .session
         .controller
         .graph()
         .node(id)
@@ -1212,7 +1227,7 @@ fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
     let wait_for = |app: &App, value: f32| {
         (0..400).any(|_| {
             std::thread::sleep(Duration::from_millis(5));
-            app.controller.display(id, gate) == Some(value)
+            app.session.controller.display(id, gate) == Some(value)
         })
     };
     pad.note_on(0, 60, 100).unwrap();
@@ -1230,7 +1245,7 @@ fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
     assert!(!wait_for(&app, 1.0), "the input that is off does not play");
     keys.note_on(0, 62, 100).unwrap();
     assert!(wait_for(&app, 1.0), "the other input still plays");
-    assert!(app.stream.is_playing(), "audio did not stop");
+    assert!(app.session.engine.stream.is_playing(), "audio did not stop");
 }
 
 #[test]
@@ -1290,12 +1305,12 @@ fn the_saved_output_safety_applies_unless_a_flag_sets_it() {
     write(&dir, "(output_safety: \"clean\")");
     let fake = two_devices();
     let app = start(args(&dir), &fake);
-    assert_eq!(app.controller.config().output_safety, OutputSafety::Clean);
+    assert_eq!(app.session.controller.config().output_safety, OutputSafety::Clean);
 
     let mut flagged = args(&dir);
     flagged.output_safety = Some(OutputSafety::LowLatency);
     let app = start(flagged, &fake);
-    assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
+    assert_eq!(app.session.controller.config().output_safety, OutputSafety::LowLatency);
     assert!(app.rig.safety_flag);
 }
 
@@ -1322,8 +1337,12 @@ fn the_safety_flag_is_shown_and_never_saved() {
     let mut flagged = args(&dir);
     flagged.output_safety = Some(OutputSafety::Off);
     let mut app = start(flagged, &two_devices());
-    assert_eq!(app.controller.config().output_safety, OutputSafety::Off);
-    assert_eq!(app.stream.output_safety(), OutputSafety::Off, "the window shows Off");
+    assert_eq!(app.session.controller.config().output_safety, OutputSafety::Off);
+    assert_eq!(
+        app.session.engine.stream.output_safety(),
+        OutputSafety::Off,
+        "the window shows Off"
+    );
     assert!(app.rig.safety_flag, "with the flag note");
     app.quit = true;
     let _ = app.update(crate::Message::Tick);
@@ -1368,7 +1387,7 @@ fn picking_a_mode_tells_the_engine_and_saves_it() {
 
     assert!(app.replace(Source::Empty));
     assert_eq!(
-        app.controller.config().output_safety,
+        app.session.controller.config().output_safety,
         OutputSafety::Off,
         "the next engine too"
     );
@@ -1379,7 +1398,7 @@ fn a_broken_file_still_starts_with_safety_on() {
     let dir = folder("broken-file");
     let path = write(&dir, "(output_safety: \"off\"");
     let mut app = start(args(&dir), &two_devices());
-    assert_eq!(app.controller.config().output_safety, OutputSafety::LowLatency);
+    assert_eq!(app.session.controller.config().output_safety, OutputSafety::LowLatency);
     assert!(
         app.alerts.status().contains("Could not read preferences"),
         "{}",
@@ -1470,12 +1489,12 @@ fn boot_open_failure_leaves_engine_idle_and_reports_error() {
     fake.broken.borrow_mut().push("Fake A".into());
     let fake = Rc::new(fake);
     let app = start(args(&dir), &fake);
-    assert!(!app.stream.is_playing());
-    assert!(app.stream.is_idle());
+    assert!(!app.session.engine.stream.is_playing());
+    assert!(app.session.engine.stream.is_idle());
     assert!(
-        app.stream.label().contains("the device is busy"),
+        app.session.engine.stream.label().contains("the device is busy"),
         "audio_name: {:?}",
-        app.stream.label()
+        app.session.engine.stream.label()
     );
 }
 
@@ -1495,10 +1514,10 @@ fn check_audio_returns_early_when_audio_disabled() {
     let dir = folder("check-audio-disabled");
     let fake = two_devices();
     let mut app = start(args(&dir), &fake);
-    app.stream.set_playback(crate::stream::Playback::Off);
+    app.session.engine.stream.set_playback(crate::stream::Playback::Off);
     app.check_audio(Instant::now());
-    app.stream.set_playback(crate::stream::Playback::Device);
-    app.stream.set_playback(crate::stream::Playback::Fake);
+    app.session.engine.stream.set_playback(crate::stream::Playback::Device);
+    app.session.engine.stream.set_playback(crate::stream::Playback::Fake);
     app.check_audio(Instant::now());
 }
 
@@ -1521,7 +1540,7 @@ fn handle_audio_loss_guards_and_named_fallback() {
     // When audio was never playing and not lost, return early
     app.rig.lost_audio = None;
     app.rig.playing = None;
-    assert!(!app.stream.is_playing());
+    assert!(!app.session.engine.stream.is_playing());
     app.handle_audio_loss("ignored");
     assert!(app.rig.lost_audio.is_none());
 
@@ -1529,7 +1548,7 @@ fn handle_audio_loss_guards_and_named_fallback() {
     let output = loom_host_desktop::AudioOutput::clock(48_000, 256);
     let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let running = output.start(parts.engine).unwrap();
-    app.stream.set_running(Some(running));
+    app.session.engine.stream.set_running(Some(running));
     let mut saved = app.rig.store.saved().clone();
     saved.audio.device = DeviceChoice::Named("Saved Device".into());
     app.rig.save(saved);
@@ -1539,7 +1558,10 @@ fn handle_audio_loss_guards_and_named_fallback() {
     // When _audio is present, playing is None, and saved is SystemDefault, falls back to "audio device"
     let output2 = loom_host_desktop::AudioOutput::clock(48_000, 256);
     let parts2 = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
-    app.stream.set_running(Some(output2.start(parts2.engine).unwrap()));
+    app.session
+        .engine
+        .stream
+        .set_running(Some(output2.start(parts2.engine).unwrap()));
     app.rig.lost_audio = None;
     let mut saved2 = app.rig.store.saved().clone();
     saved2.audio.device = DeviceChoice::SystemDefault;
@@ -1626,7 +1648,7 @@ fn failed_saves_say_why_and_keep_the_choice() {
 
     // A patch that uses the input opens it, so turning it off has
     // something to close.
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_opens.get(), 1);
     app.alerts.say(String::new());
@@ -1724,7 +1746,7 @@ fn opening_a_patch_drops_an_input_error_that_is_over() {
     };
     *fake.input_error.borrow_mut() = Some(InputError::Other("device busy".into()));
     let mut app = start(args(&dir), &fake);
-    app.controller.add_module("loom.io.audio-in").unwrap();
+    app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     app.sync_audio_input();
     assert_eq!(app.alerts.kept().len(), 1);

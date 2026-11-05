@@ -9,12 +9,14 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
     let mut ui = Ui::open("modulation.ron");
     let assignment = *ui
         .app
+        .session
         .controller
         .graph()
         .assignment(AssignmentId(1))
         .expect("assignment");
     for index in 0..30 {
         ui.app
+            .session
             .controller
             .add_assignment(
                 assignment.source,
@@ -57,6 +59,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
     }
     let before: Vec<_> = ui
         .app
+        .session
         .controller
         .graph()
         .assignments()
@@ -74,7 +77,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
         assert!(cell.x + cell.width - translation.x <= viewport.x + viewport.width + 1.0);
         assert_eq!(
             ui.app.ui_snapshot().matrix.selected,
-            ui.app.matrix.selected.map(|id| id.0)
+            ui.app.session.matrix.selected.map(|id| id.0)
         );
         translation
     };
@@ -82,7 +85,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
         ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
         check(&mut ui);
     }
-    assert_eq!(ui.app.matrix.selected, Some(AssignmentId(32)));
+    assert_eq!(ui.app.session.matrix.selected, Some(AssignmentId(32)));
     // Every cell of a card fits the column, so moving between cells
     // never scrolls sideways (#456).
     for _ in 0..4 {
@@ -93,7 +96,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
         ui.tap(keyboard::Key::Named(Named::ArrowUp), keyboard::Modifiers::default());
         assert_eq!(check(&mut ui).x, 0.0, "no sideways scroll");
     }
-    assert_eq!(ui.app.matrix.selected, Some(AssignmentId(1)));
+    assert_eq!(ui.app.session.matrix.selected, Some(AssignmentId(1)));
     ui.send(Message::Matrix(Event::SortBy(Some(Column::Depth))));
     check(&mut ui);
     ui.send(Message::Matrix(Event::ReverseSort));
@@ -104,11 +107,16 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
     check(&mut ui);
     for _ in 0..31 {
         ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        let selected = ui.app.matrix.selected.expect("visible selection");
+        let selected = ui.app.session.matrix.selected.expect("visible selection");
         assert!(
             ui.app
+                .session
                 .matrix
-                .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab)
+                .model(
+                    ui.app.session.controller.graph(),
+                    &ui.app.session.selection,
+                    ui.app.right_tab
+                )
                 .rows
                 .iter()
                 .any(|row| row.id == selected.0)
@@ -118,13 +126,14 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
     assert_eq!(
         before,
         ui.app
+            .session
             .controller
             .graph()
             .assignments()
             .map(|(id, a)| (id, *a))
             .collect::<Vec<_>>()
     );
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert!(ui.app.session.edits.history.undo_step().is_none());
 }
 
 /// Visible rows follow engine order, sorting, text, and module filters
@@ -134,6 +143,7 @@ fn rows_sort_and_filter_without_editing_assignments() {
     let mut ui = Ui::open("modulation.ron");
     let before: Vec<_> = ui
         .app
+        .session
         .controller
         .graph()
         .assignments()
@@ -141,9 +151,11 @@ fn rows_sort_and_filter_without_editing_assignments() {
         .collect();
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     let model = |ui: &Ui| {
-        ui.app
-            .matrix
-            .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab)
+        ui.app.session.matrix.model(
+            ui.app.session.controller.graph(),
+            &ui.app.session.selection,
+            ui.app.right_tab,
+        )
     };
     assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
     ui.app.matrix_event(Event::SortBy(Some(Column::Depth)));
@@ -166,13 +178,14 @@ fn rows_sort_and_filter_without_editing_assignments() {
     assert_eq!(
         before,
         ui.app
+            .session
             .controller
             .graph()
             .assignments()
             .map(|(id, a)| (id, *a))
             .collect::<Vec<_>>()
     );
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert!(ui.app.session.edits.history.undo_step().is_none());
 }
 
 /// Retargeting keeps the same id and fields, refuses duplicates, and
@@ -182,19 +195,32 @@ fn retarget_keeps_id_order_and_one_undo_step() {
     let mut ui = Ui::open("modulation.ron");
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     let id = AssignmentId(1);
-    let original = *ui.app.controller.graph().assignment(id).expect("first assignment");
-    let target = targets(ui.app.controller.graph())
+    let original = *ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(id)
+        .expect("first assignment");
+    let target = targets(ui.app.session.controller.graph())
         .into_iter()
         .find(|t| t.module == ModuleId(4) && t.param != original.param)
         .expect("another filter parameter");
     ui.app.matrix_event(Event::Target(id, target));
-    let changed = *ui.app.controller.graph().assignment(id).expect("retargeted assignment");
+    let changed = *ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(id)
+        .expect("retargeted assignment");
     assert_ne!(changed.param, original.param);
     assert_eq!(changed.depth, original.depth);
     assert_eq!(changed.polarity, original.polarity);
     assert_eq!(changed.enabled, original.enabled);
     assert_eq!(
         ui.app
+            .session
             .controller
             .graph()
             .assignments()
@@ -203,16 +229,16 @@ fn retarget_keeps_id_order_and_one_undo_step() {
         vec![1, 2]
     );
     ui.app.undo();
-    assert_eq!(ui.app.controller.graph().assignment(id), Some(&original));
+    assert_eq!(ui.app.session.controller.graph().assignment(id), Some(&original));
     ui.app.redo();
-    assert_eq!(ui.app.controller.graph().assignment(id), Some(&changed));
-    let duplicate = sources(ui.app.controller.graph())
+    assert_eq!(ui.app.session.controller.graph().assignment(id), Some(&changed));
+    let duplicate = sources(ui.app.session.controller.graph())
         .into_iter()
         .find(|s| s.output.module == ModuleId(6))
         .expect("envelope output");
     ui.app.matrix_event(Event::Target(
         id,
-        targets(ui.app.controller.graph())
+        targets(ui.app.session.controller.graph())
             .into_iter()
             .find(|t| t.module == ModuleId(4) && t.param == original.param)
             .expect("cutoff"),
@@ -221,6 +247,7 @@ fn retarget_keeps_id_order_and_one_undo_step() {
     assert!(ui.app.alerts.status().contains("already modulates"));
     assert_eq!(
         ui.app
+            .session
             .controller
             .graph()
             .assignment(id)
@@ -240,27 +267,51 @@ fn typed_depth_and_escape() {
     ui.app.matrix_event(Event::Edit(id, Column::Depth));
     ui.app.matrix_event(Event::DepthText("101".into()));
     ui.app.matrix_event(Event::Apply);
-    assert!(ui.app.matrix.edit.is_some());
+    assert!(ui.app.session.matrix.edit.is_some());
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").depth,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .depth,
         0.08
     );
     ui.app.matrix_event(Event::DepthText("-35%".into()));
     ui.app.matrix_event(Event::Apply);
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").depth,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .depth,
         -0.35
     );
     ui.app.undo();
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").depth,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .depth,
         0.08
     );
     ui.app.matrix_event(Event::Edit(id, Column::Depth));
     ui.app.matrix_event(Event::DepthText("90".into()));
     ui.app.matrix_event(Event::Cancel);
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").depth,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .depth,
         0.08
     );
 }
@@ -279,20 +330,23 @@ fn keyboard_path_selects_edits_and_deletes() {
         ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
     };
     key(&mut ui, Named::ArrowDown);
-    assert_eq!(ui.app.matrix.selected, Some(AssignmentId(1)));
+    assert_eq!(ui.app.session.matrix.selected, Some(AssignmentId(1)));
     key(&mut ui, Named::ArrowRight);
     key(&mut ui, Named::ArrowRight);
-    assert_eq!(ui.app.matrix.cell, Column::Target);
+    assert_eq!(ui.app.session.matrix.cell, Column::Target);
     key(&mut ui, Named::Enter);
-    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Target));
+    assert_eq!(
+        ui.app.session.matrix.edit.as_ref().map(|e| e.column),
+        Some(Column::Target)
+    );
     key(&mut ui, Named::Escape);
-    assert!(ui.app.matrix.edit.is_none());
+    assert!(ui.app.session.matrix.edit.is_none());
     key(&mut ui, Named::Delete);
-    assert!(ui.app.controller.graph().assignment(AssignmentId(1)).is_none());
+    assert!(ui.app.session.controller.graph().assignment(AssignmentId(1)).is_none());
     ui.app.undo();
-    assert!(ui.app.controller.graph().assignment(AssignmentId(1)).is_some());
+    assert!(ui.app.session.controller.graph().assignment(AssignmentId(1)).is_some());
     key(&mut ui, Named::Tab);
-    assert!(!ui.app.matrix.focused);
+    assert!(!ui.app.session.matrix.focused);
 }
 
 /// Matrix focus leaves command shortcuts available after an edit.
@@ -301,13 +355,26 @@ fn command_shortcuts_undo_and_redo_while_matrix_is_focused() {
     let mut ui = Ui::open("modulation.ron");
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     let id = AssignmentId(1);
-    let original = ui.app.controller.graph().assignment(id).expect("assignment").enabled;
+    let original = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(id)
+        .expect("assignment")
+        .enabled;
     ui.app.matrix_event(Event::Enabled(id, !original));
-    assert!(ui.app.matrix.focused);
+    assert!(ui.app.session.matrix.focused);
 
     ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").enabled,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .enabled,
         original
     );
 
@@ -316,7 +383,13 @@ fn command_shortcuts_undo_and_redo_while_matrix_is_focused() {
         keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
     );
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").enabled,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .enabled,
         !original
     );
 }
@@ -352,18 +425,29 @@ fn cmd_v_in_a_depth_field_opened_by_pointer_stays_out_of_the_canvas() {
     let mut ui = Ui::open("modulation.ron");
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     ui.redraw();
-    let id = ui.app.controller.graph().assignments().next().expect("an assignment").0;
+    let id = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignments()
+        .next()
+        .expect("an assignment")
+        .0;
     ui.app.matrix_event(Event::Select(id, Column::Depth));
     ui.redraw();
     let depth = {
-        let assignment = ui.app.controller.graph().assignment(id).unwrap();
+        let assignment = ui.app.session.controller.graph().assignment(id).unwrap();
         crate::modulation::depth_text(assignment.depth)
     };
     let cell = ui.text(&depth).expect("the depth cell shows its value");
     ui.move_to(cell.center());
     ui.press();
     ui.release();
-    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+    assert_eq!(
+        ui.app.session.matrix.edit.as_ref().map(|e| e.column),
+        Some(Column::Depth)
+    );
 
     let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
     assert!(
@@ -380,17 +464,17 @@ fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
     let mut ui = Ui::open("modulation.ron");
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     ui.app.matrix_event(Event::Select(AssignmentId(1), Column::On));
-    let tile = ui.app.scene.module(2).expect("phase tile").bounds();
+    let tile = ui.app.session.scene.module(2).expect("phase tile").bounds();
     let at = ui.canvas().to_window(iced::Point::new(tile.center().x, tile.y + 10.0));
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert!(!ui.app.matrix.focused);
-    assert!(ui.app.selection.contains(&2));
+    assert!(!ui.app.session.matrix.focused);
+    assert!(ui.app.session.selection.contains(&2));
 
     ui.tap(keyboard::Key::Named(Named::Delete), keyboard::Modifiers::default());
-    assert!(ui.app.controller.graph().node(ModuleId(2)).is_none());
-    assert_eq!(ui.app.controller.graph().assignments().count(), 2);
+    assert!(ui.app.session.controller.graph().node(ModuleId(2)).is_none());
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), 2);
 }
 
 /// The keyboard can toggle On, choose a new source and polarity, and
@@ -405,35 +489,83 @@ fn keyboard_changes_cells_and_adds_an_assignment() {
     key(&mut ui, Named::ArrowDown);
     let id = AssignmentId(1);
     key(&mut ui, Named::Enter);
-    assert!(!ui.app.controller.graph().assignment(id).expect("assignment").enabled);
+    assert!(
+        !ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .enabled
+    );
     ui.app.undo();
-    assert!(ui.app.controller.graph().assignment(id).expect("assignment").enabled);
+    assert!(
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .enabled
+    );
     key(&mut ui, Named::ArrowRight);
     key(&mut ui, Named::Enter);
-    let before = ui.app.controller.graph().assignment(id).expect("assignment").source;
+    let before = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(id)
+        .expect("assignment")
+        .source;
     key(&mut ui, Named::ArrowDown);
     key(&mut ui, Named::Enter);
     assert_ne!(
-        ui.app.controller.graph().assignment(id).expect("assignment").source,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .source,
         before
     );
     key(&mut ui, Named::ArrowRight);
     key(&mut ui, Named::Enter);
-    let before_target = ui.app.controller.graph().assignment(id).expect("assignment").param;
+    let before_target = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(id)
+        .expect("assignment")
+        .param;
     key(&mut ui, Named::ArrowDown);
     key(&mut ui, Named::Enter);
     assert_ne!(
-        ui.app.controller.graph().assignment(id).expect("assignment").param,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .param,
         before_target
     );
     // Polarity comes right after the target, as on the card.
     key(&mut ui, Named::ArrowRight);
-    assert_eq!(ui.app.matrix.cell, Column::Polarity);
+    assert_eq!(ui.app.session.matrix.cell, Column::Polarity);
     key(&mut ui, Named::Enter);
     key(&mut ui, Named::ArrowDown);
     key(&mut ui, Named::Enter);
     assert_eq!(
-        ui.app.controller.graph().assignment(id).expect("assignment").polarity,
+        ui.app
+            .session
+            .controller
+            .graph()
+            .assignment(id)
+            .expect("assignment")
+            .polarity,
         Some(loom_core::Polarity::Unipolar)
     );
 
@@ -441,17 +573,21 @@ fn keyboard_changes_cells_and_adds_an_assignment() {
     key(&mut ui, Named::ArrowDown);
     key(&mut ui, Named::ArrowRight);
     key(&mut ui, Named::ArrowDown);
-    let add = ui.app.matrix.add.as_ref().expect("add picks");
+    let add = ui.app.session.matrix.add.as_ref().expect("add picks");
     assert!(add.source.is_some() && add.target.is_some());
     // Pressing Add again keeps the picks.
     ui.app.matrix_event(Event::AddOpen);
-    let add = ui.app.matrix.add.as_ref().expect("add picks");
+    let add = ui.app.session.matrix.add.as_ref().expect("add picks");
     assert!(add.source.is_some() && add.target.is_some(), "Add again keeps the form");
-    let before_count = ui.app.controller.graph().assignments().count();
+    let before_count = ui.app.session.controller.graph().assignments().count();
     key(&mut ui, Named::Enter);
-    assert_eq!(ui.app.controller.graph().assignments().count(), before_count + 1);
+    assert_eq!(
+        ui.app.session.controller.graph().assignments().count(),
+        before_count + 1
+    );
     let added = ui
         .app
+        .session
         .controller
         .graph()
         .assignments()
@@ -460,6 +596,7 @@ fn keyboard_changes_cells_and_adds_an_assignment() {
         .1;
     let spec = ui
         .app
+        .session
         .controller
         .graph()
         .node(added.target)
@@ -468,7 +605,7 @@ fn keyboard_changes_cells_and_adds_an_assignment() {
         .expect("parameter");
     assert_eq!(added.depth, modulation::default_depth(&spec));
     ui.app.undo();
-    assert_eq!(ui.app.controller.graph().assignments().count(), before_count);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before_count);
 }
 
 /// Enter on the Depth cell focuses its text field, so typing a percent
@@ -485,14 +622,18 @@ fn keyboard_types_a_depth_percentage() {
     for _ in 0..4 {
         key(&mut ui, Named::ArrowRight);
     }
-    assert_eq!(ui.app.matrix.cell, Column::Depth);
+    assert_eq!(ui.app.session.matrix.cell, Column::Depth);
     key(&mut ui, Named::Enter);
-    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+    assert_eq!(
+        ui.app.session.matrix.edit.as_ref().map(|e| e.column),
+        Some(Column::Depth)
+    );
     ui.typewrite("42");
-    assert_eq!(ui.app.matrix.edit.as_ref().expect("depth editor").depth, "42");
+    assert_eq!(ui.app.session.matrix.edit.as_ref().expect("depth editor").depth, "42");
     key(&mut ui, Named::Enter);
     assert_eq!(
         ui.app
+            .session
             .controller
             .graph()
             .assignment(AssignmentId(1))
@@ -500,10 +641,11 @@ fn keyboard_types_a_depth_percentage() {
             .depth,
         0.42
     );
-    assert!(ui.app.matrix.edit.is_none(), "Enter leaves the depth editor");
+    assert!(ui.app.session.matrix.edit.is_none(), "Enter leaves the depth editor");
     ui.app.undo();
     assert_eq!(
         ui.app
+            .session
             .controller
             .graph()
             .assignment(AssignmentId(1))
@@ -521,15 +663,16 @@ fn add_duplicate_and_drag_follow_inspector_edits() {
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     let existing = *ui
         .app
+        .session
         .controller
         .graph()
         .assignment(AssignmentId(1))
         .expect("assignment");
-    let source = sources(ui.app.controller.graph())
+    let source = sources(ui.app.session.controller.graph())
         .into_iter()
         .find(|s| s.output == existing.source)
         .expect("source");
-    let target = targets(ui.app.controller.graph())
+    let target = targets(ui.app.session.controller.graph())
         .into_iter()
         .find(|t| (t.module, t.param) == (existing.target, existing.param))
         .expect("target");
@@ -537,13 +680,14 @@ fn add_duplicate_and_drag_follow_inspector_edits() {
     ui.app.matrix_event(Event::AddSource(source));
     ui.app.matrix_event(Event::AddTarget(target));
     ui.app.matrix_event(Event::AddApply);
-    assert_eq!(ui.app.controller.graph().assignments().count(), 2);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), 2);
     assert!(ui.app.alerts.status().contains("already modulates"));
     ui.app.matrix_event(Event::DepthDrag(AssignmentId(1), 0.4));
     ui.app.matrix_event(Event::DepthDrag(AssignmentId(1), 0.5));
     ui.app.matrix_event(Event::DepthReleased);
     assert_eq!(
         ui.app
+            .session
             .controller
             .graph()
             .assignment(AssignmentId(1))
@@ -552,7 +696,10 @@ fn add_duplicate_and_drag_follow_inspector_edits() {
         0.5
     );
     ui.app.undo();
-    assert_eq!(ui.app.controller.graph().assignment(AssignmentId(1)), Some(&existing));
+    assert_eq!(
+        ui.app.session.controller.graph().assignment(AssignmentId(1)),
+        Some(&existing)
+    );
 }
 
 /// A new patch keeps the session tab but drops patch-specific rows and
@@ -562,9 +709,10 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
     let mut ui = Ui::open("modulation.ron");
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     let id = AssignmentId(1);
-    let old = *ui.app.controller.graph().assignment(id).expect("assignment");
+    let old = *ui.app.session.controller.graph().assignment(id).expect("assignment");
     assert!(
         ui.app
+            .session
             .controller
             .retarget_assignment(
                 id,
@@ -577,7 +725,7 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
             )
             .is_err()
     );
-    assert_eq!(ui.app.controller.graph().assignment(id), Some(&old));
+    assert_eq!(ui.app.session.controller.graph().assignment(id), Some(&old));
     ui.app.matrix_event(Event::Select(id, Column::Source));
     assert_eq!(
         ui.app.matrix_line().expect("selected line").from,
@@ -587,12 +735,17 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
     assert_eq!(ui.app.right_tab, Tab::Matrix);
     assert!(
         ui.app
+            .session
             .matrix
-            .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab)
+            .model(
+                ui.app.session.controller.graph(),
+                &ui.app.session.selection,
+                ui.app.right_tab
+            )
             .rows
             .is_empty()
     );
-    assert!(ui.app.matrix.selected.is_none());
+    assert!(ui.app.session.matrix.selected.is_none());
 }
 
 /// Every part of every card fits the right-hand column: a 24-character
@@ -601,9 +754,10 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
 #[test]
 fn cards_fit_the_column() {
     let mut ui = Ui::open("modulation.ron");
-    let hold = ui.app.controller.add_module("loom.rand.sample-hold").unwrap();
+    let hold = ui.app.session.controller.add_module("loom.rand.sample-hold").unwrap();
     let svf = ModuleId(4);
     ui.app
+        .session
         .controller
         .add_assignment(OutputRef { module: hold, port: 0 }, svf, 1, 0.25)
         .unwrap();
@@ -613,10 +767,11 @@ fn cards_fit_the_column() {
 
     let source = format!("Sample and Hold #{}: Out", hold.0);
     assert_eq!(source.len(), 24);
-    let column = ui
-        .app
-        .matrix
-        .model(ui.app.controller.graph(), &ui.app.selection, ui.app.right_tab);
+    let column = ui.app.session.matrix.model(
+        ui.app.session.controller.graph(),
+        &ui.app.session.selection,
+        ui.app.right_tab,
+    );
     let right = crate::WINDOW.width;
     let left = right - 280.0;
     let mut labels = vec![source.clone()];
@@ -651,7 +806,10 @@ fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
         key(&mut ui, Named::ArrowRight);
     }
     key(&mut ui, Named::Enter);
-    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
+    assert_eq!(
+        ui.app.session.matrix.edit.as_ref().map(|e| e.column),
+        Some(Column::Depth)
+    );
 
     let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
     assert!(
@@ -668,7 +826,7 @@ fn matrix_with_a_row() -> Ui {
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     ui.app.matrix_event(Event::Select(AssignmentId(1), Column::On));
     ui.redraw();
-    assert!(ui.app.matrix.focused);
+    assert!(ui.app.session.matrix.focused);
     ui
 }
 
@@ -688,10 +846,10 @@ fn click_filter(ui: &mut Ui) {
 /// What a key must not change: the row, the cell, any edit, and the patch.
 fn rows_and_cells(ui: &Ui) -> (Option<AssignmentId>, Column, bool, usize) {
     (
-        ui.app.matrix.selected,
-        ui.app.matrix.cell,
-        ui.app.matrix.edit.is_some(),
-        ui.app.controller.graph().assignments().count(),
+        ui.app.session.matrix.selected,
+        ui.app.session.matrix.cell,
+        ui.app.session.matrix.edit.is_some(),
+        ui.app.session.controller.graph().assignments().count(),
     )
 }
 
@@ -711,7 +869,7 @@ fn keys_in_an_empty_filter_leave_rows_alone() {
     ] {
         let mut ui = matrix_with_a_row();
         click_filter(&mut ui);
-        assert!(ui.app.matrix.focused, "the click left the table focused");
+        assert!(ui.app.session.matrix.focused, "the click left the table focused");
         let before = rows_and_cells(&ui);
         ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
         assert_eq!(rows_and_cells(&ui), before, "{named:?}");
@@ -723,16 +881,19 @@ fn keys_in_an_empty_filter_leave_rows_alone() {
 #[test]
 fn typing_and_clearing_a_filter_changes_only_the_filter() {
     let mut ui = matrix_with_a_row();
-    let count = ui.app.controller.graph().assignments().count();
-    let undo = ui.app.edits.history.undo_step().map(|s| s.name().to_string());
+    let count = ui.app.session.controller.graph().assignments().count();
+    let undo = ui.app.session.edits.history.undo_step().map(|s| s.name().to_string());
     click_filter(&mut ui);
     ui.typewrite("zz");
-    assert_eq!(ui.app.matrix.filter, "zz");
+    assert_eq!(ui.app.session.matrix.filter, "zz");
     ui.tap(keyboard::Key::Named(Named::Backspace), keyboard::Modifiers::default());
     ui.tap(keyboard::Key::Named(Named::Backspace), keyboard::Modifiers::default());
-    assert_eq!(ui.app.matrix.filter, "");
-    assert_eq!(ui.app.controller.graph().assignments().count(), count);
-    assert_eq!(ui.app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
+    assert_eq!(ui.app.session.matrix.filter, "");
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), count);
+    assert_eq!(
+        ui.app.session.edits.history.undo_step().map(|s| s.name().to_string()),
+        undo
+    );
 }
 
 /// #435, modulation.md, Filter focus: Escape and Tab each end the field's focus
@@ -745,7 +906,7 @@ fn escape_and_tab_leave_the_filter_and_the_table_in_one_press() {
         click_filter(&mut ui);
         ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
         ui.redraw();
-        assert!(!ui.app.matrix.focused, "{named:?} left the table");
+        assert!(!ui.app.session.matrix.focused, "{named:?} left the table");
         assert!(!ui.text_field_focused(), "{named:?} ended the field's focus");
     }
 }
@@ -755,7 +916,14 @@ fn escape_and_tab_leave_the_filter_and_the_table_in_one_press() {
 fn command_shortcuts_work_from_the_filter() {
     let mut ui = matrix_with_a_row();
     let id = AssignmentId(1);
-    let original = ui.app.controller.graph().assignment(id).expect("assignment").enabled;
+    let original = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(id)
+        .expect("assignment")
+        .enabled;
     ui.app.matrix_event(Event::Enabled(id, !original));
     ui.app.commit();
     ui.redraw();
@@ -779,18 +947,25 @@ fn a_cell_editor_keeps_its_captured_keys() {
     let mut ui = matrix_with_a_row();
     ui.app.matrix_event(Event::Select(AssignmentId(1), Column::Depth));
     ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
-    assert_eq!(ui.app.matrix.edit.as_ref().map(|e| e.column), Some(Column::Depth));
-    let before = ui.app.matrix.selected;
-    let count = ui.app.controller.graph().assignments().count();
+    assert_eq!(
+        ui.app.session.matrix.edit.as_ref().map(|e| e.column),
+        Some(Column::Depth)
+    );
+    let before = ui.app.session.matrix.selected;
+    let count = ui.app.session.controller.graph().assignments().count();
     for named in [Named::Delete, Named::Backspace, Named::ArrowLeft] {
         ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-        assert!(ui.app.matrix.edit.is_some(), "{named:?} stayed in the edit");
-        assert_eq!(ui.app.matrix.selected, before, "{named:?}");
-        assert_eq!(ui.app.controller.graph().assignments().count(), count, "{named:?}");
+        assert!(ui.app.session.matrix.edit.is_some(), "{named:?} stayed in the edit");
+        assert_eq!(ui.app.session.matrix.selected, before, "{named:?}");
+        assert_eq!(
+            ui.app.session.controller.graph().assignments().count(),
+            count,
+            "{named:?}"
+        );
     }
     ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
-    assert!(ui.app.matrix.edit.is_none(), "Escape left the edit");
-    assert!(ui.app.matrix.focused, "and stayed in the table");
+    assert!(ui.app.session.matrix.edit.is_none(), "Escape left the edit");
+    assert!(ui.app.session.matrix.focused, "and stayed in the table");
 }
 
 /// #435: arrows no longer move rows behind an overlay. They used to, behind
@@ -808,13 +983,13 @@ fn the_matrix_has_no_keys_behind_an_overlay() {
         InputOwner::RecentList,
     ] {
         let mut ui = matrix_with_a_row();
-        let undo = ui.app.edits.history.undo_step().map(|s| s.name().to_string());
+        let undo = ui.app.session.edits.history.undo_step().map(|s| s.name().to_string());
         open_overlay(&mut ui, owner);
-        let before = ui.app.matrix.selected;
+        let before = ui.app.session.matrix.selected;
         ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        assert_eq!(ui.app.matrix.selected, before, "{owner:?}");
+        assert_eq!(ui.app.session.matrix.selected, before, "{owner:?}");
         assert_eq!(
-            ui.app.edits.history.undo_step().map(|s| s.name().to_string()),
+            ui.app.session.edits.history.undo_step().map(|s| s.name().to_string()),
             undo,
             "{owner:?}"
         );
@@ -827,12 +1002,12 @@ fn the_table_has_the_keys_again_after_an_overlay_closes() {
     use crate::input_owner::{InputOwner, tests::open_overlay};
     for owner in [InputOwner::Browser, InputOwner::Preferences] {
         let mut ui = matrix_with_a_row();
-        let before = ui.app.matrix.selected;
+        let before = ui.app.session.matrix.selected;
         open_overlay(&mut ui, owner);
         ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
         ui.redraw();
         assert_eq!(ui.app.input_owner(), InputOwner::Canvas, "{owner:?} closed");
         ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        assert_ne!(ui.app.matrix.selected, before, "{owner:?}: Down moved the row");
+        assert_ne!(ui.app.session.matrix.selected, before, "{owner:?}: Down moved the row");
     }
 }

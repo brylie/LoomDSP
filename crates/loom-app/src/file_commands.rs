@@ -11,13 +11,13 @@ use std::time::Instant;
 impl App {
     /// The name of the patch as the title shows it, without the mark.
     pub(crate) fn patch_name(&self) -> String {
-        self.document.title_name()
+        self.session.document.title_name()
     }
 
     /// True when the patch differs from the file (`docs/design/files.md`).
     /// An edit in patch info counts too (patch-metadata.md).
     pub(crate) fn unsaved(&self) -> bool {
-        !self.edits.history.is_saved() || self.document.info_unsaved()
+        !self.session.edits.history.is_saved() || self.session.document.info_unsaved()
     }
 
     /// Writes the patch to `path`. On success the path becomes the current
@@ -29,8 +29,8 @@ impl App {
             Ok(()) => {
                 self.alerts.clear(alerts::Cause::File);
                 self.alerts.say(format!("saved {}", path.display()));
-                self.document.saved(path, patch);
-                self.edits.history.mark_saved();
+                self.session.document.saved(path, patch);
+                self.session.edits.history.mark_saved();
                 self.remember_current();
                 // The file holds the work now: the copy goes.
                 self.autosave(Instant::now());
@@ -88,7 +88,7 @@ impl App {
         if !self.control.is_empty() {
             return;
         }
-        let Some(file) = self.document.file() else {
+        let Some(file) = self.session.document.file() else {
             return;
         };
         // Absolute, so a relative path from the command line still opens
@@ -104,19 +104,19 @@ impl App {
     /// channel on, where nobody could answer a dialog.
     fn offer_credit(&mut self) {
         let name = self.rig.store.saved().author.trim().to_string();
-        if !self.control.is_empty() || !self.document.should_offer_credit(&name) {
+        if !self.control.is_empty() || !self.session.document.should_offer_credit(&name) {
             return;
         }
-        match files::confirm_add_author(&name, &self.document.info().authors) {
+        match files::confirm_add_author(&name, &self.session.document.info().authors) {
             Some(true) => {
-                self.document.edit_info(|info| info.authors.push(name));
+                self.session.document.edit_info(|info| info.authors.push(name));
                 // The authors box shows the new name, so its next edit
                 // keeps it.
                 // Only the authors box: a tag being typed stays.
-                self.patch_info.authors = crate::patch_info::State::new(self.document.info()).authors;
+                self.session.patch_info.authors = crate::patch_info::State::new(self.session.document.info()).authors;
             }
             Some(false) => {}
-            None => self.document.credit_not_asked(),
+            None => self.session.document.credit_not_asked(),
         }
     }
 
@@ -141,7 +141,7 @@ impl App {
     /// work).
     pub(crate) fn save_then(&mut self, next: Option<AfterDiscard>) -> bool {
         self.finish_edits();
-        match self.document.file().map(Path::to_path_buf) {
+        match self.session.document.file().map(Path::to_path_buf) {
             Some(path) => self.write_then(path, next),
             None => self.save_as_then(next),
         }
@@ -168,15 +168,15 @@ impl App {
         // copy's). A bare hint, as an example copy suggests, goes in the
         // library like a new patch, keeping its name.
         let start = match (
-            self.document.file().map(Path::to_path_buf),
-            self.document.save_start().map(Path::to_path_buf),
+            self.session.document.file().map(Path::to_path_buf),
+            self.session.document.save_start().map(Path::to_path_buf),
         ) {
             // The current file always wins, even one opened by a bare name.
             (Some(file), _) => Some(file),
             (None, Some(path)) if path.parent().is_some_and(|dir| !dir.as_os_str().is_empty()) => Some(path),
             (None, hint) => {
                 let name = hint.as_deref().and_then(Path::file_stem).map_or_else(
-                    || self.document.name().to_string(),
+                    || self.session.document.name().to_string(),
                     |stem| stem.to_string_lossy().into_owned(),
                 );
                 self.dialog_folder().map(|dir| files::free_path(&dir, &name)).or(hint)
@@ -210,7 +210,7 @@ impl App {
     /// when it ends.
     pub(crate) fn finish_edits(&mut self) {
         self.close_slider_gesture();
-        if self.edits.gesture_open() {
+        if self.session.edits.gesture_open() {
             self.record();
         }
     }
@@ -235,7 +235,7 @@ impl App {
                 }
             }
             AfterDiscard::OpenDialog => {
-                let current = self.document.file().map(Path::to_path_buf);
+                let current = self.session.document.file().map(Path::to_path_buf);
                 // Only if the current file has no folder to start in: looking
                 // up the library folder makes it.
                 let has_folder = current.as_deref().and_then(Path::parent).is_some_and(Path::is_dir);
@@ -294,7 +294,7 @@ impl App {
         // playing. The engine is built at the rate of the device that will
         // play it.
         // A recording goes on into the same file (rig.recorder).
-        let playback = self.stream.playback();
+        let playback = self.session.engine.stream.playback();
         // A lost named device is being waited for, so the new patch stays idle
         // too, rather than coming out of other speakers (device-changes.md).
         let (output, _) = match self.rig.lost_audio.as_ref().filter(|lost| !lost.was_system_default) {
@@ -302,7 +302,7 @@ impl App {
             None => settings::open_output(&self.rig, playback.is_off(), playback.is_fake()),
         };
         // Playing now and no device to play on afterwards: keep what plays.
-        if let (Err(e), true) = (&output, self.stream.is_playing()) {
+        if let (Err(e), true) = (&output, self.session.engine.stream.is_playing()) {
             let message = format!(
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             );
@@ -313,9 +313,9 @@ impl App {
         let sample_rate = output
             .as_ref()
             .map(|o| o.sample_rate() as f32)
-            .unwrap_or(self.stream.sample_rate());
+            .unwrap_or(self.session.engine.stream.sample_rate());
         let config = EngineConfig {
-            output_safety: self.stream.output_safety(),
+            output_safety: self.session.engine.stream.output_safety(),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
         let loaded = match Loaded::read(config, self.test_modules, source) {
@@ -331,7 +331,7 @@ impl App {
         // audio device before the new engine takes it. MIDI inputs stay
         // open and move to the new engine.
         self.stop_audio();
-        self.midi = None;
+        self.session.engine.midi = None;
         let args = Args {
             patch: None,
             generate: None,
@@ -343,7 +343,7 @@ impl App {
                 ..Default::default()
             },
             control: control::Options::default(),
-            output_safety: Some(self.stream.output_safety()),
+            output_safety: Some(self.session.engine.stream.output_safety()),
             devices: devices::Options::default(),
             view: screenshot::Options::default(),
             dump_ui: false,
@@ -366,7 +366,7 @@ impl App {
         fresh.pointer = self.pointer.clone();
         // The run goes on; only its patch changed.
         fresh.run_files = std::mem::take(&mut self.run_files);
-        fresh.run_files.copy_if_example(&mut fresh.document);
+        fresh.run_files.copy_if_example(&mut fresh.session.document);
         // Commands waiting to be drawn still get their answer, except a
         // `sample`, which would measure a module of the new patch.
         fresh.control_pending = control::end_samples(std::mem::take(&mut self.control_pending));
@@ -383,7 +383,7 @@ impl App {
         fresh.alerts.clear(alerts::Cause::File);
         // The new app's first look at the devices came before the carry, so
         // it could not clear what it found to be over.
-        if fresh.stream.is_playing() {
+        if fresh.session.engine.stream.is_playing() {
             fresh.audio_back();
         }
         if fresh.rig.input.open().is_some() || !fresh.input_wanted() {
@@ -451,7 +451,7 @@ impl App {
         }
         self.overlays.close_preferences();
         if several {
-            let notes = self.document.load_notes().join("; ");
+            let notes = self.session.document.load_notes().join("; ");
             let name = files::display_name(Some(path));
             let notes = if notes.is_empty() {
                 notes
@@ -472,7 +472,7 @@ impl App {
         } else {
             let rows = crate::recent::rows(self.rig.recent.files());
             self.overlays.open(Overlay::RecentList(rows));
-            self.matrix.focused = false;
+            self.session.matrix.focused = false;
         }
     }
 
@@ -539,8 +539,8 @@ impl App {
     /// Says a patch opened: info, or a warning when it loaded differently
     /// from how it was saved. Shared with the control channel's `open`.
     pub(crate) fn say_opened(&mut self, path: &std::path::Path) {
-        let status = opened_status(path, self.document.load_notes());
-        if self.document.load_notes().is_empty() {
+        let status = opened_status(path, self.session.document.load_notes());
+        if self.session.document.load_notes().is_empty() {
             self.alerts.say(status);
         } else {
             self.alerts.warn(status);

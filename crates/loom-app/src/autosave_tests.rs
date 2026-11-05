@@ -256,7 +256,7 @@ fn restore_keeps_an_unchanged_file() {
     drop(app);
 
     let mut app = setup.boot(None, &mut Answer::new(Choice::Restore));
-    assert_eq!(app.document.file(), Some(setup.file().as_path()));
+    assert_eq!(app.session.document.file(), Some(setup.file().as_path()));
     assert_eq!(app.title(), "* drone.ron - LoomDSP");
     assert_eq!(app.current_patch(), edited, "the edit is back");
     assert!(
@@ -288,7 +288,7 @@ fn restore_after_the_file_changed_leaves_it_alone() {
             .1
             .contains("\"drone.ron\" has changed since this copy was taken.")
     );
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert_eq!(app.title(), "* drone (recovered) - LoomDSP");
     assert_eq!(fs::read(&file).unwrap(), saved);
 }
@@ -299,7 +299,7 @@ fn restore_of_a_never_saved_patch_is_untitled() {
     let setup = Setup::new("untitled");
     let mut app = setup.boot(None, &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
-    let filter = app.controller.add_module("loom.filter.svf").unwrap();
+    let filter = app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     let t0 = Instant::now();
     app.autosave(t0);
@@ -307,9 +307,9 @@ fn restore_of_a_never_saved_patch_is_untitled() {
     drop(app);
 
     let app = setup.boot(None, &mut Answer::new(Choice::Restore));
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert_eq!(app.title(), "* Untitled - LoomDSP");
-    assert!(app.controller.graph().node(filter).is_some());
+    assert!(app.session.controller.graph().node(filter).is_some());
 }
 
 /// A copy that does not load: the error shows, the app starts empty, and
@@ -330,7 +330,7 @@ fn a_broken_copy_is_kept() {
     assert!(error.starts_with("Could not restore the unsaved changes: "), "{error}");
     assert!(error.contains("The copy is kept at "), "{error}");
     assert_eq!(
-        app.controller.graph().nodes().count(),
+        app.session.controller.graph().nodes().count(),
         1,
         "starts empty, but for its Transport"
     );
@@ -405,9 +405,9 @@ fn save_as_after_a_changed_restore_starts_in_the_folder() {
     drop(app);
     fs::remove_file(setup.file()).unwrap();
     let app = setup.boot(None, &mut Answer::new(Choice::Restore));
-    assert!(app.document.file().is_none());
+    assert!(app.session.document.file().is_none());
     assert_eq!(
-        app.document.save_hint(),
+        app.session.document.save_hint(),
         Some(setup.tmp.0.join("drone (recovered).ron").as_path())
     );
 }

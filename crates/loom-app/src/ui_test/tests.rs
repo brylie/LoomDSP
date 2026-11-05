@@ -16,9 +16,16 @@ fn an_output_dropped_on_an_inspector_row_assigns_once() {
     let mut ui = Ui::open("subtractive.ron");
     let row = inspector_row(&mut ui, 4, "Cutoff");
     let from = ui.output(7, "out");
-    let before = ui.app.controller.graph().assignments().count();
+    let before = ui.app.session.controller.graph().assignments().count();
     ui.drag(from, row, 12);
-    let assignments: Vec<_> = ui.app.controller.graph().assignments().map(|(_, a)| *a).collect();
+    let assignments: Vec<_> = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignments()
+        .map(|(_, a)| *a)
+        .collect();
     assert_eq!(assignments.len(), before + 1);
     let added = assignments.last().expect("new assignment");
     assert_eq!(added.depth, 0.25);
@@ -32,10 +39,10 @@ fn an_output_dropped_on_an_inspector_row_assigns_once() {
     );
     assert!(added.enabled);
     ui.drag(from, row, 12);
-    assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before + 1);
     assert!(ui.app.alerts.status().contains("already modulates"));
     let _ = ui.app.update(Message::Undo);
-    assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
 }
 
 /// Moving between parameter rows changes the one highlighted target.
@@ -49,12 +56,12 @@ fn only_the_inspector_row_under_an_output_drag_is_highlighted() {
     ui.press();
     ui.move_to(cutoff);
     assert_eq!(
-        ui.app.gestures.assign_drag().expect("window drag").zoom,
+        ui.app.session.gestures.assign_drag().expect("window drag").zoom,
         ui.canvas().camera.zoom
     );
-    assert_eq!(ui.app.gestures.drop_row(), Some((4, 0)));
+    assert_eq!(ui.app.session.gestures.drop_row(), Some((4, 0)));
     ui.move_to(resonance);
-    assert_eq!(ui.app.gestures.drop_row(), Some((4, 1)));
+    assert_eq!(ui.app.session.gestures.drop_row(), Some((4, 1)));
     ui.release();
 }
 
@@ -65,7 +72,14 @@ fn an_output_dropped_on_a_toggle_row_uses_one_step() {
     let row = inspector_row(&mut ui, 10, "Run");
     let from = ui.output(7, "out");
     ui.drag(from, row, 12);
-    let (_, assignment) = ui.app.controller.graph().assignments().last().expect("assignment");
+    let (_, assignment) = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignments()
+        .last()
+        .expect("assignment");
     assert_eq!(assignment.target, ModuleId(10));
     assert_eq!(assignment.depth, 1.0);
 }
@@ -78,13 +92,13 @@ fn a_button_only_parameter_row_rejects_a_drop() {
     let button = select_new(&mut ui, "loom.ui.button");
     let row = inspector_row(&mut ui, button.0, "On");
     let from = ui.output(7, "out");
-    let before = ui.app.controller.graph().assignments().count();
+    let before = ui.app.session.controller.graph().assignments().count();
     ui.move_to(from);
     ui.press();
     ui.move_to(row);
-    assert_eq!(ui.app.gestures.drop_row(), None);
+    assert_eq!(ui.app.session.gestures.drop_row(), None);
     ui.release();
-    assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
 }
 
 /// A normal parameter with no tile widget still accepts a row drop.
@@ -94,10 +108,17 @@ fn an_inspector_only_parameter_accepts_a_drop() {
     let button = select_new(&mut ui, "loom.ui.button");
     let row = inspector_row(&mut ui, button.0, "Mode");
     let from = ui.output(7, "out");
-    let before = ui.app.controller.graph().assignments().count();
+    let before = ui.app.session.controller.graph().assignments().count();
     ui.drag(from, row, 12);
-    assert_eq!(ui.app.controller.graph().assignments().count(), before + 1);
-    let (_, assignment) = ui.app.controller.graph().assignments().last().expect("assignment");
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before + 1);
+    let (_, assignment) = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignments()
+        .last()
+        .expect("assignment");
     assert_eq!(assignment.target, button);
 }
 
@@ -108,7 +129,7 @@ fn escape_and_focus_loss_cancel_an_inspector_drop() {
         let mut ui = Ui::open("subtractive.ron");
         let row = inspector_row(&mut ui, 4, "Cutoff");
         let from = ui.output(7, "out");
-        let before = ui.app.controller.graph().assignments().count();
+        let before = ui.app.session.controller.graph().assignments().count();
         ui.move_to(from);
         ui.press();
         ui.move_to(row);
@@ -121,8 +142,8 @@ fn escape_and_focus_loss_cancel_an_inspector_drop() {
             );
         }
         ui.release();
-        assert_eq!(ui.app.controller.graph().assignments().count(), before);
-        assert!(ui.app.gestures.assign_drag().is_none());
+        assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
+        assert!(ui.app.session.gestures.assign_drag().is_none());
     }
 }
 
@@ -133,23 +154,29 @@ fn empty_outside_and_learn_mode_make_no_inspector_assignment() {
     let mut ui = Ui::open("subtractive.ron");
     let row = inspector_row(&mut ui, 4, "Cutoff");
     let from = ui.output(7, "out");
-    let before = ui.app.controller.graph().assignments().count();
+    let before = ui.app.session.controller.graph().assignments().count();
     let canvas = ui.canvas();
     ui.drag(from, Point::new(canvas.bounds.x + 4.0, canvas.bounds.y + 4.0), 8);
-    assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
     ui.move_to(from);
     ui.press();
     ui.move_to(row);
     ui.cursor = mouse::Cursor::Unavailable;
     ui.step(&[Event::Mouse(mouse::Event::CursorLeft)]);
     ui.move_to(Point::new(WINDOW.width + 20.0, WINDOW.height + 20.0));
-    assert!(ui.app.gestures.assign_drag().is_some_and(|drag| drag.at.is_none()));
+    assert!(
+        ui.app
+            .session
+            .gestures
+            .assign_drag()
+            .is_some_and(|drag| drag.at.is_none())
+    );
     ui.release();
-    assert_eq!(ui.app.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
     let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
     ui.drag(from, row, 8);
-    assert_eq!(ui.app.controller.graph().assignments().count(), before);
-    assert_eq!(ui.app.gestures.drop_row(), None);
+    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app.session.gestures.drop_row(), None);
 }
 
 fn connected(ui: &Ui, from: (u32, usize), to: (u32, usize)) -> bool {
@@ -161,7 +188,12 @@ fn connected(ui: &Ui, from: (u32, usize), to: (u32, usize)) -> bool {
         module: ModuleId(to.0),
         port: to.1,
     };
-    ui.app.controller.graph().cables().any(|cable| cable == (output, input))
+    ui.app
+        .session
+        .controller
+        .graph()
+        .cables()
+        .any(|cable| cable == (output, input))
 }
 
 /// A press on an output port, moves onto an input port, and a release
@@ -172,7 +204,7 @@ fn dragging_from_an_output_to_an_input_makes_a_cable() {
     let from = ui.output(8, "out");
     let to = ui.input(6, "b");
     assert!(!connected(&ui, (8, 0), (6, 1)));
-    let cables = ui.app.controller.graph().cables().count();
+    let cables = ui.app.session.controller.graph().cables().count();
 
     ui.drag(from, to, 12);
 
@@ -180,7 +212,7 @@ fn dragging_from_an_output_to_an_input_makes_a_cable() {
         connected(&ui, (8, 0), (6, 1)),
         "the drag made a cable from VCA out to the second multiplier input"
     );
-    assert_eq!(ui.app.controller.graph().cables().count(), cables + 1);
+    assert_eq!(ui.app.session.controller.graph().cables().count(), cables + 1);
 }
 
 /// The window-wide drag line snaps to an input under the pointer, then
@@ -193,10 +225,16 @@ fn an_output_drag_line_snaps_to_a_hovered_input() {
     ui.move_to(from);
     ui.press();
     ui.move_to(Point::new(input.x + 3.0, input.y + 2.0));
-    assert_eq!(ui.app.gestures.assign_drag().expect("output drag").at, Some(input));
+    assert_eq!(
+        ui.app.session.gestures.assign_drag().expect("output drag").at,
+        Some(input)
+    );
     let empty = Point::new(1000.0, 800.0);
     ui.move_to(empty);
-    assert_eq!(ui.app.gestures.assign_drag().expect("output drag").at, Some(empty));
+    assert_eq!(
+        ui.app.session.gestures.assign_drag().expect("output drag").at,
+        Some(empty)
+    );
     ui.release();
 }
 
@@ -214,7 +252,7 @@ fn a_clock_mark_shows_only_while_the_input_follows_the_transport() {
         let lfo = snapshot.tiles.iter().find(|t| t.id == 5).expect("the LFO");
         lfo.inputs[0].follows_transport
     };
-    let canvas_mark = |ui: &Ui| ui.app.scene.module(5).and_then(|m| m.clock_mark_centre(0));
+    let canvas_mark = |ui: &Ui| ui.app.session.scene.module(5).and_then(|m| m.clock_mark_centre(0));
     assert_eq!(mark(&ui), Some("bar_phase"));
     assert!(canvas_mark(&ui).is_some());
     let filter = ui.app.ui_snapshot();
@@ -243,7 +281,15 @@ fn a_clock_mark_shows_only_while_the_input_follows_the_transport() {
 fn turning_a_knob_builds_only_the_controls() {
     use loom_canvas::stats::RenderCounts;
     let mut ui = Ui::open("subtractive.ron");
-    let cutoff = |ui: &Ui| ui.app.controller.graph().node(ModuleId(4)).expect("filter").params[0];
+    let cutoff = |ui: &Ui| {
+        ui.app
+            .session
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .expect("filter")
+            .params[0]
+    };
     let before_value = cutoff(&ui);
     let before = RenderCounts::this_thread();
 
@@ -268,12 +314,24 @@ fn envelope_mode_popup_draws_and_accepts_keyboard_choice() {
 
     let key = |name| keyboard::Key::Named(name);
     ui.tap(key(keyboard::key::Named::ArrowDown), keyboard::Modifiers::default());
-    let current = ui.app.controller.graph().node(ModuleId(5)).expect("filter envelope");
+    let current = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(ModuleId(5))
+        .expect("filter envelope");
     let index = current.descriptor.param_index("mode").expect("Mode parameter");
     assert_eq!(current.params[index], 0.0, "arrows highlight without committing");
     ui.tap(key(keyboard::key::Named::Enter), keyboard::Modifiers::default());
 
-    let node = ui.app.controller.graph().node(ModuleId(5)).expect("filter envelope");
+    let node = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(ModuleId(5))
+        .expect("filter envelope");
     assert_eq!(node.params[index], 1.0);
 }
 
@@ -298,7 +356,7 @@ fn undo_key_removes_a_dragged_cable() {
 #[test]
 fn the_browser_search_field_takes_typing() {
     let mut ui = Ui::open("subtractive.ron");
-    let modules = ui.app.controller.graph().nodes().count();
+    let modules = ui.app.session.controller.graph().nodes().count();
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
     ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
@@ -314,7 +372,7 @@ fn the_browser_search_field_takes_typing() {
         ui.app.overlays.browser().is_none(),
         "Enter adds the match and closes the browser"
     );
-    assert_eq!(ui.app.controller.graph().nodes().count(), modules + 1);
+    assert_eq!(ui.app.session.controller.graph().nodes().count(), modules + 1);
 }
 
 /// Copy writes the selected module to the clipboard through a task, and
@@ -322,7 +380,7 @@ fn the_browser_search_field_takes_typing() {
 #[test]
 fn copy_and_paste_go_through_the_clipboard() {
     let mut ui = Ui::open("subtractive.ron");
-    let modules = ui.app.controller.graph().nodes().count();
+    let modules = ui.app.session.controller.graph().nodes().count();
     let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
@@ -331,7 +389,7 @@ fn copy_and_paste_go_through_the_clipboard() {
     assert!(ui.clipboard.0.is_some(), "copy wrote the clipboard");
     ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
 
-    assert_eq!(ui.app.controller.graph().nodes().count(), modules + 1);
+    assert_eq!(ui.app.session.controller.graph().nodes().count(), modules + 1);
 }
 
 /// The same drag released on empty canvas makes no cable.
@@ -339,13 +397,13 @@ fn copy_and_paste_go_through_the_clipboard() {
 fn dragging_onto_empty_canvas_makes_no_cable() {
     let mut ui = Ui::open("subtractive.ron");
     let from = ui.output(8, "out");
-    let cables = ui.app.controller.graph().cables().count();
+    let cables = ui.app.session.controller.graph().cables().count();
     let canvas = ui.canvas();
     let empty = Point::new(canvas.bounds.x + 4.0, canvas.bounds.y + 4.0);
 
     ui.drag(from, empty, 12);
 
-    assert_eq!(ui.app.controller.graph().cables().count(), cables);
+    assert_eq!(ui.app.session.controller.graph().cables().count(), cables);
 }
 
 #[test]
@@ -360,7 +418,7 @@ fn finds_controls_and_text_by_name() {
     // A click on the filter's title selects it, and the inspector then
     // shows its parameter rows.
     let title = {
-        let module = ui.app.scene.module(4).expect("filter in the scene");
+        let module = ui.app.session.scene.module(4).expect("filter in the scene");
         let b = module.bounds();
         Point::new(b.x + b.width * 0.5, b.y + 6.0)
     };
@@ -368,7 +426,7 @@ fn finds_controls_and_text_by_name() {
     ui.move_to(title);
     ui.press();
     ui.release();
-    assert_eq!(ui.app.selection, [4].into());
+    assert_eq!(ui.app.session.selection, [4].into());
     let row = ui.text("Cutoff").expect("the inspector shows the Cutoff row");
     assert!(!canvas.bounds.intersects(&row), "the row {row:?} is beside the canvas");
 }
@@ -381,6 +439,7 @@ fn mapping_options_rows_open_and_edit() {
     let mut ui = Ui::open("subtractive.ron");
     let id = loom_core::ModuleId(4);
     ui.app
+        .session
         .controller
         .map_midi(
             loom_core::MidiControl {
@@ -413,7 +472,16 @@ fn mapping_options_rows_open_and_edit() {
     ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
     ui.redraw();
     assert!(ui.text("the low end of its range must be below the high end").is_some());
-    let options = |ui: &Ui| ui.app.controller.graph().midi_mapping_of(id, 0).unwrap().1.options;
+    let options = |ui: &Ui| {
+        ui.app
+            .session
+            .controller
+            .graph()
+            .midi_mapping_of(id, 0)
+            .unwrap()
+            .1
+            .options
+    };
     assert_eq!(options(&ui), loom_core::MidiMappingOptions::DEFAULT);
     ui.send(Message::MidiRangeText {
         module: 4,
@@ -478,7 +546,7 @@ fn mapping_options_rows_open_and_edit() {
 
 /// Adds a module of `kind`, selects it, and draws the inspector.
 fn select_new(ui: &mut Ui, kind: &str) -> ModuleId {
-    let id = ui.app.controller.add_module(kind).expect("a built-in module");
+    let id = ui.app.session.controller.add_module(kind).expect("a built-in module");
     ui.app.commit();
     let _ = ui.app.update(Message::SelectModule(id.0));
     ui.redraw();
@@ -490,18 +558,22 @@ fn select_new(ui: &mut Ui, kind: &str) -> ModuleId {
 fn resizing_scope_with_pointer_and_keyboard() {
     let mut ui = Ui::open("modulation.ron");
     let scope = select_new(&mut ui, "loom.display.scope");
-    let target = ui.app.controller.add_module("loom.math.mul").unwrap();
-    ui.app.controller.connect_named(scope, "out", target, "a").unwrap();
+    let target = ui.app.session.controller.add_module("loom.math.mul").unwrap();
+    ui.app
+        .session
+        .controller
+        .connect_named(scope, "out", target, "a")
+        .unwrap();
     ui.app.commit();
-    ui.app.positions.insert(scope.0, (300.0, 100.0));
+    ui.app.session.positions.insert(scope.0, (300.0, 100.0));
     ui.app.refresh();
-    ui.app.edits.history.clear();
+    ui.app.session.edits.history.clear();
     ui.redraw();
-    let tile = ui.app.scene.module(scope.0).unwrap();
+    let tile = ui.app.session.scene.module(scope.0).unwrap();
     let bounds = tile.bounds();
     let original = (tile.width(), tile.height());
     let output_before = tile.output_position(0);
-    let generation = ui.app.scene.generation();
+    let generation = ui.app.session.scene.generation();
     let canvas = ui.canvas();
     let from = canvas.to_window(Point::new(
         bounds.x + bounds.width - 3.0,
@@ -515,12 +587,12 @@ fn resizing_scope_with_pointer_and_keyboard() {
     ui.press();
     ui.move_to(to);
     assert_eq!(
-        ui.app.scene.generation(),
+        ui.app.session.scene.generation(),
         generation,
         "preview does not rebuild the scene"
     );
     ui.release();
-    let resized = ui.app.scene.module(scope.0).unwrap();
+    let resized = ui.app.session.scene.module(scope.0).unwrap();
     assert_eq!(
         (resized.width(), resized.height()),
         (
@@ -528,14 +600,14 @@ fn resizing_scope_with_pointer_and_keyboard() {
             original.1 + 3.0 * loom_canvas::GRID
         )
     );
-    assert_ne!(ui.app.scene.generation(), generation);
+    assert_ne!(ui.app.session.scene.generation(), generation);
     let output_after = resized.output_position(0);
     assert!(output_after.x > output_before.x && output_after.y > output_before.y);
     assert!(
-        matches!(ui.app.scene.hit(output_after, 4.0), loom_canvas::Hit::Port(port) if port.module == scope.0 && port.output)
+        matches!(ui.app.session.scene.hit(output_after, 4.0), loom_canvas::Hit::Port(port) if port.module == scope.0 && port.output)
     );
     assert_eq!(
-        ui.app.scene.port_position(loom_canvas::PortRef {
+        ui.app.session.scene.port_position(loom_canvas::PortRef {
             module: scope.0,
             index: 0,
             output: true
@@ -546,15 +618,15 @@ fn resizing_scope_with_pointer_and_keyboard() {
     let loaded = loom_patch::Patch::from_ron(&saved).unwrap();
     assert_eq!(
         loaded.modules.iter().find(|module| module.id == scope.0).unwrap().size,
-        ui.app.sizes.get(&scope.0).copied()
+        ui.app.session.sizes.get(&scope.0).copied()
     );
     ui.app.undo();
-    let undone = ui.app.scene.module(scope.0).unwrap();
+    let undone = ui.app.session.scene.module(scope.0).unwrap();
     assert_eq!((undone.width(), undone.height()), original);
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert!(ui.app.session.edits.history.undo_step().is_none());
     ui.app.redo();
     assert_eq!(
-        ui.app.scene.module(scope.0).unwrap().width(),
+        ui.app.session.scene.module(scope.0).unwrap().width(),
         original.0 + 2.0 * loom_canvas::GRID
     );
     ui.tap(
@@ -562,12 +634,12 @@ fn resizing_scope_with_pointer_and_keyboard() {
         keyboard::Modifiers::ALT,
     );
     assert_eq!(
-        ui.app.scene.module(scope.0).unwrap().width(),
+        ui.app.session.scene.module(scope.0).unwrap().width(),
         original.0 + 3.0 * loom_canvas::GRID
     );
     ui.app.undo();
     assert_eq!(
-        ui.app.scene.module(scope.0).unwrap().width(),
+        ui.app.session.scene.module(scope.0).unwrap().width(),
         original.0 + 2.0 * loom_canvas::GRID
     );
 }
@@ -578,6 +650,7 @@ fn placeholder_label_is_editable_and_undoable() {
     let mut ui = Ui::open("subtractive.ron");
     let missing = ui
         .app
+        .session
         .controller
         .add_unknown(loom_core::UnknownModule {
             kind: "future.effect@1".into(),
@@ -590,7 +663,7 @@ fn placeholder_label_is_editable_and_undoable() {
         })
         .unwrap();
     ui.app.commit();
-    ui.app.edits.history.clear();
+    ui.app.session.edits.history.clear();
     let label = inspector_row(&mut ui, missing.0, "Label");
     ui.move_to(Point::new(label.x + 25.0, label.y + 28.0));
     ui.press();
@@ -606,7 +679,7 @@ fn placeholder_label_is_editable_and_undoable() {
             .label,
         None
     );
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert!(ui.app.session.edits.history.undo_step().is_none());
     ui.tap(
         keyboard::Key::Named(keyboard::key::Named::Enter),
         keyboard::Modifiers::default(),
@@ -635,7 +708,7 @@ fn placeholder_label_is_editable_and_undoable() {
             .label,
         None
     );
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert!(ui.app.session.edits.history.undo_step().is_none());
     ui.app.redo();
     assert_eq!(
         ui.app
@@ -755,6 +828,7 @@ fn dragging_cables_to_unknown_ports_is_refused() {
     .unwrap();
     let mut ui = Ui::open(path.to_str().unwrap());
     ui.app
+        .session
         .controller
         .disconnect(loom_core::InputRef {
             module: ModuleId(1),
@@ -762,19 +836,19 @@ fn dragging_cables_to_unknown_ports_is_refused() {
         })
         .unwrap();
     ui.app.commit();
-    ui.app.edits.history.clear();
+    ui.app.session.edits.history.clear();
     ui.redraw();
     let from = ui.output(2, "phase");
     let to = ui.input(1, "in");
     ui.drag(from, to, 8);
     assert_eq!(ui.app.alerts.status(), "Cannot connect to an unknown module");
-    assert_eq!(ui.app.controller.graph().cables().count(), 0);
+    assert_eq!(ui.app.session.controller.graph().cables().count(), 0);
     let from = ui.output(1, "out");
     let to = ui.input(2, "pitch");
     ui.drag(from, to, 8);
     assert_eq!(ui.app.alerts.status(), "Cannot connect to an unknown module");
-    assert_eq!(ui.app.controller.graph().cables().count(), 0);
-    assert!(ui.app.edits.history.undo_step().is_none());
+    assert_eq!(ui.app.session.controller.graph().cables().count(), 0);
+    assert!(ui.app.session.edits.history.undo_step().is_none());
     let _ = std::fs::remove_file(path);
 }
 
@@ -787,6 +861,7 @@ fn a_click_on_a_choice_name_in_the_inspector_picks_it() {
     let button = select_new(&mut ui, "loom.ui.button");
     let mode = ui
         .app
+        .session
         .controller
         .graph()
         .node(button)
@@ -804,7 +879,7 @@ fn a_click_on_a_choice_name_in_the_inspector_picks_it() {
         ui.move_to(at);
         ui.press();
         ui.release();
-        if ui.app.controller.graph().node(button).unwrap().params[mode] == 1.0 {
+        if ui.app.session.controller.graph().node(button).unwrap().params[mode] == 1.0 {
             picked = true;
             break;
         }
@@ -853,18 +928,18 @@ fn a_typed_value_above_the_control_range_selects_a_wider_one() {
         range: 0,
     });
     let module = mul.0;
-    let selected = |ui: &Ui| ui.app.controller.graph().node(mul).unwrap().spec(0).unwrap();
+    let selected = |ui: &Ui| ui.app.session.controller.graph().node(mul).unwrap().spec(0).unwrap();
     assert_eq!(selected(&ui).max, 0.1);
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     let _ = ui.app.update(Message::ValueText {
         module,
         index: 0,
         text: "0.5".to_string(),
     });
     let _ = ui.app.update(Message::ValueSubmit { module, index: 0 });
-    assert_eq!(ui.app.controller.graph().node(mul).unwrap().params[0], 0.5);
+    assert_eq!(ui.app.session.controller.graph().node(mul).unwrap().params[0], 0.5);
     assert!(selected(&ui).max >= 0.5, "the range widened");
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
 }
 
 /// Subtractive with the filter envelope (module 5) modulating the
@@ -873,6 +948,7 @@ fn modulated_cutoff() -> (Ui, f32) {
     let mut ui = Ui::open("subtractive.ron");
     let cutoff = ui
         .app
+        .session
         .controller
         .graph()
         .node(ModuleId(4))
@@ -900,6 +976,7 @@ fn env_depth(ui: &Ui) -> f32 {
         port: 0,
     };
     ui.app
+        .session
         .controller
         .graph()
         .assignments()
@@ -915,7 +992,15 @@ fn env_depth(ui: &Ui) -> f32 {
 #[test]
 fn the_range_ring_takes_a_depth_drag_at_its_side_and_top() {
     let (mut ui, start) = modulated_cutoff();
-    let cutoff_value = |ui: &Ui| ui.app.controller.graph().node(ModuleId(4)).expect("filter").params[0];
+    let cutoff_value = |ui: &Ui| {
+        ui.app
+            .session
+            .controller
+            .graph()
+            .node(ModuleId(4))
+            .expect("filter")
+            .params[0]
+    };
     let (centre, radius) = ui.range_ring(4, "cutoff");
     let cell = {
         let rect = ui.control_bounds(4, "cutoff");
@@ -985,13 +1070,13 @@ fn a_long_depth_drag_clamps_at_one() {
 #[test]
 fn one_depth_drag_is_one_undo_step() {
     let (mut ui, start) = modulated_cutoff();
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     let (centre, radius) = ui.range_ring(4, "cutoff");
     let side = Point::new(centre.x + radius, centre.y);
 
     ui.drag(side, Point::new(side.x, side.y - 40.0), 8);
     assert!((env_depth(&ui) - (start + 0.2)).abs() < 1e-4, "{}", env_depth(&ui));
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "the drag is one step");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "the drag is one step");
 
     ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
     assert_eq!(env_depth(&ui), start);
@@ -1067,21 +1152,22 @@ fn examples_open_and_frame_with_labels_shown() {
 #[test]
 fn a_segment_click_changes_the_mode_and_hides_its_controls() {
     let mut ui = Ui::open("sine.ron");
-    let env = ui.app.controller.add_module("loom.env.envelope").unwrap();
+    let env = ui.app.session.controller.add_module("loom.env.envelope").unwrap();
     ui.app.refresh();
     ui.step(&[]);
-    let tile = ui.app.scene.module(env.0).unwrap().clone();
+    let tile = ui.app.session.scene.module(env.0).unwrap().clone();
     let rect = tile.widget_bounds(1).expect("the mode segments");
     let ad = loom_canvas::segment_centre(rect, 1, 2);
     let at = ui.canvas().to_window(ad);
     ui.move_to(at);
     ui.press();
     ui.release();
-    let node = ui.app.controller.graph().node(env).unwrap();
+    let node = ui.app.session.controller.graph().node(env).unwrap();
     let mode = node.params[node.descriptor.param_index("mode").unwrap()];
     assert_eq!(mode, 1.0, "AD picked");
     let hidden: Vec<_> = ui
         .app
+        .session
         .scene
         .module(env.0)
         .unwrap()
@@ -1104,11 +1190,11 @@ fn a_select_list_takes_its_keys_through_the_real_view() {
     let mut ui = Ui::open("sine.ron");
     let lfo = select_new(&mut ui, "loom.mod.lfo");
     let shape = |ui: &Ui| {
-        let node = ui.app.controller.graph().node(lfo).unwrap();
+        let node = ui.app.session.controller.graph().node(lfo).unwrap();
         node.params[node.descriptor.param_index("shape").unwrap()]
     };
     let before = shape(&ui);
-    let position = ui.app.scene.module(lfo.0).unwrap().position;
+    let position = ui.app.session.scene.module(lfo.0).unwrap().position;
     let at = ui.control(lfo.0, "shape");
     let none = keyboard::Modifiers::default();
 
@@ -1124,7 +1210,7 @@ fn a_select_list_takes_its_keys_through_the_real_view() {
     assert_eq!(shape(&ui), before, "Down moves only the highlight");
     ui.tap(keyboard::Key::Named(Named::Enter), none);
     assert_eq!(shape(&ui), before + 1.0, "Enter commits one choice");
-    assert_eq!(ui.app.scene.module(lfo.0).unwrap().position, position);
+    assert_eq!(ui.app.session.scene.module(lfo.0).unwrap().position, position);
 }
 
 /// A fader on a float parameter keeps every value in its range: a drag to
@@ -1136,7 +1222,7 @@ fn a_fader_sets_a_float_value_and_takes_an_assignment() {
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let param = |ui: &Ui, name: &str| {
-        let node = ui.app.controller.graph().node(id).unwrap();
+        let node = ui.app.session.controller.graph().node(id).unwrap();
         node.params[node.descriptor.param_index(name).unwrap()]
     };
     let at = ui.control(id.0, "wide");
@@ -1151,7 +1237,8 @@ fn a_fader_sets_a_float_value_and_takes_an_assignment() {
         "{moved}: a small drag makes a small change, with no snap"
     );
 
-    let (_, kind, spec) = crate::scene::control_param(&ui.app.controller, id.0, widget_of(&ui, id, "tall")).unwrap();
+    let (_, kind, spec) =
+        crate::scene::control_param(&ui.app.session.controller, id.0, widget_of(&ui, id, "tall")).unwrap();
     assert_eq!(kind, loom_core::WidgetKind::Fader { vertical: true });
     let position = crate::scene::control_position(kind, &spec, 1_000.0);
     assert!(position > 0.0 && position < 1.0, "through the logarithmic mapping");
@@ -1172,7 +1259,7 @@ fn a_select_only_parameter_is_a_modulation_target() {
     use crate::snapshot::Mark;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
-    let node = ui.app.controller.graph().node(id).unwrap();
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     let long = node.descriptor.param_index("long").unwrap();
     assert!(
         node.descriptor
@@ -1189,7 +1276,7 @@ fn a_select_only_parameter_is_a_modulation_target() {
     };
     assert!(rows.params[long].accepts_drop, "its row accepts a drop");
     assert!(
-        crate::matrix::targets(ui.app.controller.graph())
+        crate::matrix::targets(ui.app.session.controller.graph())
             .iter()
             .any(|t| t.module == id && t.param == long),
         "the matrix offers it as a target"
@@ -1209,6 +1296,7 @@ fn a_select_only_parameter_is_a_modulation_target() {
     ui.drag(from, to, 12);
     let assignments: Vec<_> = ui
         .app
+        .session
         .controller
         .graph()
         .assignments()
@@ -1234,7 +1322,7 @@ fn pad_area(ui: &mut Ui, id: ModuleId) -> Rectangle {
 
 /// A parameter's position on its control.
 fn position_of(ui: &Ui, module: ModuleId, name: &str) -> f32 {
-    let node = ui.app.controller.graph().node(module).unwrap();
+    let node = ui.app.session.controller.graph().node(module).unwrap();
     let spec = node.spec(node.descriptor.param_index(name).unwrap()).unwrap();
     spec.normalize(param_value(ui, module, name))
 }
@@ -1252,10 +1340,10 @@ fn an_xy_pad_drags_relatively_on_both_axes() {
     ui.press();
     assert_eq!(position_of(&ui, id, "pad_x"), before.0, "a plain press moves nothing");
     assert_eq!(position_of(&ui, id, "pad_y"), before.1, "a plain press moves nothing");
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.move_to(Point::new(at.x + 20.0, at.y - 20.0));
     ui.release();
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
     let moved = position_of(&ui, id, "pad_x") - before.0;
     assert!((moved - 0.1).abs() < 1e-3, "{moved}");
     let moved = position_of(&ui, id, "pad_y") - before.1;
@@ -1290,7 +1378,7 @@ fn an_xy_pad_jumps_with_alt_and_resets_both() {
     assert!((y - 0.75).abs() < 1e-3, "y follows the pointer: {y}");
 
     std::thread::sleep(std::time::Duration::from_millis(450));
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.move_to(at);
     ui.press();
     ui.release();
@@ -1298,7 +1386,7 @@ fn an_xy_pad_jumps_with_alt_and_resets_both() {
     ui.release();
     assert_eq!(param_value(&ui, id, "pad_x"), 0.5, "reset to the default");
     assert_eq!(param_value(&ui, id, "pad_y"), 1_000.0, "reset to the default");
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step for both");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step for both");
 }
 
 /// Left and Right change `x`, and Up and Down change `y`, by 1%, or 0.1%
@@ -1344,16 +1432,16 @@ fn learn_mode_arms_nothing_on_an_xy_pad() {
     let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
     ui.redraw();
     focus_control(&mut ui, id, "pad_x");
-    assert!(ui.app.learn.armed().is_none(), "a click arms nothing");
+    assert!(ui.app.session.learn.armed().is_none(), "a click arms nothing");
     assert!(ui.app.ui_snapshot().status.contains("inspector"));
     for key in [Named::Space, Named::Enter] {
         ui.app.alerts.say(String::new());
         ui.tap(keyboard::Key::Named(key), keyboard::Modifiers::default());
-        assert!(ui.app.learn.armed().is_none(), "{key:?} arms nothing");
+        assert!(ui.app.session.learn.armed().is_none(), "{key:?} arms nothing");
         assert!(ui.app.ui_snapshot().status.contains("inspector"), "{key:?} says why");
     }
     let widget = widget_of(&ui, id, "pad_x");
-    let view = crate::learn::view(&ui.app.controller, ui.app.learn.armed());
+    let view = crate::learn::view(&ui.app.session.controller, ui.app.session.learn.armed());
     assert!(!view.labels.contains_key(&(id.0, widget)));
 }
 
@@ -1367,13 +1455,13 @@ fn an_xy_pad_takes_a_drop_at_its_nearest_edge_and_marks_each_axis() {
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let area = pad_area(&mut ui, id);
-    let node = ui.app.controller.graph().node(id).unwrap();
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     let (x, y) = (
         node.descriptor.param_index("pad_x").unwrap(),
         node.descriptor.param_index("pad_y").unwrap(),
     );
     let target = |ui: &Ui, param: usize| {
-        let graph = ui.app.controller.graph();
+        let graph = ui.app.session.controller.graph();
         let found = graph.assignments().find(|(_, a)| a.target == id && a.param == param);
         found.map(|(assignment, _)| assignment)
     };
@@ -1406,6 +1494,7 @@ fn an_xy_pad_takes_a_drop_at_its_nearest_edge_and_marks_each_axis() {
 
     let depth = |ui: &Ui| {
         ui.app
+            .session
             .controller
             .graph()
             .assignment(target(ui, x).unwrap())
@@ -1428,7 +1517,7 @@ fn each_axis_of_an_xy_pad_has_its_own_text() {
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let widget = widget_of(&ui, id, "pad_x");
-    let tile = ui.app.scene.module(id.0).unwrap();
+    let tile = ui.app.session.scene.module(id.0).unwrap();
     let view = &tile.panel.widgets[widget];
     let parts = view.kind.parts().expect("a pad has two parts");
     assert_eq!(view.label, "Position", "the caption names the pair");
@@ -1438,8 +1527,8 @@ fn each_axis_of_an_xy_pad_has_its_own_text() {
 
 /// A handle of the range on a new `test.panel`, in window coordinates.
 fn handle(ui: &mut Ui, id: ModuleId, name: &str) -> Point {
-    let part = crate::targets::find(ui.app.controller.graph(), id.0, name).unwrap();
-    let world = crate::targets::world_bounds(&ui.app.scene, &ui.app.values, part).unwrap();
+    let part = crate::targets::find(ui.app.session.controller.graph(), id.0, name).unwrap();
+    let world = crate::targets::world_bounds(&ui.app.session.scene, &ui.app.session.values, part).unwrap();
     ui.canvas().to_window(world.center())
 }
 
@@ -1483,11 +1572,15 @@ fn a_range_handle_drags_and_cannot_cross() {
         position: 0.75,
     }));
     ui.redraw();
-    let before = ui.app.scene.module(id.0).unwrap().bounds();
+    let before = ui.app.session.scene.module(id.0).unwrap().bounds();
     let values = (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high"));
     let outside = on_span(&mut ui, id, 0.2);
     ui.drag(outside, Point::new(outside.x + 48.0, outside.y), 4);
-    assert_ne!(ui.app.scene.module(id.0).unwrap().bounds(), before, "the tile moved");
+    assert_ne!(
+        ui.app.session.scene.module(id.0).unwrap().bounds(),
+        before,
+        "the tile moved"
+    );
     assert_eq!(
         (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high")),
         values
@@ -1528,9 +1621,9 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let middle = on_span(&mut ui, id, 0.75);
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.drag(middle, Point::new(middle.x - 10.0, middle.y), 4);
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
     let (low, high) = (param_value(&ui, id, "span_low"), param_value(&ui, id, "span_high"));
     assert!(low < 0.0 && high < 1.0, "both moved: {low}, {high}");
     assert!((high - low - 1.0).abs() < 1e-3, "the width stays: {}", high - low);
@@ -1561,14 +1654,14 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
 
     std::thread::sleep(std::time::Duration::from_millis(450));
     let middle = on_span(&mut ui, id, 0.7);
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.move_to(middle);
     ui.press();
     ui.release();
     ui.press();
     ui.release();
     assert_eq!(param_value(&ui, id, "span_low"), 0.0, "low resets");
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
 }
 
 /// Selecting a control range on either parameter selects it for both, as
@@ -1578,22 +1671,22 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
 fn a_range_widgets_parameters_share_a_control_range() {
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
-    let node = ui.app.controller.graph().node(id).unwrap();
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     let low = node.descriptor.param_index("span_low").unwrap();
     let high = node.descriptor.param_index("span_high").unwrap();
     let wide = node.descriptor.params[low].options.ranges.len() - 1;
     let selected = |ui: &Ui| {
-        let node = ui.app.controller.graph().node(id).unwrap();
+        let node = ui.app.session.controller.graph().node(id).unwrap();
         (node.range(low), node.range(high))
     };
     let (a, b) = selected(&ui);
     assert_eq!(a, b);
 
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.app.set_range(id.0, high, wide);
     let (a, b) = selected(&ui);
     assert_eq!(a, b, "selecting one selects both");
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one undo step");
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
     let _ = ui.app.update(Message::Undo);
     assert_eq!(selected(&ui).0, selected(&ui).1, "undo keeps them together");
 
@@ -1682,10 +1775,10 @@ fn the_keyboard_goes_inside_a_range() {
 fn two_value_widgets_do_not_redraw_when_nothing_changes() {
     let mut ui = Ui::open("sine.ron");
     select_new(&mut ui, "test.panel");
-    let generation = ui.app.values.generation();
+    let generation = ui.app.session.values.generation();
     ui.app.refresh_values();
-    crate::scene::update_live_values(&mut ui.app.values, &ui.app.controller);
-    assert_eq!(ui.app.values.generation(), generation);
+    crate::scene::update_live_values(&mut ui.app.session.values, &ui.app.session.controller);
+    assert_eq!(ui.app.session.values.generation(), generation);
 }
 
 /// Transport's Tempo is a number that an arrow moves by 1 BPM, or 0.1 BPM
@@ -1695,7 +1788,7 @@ fn two_value_widgets_do_not_redraw_when_nothing_changes() {
 fn the_tempo_number_steps_by_whole_beats_per_minute() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
-    let transport = ui.app.controller.transport_module().expect("a transport");
+    let transport = ui.app.session.controller.transport_module().expect("a transport");
     let _ = ui.app.update(Message::SelectModule(transport.0));
     ui.redraw();
     focus_control(&mut ui, transport, "tempo");
@@ -1758,6 +1851,7 @@ fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
         module: id.0,
         index: ui
             .app
+            .session
             .controller
             .graph()
             .node(id)
@@ -1769,6 +1863,7 @@ fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
     ui.redraw();
     let badge = ui.canvas().to_window(
         ui.app
+            .session
             .scene
             .badge_bounds(id.0, 0)
             .expect("the output shows a badge")
@@ -1820,7 +1915,7 @@ fn a_range_reports_both_values_and_names_each_handle() {
         tile.widgets[widget].text
     );
 
-    let graph = ui.app.controller.graph();
+    let graph = ui.app.session.controller.graph();
     let low = crate::targets::find(graph, id.0, "span_low").unwrap();
     let high = crate::targets::find(graph, id.0, "span_high").unwrap();
     assert_ne!(low, high);
@@ -1847,13 +1942,13 @@ fn a_range_reports_both_values_and_names_each_handle() {
     let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
     ui.redraw();
     ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
-    assert!(ui.app.learn.armed().is_none(), "learn mode arms nothing");
+    assert!(ui.app.session.learn.armed().is_none(), "learn mode arms nothing");
     assert!(ui.app.ui_snapshot().status.contains("inspector"));
 }
 
 /// The widget index of the control bound to a parameter.
 fn widget_of(ui: &Ui, module: ModuleId, param: &str) -> usize {
-    let node = ui.app.controller.graph().node(module).unwrap();
+    let node = ui.app.session.controller.graph().node(module).unwrap();
     node.descriptor
         .panel
         .widgets
@@ -1870,7 +1965,7 @@ fn a_number_steps_by_one_and_shows_the_base_value() {
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let count = |ui: &Ui| {
-        let node = ui.app.controller.graph().node(id).unwrap();
+        let node = ui.app.session.controller.graph().node(id).unwrap();
         node.params[node.descriptor.param_index("count").unwrap()]
     };
     assert_eq!(count(&ui), 7.0);
@@ -1880,9 +1975,9 @@ fn a_number_steps_by_one_and_shows_the_base_value() {
     assert_eq!(count(&ui), 17.0, "40 pixels at 4 pixels per value");
 
     let widget = widget_of(&ui, id, "tempo");
-    let (_, kind, spec) = crate::scene::control_param(&ui.app.controller, id.0, widget).unwrap();
+    let (_, kind, spec) = crate::scene::control_param(&ui.app.session.controller, id.0, widget).unwrap();
     assert_eq!(kind, loom_core::WidgetKind::Number);
-    let value = ui.app.values.get(id.0, widget).unwrap();
+    let value = ui.app.session.values.get(id.0, widget).unwrap();
     assert_eq!(value.text, crate::param::format(&spec, 120.0), "the base value");
     let reach = crate::modulation::Reach {
         depth: 0.25,
@@ -1897,7 +1992,7 @@ fn a_number_steps_by_one_and_shows_the_base_value() {
 
 /// The value of a parameter by name.
 fn param_value(ui: &Ui, module: ModuleId, name: &str) -> f32 {
-    let node = ui.app.controller.graph().node(module).unwrap();
+    let node = ui.app.session.controller.graph().node(module).unwrap();
     node.params[node.descriptor.param_index(name).unwrap()]
 }
 
@@ -1959,15 +2054,19 @@ fn the_typed_field_is_null_without_the_control_channel() {
 fn typing_on_a_focused_knob_sets_the_exact_value() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
-    let transport = ui.app.controller.transport_module().expect("a transport");
+    let transport = ui.app.session.controller.transport_module().expect("a transport");
     let _ = ui.app.update(Message::SelectModule(transport.0));
     ui.redraw();
     focus_control(&mut ui, transport, "tempo");
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.typewrite("128");
     ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
     assert_eq!(param_value(&ui, transport, "tempo"), 128.0);
-    assert_eq!(ui.app.edits.history.len(), steps + 1, "one commit is one undo step");
+    assert_eq!(
+        ui.app.session.edits.history.len(),
+        steps + 1,
+        "one commit is one undo step"
+    );
 }
 
 /// "2k" commits 2000, and "abc" leaves the value and blocks Enter. Then
@@ -1996,7 +2095,7 @@ fn typed_text_commits_units_and_bad_text_is_corrected_in_place() {
     ui.typewrite("50");
     ui.tap(keyboard::Key::Named(Named::Enter), none);
     assert_eq!(param_value(&ui, id, "tempo"), 150.0);
-    assert!(ui.app.controller.graph().node(id).is_some(), "the module stays");
+    assert!(ui.app.session.controller.graph().node(id).is_some(), "the module stays");
 }
 
 /// Enter then Enter on a value the text rounds keeps the exact value, with
@@ -2009,6 +2108,7 @@ fn enter_then_enter_keeps_a_value_the_text_rounds() {
     let id = select_new(&mut ui, "test.panel");
     let index = ui
         .app
+        .session
         .controller
         .graph()
         .node(id)
@@ -2024,11 +2124,11 @@ fn enter_then_enter_keeps_a_value_the_text_rounds() {
     let _ = ui.app.update(Message::SliderReleased);
     ui.redraw();
     focus_control(&mut ui, id, "tempo");
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     ui.tap(keyboard::Key::Named(Named::Enter), none);
     ui.tap(keyboard::Key::Named(Named::Enter), none);
     assert_eq!(param_value(&ui, id, "tempo"), 127.96);
-    assert_eq!(ui.app.edits.history.len(), steps, "no undo step");
+    assert_eq!(ui.app.session.edits.history.len(), steps, "no undo step");
 }
 
 /// The inspector's field: typing is a draft, Enter commits it as one undo
@@ -2039,7 +2139,7 @@ fn the_inspector_takes_typed_values() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
-    let node = ui.app.controller.graph().node(id).unwrap();
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     let index = node.descriptor.param_index("cutoff").unwrap();
     let module = id.0;
     let text = |text: &str| Message::ValueText {
@@ -2055,24 +2155,24 @@ fn the_inspector_takes_typed_values() {
     };
     assert_eq!(field(&ui).unwrap().error, None);
 
-    let steps = ui.app.edits.history.len();
+    let steps = ui.app.session.edits.history.len();
     let _ = ui.app.update(text("440 hz"));
     assert_eq!(field(&ui).unwrap().text, "440 hz");
     let _ = ui.app.update(Message::ValueSubmit { module, index });
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
-    assert_eq!(ui.app.edits.history.len(), steps + 1);
-    assert!(ui.app.value_draft.is_none());
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1);
+    assert!(ui.app.session.value_draft.is_none());
 
     let _ = ui.app.update(text("abc"));
     assert_eq!(field(&ui).unwrap().error.as_deref(), Some("Not a number in Hz"));
     let _ = ui.app.update(Message::ValueSubmit { module, index });
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0, "bad text commits nothing");
-    assert!(ui.app.value_draft.is_some(), "and stays to be corrected");
+    assert!(ui.app.session.value_draft.is_some(), "and stays to be corrected");
 
     // Escape drops it, through the same listener the app uses.
     let messages = ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
     assert!(messages.iter().any(|m| matches!(m, Message::ValueDraftClear)));
-    assert!(ui.app.value_draft.is_none());
+    assert!(ui.app.session.value_draft.is_none());
 
     // A press with no field focused drops a draft too.
     let _ = ui.app.update(text("5"));
@@ -2081,7 +2181,7 @@ fn the_inspector_takes_typed_values() {
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert!(ui.app.value_draft.is_none(), "focus moved away");
+    assert!(ui.app.session.value_draft.is_none(), "focus moved away");
 
     // In learn mode the row is plain text, so a click arms it.
     let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
@@ -2094,6 +2194,7 @@ fn focus_cutoff_field(ui: &mut Ui) -> (ModuleId, usize) {
     let id = select_new(ui, "test.panel");
     let index = ui
         .app
+        .session
         .controller
         .graph()
         .node(id)
@@ -2111,7 +2212,7 @@ fn focus_cutoff_field(ui: &mut Ui) -> (ModuleId, usize) {
 
 /// The module's position, to see that a key did not move it.
 fn tile_position(ui: &Ui, id: ModuleId) -> (f32, f32) {
-    ui.app.positions[&id.0]
+    ui.app.session.positions[&id.0]
 }
 
 /// Enter in an inspector field commits only that parameter. It never
@@ -2121,8 +2222,8 @@ fn enter_in_an_inspector_field_leaves_the_canvas_alone() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let (id, index) = focus_cutoff_field(&mut ui);
-    let params = |ui: &Ui| ui.app.controller.graph().node(id).unwrap().params.clone();
-    let steps = ui.app.edits.history.len();
+    let params = |ui: &Ui| ui.app.session.controller.graph().node(id).unwrap().params.clone();
+    let steps = ui.app.session.edits.history.len();
 
     let enter = keyboard::Key::Named(Named::Enter);
     ui.typewrite("440");
@@ -2140,7 +2241,11 @@ fn enter_in_an_inspector_field_leaves_the_canvas_alone() {
             assert_eq!(before, after, "parameter {i} did not change");
         }
     }
-    assert_eq!(ui.app.edits.history.len(), steps + 2, "one undo step per commit");
+    assert_eq!(
+        ui.app.session.edits.history.len(),
+        steps + 2,
+        "one undo step per commit"
+    );
 }
 
 /// Keys that edit a text field never act on the canvas behind it: not an
@@ -2151,36 +2256,43 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     let mut ui = Ui::open("sine.ron");
     let (id, _) = focus_cutoff_field(&mut ui);
     let place = tile_position(&ui, id);
-    let running = ui.app.controller.transport().running;
-    let steps = ui.app.edits.history.len();
+    let running = ui.app.session.controller.transport().running;
+    let steps = ui.app.session.edits.history.len();
 
     let none = keyboard::Modifiers::default();
     ui.tap(keyboard::Key::Named(Named::ArrowLeft), none);
     ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
     assert_eq!(tile_position(&ui, id), place, "an arrow moves the caret, not the tile");
     ui.tap(keyboard::Key::Named(Named::Space), none);
-    assert_eq!(ui.app.controller.transport().running, running, "Space is not Run");
+    assert_eq!(
+        ui.app.session.controller.transport().running,
+        running,
+        "Space is not Run"
+    );
 
     // Over the canvas, with the module selected, Backspace would delete it
     // and `a` would open the browser. The field has the keys all the same.
     let tile = ui.control(id.0, "level");
     ui.cursor = mouse::Cursor::Available(tile);
     ui.tap(keyboard::Key::Named(Named::Backspace), none);
-    assert!(ui.app.controller.graph().node(id).is_some(), "Backspace edits the text");
+    assert!(
+        ui.app.session.controller.graph().node(id).is_some(),
+        "Backspace edits the text"
+    );
     ui.typewrite("a");
     assert!(ui.app.overlays.browser().is_none());
-    assert_eq!(ui.app.edits.history.len(), steps);
+    assert_eq!(ui.app.session.edits.history.len(), steps);
 
     // Escape ends the field's focus and keeps the selection. The next one
     // reaches the canvas again.
     ui.tap(keyboard::Key::Named(Named::Escape), none);
     assert!(
-        ui.app.selection.contains(&id.0),
+        ui.app.session.selection.contains(&id.0),
         "Escape in a field keeps the selection"
     );
     assert!(!ui.app.text_focus.any, "the field gave up focus");
     ui.tap(keyboard::Key::Named(Named::Escape), none);
-    assert!(ui.app.selection.is_empty());
+    assert!(ui.app.session.selection.is_empty());
 }
 
 /// Tab closes a field with no change and moves the canvas's focus as usual.
@@ -2191,9 +2303,9 @@ fn tab_closes_an_inspector_field() {
     let (id, _) = focus_cutoff_field(&mut ui);
     let before = param_value(&ui, id, "cutoff");
     ui.typewrite("5");
-    assert!(ui.app.value_draft.is_some());
+    assert!(ui.app.session.value_draft.is_some());
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
-    assert!(ui.app.value_draft.is_none());
+    assert!(ui.app.session.value_draft.is_none());
     assert!(!ui.app.text_focus.any);
     assert_eq!(param_value(&ui, id, "cutoff"), before);
 }
@@ -2211,7 +2323,11 @@ fn tab_from_a_value_field_moves_the_canvas() {
         messages.iter().any(|m| matches!(m, Message::Canvas(_))),
         "the canvas took Tab: {messages:?}"
     );
-    assert_ne!(ui.app.selection.iter().copied().next(), Some(id.0), "focus moved on");
+    assert_ne!(
+        ui.app.session.selection.iter().copied().next(),
+        Some(id.0),
+        "focus moved on"
+    );
 }
 
 /// A draft ends when focus moves to another value field, and a new patch
@@ -2222,26 +2338,26 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
     let (id, _) = focus_cutoff_field(&mut ui);
     ui.typewrite("abc");
     assert_eq!(
-        ui.app.value_draft.as_ref().unwrap().text,
+        ui.app.session.value_draft.as_ref().unwrap().text,
         "abc",
         "bad text keeps its focus"
     );
     assert!(ui.app.text_focus.any);
 
-    let node = ui.app.controller.graph().node(id).unwrap();
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     let other = node.descriptor.param_index("level").unwrap();
     let at = ui.value_field(id.0, other);
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert!(ui.app.value_draft.is_none(), "the bad text went with the focus");
+    assert!(ui.app.session.value_draft.is_none(), "the bad text went with the focus");
     assert!(ui.app.text_focus.any, "the other field has focus now");
 
     ui.typewrite("5");
-    assert!(ui.app.value_draft.is_some());
+    assert!(ui.app.session.value_draft.is_some());
     assert!(ui.app.replace(crate::Source::Empty));
     ui.step(&[]);
-    assert!(ui.app.value_draft.is_none());
+    assert!(ui.app.session.value_draft.is_none());
     assert!(!ui.app.text_focus.any);
 }
 
@@ -2252,7 +2368,7 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
 #[test]
 fn a_readout_shows_text_and_a_press_selects_its_module() {
     let mut ui = Ui::open("sine.ron");
-    let id = ui.app.controller.add_module("test.readout").unwrap();
+    let id = ui.app.session.controller.add_module("test.readout").unwrap();
     ui.app.refresh();
     ui.step(&[]);
     ui.app.run_engine(4800);
@@ -2266,7 +2382,7 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     assert_eq!(shown("Pitch"), ("readout", "B4 -20¢".to_string()));
     assert_eq!(shown("Input"), ("readout", "Second".to_string()));
     assert_eq!(shown("Cents").1, "12.5 cents");
-    let view = ui.app.scene.module(id.0).unwrap();
+    let view = ui.app.session.scene.module(id.0).unwrap();
     assert!(
         view.panel
             .widgets
@@ -2280,7 +2396,7 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert_eq!(ui.app.selection, [id.0].into());
-    let node = ui.app.controller.graph().node(id).unwrap();
+    assert_eq!(ui.app.session.selection, [id.0].into());
+    let node = ui.app.session.controller.graph().node(id).unwrap();
     assert_eq!(node.params[0], 7.0, "a press edits nothing");
 }

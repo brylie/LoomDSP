@@ -155,14 +155,20 @@ fn running_the_subtractive_patch_shows_scope_trace() {
 #[test]
 fn headless_snapshot_shows_right_only_stereo_activity() {
     let mut app = crate::tests::app();
-    let source = app.controller.add_module("loom.math.constant").unwrap();
-    let join = app.controller.add_module("loom.mix.join").unwrap();
-    let meter = app.controller.add_module("loom.display.meter").unwrap();
-    let output = app.controller.add_module("loom.io.audio-out").unwrap();
-    app.controller.set_param_named(source, "value", 0.5).unwrap();
-    app.controller.connect_named(source, "out", join, "right").unwrap();
-    app.controller.connect_named(join, "out", meter, "in").unwrap();
-    app.controller.connect_named(meter, "out", output, "in").unwrap();
+    let source = app.session.controller.add_module("loom.math.constant").unwrap();
+    let join = app.session.controller.add_module("loom.mix.join").unwrap();
+    let meter = app.session.controller.add_module("loom.display.meter").unwrap();
+    let output = app.session.controller.add_module("loom.io.audio-out").unwrap();
+    app.session.controller.set_param_named(source, "value", 0.5).unwrap();
+    app.session
+        .controller
+        .connect_named(source, "out", join, "right")
+        .unwrap();
+    app.session.controller.connect_named(join, "out", meter, "in").unwrap();
+    app.session
+        .controller
+        .connect_named(meter, "out", output, "in")
+        .unwrap();
     assert!(app.commit());
     app.run_engine(4_800);
     let snapshot = app.ui_snapshot();
@@ -176,12 +182,15 @@ fn headless_snapshot_shows_right_only_stereo_activity() {
     assert!(value.right.unwrap().0 > 0.0);
     assert!(value.text.starts_with("Out: L below -60 dB, R "));
 
-    app.controller.set_param_named(source, "value", 0.00005).unwrap();
+    app.session
+        .controller
+        .set_param_named(source, "value", 0.00005)
+        .unwrap();
     app.run_engine(9_600);
     let quiet = app.ui_snapshot();
     assert!(!quiet.tiles.iter().find(|tile| tile.id == join.0).unwrap().outputs[0].carrying);
 
-    app.controller.set_param_named(source, "value", -0.5).unwrap();
+    app.session.controller.set_param_named(source, "value", -0.5).unwrap();
     app.run_engine(4_800);
     let negative = app.ui_snapshot();
     assert!(negative.tiles.iter().find(|tile| tile.id == join.0).unwrap().outputs[0].carrying);

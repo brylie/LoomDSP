@@ -91,7 +91,7 @@ fn help_from_selected_tile_inspector_and_menu() {
     ui.release();
     assert_eq!(ui.app.ui_snapshot().help, Some(expected.clone()));
     ui.tap(Key::Named(Named::Escape), Modifiers::default());
-    let bounds = ui.app.scene.module(4).unwrap().bounds();
+    let bounds = ui.app.session.scene.module(4).unwrap().bounds();
     let at = ui.canvas().to_window(Point::new(bounds.center().x, bounds.y + 4.0));
     ui.move_to(at);
     ui.step(&[iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))]);
@@ -159,9 +159,10 @@ fn example_button_honors_unsaved_changes() {
         .update(Message::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(ui.app.overlays.help.is_none());
     assert!(!ui.app.unsaved());
-    assert!(ui.app.document.file().is_none());
+    assert!(ui.app.session.document.file().is_none());
     assert_eq!(
         ui.app
+            .session
             .controller
             .graph()
             .nodes()
@@ -178,7 +179,7 @@ fn example_button_saves_the_old_patch_when_requested() {
     let destination = dir.0.join("saved.ron");
     let mut ui = Ui::open("sine.ron");
     // The test patch is an untitled copy, so saving asks for a path.
-    ui.app.document.forget_file();
+    ui.app.session.document.forget_file();
     let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
     let _ = ui.app.update(Message::Param {
         module: 5,
@@ -186,7 +187,14 @@ fn example_button_saves_the_old_patch_when_requested() {
         position: 0.8,
     });
     let _ = ui.app.update(Message::SliderReleased);
-    let value = ui.app.controller.graph().node(loom_core::ModuleId(5)).unwrap().params[0];
+    let value = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(5))
+        .unwrap()
+        .params[0];
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let _ = files::fake::asked();
     files::fake::answer_save(Some(destination.clone()));
@@ -198,7 +206,10 @@ fn example_button_saves_the_old_patch_when_requested() {
     let saved = loom_patch::Patch::load(&destination).expect("old patch was saved");
     let gain = saved.modules.iter().find(|module| module.id == 5).unwrap().params["gain"];
     assert_eq!(gain, value);
-    assert!(ui.app.document.file().is_none(), "the example is an untitled copy");
+    assert!(
+        ui.app.session.document.file().is_none(),
+        "the example is an untitled copy"
+    );
     assert!(!ui.app.unsaved());
     assert!(matches!(files::fake::asked().as_slice(), [files::fake::Asked::Save(_)]));
     files::fake::answer_save(None);
@@ -226,7 +237,7 @@ fn example_uses_existing_unsaved_changes_flow() {
     let _ = clean.app.update(Message::ShowHelp);
     let _ = clean.app.update(Message::HelpExample);
     assert!(clean.app.overlays.help.is_none());
-    assert!(clean.app.document.file().is_none());
+    assert!(clean.app.session.document.file().is_none());
 }
 
 /// Clicks the middle of a window rectangle.

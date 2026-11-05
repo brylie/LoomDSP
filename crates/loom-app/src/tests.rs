@@ -13,14 +13,14 @@ fn a_full_queue_retries_staged_modules() {
         ..EngineConfig::default()
     });
     for _ in 0..4 {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
     }
     assert!(!app.commit());
-    assert!(app.retry_commit);
+    assert!(app.session.retry_commit);
     let _ = app.update(Message::Tick);
-    assert!(!app.retry_commit);
-    assert!(!app.controller.has_uncommitted_changes());
-    assert_eq!(app.controller.last_report().modules, 4);
+    assert!(!app.session.retry_commit);
+    assert!(!app.session.controller.has_uncommitted_changes());
+    assert_eq!(app.session.controller.last_report().modules, 4);
 }
 
 /// A full queue fixes itself, so with no undo history to lose it is a warning
@@ -29,14 +29,14 @@ fn a_full_queue_retries_staged_modules() {
 #[test]
 fn a_commit_that_cannot_retry_is_kept() {
     let mut app = app();
-    assert!(app.edits.history.undo_step().is_none());
+    assert!(app.session.edits.history.undo_step().is_none());
     app.commit_failed(&LoomError::QueueFull);
-    assert!(app.retry_commit);
+    assert!(app.session.retry_commit);
     assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
     assert!(app.alerts.kept().is_empty());
 
     app.commit_failed(&LoomError::TooManyModules(4));
-    assert!(!app.retry_commit);
+    assert!(!app.session.retry_commit);
     assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
     assert_eq!(app.alerts.top_kept().unwrap().cause, alerts::Cause::Other);
     app.alerts.say("saved");
@@ -51,18 +51,21 @@ fn a_full_queue_keeps_the_loss_of_the_undo_history_on_screen() {
         command_capacity: 8,
         ..EngineConfig::default()
     });
-    let module = app.controller.add_module("loom.osc.sine").unwrap();
+    let module = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.edit(|app| {
-        app.controller.remove_module(module).unwrap();
+        app.session.controller.remove_module(module).unwrap();
         assert!(app.commit());
     });
-    assert!(app.edits.history.undo_step().is_some(), "there is history to lose");
+    assert!(
+        app.session.edits.history.undo_step().is_some(),
+        "there is history to lose"
+    );
     for _ in 0..8 {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
     }
     assert!(!app.commit());
-    assert!(app.retry_commit, "it still retries");
-    assert!(app.edits.history.undo_step().is_none());
+    assert!(app.session.retry_commit, "it still retries");
+    assert!(app.session.edits.history.undo_step().is_none());
     assert!(
         app.alerts.status().contains("undo history cleared"),
         "{}",
@@ -70,7 +73,7 @@ fn a_full_queue_keeps_the_loss_of_the_undo_history_on_screen() {
     );
 
     let _ = app.update(Message::Tick);
-    assert!(!app.retry_commit, "the retry worked");
+    assert!(!app.session.retry_commit, "the retry worked");
     let kept = app.alerts.kept_field().expect("the loss stays on screen");
     assert!(kept.text.contains("undo history cleared"), "{}", kept.text);
     assert!(kept.dismissible);
@@ -86,14 +89,15 @@ pub(crate) fn app() -> App {
 fn live_value_overflow_warning_is_latched_per_patch() {
     let mut app = app();
     let parts = create_engine(registry(true), EngineConfig::default());
-    app.controller = parts.controller;
-    app.stream.keep_idle(parts.engine);
-    app.stream.set_running(None);
-    let source = app.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller = parts.controller;
+    app.session.engine.stream.keep_idle(parts.engine);
+    app.session.engine.stream.set_running(None);
+    let source = app.session.controller.add_module("loom.math.constant").unwrap();
     let mut last = None;
     for _ in 0..257 {
-        let target = app.controller.add_module("loom.math.add").unwrap();
+        let target = app.session.controller.add_module("loom.math.add").unwrap();
         let offset = app
+            .session
             .controller
             .graph()
             .node(target)
@@ -101,7 +105,11 @@ fn live_value_overflow_warning_is_latched_per_patch() {
             .descriptor
             .param_index("offset")
             .unwrap();
-        let assignment = app.controller.add_assignment(out(source), target, offset, 0.5).unwrap();
+        let assignment = app
+            .session
+            .controller
+            .add_assignment(out(source), target, offset, 0.5)
+            .unwrap();
         last = Some((target, offset, assignment));
     }
     let (last_target, last_offset, last_id) = last.unwrap();
@@ -109,10 +117,11 @@ fn live_value_overflow_warning_is_latched_per_patch() {
     assert!(app.alerts.status().contains("table full"), "{}", app.alerts.status());
     assert!(app.commit());
     assert!(!app.alerts.status().contains("table full"), "{}", app.alerts.status());
-    app.controller.remove_assignment(last_id).unwrap();
+    app.session.controller.remove_assignment(last_id).unwrap();
     assert!(app.commit());
     assert!(!app.alerts.status().contains("table full"), "{}", app.alerts.status());
-    app.controller
+    app.session
+        .controller
         .add_assignment(out(source), last_target, last_offset, 0.5)
         .unwrap();
     assert!(app.commit());
@@ -133,15 +142,15 @@ fn audio_watcher_events_update_the_stats_model() {
         silenced: false,
         clipped: false,
     }));
-    assert_eq!(app.stream.load().0, 0.95);
-    assert_eq!(app.stream.load().1, 0.95);
+    assert_eq!(app.session.engine.stream.load().0, 0.95);
+    assert_eq!(app.session.engine.stream.load().1, 0.95);
     assert_eq!(app.alerts.dropout_count(), 1);
     let _ = app.update(Message::Audio(audio_watch::Event::Stalled {
         callbacks: 3,
         advanced: now,
     }));
-    assert_eq!(app.stream.callbacks().0, 3);
-    assert!(app.stream.callbacks().1 >= now);
+    assert_eq!(app.session.engine.stream.callbacks().0, 3);
+    assert!(app.session.engine.stream.callbacks().1 >= now);
 }
 
 /// #16: the inspector help text names every canvas shortcut, the new
@@ -259,8 +268,8 @@ fn fake_audio_keeps_taking_edits() {
         no_audio: false,
         ..app_args()
     });
-    assert!(app.stream.is_playing(), "the clock plays the engine");
-    let filter = app.controller.add_module("loom.filter.svf").unwrap();
+    assert!(app.session.engine.stream.is_playing(), "the clock plays the engine");
+    let filter = app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     for burst in 0..10 {
         for i in 0..500 {
@@ -286,8 +295,8 @@ fn fake_audio_keeps_taking_edits() {
 #[test]
 fn no_audio_keeps_taking_edits() {
     let mut app = app();
-    assert!(!app.stream.is_playing() && app.stream.is_idle());
-    let filter = app.controller.add_module("loom.filter.svf").unwrap();
+    assert!(!app.session.engine.stream.is_playing() && app.session.engine.stream.is_idle());
+    let filter = app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     let capacity = loom_core::EngineConfig::default().command_capacity;
     for i in 0..5_000 {
@@ -303,7 +312,7 @@ fn no_audio_keeps_taking_edits() {
         );
     }
     assert!(5_000 > capacity);
-    let stats = app.controller.stats();
+    let stats = app.session.controller.stats();
     assert_eq!(stats.buffers.load(std::sync::atomic::Ordering::Relaxed), 0);
     assert_eq!(stats.leaked.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
@@ -323,38 +332,44 @@ fn type_query(app: &mut App, query: &str) {
 #[test]
 fn adding_from_the_browser_is_one_undo_step_at_the_snapped_point() {
     let mut app = app();
-    let before = app.controller.graph().nodes().count();
-    let undo = app.edits.history.undo_step().map(|s| s.name().to_string());
+    let before = app.session.controller.graph().nodes().count();
+    let undo = app.session.edits.history.undo_step().map(|s| s.name().to_string());
 
     // Opening, typing, and closing are not edits.
     open_at(&mut app, Point::new(250.0, 130.0));
     type_query(&mut app, "svf");
     let _ = app.update(Message::Browser(browser::Message::Key(browser::Nav::Escape)));
     assert!(app.overlays.browser().is_none());
-    assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
+    assert_eq!(
+        app.session.edits.history.undo_step().map(|s| s.name().to_string()),
+        undo
+    );
 
     open_at(&mut app, Point::new(250.0, 130.0));
     type_query(&mut app, "svf");
     let _ = app.update(Message::Browser(browser::Message::Submit));
     assert!(app.overlays.browser().is_none());
-    assert_eq!(app.controller.graph().nodes().count(), before + 1);
-    let id = *app.selection.iter().next().expect("the new module is selected");
-    assert_eq!(app.selection.len(), 1);
-    assert_eq!(app.positions[&id], (252.0, 132.0));
+    assert_eq!(app.session.controller.graph().nodes().count(), before + 1);
+    let id = *app.session.selection.iter().next().expect("the new module is selected");
+    assert_eq!(app.session.selection.len(), 1);
+    assert_eq!(app.session.positions[&id], (252.0, 132.0));
 
     app.undo();
-    assert_eq!(app.controller.graph().nodes().count(), before);
-    assert_eq!(app.edits.history.undo_step().map(|s| s.name().to_string()), undo);
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
+    assert_eq!(
+        app.session.edits.history.undo_step().map(|s| s.name().to_string()),
+        undo
+    );
 }
 
 #[test]
 fn keys_go_to_the_browser_not_the_shortcuts() {
     let mut app = app();
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     open_at(&mut app, Point::ORIGIN);
     type_query(&mut app, "saw");
     let _ = app.update(Message::Browser(browser::Message::Submit));
-    assert_eq!(app.controller.graph().nodes().count(), before + 1);
+    assert_eq!(app.session.controller.graph().nodes().count(), before + 1);
 
     // Cmd+Z or Ctrl+Z while the browser is open does not undo.
     open_at(&mut app, Point::ORIGIN);
@@ -367,18 +382,18 @@ fn keys_go_to_the_browser_not_the_shortcuts() {
         text: None,
         repeat: false,
     }));
-    assert_eq!(app.controller.graph().nodes().count(), before + 1);
+    assert_eq!(app.session.controller.graph().nodes().count(), before + 1);
 }
 
 /// An envelope and a filter, with the filter's cutoff knob widget.
 fn env_and_filter(app: &mut App) -> (ModuleId, ModuleId, usize, usize) {
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
-    let filter = app.controller.add_module("loom.filter.svf").unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
+    let filter = app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
-    let d = app.controller.graph().node(filter).unwrap().descriptor;
+    let d = app.session.controller.graph().node(filter).unwrap().descriptor;
     let cutoff = d.param_index("cutoff").unwrap();
     let widget = d.panel.widgets.iter().position(|w| w.binds("cutoff")).unwrap();
-    app.edits.history.clear();
+    app.session.edits.history.clear();
     (env, filter, cutoff, widget)
 }
 
@@ -397,7 +412,7 @@ fn drop_env(app: &mut App, env: ModuleId, filter: ModuleId, widget: usize) {
 }
 
 fn assignments(app: &App) -> Vec<loom_core::Assignment> {
-    app.controller.graph().assignments().map(|(_, a)| *a).collect()
+    app.session.controller.graph().assignments().map(|(_, a)| *a).collect()
 }
 
 /// Dropping an output on a knob assigns it with depth 0.25, following
@@ -416,7 +431,7 @@ fn a_drop_assigns_once_and_is_one_undo_step() {
     assert_eq!(made[0].polarity, None);
     assert!(made[0].enabled);
     assert_eq!(
-        app.edits.history.undo_step().map(undo::Step::name),
+        app.session.edits.history.undo_step().map(undo::Step::name),
         Some("add modulation")
     );
 
@@ -446,8 +461,13 @@ fn test_modules_are_listed_only_with_the_flag() {
         ..app_args()
     });
     // The three test modules and the patch's Transport.
-    assert_eq!(app.controller.graph().nodes().count(), 4, "{}", app.alerts.status());
-    assert_eq!(app.controller.graph().assignments().count(), 14);
+    assert_eq!(
+        app.session.controller.graph().nodes().count(),
+        4,
+        "{}",
+        app.alerts.status()
+    );
+    assert_eq!(app.session.controller.graph().assignments().count(), 14);
     assert!(app.modules.iter().any(|d| d.id == "test.panel"));
 
     let app = self::app();
@@ -461,10 +481,10 @@ fn test_modules_are_listed_only_with_the_flag() {
 #[test]
 fn a_drop_on_a_toggle_or_radio_moves_one_step() {
     let mut app = app();
-    let source = app.controller.add_module("test.panel").unwrap();
-    let target = app.controller.add_module("test.panel").unwrap();
+    let source = app.session.controller.add_module("test.panel").unwrap();
+    let target = app.session.controller.add_module("test.panel").unwrap();
     app.commit();
-    let d = app.controller.graph().node(target).unwrap().descriptor;
+    let d = app.session.controller.graph().node(target).unwrap().descriptor;
     let cases = [("on", 1.0), ("choice", 0.5)];
     let outputs = [(0, loom_core::Polarity::Unipolar), (1, loom_core::Polarity::Bipolar)];
     for (port, _) in outputs {
@@ -483,7 +503,7 @@ fn a_drop_on_a_toggle_or_radio_moves_one_step() {
         }
     }
 
-    let graph = app.controller.graph();
+    let graph = app.session.controller.graph();
     assert_eq!(graph.assignments().count(), 4);
     for (port, polarity) in outputs {
         for (bind, depth) in cases {
@@ -509,10 +529,10 @@ fn add_modulation_matches_a_drop() {
     let mut app = app();
     let (env, filter, cutoff, widget) = env_and_filter(&mut app);
     let source = OutputRef { module: env, port: 0 };
-    let graph = app.controller.graph();
+    let graph = app.session.controller.graph();
     let sources = modulation::sources(graph);
     // The new patch's Transport comes first; the envelope is next.
-    let transport = app.controller.transport_module();
+    let transport = app.session.controller.transport_module();
     assert_eq!(sources.iter().find(|s| Some(s.module) != transport), Some(&source));
     let mut sorted = sources.clone();
     sorted.sort();
@@ -522,15 +542,20 @@ fn add_modulation_matches_a_drop() {
         module: filter.0,
         index: cutoff,
     });
-    assert_eq!(app.gestures.adding(), Some((filter.0, cutoff)));
+    assert_eq!(app.session.gestures.adding(), Some((filter.0, cutoff)));
     let _ = app.update(Message::Assign {
         source,
         module: filter.0,
         index: cutoff,
     });
-    assert_eq!(app.gestures.adding(), None);
+    assert_eq!(app.session.gestures.adding(), None);
     let picked = assignments(&app);
-    assert!(modulation::exists(app.controller.graph(), source, filter, cutoff));
+    assert!(modulation::exists(
+        app.session.controller.graph(),
+        source,
+        filter,
+        cutoff
+    ));
 
     let mut dropped = self::app();
     let (env, filter, _, widget2) = env_and_filter(&mut dropped);
@@ -547,16 +572,16 @@ fn inspector_rows_edit_and_remove_assignments() {
     let mut app = app();
     let (env, filter, cutoff, widget) = env_and_filter(&mut app);
     drop_env(&mut app, env, filter, widget);
-    let id = app.controller.graph().assignments().next().unwrap().0;
-    let generation = app.scene.generation();
-    let steps = app.edits.history.len();
+    let id = app.session.controller.graph().assignments().next().unwrap().0;
+    let generation = app.session.scene.generation();
+    let steps = app.session.edits.history.len();
 
     for depth in [0.3, 0.4, 0.5] {
         let _ = app.update(Message::Depth { id, depth });
     }
     let _ = app.update(Message::SliderReleased);
     assert_eq!(assignments(&app)[0].depth, 0.5);
-    assert_eq!(app.edits.history.len(), steps + 1, "one drag, one step");
+    assert_eq!(app.session.edits.history.len(), steps + 1, "one drag, one step");
 
     let _ = app.update(Message::Polarity {
         id,
@@ -566,7 +591,7 @@ fn inspector_rows_edit_and_remove_assignments() {
     let a = assignments(&app)[0];
     assert_eq!(a.polarity, Some(loom_core::Polarity::Bipolar));
     assert!(!a.enabled);
-    assert_eq!(app.scene.generation(), generation, "no scene rebuild for edits");
+    assert_eq!(app.session.scene.generation(), generation, "no scene rebuild for edits");
 
     app.undo();
     app.undo();
@@ -575,7 +600,7 @@ fn inspector_rows_edit_and_remove_assignments() {
 
     let _ = app.update(Message::Unassign(id));
     assert!(assignments(&app).is_empty());
-    assert!(modulation::on_param(app.controller.graph(), filter, cutoff).is_empty());
+    assert!(modulation::on_param(app.session.controller.graph(), filter, cutoff).is_empty());
 }
 
 /// The source's output shows how many assignments it drives, counting
@@ -584,10 +609,11 @@ fn inspector_rows_edit_and_remove_assignments() {
 fn badges_count_every_assignment_on_an_output() {
     let mut app = app();
     let (env, filter, _, widget) = env_and_filter(&mut app);
-    let badge = |app: &App| app.scene.module(env.0).unwrap().outputs[0].badge;
+    let badge = |app: &App| app.session.scene.module(env.0).unwrap().outputs[0].badge;
     assert_eq!(badge(&app), 0);
     drop_env(&mut app, env, filter, widget);
     let resonance = app
+        .session
         .controller
         .graph()
         .node(filter)
@@ -601,7 +627,7 @@ fn badges_count_every_assignment_on_an_output() {
         index: resonance,
     });
     assert_eq!(badge(&app), 2);
-    let id = app.controller.graph().assignments().next().unwrap().0;
+    let id = app.session.controller.graph().assignments().next().unwrap().0;
     let _ = app.update(Message::Enabled { id, enabled: false });
     assert_eq!(badge(&app), 2, "off still counts");
     let _ = app.update(Message::Unassign(id));
@@ -617,12 +643,12 @@ fn drives_lists_targets_and_selects_them() {
     let mut app = app();
     let (env, filter, cutoff, widget) = env_and_filter(&mut app);
     drop_env(&mut app, env, filter, widget);
-    let drives = modulation::drives(app.controller.graph(), env);
+    let drives = modulation::drives(app.session.controller.graph(), env);
     let targets: Vec<_> = drives[&0].iter().map(|(_, a)| (a.target, a.param)).collect();
     assert_eq!(targets, vec![(filter, cutoff)]);
-    assert!(modulation::drives(app.controller.graph(), filter).is_empty());
+    assert!(modulation::drives(app.session.controller.graph(), filter).is_empty());
     let _ = app.update(Message::SelectModule(filter.0));
-    assert_eq!(app.selection, BTreeSet::from([filter.0]));
+    assert_eq!(app.session.selection, BTreeSet::from([filter.0]));
 }
 
 /// Saved and loaded, the inspector lists the same assignments in the
@@ -631,7 +657,7 @@ fn drives_lists_targets_and_selects_them() {
 fn assignments_keep_their_order_through_a_save() {
     let mut app = app();
     let (env, filter, cutoff, widget) = env_and_filter(&mut app);
-    let other = app.controller.add_module("loom.osc.sine").unwrap();
+    let other = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
     let _ = app.update(Message::Assign {
         source: OutputRef { module: other, port: 0 },
@@ -645,10 +671,12 @@ fn assignments_keep_their_order_through_a_save() {
             .map(|(_, a)| (a.source, a.depth))
             .collect()
     };
-    let before = rows(&app.controller);
+    let before = rows(&app.session.controller);
     assert_eq!(before[0].0.module, other, "the sine was added first");
 
-    let text = Patch::from_graph("Order", app.controller.graph()).to_ron().unwrap();
+    let text = Patch::from_graph("Order", app.session.controller.graph())
+        .to_ron()
+        .unwrap();
     let mut reloaded = create_engine(loom_modules::registry(), EngineConfig::default());
     Patch::from_ron(&text)
         .unwrap()
@@ -660,7 +688,7 @@ fn assignments_keep_their_order_through_a_save() {
 /// An envelope and a sine both on the filter cutoff.
 fn two_sources(app: &mut App) -> (ModuleId, ModuleId, ModuleId, usize, usize) {
     let (env, filter, cutoff, widget) = env_and_filter(app);
-    let sine = app.controller.add_module("loom.osc.sine").unwrap();
+    let sine = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
     drop_env(app, env, filter, widget);
     let _ = app.update(Message::Assign {
@@ -681,7 +709,7 @@ fn out(module: ModuleId) -> OutputRef {
 fn the_arc_drag_picks_its_assignment_in_order() {
     let mut app = app();
     let (env, sine, filter, cutoff, _) = two_sources(&mut app);
-    let graph = app.controller.graph();
+    let graph = app.session.controller.graph();
     let id_of = |source: OutputRef| {
         graph
             .assignments()
@@ -699,8 +727,8 @@ fn the_arc_drag_picks_its_assignment_in_order() {
 
     // With one of them off, the other is the only enabled one.
     let (sine_id, env_id) = (id_of(out(sine)), id_of(out(env)));
-    app.controller.set_assignment_enabled(sine_id, false).unwrap();
-    let graph = app.controller.graph();
+    app.session.controller.set_assignment_enabled(sine_id, false).unwrap();
+    let graph = app.session.controller.graph();
     assert_eq!(modulation::drag_target(graph, filter, cutoff, None, None), Ok(env_id));
 }
 
@@ -711,9 +739,12 @@ fn a_duplicate_source_is_not_a_drag_target() {
     let mut app = app();
     let (env, filter, cutoff, _) = env_and_filter(&mut app);
     for depth in [0.1, 0.2] {
-        app.controller.add_assignment(out(env), filter, cutoff, depth).unwrap();
+        app.session
+            .controller
+            .add_assignment(out(env), filter, cutoff, depth)
+            .unwrap();
     }
-    let graph = app.controller.graph();
+    let graph = app.session.controller.graph();
     for (pinned, selected) in [(Some(out(env)), None), (None, Some(env))] {
         let why = modulation::drag_target(graph, filter, cutoff, pinned, selected).unwrap_err();
         assert!(why.contains("inspector"), "{why}");
@@ -726,7 +757,7 @@ fn a_duplicate_source_is_not_a_drag_target() {
 fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
     let mut app = app();
     let (_, sine, filter, _, widget) = two_sources(&mut app);
-    let steps = app.edits.history.len();
+    let steps = app.session.edits.history.len();
     let pinned = Some(loom_canvas::PortRef {
         module: sine.0,
         output: true,
@@ -741,7 +772,7 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
             part: loom_canvas::ControlPart::Main,
         })
     };
-    let mark = |app: &App| app.values.get(filter.0, widget).unwrap().modulation;
+    let mark = |app: &App| app.session.values.get(filter.0, widget).unwrap().modulation;
     let both = mark(&app);
     let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
     let _ = app.update(drag(0.1));
@@ -749,9 +780,10 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
     let during = mark(&app);
     assert_ne!(during, both, "the arc shows the dragged assignment alone");
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
-    assert!(!app.gestures.depth_dragging());
+    assert!(!app.session.gestures.depth_dragging());
     let depth = |app: &App| {
-        app.controller
+        app.session
+            .controller
             .graph()
             .assignments()
             .find(|(_, a)| a.source == out(sine))
@@ -761,7 +793,7 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
     };
     assert!((depth(&app) - 0.45).abs() < 1e-6, "{}", depth(&app));
     assert!(app.alerts.status().contains("+45%"), "{}", app.alerts.status());
-    assert_eq!(app.edits.history.len(), steps + 1);
+    assert_eq!(app.session.edits.history.len(), steps + 1);
     app.undo();
     assert_eq!(depth(&app), 0.25);
 }
@@ -772,7 +804,7 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
 fn a_selected_source_picks_the_arc_drag() {
     let mut app = app();
     let (env, sine, filter, _, widget) = two_sources(&mut app);
-    app.selection = BTreeSet::from([sine.0]);
+    app.session.selection = BTreeSet::from([sine.0]);
     let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
     let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
         module: filter.0,
@@ -783,7 +815,8 @@ fn a_selected_source_picks_the_arc_drag() {
     }));
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
     let depth = |source| {
-        app.controller
+        app.session
+            .controller
             .graph()
             .assignments()
             .find(|(_, a)| a.source == out(source))
@@ -801,9 +834,9 @@ fn a_selected_source_picks_the_arc_drag() {
 fn an_arc_drag_with_no_choice_changes_nothing() {
     let mut app = app();
     let (_, _, filter, _, widget) = two_sources(&mut app);
-    app.selection.clear();
+    app.session.selection.clear();
     let before = assignments(&app);
-    let steps = app.edits.history.len();
+    let steps = app.session.edits.history.len();
     let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
     let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
         module: filter.0,
@@ -814,7 +847,7 @@ fn an_arc_drag_with_no_choice_changes_nothing() {
     }));
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
     assert_eq!(assignments(&app), before);
-    assert_eq!(app.edits.history.len(), steps);
+    assert_eq!(app.session.edits.history.len(), steps);
     assert!(
         app.alerts.status().contains("Several sources"),
         "{}",
@@ -828,6 +861,7 @@ fn the_scene_has_a_line_per_assignment() {
     let mut app = app();
     let (env, sine, filter, _, widget) = two_sources(&mut app);
     let lines: Vec<_> = app
+        .session
         .scene
         .modulations()
         .iter()
@@ -857,53 +891,53 @@ pub(crate) fn command_key(c: &str) -> Message {
 
 /// A sine into a multiply, both selected, at known places.
 fn two_selected(app: &mut App) -> (ModuleId, ModuleId) {
-    let sine = app.controller.add_module("loom.osc.sine").unwrap();
-    let vca = app.controller.add_module("loom.math.mul").unwrap();
-    app.controller.connect_named(sine, "out", vca, "a").unwrap();
-    app.controller.set_param_named(vca, "gain", 0.4).unwrap();
-    app.positions.insert(sine.0, (0.0, 0.0));
-    app.positions.insert(vca.0, (240.0, 0.0));
+    let sine = app.session.controller.add_module("loom.osc.sine").unwrap();
+    let vca = app.session.controller.add_module("loom.math.mul").unwrap();
+    app.session.controller.connect_named(sine, "out", vca, "a").unwrap();
+    app.session.controller.set_param_named(vca, "gain", 0.4).unwrap();
+    app.session.positions.insert(sine.0, (0.0, 0.0));
+    app.session.positions.insert(vca.0, (240.0, 0.0));
     app.commit();
-    app.edits.history.clear();
-    app.selection = BTreeSet::from([sine.0, vca.0]);
+    app.session.edits.history.clear();
+    app.session.selection = BTreeSet::from([sine.0, vca.0]);
     (sine, vca)
 }
 
 fn step_name(app: &App) -> Option<String> {
-    app.edits.history.undo_step().map(|s| s.name().to_string())
+    app.session.edits.history.undo_step().map(|s| s.name().to_string())
 }
 
 /// Tile dimensions are restored by undo and redo.
 #[test]
 fn tile_dimensions_undo_and_redo() {
     let mut app = app();
-    let id = app.controller.add_module("loom.display.scope").unwrap();
+    let id = app.session.controller.add_module("loom.display.scope").unwrap();
     app.commit();
-    app.edits.history.clear();
+    app.session.edits.history.clear();
     app.edit(|app| {
-        app.sizes.insert(id.0, (24, 16));
+        app.session.sizes.insert(id.0, (24, 16));
         app.refresh();
     });
-    assert_eq!(app.sizes.get(&id.0), Some(&(24, 16)));
+    assert_eq!(app.session.sizes.get(&id.0), Some(&(24, 16)));
     app.undo();
-    assert!(!app.sizes.contains_key(&id.0));
+    assert!(!app.session.sizes.contains_key(&id.0));
     app.redo();
-    assert_eq!(app.sizes.get(&id.0), Some(&(24, 16)));
+    assert_eq!(app.session.sizes.get(&id.0), Some(&(24, 16)));
 }
 
 /// Resize commands respect the panel minimum, maximum, and growable widgets.
 #[test]
 fn resize_respects_limits_and_ignores_fixed_panels() {
     let mut app = app();
-    let scope = app.controller.add_module("loom.display.scope").unwrap();
-    let fixed = app.controller.add_module("loom.math.constant").unwrap();
+    let scope = app.session.controller.add_module("loom.display.scope").unwrap();
+    let fixed = app.session.controller.add_module("loom.math.constant").unwrap();
     app.commit();
-    let min = app.scene.module(scope.0).unwrap().minimum_size();
+    let min = app.session.scene.module(scope.0).unwrap().minimum_size();
     app.canvas_event(CanvasEvent::Resize {
         module: scope.0,
         size: (255, 255),
     });
-    let tile = app.scene.module(scope.0).unwrap();
+    let tile = app.session.scene.module(scope.0).unwrap();
     assert_eq!(
         (tile.width(), tile.height()),
         (64.0 * loom_canvas::GRID, 64.0 * loom_canvas::GRID)
@@ -912,39 +946,39 @@ fn resize_respects_limits_and_ignores_fixed_panels() {
         module: scope.0,
         size: (0, 0),
     });
-    assert_eq!(app.scene.module(scope.0).unwrap().bounds().size(), min);
-    let generation = app.scene.generation();
+    assert_eq!(app.session.scene.module(scope.0).unwrap().bounds().size(), min);
+    let generation = app.session.scene.generation();
     app.canvas_event(CanvasEvent::Resize {
         module: fixed.0,
         size: (64, 64),
     });
-    assert_eq!(app.scene.generation(), generation);
-    assert!(!app.sizes.contains_key(&fixed.0));
+    assert_eq!(app.session.scene.generation(), generation);
+    assert!(!app.session.sizes.contains_key(&fixed.0));
 }
 
 /// Copy and paste carry a saved tile size to the new module ID.
 #[test]
 fn copy_and_paste_keep_tile_size() {
     let mut app = app();
-    let id = app.controller.add_module("loom.display.scope").unwrap();
-    app.positions.insert(id.0, (0.0, 0.0));
-    app.sizes.insert(id.0, (24, 16));
-    app.selection = BTreeSet::from([id.0]);
+    let id = app.session.controller.add_module("loom.display.scope").unwrap();
+    app.session.positions.insert(id.0, (0.0, 0.0));
+    app.session.sizes.insert(id.0, (24, 16));
+    app.session.selection = BTreeSet::from([id.0]);
     app.commit();
     let text = app.copy().unwrap();
     app.paste(Point::new(100.0, 100.0), Some(text));
-    let pasted = *app.selection.iter().next().unwrap();
+    let pasted = *app.session.selection.iter().next().unwrap();
     assert_ne!(pasted, id.0);
-    assert_eq!(app.sizes.get(&pasted), Some(&(24, 16)));
+    assert_eq!(app.session.sizes.get(&pasted), Some(&(24, 16)));
 }
 
 #[test]
 fn copy_with_nothing_selected_writes_nothing() {
     let mut app = app();
-    app.selection.clear();
+    app.session.selection.clear();
     assert!(app.copy().is_none());
     assert_eq!(app.alerts.status(), "Nothing selected to copy");
-    assert!(app.edits.history.undo_step().is_none(), "copy is not an edit");
+    assert!(app.session.edits.history.undo_step().is_none(), "copy is not an edit");
 }
 
 #[test]
@@ -953,23 +987,24 @@ fn a_paste_lands_at_the_snapped_point_is_selected_and_is_one_undo_step() {
     let (sine, vca) = two_selected(&mut app);
     let text = app.copy().unwrap();
     assert_eq!(app.alerts.status(), "Copied 2 modules");
-    assert!(app.edits.history.undo_step().is_none(), "copy is not an edit");
+    assert!(app.session.edits.history.undo_step().is_none(), "copy is not an edit");
 
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     app.paste(Point::new(605.0, 299.0), Some(text));
-    assert_eq!(app.controller.graph().nodes().count(), before + 2);
+    assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
     assert_eq!(app.alerts.status(), "Pasted 2 modules");
     assert_eq!(step_name(&app).as_deref(), Some("paste 2 modules"));
-    let new: Vec<u32> = app.selection.iter().copied().collect();
+    let new: Vec<u32> = app.session.selection.iter().copied().collect();
     assert_eq!(new.len(), 2, "only the pasted modules are selected");
     assert!(!new.contains(&sine.0) && !new.contains(&vca.0));
-    assert_eq!(app.positions[&new[0]], (600.0, 300.0));
-    assert_eq!(app.positions[&new[1]], (840.0, 300.0));
+    assert_eq!(app.session.positions[&new[0]], (600.0, 300.0));
+    assert_eq!(app.session.positions[&new[1]], (840.0, 300.0));
 
     app.undo();
-    assert_eq!(app.controller.graph().nodes().count(), before);
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
     app.redo();
     let back: Vec<u32> = app
+        .session
         .controller
         .graph()
         .nodes()
@@ -977,43 +1012,43 @@ fn a_paste_lands_at_the_snapped_point_is_selected_and_is_one_undo_step() {
         .filter(|id| new.contains(id))
         .collect();
     assert_eq!(back, new, "redo brings the paste back with the same ids");
-    assert_eq!(app.controller.graph().cables().count(), 2);
+    assert_eq!(app.session.controller.graph().cables().count(), 2);
 }
 
 #[test]
 fn duplicate_from_the_keyboard_is_one_step_offset_by_two_grid_units() {
     let mut app = app();
     let (sine, _) = two_selected(&mut app);
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     let _ = app.update(command_key("d"));
-    assert_eq!(app.controller.graph().nodes().count(), before + 2);
+    assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
     assert_eq!(step_name(&app).as_deref(), Some("duplicate 2 modules"));
-    let first = *app.selection.iter().next().unwrap();
+    let first = *app.session.selection.iter().next().unwrap();
     assert_ne!(first, sine.0);
-    assert_eq!(app.positions[&first], (24.0, 24.0));
+    assert_eq!(app.session.positions[&first], (24.0, 24.0));
     app.undo();
-    assert_eq!(app.controller.graph().nodes().count(), before);
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
 }
 
 #[test]
 fn cut_copies_and_deletes_as_one_step() {
     let mut app = app();
     let (sine, vca) = two_selected(&mut app);
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     let text = app.cut().unwrap();
     assert!(text.contains("loom.osc.sine"));
-    assert_eq!(app.controller.graph().nodes().count(), before - 2);
+    assert_eq!(app.session.controller.graph().nodes().count(), before - 2);
     assert_eq!(step_name(&app).as_deref(), Some("cut 2 modules"));
-    assert_eq!(app.edits.history.len(), 1);
+    assert_eq!(app.session.edits.history.len(), 1);
     app.undo();
-    assert!(app.controller.graph().node(sine).is_some() && app.controller.graph().node(vca).is_some());
-    assert_eq!(app.controller.graph().cables().count(), 1);
+    assert!(app.session.controller.graph().node(sine).is_some() && app.session.controller.graph().node(vca).is_some());
+    assert_eq!(app.session.controller.graph().cables().count(), 1);
 }
 
 #[test]
 fn a_refused_paste_adds_nothing_and_no_step() {
     let mut app = app();
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     app.paste(Point::ORIGIN, None);
     assert_eq!(app.alerts.status(), clipboard::NOTHING_TO_PASTE);
     app.paste(Point::ORIGIN, Some("not a patch".to_string()));
@@ -1023,19 +1058,19 @@ fn a_refused_paste_adds_nothing_and_no_step() {
         Some("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])".to_string()),
     );
     assert!(app.alerts.status().contains("invalid") && app.alerts.status().contains("loom.none.such"));
-    assert_eq!(app.controller.graph().nodes().count(), before);
-    assert!(app.edits.history.undo_step().is_none());
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
+    assert!(app.session.edits.history.undo_step().is_none());
 }
 
 #[test]
 fn clipboard_keys_go_to_the_browser_while_it_is_open() {
     let mut app = app();
     two_selected(&mut app);
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     open_at(&mut app, Point::ORIGIN);
     let _ = app.update(command_key("d"));
     let _ = app.update(command_key("x"));
-    assert_eq!(app.controller.graph().nodes().count(), before);
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
 }
 
 /// A command's step name never labels a later edit, even when the
@@ -1044,13 +1079,13 @@ fn clipboard_keys_go_to_the_browser_while_it_is_open() {
 fn a_step_name_does_not_outlive_its_edit() {
     let mut app = app();
     let (_, vca) = two_selected(&mut app);
-    app.edits.set_history_off(true);
-    app.step_name = Some("cut 2 modules".to_string());
+    app.session.edits.set_history_off(true);
+    app.session.step_name = Some("cut 2 modules".to_string());
     app.edit(|_| {});
-    assert!(app.step_name.is_none());
-    app.edits.set_history_off(false);
+    assert!(app.session.step_name.is_none());
+    app.session.edits.set_history_off(false);
     app.edit(|app| {
-        app.controller.set_param_named(vca, "gain", 0.9).unwrap();
+        app.session.controller.set_param_named(vca, "gain", 0.9).unwrap();
         app.commit();
     });
     assert_eq!(step_name(&app).as_deref(), Some("change Multiply Gain"));
@@ -1062,19 +1097,19 @@ fn a_paste_for_a_closed_patch_is_dropped() {
     let mut app = app();
     two_selected(&mut app);
     let text = app.copy().unwrap();
-    let before = app.controller.graph().nodes().count();
+    let before = app.session.controller.graph().nodes().count();
     let _ = app.update(Message::Pasted {
         world: Point::ORIGIN,
         text: Some(text.clone()),
         generation: app.generation + 1,
     });
-    assert_eq!(app.controller.graph().nodes().count(), before);
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
     let _ = app.update(Message::Pasted {
         world: Point::ORIGIN,
         text: Some(text),
         generation: app.generation,
     });
-    assert_eq!(app.controller.graph().nodes().count(), before + 2);
+    assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
 }
 
 /// Panic is not an edit: the value, the cables, and the unsaved mark
@@ -1084,20 +1119,21 @@ fn panic_is_not_an_edit() {
     let mut app = app();
     let (_, vca) = two_selected(&mut app);
     app.edit(|app| {
-        app.controller.set_param_named(vca, "gain", 0.9).unwrap();
+        app.session.controller.set_param_named(vca, "gain", 0.9).unwrap();
         app.commit();
     });
     assert!(app.unsaved());
-    let steps = app.edits.history.len();
-    let cables = app.controller.graph().cables().count();
-    app.holding = true;
+    let steps = app.session.edits.history.len();
+    let cables = app.session.controller.graph().cables().count();
+    app.session.engine.holding = true;
     let _ = app.update(Message::Panic);
     // The MIDI poll runs while the app has an engine, and finds nothing.
     let _ = app.subscription();
     let _ = app.update(Message::MidiPoll);
     assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
-    assert!(!app.holding, "Hold note lets go");
+    assert!(!app.session.engine.holding, "Hold note lets go");
     let gain = app
+        .session
         .controller
         .graph()
         .node(vca)
@@ -1105,10 +1141,10 @@ fn panic_is_not_an_edit() {
         .descriptor
         .param_index("gain")
         .unwrap();
-    assert_eq!(app.controller.graph().node(vca).unwrap().params[gain], 0.9);
-    assert_eq!(app.controller.graph().cables().count(), cables);
+    assert_eq!(app.session.controller.graph().node(vca).unwrap().params[gain], 0.9);
+    assert_eq!(app.session.controller.graph().cables().count(), cables);
     assert!(app.unsaved(), "the unsaved mark stays");
-    assert_eq!(app.edits.history.len(), steps, "no undo step");
+    assert_eq!(app.session.edits.history.len(), steps, "no undo step");
 }
 
 /// The panic key works with a text field focused, the toolbar button
@@ -1147,13 +1183,14 @@ fn the_panic_key_button_and_command_run_panic() {
 #[test]
 fn a_momentary_hold_is_not_part_of_the_patch() {
     let mut app = app();
-    let id = app.controller.add_module("loom.ui.button").unwrap();
-    app.controller.set_param_named(id, "mode", 1.0).unwrap();
-    app.positions.insert(id.0, (0.0, 0.0));
+    let id = app.session.controller.add_module("loom.ui.button").unwrap();
+    app.session.controller.set_param_named(id, "mode", 1.0).unwrap();
+    app.session.positions.insert(id.0, (0.0, 0.0));
     app.commit();
-    app.edits.history.clear();
-    app.edits.history.mark_saved();
+    app.session.edits.history.clear();
+    app.session.edits.history.mark_saved();
     let hold = app
+        .session
         .controller
         .graph()
         .node(id)
@@ -1161,7 +1198,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
         .descriptor
         .param_index("hold")
         .unwrap();
-    let held = |app: &App| app.controller.graph().node(id).unwrap().params[hold];
+    let held = |app: &App| app.session.controller.graph().node(id).unwrap().params[hold];
 
     let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed {
         module: id.0,
@@ -1170,24 +1207,28 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
     assert_eq!(held(&app), 1.0);
     assert_eq!(tile_widget(&app, id, 0).position, 1.0, "a held button looks held");
     assert!(!app.unsaved(), "a hold does not mark the patch changed");
-    assert_eq!(app.edits.history.len(), 0, "a hold is no undo step");
+    assert_eq!(app.session.edits.history.len(), 0, "a hold is no undo step");
     let text = app.current_patch().to_ron().unwrap();
     assert!(!text.contains("hold"), "{text}");
     app.arm((id.0, hold));
-    assert!(app.learn.armed().is_none(), "a hold cannot be a MIDI learn target");
+    assert!(
+        app.session.learn.armed().is_none(),
+        "a hold cannot be a MIDI learn target"
+    );
 
-    app.selection = BTreeSet::from([id.0]);
+    app.session.selection = BTreeSet::from([id.0]);
     let snapshot = app.ui_snapshot();
     let rows = serde_json::to_string(&snapshot.inspector).unwrap();
     assert!(!rows.contains("\"Hold\""), "{rows}");
     let copied = app.copy().unwrap();
-    let before: BTreeSet<u32> = app.controller.graph().nodes().map(|(m, _)| m.0).collect();
+    let before: BTreeSet<u32> = app.session.controller.graph().nodes().map(|(m, _)| m.0).collect();
     let _ = app.update(Message::Pasted {
         world: Point::new(400.0, 0.0),
         text: Some(copied),
         generation: app.generation,
     });
     let (pasted, node) = app
+        .session
         .controller
         .graph()
         .nodes()
@@ -1216,8 +1257,8 @@ fn tile_widget(app: &App, id: ModuleId, widget: usize) -> snapshot::Widget {
 #[test]
 fn a_running_engine_moves_the_live_dot() {
     let mut app = app();
-    let source = app.controller.add_module("loom.math.constant").unwrap();
-    app.controller.set_param_named(source, "value", 0.5).unwrap();
+    let source = app.session.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller.set_param_named(source, "value", 0.5).unwrap();
     let (_, filter, cutoff, widget) = env_and_filter(&mut app);
     let _ = app.update(Message::Assign {
         source: out(source),
@@ -1243,11 +1284,11 @@ fn a_running_engine_moves_the_live_dot() {
 #[test]
 fn a_running_engine_lights_the_envelope() {
     let mut app = app();
-    let gate = app.controller.add_module("loom.math.constant").unwrap();
-    app.controller.set_param_named(gate, "value", 1.0).unwrap();
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
+    let gate = app.session.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller.set_param_named(gate, "value", 1.0).unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
     app.commit();
-    let d = app.controller.graph().node(env).unwrap().descriptor;
+    let d = app.session.controller.graph().node(env).unwrap().descriptor;
     let light = d.panel.widgets.iter().position(|w| w.binds("level")).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![env.0])));
     let watch = app.watched_lights().expect("the level light is on screen");
@@ -1256,7 +1297,7 @@ fn a_running_engine_lights_the_envelope() {
     let _ = app.update(Message::Lights(watch.read()));
     assert_eq!(tile_widget(&app, env, light).position, 0.0, "no gate, no level");
 
-    app.controller.connect_named(gate, "out", env, "gate").unwrap();
+    app.session.controller.connect_named(gate, "out", env, "gate").unwrap();
     app.commit();
     app.process(4_800);
     // A level light draws its value as it is, with no fade.
@@ -1273,11 +1314,11 @@ fn a_running_engine_lights_the_envelope() {
 #[test]
 fn the_watcher_sends_a_moving_reduction_meter() {
     let mut app = app();
-    let source = app.controller.add_module("loom.math.constant").unwrap();
-    app.controller.set_param_named(source, "value", 1.0).unwrap();
-    let dynamics = app.controller.add_module("loom.dyn.dynamics").unwrap();
+    let source = app.session.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller.set_param_named(source, "value", 1.0).unwrap();
+    let dynamics = app.session.controller.add_module("loom.dyn.dynamics").unwrap();
     app.commit();
-    let d = app.controller.graph().node(dynamics).unwrap().descriptor;
+    let d = app.session.controller.graph().node(dynamics).unwrap().descriptor;
     let meter = d.panel.widgets.iter().position(|w| w.binds("reduction")).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![dynamics.0])));
     let watch = app.watched_lights().expect("the meter is on screen");
@@ -1298,7 +1339,10 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     .unwrap();
     assert_eq!(quiet[entry], Some(255), "no signal, no reduction");
 
-    app.controller.connect_named(source, "out", dynamics, "in").unwrap();
+    app.session
+        .controller
+        .connect_named(source, "out", dynamics, "in")
+        .unwrap();
     app.commit();
     app.process(4_800);
     let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges, &watch.readouts)
@@ -1311,9 +1355,9 @@ fn the_watcher_sends_a_moving_reduction_meter() {
 #[test]
 fn a_meter_says_its_value_past_its_range() {
     let mut app = app();
-    let dynamics = app.controller.add_module("loom.dyn.dynamics").unwrap();
+    let dynamics = app.session.controller.add_module("loom.dyn.dynamics").unwrap();
     app.commit();
-    let d = app.controller.graph().node(dynamics).unwrap().descriptor;
+    let d = app.session.controller.graph().node(dynamics).unwrap().descriptor;
     let meter = d.panel.widgets.iter().position(|w| w.binds("reduction")).unwrap();
     let _ = app.update(Message::Lights(vec![((dynamics.0, meter), -60.0)]));
     let widget = tile_widget(&app, dynamics, meter);
@@ -1343,8 +1387,8 @@ fn session_keeps_saved_tile_dimensions() {
         (24.0 * loom_canvas::GRID, 16.0 * loom_canvas::GRID)
     );
     let mut app = app();
-    let id = app.controller.add_module("loom.display.scope").unwrap();
-    app.sizes.insert(id.0, (24, 16));
+    let id = app.session.controller.add_module("loom.display.scope").unwrap();
+    app.session.sizes.insert(id.0, (24, 16));
     let saved = app.current_patch();
     assert_eq!(
         saved.modules.iter().find(|m| m.id == id.0).unwrap().size,
@@ -1356,9 +1400,10 @@ fn session_keeps_saved_tile_dimensions() {
 #[test]
 fn unknown_module_rejects_new_connections_and_undo_restores_it() {
     let mut app = app();
-    let phase = app.controller.add_module("loom.phase.generator").unwrap();
+    let phase = app.session.controller.add_module("loom.phase.generator").unwrap();
     let missing = ModuleId(100);
-    app.controller
+    app.session
+        .controller
         .add_unknown_with_id(
             missing,
             loom_core::UnknownModule {
@@ -1372,12 +1417,17 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
             },
         )
         .unwrap();
-    app.controller.connect_named(phase, "phase", missing, "in").unwrap();
+    app.session
+        .controller
+        .connect_named(phase, "phase", missing, "in")
+        .unwrap();
     let assignment = app
+        .session
         .controller
         .add_assignment_named(phase, "phase", missing, "amount", 0.5)
         .unwrap();
-    app.controller
+    app.session
+        .controller
         .map_midi_named(
             loom_core::MidiControl {
                 channel: 0,
@@ -1388,14 +1438,14 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
         )
         .unwrap();
     app.commit();
-    app.edits.history.clear();
-    app.selection = BTreeSet::from([missing.0]);
+    app.session.edits.history.clear();
+    app.session.selection = BTreeSet::from([missing.0]);
     let inspector::Inspector::Unknown(rows) = app.ui_snapshot().inspector else {
         panic!("unknown inspector");
     };
     assert_eq!(rows.params, vec![("amount".into(), 0.5)]);
     assert_eq!(rows.links.len(), 2);
-    let cables = app.controller.graph().cables().count();
+    let cables = app.session.controller.graph().cables().count();
     app.canvas_event(CanvasEvent::Connect {
         from: loom_canvas::PortRef {
             module: missing.0,
@@ -1409,44 +1459,68 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
         },
     });
     assert_eq!(app.alerts.status(), "Cannot connect to an unknown module");
-    assert_eq!(app.controller.graph().cables().count(), cables);
-    assert!(app.edits.history.undo_step().is_none());
+    assert_eq!(app.session.controller.graph().cables().count(), cables);
+    assert!(app.session.edits.history.undo_step().is_none());
     app.canvas_event(CanvasEvent::Delete(vec![missing.0]));
-    assert!(app.controller.graph().node(missing).is_none());
+    assert!(app.session.controller.graph().node(missing).is_none());
     app.undo();
-    let restored = app.controller.graph().node(missing).unwrap().unknown.clone().unwrap();
+    let restored = app
+        .session
+        .controller
+        .graph()
+        .node(missing)
+        .unwrap()
+        .unknown
+        .clone()
+        .unwrap();
     assert_eq!(restored.params.get("amount"), Some(&0.5));
-    assert_eq!(app.controller.graph().cables().count(), cables);
-    app.selection = BTreeSet::from([missing.0]);
-    app.edits.history.clear();
+    assert_eq!(app.session.controller.graph().cables().count(), cables);
+    app.session.selection = BTreeSet::from([missing.0]);
+    app.session.edits.history.clear();
     let copied = app.copy().unwrap();
     app.paste(Point::new(400.0, 200.0), Some(copied));
-    let pasted = ModuleId(*app.selection.iter().next().unwrap());
+    let pasted = ModuleId(*app.session.selection.iter().next().unwrap());
     assert_ne!(pasted, missing);
     assert_eq!(
-        app.controller.graph().node(pasted).unwrap().unknown.as_ref().unwrap(),
+        app.session
+            .controller
+            .graph()
+            .node(pasted)
+            .unwrap()
+            .unknown
+            .as_ref()
+            .unwrap(),
         &restored
     );
     app.undo();
-    assert!(app.controller.graph().node(pasted).is_none());
+    assert!(app.session.controller.graph().node(pasted).is_none());
     app.redo();
-    assert!(app.controller.graph().node(pasted).unwrap().unknown.is_some());
-    app.selection = BTreeSet::from([missing.0]);
+    assert!(app.session.controller.graph().node(pasted).unwrap().unknown.is_some());
+    app.session.selection = BTreeSet::from([missing.0]);
     app.duplicate();
-    let duplicate = ModuleId(*app.selection.iter().next().unwrap());
+    let duplicate = ModuleId(*app.session.selection.iter().next().unwrap());
     assert_ne!(duplicate, missing);
-    assert!(app.controller.graph().node(duplicate).unwrap().unknown.is_some());
+    assert!(
+        app.session
+            .controller
+            .graph()
+            .node(duplicate)
+            .unwrap()
+            .unknown
+            .is_some()
+    );
     app.undo();
-    assert!(app.controller.graph().node(duplicate).is_none());
+    assert!(app.session.controller.graph().node(duplicate).is_none());
     let _ = app.update(Message::Unassign(assignment));
     let _ = app.update(Message::Unmap {
         module: missing.0,
         index: 0,
     });
-    assert!(app.controller.graph().assignment(assignment).is_none());
-    assert!(app.controller.graph().midi_mapping_of(missing, 0).is_none());
+    assert!(app.session.controller.graph().assignment(assignment).is_none());
+    assert!(app.session.controller.graph().midi_mapping_of(missing, 0).is_none());
     assert_eq!(
-        app.controller
+        app.session
+            .controller
             .graph()
             .node(missing)
             .unwrap()
@@ -1462,7 +1536,7 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
 #[test]
 fn inspector_shows_nominal_port_ranges() {
     let mut app = app();
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
     app.commit();
     let _ = app.update(Message::SelectModule(env.0));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
@@ -1487,8 +1561,8 @@ fn inspector_shows_nominal_port_ranges() {
 #[test]
 fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
     let mut app = app();
-    let button = app.controller.add_module("loom.ui.button").unwrap();
-    let lfo = app.controller.add_module("loom.mod.lfo").unwrap();
+    let button = app.session.controller.add_module("loom.ui.button").unwrap();
+    let lfo = app.session.controller.add_module("loom.mod.lfo").unwrap();
     app.commit();
     let rows = |app: &App, module: ModuleId| {
         let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
@@ -1515,22 +1589,28 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
     let on = params.iter().find(|p| p.label != "Mode").unwrap();
     assert_eq!(control(on), inspector::ParamControl::Slider);
 
-    let undo = app.edits.history.undo_step().map(|s| s.name().to_string());
+    let undo = app.session.edits.history.undo_step().map(|s| s.name().to_string());
     let _ = app.update(Message::Choice {
         module: button.0,
         index: mode.index,
         choice: 1,
     });
-    assert_eq!(app.controller.graph().node(button).unwrap().params[mode.index], 1.0);
+    assert_eq!(
+        app.session.controller.graph().node(button).unwrap().params[mode.index],
+        1.0
+    );
     let mode = rows(&app, button).into_iter().find(|p| p.label == "Mode").unwrap();
     assert_eq!(mode.value, "Momentary");
     assert_ne!(
-        app.edits.history.undo_step().map(|s| s.name().to_string()),
+        app.session.edits.history.undo_step().map(|s| s.name().to_string()),
         undo,
         "one step"
     );
     let _ = app.update(Message::Undo);
-    assert_eq!(app.controller.graph().node(button).unwrap().params[mode.index], 0.0);
+    assert_eq!(
+        app.session.controller.graph().node(button).unwrap().params[mode.index],
+        0.0
+    );
 
     // More than four names: a pick list.
     let _ = app.update(Message::SelectModule(lfo.0));
@@ -1560,7 +1640,7 @@ fn a_range_note_shows_in_the_status_bar() {
         ..app_args()
     });
     let _ = std::fs::remove_dir_all(&dir);
-    let node = app.controller.graph().node(ModuleId(1)).unwrap();
+    let node = app.session.controller.graph().node(ModuleId(1)).unwrap();
     assert_eq!(
         (node.params[0], node.range(0)),
         (5.0, Some(loom_core::ParamRange::new(-5.0, 5.0)))
@@ -1609,8 +1689,8 @@ fn opening_a_patch_names_only_its_load_notes() {
 #[test]
 fn the_inspector_selects_a_control_range() {
     let mut app = app();
-    let mul = app.controller.add_module("loom.math.mul").unwrap();
-    app.controller.set_param(mul, 0, 0.5).unwrap();
+    let mul = app.session.controller.add_module("loom.math.mul").unwrap();
+    app.session.controller.set_param(mul, 0, 0.5).unwrap();
     app.commit();
     let _ = app.update(Message::SelectModule(mul.0));
     let gain_row = |app: &App| {
@@ -1631,13 +1711,23 @@ fn the_inspector_selects_a_control_range() {
     });
     let row = gain_row(&app);
     assert_eq!(row.range.unwrap().selected, Some(0));
-    assert_eq!(app.controller.graph().node(mul).unwrap().params[0], 0.1, "clamped");
     assert_eq!(
-        app.edits.history.undo_step().map(|s| s.name().to_string()).as_deref(),
+        app.session.controller.graph().node(mul).unwrap().params[0],
+        0.1,
+        "clamped"
+    );
+    assert_eq!(
+        app.session
+            .edits
+            .history
+            .undo_step()
+            .map(|s| s.name().to_string())
+            .as_deref(),
         Some("change Multiply Gain range")
     );
     // The tile knob and its keyboard steps span -0.1 to 0.1.
     let widget = app
+        .session
         .controller
         .graph()
         .node(mul)
@@ -1648,7 +1738,7 @@ fn the_inspector_selects_a_control_range() {
         .iter()
         .position(|w| w.binds("gain"))
         .unwrap();
-    let (_, _, spec) = scene::control_param(&app.controller, mul.0, widget).unwrap();
+    let (_, _, spec) = scene::control_param(&app.session.controller, mul.0, widget).unwrap();
     assert_eq!((spec.min, spec.max), (-0.1, 0.1));
     assert!(
         (spec.denormalize(0.51) - spec.denormalize(0.5) - 0.002).abs() < 1e-6,
@@ -1656,13 +1746,13 @@ fn the_inspector_selects_a_control_range() {
     );
 
     let _ = app.update(Message::Undo);
-    let node = app.controller.graph().node(mul).unwrap();
+    let node = app.session.controller.graph().node(mul).unwrap();
     assert_eq!(
         (node.params[0], node.range(0)),
         (0.5, Some(loom_core::ParamRange::new(-1.0, 1.0)))
     );
     // A parameter without ranges has no selector.
-    let lfo = app.controller.add_module("loom.mod.lfo").unwrap();
+    let lfo = app.session.controller.add_module("loom.mod.lfo").unwrap();
     app.commit();
     let _ = app.update(Message::SelectModule(lfo.0));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
@@ -1678,13 +1768,16 @@ fn the_inspector_selects_a_control_range() {
 #[test]
 fn a_one_sample_trigger_lights_the_divide_light() {
     let mut app = app();
-    let gate = app.controller.add_module("loom.math.constant").unwrap();
-    app.controller.set_param_named(gate, "value", 1.0).unwrap();
-    let divide = app.controller.add_module("loom.logic.divide").unwrap();
-    app.controller.set_param_named(divide, "n", 1.0).unwrap();
-    app.controller.connect_named(gate, "out", divide, "trigger").unwrap();
+    let gate = app.session.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller.set_param_named(gate, "value", 1.0).unwrap();
+    let divide = app.session.controller.add_module("loom.logic.divide").unwrap();
+    app.session.controller.set_param_named(divide, "n", 1.0).unwrap();
+    app.session
+        .controller
+        .connect_named(gate, "out", divide, "trigger")
+        .unwrap();
     app.commit();
-    let d = app.controller.graph().node(divide).unwrap().descriptor;
+    let d = app.session.controller.graph().node(divide).unwrap().descriptor;
     let light = d.panel.widgets.iter().position(|w| w.binds("fired")).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![divide.0])));
     let watch = app.watched_lights().expect("the trigger light is on screen");
@@ -1713,22 +1806,25 @@ fn a_one_sample_trigger_lights_the_divide_light() {
 #[test]
 fn a_running_engine_fills_the_meter() {
     let mut app = app();
-    let phase = app.controller.add_module("loom.phase.generator").unwrap();
-    let sine = app.controller.add_module("loom.osc.sine").unwrap();
-    let meter = app.controller.add_module("loom.display.meter").unwrap();
-    app.controller.connect_named(phase, "phase", sine, "phase").unwrap();
-    app.controller.connect_named(sine, "out", meter, "in").unwrap();
+    let phase = app.session.controller.add_module("loom.phase.generator").unwrap();
+    let sine = app.session.controller.add_module("loom.osc.sine").unwrap();
+    let meter = app.session.controller.add_module("loom.display.meter").unwrap();
+    app.session
+        .controller
+        .connect_named(phase, "phase", sine, "phase")
+        .unwrap();
+    app.session.controller.connect_named(sine, "out", meter, "in").unwrap();
     app.commit();
-    let d = app.controller.graph().node(meter).unwrap().descriptor;
+    let d = app.session.controller.graph().node(meter).unwrap().descriptor;
     let widget = d.panel.widgets.iter().position(|w| w.binds("out")).unwrap();
     // On screen, so the meter gets a probe.
     let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![meter.0])));
-    let _ = app.update(Message::Meters(app.monitor.read()));
+    let _ = app.update(Message::Meters(app.session.engine.monitor.read()));
     let before = tile_widget(&app, meter, widget);
     assert_eq!((before.position, before.peak), (0.0, 0.0), "the engine has not run");
 
     app.process(4_800);
-    let _ = app.update(Message::Meters(app.monitor.read()));
+    let _ = app.update(Message::Meters(app.session.engine.monitor.read()));
     let shown = tile_widget(&app, meter, widget);
     assert_eq!(shown.kind, "meter");
     assert!(shown.position > 0.0, "a level: {shown:?}");
@@ -1747,7 +1843,7 @@ fn a_mapped_control_change_turns_the_knob() {
         channel: 0,
         controller: 74,
     };
-    app.controller.map_midi(control, filter, cutoff).unwrap();
+    app.session.controller.map_midi(control, filter, cutoff).unwrap();
     app.commit();
     let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
     let start = tile_widget(&app, filter, widget).position;
@@ -1760,8 +1856,8 @@ fn a_mapped_control_change_turns_the_knob() {
         let _ = app.update(Message::Midi);
         let knob = tile_widget(&app, filter, widget);
         assert_eq!(knob.position, position, "CC 74 at {value}: {knob:?}");
-        let param = app.controller.graph().node(filter).unwrap().params[cutoff];
-        let spec = &app.controller.graph().node(filter).unwrap().descriptor.params[cutoff];
+        let param = app.session.controller.graph().node(filter).unwrap().params[cutoff];
+        let spec = &app.session.controller.graph().node(filter).unwrap().descriptor.params[cutoff];
         assert_eq!(param, if value == 0 { spec.min } else { spec.max });
     }
 }
@@ -1775,15 +1871,18 @@ fn a_mapped_control_change_turns_the_knob() {
 #[test]
 fn the_run_toggle_follows_a_cable_on_run() {
     let mut app = app();
-    let (transport, run) = transport_run(&app.controller).expect("a new patch has a Transport");
-    let run_param = |app: &App| app.controller.graph().node(transport).unwrap().params[run];
+    let (transport, run) = transport_run(&app.session.controller).expect("a new patch has a Transport");
+    let run_param = |app: &App| app.session.controller.graph().node(transport).unwrap().params[run];
     // A Button's gate is low until pressed: it stops the transport.
-    let button = app.controller.add_module("loom.ui.button").unwrap();
-    app.controller.connect_named(button, "gate", transport, "run").unwrap();
+    let button = app.session.controller.add_module("loom.ui.button").unwrap();
+    app.session
+        .controller
+        .connect_named(button, "gate", transport, "run")
+        .unwrap();
     app.commit();
     app.process(2048);
     app.refresh_values();
-    assert_eq!(transport_running(&app.controller), Some(false));
+    assert_eq!(transport_running(&app.session.controller), Some(false));
     assert_eq!(
         tile_widget(&app, transport, 0).position,
         0.0,
@@ -1800,16 +1899,20 @@ fn the_run_toggle_follows_a_cable_on_run() {
     })));
     assert_eq!(run_param(&app), 0.0, "the toggle takes the state the input left");
     app.process(1024);
-    assert_eq!(transport_running(&app.controller), Some(false), "still stopped");
+    assert_eq!(transport_running(&app.session.controller), Some(false), "still stopped");
     let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
     app.process(1024);
-    assert_eq!(transport_running(&app.controller), Some(true), "Space works again");
+    assert_eq!(
+        transport_running(&app.session.controller),
+        Some(true),
+        "Space works again"
+    );
 
     // Delete leaves the Transport, and a second one is refused.
     let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![transport.0, button.0])));
-    assert_eq!(app.controller.transport_module(), Some(transport));
-    assert!(app.controller.graph().node(button).is_none());
-    assert!(app.controller.add_module(TRANSPORT_MODULE).is_err());
+    assert_eq!(app.session.controller.transport_module(), Some(transport));
+    assert!(app.session.controller.graph().node(button).is_none());
+    assert!(app.session.controller.add_module(TRANSPORT_MODULE).is_err());
 }
 
 /// A patch that loads with a cable on `run`: removing the cable as the
@@ -1833,15 +1936,15 @@ fn a_loaded_run_cable_hands_its_state_to_the_toggle() {
         ..app_args()
     });
     let _ = std::fs::remove_dir_all(&dir);
-    let (transport, run) = transport_run(&app.controller).expect("the patch has a Transport");
+    let (transport, run) = transport_run(&app.session.controller).expect("the patch has a Transport");
     app.process(2048);
-    assert_eq!(transport_running(&app.controller), Some(false));
+    assert_eq!(transport_running(&app.session.controller), Some(false));
     let _ = app.update(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
         module: transport.0,
         output: false,
         index: 0,
     })));
-    let param = app.controller.graph().node(transport).unwrap().params[run];
+    let param = app.session.controller.graph().node(transport).unwrap().params[run];
     assert_eq!(param, 0.0, "the toggle takes the state the input left");
 }
 
@@ -1851,12 +1954,15 @@ fn a_loaded_run_cable_hands_its_state_to_the_toggle() {
 #[test]
 fn the_transport_position_moves_only_while_running() {
     let mut app = app();
-    let scale = app.controller.add_module("loom.phase.scale").unwrap();
+    let scale = app.session.controller.add_module("loom.phase.scale").unwrap();
     let (_, filter, cutoff, widget) = env_and_filter(&mut app);
-    app.controller.add_assignment(out(scale), filter, cutoff, 1.0).unwrap();
+    app.session
+        .controller
+        .add_assignment(out(scale), filter, cutoff, 1.0)
+        .unwrap();
     app.commit();
-    let settings = app.controller.transport();
-    let beats_per_frame = settings.tempo / 60.0 / f64::from(app.stream.sample_rate());
+    let settings = app.session.controller.transport();
+    let beats_per_frame = settings.tempo / 60.0 / f64::from(app.session.engine.stream.sample_rate());
     let beats_per_bar = settings.time_signature.beats_per_bar();
     // The bar phase the knob shows, from the live value of the last
     // frame the engine ran.
@@ -1876,8 +1982,8 @@ fn the_transport_position_moves_only_while_running() {
     assert!(settings.running, "a new patch starts running");
     // Space flips the Transport's Run toggle.
     let run_on = |app: &App| {
-        let (id, index) = transport_run(&app.controller).expect("a new patch has a Transport");
-        app.controller.graph().node(id).unwrap().params[index] >= 0.5
+        let (id, index) = transport_run(&app.session.controller).expect("a new patch has a Transport");
+        app.session.controller.graph().node(id).unwrap().params[index] >= 0.5
     };
     assert!(run_on(&app));
     let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
@@ -1909,29 +2015,29 @@ fn the_transport_position_moves_only_while_running() {
 #[test]
 fn removed_probes_lose_their_levels() {
     let mut app = app();
-    let gate = app.controller.add_module("loom.math.constant").unwrap();
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
-    app.controller.connect_named(gate, "out", env, "gate").unwrap();
+    let gate = app.session.controller.add_module("loom.math.constant").unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
+    app.session.controller.connect_named(gate, "out", env, "gate").unwrap();
     app.commit();
     for _ in 0..20 {
-        app.live.set_activity(true);
+        app.session.engine.live.set_activity(true);
         app.sync_probes();
         app.process(64);
-        let probe = app.live.probes().next().expect("a probe on the cable");
+        let probe = app.session.engine.live.probes().next().expect("a probe on the cable");
         let level = live::Level {
             rms: 0.5,
             peak: 0.6,
             right: None,
         };
         let _ = app.update(Message::Meters(vec![(probe, level)]));
-        assert_eq!(app.meter_levels.len(), 1);
+        assert_eq!(app.session.meter_levels.len(), 1);
 
-        app.live.set_activity(false);
+        app.session.engine.live.set_activity(false);
         app.sync_probes();
-        assert!(app.meter_levels.is_empty(), "{:?}", app.meter_levels);
+        assert!(app.session.meter_levels.is_empty(), "{:?}", app.session.meter_levels);
         // A late reading for the removed probe is ignored.
         let _ = app.update(Message::Meters(vec![(probe, level)]));
-        assert!(app.meter_levels.is_empty());
+        assert!(app.session.meter_levels.is_empty());
     }
 }
 
@@ -1943,6 +2049,7 @@ fn the_snapshot_shows_the_inspector_rows() {
     let mut app = app();
     let (env, sine, filter, cutoff, _) = two_sources(&mut app);
     let off = app
+        .session
         .controller
         .graph()
         .assignments()
@@ -2006,15 +2113,15 @@ fn the_snapshot_places_what_the_canvas_draws() {
     use loom_canvas::{Hit, PortRef};
     let mut app = app();
     let (env, sine, filter, _, widget) = two_sources(&mut app);
-    app.controller.connect_named(sine, "out", filter, "in").unwrap();
+    app.session.controller.connect_named(sine, "out", filter, "in").unwrap();
     app.commit();
     let snapshot = app.ui_snapshot();
     let tile = |id: ModuleId| snapshot.tiles.iter().find(|t| t.id == id.0).expect("a tile");
-    let view = app.scene.module(env.0).unwrap();
+    let view = app.session.scene.module(env.0).unwrap();
 
     let output = &tile(env).outputs[0];
     let badge = output.badge_bounds.expect("the envelope drives one assignment");
-    let drawn = app.scene.badge_bounds(env.0, 0).unwrap();
+    let drawn = app.session.scene.badge_bounds(env.0, 0).unwrap();
     assert_eq!(badge, drawn.into());
     let port = PortRef {
         module: env.0,
@@ -2022,16 +2129,16 @@ fn the_snapshot_places_what_the_canvas_draws() {
         index: 0,
     };
     assert_eq!(
-        app.scene.hit(drawn.center(), snapshot.port_hit_radius),
+        app.session.scene.hit(drawn.center(), snapshot.port_hit_radius),
         Hit::Badge(port)
     );
     let centre = Point::new(output.centre.x, output.centre.y);
-    assert_eq!(app.scene.hit(centre, snapshot.port_hit_radius), Hit::Port(port));
+    assert_eq!(app.session.scene.hit(centre, snapshot.port_hit_radius), Hit::Port(port));
     assert_eq!(tile(env).bounds, view.bounds().into());
     assert_eq!(tile(sine).outputs[0].badge_bounds.map(|b| b.width), Some(drawn.width));
 
     let knob = tile(filter).widgets[widget].bounds.expect("a shown knob");
-    let filter_view = app.scene.module(filter.0).unwrap();
+    let filter_view = app.session.scene.module(filter.0).unwrap();
     assert_eq!(knob, filter_view.widget_bounds(widget).unwrap().into());
 
     let cable = snapshot
@@ -2047,9 +2154,10 @@ fn the_snapshot_places_what_the_canvas_draws() {
 /// An app with one filter, its ID, and the index of its Cutoff.
 fn app_with_filter() -> (App, u32, usize) {
     let mut app = app();
-    let id = app.controller.add_module("loom.filter.svf").unwrap();
+    let id = app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
     let cutoff = app
+        .session
         .controller
         .graph()
         .node(id)
@@ -2073,6 +2181,7 @@ fn slide(app: &mut App, module: u32, index: usize, values: &[f32]) {
 fn pending_arrow_group_yields_to_undo_and_inspector() {
     let (mut app, module, cutoff) = app_with_filter();
     let widget = app
+        .session
         .controller
         .graph()
         .node(ModuleId(module))
@@ -2083,7 +2192,7 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
         .iter()
         .position(|w| w.binds("cutoff"))
         .unwrap();
-    let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+    let original = app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
     let set = |app: &mut App, position| {
         let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
         let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
@@ -2094,26 +2203,26 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
         }));
         let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupPending));
     };
-    let value = |app: &App| app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+    let value = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
 
     set(&mut app, 0.6);
-    assert!(app.edits.gesture_open());
+    assert!(app.session.edits.gesture_open());
     let _ = app.update(Message::Undo);
     assert_eq!(value(&app), original, "Undo must act before the 500 ms timer");
-    assert!(!app.edits.gesture_open());
+    assert!(!app.session.edits.gesture_open());
     let _ = app.update(Message::Redo);
     assert_ne!(value(&app), original, "Redo must also act before the timer");
     let _ = app.update(Message::Undo);
     let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
-    assert!(!app.edits.gesture_open());
+    assert!(!app.session.edits.gesture_open());
 
     set(&mut app, 0.7);
     let arrow_value = value(&app);
     slide(&mut app, module, cutoff, &[800.0, 900.0]);
-    assert!(app.edits.slider_gesture_open());
+    assert!(app.session.edits.slider_gesture_open());
     let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
     assert!(
-        app.edits.slider_gesture_open(),
+        app.session.edits.slider_gesture_open(),
         "late arrow end must leave the slider open"
     );
     let _ = app.update(Message::SliderReleased);
@@ -2127,6 +2236,7 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
 fn arrow_resumed_after_undo_starts_a_new_step() {
     let (mut app, module, cutoff) = app_with_filter();
     let widget = app
+        .session
         .controller
         .graph()
         .node(ModuleId(module))
@@ -2137,7 +2247,7 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
         .iter()
         .position(|w| w.binds("cutoff"))
         .unwrap();
-    let original = app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+    let original = app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
     for event in [
         CanvasEvent::GestureStart,
         CanvasEvent::SetControl {
@@ -2152,7 +2262,7 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
     }
     let _ = app.update(Message::Undo);
     assert_eq!(
-        app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
+        app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
         original
     );
     for event in [
@@ -2168,11 +2278,11 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
     ] {
         let _ = app.update(Message::Canvas(event));
     }
-    assert_eq!(app.edits.history.len(), 1, "the undone step was replaced");
-    assert!(!app.edits.gesture_open());
+    assert_eq!(app.session.edits.history.len(), 1, "the undone step was replaced");
+    assert!(!app.session.edits.gesture_open());
     let _ = app.update(Message::Undo);
     assert_eq!(
-        app.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
+        app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
         original
     );
 }
@@ -2183,23 +2293,27 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
 #[test]
 fn an_inspector_slider_gesture_closes_at_release_at_the_next_edit_and_at_undo() {
     let (mut app, filter, cutoff) = app_with_filter();
-    let steps = app.edits.history.len();
+    let steps = app.session.edits.history.len();
 
     // Release.
     slide(&mut app, filter, cutoff, &[500.0, 600.0, 700.0]);
-    assert!(app.edits.slider_gesture_open());
+    assert!(app.session.edits.slider_gesture_open());
     let _ = app.update(Message::SliderReleased);
-    assert!(!app.edits.gesture_open());
-    assert_eq!(app.edits.history.len(), steps + 1, "one drag, one step");
+    assert!(!app.session.edits.gesture_open());
+    assert_eq!(app.session.edits.history.len(), steps + 1, "one drag, one step");
 
     // The next edit, here a canvas gesture start.
     slide(&mut app, filter, cutoff, &[800.0, 900.0]);
     let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
-    assert!(!app.edits.slider_gesture_open());
-    assert_eq!(app.edits.history.len(), steps + 2, "the start closed the slider's step");
+    assert!(!app.session.edits.slider_gesture_open());
+    assert_eq!(
+        app.session.edits.history.len(),
+        steps + 2,
+        "the start closed the slider's step"
+    );
     let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
     assert_eq!(
-        app.edits.history.len(),
+        app.session.edits.history.len(),
         steps + 2,
         "a gesture with no change is no step"
     );
@@ -2207,12 +2321,12 @@ fn an_inspector_slider_gesture_closes_at_release_at_the_next_edit_and_at_undo() 
     // Undo, which takes back the slider's step it closes.
     slide(&mut app, filter, cutoff, &[1000.0]);
     let _ = app.update(Message::Undo);
-    assert!(!app.edits.gesture_open());
-    let value = app.controller.graph().node(ModuleId(filter)).unwrap().params[cutoff];
+    assert!(!app.session.edits.gesture_open());
+    let value = app.session.controller.graph().node(ModuleId(filter)).unwrap().params[cutoff];
     assert_eq!(value, 900.0, "undo took back the slider's last step");
-    assert_eq!(app.edits.history.len(), steps + 3);
+    assert_eq!(app.session.edits.history.len(), steps + 3);
     assert_eq!(
-        app.edits.history.redo_step().map(undo::Step::name),
+        app.session.edits.history.redo_step().map(undo::Step::name),
         Some("change SVF Cutoff")
     );
 }
@@ -2222,21 +2336,21 @@ fn an_inspector_slider_gesture_closes_at_release_at_the_next_edit_and_at_undo() 
 #[test]
 fn a_release_clears_the_hold_after_a_mode_change() {
     let mut app = app();
-    let id = app.controller.add_module("loom.ui.button").unwrap();
+    let id = app.session.controller.add_module("loom.ui.button").unwrap();
     app.commit();
-    let node = app.controller.graph().node(id).unwrap();
+    let node = app.session.controller.graph().node(id).unwrap();
     let mode = node.descriptor.param_index("mode").unwrap();
     let hold = node.descriptor.param_index("hold").unwrap();
     let (module, widget) = (id.0, 0);
-    let held = |app: &App| app.controller.graph().node(id).unwrap().params[hold];
+    let held = |app: &App| app.session.controller.graph().node(id).unwrap().params[hold];
 
-    app.controller.set_param(id, mode, 1.0).unwrap();
+    app.session.controller.set_param(id, mode, 1.0).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
     assert_eq!(held(&app), 1.0, "the hold is down");
-    app.controller.set_param(id, mode, 0.0).unwrap();
+    app.session.controller.set_param(id, mode, 0.0).unwrap();
     let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
     assert_eq!(held(&app), 0.0, "the release let go of the hold");
-    app.controller.set_param(id, mode, 1.0).unwrap();
+    app.session.controller.set_param(id, mode, 1.0).unwrap();
     assert_eq!(held(&app), 0.0, "Momentary mode comes back released");
 }
 
@@ -2246,9 +2360,9 @@ fn a_release_clears_the_hold_after_a_mode_change() {
 #[test]
 fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
     let mut app = app();
-    let id = app.controller.add_module("loom.ui.button").unwrap();
+    let id = app.session.controller.add_module("loom.ui.button").unwrap();
     app.commit();
-    let node = app.controller.graph().node(id).unwrap();
+    let node = app.session.controller.graph().node(id).unwrap();
     let mode = node.descriptor.param_index("mode").unwrap();
     let on = node
         .descriptor
@@ -2259,28 +2373,32 @@ fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
     let (module, widget) = (id.0, 0);
     let press = |app: &mut App, param: usize, release: bool| {
         let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
-        let held = app.controller.graph().node(id).unwrap().params[param];
+        let held = app.session.controller.graph().node(id).unwrap().params[param];
         if release {
             let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
         }
         held
     };
 
-    app.controller.set_param(id, mode, 1.0).unwrap();
+    app.session.controller.set_param(id, mode, 1.0).unwrap();
     app.commit();
-    let steps = app.edits.history.len();
+    let steps = app.session.edits.history.len();
     assert_eq!(press(&mut app, hold, false), 1.0, "the hold is down");
-    assert_eq!(app.edits.history.len(), steps, "a momentary press is no step");
+    assert_eq!(app.session.edits.history.len(), steps, "a momentary press is no step");
     let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
-    assert_eq!(app.controller.graph().node(id).unwrap().params[hold], 0.0);
-    assert_eq!(app.edits.history.len(), steps, "nor is its release");
+    assert_eq!(app.session.controller.graph().node(id).unwrap().params[hold], 0.0);
+    assert_eq!(app.session.edits.history.len(), steps, "nor is its release");
 
-    app.controller.set_param(id, mode, 0.0).unwrap();
+    app.session.controller.set_param(id, mode, 0.0).unwrap();
     app.commit();
-    let steps = app.edits.history.len();
+    let steps = app.session.edits.history.len();
     assert_eq!(press(&mut app, on, true), 1.0, "the toggle is on");
-    assert_eq!(app.edits.history.len(), steps + 1, "a toggle press is a step");
-    assert_eq!(app.controller.graph().node(id).unwrap().params[on], 1.0, "and stays on");
+    assert_eq!(app.session.edits.history.len(), steps + 1, "a toggle press is a step");
+    assert_eq!(
+        app.session.controller.graph().node(id).unwrap().params[on],
+        1.0,
+        "and stays on"
+    );
 }
 
 /// File > New on a saved patch starts an empty one and says so.
@@ -2290,6 +2408,7 @@ fn new_says_it_started_an_empty_patch() {
     let _ = app.update(Message::File(FileAction::New));
     assert_eq!(app.alerts.status(), "new patch");
     let filters = app
+        .session
         .controller
         .graph()
         .nodes()
@@ -2314,9 +2433,9 @@ fn learn_disarms_on_a_second_click_and_bad_params_say_why() {
     let (mut app, id, cutoff) = app_with_filter();
     let _ = app.update(Message::Learn(learn::Message::Toggle));
     let _ = app.update(Message::Learn(learn::Message::Arm((id, cutoff))));
-    assert!(app.learn.is_armed((id, cutoff)));
+    assert!(app.session.learn.is_armed((id, cutoff)));
     let _ = app.update(Message::Learn(learn::Message::Arm((id, cutoff))));
-    assert!(!app.learn.is_armed((id, cutoff)));
+    assert!(!app.session.learn.is_armed((id, cutoff)));
     assert_eq!(app.alerts.status(), "MIDI learn: click a control to map it");
 
     app.set_param(id, 999, 0.5);
@@ -2335,7 +2454,7 @@ fn the_matrix_add_form_needs_a_source_and_a_target() {
     let _ = app.update(Message::Matrix(matrix::Event::AddOpen));
     let _ = app.update(Message::Matrix(matrix::Event::AddApply));
     assert_eq!(app.alerts.status(), "Choose a source and a target");
-    assert!(app.controller.graph().assignments().next().is_none());
+    assert!(app.session.controller.graph().assignments().next().is_none());
 }
 
 /// With no free module slot, Duplicate and an Undo that brings a module
@@ -2348,26 +2467,26 @@ fn a_full_patch_refuses_duplicate_and_undo() {
         ..EngineConfig::default()
     };
     let parts = create_engine(registry(true), config);
-    app.controller = parts.controller;
-    app.stream.keep_idle(parts.engine);
-    app.stream.set_running(None);
-    let sine = app.controller.add_module("loom.osc.sine").unwrap();
+    app.session.controller = parts.controller;
+    app.session.engine.stream.keep_idle(parts.engine);
+    app.session.engine.stream.set_running(None);
+    let sine = app.session.controller.add_module("loom.osc.sine").unwrap();
     assert!(app.commit());
-    app.selection = BTreeSet::from([sine.0]);
+    app.session.selection = BTreeSet::from([sine.0]);
     app.duplicate();
     assert!(
         app.alerts.status().starts_with("Cannot duplicate: "),
         "{}",
         app.alerts.status()
     );
-    assert_eq!(app.controller.graph().nodes().count(), 1);
+    assert_eq!(app.session.controller.graph().nodes().count(), 1);
 
     app.edit(|app| {
-        app.controller.remove_module(sine).unwrap();
+        app.session.controller.remove_module(sine).unwrap();
         app.commit();
     });
     // Something else takes the freed slot.
-    app.controller.add_module("loom.osc.saw").unwrap();
+    app.session.controller.add_module("loom.osc.saw").unwrap();
     assert!(app.commit());
     let _ = app.update(Message::Undo);
     assert!(
@@ -2375,7 +2494,7 @@ fn a_full_patch_refuses_duplicate_and_undo() {
         "{}",
         app.alerts.status()
     );
-    assert!(app.controller.graph().node(sine).is_none());
+    assert!(app.session.controller.graph().node(sine).is_none());
 }
 
 /// A help example that does not parse leaves the patch and says why.
@@ -2399,9 +2518,9 @@ fn a_broken_help_example_says_why() {
 fn app_with_engine(config: EngineConfig) -> App {
     let mut app = app();
     let parts = create_engine(registry(true), config);
-    app.controller = parts.controller;
-    app.stream.keep_idle(parts.engine);
-    app.stream.set_running(None);
+    app.session.controller = parts.controller;
+    app.session.engine.stream.keep_idle(parts.engine);
+    app.session.engine.stream.set_running(None);
     app
 }
 
@@ -2415,13 +2534,13 @@ fn a_full_module_table_says_the_module_was_not_added() {
     });
     let sine = registry(true).resolve("loom.osc.sine").unwrap();
     app.add_module(sine, Point::ORIGIN);
-    let count = app.controller.graph().nodes().count();
+    let count = app.session.controller.graph().nodes().count();
 
     app.add_module(sine, Point::new(200.0, 0.0));
 
     let status = app.alerts.status();
     assert!(status.starts_with(&format!("Could not add {}:", sine.name)), "{status}");
-    assert_eq!(app.controller.graph().nodes().count(), count);
+    assert_eq!(app.session.controller.graph().nodes().count(), count);
 }
 
 /// When the command queue is full, Panic says it did not run, and the
@@ -2533,7 +2652,7 @@ fn the_status_bar_says_learning_while_learn_mode_is_on() {
 #[test]
 fn disabled_toolbar_buttons_say_why_in_hover_text() {
     let app = app();
-    assert!(app.midi.is_none(), "no audio in this test");
+    assert!(app.session.engine.midi.is_none(), "no audio in this test");
     assert_eq!(app.hold_hover(), Some(crate::view::HOLD_DISABLED));
     assert!(app.rig.recent.files().is_empty());
     assert!(app.recent_hover().contains("disabled"), "{}", app.recent_hover());

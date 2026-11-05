@@ -296,8 +296,8 @@ impl App {
                 self.overlays.chooser = None;
                 match target {
                     Target::Patch => {
-                        if self.document.info().license != licence {
-                            self.document.edit_info(|info| info.license = licence);
+                        if self.session.document.info().license != licence {
+                            self.session.document.edit_info(|info| info.license = licence);
                         }
                     }
                     Target::Default => self.set_default_licence(licence),

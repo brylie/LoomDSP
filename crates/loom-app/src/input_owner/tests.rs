@@ -23,7 +23,7 @@ pub(crate) const OWNERS: [InputOwner; 10] = [
 
 /// Selects the first module, which help and the clipboard keys need.
 pub(crate) fn select_first_module(ui: &mut Ui) {
-    let (id, _) = ui.app.controller.graph().nodes().next().expect("a module");
+    let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
     ui.send(Message::Canvas(CanvasEvent::Select(vec![id.0])));
     ui.redraw();
 }
@@ -34,7 +34,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
     match owner {
         InputOwner::Question => {
             ui.app.edit(|app| {
-                app.controller.add_module("loom.osc.sine").unwrap();
+                app.session.controller.add_module("loom.osc.sine").unwrap();
                 app.commit();
             });
             ui.send(Message::File(crate::FileAction::New));
@@ -49,7 +49,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
         InputOwner::Browser => ui.send(Message::OpenBrowser),
         InputOwner::RecentList => ui.app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new())),
         InputOwner::ProbeMenu => {
-            let (from, _) = ui.app.controller.graph().cables().next().expect("a cable");
+            let (from, _) = ui.app.session.controller.graph().cables().next().expect("a cable");
             let output = PortRef {
                 module: from.module.0,
                 output: true,
@@ -63,7 +63,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
             }));
         }
         InputOwner::TileMenu => {
-            let (id, _) = ui.app.controller.graph().nodes().next().expect("a module");
+            let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
             ui.send(Message::Canvas(CanvasEvent::TileMenu {
                 module: id.0,
                 at: Point::new(100.0, 100.0),
@@ -164,7 +164,7 @@ fn a_route_reads_who_was_listening_before_the_event() {
     let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
     let before = app.listening();
     app.edit(|app| {
-        app.controller.add_module("loom.osc.sine").unwrap();
+        app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
     let _ = app.update(Message::File(crate::FileAction::New));
@@ -298,7 +298,7 @@ fn up_and_down_leave_the_patch_list_alone_behind_help() {
 /// Taps Cmd with a character, and returns the number of modules after it.
 fn tap_command(ui: &mut Ui, c: &str) -> usize {
     ui.tap(Key::Character(c.into()), Modifiers::COMMAND);
-    ui.app.controller.graph().nodes().count()
+    ui.app.session.controller.graph().nodes().count()
 }
 
 /// #581: with an overlay open and no text field in focus, Cmd+X and Cmd+D leave
@@ -312,7 +312,7 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
             let mut ui = Ui::open("subtractive.ron");
             select_first_module(&mut ui);
             open_overlay(&mut ui, owner);
-            let modules = ui.app.controller.graph().nodes().count();
+            let modules = ui.app.session.controller.graph().nodes().count();
             ui.run_task(crate::editing::unfocus_text_fields());
             ui.redraw();
             assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
@@ -332,7 +332,7 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
 fn duplicate_does_nothing_from_a_focused_search_field() {
     let mut ui = Ui::open("subtractive.ron");
     select_first_module(&mut ui);
-    let modules = ui.app.controller.graph().nodes().count();
+    let modules = ui.app.session.controller.graph().nodes().count();
     open_overlay(&mut ui, InputOwner::Patches);
     ui.focus(patches::SEARCH);
     assert!(ui.text_field_focused());
@@ -344,12 +344,12 @@ fn duplicate_does_nothing_from_a_focused_search_field() {
 fn clipboard_keys_work_with_no_overlay() {
     let mut ui = Ui::open("subtractive.ron");
     select_first_module(&mut ui);
-    let modules = ui.app.controller.graph().nodes().count();
+    let modules = ui.app.session.controller.graph().nodes().count();
     assert_eq!(tap_command(&mut ui, "d"), modules + 1, "Cmd+D duplicates");
     ui.clipboard.0 = None;
     ui.tap(Key::Character("c".into()), Modifiers::COMMAND);
     assert!(ui.clipboard.0.is_some(), "Cmd+C copies");
-    let before = ui.app.controller.graph().nodes().count();
+    let before = ui.app.session.controller.graph().nodes().count();
     assert!(tap_command(&mut ui, "x") < before, "Cmd+X cuts");
 }
 

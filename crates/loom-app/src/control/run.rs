@@ -172,7 +172,7 @@ impl App {
                     value,
                     frames_left,
                 } => {
-                    let seen = self.controller.last_control_change();
+                    let seen = self.session.controller.last_control_change();
                     if seen.is_some_and(|seen| {
                         Some(seen.serial) != before && seen.control == control && seen.value == value
                     }) {
@@ -200,8 +200,8 @@ impl App {
                 Step::Sample(mut sampling) => {
                     // The live values this frame draws, even when nothing
                     // else asks for frames.
-                    crate::scene::update_live_values(&mut self.values, &self.controller);
-                    match sampling.record(self.controller.graph(), &self.values, now) {
+                    crate::scene::update_live_values(&mut self.session.values, &self.session.controller);
+                    match sampling.record(self.session.controller.graph(), &self.session.values, now) {
                         Err(error) => call.answer(Err(error)),
                         Ok(true) => call.answer(Ok(fields(json!({ "frames": sampling.frames })))),
                         Ok(false) => waiting.push(Pending {
@@ -276,7 +276,8 @@ impl App {
                 .and_then(|from| Ok((from, port(self, &to, false)?)))
                 .and_then(|(from, to)| {
                     if [from.module, to.module].iter().any(|&id| {
-                        self.controller
+                        self.session
+                            .controller
                             .graph()
                             .node(ModuleId(id))
                             .is_some_and(|node| node.unknown.is_some())
@@ -337,7 +338,7 @@ impl App {
                 };
                 let value = value.min(127);
                 let step = Step::ControlChange {
-                    before: self.controller.last_control_change().map(|seen| seen.serial),
+                    before: self.session.controller.last_control_change().map(|seen| seen.serial),
                     control,
                     value,
                     frames_left: FRAMES_FOR_ENGINE,
@@ -380,7 +381,7 @@ impl App {
                 // after it was dropped too (rule 9). `update` cannot say so,
                 // and a field would not survive the patch being replaced.
                 if let Message::Question(answer) = message {
-                    self.document.may_have_changed();
+                    self.session.document.may_have_changed();
                     if !self.question_message(answer) {
                         return Err(self.alerts.status().to_string());
                     }
@@ -645,7 +646,7 @@ impl App {
         let wanted = self.input_wanted();
         let denied = wanted && self.rig.host.audio_input_permission_denied();
         let input = self.rig.input.stream_report(wanted, denied);
-        let Some(stats) = self.stream.stats().cloned() else {
+        let Some(stats) = self.session.engine.stream.stats().cloned() else {
             return json!({
                 "device": null, "rate": null, "buffer": null, "callbacks": 0,
                 "advanced": null, "stream_errors": 0, "start_overloads": 0, "overruns": 0,
@@ -654,12 +655,12 @@ impl App {
         };
         let now = stats.snapshot();
         // A new stream counts from its start.
-        let before = match &self.control_seen {
+        let before = match &self.session.engine.control_seen {
             Some((seen, callbacks)) if Arc::ptr_eq(seen, &stats) => *callbacks,
             _ => 0,
         };
         if remember {
-            self.control_seen = Some((stats.clone(), now.callbacks));
+            self.session.engine.control_seen = Some((stats.clone(), now.callbacks));
         }
         let playing = self.rig.playing.as_ref();
         json!({
@@ -678,7 +679,7 @@ impl App {
     pub(super) fn check_modules(&self, modules: &[u32]) -> Result<(), String> {
         match modules
             .iter()
-            .find(|&&m| self.controller.graph().node(ModuleId(m)).is_none())
+            .find(|&&m| self.session.controller.graph().node(ModuleId(m)).is_none())
         {
             Some(m) => Err(format!("no module {m}")),
             None => Ok(()),
@@ -694,6 +695,7 @@ impl App {
         send: &mut impl FnMut(&mut App, Message),
     ) -> Answer {
         let node = self
+            .session
             .controller
             .graph()
             .node(ModuleId(module))
@@ -716,6 +718,7 @@ impl App {
         send(self, message);
         send(self, Message::SliderReleased);
         let stored = self
+            .session
             .controller
             .graph()
             .node(ModuleId(module))
@@ -727,7 +730,7 @@ impl App {
     /// The message an inspector row sends in learn mode: it arms the
     /// parameter, or disarms it if it is armed.
     pub(super) fn arm_command(&self, target: &str) -> Result<Message, String> {
-        if !self.learn.is_on() {
+        if !self.session.learn.is_on() {
             return Err("MIDI learn is off; press `learn` first".to_string());
         }
         let Some((module, Some(param))) = split_target(target) else {
@@ -736,6 +739,7 @@ impl App {
             ));
         };
         let node = self
+            .session
             .controller
             .graph()
             .node(ModuleId(module))
@@ -765,6 +769,7 @@ impl App {
             ));
         };
         let node = self
+            .session
             .controller
             .graph()
             .node(ModuleId(module))
@@ -774,6 +779,7 @@ impl App {
             .param_index(param)
             .ok_or_else(|| format!("module {module} ({}) has no parameter `{param}`", node.descriptor.name))?;
         let (_, mapping) = self
+            .session
             .controller
             .graph()
             .midi_mapping_of(ModuleId(module), index)
@@ -829,6 +835,7 @@ impl App {
             ));
         };
         let node = self
+            .session
             .controller
             .graph()
             .node(ModuleId(module))
@@ -868,13 +875,14 @@ impl App {
         // Below the patch, unless a place is given.
         let world = match at {
             Some([x, y]) => Point::new(x, y),
-            None => self.scene.bounds().map_or(Point::ORIGIN, |b| {
+            None => self.session.scene.bounds().map_or(Point::ORIGIN, |b| {
                 Point::new(b.x, b.y + b.height + 2.0 * loom_canvas::GRID)
             }),
         };
-        let before: Vec<u32> = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        let before: Vec<u32> = self.session.controller.graph().nodes().map(|(id, _)| id.0).collect();
         self.add_module(descriptor, world);
         let added = self
+            .session
             .controller
             .graph()
             .nodes()
@@ -895,12 +903,14 @@ impl App {
             _ => return Err(format!("`{kind}` is not scope or meter")),
         };
         let world = self
+            .session
             .scene
             .port_position(output)
             .ok_or_else(|| format!("`{from}` is not on the canvas"))?;
-        let before: Vec<u32> = self.controller.graph().nodes().map(|(id, _)| id.0).collect();
+        let before: Vec<u32> = self.session.controller.graph().nodes().map(|(id, _)| id.0).collect();
         send(self, Message::AddProbe { probe, output, world });
         let added = self
+            .session
             .controller
             .graph()
             .nodes()
@@ -914,6 +924,8 @@ impl App {
 
     pub(super) fn send_midi(&mut self, event: MidiEvent) -> Answer {
         let midi = self
+            .session
+            .engine
             .midi
             .as_ref()
             .ok_or("no audio is playing the engine; start the app with --fake-audio or a device")?;

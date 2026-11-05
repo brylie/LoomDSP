@@ -529,8 +529,8 @@ fn hiding_a_whole_row_shortens_the_panel() {
 #[test]
 fn the_inspector_marks_a_hidden_parameter() {
     let mut app = crate::tests::app();
-    let env = app.controller.add_module("loom.env.envelope").unwrap();
-    app.controller.set_param_named(env, "mode", 1.0).unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
+    app.session.controller.set_param_named(env, "mode", 1.0).unwrap();
     let _ = app.update(crate::Message::SelectModule(env.0));
     let crate::inspector::Inspector::Module(rows) = app.inspector_model() else {
         panic!("the envelope's rows");
@@ -550,13 +550,14 @@ fn the_all_modules_patch_has_every_module_without_overlap() {
         patch: Some(path),
         ..crate::tests::app_args()
     });
-    let graph = app.controller.graph();
+    let graph = app.session.controller.graph();
     let mut kinds: Vec<&str> = graph.nodes().map(|(_, node)| node.descriptor.id).collect();
     kinds.sort_unstable();
     let mut registry: Vec<&str> = loom_modules::registry().iter().map(|d| d.id).collect();
     registry.sort_unstable();
     assert_eq!(kinds, registry, "every built-in module, once");
     let tiles: Vec<_> = app
+        .session
         .scene
         .modules()
         .iter()

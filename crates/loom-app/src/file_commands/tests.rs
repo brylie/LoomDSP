@@ -2,6 +2,7 @@ use crate::files::fake::{self, Asked};
 use crate::input_owner::{InputOwner, tests::open_overlay};
 use crate::matrix::Tab;
 use crate::recovery::tests::TempDir;
+use crate::session::{EngineLink, PatchSession};
 use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
 use crate::{App, Source, alerts, control, controls, editing, help, live, settings};
@@ -20,44 +21,44 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     args.bench.bench_seconds = Some(30.0);
     let mut app = App::new(args);
     let report = format!("{:?}", app.reporter);
-    let added = app.controller.add_module("loom.osc.sine").unwrap();
+    let added = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
 
     // What goes with the patch.
-    app.retry_commit = true;
-    app.positions.insert(added.0, (1.0, 2.0));
-    app.unknown_positions.insert(99, (None, (0.0, 0.0)));
-    app.sizes.insert(added.0, (4, 4));
-    app.mode_key.push((99, 0, 1));
-    app.gestures.toggle_adding((added.0, 0));
-    app.value_draft = Some(controls::ValueDraft {
+    app.session.retry_commit = true;
+    app.session.positions.insert(added.0, (1.0, 2.0));
+    app.session.unknown_positions.insert(99, (None, (0.0, 0.0)));
+    app.session.sizes.insert(added.0, (4, 4));
+    app.session.mode_key.push((99, 0, 1));
+    app.session.gestures.toggle_adding((added.0, 0));
+    app.session.value_draft = Some(controls::ValueDraft {
         module: added.0,
         index: 0,
         text: "1".to_string(),
         error: None,
     });
     app.text_focus = editing::TextFocus { any: true, field: None };
-    app.lights.insert((added.0, 0), 1.0);
-    app.run_driven = true;
-    app.meter_levels.insert(ProbeId(99), live::Level::default());
-    app.clip_holds.reset((added.0, 0));
-    app.traces.set(added.0, 0, loom_canvas::Trace::default());
-    app.carrying.insert(OutputRef { module: added, port: 0 });
-    app.full_traces = false;
-    app.visible_displays.push(added.0);
-    app.selection.insert(added.0);
-    app.holding = true;
-    app.patch_info.tag_draft = "draft".to_string();
+    app.session.lights.insert((added.0, 0), 1.0);
+    app.session.run_driven = true;
+    app.session.meter_levels.insert(ProbeId(99), live::Level::default());
+    app.session.clip_holds.reset((added.0, 0));
+    app.session.traces.set(added.0, 0, loom_canvas::Trace::default());
+    app.session.carrying.insert(OutputRef { module: added, port: 0 });
+    app.session.full_traces = false;
+    app.session.visible_displays.push(added.0);
+    app.session.selection.insert(added.0);
+    app.session.engine.holding = true;
+    app.session.patch_info.tag_draft = "draft".to_string();
     app.drops.push("dropped.ron".into());
     let now = Instant::now();
     app.meter.record(now);
     app.meter.record(now + Duration::from_millis(10));
-    app.control_seen = Some((Arc::default(), 1));
-    app.learn.start();
-    app.arrow_group_pending = true;
-    app.arrow_group_closed = true;
-    app.matrix.focused = true;
-    app.step_name = Some("step".to_string());
+    app.session.engine.control_seen = Some((Arc::default(), 1));
+    app.session.learn.start();
+    app.session.arrow_group_pending = true;
+    app.session.arrow_group_closed = true;
+    app.session.matrix.focused = true;
+    app.session.step_name = Some("step".to_string());
     // Overlays close, all but the Preferences window.
     app.overlays.help = Some(help::Help::shortcuts());
 
@@ -76,49 +77,22 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(app.replace(Source::Empty));
 
     let App {
-        controller,
-        retry_commit,
-        positions,
-        unknown_positions,
-        sizes,
-        scene,
-        mode_key,
-        gestures,
-        // Rebuilt from the new patch, as the scene is.
-        values: _,
-        value_draft,
-        text_focus,
-        lights,
-        run_driven,
-        meter_levels,
-        clip_holds,
-        traces,
-        carrying,
-        full_traces,
-        visible_displays,
-        selection,
-        document,
+        session,
         // `document/tests.rs` and `autosave_tests.rs` cover what it does.
         run_files: _,
         right_tab,
+        text_focus,
         generation,
         test_modules,
         // Set only by `AfterDiscard::Close`, which never replaces the patch.
         quit: _,
         // Built the same way every time.
         theme: _,
-        stream,
-        // Rebuilt around the new engine's telemetry.
-        monitor: _,
-        live,
         // What belongs to the machine. `Rig`'s own tests cover it.
         rig: _,
         alerts,
-        midi,
-        holding,
         modules,
         overlays,
-        patch_info,
         drops,
         patches_open,
         browser_key,
@@ -129,21 +103,54 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // `control::end_samples` decides what stays. Empty here.
         control_pending,
         pointer,
-        control_seen,
         measuring,
         animating,
         dev_tools,
-        learn,
-        edits,
-        arrow_group_pending,
-        arrow_group_closed,
-        matrix,
         // Set only on the screenshot path, which never replaces the patch.
         still: _,
-        step_name,
         // Set and taken within one `update`.
         history_key: _,
     } = &app;
+    let PatchSession {
+        controller,
+        retry_commit,
+        positions,
+        unknown_positions,
+        sizes,
+        selection,
+        document,
+        patch_info,
+        edits,
+        arrow_group_pending,
+        arrow_group_closed,
+        step_name,
+        gestures,
+        value_draft,
+        learn,
+        matrix,
+        run_driven,
+        scene,
+        mode_key,
+        // Rebuilt from the new patch, as the scene is.
+        values: _,
+        lights,
+        meter_levels,
+        clip_holds,
+        traces,
+        carrying,
+        full_traces,
+        visible_displays,
+        engine,
+    } = session;
+    let EngineLink {
+        stream,
+        // Rebuilt around the new engine's telemetry.
+        monitor: _,
+        live,
+        midi,
+        holding,
+        control_seen,
+    } = engine;
 
     // A new patch: only its Transport.
     assert_eq!(controller.graph().nodes().count(), 1);
@@ -214,7 +221,7 @@ fn the_output_safety_flag_holds_for_a_new_patch() {
 
     assert!(app.replace(Source::Empty));
 
-    assert_eq!(app.stream.output_safety(), OutputSafety::Clean);
+    assert_eq!(app.session.engine.stream.output_safety(), OutputSafety::Clean);
 }
 
 /// Opening a patch closes help, even the help that offered it as an example.
@@ -285,5 +292,5 @@ fn a_failed_save_shows_the_reason_in_the_window() {
     let asked = fake::asked();
     assert!(matches!(asked.as_slice(), [Asked::Save(_)]), "{asked:?}");
     assert_eq!(ui.app.ui_snapshot().question.unwrap().text, status);
-    assert_eq!(ui.app.document.file(), None);
+    assert_eq!(ui.app.session.document.file(), None);
 }
