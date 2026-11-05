@@ -7,9 +7,12 @@ all-features = false
 version = 2
 yanked = "deny"
 # "Unmaintained" notices for crates deep inside the UI stack, which we cannot
-# replace ourselves. Neither is a security vulnerability. Review when Iced or
+# replace ourselves. None is a security vulnerability. Review when Iced or
 # wgpu is upgraded (OQ-14); remove an entry once upstream drops the crate.
 ignore = [
+    # pin-utils: pinning macros used by wasmtimer, Iced's timer on wasm32 only.
+    # Our desktop builds do not compile it, but cargo-deny checks every target.
+    { id = "RUSTSEC-2026-0441", reason = "via iced_futures/wasmtimer on wasm32 only; unmaintained, not vulnerable" },
     # paste: proc macro used by metal (wgpu's macOS backend).
     { id = "RUSTSEC-2024-0436", reason = "via wgpu-hal/metal; unmaintained, not vulnerable" },
     # ttf-parser: font parsing used by cosmic-text (Iced's text system).
