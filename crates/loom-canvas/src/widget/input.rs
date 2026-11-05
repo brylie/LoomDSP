@@ -102,6 +102,7 @@ impl<Message> PatchCanvas<'_, Message> {
             self.release_pointer_hold(state, shell);
             self.release_every_key_hold(state, shell);
             self.end_gestures(state, shell);
+            self.end_arrow_group(shell, false);
             state.interaction = Interaction::Idle;
             state.focus.close_typing();
             if !matches!(event, Event::Window(_)) {
@@ -126,22 +127,16 @@ impl<Message> PatchCanvas<'_, Message> {
                 ..
             }) if matches!(state.interaction, Interaction::Wiring { .. }) => {
                 self.end_gestures(state, shell);
+                self.end_arrow_group(shell, false);
                 shell.request_redraw();
                 shell.capture_event();
             }
             Event::Window(window::Event::RedrawRequested(now)) => {
                 let new_frame = state.framed_key != Some(self.frame_key);
-                if state.framed_key.is_some_and(|key| key != self.frame_key) {
-                    // The app has replaced the patch and its gesture history.
-                    // Do not deliver the previous patch's delayed arrow end.
-                    state.arrow_deadline = None;
-                    state.arrow_gesture = false;
-                }
-                if state.arrow_deadline.is_some_and(|due| *now >= due) {
-                    state.arrow_deadline = None;
-                    if std::mem::take(&mut state.arrow_gesture) {
-                        self.emit(shell, CanvasEvent::ArrowGroupEnd);
-                    }
+                if let ArrowGroupView::Released { due } = self.arrow_group
+                    && *now >= due
+                {
+                    self.emit(shell, CanvasEvent::ArrowGroupDue { at: *now });
                 }
                 if state
                     .browser_key
@@ -292,6 +287,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 // without a release would leave a momentary gate high.
                 self.release_pointer_hold(state, shell);
                 self.end_gestures(state, shell);
+                self.end_arrow_group(shell, false);
                 let world = state.camera.to_world(screen);
                 match button {
                     mouse::Button::Middle => {
@@ -631,6 +627,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.release_pointer_hold(state, shell);
                 self.release_every_key_hold(state, shell);
                 self.end_gestures(state, shell);
+                // No key-up follows, so a group this view does not show yet
+                // must end too.
+                self.end_arrow_group(shell, true);
                 shell.request_redraw();
             }
             _ => {}

@@ -13,6 +13,97 @@
 
 use crate::undo::{self, History, Snapshot};
 use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
+
+/// How long an arrow group stays open after its key comes up, for another
+/// quick press to join it (`docs/design/undo.md`).
+pub(crate) const ARROW_GROUP: Duration = Duration::from_millis(500);
+
+/// The undo group of arrow-key edits on the canvas. The app owns it, with the
+/// gesture it opens: an open group always has an open gesture. It lives in
+/// the patch session, so replacing the patch closes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ArrowGroup {
+    /// No group is open.
+    #[default]
+    Closed,
+    /// An arrow key is down. Its repeats join the group.
+    Held,
+    /// The last arrow key came up. An arrow press before `due` joins the
+    /// group; the group ends at `due`.
+    Released {
+        /// When the group ends if no arrow comes.
+        due: Instant,
+    },
+}
+
+/// What happens to an arrow group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArrowEvent {
+    /// An arrow key is about to edit.
+    Step(Instant),
+    /// An arrow key was pressed while the group was released.
+    Pressed(Instant),
+    /// An arrow key came up.
+    Released(Instant),
+    /// The canvas ends the group: another key, a pointer press, keys
+    /// leaving the canvas, or focus loss.
+    End,
+    /// A redraw at this time passed the deadline the canvas was given.
+    Due(Instant),
+    /// The app closes a released group before another action: Undo, Redo,
+    /// an inspector edit. A held key keeps its group.
+    Close,
+}
+
+/// What the app does with the gesture for an arrow event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArrowEffect {
+    /// Nothing.
+    Nothing,
+    /// End the group's gesture: its edits become one step.
+    End,
+    /// Open a gesture for a new group.
+    Start,
+    /// End the old group's gesture, then open one for a new group.
+    EndAndStart,
+}
+
+impl ArrowEffect {
+    /// True if the effect ends the open gesture.
+    pub(crate) fn ends(self) -> bool {
+        matches!(self, Self::End | Self::EndAndStart)
+    }
+
+    /// True if the effect opens a gesture.
+    pub(crate) fn starts(self) -> bool {
+        matches!(self, Self::Start | Self::EndAndStart)
+    }
+}
+
+impl ArrowGroup {
+    /// The group after `event`, and what the app does with the gesture.
+    /// A pure function, so every transition is tested without a clock.
+    pub(crate) fn on(self, event: ArrowEvent) -> (Self, ArrowEffect) {
+        use ArrowEffect as Do;
+        use ArrowEvent as E;
+        match (self, event) {
+            (Self::Closed, E::Step(_)) => (Self::Held, Do::Start),
+            (Self::Closed, _) => (Self::Closed, Do::Nothing),
+            (Self::Held, E::Released(at)) => (Self::Released { due: at + ARROW_GROUP }, Do::Nothing),
+            (Self::Held, E::End) => (Self::Closed, Do::End),
+            (Self::Held, _) => (Self::Held, Do::Nothing),
+            (Self::Released { due }, E::Pressed(at)) if at < due => (Self::Held, Do::Nothing),
+            (Self::Released { .. }, E::Pressed(_)) => (Self::Closed, Do::End),
+            (Self::Released { due }, E::Step(at)) if at < due => (Self::Held, Do::Nothing),
+            (Self::Released { .. }, E::Step(_)) => (Self::Held, Do::EndAndStart),
+            (Self::Released { .. }, E::Released(at)) => (Self::Released { due: at + ARROW_GROUP }, Do::Nothing),
+            (Self::Released { due }, E::Due(at)) if at >= due => (Self::Closed, Do::End),
+            (Self::Released { due }, E::Due(_)) => (Self::Released { due }, Do::Nothing),
+            (Self::Released { .. }, E::End | E::Close) => (Self::Closed, Do::End),
+        }
+    }
+}
 
 /// Records edits as undo steps.
 #[derive(Default)]
@@ -34,6 +125,8 @@ pub(crate) struct Edits {
     /// Parameters this app set during the edit in progress. A change on a
     /// mapped parameter is part of the step only if it is listed here.
     touched: BTreeSet<(u32, usize)>,
+    /// The undo group of arrow-key edits.
+    arrow: ArrowGroup,
 }
 
 impl Edits {
@@ -45,6 +138,17 @@ impl Edits {
     /// True while the open gesture began on an inspector slider.
     pub(crate) fn slider_gesture_open(&self) -> bool {
         self.slider_gesture
+    }
+
+    /// The undo group of arrow-key edits.
+    pub(crate) fn arrow_group(&self) -> ArrowGroup {
+        self.arrow
+    }
+
+    /// Sets the arrow group, after the app has applied the effect of an
+    /// event. See [`ArrowGroup::on`].
+    pub(crate) fn set_arrow_group(&mut self, group: ArrowGroup) {
+        self.arrow = group;
     }
 
     /// True while no step is recorded, after a failed commit.
@@ -116,6 +220,9 @@ impl Edits {
     pub(crate) fn end_gesture(&mut self, uncommitted: bool, name: Option<String>, now: impl FnOnce() -> Snapshot) {
         self.gesture = false;
         self.slider_gesture = false;
+        // An open group always has an open gesture, so a later end cannot
+        // close a gesture that is not the group's.
+        self.arrow = ArrowGroup::Closed;
         self.record(name, now);
         self.back_on(uncommitted);
     }

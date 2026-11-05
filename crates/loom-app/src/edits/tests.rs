@@ -195,3 +195,72 @@ fn the_saved_mark_follows_the_history_through_a_failed_commit() {
     edits.committed(false);
     assert!(!edits.history.is_saved(), "no history, so no saved state in it");
 }
+
+/// Every arrow-group transition, against the table in `docs/design/undo.md`
+/// and #430: which state follows each event, and what happens to the
+/// gesture. `t0` is a release time; its deadline is `t0 + 500 ms`.
+#[test]
+fn every_arrow_group_transition() {
+    use ArrowEffect as Do;
+    use ArrowEvent as E;
+    let t0 = Instant::now();
+    let due = t0 + ARROW_GROUP;
+    let before = due - Duration::from_millis(1);
+    let after = due + Duration::from_millis(1);
+    let released = ArrowGroup::Released { due };
+    let later = ArrowGroup::Released {
+        due: before + ARROW_GROUP,
+    };
+    let cases = [
+        // Closed: only a step opens a group.
+        (ArrowGroup::Closed, E::Step(t0), ArrowGroup::Held, Do::Start),
+        (ArrowGroup::Closed, E::Pressed(t0), ArrowGroup::Closed, Do::Nothing),
+        (ArrowGroup::Closed, E::Released(t0), ArrowGroup::Closed, Do::Nothing),
+        (ArrowGroup::Closed, E::End, ArrowGroup::Closed, Do::Nothing),
+        (ArrowGroup::Closed, E::Due(after), ArrowGroup::Closed, Do::Nothing),
+        (ArrowGroup::Closed, E::Close, ArrowGroup::Closed, Do::Nothing),
+        // Held: repeats join, key up starts the 500 ms, the canvas can end it,
+        // and the app's own close waits for the key.
+        (ArrowGroup::Held, E::Step(t0), ArrowGroup::Held, Do::Nothing),
+        (ArrowGroup::Held, E::Pressed(t0), ArrowGroup::Held, Do::Nothing),
+        (ArrowGroup::Held, E::Released(t0), released, Do::Nothing),
+        (ArrowGroup::Held, E::End, ArrowGroup::Closed, Do::End),
+        (ArrowGroup::Held, E::Due(after), ArrowGroup::Held, Do::Nothing),
+        (ArrowGroup::Held, E::Close, ArrowGroup::Held, Do::Nothing),
+        // Released: in time joins, late ends, a second key-up moves the
+        // deadline, and only a timer at or past the deadline ends it.
+        (released, E::Pressed(before), ArrowGroup::Held, Do::Nothing),
+        (released, E::Pressed(due), ArrowGroup::Closed, Do::End),
+        (released, E::Step(before), ArrowGroup::Held, Do::Nothing),
+        (released, E::Step(after), ArrowGroup::Held, Do::EndAndStart),
+        (released, E::Released(before), later, Do::Nothing),
+        (released, E::Due(before), released, Do::Nothing),
+        (released, E::Due(due), ArrowGroup::Closed, Do::End),
+        (released, E::End, ArrowGroup::Closed, Do::End),
+        (released, E::Close, ArrowGroup::Closed, Do::End),
+    ];
+    for (from, event, to, effect) in cases {
+        assert_eq!(from.on(event), (to, effect), "{event:?} from {from:?}");
+    }
+}
+
+/// Ending any gesture closes the arrow group, so an open group always has an
+/// open gesture, and a later end cannot close another gesture.
+#[test]
+fn ending_a_gesture_closes_the_arrow_group() {
+    let (c, _, _, positions) = filter();
+    let mut edits = Edits::default();
+    edits.start_gesture();
+    edits.set_arrow_group(ArrowGroup::Held);
+    edits.end_gesture(false, None, || Snapshot::take(&c, &positions));
+    assert_eq!(edits.arrow_group(), ArrowGroup::Closed);
+}
+
+/// The effects say whether they end or open a gesture.
+#[test]
+fn arrow_effects_end_and_start() {
+    assert!(!ArrowEffect::Nothing.ends() && !ArrowEffect::Nothing.starts());
+    assert!(ArrowEffect::End.ends() && !ArrowEffect::End.starts());
+    assert!(!ArrowEffect::Start.ends() && ArrowEffect::Start.starts());
+    assert!(ArrowEffect::EndAndStart.ends() && ArrowEffect::EndAndStart.starts());
+}

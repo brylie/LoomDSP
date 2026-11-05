@@ -75,7 +75,7 @@ The exact wording can change while building. Each step must have a name.
 | Connect | The cable. If it replaced a cable into the same input, undo brings the old cable back. |
 | Disconnect | The removed cable. |
 | One drag that removes a cable and adds another (moving a cable end to another input) | Both changes, as one step. |
-| Change a parameter by a knob, slider, or radio control, on a tile or in the inspector | One gesture. A single click or key press on a control is a gesture of its own. Holding an arrow key down, so that it repeats, is one gesture from key down to key up, however many times it repeats. A gesture that ends at its starting value is not a step. |
+| Change a parameter by a knob, slider, or radio control, on a tile or in the inspector | One gesture. A single click or key press on a control is a gesture of its own. Holding an arrow key so that it repeats, and further arrow presses within 500 ms of the release, are one gesture. A gesture that ends at its starting value is not a step. |
 | Double-click a control to reset it to its default | The reset, as one step. |
 | Pick a parameter's control range in the inspector ([control ranges](control-ranges.md)) | The new range, and the value it clamped, together. |
 | Pick a choice name in the inspector ([choice names](panels.md#choice-names)) | The pick, as one step. |
@@ -116,7 +116,9 @@ The canvas reports one `SetControl` per pointer move, and one `Move` per pointer
 
 An inspector slider sends no start, and letting go of it sends a slider-release message. The slider's first change opens the gesture. Arrow keys on a hovered slider change it without any release, so the next edit, or an undo or redo, closes a gesture that began on a slider. *Why:* the slider widget gives no other signal, and a gesture left open would block undo.
 
-A control that changes without a drag (a click on a toggle, a radio choice, a key step on a focused control, a double-click reset) sends a start and an end around its single change. An arrow key held down repeats. It sends the start at key down and the end at key up, and every repeat falls inside, so the whole hold is one step. *Why:* holding a key for a second would otherwise make dozens of steps and push the user's real edits out of the history.
+A control that changes without a drag (a click on a toggle, a radio choice, a double-click reset) sends a start and an end around its single change. An arrow key groups differently, because a quick tap, tap should be one edit. The first step opens a group. Repeats while the key is held, and presses within 500 ms of the release, join it. The group closes 500 ms after the last release, or sooner if another key is pressed, the pointer presses on the canvas, the inspector edits, Undo or Redo runs, keys leave the canvas, or the window loses focus. *Why:* holding a key for a second would otherwise make dozens of steps and push the user's real edits out of the history.
+
+The app owns the arrow group and the step it makes (`ArrowGroup` in `crates/loom-app/src/edits.rs`). The canvas only reports what it sees: each arrow step, each arrow key-up, an arrow press while the group is released, and the things that end it. It reads the group back through its view, to wake at the deadline and to know when a key or press matters. The group lives with the patch, so a new patch starts with none, and toolbar Undo works while a group is released.
 
 If a gesture is cut off (the pointer is released outside the window, the window loses focus, the patch is closed), the end is still sent. The existing rule for button holds ending applies here too.
 

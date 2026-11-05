@@ -1,6 +1,7 @@
 //! What a canvas event does to the patch: the canvas reports
 //! `CanvasEvent`s and never edits the graph itself (ADR-0010).
 
+use crate::edits::ArrowEvent;
 use crate::overlays::{ContextMenu, Overlay};
 use crate::{App, browser, gestures, probe_menu, scene, undo};
 use iced::Point;
@@ -72,23 +73,11 @@ impl App {
                 }
                 self.end_gesture();
             }
-            CanvasEvent::ArrowGroupPending => self.session.arrow_group_pending = true,
-            CanvasEvent::ArrowGroupResumed => {
-                self.session.arrow_group_pending = false;
-                if self.session.arrow_group_closed {
-                    self.close_slider_gesture();
-                    self.session.edits.start_gesture();
-                    self.begin_edit();
-                    self.session.arrow_group_closed = false;
-                }
-            }
-            CanvasEvent::ArrowGroupEnd => {
-                self.session.arrow_group_pending = false;
-                if !self.session.arrow_group_closed {
-                    self.end_gesture();
-                }
-                self.session.arrow_group_closed = false;
-            }
+            CanvasEvent::ArrowStep { at } => self.arrow_event(ArrowEvent::Step(at)),
+            CanvasEvent::ArrowPressed { at } => self.arrow_event(ArrowEvent::Pressed(at)),
+            CanvasEvent::ArrowReleased { at } => self.arrow_event(ArrowEvent::Released(at)),
+            CanvasEvent::ArrowGroupEnd => self.arrow_event(ArrowEvent::End),
+            CanvasEvent::ArrowGroupDue { at } => self.arrow_event(ArrowEvent::Due(at)),
             CanvasEvent::Select(ids) => self.session.selection = ids.into_iter().collect(),
             CanvasEvent::Move { ids, delta } => {
                 for id in &ids {

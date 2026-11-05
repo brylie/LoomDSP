@@ -692,7 +692,7 @@ The table below applies when no text field has focus.
 - **Reading order** is top to bottom by tile top, then left to right, then by module ID. It is the same order as Tab in the module browser's results.
 - Tab selects the module, so the inspector and the highlight follow. Focus on a control also selects its module.
 - `focus_keys` no longer swallows Space and Enter for a knob: a key with no use passes on to the next owner. *Why:* a swallowed key is a key that does nothing.
-- Moving by keys is one undo step per key press group (repeats within 500 ms join one step).
+- Moving by keys is one undo step per key press group: repeats while the key is held, and presses within 500 ms of the release, join one step.
 - Test: select a module, focus a knob, change its value, and leave, by keys alone.
 
 ### Signal activity on ports

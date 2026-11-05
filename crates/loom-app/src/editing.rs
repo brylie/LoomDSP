@@ -198,11 +198,22 @@ impl App {
 
     /// Records a released arrow edit before an action outside the canvas.
     pub(crate) fn close_pending_arrow_group(&mut self) {
-        if self.session.arrow_group_pending {
-            self.session.arrow_group_pending = false;
-            self.session.arrow_group_closed = true;
+        self.arrow_event(crate::edits::ArrowEvent::Close);
+    }
+
+    /// Applies an arrow-group event: ends or opens the gesture as the group
+    /// says, then keeps the group's new state (`docs/design/undo.md`).
+    pub(crate) fn arrow_event(&mut self, event: crate::edits::ArrowEvent) {
+        let (next, effect) = self.session.edits.arrow_group().on(event);
+        if effect.ends() {
             self.end_gesture();
         }
+        if effect.starts() {
+            self.close_slider_gesture();
+            self.session.edits.start_gesture();
+            self.begin_edit();
+        }
+        self.session.edits.set_arrow_group(next);
     }
 
     pub(crate) fn undo(&mut self) {

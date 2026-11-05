@@ -44,10 +44,6 @@ pub(crate) struct PatchSession {
     /// Undo and redo (`docs/design/undo.md`): the history, and the edit
     /// or gesture being recorded.
     pub(crate) edits: edits::Edits,
-    /// An arrow key was released and its undo group may still grow.
-    pub(crate) arrow_group_pending: bool,
-    /// A toolbar or inspector action closed that group before its canvas timer.
-    pub(crate) arrow_group_closed: bool,
     /// The name for the step the edit in progress makes, when a command
     /// names it (cut, paste, duplicate) rather than what changed.
     pub(crate) step_name: Option<String>,
@@ -194,8 +190,6 @@ impl PatchSession {
             document: document::Document::new(info, file, stamp, notes),
             patch_info: patch_info::State::new(&Metadata::default()),
             edits: edits::Edits::default(),
-            arrow_group_pending: false,
-            arrow_group_closed: false,
             step_name: None,
             gestures: gestures::Gestures::default(),
             value_draft: None,

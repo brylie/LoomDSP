@@ -30,6 +30,15 @@ pub(super) fn focusable(panel: &crate::scene::PanelView) -> Vec<usize> {
         .collect()
 }
 
+/// True for the four arrow keys.
+pub(super) fn is_arrow(key: &keyboard::Key) -> bool {
+    use keyboard::key::Named;
+    matches!(
+        key.as_ref(),
+        keyboard::Key::Named(Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft)
+    )
+}
+
 impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn is_control(&self, module: u32, widget: usize) -> bool {
         self.scene
@@ -215,10 +224,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 let step = if modifiers.shift() { 0.001 } else { 0.01 };
                 let (_, next_low, next_high) = grab.moved(low, high, if up { step } else { -step });
-                if !state.arrow_gesture {
-                    state.arrow_gesture = true;
-                    self.emit(shell, CanvasEvent::GestureStart);
-                }
+                self.arrow_step(shell);
                 self.set_pad(shell, module, widget, (low, high), (next_low, next_high));
                 true
             }
@@ -328,9 +334,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// takes them: no button stays held, and an arrow-key edit closes.
     pub(super) fn leave_keys(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
         self.release_every_key_hold(state, shell);
-        if std::mem::take(&mut state.arrow_gesture) {
-            self.emit(shell, CanvasEvent::GestureEnd);
-        }
+        self.end_arrow_group(shell, false);
     }
 
     /// Space or Enter, the keys that hold a button.
@@ -432,21 +436,8 @@ impl<Message> PatchCanvas<'_, Message> {
         if let Some(named) = Self::button_key(key) {
             self.release_button_key(state, named, shell);
         }
-        if state.arrow_gesture
-            && matches!(
-                key.as_ref(),
-                keyboard::Key::Named(
-                    keyboard::key::Named::ArrowUp
-                        | keyboard::key::Named::ArrowRight
-                        | keyboard::key::Named::ArrowDown
-                        | keyboard::key::Named::ArrowLeft
-                )
-            )
-        {
-            let due = Instant::now() + ARROW_GROUP;
-            state.arrow_deadline = Some(due);
-            self.emit(shell, CanvasEvent::ArrowGroupPending);
-            shell.request_redraw_at(due);
+        if is_arrow(key) {
+            self.emit(shell, CanvasEvent::ArrowReleased { at: Instant::now() });
         }
     }
 
@@ -501,16 +492,13 @@ impl<Message> PatchCanvas<'_, Message> {
         shell: &mut Shell<'_, Message>,
     ) -> bool {
         use keyboard::key::Named;
-        if let Some(due) = state.arrow_deadline.take() {
-            let arrow = matches!(
-                key.as_ref(),
-                keyboard::Key::Named(Named::ArrowUp | Named::ArrowRight | Named::ArrowDown | Named::ArrowLeft)
-            );
-            if !arrow || Instant::now() >= due {
-                state.arrow_gesture = false;
-                self.emit(shell, CanvasEvent::ArrowGroupEnd);
+        // Within the release window, an arrow keeps the group open and any
+        // other key ends it.
+        if let ArrowGroupView::Released { .. } = self.arrow_group {
+            if is_arrow(key) {
+                self.emit(shell, CanvasEvent::ArrowPressed { at: Instant::now() });
             } else {
-                self.emit(shell, CanvasEvent::ArrowGroupResumed);
+                self.end_arrow_group(shell, false);
             }
         }
         // Focus is only valid on a control of the one selected module.
@@ -682,10 +670,7 @@ impl<Message> PatchCanvas<'_, Message> {
                             Named::ArrowRight => (width.saturating_add(1), height),
                             _ => unreachable!(),
                         };
-                        if !state.arrow_gesture {
-                            state.arrow_gesture = true;
-                            self.emit(shell, CanvasEvent::GestureStart);
-                        }
+                        self.arrow_step(shell);
                         self.emit(shell, CanvasEvent::Resize { module: id, size });
                         shell.request_redraw();
                         shell.capture_event();
@@ -705,10 +690,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         Named::ArrowLeft => Vector::new(-step, 0.0),
                         _ => unreachable!(),
                     };
-                    if !state.arrow_gesture {
-                        state.arrow_gesture = true;
-                        self.emit(shell, CanvasEvent::GestureStart);
-                    }
+                    self.arrow_step(shell);
                     self.emit(
                         shell,
                         CanvasEvent::Move {
@@ -731,10 +713,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     };
                     let position = self.part_position(module, widget, part);
                     let next = knob_step(position, up, modifiers.shift(), 0);
-                    if !state.arrow_gesture {
-                        state.arrow_gesture = true;
-                        self.emit(shell, CanvasEvent::GestureStart);
-                    }
+                    self.arrow_step(shell);
                     if next != position {
                         self.set_part(shell, module, widget, part, next);
                     }
@@ -778,10 +757,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                         _ => return false,
                     };
-                    if !state.arrow_gesture {
-                        state.arrow_gesture = true;
-                        self.emit(shell, CanvasEvent::GestureStart);
-                    }
+                    self.arrow_step(shell);
                     if next != position {
                         self.set_control(shell, module, widget, next);
                     }

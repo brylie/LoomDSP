@@ -2,6 +2,7 @@
 //! and the stats bar. Each is drawn from the app's parts; nothing here
 //! changes state.
 
+use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
-use loom_canvas::{DragLine, PatchCanvas};
+use loom_canvas::{ArrowGroupView, DragLine, PatchCanvas};
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
@@ -29,6 +30,11 @@ impl App {
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
             .focus_policy(self.canvas_focus_policy())
+            .arrow_group(match self.session.edits.arrow_group() {
+                ArrowGroup::Closed => ArrowGroupView::Closed,
+                ArrowGroup::Held => ArrowGroupView::Held,
+                ArrowGroup::Released { due } => ArrowGroupView::Released { due },
+            })
             .matrix_line(self.matrix_line())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
             .animate(self.animating)
@@ -178,7 +184,7 @@ impl App {
         ];
         // A released arrow edit is not a step until its group closes, and
         // Undo closes it first, so Undo works then too (undo.md).
-        let undo_hint = if self.session.arrow_group_pending {
+        let undo_hint = if matches!(self.session.edits.arrow_group(), ArrowGroup::Released { .. }) {
             Some("Undo: the arrow key edit".to_string())
         } else {
             self.session

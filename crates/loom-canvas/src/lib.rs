@@ -39,6 +39,6 @@ pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{Align, TextItem, TextKind, for_each as for_each_tile_text};
 pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace};
 pub use widget::{
-    CanvasEvent, CanvasFocusPolicy, CanvasPointer, CanvasTyped, CanvasView, ControlPart, LearnView, PatchCanvas,
-    PointerDrag, Still, StillDrag,
+    ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasPointer, CanvasTyped, CanvasView, ControlPart, LearnView,
+    PatchCanvas, PointerDrag, Still, StillDrag,
 };

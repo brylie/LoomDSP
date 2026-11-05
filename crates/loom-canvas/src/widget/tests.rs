@@ -1997,7 +1997,13 @@ fn losing_the_window_releases_a_hold() {
         ..State::default()
     };
     let events = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), centre);
-    assert_eq!(events, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+    assert_eq!(
+        events,
+        vec![
+            CanvasEvent::ButtonReleased { module: 1, widget: 0 },
+            CanvasEvent::ArrowGroupEnd
+        ]
+    );
     assert!(matches!(state.interaction, Interaction::Idle));
     assert!(state.key_holds.iter().all(Option::is_none));
 }
@@ -2256,40 +2262,73 @@ fn keyboard_focus_follows_tiles_and_controls() {
     );
 }
 
+/// A fixed time for arrow events, so tests can compare them. See
+/// [`untimed`].
+fn epoch() -> Instant {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// The events with every arrow event's time set to [`epoch`].
+fn untimed(events: Vec<CanvasEvent>) -> Vec<CanvasEvent> {
+    events
+        .into_iter()
+        .map(|event| match event {
+            CanvasEvent::ArrowStep { .. } => CanvasEvent::ArrowStep { at: epoch() },
+            CanvasEvent::ArrowPressed { .. } => CanvasEvent::ArrowPressed { at: epoch() },
+            CanvasEvent::ArrowReleased { .. } => CanvasEvent::ArrowReleased { at: epoch() },
+            CanvasEvent::ArrowGroupDue { .. } => CanvasEvent::ArrowGroupDue { at: epoch() },
+            other => other,
+        })
+        .collect()
+}
+
+/// The group as the app shows it after a release, with a deadline far off.
+fn released_group() -> ArrowGroupView {
+    ArrowGroupView::Released {
+        due: Instant::now() + Duration::from_secs(60),
+    }
+}
+
 /// An unfocused selected tile moves by one grid cell, or ten with Shift.
-/// The next key closes its pending arrow group before acting.
+/// The canvas reports each arrow step and release; with the group released,
+/// an arrow press says so first, and the next other key ends the group.
 #[test]
 fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let closed = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
     let at = Point::new(700.0, 500.0);
-    let first = drive(&canvas, &mut state, &arrow_up(), at);
+    let first = untimed(drive(&closed, &mut state, &arrow_up(), at));
     assert_eq!(
         first,
         vec![
-            CanvasEvent::GestureStart,
+            CanvasEvent::ArrowStep { at: epoch() },
             CanvasEvent::Move {
                 ids: vec![1],
                 delta: Vector::new(0.0, -GRID)
             }
         ]
     );
+    let up = key_event(keyboard::key::Named::ArrowUp, false);
     assert_eq!(
-        drive(
-            &canvas,
-            &mut state,
-            &key_event(keyboard::key::Named::ArrowUp, false),
-            at
-        ),
-        vec![CanvasEvent::ArrowGroupPending]
+        untimed(drive(&closed, &mut state, &up, at)),
+        vec![CanvasEvent::ArrowReleased { at: epoch() }]
     );
-    let next = drive(&canvas, &mut state, &shifted(keyboard::key::Named::ArrowRight), at);
+
+    let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
+    let next = untimed(drive(
+        &released,
+        &mut state,
+        &shifted(keyboard::key::Named::ArrowRight),
+        at,
+    ));
     assert_eq!(
         next,
         vec![
-            CanvasEvent::ArrowGroupResumed,
+            CanvasEvent::ArrowPressed { at: epoch() },
+            CanvasEvent::ArrowStep { at: epoch() },
             CanvasEvent::Move {
                 ids: vec![1],
                 delta: Vector::new(10.0 * GRID, 0.0)
@@ -2297,40 +2336,70 @@ fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
         ]
     );
     assert_eq!(
-        drive(
-            &canvas,
-            &mut state,
-            &key_event(keyboard::key::Named::ArrowRight, false),
-            at
-        ),
-        vec![CanvasEvent::ArrowGroupPending]
-    );
-    assert_eq!(
-        drive(&canvas, &mut state, &escape(), at),
+        drive(&released, &mut state, &escape(), at),
         vec![CanvasEvent::ArrowGroupEnd, CanvasEvent::Select(Vec::new())]
+    );
+    let plain = drive(&closed, &mut state, &escape(), at);
+    assert!(
+        !plain.contains(&CanvasEvent::ArrowGroupEnd),
+        "with no group open, Escape ends none: {plain:?}"
     );
 }
 
-/// A pointer press replaces a pending arrow group before starting its
-/// own interaction, so its eventual release cannot close the arrow step.
+/// A pointer press ends an open arrow group before starting its own
+/// interaction, so its eventual release cannot close the arrow step. With
+/// no group open it sends no end.
 #[test]
-fn pointer_press_ends_a_pending_arrow_group() {
+fn pointer_press_ends_an_open_arrow_group() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let at = Point::new(700.0, 500.0);
+    for group in [ArrowGroupView::Held, released_group()] {
+        let canvas = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(group);
+        let press = drive(&canvas, &mut State::default(), &click(mouse::Button::Left), at);
+        assert_eq!(press.first(), Some(&CanvasEvent::ArrowGroupEnd), "{group:?}: {press:?}");
+    }
+    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let press = drive(&canvas, &mut State::default(), &click(mouse::Button::Left), at);
+    assert!(!press.contains(&CanvasEvent::ArrowGroupEnd), "{press:?}");
+}
+
+/// Losing the window ends the group whatever the view shows, because no key
+/// release will come to end it.
+#[test]
+fn losing_the_window_always_ends_the_arrow_group() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
-    let at = Point::new(700.0, 500.0);
-    drive(&canvas, &mut state, &arrow_up(), at);
-    drive(
+    let lost = drive(
         &canvas,
-        &mut state,
-        &key_event(keyboard::key::Named::ArrowUp, false),
-        at,
+        &mut State::default(),
+        &Event::Window(window::Event::Unfocused),
+        Point::ORIGIN,
     );
-    let press = drive(&canvas, &mut state, &click(mouse::Button::Left), at);
-    assert_eq!(press.first(), Some(&CanvasEvent::ArrowGroupEnd), "{press:?}");
-    assert!(!state.arrow_gesture);
-    assert!(state.arrow_deadline.is_none());
+    assert!(lost.contains(&CanvasEvent::ArrowGroupEnd), "{lost:?}");
+}
+
+/// Keys that belong to an app text field leave the canvas, and end an open
+/// group, but send nothing with none open.
+#[test]
+fn keys_leaving_the_canvas_end_only_an_open_group() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let policy = CanvasFocusPolicy {
+        text_field_keys: true,
+        ..CanvasFocusPolicy::default()
+    };
+    let at = Point::new(700.0, 500.0);
+    let quiet = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(policy);
+    assert!(drive(&quiet, &mut State::default(), &arrow_up(), at).is_empty());
+    let open = PatchCanvas::new(&scene, &selected, |e| e)
+        .focus_policy(policy)
+        .arrow_group(released_group());
+    assert_eq!(
+        drive(&open, &mut State::default(), &arrow_up(), at),
+        vec![CanvasEvent::ArrowGroupEnd]
+    );
 }
 
 /// Keyboard navigation selects a tile, enters its control, edits it,
@@ -2370,8 +2439,10 @@ fn keys_reach_and_leave_a_panel_control() {
         &key_event(keyboard::key::Named::ArrowUp, false),
         at,
     );
+    // The app now shows the group released, so Escape ends it first.
+    let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
     assert_eq!(
-        drive(&canvas, &mut state, &escape(), at),
+        drive(&released, &mut state, &escape(), at),
         vec![CanvasEvent::ArrowGroupEnd]
     );
     assert_eq!(state.focus.control(), None);
@@ -2962,8 +3033,8 @@ fn a_pin_without_its_badge_takes_no_escape() {
     assert_eq!(shell.event_status(), iced::event::Status::Ignored);
 }
 
-/// A new patch drops the pin and old arrow timer. Module IDs repeat
-/// between patches, and the new app has a fresh undo history.
+/// A new patch drops the pin. Module IDs repeat between patches. The arrow
+/// group needs nothing here: the app owns it, and a new patch closes it.
 #[test]
 fn a_new_patch_clears_old_canvas_state() {
     let (scene, values) = modulated_scene();
@@ -2972,40 +3043,80 @@ fn a_new_patch_clears_old_canvas_state() {
     let mut state = State {
         pinned: Some(OUT),
         framed_key: Some(1),
-        arrow_gesture: true,
-        arrow_deadline: Some(Instant::now() - Duration::from_millis(1)),
         ..State::default()
     };
     let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
     let events = drive(&canvas, &mut state, &redraw, Point::ORIGIN);
     assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
-    assert!(!state.arrow_gesture);
-    assert!(state.arrow_deadline.is_none());
     assert_eq!(state.pinned, None);
 }
 
-/// The first frame has no old patch key, so it keeps a key gesture that
-/// began before that redraw.
+/// A redraw at or past the deadline the app gave says so, with its time,
+/// and one before it says nothing.
 #[test]
-fn first_frame_keeps_a_current_arrow_group() {
+fn a_redraw_past_the_deadline_reports_it() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).frame_key(2);
-    let now = Instant::now();
-    let mut state = State {
-        arrow_gesture: true,
-        arrow_deadline: Some(now + Duration::from_millis(100)),
-        ..State::default()
-    };
-    let events = drive(
+    let due = Instant::now() + Duration::from_millis(100);
+    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
+    let redraw = |at| Event::Window(window::Event::RedrawRequested(at));
+    let mut state = State::default();
+    let early = drive(
         &canvas,
         &mut state,
-        &Event::Window(window::Event::RedrawRequested(now)),
+        &redraw(due - Duration::from_millis(1)),
         Point::ORIGIN,
     );
-    assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
-    assert!(state.arrow_gesture);
-    assert!(state.arrow_deadline.is_some());
+    assert!(
+        !early.iter().any(|e| matches!(e, CanvasEvent::ArrowGroupDue { .. })),
+        "{early:?}"
+    );
+    let late = drive(&canvas, &mut state, &redraw(due), Point::ORIGIN);
+    assert!(late.contains(&CanvasEvent::ArrowGroupDue { at: due }), "{late:?}");
+}
+
+/// While the group is released, every event asks for a redraw at its
+/// deadline, not only the first, so the deadline is never lost on an idle
+/// patch: the runtime drops a pending one when a later frame is asked for.
+/// Within one event the earlier request wins, so the events here ask for no
+/// frame of their own.
+#[test]
+fn every_event_asks_for_a_redraw_at_the_deadline() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let due = Instant::now() + Duration::from_millis(400);
+    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    // Already framed and reported, so a redraw asks for nothing itself.
+    let mut state = State::default();
+    let at = Point::new(100.0, 100.0);
+    let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+    canvas.on_event(
+        &mut state,
+        &redraw,
+        bounds,
+        mouse::Cursor::Available(at),
+        &mut Shell::new(&mut Vec::new()),
+    );
+    for event in [
+        redraw,
+        Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT)),
+    ] {
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        canvas.on_event(&mut state, &event, bounds, mouse::Cursor::Available(at), &mut shell);
+        assert_eq!(shell.redraw_request(), window::RedrawRequest::At(due), "{event:?}");
+    }
+    let closed = PatchCanvas::new(&scene, &none, |e| e);
+    let mut messages = Vec::new();
+    let mut shell = Shell::new(&mut messages);
+    let shift = Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT));
+    closed.on_event(&mut state, &shift, bounds, mouse::Cursor::Available(at), &mut shell);
+    assert_ne!(
+        shell.redraw_request(),
+        window::RedrawRequest::At(due),
+        "no group, no wake"
+    );
 }
 
 /// The lines are built once for a given pin, pointer, and selection,
@@ -3275,7 +3386,8 @@ fn losing_the_window_ends_a_drag_gesture() {
     let mut state = State::default();
     drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
     let lost = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), knob);
-    assert_eq!(lost, vec![CanvasEvent::GestureEnd]);
+    // The arrow group ends too: losing the window always sends its end.
+    assert_eq!(lost, vec![CanvasEvent::GestureEnd, CanvasEvent::ArrowGroupEnd]);
     let later = drive(&canvas, &mut state, &released(), knob);
     assert!(later.is_empty(), "{later:?}");
 }
@@ -3293,10 +3405,10 @@ fn another_button_during_a_drag_ends_the_gesture() {
     assert_eq!(events, vec![CanvasEvent::GestureEnd]);
 }
 
-/// A held arrow key repeats. The whole hold, key down to key up, is one
-/// gesture.
+/// A held arrow key repeats. Each press reports a step, and the app keeps
+/// them in one group; key up reports the release (`docs/design/undo.md`).
 #[test]
-fn a_held_arrow_key_is_one_gesture() {
+fn a_held_arrow_key_reports_each_step_and_the_release() {
     let (scene, knob) = knob_scene();
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
@@ -3304,8 +3416,16 @@ fn a_held_arrow_key_is_one_gesture() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    let first = drive(&canvas, &mut state, &arrow_up(), knob);
-    assert_eq!(first.first(), Some(&CanvasEvent::GestureStart), "{first:?}");
+    let first = untimed(drive(&canvas, &mut state, &arrow_up(), knob));
+    assert_eq!(
+        first.first(),
+        Some(&CanvasEvent::ArrowStep { at: epoch() }),
+        "{first:?}"
+    );
+    assert!(
+        !first.iter().any(|e| matches!(e, CanvasEvent::GestureStart)),
+        "an arrow sends no drag gesture: {first:?}"
+    );
     let Event::Keyboard(keyboard::Event::KeyPressed {
         key,
         modified_key,
@@ -3327,9 +3447,10 @@ fn a_held_arrow_key_is_one_gesture() {
         text,
         repeat: true,
     });
-    let repeat = drive(&canvas, &mut state, &again, knob);
-    assert!(
-        repeat.iter().all(|e| !matches!(e, CanvasEvent::GestureStart)),
+    let repeat = untimed(drive(&canvas, &mut state, &again, knob));
+    assert_eq!(
+        repeat.first(),
+        Some(&CanvasEvent::ArrowStep { at: epoch() }),
         "{repeat:?}"
     );
     let up = Event::Keyboard(keyboard::Event::KeyReleased {
@@ -3339,26 +3460,10 @@ fn a_held_arrow_key_is_one_gesture() {
         location: keyboard::Location::Standard,
         modifiers,
     });
-    let end = drive(&canvas, &mut state, &up, knob);
-    assert_eq!(end, vec![CanvasEvent::ArrowGroupPending]);
-    let quick = drive(&canvas, &mut state, &arrow_up(), knob);
-    assert!(
-        quick.iter().all(|e| !matches!(e, CanvasEvent::GestureStart)),
-        "{quick:?}"
-    );
-    assert_eq!(quick.first(), Some(&CanvasEvent::ArrowGroupResumed));
     assert_eq!(
-        drive(&canvas, &mut state, &up, knob),
-        vec![CanvasEvent::ArrowGroupPending]
+        untimed(drive(&canvas, &mut state, &up, knob)),
+        vec![CanvasEvent::ArrowReleased { at: epoch() }]
     );
-    let due = state.arrow_deadline.expect("a release schedules the end");
-    let end = drive(
-        &canvas,
-        &mut state,
-        &Event::Window(window::Event::RedrawRequested(due)),
-        knob,
-    );
-    assert!(end.contains(&CanvasEvent::ArrowGroupEnd), "{end:?}");
 }
 
 /// A right press and release at `at`, with no move in between.

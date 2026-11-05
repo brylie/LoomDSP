@@ -2204,14 +2204,15 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
         .unwrap();
     let original = app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
     let set = |app: &mut App, position| {
-        let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+        let at = std::time::Instant::now();
+        let _ = app.update(Message::Canvas(CanvasEvent::ArrowStep { at }));
         let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
             module,
             widget,
             position,
             part: loom_canvas::ControlPart::Main,
         }));
-        let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupPending));
+        let _ = app.update(Message::Canvas(CanvasEvent::ArrowReleased { at }));
     };
     let value = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
 
@@ -2240,8 +2241,8 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
     assert_eq!(value(&app), arrow_value, "slider and arrow are separate steps");
 }
 
-/// A quick arrow press after Undo starts a fresh step even though the
-/// canvas still considers it part of the previous 500 ms group.
+/// A quick arrow press after Undo starts a fresh step, even inside the
+/// previous group's 500 ms: Undo closed that group.
 #[test]
 fn arrow_resumed_after_undo_starts_a_new_step() {
     let (mut app, module, cutoff) = app_with_filter();
@@ -2258,15 +2259,16 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
         .position(|w| w.binds("cutoff"))
         .unwrap();
     let original = app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
+    let at = std::time::Instant::now();
     for event in [
-        CanvasEvent::GestureStart,
+        CanvasEvent::ArrowStep { at },
         CanvasEvent::SetControl {
             module,
             widget,
             position: 0.6,
             part: loom_canvas::ControlPart::Main,
         },
-        CanvasEvent::ArrowGroupPending,
+        CanvasEvent::ArrowReleased { at },
     ] {
         let _ = app.update(Message::Canvas(event));
     }
@@ -2275,15 +2277,18 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
         app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
         original
     );
+    // A quick press, well inside the old group's 500 ms: Undo has closed
+    // that group, so this step opens a new one.
     for event in [
-        CanvasEvent::ArrowGroupResumed,
+        CanvasEvent::ArrowPressed { at },
+        CanvasEvent::ArrowStep { at },
         CanvasEvent::SetControl {
             module,
             widget,
             position: 0.7,
             part: loom_canvas::ControlPart::Main,
         },
-        CanvasEvent::ArrowGroupPending,
+        CanvasEvent::ArrowReleased { at },
         CanvasEvent::ArrowGroupEnd,
     ] {
         let _ = app.update(Message::Canvas(event));

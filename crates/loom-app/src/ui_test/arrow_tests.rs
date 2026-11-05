@@ -248,3 +248,27 @@ fn a_new_patch_after_the_question_ignores_an_old_arrow_group() {
         assert!(ui.app.overlays.question.is_none());
     });
 }
+
+/// An arrow press and its release in one frame, before the view shows the
+/// group: the release still reaches the app, and the deadline closes the
+/// group as one step.
+#[test]
+fn a_press_and_release_in_one_frame_still_close_the_group() {
+    let mut ui = open_on_cutoff();
+    let original = cutoff(&ui);
+    let before = steps(&ui);
+    ui.step(&[
+        key_pressed(right(), false),
+        Event::Keyboard(keyboard::Event::KeyReleased {
+            key: right(),
+            modified_key: right(),
+            physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::default(),
+        }),
+    ]);
+    assert_ne!(cutoff(&ui), original);
+    ui.redraw_at(Instant::now() + PAST_GROUP);
+    assert!(!ui.app.session.edits.gesture_open(), "the deadline closed the group");
+    assert_eq!(steps(&ui), before + 1);
+}

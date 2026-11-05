@@ -55,8 +55,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     }
     app.session.engine.control_seen = Some((Arc::default(), 1));
     app.session.learn.start();
-    app.session.arrow_group_pending = true;
-    app.session.arrow_group_closed = true;
+    app.session.edits.set_arrow_group(crate::edits::ArrowGroup::Released {
+        due: Instant::now() + Duration::from_secs(60),
+    });
     app.session.matrix.focused = true;
     app.session.step_name = Some("step".to_string());
     // Overlays close, all but the Preferences window.
@@ -124,8 +125,6 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         document,
         patch_info,
         edits,
-        arrow_group_pending,
-        arrow_group_closed,
         step_name,
         gestures,
         value_draft,
@@ -187,8 +186,11 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(control_seen.is_none());
     assert!(!learn.is_on());
     assert!(edits.history.undo_step().is_none());
-    assert!(!arrow_group_pending);
-    assert!(!arrow_group_closed);
+    assert_eq!(
+        edits.arrow_group(),
+        crate::edits::ArrowGroup::Closed,
+        "an old arrow group cannot reach the new patch"
+    );
     assert!(!matrix.focused);
     assert!(step_name.is_none());
     assert!(control_pending.is_empty());

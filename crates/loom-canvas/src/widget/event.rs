@@ -231,16 +231,39 @@ pub enum CanvasEvent {
     ToggleRun,
     /// A drag began: turning a knob, moving tiles, or pulling a cable. Every
     /// edit until [`CanvasEvent::GestureEnd`] is one undo step
-    /// (`docs/design/undo.md`, Gestures). Arrow edits end with
-    /// [`CanvasEvent::ArrowGroupEnd`] after their grouping window.
+    /// (`docs/design/undo.md`, Gestures). Arrow edits group differently: see
+    /// [`CanvasEvent::ArrowStep`].
     GestureStart,
     /// The gesture ended. It is always sent after a start, also when the
     /// pointer is released outside the window or the window loses focus.
     GestureEnd,
-    /// The arrow key was released; another quick press may share its step.
-    ArrowGroupPending,
-    /// An arrow key was pressed again before the grouping deadline.
-    ArrowGroupResumed,
-    /// The arrow group ended, including when another interaction replaces it.
+    /// An arrow key is about to edit, at `at`. The app owns the undo group
+    /// of arrow edits (`docs/design/undo.md`): this opens one, or joins the
+    /// open one while it is held or within 500 ms of its release. Sent on
+    /// every press, repeats too.
+    ArrowStep {
+        /// When the key was pressed.
+        at: Instant,
+    },
+    /// An arrow key was pressed while the group was released. It keeps the
+    /// group open if it came in time, even when the press edits nothing.
+    ArrowPressed {
+        /// When the key was pressed.
+        at: Instant,
+    },
+    /// An arrow key came up. The group stays open for 500 ms from `at`.
+    ArrowReleased {
+        /// When the key came up.
+        at: Instant,
+    },
+    /// The group ends now: another key or a pointer press came, the keys left
+    /// the canvas, or the window lost focus.
     ArrowGroupEnd,
+    /// A redraw at `at` passed the group's deadline, as the app gave it. The
+    /// app ends the group only if that deadline is still the group's, so a
+    /// redraw built from an older view cannot end a newer group.
+    ArrowGroupDue {
+        /// The redraw's time.
+        at: Instant,
+    },
 }

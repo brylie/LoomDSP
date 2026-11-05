@@ -51,9 +51,6 @@ const CLICK_SLOP: f32 = 4.0;
 const SELECT_ROW_PX: f32 = 23.0;
 /// Minimum popup width in screen pixels, so names stay legible at middle zoom.
 const SELECT_WIDTH_PX: f32 = 124.0;
-/// Arrow presses within this time share one undo gesture (panels.md).
-const ARROW_GROUP: Duration = Duration::from_millis(500);
-
 /// Titles are drawn when they would be at least this tall on screen.
 const TITLE_MIN_PX: f32 = 6.5;
 /// Port labels are drawn when they would be at least this tall on screen.
@@ -104,6 +101,9 @@ pub struct PatchCanvas<'a, Message> {
     matrix_line: Option<crate::scene::ModulationView>,
     /// Who else in the window has the keys. See [`CanvasFocusPolicy`].
     focus_policy: CanvasFocusPolicy,
+    /// The app's arrow-key undo group, as of this view. See
+    /// [`PatchCanvas::arrow_group`].
+    arrow_group: ArrowGroupView,
     /// The check for typed values. See [`PatchCanvas::typed_check`].
     typed_check: Option<TypedCheck<'a>>,
     still: Option<Still>,
@@ -268,6 +268,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             learn: None,
             matrix_line: None,
             focus_policy: CanvasFocusPolicy::default(),
+            arrow_group: ArrowGroupView::Closed,
             typed_check: None,
             still: None,
             window_drag_line: false,
@@ -301,6 +302,14 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// from who has the input.
     pub fn focus_policy(mut self, policy: CanvasFocusPolicy) -> Self {
         self.focus_policy = policy;
+        self
+    }
+
+    /// Says where the app's arrow-key undo group is (`docs/design/undo.md`).
+    /// The app owns the group; the canvas only reads it, to know when an
+    /// arrow press or another key matters, and to wake for its deadline.
+    pub fn arrow_group(mut self, group: ArrowGroupView) -> Self {
+        self.arrow_group = group;
         self
     }
 
@@ -403,6 +412,26 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         }
     }
 
+    /// Everything one event does: what it means, the hover text, and the
+    /// wake-up for the arrow group's deadline.
+    fn on_event(
+        &self,
+        state: &mut State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        self.handle(state, event, bounds, cursor, shell);
+        self.sync_hover_text(state, event, shell);
+        // Asked again on every event, because a later request for the next
+        // frame replaces a pending one for a time, and the group would then
+        // stay open on an idle patch.
+        if let ArrowGroupView::Released { due } = self.arrow_group {
+            shell.request_redraw_at(due);
+        }
+    }
+
     fn emit(&self, shell: &mut Shell<'_, Message>, event: CanvasEvent) {
         shell.publish((self.on_event)(event));
     }
@@ -413,9 +442,9 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         state.interaction = interaction;
     }
 
-    /// Ends the gesture of the current interaction, if it has one, and the
-    /// gesture of a held arrow key. Used when the interaction is replaced or
-    /// cut off, so a start always has an end.
+    /// Ends the gesture of the current interaction, if it has one. Used when
+    /// the interaction is replaced or cut off, so a start always has an end.
+    /// The arrow group ends separately, with [`PatchCanvas::end_arrow_group`].
     fn end_gestures(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
         if matches!(
             state.interaction,
@@ -439,11 +468,40 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             state.interaction = Interaction::Idle;
             self.emit(shell, CanvasEvent::GestureEnd);
         }
-        if std::mem::take(&mut state.arrow_gesture) {
-            state.arrow_deadline = None;
+    }
+
+    /// Ends the arrow group. With `always` false, only when this view shows
+    /// one open, so the paths that run on every key or redraw stay quiet.
+    /// The app ignores an end with no group open, so sending one too many is
+    /// safe; with `always` true it is sent where no key-up or timer would
+    /// follow to close a group the view does not show yet.
+    fn end_arrow_group(&self, shell: &mut Shell<'_, Message>, always: bool) {
+        if always || self.arrow_group != ArrowGroupView::Closed {
             self.emit(shell, CanvasEvent::ArrowGroupEnd);
         }
     }
+
+    /// Reports an arrow key about to edit.
+    fn arrow_step(&self, shell: &mut Shell<'_, Message>) {
+        self.emit(shell, CanvasEvent::ArrowStep { at: Instant::now() });
+    }
+}
+
+/// The app's arrow-key undo group, as the canvas sees it in one view
+/// (`docs/design/undo.md`). The app owns the group and its history step.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArrowGroupView {
+    /// No arrow group is open.
+    #[default]
+    Closed,
+    /// An arrow key is down, and its edits are one step.
+    Held,
+    /// The last arrow key came up. Another arrow press before `due` joins
+    /// the same step.
+    Released {
+        /// When the group ends if no arrow comes.
+        due: Instant,
+    },
 }
 
 /// Who else in the window has the keyboard, so the canvas knows which
@@ -677,10 +735,6 @@ struct State {
     key_holds: [Option<KeyHold>; 2],
     /// Modules with lights on screen, as last reported.
     reported_lights: Option<Vec<u32>>,
-    /// True while an arrow group is open, including its 500 ms release gap.
-    arrow_gesture: bool,
-    /// A released arrow keeps its gesture open for the next quick press.
-    arrow_deadline: Option<Instant>,
 }
 
 impl State {
@@ -746,9 +800,7 @@ where
         _viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State>();
-        let bounds = layout.bounds();
-        self.handle(state, event, bounds, cursor, shell);
-        self.sync_hover_text(state, event, shell);
+        self.on_event(state, event, layout.bounds(), cursor, shell);
     }
 
     fn operate(
