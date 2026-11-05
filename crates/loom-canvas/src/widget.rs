@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 mod draw;
 mod event;
+mod focus;
 mod hover_text;
 mod input;
 mod panel_input;
@@ -601,17 +602,6 @@ impl Interaction {
     }
 }
 
-/// The keyboard inside a composite widget (panel-widgets.md, rule 4).
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Inside {
-    module: u32,
-    widget: usize,
-    /// The picked part: 0 is the low handle, 1 the band, and 2 the high handle.
-    part: u8,
-    /// How the arrows change the part while it is grabbed.
-    grab: Option<RangeGrab>,
-}
-
 /// What a stationary click on a choice control does.
 #[derive(Debug, Clone)]
 enum ChoiceClick {
@@ -621,11 +611,9 @@ enum ChoiceClick {
     ClearClip(u32, usize),
 }
 
-/// The choice list that is open above the canvas.
-#[derive(Debug, Clone, Copy)]
+/// The choice list that is open above the canvas, for the focused control.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct SelectPopup {
-    module: u32,
-    widget: usize,
     highlight: usize,
     /// The first row that shows, for a list longer than it can show.
     scroll: usize,
@@ -653,17 +641,12 @@ struct State {
     /// Whether scopes were last reported as drawing full traces.
     reported_full_traces: Option<bool>,
     animation: Option<(Instant, Camera)>,
-    /// The control with keyboard focus: module ID and widget index.
-    focus: Option<(u32, usize)>,
-    /// Open select list, if any.
-    select_popup: Option<SelectPopup>,
-    /// The open field for a typed value, if any.
-    typed: Option<typed_field::TypedField>,
-    /// True when the focus came from Tab, so its hover text shows. A click
-    /// also focuses a control, but the pointer is on it then.
-    tab_focus: bool,
+    /// The control with keyboard focus, and what the keys do on it.
+    focus: focus::FocusState,
     /// True from a Tab press until the pointer moves: the focused control's
-    /// hover text wins over the port or control under a resting pointer.
+    /// hover text wins over the port or control under a resting pointer. It
+    /// is not part of [`focus::FocusState`], because it outlives a control:
+    /// Tab off a module and then Enter keep it.
     focus_first: bool,
     /// The output whose modulation lines stay on screen: its badge was
     /// clicked (`docs/design/modulation.md`, Lines).
@@ -676,9 +659,6 @@ struct State {
     hover_text: HoverTimer,
     /// The last press on a control, for double-click.
     last_click: Option<(Instant, u32, usize, ControlPart)>,
-    /// The focused range while the keyboard is inside it (panel-widgets.md,
-    /// rule 4).
-    inside: Option<Inside>,
     /// The last press on empty canvas, in screen coordinates, for
     /// double-click.
     last_empty_click: Option<(Instant, Point)>,
@@ -790,10 +770,10 @@ where
         };
         operation.custom(None, layout.bounds(), &mut pointer);
         // The open typed field, for the same snapshot.
-        if let Some(field) = &state.typed {
+        if let (Some((module, widget)), Some(field)) = (state.focus.control(), state.focus.typed()) {
             let mut typed = CanvasTyped {
-                module: field.module,
-                widget: field.widget,
+                module,
+                widget,
                 text: field.text.clone(),
             };
             operation.custom(None, layout.bounds(), &mut typed);

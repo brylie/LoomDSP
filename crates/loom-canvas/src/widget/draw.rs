@@ -176,8 +176,7 @@ impl<Message> PatchCanvas<'_, Message> {
         // The focus ring shows for keyboard focus only. After a click or a
         // drag the pointer already shows where the user is, and the ring
         // would only crowd the value text (#92).
-        if let Some((module, widget)) = state.focus
-            && state.tab_focus
+        if let Some((module, widget)) = state.focus.tab_control()
             && self.selection.contains(&module)
             && let Some(m) = self.scene.module(module)
             && let (Some(rect), Some(view)) = (m.widget_bounds(widget), m.panel.widgets.get(widget))
@@ -188,9 +187,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 .push(Shape::new(ring, radius, Color::TRANSPARENT, p.focus, 1.5));
             // Inside a range, the picked part has its own outline: thicker
             // while it is grabbed (panel-widgets.md, rule 4).
-            if let (WidgetViewKind::Range { vertical, .. }, Some(inside)) = (&view.kind, state.inside)
-                && (inside.module, inside.widget) == (m.id, widget)
-            {
+            if let (WidgetViewKind::Range { vertical, .. }, Some(inside)) = (&view.kind, state.focus.range_part()) {
                 let at = |part| self.part_position(m.id, widget, part);
                 let ring = match inside.part {
                     0 => range_handle(rect, *vertical, at(ControlPart::Main)).expand(2.0),
@@ -430,7 +427,7 @@ impl<Message> PatchCanvas<'_, Message> {
         // The control whose value shows instead of its label.
         let active = match state.interaction {
             Interaction::Turning { module, widget, .. } => Some((module, widget)),
-            _ => state.focus,
+            _ => state.focus.control(),
         };
 
         for module in self.scene.modules() {
@@ -573,13 +570,13 @@ impl<Message> PatchCanvas<'_, Message> {
     where
         Renderer: text::Renderer<Font = Font>,
     {
-        let Some(popup) = state.select_popup else {
+        let (Some(popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
             return;
         };
         let Some(rect) = self.select_popup_bounds(state, Rectangle::new(Point::ORIGIN, bounds.size())) else {
             return;
         };
-        let Some(WidgetViewKind::Select { options }) = self.widget_kind(popup.module, popup.widget) else {
+        let Some(WidgetViewKind::Select { options }) = self.widget_kind(module, widget) else {
             return;
         };
         let at = Point::new(bounds.x + rect.x, bounds.y + rect.y);
@@ -617,7 +614,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         self.palette.control_track,
                     );
                 }
-                let chosen = self.position(popup.module, popup.widget).round().max(0.0) as usize == index;
+                let chosen = self.position(module, widget).round().max(0.0) as usize == index;
                 let label = if chosen {
                     format!("✓  {option}")
                 } else {

@@ -14,11 +14,9 @@ const FIELD_PADDING_PX: f32 = 6.0;
 /// Size of the field's text, in screen pixels.
 const FIELD_TEXT_PX: f32 = 12.0;
 
-/// The open field.
+/// The open field, on the focused control.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct TypedField {
-    pub(super) module: u32,
-    pub(super) widget: usize,
     pub(super) text: String,
     /// Where the caret is, as a byte index on a character boundary.
     caret: usize,
@@ -30,6 +28,17 @@ pub(super) struct TypedField {
 }
 
 impl TypedField {
+    /// A field opened by typing `text`: the caret after it, nothing
+    /// selected.
+    pub(super) fn typing(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            caret: text.len(),
+            selected: false,
+            unchanged: None,
+        }
+    }
+
     /// Inserts typed text at the caret, or in place of the selected text.
     fn insert(&mut self, typed: &str) {
         if std::mem::take(&mut self.selected) {
@@ -91,17 +100,20 @@ pub(super) fn typed_reason_bounds(field: Rectangle, width: f32, bounds: Rectangl
 }
 
 impl<Message> PatchCanvas<'_, Message> {
-    /// Why the text cannot be committed, or `None` if it can.
-    pub(super) fn typed_error(&self, field: &TypedField) -> Option<String> {
+    /// Why the text of a field on `widget` of `module` cannot be committed,
+    /// or `None` if it can.
+    pub(super) fn typed_error(&self, module: u32, widget: usize, field: &TypedField) -> Option<String> {
         self.typed_check
             .as_ref()
-            .and_then(|check| check(field.module, field.widget, &field.text).err())
+            .and_then(|check| check(module, widget, &field.text).err())
     }
 
-    /// Screen rectangle of the field: at a fixed size, centred on its widget,
-    /// and inside the canvas.
-    pub(super) fn typed_field_bounds(&self, state: &State, bounds: Rectangle, field: &TypedField) -> Option<Rectangle> {
-        let rect = self.scene.module(field.module)?.widget_bounds(field.widget)?;
+    /// Screen rectangle of the open field: at a fixed size, centred on its
+    /// widget, and inside the canvas.
+    pub(super) fn typed_field_bounds(&self, state: &State, bounds: Rectangle) -> Option<Rectangle> {
+        state.focus.typed()?;
+        let (module, widget) = state.focus.control()?;
+        let rect = self.scene.module(module)?.widget_bounds(widget)?;
         let centre = state.camera.to_screen(rect.center());
         let x = (centre.x - FIELD_WIDTH_PX * 0.5).clamp(0.0, (bounds.width - FIELD_WIDTH_PX).max(0.0));
         let y = (centre.y - FIELD_HEIGHT_PX * 0.5).clamp(0.0, (bounds.height - FIELD_HEIGHT_PX).max(0.0));
@@ -109,24 +121,6 @@ impl<Message> PatchCanvas<'_, Message> {
             Point::new(x, y),
             Size::new(FIELD_WIDTH_PX, FIELD_HEIGHT_PX),
         ))
-    }
-
-    /// Closes a field whose control has gone, been hidden, or lost its
-    /// selection, or when MIDI learn starts. No value changes.
-    pub(super) fn close_stale_typed(&self, state: &mut State) {
-        let live = state.typed.as_ref().is_some_and(|field| {
-            self.learn.is_none()
-                && self.selection.len() == 1
-                && self.selection.contains(&field.module)
-                && self
-                    .scene
-                    .module(field.module)
-                    .and_then(|module| module.panel.widgets.get(field.widget))
-                    .is_some_and(|widget| widget.number_steps().is_some() && !widget.hidden)
-        });
-        if !live {
-            state.typed = None;
-        }
     }
 
     /// Opens the field if this key starts one on the focused control: Enter,
@@ -152,7 +146,7 @@ impl<Message> PatchCanvas<'_, Message> {
         {
             return false;
         }
-        let Some((module, widget)) = state.focus else {
+        let Some((module, widget)) = state.focus.control() else {
             return false;
         };
         let is_number = self
@@ -170,9 +164,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     .values
                     .and_then(|values| values.get(module, widget))
                     .map_or_else(String::new, |value| value.text.clone());
-                state.typed = Some(TypedField {
-                    module,
-                    widget,
+                state.focus.open_typing(TypedField {
                     caret: shown.len(),
                     selected: true,
                     unchanged: Some(shown.clone()),
@@ -183,14 +175,7 @@ impl<Message> PatchCanvas<'_, Message> {
         }
         match text.filter(|text| starts_a_number(text)) {
             Some(text) => {
-                state.typed = Some(TypedField {
-                    module,
-                    widget,
-                    text: text.to_string(),
-                    caret: text.len(),
-                    selected: false,
-                    unchanged: None,
-                });
+                state.focus.open_typing(TypedField::typing(text));
                 true
             }
             None => false,
@@ -211,24 +196,27 @@ impl<Message> PatchCanvas<'_, Message> {
         shell: &mut Shell<'_, Message>,
     ) -> bool {
         use keyboard::key::Named;
-        let Some(mut field) = state.typed.take() else {
+        let Some((module, widget)) = state.focus.control() else {
+            return false;
+        };
+        let Some(mut field) = state.focus.take_typing() else {
             return false;
         };
         match key.as_ref() {
             keyboard::Key::Named(Named::Tab) => return false,
             keyboard::Key::Named(Named::Escape) => {}
-            keyboard::Key::Named(Named::Enter) if repeat => state.typed = Some(field),
+            keyboard::Key::Named(Named::Enter) if repeat => state.focus.open_typing(field),
             keyboard::Key::Named(Named::Enter) => {
                 if field.unchanged.as_ref() == Some(&field.text) {
                     // Nothing was typed, so nothing changes.
-                } else if self.typed_error(&field).is_some() {
-                    state.typed = Some(field);
+                } else if self.typed_error(module, widget, &field).is_some() {
+                    state.focus.open_typing(field);
                 } else {
                     self.emit(
                         shell,
                         CanvasEvent::TypedValue {
-                            module: field.module,
-                            widget: field.widget,
+                            module,
+                            widget,
                             text: field.text,
                         },
                     );
@@ -277,7 +265,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                     }
                 }
-                state.typed = Some(field);
+                state.focus.open_typing(field);
             }
         }
         shell.request_redraw();
@@ -297,25 +285,25 @@ impl<Message> PatchCanvas<'_, Message> {
         screen: Option<Point>,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
-        let Some(field) = state.typed.as_ref() else {
+        if state.focus.typed().is_none() {
             return false;
-        };
+        }
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(_)) => {
                 let inside = self
-                    .typed_field_bounds(state, bounds, field)
+                    .typed_field_bounds(state, bounds)
                     .zip(screen)
                     .is_some_and(|(rect, at)| rect.contains(at));
                 if inside {
                     shell.capture_event();
                     return true;
                 }
-                state.typed = None;
+                state.focus.close_typing();
                 shell.request_redraw();
                 false
             }
             Event::Mouse(mouse::Event::WheelScrolled { .. }) | Event::Window(window::Event::Unfocused) => {
-                state.typed = None;
+                state.focus.close_typing();
                 shell.request_redraw();
                 false
             }
@@ -329,15 +317,15 @@ impl<Message> PatchCanvas<'_, Message> {
     where
         Renderer: text::Renderer<Font = Font>,
     {
-        let Some(field) = state.typed.as_ref() else {
+        let (Some((module, widget)), Some(field)) = (state.focus.control(), state.focus.typed()) else {
             return;
         };
-        let Some(rect) = self.typed_field_bounds(state, Rectangle::new(Point::ORIGIN, bounds.size()), field) else {
+        let Some(rect) = self.typed_field_bounds(state, Rectangle::new(Point::ORIGIN, bounds.size())) else {
             return;
         };
         let area = Rectangle::new(Point::new(bounds.x + rect.x, bounds.y + rect.y), rect.size());
         let font = renderer.default_font();
-        let error = self.typed_error(field);
+        let error = self.typed_error(module, widget, field);
         let line = |content: String, width: f32| Text {
             content,
             bounds: Size::new(width, FIELD_HEIGHT_PX),
