@@ -6,7 +6,7 @@ use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
 use crate::{
     App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, pointer, probe_menu, recent, settings,
-    style, undo,
+    style,
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
@@ -182,9 +182,26 @@ impl App {
                 },
             ),
         ];
+        // A released arrow edit is not a step until its group closes, and
+        // Undo closes it first, so Undo works then too (undo.md).
+        let undo_hint = if self.session.arrow_group_pending {
+            Some("Undo: the arrow key edit".to_string())
+        } else {
+            self.session
+                .edits
+                .history
+                .undo_step()
+                .map(|step| format!("Undo: {}", step.name()))
+        };
+        let redo_hint = self
+            .session
+            .edits
+            .history
+            .redo_step()
+            .map(|step| format!("Redo: {}", step.name()));
         let edit = row![
-            self.history_button("Undo", "Undo", self.session.edits.history.undo_step(), Message::Undo),
-            self.history_button("Redo", "Redo", self.session.edits.history.redo_step(), Message::Redo),
+            history_button("Undo", undo_hint, "Nothing to undo", Message::Undo),
+            history_button("Redo", redo_hint, "Nothing to redo", Message::Redo),
         ];
         let setup = row![
             // Primary only while learning: a mode that is on.
@@ -237,27 +254,6 @@ impl App {
 
     /// An Undo or Redo button. It is disabled with nothing to do, and its
     /// hover text names the step.
-    pub(crate) fn history_button<'a>(
-        &self,
-        label: &'a str,
-        verb: &str,
-        step: Option<&undo::Step>,
-        message: Message,
-    ) -> Element<'a, Message> {
-        let hint = match step {
-            Some(step) => format!("{verb}: {}", step.name()),
-            None => format!("Nothing to {}", verb.to_lowercase()),
-        };
-        tooltip(
-            button(text(label).size(style::CONTROL)).on_press_maybe(step.map(|_| message)),
-            container(text(hint).size(style::BODY))
-                .padding(6)
-                .style(container::rounded_box),
-            tooltip::Position::Bottom,
-        )
-        .into()
-    }
-
     pub(crate) fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
@@ -501,4 +497,19 @@ pub(crate) fn severity_colour(severity: alerts::Severity) -> Color {
         alerts::Severity::Warning => style::WARNING_TEXT,
         alerts::Severity::Alarm => style::ERROR_TEXT,
     }
+}
+
+/// A toolbar Undo or Redo button. `hint` names what it would do, and the
+/// button works only when there is one. `nothing` is the hint otherwise.
+fn history_button<'a>(label: &'a str, hint: Option<String>, nothing: &str, message: Message) -> Element<'a, Message> {
+    let enabled = hint.is_some();
+    let hint = hint.unwrap_or_else(|| nothing.to_string());
+    tooltip(
+        button(text(label).size(style::CONTROL)).on_press_maybe(enabled.then_some(message)),
+        container(text(hint).size(style::BODY))
+            .padding(6)
+            .style(container::rounded_box),
+        tooltip::Position::Bottom,
+    )
+    .into()
 }

@@ -291,7 +291,43 @@ impl Ui {
     /// A redraw, as the runtime sends before each frame. The canvas uses it
     /// to frame the patch and to report which lights are visible.
     pub(crate) fn redraw(&mut self) -> Vec<Message> {
-        self.step(&[Event::Window(window::Event::RedrawRequested(Instant::now()))])
+        self.redraw_at(Instant::now())
+    }
+
+    /// A redraw at a chosen time, so a test can pass a timer's deadline
+    /// without sleeping.
+    pub(crate) fn redraw_at(&mut self, at: Instant) -> Vec<Message> {
+        self.step(&[Event::Window(window::Event::RedrawRequested(at))])
+    }
+
+    /// Presses a key and holds it. With `repeat`, it is a repeat the
+    /// keyboard sends while the key stays down.
+    pub(crate) fn key_down(&mut self, key: keyboard::Key, repeat: bool) -> Vec<Message> {
+        self.step(&[key_pressed(key, repeat)])
+    }
+
+    /// Lets go of a key.
+    pub(crate) fn key_up(&mut self, key: keyboard::Key) -> Vec<Message> {
+        self.step(&[Event::Keyboard(keyboard::Event::KeyReleased {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::default(),
+        })])
+    }
+
+    /// Clicks the first text widget that reads exactly `content`, such as a
+    /// toolbar button's label.
+    pub(crate) fn click_text(&mut self, content: &str) -> Vec<Message> {
+        let at = self
+            .text(content)
+            .unwrap_or_else(|| panic!("no widget shows `{content}`"))
+            .center();
+        let mut messages = self.move_to(at);
+        messages.extend(self.press());
+        messages.extend(self.release());
+        messages
     }
 
     /// Sends one message and runs its widget operations as the runtime does.
@@ -584,5 +620,20 @@ impl Ui {
     }
 }
 
+/// A key press with no modifiers and no text, as the keyboard sends it.
+pub(crate) fn key_pressed(key: keyboard::Key, repeat: bool) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::default(),
+        text: None,
+        repeat,
+    })
+}
+
+#[cfg(test)]
+mod arrow_tests;
 #[cfg(test)]
 mod tests;
