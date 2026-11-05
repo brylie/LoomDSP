@@ -248,48 +248,53 @@ impl App {
 
     /// What toolbar Undo would do, or why it is disabled. The button and
     /// the control channel both ask this, so a script presses what a click
-    /// could. A released arrow edit is not a step until its group closes,
-    /// and Undo closes it first, so Undo works then too. While an arrow key
-    /// is held, Undo would do nothing, so it is disabled (undo.md).
+    /// could. An edit that Undo closes first, a released arrow group or an
+    /// inspector slider gesture, is not a step until it closes, so Undo
+    /// works then too and takes that edit. While an arrow key is held, Undo
+    /// would do nothing, so it is disabled (undo.md).
     pub(crate) fn undo_hint(&self) -> Result<String, HistoryBlock> {
         if self.history_waits() {
             return Err(HistoryBlock::EditOpen);
         }
-        if matches!(
-            self.session.edits.arrow_group(),
-            crate::edits::ArrowGroup::Released { .. }
-        ) {
-            return Ok("Undo: the arrow key edit".to_string());
+        if let Some(edit) = self.edit_undo_closes() {
+            return Ok(format!("Undo: {edit}"));
         }
         let step = self.session.edits.history.undo_step().ok_or(HistoryBlock::Nothing)?;
         Ok(format!("Undo: {}", step.name()))
     }
 
-    /// What toolbar Redo would do, or why it is disabled. A released arrow
-    /// edit is a new edit: Redo would close its group first, and that drops
-    /// the redo steps, so there is nothing to redo (undo.md).
+    /// What toolbar Redo would do, or why it is disabled. An edit that Redo
+    /// closes first is a new edit, and a new edit drops the redo steps, so
+    /// there is nothing to redo then (undo.md).
     pub(crate) fn redo_hint(&self) -> Result<String, HistoryBlock> {
         if self.history_waits() {
             return Err(HistoryBlock::EditOpen);
         }
-        if matches!(
-            self.session.edits.arrow_group(),
-            crate::edits::ArrowGroup::Released { .. }
-        ) {
+        if self.edit_undo_closes().is_some() {
             return Err(HistoryBlock::Nothing);
         }
         let step = self.session.edits.history.redo_step().ok_or(HistoryBlock::Nothing)?;
         Ok(format!("Redo: {}", step.name()))
     }
 
-    /// True while a gesture is open that Undo and Redo do not close first,
-    /// such as a held arrow key or a drag, so they would do nothing. They
-    /// close only an inspector slider gesture and a released arrow group.
-    fn history_waits(&self) -> bool {
+    /// The edit in progress that Undo and Redo close before they act, as
+    /// hover text names it: an inspector slider gesture or a released arrow
+    /// group (`close_slider_gesture`).
+    fn edit_undo_closes(&self) -> Option<&'static str> {
         let edits = &self.session.edits;
-        edits.gesture_open()
-            && !edits.slider_gesture_open()
-            && !matches!(edits.arrow_group(), crate::edits::ArrowGroup::Released { .. })
+        if edits.slider_gesture_open() {
+            Some("the slider edit")
+        } else if matches!(edits.arrow_group(), crate::edits::ArrowGroup::Released { .. }) {
+            Some("the arrow key edit")
+        } else {
+            None
+        }
+    }
+
+    /// True while a gesture is open that Undo and Redo do not close first,
+    /// such as a held arrow key or a drag, so they would do nothing.
+    fn history_waits(&self) -> bool {
+        self.session.edits.gesture_open() && self.edit_undo_closes().is_none()
     }
 
     pub(crate) fn undo(&mut self) {

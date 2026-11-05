@@ -199,6 +199,26 @@ fn undo_is_disabled_while_an_arrow_is_held() {
     assert_eq!(cutoff(&ui), original);
 }
 
+/// An open inspector slider gesture is an edit Undo and Redo close first,
+/// as a released arrow group is: Undo takes it, even on a new patch with
+/// no steps yet, and Redo is disabled, since closing it drops the redo
+/// steps.
+#[test]
+fn undo_and_redo_see_an_open_slider_gesture() {
+    let mut ui = Ui::open(PATCH);
+    let original = cutoff(&ui);
+    assert!(ui.app.undo_hint().is_err(), "a new patch has nothing to undo");
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(FILTER)));
+    slide_cutoff(&mut ui, 2_500.0);
+    assert!(ui.app.session.edits.slider_gesture_open());
+    assert_eq!(ui.app.undo_hint().as_deref(), Ok("Undo: the slider edit"));
+    assert_eq!(ui.app.redo_hint(), Err(crate::editing::HistoryBlock::Nothing));
+
+    ui.click_text("Undo");
+    assert_eq!(cutoff(&ui), original, "Undo closed the slider edit and took it");
+    assert!(ui.app.redo_hint().is_ok(), "and the slider edit can come back");
+}
+
 /// An arrow press and the window losing focus in one frame: no key release
 /// will come, so the group ends there, and Undo works at once.
 #[test]
