@@ -111,7 +111,33 @@ fn each_overlay_has_the_input_while_it_is_open() {
             matches!(owner, InputOwner::Canvas | InputOwner::ProbeMenu | InputOwner::TileMenu),
             "{owner:?}"
         );
+        let policy = ui.app.canvas_focus_policy();
+        assert_eq!(policy.interactive, owner == InputOwner::Canvas, "{owner:?}");
+        assert!(
+            !policy.matrix_keyboard && !policy.matrix_escape,
+            "{owner:?}: the matrix is not focused"
+        );
     }
+}
+
+/// The canvas's focus policy follows the matrix: with the matrix focused it
+/// leaves the keys to it, and Escape reaches a pinned badge only while no
+/// cell editor is open.
+#[test]
+fn the_canvas_policy_follows_the_matrix() {
+    let mut ui = Ui::open("subtractive.ron");
+    let idle = ui.app.canvas_focus_policy();
+    assert_eq!(
+        idle,
+        loom_canvas::CanvasFocusPolicy::default(),
+        "the canvas has the keys"
+    );
+
+    ui.app.right_tab = crate::matrix::Tab::Matrix;
+    ui.app.session.matrix.focused = true;
+    let matrix = ui.app.canvas_focus_policy();
+    assert!(matrix.interactive && matrix.matrix_keyboard && matrix.matrix_escape);
+    assert!(!matrix.text_field_keys);
 }
 
 /// A plain key press is one input cause: the message for the event is not

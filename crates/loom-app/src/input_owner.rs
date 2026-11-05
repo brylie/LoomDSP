@@ -183,6 +183,20 @@ impl App {
         )
     }
 
+    /// Who else has the keyboard, for the canvas: the overlays, the matrix,
+    /// and the app's text fields. One place decides it, so the canvas never
+    /// infers it from loose flags.
+    pub(crate) fn canvas_focus_policy(&self) -> loom_canvas::CanvasFocusPolicy {
+        let matrix = self.matrix_has_keys();
+        loom_canvas::CanvasFocusPolicy {
+            interactive: self.input_owner() == InputOwner::Canvas,
+            matrix_keyboard: matrix,
+            matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
+            text_field_keys: self.text_focus.any,
+            text_field_keeps_tab: self.tab_moves_between_fields(),
+        }
+    }
+
     /// Which listeners hear events now.
     pub(crate) fn listening(&self) -> Listening {
         Listening {

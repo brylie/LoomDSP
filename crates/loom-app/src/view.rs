@@ -28,15 +28,9 @@ impl App {
             )
             .frame_key(self.frame_key)
             .browser_key(self.browser_key)
-            .interactive(self.input_owner() == crate::input_owner::InputOwner::Canvas)
+            .focus_policy(self.canvas_focus_policy())
             .matrix_line(self.matrix_line())
-            .matrix_keyboard(self.matrix_has_keys())
-            .text_field_keys(self.text_focus.any)
-            .text_field_keeps_tab(self.tab_moves_between_fields())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
-            .matrix_escape(
-                self.matrix_has_keys() && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
-            )
             .animate(self.animating)
             .learn(self.session.learn.shown());
         if let Some(still) = self.still {

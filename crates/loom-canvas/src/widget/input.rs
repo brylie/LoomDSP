@@ -59,7 +59,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let screen = relative(cursor, bounds);
         state.size = bounds.size();
 
-        if self.matrix_escape
+        if self.focus_policy.matrix_escape
             && matches!(
                 event,
                 Event::Keyboard(keyboard::Event::KeyPressed {
@@ -77,9 +77,9 @@ impl<Message> PatchCanvas<'_, Message> {
 
         let keys_elsewhere = match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                (self.matrix_keyboard && !modifiers.command())
-                    || (self.text_field_keys
-                        && (self.text_field_keeps_tab
+                (self.focus_policy.matrix_keyboard && !modifiers.command())
+                    || (self.focus_policy.text_field_keys
+                        && (self.focus_policy.text_field_keeps_tab
                             || !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))))
             }
             _ => false,
@@ -89,7 +89,7 @@ impl<Message> PatchCanvas<'_, Message> {
             return;
         }
 
-        if !self.interactive {
+        if !self.focus_policy.interactive {
             // Modifiers still count, so Shift held while the pop-up closes
             // is known on the next click.
             if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
@@ -285,7 +285,7 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
                 let Some(screen) = screen else { return };
-                if self.matrix_keyboard {
+                if self.focus_policy.matrix_keyboard {
                     self.emit(shell, CanvasEvent::PointerDown);
                 }
                 // A second button must end a hold. Replacing the interaction

@@ -98,19 +98,11 @@ pub struct PatchCanvas<'a, Message> {
     frame_key: u64,
     browser_key: u64,
     animate: bool,
-    interactive: bool,
     learn: Option<&'a LearnView>,
     /// The row selected in the modulation matrix, without changing the pin.
     matrix_line: Option<crate::scene::ModulationView>,
-    /// Lets Escape hide a badge pin while the matrix owns keyboard focus.
-    matrix_escape: bool,
-    /// Leaves unmodified keys to the focused matrix while keeping pointer input active.
-    matrix_keyboard: bool,
-    /// An app text field has focus, so its keys never act on the canvas.
-    text_field_keys: bool,
-    /// The focused text field moves to the next field on Tab, so the canvas
-    /// leaves Tab alone too.
-    text_field_keeps_tab: bool,
+    /// Who else in the window has the keys. See [`CanvasFocusPolicy`].
+    focus_policy: CanvasFocusPolicy,
     /// The check for typed values. See [`PatchCanvas::typed_check`].
     typed_check: Option<TypedCheck<'a>>,
     still: Option<Still>,
@@ -272,13 +264,9 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             frame_key: 0,
             browser_key: 0,
             animate: false,
-            interactive: true,
             learn: None,
             matrix_line: None,
-            matrix_escape: false,
-            matrix_keyboard: false,
-            text_field_keys: false,
-            text_field_keeps_tab: false,
+            focus_policy: CanvasFocusPolicy::default(),
             typed_check: None,
             still: None,
             window_drag_line: false,
@@ -307,31 +295,11 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
-    /// Lets a focused matrix pass Escape to a pinned badge after its cell
-    /// editor has closed.
-    pub fn matrix_escape(mut self, enabled: bool) -> Self {
-        self.matrix_escape = enabled;
-        self
-    }
-
-    /// Leaves unmodified keyboard input to the matrix without blocking the pointer.
-    pub fn matrix_keyboard(mut self, enabled: bool) -> Self {
-        self.matrix_keyboard = enabled;
-        self
-    }
-
-    /// Says that the focused text field moves to the next field on Tab, so the
-    /// canvas leaves Tab alone too (panels.md, Keyboard without a mouse).
-    pub fn text_field_keeps_tab(mut self, enabled: bool) -> Self {
-        self.text_field_keeps_tab = enabled;
-        self
-    }
-
-    /// Says that an app text field has focus. The canvas then leaves every key
-    /// press to it except Tab, which moves focus as usual. The pointer still
-    /// works (panel-widgets.md, Typing a value).
-    pub fn text_field_keys(mut self, enabled: bool) -> Self {
-        self.text_field_keys = enabled;
+    /// Says who else in the window has the keyboard, so the canvas leaves
+    /// them alone (panels.md, Keyboard without a mouse). The app builds it
+    /// from who has the input.
+    pub fn focus_policy(mut self, policy: CanvasFocusPolicy) -> Self {
+        self.focus_policy = policy;
         self
     }
 
@@ -388,14 +356,6 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// camera.
     pub fn browser_key(mut self, key: u64) -> Self {
         self.browser_key = key;
-        self
-    }
-
-    /// While false, the canvas ignores the keyboard and the pointer, and
-    /// lets go of any hold or drag. For a pop-up that takes the keys, such
-    /// as the module browser.
-    pub fn interactive(mut self, interactive: bool) -> Self {
-        self.interactive = interactive;
         self
     }
 
@@ -481,6 +441,47 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         if std::mem::take(&mut state.arrow_gesture) {
             state.arrow_deadline = None;
             self.emit(shell, CanvasEvent::ArrowGroupEnd);
+        }
+    }
+}
+
+/// Who else in the window has the keyboard, so the canvas knows which
+/// keys and presses are its own. The app builds it from who has the input,
+/// once per view.
+///
+/// It is a set of flags rather than one enum because they combine: the
+/// matrix's depth field is a text field inside the matrix, so
+/// `matrix_keyboard` and `text_field_keys` are both true while it has focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanvasFocusPolicy {
+    /// False while a pop-up such as the module browser has the input. The
+    /// canvas then ignores the keyboard and the pointer, and lets go of any
+    /// hold or drag.
+    pub interactive: bool,
+    /// The focused matrix has the keys: unmodified keys are left to it, and
+    /// the pointer still works.
+    pub matrix_keyboard: bool,
+    /// The matrix has the keys and no cell editor is open, so Escape can
+    /// still hide a pinned badge's lines.
+    pub matrix_escape: bool,
+    /// An app text field has focus. The canvas then leaves every key to it
+    /// except Tab, which moves focus as usual. The pointer still works
+    /// (panel-widgets.md, Typing a value).
+    pub text_field_keys: bool,
+    /// The focused text field moves to the next field on Tab, so the canvas
+    /// leaves Tab alone too (panels.md, Keyboard without a mouse).
+    pub text_field_keeps_tab: bool,
+}
+
+impl Default for CanvasFocusPolicy {
+    /// The canvas has the keys and the pointer.
+    fn default() -> Self {
+        Self {
+            interactive: true,
+            matrix_keyboard: false,
+            matrix_escape: false,
+            text_field_keys: false,
+            text_field_keeps_tab: false,
         }
     }
 }

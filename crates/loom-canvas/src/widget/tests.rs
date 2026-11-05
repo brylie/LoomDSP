@@ -1259,7 +1259,10 @@ fn a_focused_text_field_keeps_keys_from_the_canvas() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event)
         .values(&values)
-        .text_field_keys(true);
+        .focus_policy(CanvasFocusPolicy {
+            text_field_keys: true,
+            ..CanvasFocusPolicy::default()
+        });
     let at = scene.module(1).unwrap().bounds().center();
     let mut state = State::default();
     for key in [
@@ -1724,7 +1727,10 @@ fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
     let mut state = State::default();
     let pressed = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
     assert_eq!(pressed, vec![CanvasEvent::GestureStart]);
-    let blocked = PatchCanvas::new(&scene, &selected, |e| e).interactive(false);
+    let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+        interactive: false,
+        ..CanvasFocusPolicy::default()
+    });
     let events = drive(&blocked, &mut state, &redraw, tile);
     assert!(events.contains(&CanvasEvent::GestureEnd), "{events:?}");
     assert!(matches!(state.interaction, Interaction::Idle));
@@ -1737,7 +1743,10 @@ fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
     drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
-    let blocked = PatchCanvas::new(&scene, &selected, |e| e).interactive(false);
+    let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+        interactive: false,
+        ..CanvasFocusPolicy::default()
+    });
     let events = drive(&blocked, &mut state, &redraw, centre);
     assert!(
         events.contains(&CanvasEvent::ButtonReleased { module: 1, widget: 0 }),
@@ -1858,7 +1867,10 @@ fn paste_goes_to_the_pointer_or_the_centre_of_the_view() {
         }]
     );
     // While a pop-up has the keys, paste is the pop-up's.
-    let blocked = PatchCanvas::new(&scene, &none, |e| e).interactive(false);
+    let blocked = PatchCanvas::new(&scene, &none, |e| e).focus_policy(CanvasFocusPolicy {
+        interactive: false,
+        ..CanvasFocusPolicy::default()
+    });
     assert!(drive(&blocked, &mut state, &paste, at).is_empty());
 }
 
@@ -1872,7 +1884,10 @@ fn modifiers_stay_current_while_the_canvas_is_not_interactive() {
     let shift = Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT));
     let mut state = State::default();
 
-    let blocked = PatchCanvas::new(&scene, &selected, |e| e).interactive(false);
+    let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+        interactive: false,
+        ..CanvasFocusPolicy::default()
+    });
     assert!(drive(&blocked, &mut state, &shift, tile).is_empty());
     assert!(state.modifiers.shift());
 
@@ -3068,8 +3083,11 @@ fn matrix_escape_clears_canvas_pin() {
     let none = BTreeSet::new();
     let canvas = PatchCanvas::new(&scene, &none, |e| e)
         .values(&values)
-        .matrix_keyboard(true)
-        .matrix_escape(true);
+        .focus_policy(CanvasFocusPolicy {
+            matrix_keyboard: true,
+            matrix_escape: true,
+            ..CanvasFocusPolicy::default()
+        });
     let mut state = State {
         pinned: Some(OUT),
         ..State::default()
@@ -3084,7 +3102,10 @@ fn matrix_keyboard_focus_keeps_canvas_pointer_active() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
     let tile = scene.module(2).unwrap().bounds().center();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e).matrix_keyboard(true);
+    let canvas = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+        matrix_keyboard: true,
+        ..CanvasFocusPolicy::default()
+    });
     let mut state = State::default();
 
     assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), tile).is_empty());
