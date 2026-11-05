@@ -4,7 +4,7 @@
 //! A native message box stopped the app while it was open, and on Linux it
 //! needed another program. This one needs nothing, but nothing stops either:
 //! `update` goes on running, so what a question blocks is listed on purpose
-//! (`Message::allowed_during_question` in `main.rs`), and each question
+//! (`Message::allowed_during_question` in `lib.rs`), and each question
 //! carries what to do after its answer.
 
 use crate::files;

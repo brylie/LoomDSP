@@ -270,7 +270,7 @@ An unconnected input reads its `default`: a fixed value, or a transport signal s
 | Patch loading and round trips | `crates/loom-patch`. |
 | Canvas logic and shaders | `crates/loom-canvas` (hit-testing, camera, geometry, shader validation). |
 | Layout and parameter mapping in the app | `crates/loom-app`. |
-| Pointer and key events reaching the right widget in the app view | `crates/loom-app/src/ui_test.rs`: the headless `Ui` harness sends real events to `App::view`, runs the tasks they return, and finds ports, controls, and text by name. A test in `crates/loom-app/tests/` can import it (`loom_app::ui_test::Ui`) through the `test-ui` feature, with what the crate makes public: `Ui::headless`, `tap_key`, and `snapshot_json`. |
+| Pointer and key events reaching the right widget in the app view | `crates/loom-app/src/ui_test.rs`: the headless `Ui` harness sends real events to `App::view`, runs the tasks they return, and finds ports, controls, and text by name. A test in `crates/loom-app/tests/` can import it (`loom_app::ui_test::Ui`) through the `test-ui` feature, with what the crate makes public: `Ui::headless`, `tap_key`, and `snapshot_json`. The fake dialogs and folders are off there, so `tap_key` refuses command shortcuts; test those with `Ui::open` in a unit test. |
 | Engine speed | `cargo bench -p loom-modules`. |
 
 CI runs all of them on Linux, macOS, and Windows. The full list of CI jobs is in CONTRIBUTING.md.

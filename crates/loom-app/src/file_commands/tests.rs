@@ -87,7 +87,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         text_focus,
         generation,
         test_modules,
-        // Set only by `AfterDiscard::Close`, which never replaces the patch.
+        // The update that sets it ends by exiting the app, so a replace never
+        // starts with it set.
         quit: _,
         // Built the same way every time.
         theme: _,

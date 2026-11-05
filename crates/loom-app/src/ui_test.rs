@@ -96,7 +96,16 @@ impl Ui {
     }
 
     /// Presses and releases a key.
+    ///
+    /// Panics on a command shortcut. A test in `tests/` builds the crate without
+    /// `cfg(test)`, so the fake dialogs and folders are off: Cmd+S would overwrite
+    /// the example patch, Cmd+O would open a real dialog, and Cmd+Shift+O would
+    /// make the real library folder. Test those with `Ui::open` in a unit test.
     pub fn tap_key(&mut self, key: keyboard::Key, modifiers: keyboard::Modifiers) {
+        assert!(
+            !modifiers.command(),
+            "command shortcuts reach real files and dialogs from tests/: use Ui::open in a unit test"
+        );
         self.tap(key, modifiers);
     }
 
