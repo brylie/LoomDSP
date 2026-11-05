@@ -8,14 +8,46 @@
 use crate::modulation::{self, PolarityChoice};
 use crate::style::{self, button};
 use crate::view::remove_button;
-use crate::{App, DIM, Message, param};
+use crate::{App, DIM, Message as AppMessage, param};
 use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, stack, text, text_input,
     tooltip,
 };
-use iced::{Element, Length, Theme};
+use iced::{Element, Length, Task, Theme};
 use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, WidgetKind};
 use serde::Serialize;
+
+/// What the inspector's controls send. The control channel sends the two that
+/// set a parameter too.
+#[derive(Debug, Clone)]
+pub(crate) enum Message {
+    /// A slider moved to a position from 0 to 1.
+    Param { module: u32, index: usize, position: f32 },
+    /// An exact parameter value, in the parameter's units, sent as a knob
+    /// turn is. The control channel's `set` with a `value` uses it, so the
+    /// stored number is the one sent and not a round trip through a position.
+    ParamValue { module: u32, index: usize, value: f32 },
+    /// Text typed in a value field (panel-widgets.md, Typing a value).
+    ValueText { module: u32, index: usize, text: String },
+    /// Enter in a value field.
+    ValueSubmit { module: u32, index: usize },
+    /// Escape with a draft in a value field: it is dropped.
+    ValueDraftClear,
+    /// A choice name was picked: value `min + choice` of the parameter, as one
+    /// undo step (panels.md, Choice names).
+    Choice { module: u32, index: usize, choice: usize },
+    /// A range was picked in a parameter's **Range** selector: index `range`
+    /// of the ranges it offers (`docs/design/control-ranges.md`).
+    Range { module: u32, index: usize, range: usize },
+    /// A line under **Drives** selects its target module.
+    SelectModule(u32),
+    /// Edit a placeholder label without changing the patch yet.
+    UnknownLabelDraft { module: u32, value: String },
+    /// Apply the placeholder label as one undo step.
+    UnknownLabelApply { module: u32 },
+    /// The eligible parameter currently under an output drag.
+    DropRow(Option<(u32, usize)>),
+}
 
 /// Width of a parameter's value field, in pixels.
 const VALUE_FIELD_WIDTH: f32 = 84.0;
@@ -287,6 +319,81 @@ pub struct DrivesLine {
 
 fn display<S: serde::Serializer>(value: &impl std::fmt::Display, s: S) -> Result<S::Ok, S::Error> {
     s.collect_str(value)
+}
+
+impl App {
+    /// Handles a message from the inspector. Only a submitted value returns a
+    /// task, which moves focus.
+    pub(crate) fn inspector_message(&mut self, message: Message) -> Task<AppMessage> {
+        match message {
+            Message::ValueSubmit { module, index } => return self.value_submit(module, index),
+            Message::UnknownLabelDraft { module, value } => self.session.gestures.draft_label(module, value),
+            Message::UnknownLabelApply { module } => {
+                if let Some(value) = self.session.gestures.take_label(module) {
+                    let label = (!value.is_empty()).then_some(value);
+                    self.edit(|app| {
+                        if app.session.controller.set_unknown_label(ModuleId(module), label) {
+                            app.refresh();
+                        }
+                    });
+                }
+            }
+            Message::DropRow(row) => {
+                let allowed = !self.session.learn.is_on();
+                self.session.gestures.hover_row(row, allowed);
+            }
+            Message::Param {
+                module,
+                index,
+                position,
+            } => {
+                let value = self
+                    .session
+                    .controller
+                    .graph()
+                    .node(ModuleId(module))
+                    .and_then(|n| n.spec(index))
+                    .map(|spec| spec.denormalize(position));
+                if let Some(value) = value {
+                    self.turn_param(module, index, value);
+                }
+            }
+            Message::ParamValue { module, index, value } => {
+                let value = self
+                    .session
+                    .controller
+                    .graph()
+                    .node(ModuleId(module))
+                    .and_then(|n| n.spec(index))
+                    .map(|spec| spec.clamp(value));
+                if let Some(value) = value {
+                    self.turn_param(module, index, value);
+                }
+            }
+            Message::Choice { module, index, choice } => {
+                let value = self
+                    .session
+                    .controller
+                    .graph()
+                    .node(ModuleId(module))
+                    .and_then(|n| n.spec(index))
+                    .map(|spec| spec.clamp(spec.min + choice as f32));
+                if let Some(value) = value {
+                    self.turn_param(module, index, value);
+                    self.close_slider_gesture();
+                }
+            }
+            Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
+            Message::ValueDraftClear => self.clear_value_draft(),
+            Message::Range { module, index, range } => self.set_range(module, index, range),
+            Message::SelectModule(id) => {
+                if self.session.controller.graph().node(ModuleId(id)).is_some() {
+                    self.session.selection = std::collections::BTreeSet::from([id]);
+                }
+            }
+        }
+        Task::none()
+    }
 }
 
 impl App {
@@ -570,15 +677,15 @@ pub fn view<'a>(
     authors: &'a iced::widget::text_editor::Content,
     drop_row: Option<(u32, usize)>,
     dragging: bool,
-) -> Element<'a, Message> {
-    let content: Element<'a, Message> = match model {
+) -> Element<'a, AppMessage> {
+    let content: Element<'a, AppMessage> = match model {
         // Short, with the full list one click away (visual-system.md).
         Inspector::Patch(rows) => column![
             crate::patch_info::view(rows, authors),
             iced::widget::rule::horizontal(1),
             text("Select a module to edit it.").size(style::BODY).color(DIM),
             text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
-            button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(Message::ShowShortcuts),
+            button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(AppMessage::ShowShortcuts),
         ]
         .spacing(8)
         .into(),
@@ -592,9 +699,9 @@ pub fn view<'a>(
                 text("Label").size(style::BODY),
                 row![
                     text_input("Label", &m.label)
-                        .on_input(move |value| Message::UnknownLabelDraft { module: id, value })
-                        .on_submit(Message::UnknownLabelApply { module: id }),
-                    button("Apply").on_press(Message::UnknownLabelApply { module: id }),
+                        .on_input(move |value| AppMessage::Inspector(Message::UnknownLabelDraft { module: id, value }))
+                        .on_submit(AppMessage::Inspector(Message::UnknownLabelApply { module: id })),
+                    button("Apply").on_press(AppMessage::Inspector(Message::UnknownLabelApply { module: id })),
                 ].spacing(6),
             ].spacing(6);
             for (name, value) in m.params {
@@ -602,8 +709,14 @@ pub fn view<'a>(
             }
             for link in m.links {
                 let (label, message) = match link {
-                    UnknownLink::Assignment { id, text } => (text, Message::Unassign(AssignmentId(id))),
-                    UnknownLink::Midi { index, text } => (text, Message::Unmap { module: m.id, index }),
+                    UnknownLink::Assignment { id, text } => (
+                        text,
+                        AppMessage::Modulation(crate::modulation::Message::Unassign(AssignmentId(id))),
+                    ),
+                    UnknownLink::Midi { index, text } => (
+                        text,
+                        AppMessage::Learn(crate::learn::Message::Unmap { module: m.id, index }),
+                    ),
                 };
                 rows = rows.push(
                     row![
@@ -625,20 +738,20 @@ pub fn view<'a>(
         .into()
 }
 
-fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, Message> {
+fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, AppMessage> {
     let id = m.id;
     let mut items = column![
         row![
             text(m.name).size(style::HEADING),
             space::horizontal(),
-            button(text("Help").size(style::CONTROL)).on_press(Message::ShowModuleHelp(id))
+            button(text("Help").size(style::CONTROL)).on_press(AppMessage::ShowModuleHelp(id))
         ]
         .align_y(iced::Alignment::Center),
         text(m.description).size(style::BODY),
     ]
     .spacing(6);
     if m.resets_clip {
-        items = items.push(button(text("Reset clip").size(style::CONTROL)).on_press(Message::ResetClip(id)));
+        items = items.push(button(text("Reset clip").size(style::CONTROL)).on_press(AppMessage::ResetClip(id)));
     }
     if m.params.is_empty() {
         items = items.push(text("No parameters.").size(style::BODY).color(DIM));
@@ -646,9 +759,9 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
     for p in m.params {
         let index = p.index;
         let accepts_drop = p.accepts_drop;
-        let unmap = Message::Unmap { module: id, index };
+        let unmap = AppMessage::Learn(crate::learn::Message::Unmap { module: id, index });
         let ghost = p.mapping_options.as_ref().and_then(|row| row.ghost);
-        let line: Element<'a, Message> = match p.mode {
+        let line: Element<'a, AppMessage> = match p.mode {
             ParamMode::Learn { armed, detail } => {
                 let arm = button(row![
                     text(p.label).size(style::BODY),
@@ -657,7 +770,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 ])
                 .width(Length::Fill)
                 .style(if armed { style::primary } else { style::secondary })
-                .on_press(Message::Learn(crate::learn::Message::Arm((id, index))));
+                .on_press(AppMessage::Learn(crate::learn::Message::Arm((id, index))));
                 // A mapping can be removed or changed in learn mode too.
                 let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
                 if p.mapping.is_some() {
@@ -719,7 +832,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                 if let Some(mapping) = p.mapping_options.filter(|row| row.open) {
                     rows = rows.push(mapping_rows(id, index, mapping));
                 }
-                let editor: Element<'a, Message> = container(rows)
+                let editor: Element<'a, AppMessage> = container(rows)
                     .width(Length::Fill)
                     .style(move |theme: &Theme| {
                         let mut style = container::Style::default();
@@ -730,10 +843,10 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
                         style
                     })
                     .into();
-                let editor: Element<'a, Message> = if accepts_drop {
+                let editor: Element<'a, AppMessage> = if accepts_drop {
                     mouse_area(editor)
-                        .on_enter(Message::DropRow(Some((id, index))))
-                        .on_exit(Message::DropRow(None))
+                        .on_enter(AppMessage::Inspector(Message::DropRow(Some((id, index)))))
+                        .on_exit(AppMessage::Inspector(Message::DropRow(None)))
                         .into()
                 } else {
                     editor
@@ -774,17 +887,20 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
 }
 
 /// The small button beside a mapping's ×, which opens its options rows.
-fn options_button<'a>(module: u32, index: usize) -> Element<'a, Message> {
+fn options_button<'a>(module: u32, index: usize) -> Element<'a, AppMessage> {
     button(text("Options").size(style::SMALL))
         .style(style::plain)
         .padding(1)
-        .on_press(Message::MidiOptionsRows { module, index })
+        .on_press(AppMessage::Learn(crate::learn::Message::MidiOptionsRows {
+            module,
+            index,
+        }))
         .into()
 }
 
 /// A mapping's options, under its line: mode, then range and invert, or the
 /// encoding for Relative (midi-learn.md, Mapping modes).
-fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<'a, Message> {
+fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<'a, AppMessage> {
     let options = row_data.options;
     let modes: Vec<Labelled<MidiMode>> = [
         MidiMode::Absolute,
@@ -803,11 +919,13 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
         row![
             label("Mode"),
             space::horizontal(),
-            pick_list(modes, current, move |choice: Labelled<MidiMode>| Message::MidiOptions {
-                module,
-                index,
-                options: options.with_mode(choice.value),
-            })
+            pick_list(modes, current, move |choice: Labelled<MidiMode>| AppMessage::Learn(
+                crate::learn::Message::MidiOptions {
+                    module,
+                    index,
+                    options: options.with_mode(choice.value),
+                }
+            ))
             .text_size(style::SMALL)
             .width(120),
         ]
@@ -832,11 +950,11 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
                 label("Encoding"),
                 space::horizontal(),
                 pick_list(encodings, current, move |choice: Labelled<MidiEncoding>| {
-                    Message::MidiOptions {
+                    AppMessage::Learn(crate::learn::Message::MidiOptions {
                         module,
                         index,
                         options: options.with_mode(MidiMode::Relative(choice.value)),
-                    }
+                    })
                 })
                 .text_size(style::SMALL)
                 .width(120),
@@ -848,7 +966,10 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
         let bad = row_data.range_error.is_some();
         let field = |shown: &str| {
             text_input("", shown)
-                .on_submit(Message::MidiRangeSubmit { module, index })
+                .on_submit(AppMessage::Learn(crate::learn::Message::MidiRangeSubmit {
+                    module,
+                    index,
+                }))
                 .size(style::SMALL)
                 .width(72)
                 .padding(1)
@@ -862,18 +983,22 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
                 })
         };
         let high_text = high.clone();
-        let low_field = field(&low).on_input(move |text| Message::MidiRangeText {
-            module,
-            index,
-            low: text,
-            high: high_text.clone(),
+        let low_field = field(&low).on_input(move |text| {
+            AppMessage::Learn(crate::learn::Message::MidiRangeText {
+                module,
+                index,
+                low: text,
+                high: high_text.clone(),
+            })
         });
         let low_text = low.clone();
-        let high_field = field(&high).on_input(move |text| Message::MidiRangeText {
-            module,
-            index,
-            low: low_text.clone(),
-            high: text,
+        let high_field = field(&high).on_input(move |text| {
+            AppMessage::Learn(crate::learn::Message::MidiRangeText {
+                module,
+                index,
+                low: low_text.clone(),
+                high: text,
+            })
         });
         rows = rows.push(
             row![label("Range"), space::horizontal(), low_field, label("to"), high_field]
@@ -888,10 +1013,12 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
                 .label("Invert")
                 .size(style::SWITCH)
                 .text_size(style::SMALL)
-                .on_toggle(move |invert| Message::MidiOptions {
-                    module,
-                    index,
-                    options: MidiMappingOptions { invert, ..options },
+                .on_toggle(move |invert| {
+                    AppMessage::Learn(crate::learn::Message::MidiOptions {
+                        module,
+                        index,
+                        options: MidiMappingOptions { invert, ..options },
+                    })
                 }),
         );
     }
@@ -899,7 +1026,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
 }
 
 /// Dim small text that the view owns.
-fn label_owned<'a>(words: String) -> Element<'a, Message> {
+fn label_owned<'a>(words: String) -> Element<'a, AppMessage> {
     text(words).size(style::SMALL).color(DIM).into()
 }
 
@@ -944,7 +1071,7 @@ fn encoding_name(encoding: MidiEncoding) -> &'static str {
 
 /// A slider with a waiting pickup's hollow ghost mark over its track, in
 /// proportion across it. It takes no presses, so the slider still gets them.
-fn with_ghost<'a>(control: Element<'a, Message>, ghost: Option<f32>) -> Element<'a, Message> {
+fn with_ghost<'a>(control: Element<'a, AppMessage>, ghost: Option<f32>) -> Element<'a, AppMessage> {
     let Some(ghost) = ghost else {
         return control;
     };
@@ -972,15 +1099,15 @@ fn with_ghost<'a>(control: Element<'a, Message>, ghost: Option<f32>) -> Element<
 /// A parameter's value: a field to type in, or plain text for a parameter
 /// that names its values. Text that is not a value gets a warning outline and
 /// the reason in hover text.
-fn value_field<'a>(module: u32, index: usize, field: Option<ValueField>, value: String) -> Element<'a, Message> {
+fn value_field<'a>(module: u32, index: usize, field: Option<ValueField>, value: String) -> Element<'a, AppMessage> {
     let Some(field) = field else {
         return text(value).size(style::BODY).color(DIM).into();
     };
     let bad = field.error.is_some();
     let input = text_input(&value, &field.text)
         .id(crate::controls::value_field_id(module, index))
-        .on_input(move |text| Message::ValueText { module, index, text })
-        .on_submit(Message::ValueSubmit { module, index })
+        .on_input(move |text| AppMessage::Inspector(Message::ValueText { module, index, text }))
+        .on_submit(AppMessage::Inspector(Message::ValueSubmit { module, index }))
         .size(style::BODY)
         .width(VALUE_FIELD_WIDTH)
         .padding(1)
@@ -995,7 +1122,7 @@ fn value_field<'a>(module: u32, index: usize, field: Option<ValueField>, value: 
     // The tooltip stays when the text is good, with nothing in it. Without it
     // the field would sit at another place in the widget tree once the text
     // turned bad, and lose its focus and caret on that character.
-    let reason: Element<'a, Message> = match field.error {
+    let reason: Element<'a, AppMessage> = match field.error {
         Some(reason) => container(text(reason).size(style::BODY))
             .padding(6)
             .style(container::rounded_box)
@@ -1013,17 +1140,19 @@ fn value_control<'a>(
     control: ParamControl,
     position: f32,
     step: f32,
-) -> Element<'a, Message> {
+) -> Element<'a, AppMessage> {
     // A choice is the parameter's minimum plus its index. The model gives
     // the index; the message turns it into a value.
-    let pick = move |choice: usize| Message::Choice { module, index, choice };
+    let pick = move |choice: usize| AppMessage::Inspector(Message::Choice { module, index, choice });
     match control {
-        ParamControl::Slider => slider(0.0..=1.0, position, move |position| Message::Param {
-            module,
-            index,
-            position,
+        ParamControl::Slider => slider(0.0..=1.0, position, move |position| {
+            AppMessage::Inspector(Message::Param {
+                module,
+                index,
+                position,
+            })
         })
-        .on_release(Message::SliderReleased)
+        .on_release(AppMessage::SliderReleased)
         .step(step)
         .into(),
         ParamControl::Radio { choices, selected } => {
@@ -1054,7 +1183,7 @@ fn value_control<'a>(
 
 /// The **Range** selector: a pick list of the range names. A pick is one
 /// undo step.
-fn range_view<'a>(module: u32, index: usize, range: RangeRow) -> Element<'a, Message> {
+fn range_view<'a>(module: u32, index: usize, range: RangeRow) -> Element<'a, AppMessage> {
     let options: Vec<Named> = range
         .choices
         .into_iter()
@@ -1063,10 +1192,12 @@ fn range_view<'a>(module: u32, index: usize, range: RangeRow) -> Element<'a, Mes
         .collect();
     let current = range.selected.and_then(|i| options.get(i).cloned());
     tooltip(
-        pick_list(options, current, move |n: Named| Message::Range {
-            module,
-            index,
-            range: n.index,
+        pick_list(options, current, move |n: Named| {
+            AppMessage::Inspector(Message::Range {
+                module,
+                index,
+                range: n.index,
+            })
         })
         .placeholder("Full")
         .text_size(style::SMALL)
@@ -1112,7 +1243,7 @@ fn modulation_view<'a>(
     index: usize,
     assignments: Vec<AssignmentRow>,
     adding: Option<Vec<SourceRow>>,
-) -> Element<'a, Message> {
+) -> Element<'a, AppMessage> {
     let center = iced::Alignment::Center;
     let mut rows = column![].spacing(6);
     for a in assignments {
@@ -1122,25 +1253,31 @@ fn modulation_view<'a>(
         let card = column![
             row![
                 checkbox(a.enabled)
-                    .on_toggle(move |enabled| Message::Enabled { id, enabled })
+                    .on_toggle(
+                        move |enabled| AppMessage::Modulation(crate::modulation::Message::Enabled { id, enabled })
+                    )
                     .size(style::SWITCH),
                 text(a.source).size(style::SMALL),
                 space::horizontal(),
-                remove_button("Remove modulation", Message::Unassign(id)),
+                remove_button(
+                    "Remove modulation",
+                    AppMessage::Modulation(crate::modulation::Message::Unassign(id))
+                ),
             ]
             .spacing(4)
             .align_y(center),
-            pick_list(a.polarities, Some(a.polarity), move |choice| Message::Polarity {
-                id,
-                choice
-            })
+            pick_list(a.polarities, Some(a.polarity), move |choice| AppMessage::Modulation(
+                crate::modulation::Message::Polarity { id, choice }
+            ))
             .text_size(style::SMALL)
             .padding([1, 4])
             .style(style::quiet_pick_list),
             row![
-                slider(-1.0..=1.0, a.depth, move |depth| Message::Depth { id, depth })
-                    .on_release(Message::SliderReleased)
-                    .step(0.01_f32),
+                slider(-1.0..=1.0, a.depth, move |depth| AppMessage::Modulation(
+                    crate::modulation::Message::Depth { id, depth }
+                ))
+                .on_release(AppMessage::SliderReleased)
+                .step(0.01_f32),
                 text(a.depth_text).size(style::SMALL).width(40),
             ]
             .spacing(6)
@@ -1152,19 +1289,25 @@ fn modulation_view<'a>(
     rows = rows.push(
         button(text(if adding.is_some() { "Cancel" } else { "+ Add modulation" }).size(style::SMALL))
             .padding([2, 8])
-            .on_press(Message::AddModulation { module, index }),
+            .on_press(AppMessage::Modulation(crate::modulation::Message::AddModulation {
+                module,
+                index,
+            })),
     );
     if let Some(sources) = adding {
         let mut list = column![].spacing(1);
         for s in sources {
             let source = s.source;
-            list = list.push(
-                button(text(s.name).size(style::SMALL))
-                    .width(Length::Fill)
-                    .padding([2, 6])
-                    .style(style::secondary)
-                    .on_press_maybe(s.enabled.then_some(Message::Assign { source, module, index })),
-            );
+            list =
+                list.push(
+                    button(text(s.name).size(style::SMALL))
+                        .width(Length::Fill)
+                        .padding([2, 6])
+                        .style(style::secondary)
+                        .on_press_maybe(s.enabled.then_some(AppMessage::Modulation(
+                            crate::modulation::Message::Assign { source, module, index },
+                        ))),
+                );
         }
         rows = rows.push(container(list).padding([0, 8]));
     }
@@ -1172,7 +1315,7 @@ fn modulation_view<'a>(
 }
 
 /// **Drives**: one group per output. A line selects its target.
-fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, Message> {
+fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, AppMessage> {
     let mut list = column![text("Drives").size(style::CONTROL)].spacing(4);
     for group in drives {
         list = list.push(text(group.output).size(style::SMALL).color(DIM));
@@ -1183,7 +1326,7 @@ fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, Message> {
                     .width(Length::Fill)
                     .padding([2, 8])
                     .style(style::plain)
-                    .on_press(Message::SelectModule(line.target)),
+                    .on_press(AppMessage::Inspector(Message::SelectModule(line.target))),
             );
         }
     }

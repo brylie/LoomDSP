@@ -131,11 +131,11 @@ fn help_close_stays_visible_while_scrolling() {
 fn example_button_honors_unsaved_changes() {
     let mut ui = Ui::open("sine.ron");
     let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
-    let _ = ui.app.update(Message::Param {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Param {
         module: 5,
         index: 0,
         position: 0.8,
-    });
+    }));
     let _ = ui.app.update(Message::SliderReleased);
     assert!(ui.app.unsaved());
     ui.tap(Key::Named(Named::F1), Modifiers::default());
@@ -181,11 +181,11 @@ fn example_button_saves_the_old_patch_when_requested() {
     // The test patch is an untitled copy, so saving asks for a path.
     ui.app.session.document.forget_file();
     let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
-    let _ = ui.app.update(Message::Param {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Param {
         module: 5,
         index: 0,
         position: 0.8,
-    });
+    }));
     let _ = ui.app.update(Message::SliderReleased);
     let value = ui
         .app
@@ -221,11 +221,11 @@ fn example_uses_existing_unsaved_changes_flow() {
     let mut ui = Ui::open("subtractive.ron");
     let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
     let _ = ui.app.update(Message::ShowHelp);
-    let _ = ui.app.update(Message::Param {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position: 0.8,
-    });
+    }));
     let _ = ui.app.update(Message::SliderReleased);
     assert!(ui.app.unsaved());
     let _ = files::fake::asked();

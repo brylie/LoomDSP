@@ -624,14 +624,14 @@ fn sample_follows_a_live_value_frame_by_frame() {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(env),
             port: 0,
         },
         module: filter.0,
         index: resonance,
-    });
+    }));
 
     let line = format!(r#"{{"cmd": "sample", "target": "{}:resonance", "ms": 300}}"#, filter.0);
     let sample = run_playing(&mut app, &line).unwrap();
@@ -677,14 +677,14 @@ fn sample_reads_the_named_value_of_a_two_value_widget() {
         .spec(node.descriptor.param_index("pad_y").unwrap())
         .unwrap()
         .normalize(1_000.0);
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(env),
             port: 0,
         },
         module: pad.0,
         index: pad_x,
-    });
+    }));
 
     let mut frames = |name: &str| {
         let line = format!(r#"{{"cmd": "sample", "target": "{}:{name}", "ms": 100}}"#, pad.0);
@@ -984,14 +984,14 @@ fn pointer_ui() -> crate::ui_test::Ui {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = ui.app.update(Message::Assign {
+    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(5),
             port: 0,
         },
         module: 4,
         index: resonance,
-    });
+    }));
     ui.redraw();
     ui
 }
@@ -1031,7 +1031,9 @@ fn a_script_reads_the_typed_field_from_the_snapshot() {
     let mut ui = typing_ui();
     let id = ui.app.session.controller.add_module("loom.filter.svf").unwrap();
     ui.app.commit();
-    let _ = ui.app.update(Message::SelectModule(id.0));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let at = ui.control(id.0, "cutoff");
     ui.move_to(at);
@@ -1169,7 +1171,9 @@ fn a_script_drags_an_output_onto_a_control() {
 #[test]
 fn a_script_drags_an_output_onto_an_inspector_row() {
     let mut ui = pointer_ui();
-    let _ = ui.app.update(Message::SelectModule(4));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(4)));
     ui.redraw();
     let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
     let before = ui.app.session.controller.graph().assignments().count();
@@ -1993,7 +1997,9 @@ fn a_script_types_an_exact_value() {
     let id = ui.app.session.controller.add_module("test.panel").unwrap();
     ui.app.refresh();
     ui.step(&[]);
-    let _ = ui.app.update(Message::SelectModule(id.0));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let target = format!("{}:cutoff", id.0);
     run_ui(&mut ui, &format!(r#"{{"cmd": "hover", "target": "{target}"}}"#)).unwrap();

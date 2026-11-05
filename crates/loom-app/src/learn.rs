@@ -151,14 +151,33 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = u32> + use<> {
     rx
 }
 
-/// What the player asks of learn mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the player asks of learn mode and of a parameter's MIDI mapping.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// Turn learn mode on or off.
     Toggle,
     /// Arm a parameter, or disarm it if it is armed. Ignored while learn
     /// mode is off.
     Arm(Param),
+    /// Remove a parameter's MIDI mapping.
+    Unmap { module: u32, index: usize },
+    /// Open or close the options rows of a parameter's MIDI mapping.
+    MidiOptionsRows { module: u32, index: usize },
+    /// Change the options of a parameter's MIDI mapping.
+    MidiOptions {
+        module: u32,
+        index: usize,
+        options: loom_core::MidiMappingOptions,
+    },
+    /// Text typed in a MIDI mapping's range fields.
+    MidiRangeText {
+        module: u32,
+        index: usize,
+        low: String,
+        high: String,
+    },
+    /// Enter in a MIDI mapping's range fields.
+    MidiRangeSubmit { module: u32, index: usize },
 }
 
 /// Learn mode's state: whether it is on, the armed parameter, and what the

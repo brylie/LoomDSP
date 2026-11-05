@@ -707,12 +707,12 @@ impl App {
         // As a knob turn: one change, then let go, so it is one undo step. A
         // `value` goes in as it is, so it is not bent by a position round trip.
         let message = match (value, position) {
-            (Some(value), None) => Message::ParamValue { module, index, value },
-            (None, Some(position)) => Message::Param {
+            (Some(value), None) => Message::Inspector(crate::inspector::Message::ParamValue { module, index, value }),
+            (None, Some(position)) => Message::Inspector(crate::inspector::Message::Param {
                 module,
                 index,
                 position,
-            },
+            }),
             _ => return Err("give `value` or `position`, not both".to_string()),
         };
         send(self, message);
@@ -820,7 +820,11 @@ impl App {
         options.high = high.unwrap_or(options.high);
         options.invert = invert.unwrap_or(options.invert);
         options.check()?;
-        Ok(Message::MidiOptions { module, index, options })
+        Ok(Message::Learn(crate::learn::Message::MidiOptions {
+            module,
+            index,
+            options,
+        }))
     }
 
     /// Checks a `sample` target: a panel widget by the name it is bound

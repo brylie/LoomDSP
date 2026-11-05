@@ -2,10 +2,94 @@
 //! range arc on a knob, or the dot), and the words and defaults the
 //! inspector and a drop use. Spec: `docs/design/modulation.md`, Slice 1.
 
+use crate::App;
 use loom_canvas::ModulationMark;
 use loom_core::{Assignment, AssignmentId, Graph, ModuleId, OutputRef, ParamSpec, Polarity, WidgetKind};
 use std::collections::BTreeMap;
 use std::fmt;
+
+/// A change to a modulation assignment, from the inspector or the matrix.
+#[derive(Debug, Clone)]
+pub(crate) enum Message {
+    /// Open or close the **Add modulation** list under a parameter.
+    AddModulation { module: u32, index: usize },
+    /// Assign an output to a parameter, picked from **Add modulation**.
+    Assign {
+        source: OutputRef,
+        module: u32,
+        index: usize,
+    },
+    /// An assignment's depth slider moved.
+    Depth { id: AssignmentId, depth: f32 },
+    /// An assignment's polarity was picked.
+    Polarity { id: AssignmentId, choice: PolarityChoice },
+    /// An assignment was turned on or off.
+    Enabled { id: AssignmentId, enabled: bool },
+    /// The remove button on an assignment row.
+    Unassign(AssignmentId),
+}
+
+impl App {
+    /// Handles a change to a modulation assignment.
+    pub(crate) fn modulation_message(&mut self, message: Message) {
+        match message {
+            Message::AddModulation { module, index } => {
+                self.session.gestures.toggle_adding((module, index));
+            }
+            Message::Assign { source, module, index } => {
+                self.session.gestures.close_adding();
+                self.close_slider_gesture();
+                self.edit(|app| app.assign(source, ModuleId(module), index));
+            }
+            Message::Depth { id, depth } => {
+                // Like a parameter slider: the first change opens the
+                // gesture, and letting go closes it, so one drag is one step.
+                self.close_pending_arrow_group();
+                self.session.edits.start_slider_gesture();
+                self.begin_edit();
+                if let Err(e) = self.session.controller.set_assignment_depth(id, depth) {
+                    self.alerts.warn(e.to_string());
+                }
+                self.refresh_values();
+            }
+            Message::Polarity { id, choice } => {
+                self.close_slider_gesture();
+                self.edit(|app| {
+                    if let Err(e) = app.session.controller.set_assignment_polarity(id, choice.polarity()) {
+                        app.alerts.warn(e.to_string());
+                    }
+                    app.refresh_values();
+                });
+            }
+            Message::Enabled { id, enabled } => {
+                self.close_slider_gesture();
+                self.edit(|app| {
+                    if let Err(e) = app.session.controller.set_assignment_enabled(id, enabled) {
+                        app.alerts.warn(e.to_string());
+                    } else {
+                        app.session.scene.set_modulation_enabled(id.0, enabled);
+                    }
+                    app.refresh_values();
+                });
+            }
+            Message::Unassign(id) => {
+                self.close_slider_gesture();
+                self.edit(|app| match app.session.controller.remove_assignment(id) {
+                    Ok(removed) => {
+                        app.commit();
+                        let graph = app.session.controller.graph();
+                        app.alerts.say(format!(
+                            "Removed modulation from {} to {}",
+                            source_name(graph, removed.source),
+                            target_name(graph, removed.target, removed.param)
+                        ));
+                    }
+                    Err(e) => app.alerts.warn(e.to_string()),
+                });
+            }
+        }
+    }
+}
 
 /// Depth of a new assignment on a continuous parameter: a quarter of the
 /// knob. One constant, so it is easy to change after trying it with users.

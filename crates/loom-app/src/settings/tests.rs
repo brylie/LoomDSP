@@ -816,11 +816,11 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
     app.add_module(constant, iced::Point::new(100.0, 100.0));
     let id = *app.session.selection.first().unwrap();
     for i in 0..2_000 {
-        let _ = app.update(crate::Message::Param {
+        let _ = app.update(crate::Message::Inspector(crate::inspector::Message::Param {
             module: id,
             index: 0,
             position: (i % 100) as f32 / 100.0,
-        });
+        }));
         assert!(
             !app.alerts.status().contains("queue is full"),
             "move {i}: {}",

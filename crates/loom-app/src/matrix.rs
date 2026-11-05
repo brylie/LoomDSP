@@ -663,20 +663,20 @@ impl App {
                     e.depth = s;
                 }
             }
-            Event::DepthDrag(id, depth) => self.handle(Message::Depth { id, depth }),
+            Event::DepthDrag(id, depth) => self.modulation_message(crate::modulation::Message::Depth { id, depth }),
             Event::DepthReleased => self.handle(Message::SliderReleased),
             Event::Source(id, source) => self.matrix_retarget(id, Some(source.output), None),
             Event::Target(id, target) => self.matrix_retarget(id, None, Some((target.module, target.param))),
             Event::Polarity(id, choice) => {
-                self.handle(Message::Polarity { id, choice });
+                self.modulation_message(crate::modulation::Message::Polarity { id, choice });
                 self.session.matrix.edit = None;
             }
             Event::Enabled(id, enabled) => {
                 self.matrix_select(id, Column::On);
-                self.handle(Message::Enabled { id, enabled });
+                self.modulation_message(crate::modulation::Message::Enabled { id, enabled });
             }
             Event::Remove(id) => {
-                self.handle(Message::Unassign(id));
+                self.modulation_message(crate::modulation::Message::Unassign(id));
                 self.session.matrix.reconcile(self.session.controller.graph());
             }
             Event::AddOpen => {
@@ -806,7 +806,7 @@ impl App {
             Column::On => {}
             Column::Depth => match parse_depth(&edit.depth) {
                 Some(depth) => {
-                    self.handle(Message::Depth { id: edit.id, depth });
+                    self.modulation_message(crate::modulation::Message::Depth { id: edit.id, depth });
                     self.handle(Message::SliderReleased);
                     self.session.matrix.edit = None;
                 }

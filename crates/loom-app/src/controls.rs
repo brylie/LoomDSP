@@ -28,6 +28,35 @@ impl App {
                     self.arm(param);
                 }
             }
+            learn::Message::Unmap { module, index } => {
+                self.close_slider_gesture();
+                self.edit(|app| match app.session.controller.unmap_midi(ModuleId(module), index) {
+                    Ok(Some(mapping)) => {
+                        app.commit();
+                        app.alerts.say(format!(
+                            "Removed {} from {}",
+                            mapping.control,
+                            learn::param_name(&app.session.controller, (module, index))
+                        ));
+                    }
+                    Ok(None) => {}
+                    Err(e) => app.alerts.warn(e.to_string()),
+                });
+            }
+            learn::Message::MidiOptionsRows { module, index } => self.session.learn.toggle_options((module, index)),
+            learn::Message::MidiOptions { module, index, options } => self.set_midi_options(module, index, options),
+            learn::Message::MidiRangeText {
+                module,
+                index,
+                low,
+                high,
+            } => self.session.learn.set_range_draft(Some(learn::RangeDraft {
+                param: (module, index),
+                low,
+                high,
+                error: None,
+            })),
+            learn::Message::MidiRangeSubmit { module, index } => self.submit_midi_range(module, index),
         }
     }
 
@@ -543,7 +572,7 @@ pub(crate) fn value_draft_event(
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(Named::Escape),
             ..
-        }) => Some(Message::ValueDraftClear),
+        }) => Some(Message::Inspector(crate::inspector::Message::ValueDraftClear)),
         _ => None,
     }
 }

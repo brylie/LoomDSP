@@ -273,11 +273,11 @@ fn fake_audio_keeps_taking_edits() {
     app.commit();
     for burst in 0..10 {
         for i in 0..500 {
-            let _ = app.update(Message::Param {
+            let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
                 module: filter.0,
                 index: 0,
                 position: ((burst * 500 + i) % 100) as f32 / 100.0,
-            });
+            }));
             assert!(
                 !app.alerts.status().contains("queue is full"),
                 "{}",
@@ -300,11 +300,11 @@ fn no_audio_keeps_taking_edits() {
     app.commit();
     let capacity = loom_core::EngineConfig::default().command_capacity;
     for i in 0..5_000 {
-        let _ = app.update(Message::Param {
+        let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
             module: filter.0,
             index: 0,
             position: (i % 100) as f32 / 100.0,
-        });
+        }));
         assert!(
             !app.alerts.status().contains("queue is full"),
             "move {i}: {}",
@@ -538,16 +538,16 @@ fn add_modulation_matches_a_drop() {
     sorted.sort();
     assert_eq!(sources, sorted, "module order, then port order");
 
-    let _ = app.update(Message::AddModulation {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::AddModulation {
         module: filter.0,
         index: cutoff,
-    });
+    }));
     assert_eq!(app.session.gestures.adding(), Some((filter.0, cutoff)));
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source,
         module: filter.0,
         index: cutoff,
-    });
+    }));
     assert_eq!(app.session.gestures.adding(), None);
     let picked = assignments(&app);
     assert!(modulation::exists(
@@ -577,17 +577,20 @@ fn inspector_rows_edit_and_remove_assignments() {
     let steps = app.session.edits.history.len();
 
     for depth in [0.3, 0.4, 0.5] {
-        let _ = app.update(Message::Depth { id, depth });
+        let _ = app.update(Message::Modulation(crate::modulation::Message::Depth { id, depth }));
     }
     let _ = app.update(Message::SliderReleased);
     assert_eq!(assignments(&app)[0].depth, 0.5);
     assert_eq!(app.session.edits.history.len(), steps + 1, "one drag, one step");
 
-    let _ = app.update(Message::Polarity {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Polarity {
         id,
-        choice: PolarityChoice::Bipolar,
-    });
-    let _ = app.update(Message::Enabled { id, enabled: false });
+        choice: modulation::PolarityChoice::Bipolar,
+    }));
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Enabled {
+        id,
+        enabled: false,
+    }));
     let a = assignments(&app)[0];
     assert_eq!(a.polarity, Some(loom_core::Polarity::Bipolar));
     assert!(!a.enabled);
@@ -598,7 +601,7 @@ fn inspector_rows_edit_and_remove_assignments() {
     app.undo();
     assert_eq!(assignments(&app)[0].depth, 0.25);
 
-    let _ = app.update(Message::Unassign(id));
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Unassign(id)));
     assert!(assignments(&app).is_empty());
     assert!(modulation::on_param(app.session.controller.graph(), filter, cutoff).is_empty());
 }
@@ -621,16 +624,19 @@ fn badges_count_every_assignment_on_an_output() {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: env, port: 0 },
         module: filter.0,
         index: resonance,
-    });
+    }));
     assert_eq!(badge(&app), 2);
     let id = app.session.controller.graph().assignments().next().unwrap().0;
-    let _ = app.update(Message::Enabled { id, enabled: false });
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Enabled {
+        id,
+        enabled: false,
+    }));
     assert_eq!(badge(&app), 2, "off still counts");
-    let _ = app.update(Message::Unassign(id));
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Unassign(id)));
     assert_eq!(badge(&app), 1);
     let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![filter.0])));
     assert_eq!(badge(&app), 0);
@@ -647,7 +653,7 @@ fn drives_lists_targets_and_selects_them() {
     let targets: Vec<_> = drives[&0].iter().map(|(_, a)| (a.target, a.param)).collect();
     assert_eq!(targets, vec![(filter, cutoff)]);
     assert!(modulation::drives(app.session.controller.graph(), filter).is_empty());
-    let _ = app.update(Message::SelectModule(filter.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(filter.0)));
     assert_eq!(app.session.selection, BTreeSet::from([filter.0]));
 }
 
@@ -659,11 +665,11 @@ fn assignments_keep_their_order_through_a_save() {
     let (env, filter, cutoff, widget) = env_and_filter(&mut app);
     let other = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: other, port: 0 },
         module: filter.0,
         index: cutoff,
-    });
+    }));
     drop_env(&mut app, env, filter, widget);
     let rows = |c: &Controller| -> Vec<(OutputRef, f32)> {
         modulation::on_param(c.graph(), filter, cutoff)
@@ -691,11 +697,11 @@ fn two_sources(app: &mut App) -> (ModuleId, ModuleId, ModuleId, usize, usize) {
     let sine = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
     drop_env(app, env, filter, widget);
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: sine, port: 0 },
         module: filter.0,
         index: cutoff,
-    });
+    }));
     (env, sine, filter, cutoff, widget)
 }
 
@@ -1260,11 +1266,11 @@ fn a_running_engine_moves_the_live_dot() {
     let source = app.session.controller.add_module("loom.math.constant").unwrap();
     app.session.controller.set_param_named(source, "value", 0.5).unwrap();
     let (_, filter, cutoff, widget) = env_and_filter(&mut app);
-    let _ = app.update(Message::Assign {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: out(source),
         module: filter.0,
         index: cutoff,
-    });
+    }));
     let _ = app.update(Message::LiveFrame);
     assert_eq!(tile_widget(&app, filter, widget).live, None, "the engine has not run");
 
@@ -1511,11 +1517,11 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
     );
     app.undo();
     assert!(app.session.controller.graph().node(duplicate).is_none());
-    let _ = app.update(Message::Unassign(assignment));
-    let _ = app.update(Message::Unmap {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Unassign(assignment)));
+    let _ = app.update(Message::Learn(crate::learn::Message::Unmap {
         module: missing.0,
         index: 0,
-    });
+    }));
     assert!(app.session.controller.graph().assignment(assignment).is_none());
     assert!(app.session.controller.graph().midi_mapping_of(missing, 0).is_none());
     assert_eq!(
@@ -1538,7 +1544,7 @@ fn inspector_shows_nominal_port_ranges() {
     let mut app = app();
     let env = app.session.controller.add_module("loom.env.envelope").unwrap();
     app.commit();
-    let _ = app.update(Message::SelectModule(env.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(env.0)));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
         panic!("one module is selected");
     };
@@ -1575,7 +1581,7 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
         inspector::ParamMode::Edit { control, .. } => control.clone(),
         inspector::ParamMode::Learn { .. } => panic!("not in learn mode"),
     };
-    let _ = app.update(Message::SelectModule(button.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(button.0)));
     let params = rows(&app, button);
     let mode = params.iter().find(|p| p.label == "Mode").unwrap();
     assert_eq!(
@@ -1590,11 +1596,11 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
     assert_eq!(control(on), inspector::ParamControl::Slider);
 
     let undo = app.session.edits.history.undo_step().map(|s| s.name().to_string());
-    let _ = app.update(Message::Choice {
+    let _ = app.update(Message::Inspector(crate::inspector::Message::Choice {
         module: button.0,
         index: mode.index,
         choice: 1,
-    });
+    }));
     assert_eq!(
         app.session.controller.graph().node(button).unwrap().params[mode.index],
         1.0
@@ -1613,7 +1619,7 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
     );
 
     // More than four names: a pick list.
-    let _ = app.update(Message::SelectModule(lfo.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(lfo.0)));
     let shape = rows(&app, lfo).into_iter().find(|p| p.label == "Shape").unwrap();
     let inspector::ParamControl::PickList { choices, selected } = control(&shape) else {
         panic!("five shapes are a pick list: {shape:?}");
@@ -1692,7 +1698,7 @@ fn the_inspector_selects_a_control_range() {
     let mul = app.session.controller.add_module("loom.math.mul").unwrap();
     app.session.controller.set_param(mul, 0, 0.5).unwrap();
     app.commit();
-    let _ = app.update(Message::SelectModule(mul.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(mul.0)));
     let gain_row = |app: &App| {
         let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
             panic!("one module is selected");
@@ -1704,11 +1710,11 @@ fn the_inspector_selects_a_control_range() {
     assert_eq!(range.choices[0], "-0.1 to 0.1");
     assert_eq!(range.choices[range.selected.unwrap()], "-1 to 1");
 
-    let _ = app.update(Message::Range {
+    let _ = app.update(Message::Inspector(crate::inspector::Message::Range {
         module: mul.0,
         index: 0,
         range: 0,
-    });
+    }));
     let row = gain_row(&app);
     assert_eq!(row.range.unwrap().selected, Some(0));
     assert_eq!(
@@ -1754,7 +1760,7 @@ fn the_inspector_selects_a_control_range() {
     // A parameter without ranges has no selector.
     let lfo = app.session.controller.add_module("loom.mod.lfo").unwrap();
     app.commit();
-    let _ = app.update(Message::SelectModule(lfo.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(lfo.0)));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
         panic!("one module is selected");
     };
@@ -2056,15 +2062,15 @@ fn the_snapshot_shows_the_inspector_rows() {
         .find(|(_, a)| a.source == out(sine))
         .unwrap()
         .0;
-    let _ = app.update(Message::Enabled {
+    let _ = app.update(Message::Modulation(crate::modulation::Message::Enabled {
         id: off,
         enabled: false,
-    });
-    let _ = app.update(Message::SelectModule(filter.0));
-    let _ = app.update(Message::AddModulation {
+    }));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(filter.0)));
+    let _ = app.update(Message::Modulation(crate::modulation::Message::AddModulation {
         module: filter.0,
         index: cutoff,
-    });
+    }));
 
     let snapshot = app.ui_snapshot();
     assert_eq!(snapshot.undo.as_deref(), Some("change modulation"));
@@ -2097,7 +2103,7 @@ fn the_snapshot_shows_the_inspector_rows() {
     assert!(pickable.iter().any(|&(_, enabled)| enabled), "{pickable:?}");
     assert!(rows.drives.is_empty(), "the filter drives nothing");
 
-    let _ = app.update(Message::SelectModule(sine.0));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(sine.0)));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
         panic!("the sine is selected");
     };
@@ -2171,7 +2177,11 @@ fn app_with_filter() -> (App, u32, usize) {
 /// Turns the filter's Cutoff with the inspector slider.
 fn slide(app: &mut App, module: u32, index: usize, values: &[f32]) {
     for &value in values {
-        let _ = app.update(Message::ParamValue { module, index, value });
+        let _ = app.update(Message::Inspector(crate::inspector::Message::ParamValue {
+            module,
+            index,
+            value,
+        }));
     }
 }
 

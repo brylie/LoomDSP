@@ -77,12 +77,9 @@ mod xy;
 use clap::Parser;
 use iced::{Color, Point, Size, Task, Theme};
 use loom_canvas::CanvasEvent;
-use loom_core::{
-    AssignmentId, Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId,
-};
+use loom_core::{Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId};
 use loom_patch::Patch;
 use matrix::{Event as MatrixEvent, Tab as RightTab};
-use modulation::PolarityChoice;
 use overlays::Overlay;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -273,13 +270,6 @@ enum Message {
         /// Who was listening when the event was heard.
         listening: input_owner::Listening,
     },
-    /// The eligible inspector parameter currently under an output drag.
-    DropRow(Option<(u32, usize)>),
-    Param {
-        module: u32,
-        index: usize,
-        position: f32,
-    },
     /// The toolbar asks for the module browser at the centre of the canvas.
     OpenBrowser,
     /// Open help for the browser highlight or selected tile.
@@ -359,38 +349,14 @@ enum Message {
     /// What the telemetry thread found that changed on screen: meter levels
     /// and scope traces.
     Telemetry(monitor::Update),
-    /// MIDI learn: turn it on or off, or arm a parameter.
+    /// MIDI learn, and the rows of a parameter's MIDI mapping.
     Learn(learn::Message),
+    /// A control in the inspector, or a command that sets a parameter.
+    Inspector(inspector::Message),
+    /// A change to a modulation assignment.
+    Modulation(modulation::Message),
     /// Time to check whether a recovery copy is due.
     Autosave,
-    /// Remove a parameter's MIDI mapping.
-    Unmap {
-        module: u32,
-        index: usize,
-    },
-    /// Open or close the options rows of a parameter's MIDI mapping.
-    MidiOptionsRows {
-        module: u32,
-        index: usize,
-    },
-    /// Change the options of a parameter's MIDI mapping.
-    MidiOptions {
-        module: u32,
-        index: usize,
-        options: loom_core::MidiMappingOptions,
-    },
-    /// Text typed in a MIDI mapping's range fields.
-    MidiRangeText {
-        module: u32,
-        index: usize,
-        low: String,
-        high: String,
-    },
-    /// Enter in a MIDI mapping's range fields.
-    MidiRangeSubmit {
-        module: u32,
-        index: usize,
-    },
     /// Time to check whether a ghost mark has run out.
     MidiGhosts,
     /// A MIDI control change arrived.
@@ -409,93 +375,18 @@ enum Message {
     },
     /// Replay the step undo took back.
     Redo,
-    /// An exact parameter value, in the parameter's units, sent as a knob
-    /// turn is. The control channel's `set` with a `value` uses it, so the
-    /// stored number is the one sent and not a round trip through a position.
-    ParamValue {
-        module: u32,
-        index: usize,
-        value: f32,
-    },
-    /// Text typed in an inspector value field (panel-widgets.md, Typing a
-    /// value).
-    ValueText {
-        module: u32,
-        index: usize,
-        text: String,
-    },
-    /// Enter in an inspector value field.
-    ValueSubmit {
-        module: u32,
-        index: usize,
-    },
-    /// Escape with a draft in a value field: it is dropped.
-    ValueDraftClear,
     /// Something may have moved text focus, such as a press. Ask the widgets.
     TextFocusCheck,
     /// Which text field has focus, from the widgets.
     TextFocus(editing::TextFocus),
     /// Tab was pressed. It closes a text field on the main view.
     TextFieldTab,
-    /// A choice name was picked in the inspector: value `min + choice` of
-    /// the parameter, as one undo step (panels.md, Choice names).
-    Choice {
-        module: u32,
-        index: usize,
-        choice: usize,
-    },
-    /// A range was picked in a parameter's **Range** selector: index
-    /// `range` of the ranges it offers (`docs/design/control-ranges.md`).
-    Range {
-        module: u32,
-        index: usize,
-        range: usize,
-    },
     /// An inspector slider was let go.
     SliderReleased,
-    /// Open or close the **Add modulation** list under a parameter.
-    AddModulation {
-        module: u32,
-        index: usize,
-    },
-    /// Assign an output to a parameter, picked from **Add modulation**.
-    Assign {
-        source: OutputRef,
-        module: u32,
-        index: usize,
-    },
-    /// An assignment's depth slider moved.
-    Depth {
-        id: AssignmentId,
-        depth: f32,
-    },
-    /// An assignment's polarity was picked.
-    Polarity {
-        id: AssignmentId,
-        choice: PolarityChoice,
-    },
-    /// An assignment was turned on or off.
-    Enabled {
-        id: AssignmentId,
-        enabled: bool,
-    },
-    /// The remove button on an assignment row.
-    Unassign(AssignmentId),
-    /// Edit a placeholder label without changing the patch yet.
-    UnknownLabelDraft {
-        module: u32,
-        value: String,
-    },
-    /// Apply the placeholder label as one undo step.
-    UnknownLabelApply {
-        module: u32,
-    },
     /// A change in the session-only modulation matrix.
     Matrix(MatrixEvent),
     /// A key handled by the focused matrix even if a widget used it.
     MatrixKey(iced::keyboard::Event),
-    /// A line under **Drives** selects its target module.
-    SelectModule(u32),
     /// A message for the Preferences window (`docs/design/preferences.md`).
     Preferences(settings::Message),
     /// An edit in patch info (`docs/design/patch-metadata.md`).
@@ -570,7 +461,7 @@ impl Message {
                 | Self::LiveFrame
                 | Self::MidiPoll
                 | Self::BenchDone
-                | Self::UnknownLabelDraft { .. }
+                | Self::Inspector(inspector::Message::UnknownLabelDraft { .. })
                 | Self::TextFocusCheck
                 | Self::TextFocus(_)
         )
@@ -624,11 +515,7 @@ impl Message {
             // read meanwhile must not go missing.
             Self::Patches(message) => matches!(message, patches::Message::Found { .. }),
             Self::Key(_)
-            | Self::DropRow(_)
-            | Self::MidiOptionsRows { .. }
-            | Self::MidiRangeText { .. }
             | Self::MidiGhosts
-            | Self::Param { .. }
             | Self::OpenBrowser
             | Self::ShowHelp
             | Self::ShowShortcuts
@@ -646,32 +533,16 @@ impl Message {
             | Self::Measure(_)
             | Self::Animate(_)
             | Self::Learn(_)
-            | Self::Unmap { .. }
-            | Self::MidiOptions { .. }
-            | Self::MidiRangeSubmit { .. }
+            | Self::Inspector(_)
+            | Self::Modulation(_)
             | Self::Undo
             | Self::HistoryKey { .. }
             | Self::Redo
-            | Self::ParamValue { .. }
-            | Self::ValueText { .. }
-            | Self::ValueSubmit { .. }
-            | Self::ValueDraftClear
             | Self::TextFocusCheck
             | Self::TextFieldTab
-            | Self::Choice { .. }
-            | Self::Range { .. }
             | Self::SliderReleased
-            | Self::AddModulation { .. }
-            | Self::Assign { .. }
-            | Self::Depth { .. }
-            | Self::Polarity { .. }
-            | Self::Enabled { .. }
-            | Self::Unassign(_)
-            | Self::UnknownLabelDraft { .. }
-            | Self::UnknownLabelApply { .. }
             | Self::Matrix(_)
             | Self::MatrixKey(_)
-            | Self::SelectModule(_)
             | Self::Preferences(_)
             | Self::PatchInfo(_)
             | Self::Licence(_)
@@ -1345,7 +1216,7 @@ impl App {
             Message::ControlFrame(now) => self.control_frame(now),
             Message::TextFieldTab => self.text_field_tab(),
             Message::TextFocus(focus) => self.text_focus_changed(focus),
-            Message::ValueSubmit { module, index } => self.value_submit(module, index),
+            Message::Inspector(message) => self.inspector_message(message),
             Message::Located {
                 call,
                 target,
@@ -1530,7 +1401,7 @@ impl App {
             | Message::ControlFrame(_)
             | Message::TextFieldTab
             | Message::TextFocus(_)
-            | Message::ValueSubmit { .. }
+            | Message::Inspector(_)
             | Message::Located { .. }
             | Message::TypeFocus { .. }
             | Message::Matrix(_)
@@ -1627,126 +1498,8 @@ impl App {
             }
             Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
-            Message::UnknownLabelDraft { module, value } => self.session.gestures.draft_label(module, value),
-            Message::UnknownLabelApply { module } => {
-                if let Some(value) = self.session.gestures.take_label(module) {
-                    let label = (!value.is_empty()).then_some(value);
-                    self.edit(|app| {
-                        if app.session.controller.set_unknown_label(ModuleId(module), label) {
-                            app.refresh();
-                        }
-                    });
-                }
-            }
-            Message::DropRow(row) => {
-                let allowed = !self.session.learn.is_on();
-                self.session.gestures.hover_row(row, allowed);
-            }
-            Message::Param {
-                module,
-                index,
-                position,
-            } => {
-                let value = self
-                    .session
-                    .controller
-                    .graph()
-                    .node(ModuleId(module))
-                    .and_then(|n| n.spec(index))
-                    .map(|spec| spec.denormalize(position));
-                if let Some(value) = value {
-                    self.turn_param(module, index, value);
-                }
-            }
-            Message::ParamValue { module, index, value } => {
-                let value = self
-                    .session
-                    .controller
-                    .graph()
-                    .node(ModuleId(module))
-                    .and_then(|n| n.spec(index))
-                    .map(|spec| spec.clamp(value));
-                if let Some(value) = value {
-                    self.turn_param(module, index, value);
-                }
-            }
-            Message::Choice { module, index, choice } => {
-                let value = self
-                    .session
-                    .controller
-                    .graph()
-                    .node(ModuleId(module))
-                    .and_then(|n| n.spec(index))
-                    .map(|spec| spec.clamp(spec.min + choice as f32));
-                if let Some(value) = value {
-                    self.turn_param(module, index, value);
-                    self.close_slider_gesture();
-                }
-            }
-            Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
-            Message::ValueDraftClear => self.clear_value_draft(),
             Message::TextFocusCheck => {}
-            Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::SliderReleased => self.close_slider_gesture(),
-            Message::AddModulation { module, index } => {
-                self.session.gestures.toggle_adding((module, index));
-            }
-            Message::Assign { source, module, index } => {
-                self.session.gestures.close_adding();
-                self.close_slider_gesture();
-                self.edit(|app| app.assign(source, ModuleId(module), index));
-            }
-            Message::Depth { id, depth } => {
-                // Like a parameter slider: the first change opens the
-                // gesture, and letting go closes it, so one drag is one step.
-                self.close_pending_arrow_group();
-                self.session.edits.start_slider_gesture();
-                self.begin_edit();
-                if let Err(e) = self.session.controller.set_assignment_depth(id, depth) {
-                    self.alerts.warn(e.to_string());
-                }
-                self.refresh_values();
-            }
-            Message::Polarity { id, choice } => {
-                self.close_slider_gesture();
-                self.edit(|app| {
-                    if let Err(e) = app.session.controller.set_assignment_polarity(id, choice.polarity()) {
-                        app.alerts.warn(e.to_string());
-                    }
-                    app.refresh_values();
-                });
-            }
-            Message::Enabled { id, enabled } => {
-                self.close_slider_gesture();
-                self.edit(|app| {
-                    if let Err(e) = app.session.controller.set_assignment_enabled(id, enabled) {
-                        app.alerts.warn(e.to_string());
-                    } else {
-                        app.session.scene.set_modulation_enabled(id.0, enabled);
-                    }
-                    app.refresh_values();
-                });
-            }
-            Message::Unassign(id) => {
-                self.close_slider_gesture();
-                self.edit(|app| match app.session.controller.remove_assignment(id) {
-                    Ok(removed) => {
-                        app.commit();
-                        let graph = app.session.controller.graph();
-                        app.alerts.say(format!(
-                            "Removed modulation from {} to {}",
-                            modulation::source_name(graph, removed.source),
-                            modulation::target_name(graph, removed.target, removed.param)
-                        ));
-                    }
-                    Err(e) => app.alerts.warn(e.to_string()),
-                });
-            }
-            Message::SelectModule(id) => {
-                if self.session.controller.graph().node(ModuleId(id)).is_some() {
-                    self.session.selection = BTreeSet::from([id]);
-                }
-            }
             Message::Undo => self.undo(),
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
@@ -1858,35 +1611,7 @@ impl App {
                 self.refresh_values();
             }
             Message::Learn(message) => self.learn_message(message),
-            Message::Unmap { module, index } => {
-                self.close_slider_gesture();
-                self.edit(|app| match app.session.controller.unmap_midi(ModuleId(module), index) {
-                    Ok(Some(mapping)) => {
-                        app.commit();
-                        app.alerts.say(format!(
-                            "Removed {} from {}",
-                            mapping.control,
-                            learn::param_name(&app.session.controller, (module, index))
-                        ));
-                    }
-                    Ok(None) => {}
-                    Err(e) => app.alerts.warn(e.to_string()),
-                });
-            }
-            Message::MidiOptionsRows { module, index } => self.session.learn.toggle_options((module, index)),
-            Message::MidiOptions { module, index, options } => self.set_midi_options(module, index, options),
-            Message::MidiRangeText {
-                module,
-                index,
-                low,
-                high,
-            } => self.session.learn.set_range_draft(Some(learn::RangeDraft {
-                param: (module, index),
-                low,
-                high,
-                error: None,
-            })),
-            Message::MidiRangeSubmit { module, index } => self.submit_midi_range(module, index),
+            Message::Modulation(message) => self.modulation_message(message),
             Message::MidiGhosts => {
                 if self.refresh_ghosts() {
                     self.refresh_values();

@@ -88,11 +88,11 @@ fn settle(app: &mut App, now: Instant, mut done: impl FnMut(&App) -> bool) {
 
 /// Turns the filter's cutoff, as a slider would.
 fn turn_knob(app: &mut App, position: f32) {
-    let _ = app.update(Message::Param {
+    let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position,
-    });
+    }));
     let _ = app.update(Message::SliderReleased);
 }
 
@@ -144,7 +144,7 @@ fn selection_and_notes_make_no_copy() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
     let t0 = Instant::now();
-    let _ = app.update(Message::SelectModule(4));
+    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(4)));
     let _ = app.update(Message::HoldNote);
     let _ = app.update(Message::HoldNote);
     for i in 0..40 {

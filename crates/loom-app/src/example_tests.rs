@@ -61,11 +61,11 @@ fn press_save(ui: &mut Ui) {
 
 /// Turns the filter's cutoff, as a slider would: one undo step.
 fn turn_knob(app: &mut App) {
-    let _ = app.update(Message::Param {
+    let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position: 0.8,
-    });
+    }));
     let _ = app.update(Message::SliderReleased);
 }
 

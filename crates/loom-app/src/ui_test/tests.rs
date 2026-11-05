@@ -4,7 +4,9 @@ use loom_core::{InputRef, OutputRef};
 
 /// Selects one module and finds a parameter label in its inspector.
 fn inspector_row(ui: &mut Ui, module: u32, label: &str) -> Point {
-    let _ = ui.app.update(Message::SelectModule(module));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(module)));
     ui.redraw();
     ui.text(label).expect("inspector parameter row").center()
 }
@@ -451,25 +453,31 @@ fn mapping_options_rows_open_and_edit() {
         )
         .unwrap();
     ui.app.commit();
-    ui.send(Message::SelectModule(4));
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
     ui.redraw();
     assert!(ui.text("Options").is_some(), "the small button beside the mapping's x");
     assert!(ui.text("Invert").is_none(), "closed until asked");
 
-    ui.send(Message::MidiOptionsRows { module: 4, index: 0 });
+    ui.send(Message::Learn(crate::learn::Message::MidiOptionsRows {
+        module: 4,
+        index: 0,
+    }));
     ui.redraw();
     assert!(ui.text("Range").is_some());
     assert!(ui.text("Invert").is_some());
     assert!(ui.text("Encoding").is_none());
 
     // Bad text stays, with the reason, and changes nothing.
-    ui.send(Message::MidiRangeText {
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeText {
         module: 4,
         index: 0,
         low: "0.8".to_string(),
         high: "0.2".to_string(),
-    });
-    ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+    }));
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeSubmit {
+        module: 4,
+        index: 0,
+    }));
     ui.redraw();
     assert!(ui.text("the low end of its range must be below the high end").is_some());
     let options = |ui: &Ui| {
@@ -483,63 +491,75 @@ fn mapping_options_rows_open_and_edit() {
             .options
     };
     assert_eq!(options(&ui), loom_core::MidiMappingOptions::DEFAULT);
-    ui.send(Message::MidiRangeText {
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeText {
         module: 4,
         index: 0,
         low: "x".to_string(),
         high: "0.2".to_string(),
-    });
-    ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+    }));
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeSubmit {
+        module: 4,
+        index: 0,
+    }));
     ui.redraw();
     assert!(ui.text("Not a number").is_some());
 
     // Good text applies on Enter, as one undo step.
-    ui.send(Message::MidiRangeText {
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeText {
         module: 4,
         index: 0,
         low: "0,2".to_string(),
         high: "0.8".to_string(),
-    });
-    ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+    }));
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeSubmit {
+        module: 4,
+        index: 0,
+    }));
     assert_eq!((options(&ui).low, options(&ui).high), (0.2, 0.8));
     assert_eq!(ui.app.ui_snapshot().undo.as_deref(), Some("change MIDI mapping"));
 
     // A more exact end, from a script or a patch file, shows in full, so
     // editing the other field leaves it exactly as it was.
-    ui.send(Message::MidiOptions {
+    ui.send(Message::Learn(crate::learn::Message::MidiOptions {
         module: 4,
         index: 0,
         options: loom_core::MidiMappingOptions {
             low: 0.333_33,
             ..options(&ui)
         },
-    });
+    }));
     let crate::inspector::Inspector::Module(rows) = ui.app.ui_snapshot().inspector else {
         panic!("the filter's inspector");
     };
     let shown_low = rows.params[0].mapping_options.as_ref().unwrap().low.clone();
-    ui.send(Message::MidiRangeText {
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeText {
         module: 4,
         index: 0,
         low: shown_low,
         high: "0.7".to_string(),
-    });
-    ui.send(Message::MidiRangeSubmit { module: 4, index: 0 });
+    }));
+    ui.send(Message::Learn(crate::learn::Message::MidiRangeSubmit {
+        module: 4,
+        index: 0,
+    }));
     assert_eq!((options(&ui).low, options(&ui).high), (0.333_33, 0.7));
 
     // Relative shows its encoding, and has no range or invert.
     let relative = options(&ui).with_mode(loom_core::MidiMode::Relative(loom_core::MidiEncoding::SignBit));
-    ui.send(Message::MidiOptions {
+    ui.send(Message::Learn(crate::learn::Message::MidiOptions {
         module: 4,
         index: 0,
         options: relative,
-    });
+    }));
     ui.redraw();
     assert!(ui.text("Encoding").is_some());
     assert!(ui.text("Invert").is_none());
     assert_eq!((options(&ui).low, options(&ui).high), (0.0, 1.0));
 
-    ui.send(Message::MidiOptionsRows { module: 4, index: 0 });
+    ui.send(Message::Learn(crate::learn::Message::MidiOptionsRows {
+        module: 4,
+        index: 0,
+    }));
     ui.redraw();
     assert!(ui.text("Encoding").is_none());
 }
@@ -548,7 +568,9 @@ fn mapping_options_rows_open_and_edit() {
 fn select_new(ui: &mut Ui, kind: &str) -> ModuleId {
     let id = ui.app.session.controller.add_module(kind).expect("a built-in module");
     ui.app.commit();
-    let _ = ui.app.update(Message::SelectModule(id.0));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     id
 }
@@ -898,11 +920,11 @@ fn the_inspector_draws_pick_lists_and_range_selectors() {
     assert!(ui.text("Sine").is_some(), "the shape's value is its name");
     let mul = select_new(&mut ui, "loom.math.mul");
     assert!(ui.text("Gain").is_some());
-    let _ = ui.app.update(Message::Range {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Range {
         module: mul.0,
         index: 0,
         range: 0,
-    });
+    }));
     ui.redraw();
     let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
         panic!("a module row");
@@ -922,21 +944,26 @@ fn the_inspector_draws_pick_lists_and_range_selectors() {
 fn a_typed_value_above_the_control_range_selects_a_wider_one() {
     let mut ui = Ui::open("subtractive.ron");
     let mul = select_new(&mut ui, "loom.math.mul");
-    let _ = ui.app.update(Message::Range {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Range {
         module: mul.0,
         index: 0,
         range: 0,
-    });
+    }));
     let module = mul.0;
     let selected = |ui: &Ui| ui.app.session.controller.graph().node(mul).unwrap().spec(0).unwrap();
     assert_eq!(selected(&ui).max, 0.1);
     let steps = ui.app.session.edits.history.len();
-    let _ = ui.app.update(Message::ValueText {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::ValueText {
         module,
         index: 0,
         text: "0.5".to_string(),
-    });
-    let _ = ui.app.update(Message::ValueSubmit { module, index: 0 });
+    }));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::ValueSubmit {
+            module,
+            index: 0,
+        }));
     assert_eq!(ui.app.session.controller.graph().node(mul).unwrap().params[0], 0.5);
     assert!(selected(&ui).max >= 0.5, "the range widened");
     assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
@@ -956,14 +983,14 @@ fn modulated_cutoff() -> (Ui, f32) {
         .descriptor
         .param_index("cutoff")
         .expect("cutoff");
-    let _ = ui.app.update(Message::Assign {
+    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef {
             module: ModuleId(5),
             port: 0,
         },
         module: 4,
         index: cutoff,
-    });
+    }));
     ui.redraw();
     let depth = env_depth(&ui);
     (ui, depth)
@@ -1307,10 +1334,10 @@ fn a_select_only_parameter_is_a_modulation_target() {
     ui.redraw();
     assert_eq!(mark(&ui), Mark::Dot);
 
-    let _ = ui.app.update(Message::Enabled {
+    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Enabled {
         id: assignments[0],
         enabled: false,
-    });
+    }));
     ui.redraw();
     assert_eq!(mark(&ui), Mark::Ring, "a hollow ring while the assignment is off");
 }
@@ -1477,10 +1504,10 @@ fn an_xy_pad_takes_a_drop_at_its_nearest_edge_and_marks_each_axis() {
     ui.drag(from, left, 12);
     let off = target(&ui, y).expect("the left edge is y");
 
-    let _ = ui.app.update(Message::Enabled {
+    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Enabled {
         id: off,
         enabled: false,
-    });
+    }));
     ui.redraw();
     let widget = widget_of(&ui, id, "pad_x");
     let snapshot = ui.app.ui_snapshot();
@@ -1789,7 +1816,9 @@ fn the_tempo_number_steps_by_whole_beats_per_minute() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let transport = ui.app.session.controller.transport_module().expect("a transport");
-    let _ = ui.app.update(Message::SelectModule(transport.0));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(transport.0)));
     ui.redraw();
     focus_control(&mut ui, transport, "tempo");
     let tempo = |ui: &Ui| param_value(ui, transport, "tempo");
@@ -1846,7 +1875,7 @@ fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
-    let _ = ui.app.update(Message::Assign {
+    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: id, port: 0 },
         module: id.0,
         index: ui
@@ -1859,7 +1888,7 @@ fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
             .descriptor
             .param_index("level")
             .unwrap(),
-    });
+    }));
     ui.redraw();
     let badge = ui.canvas().to_window(
         ui.app
@@ -2055,7 +2084,9 @@ fn typing_on_a_focused_knob_sets_the_exact_value() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let transport = ui.app.session.controller.transport_module().expect("a transport");
-    let _ = ui.app.update(Message::SelectModule(transport.0));
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::SelectModule(transport.0)));
     ui.redraw();
     focus_control(&mut ui, transport, "tempo");
     let steps = ui.app.session.edits.history.len();
@@ -2116,11 +2147,11 @@ fn enter_then_enter_keeps_a_value_the_text_rounds() {
         .descriptor
         .param_index("tempo")
         .unwrap();
-    let _ = ui.app.update(Message::ParamValue {
+    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::ParamValue {
         module: id.0,
         index,
         value: 127.96,
-    });
+    }));
     let _ = ui.app.update(Message::SliderReleased);
     ui.redraw();
     focus_control(&mut ui, id, "tempo");
@@ -2142,10 +2173,12 @@ fn the_inspector_takes_typed_values() {
     let node = ui.app.session.controller.graph().node(id).unwrap();
     let index = node.descriptor.param_index("cutoff").unwrap();
     let module = id.0;
-    let text = |text: &str| Message::ValueText {
-        module,
-        index,
-        text: text.to_string(),
+    let text = |text: &str| {
+        Message::Inspector(crate::inspector::Message::ValueText {
+            module,
+            index,
+            text: text.to_string(),
+        })
     };
     let field = |ui: &Ui| {
         let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
@@ -2158,20 +2191,34 @@ fn the_inspector_takes_typed_values() {
     let steps = ui.app.session.edits.history.len();
     let _ = ui.app.update(text("440 hz"));
     assert_eq!(field(&ui).unwrap().text, "440 hz");
-    let _ = ui.app.update(Message::ValueSubmit { module, index });
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::ValueSubmit {
+            module,
+            index,
+        }));
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
     assert_eq!(ui.app.session.edits.history.len(), steps + 1);
     assert!(ui.app.session.value_draft.is_none());
 
     let _ = ui.app.update(text("abc"));
     assert_eq!(field(&ui).unwrap().error.as_deref(), Some("Not a number in Hz"));
-    let _ = ui.app.update(Message::ValueSubmit { module, index });
+    let _ = ui
+        .app
+        .update(Message::Inspector(crate::inspector::Message::ValueSubmit {
+            module,
+            index,
+        }));
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0, "bad text commits nothing");
     assert!(ui.app.session.value_draft.is_some(), "and stays to be corrected");
 
     // Escape drops it, through the same listener the app uses.
     let messages = ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
-    assert!(messages.iter().any(|m| matches!(m, Message::ValueDraftClear)));
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::Inspector(crate::inspector::Message::ValueDraftClear)))
+    );
     assert!(ui.app.session.value_draft.is_none());
 
     // A press with no field focused drops a draft too.
