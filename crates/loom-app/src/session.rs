@@ -10,10 +10,14 @@
 //! (ADR-0034).
 
 use crate::live::Live;
-use crate::{clip, controls, document, edits, gestures, learn, lights, matrix, monitor, patch_info, stream};
+use crate::{
+    Loaded, clip, controls, devices, document, edits, gestures, learn, lights, matrix, monitor, patch_info,
+    run_is_driven, scene, settings, stream,
+};
 use loom_canvas::{PanelValues, Scene};
-use loom_core::{Controller, OutputRef, ProbeId};
-use loom_host_desktop::{CallbackStats, SharedMidi};
+use loom_core::{Controller, OutputRef, OutputSafety, ProbeId};
+use loom_host_desktop::{AudioOutput, CallbackStats, SharedMidi};
+use loom_patch::Metadata;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -105,4 +109,127 @@ pub(crate) struct EngineLink {
     /// The stream and its callback count at the last control `snapshot`,
     /// for its `advanced` field.
     pub(crate) control_seen: Option<(Arc<CallbackStats>, u64)>,
+}
+
+/// A session just built, and what `App::settle_session` needs to finish it.
+pub(crate) struct Started {
+    pub(crate) session: PatchSession,
+    /// The rig had no MIDI inputs open yet.
+    pub(crate) first_midi: bool,
+    /// Why the recording ended, if the new stream refused it.
+    pub(crate) recording_stopped: Option<String>,
+    /// A new, empty patch, which takes the user's defaults.
+    pub(crate) fresh: bool,
+}
+
+impl PatchSession {
+    /// Attaches audio and MIDI to a loaded patch. The only way to build a
+    /// session: each field is named here, so a new one must say how it starts.
+    pub(crate) fn start(
+        loaded: Loaded,
+        output: Result<AudioOutput, String>,
+        sample_rate: f32,
+        generation: u64,
+        playback: stream::Playback,
+        output_safety: OutputSafety,
+        rig: &mut settings::Rig,
+    ) -> Started {
+        let Loaded {
+            controller,
+            engine,
+            midi: sender,
+            telemetry,
+            positions,
+            unknown_positions,
+            sizes,
+            info,
+            fresh,
+            file,
+            stamp,
+            notes,
+        } = loaded;
+        let mut recording_stopped = None;
+
+        // Every MIDI input plays the patch, and the "Hold note" button works
+        // alongside them, so a keyboard is never hidden behind another port.
+        // The inputs are opened once the app is built, on its controller.
+        let first_midi = rig.attach(sender);
+        let midi = rig.midi_in.clone().expect("Rig::attach always sets midi_in");
+
+        let (audio, midi, audio_name, idle_engine) = match output {
+            Ok(mut output) => {
+                let label = format!("{} at {} Hz", output.name(), output.sample_rate());
+                rig.playing = (!playback.is_fake()).then(|| devices::Playing::of(&output));
+                let refused = rig.record_into(&mut output);
+                match output.start(engine) {
+                    Ok(audio) => {
+                        if let Some(e) = refused {
+                            recording_stopped = Some(rig.end_recording(&e));
+                        }
+                        (Some(audio), Some(midi), label, None)
+                    }
+                    Err(e) => {
+                        rig.playing = None;
+                        (None, None, format!("no audio ({})", e.error), Some(e.engine))
+                    }
+                }
+            }
+            Err(e) => (None, None, format!("no audio ({e})"), Some(engine)),
+        };
+
+        let scene = scene::build(&controller, &positions, &sizes);
+        let mode_key = scene::mode_key(&controller);
+        let mut values = PanelValues::new();
+        scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
+        // The loaded patch may already have a cable on run, before any
+        // commit of the app's own (#413 review).
+        let run_driven = run_is_driven(&controller);
+        let session = Self {
+            controller,
+            retry_commit: false,
+            positions,
+            unknown_positions,
+            sizes,
+            selection: BTreeSet::new(),
+            document: document::Document::new(info, file, stamp, notes),
+            patch_info: patch_info::State::new(&Metadata::default()),
+            edits: edits::Edits::default(),
+            arrow_group_pending: false,
+            arrow_group_closed: false,
+            step_name: None,
+            gestures: gestures::Gestures::default(),
+            value_draft: None,
+            learn: learn::Learn::default(),
+            matrix: matrix::State::default(),
+            run_driven,
+            scene,
+            mode_key,
+            values,
+            lights: BTreeMap::new(),
+            meter_levels: std::collections::HashMap::new(),
+            clip_holds: clip::ClipHolds::default(),
+            traces: loom_canvas::ScopeTraces::new(),
+            carrying: BTreeSet::new(),
+            full_traces: true,
+            visible_displays: Vec::new(),
+            engine: EngineLink {
+                stream: stream::Stream::new(audio, idle_engine, audio_name, sample_rate, playback, output_safety),
+                monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
+                live: {
+                    let mut live = Live::showing_activity();
+                    live.set_activity(rig.store.saved().show_activity);
+                    live
+                },
+                midi,
+                holding: false,
+                control_seen: None,
+            },
+        };
+        Started {
+            session,
+            first_midi,
+            recording_stopped,
+            fresh,
+        }
+    }
 }

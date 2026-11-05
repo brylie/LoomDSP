@@ -3,7 +3,8 @@
 
 use crate::overlays::Overlay;
 use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
-use crate::{App, Args, FileAction, Loaded, Source, alerts, bench, control, devices, files, screenshot, settings};
+use crate::session::{PatchSession, Started};
+use crate::{App, Args, FileAction, Loaded, Source, alerts, bench, control, files, settings};
 use loom_core::EngineConfig;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -332,64 +333,48 @@ impl App {
         // open and move to the new engine.
         self.stop_audio();
         self.session.engine.midi = None;
-        let args = Args {
-            patch: None,
-            generate: None,
-            no_audio: playback.is_off(),
-            fake_audio: playback.is_fake(),
-            record: None,
-            bench: bench::Options {
-                measure: self.measuring,
-                ..Default::default()
-            },
-            control: control::Options::default(),
-            output_safety: Some(self.session.engine.stream.output_safety()),
-            devices: devices::Options::default(),
-            view: screenshot::Options::default(),
-            dump_ui: false,
-            select: Vec::new(),
-            show_help: false,
-            frames: None,
-            hold_note: false,
-            recovery_dir: None,
-            no_recovery: true,
-            test_modules: self.test_modules,
-            dev: self.dev_tools,
-        };
-        let rig = std::mem::replace(&mut self.rig, settings::Rig::empty());
-        let mut fresh = Self::assemble(output, sample_rate, loaded, self.generation + 1, &args, rig, true);
-        fresh.animating = self.animating;
-        fresh.right_tab = self.right_tab;
-        fresh.reporter = self.reporter.take();
-        fresh.control = std::mem::take(&mut self.control);
-        // The script's pointer stays where it was, over the new patch.
-        fresh.pointer = self.pointer.clone();
-        // The run goes on; only its patch changed.
-        fresh.run_files = std::mem::take(&mut self.run_files);
-        fresh.run_files.copy_if_example(&mut fresh.session.document);
+        self.generation += 1;
+        self.alerts.begin_patch(loaded.status());
+        let output_safety = self.session.engine.stream.output_safety();
+        let Started {
+            session,
+            first_midi,
+            recording_stopped,
+            fresh,
+        } = PatchSession::start(
+            loaded,
+            output,
+            sample_rate,
+            self.generation,
+            playback,
+            output_safety,
+            &mut self.rig,
+        );
+        // Goes last, as the threads of the old engine's watchers end with it.
+        let old = std::mem::replace(&mut self.session, session);
+        // The canvas keeps its state across the swap and compares this key
+        // with the one it saw. A new frame key resets pan and zoom to show the
+        // whole patch.
+        self.frame_key += 1;
+        self.meter = bench::FrameMeter::default();
+        self.text_focus = crate::editing::TextFocus::default();
+        self.drops.clear();
+        self.overlays.close_for_new_patch();
         // Commands waiting to be drawn still get their answer, except a
         // `sample`, which would measure a module of the new patch.
-        fresh.control_pending = control::end_samples(std::mem::take(&mut self.control_pending));
-        // The canvas keeps its state across the rebuild and compares these
-        // keys with the ones it saw: they must keep counting up. A new frame
-        // key also resets pan and zoom to show the whole patch.
-        fresh.browser_key = self.browser_key;
-        fresh.patches_open = self.patches_open;
-        fresh.frame_key = self.frame_key + 1;
-        fresh.alerts.carry_kept_from(&mut self.alerts);
-        self.overlays.close_for_new_patch();
-        fresh.overlays.keep_panel_from(&mut self.overlays);
+        self.control_pending = control::end_samples(std::mem::take(&mut self.control_pending));
+        self.settle_session(first_midi, true, recording_stopped, fresh);
+        self.run_files.copy_if_example(&mut self.session.document);
         // The file that could not be read or written no longer matters.
-        fresh.alerts.clear(alerts::Cause::File);
-        // The new app's first look at the devices came before the carry, so
-        // it could not clear what it found to be over.
-        if fresh.session.engine.stream.is_playing() {
-            fresh.audio_back();
+        self.alerts.clear(alerts::Cause::File);
+        // A kept problem with the devices stays only if it is still true.
+        if self.session.engine.stream.is_playing() {
+            self.audio_back();
         }
-        if fresh.rig.input.open().is_some() || !fresh.input_wanted() {
-            fresh.alerts.clear(alerts::Cause::AudioInput);
+        if self.rig.input.open().is_some() || !self.input_wanted() {
+            self.alerts.clear(alerts::Cause::AudioInput);
         }
-        *self = fresh;
+        drop(old);
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());
         true

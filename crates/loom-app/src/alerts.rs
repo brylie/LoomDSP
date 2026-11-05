@@ -265,14 +265,13 @@ impl Alerts {
             .join("\n")
     }
 
-    /// Takes over the kept errors of the app this one replaces: opening a
-    /// patch does not make a lost device come back. An error this app already
-    /// raised is newer, so it wins over an old one of the same cause.
-    pub fn carry_kept_from(&mut self, old: &mut Self) {
-        let mut carried = std::mem::take(&mut old.kept);
-        carried.retain(|kept| !self.kept.iter().any(|fresh| fresh.cause == kept.cause));
-        carried.append(&mut self.kept);
-        self.kept = carried;
+    /// Starts again for a new patch, with its load notes as a warning, or with
+    /// nothing if it has none. Only the kept problems stay: they are about the
+    /// run, and each goes when its cause is gone.
+    pub fn begin_patch(&mut self, notes: String) {
+        let kept = std::mem::take(&mut self.kept);
+        *self = Self::with_notes(notes);
+        self.kept = kept;
     }
 
     /// Adds `more` to the end of the status line. If the line is a kept

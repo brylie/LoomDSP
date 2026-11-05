@@ -210,12 +210,6 @@ impl Overlays {
     pub fn close_probe_menu(&mut self) {
         self.take_probe_menu();
     }
-
-    /// Takes the panel `old` kept for a new patch. Only until the session
-    /// split, when `App::replace` stops building a second `App`.
-    pub fn keep_panel_from(&mut self, old: &mut Self) {
-        self.panel = old.panel.take();
-    }
 }
 
 #[cfg(test)]

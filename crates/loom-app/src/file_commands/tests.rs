@@ -51,8 +51,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     app.session.patch_info.tag_draft = "draft".to_string();
     app.drops.push("dropped.ron".into());
     let now = Instant::now();
-    app.meter.record(now);
-    app.meter.record(now + Duration::from_millis(10));
+    for frame in 0..20 {
+        app.meter.record(now + Duration::from_millis(frame * 10));
+    }
     app.session.engine.control_seen = Some((Arc::default(), 1));
     app.session.learn.start();
     app.session.arrow_group_pending = true;
@@ -72,6 +73,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     let serial = app.pointer.push(Vec::new());
     app.preferences(settings::Message::Open);
     app.alerts.warn_kept(alerts::Cause::Autosave, "kept".to_string());
+    // No input is wanted, so a kept problem with it is over.
+    app.alerts.warn_kept(alerts::Cause::AudioInput, "input".to_string());
     app.alerts.warn("said".to_string());
 
     assert!(app.replace(Source::Empty));
@@ -180,7 +183,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(!holding);
     assert!(patch_info.tag_draft.is_empty());
     assert!(drops.is_empty());
-    assert_eq!(meter.stats().worst_ms, 0.0);
+    assert_eq!(meter.stats().fps, 0.0, "the frame meter starts again");
     assert!(control_seen.is_none());
     assert!(!learn.is_on());
     assert!(edits.history.undo_step().is_none());
@@ -207,7 +210,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(*measuring);
     assert!(*animating);
     assert!(*dev_tools);
-    assert_eq!(alerts.kept_field().map(|kept| kept.text.as_str()), Some("kept"));
+    let kept: Vec<_> = alerts.kept().iter().map(|kept| kept.text.as_str()).collect();
+    assert_eq!(kept, ["kept"]);
     assert_ne!(alerts.status(), "said");
 }
 

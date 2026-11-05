@@ -196,21 +196,35 @@ fn appending_to_a_kept_error_keeps_them_matched() {
 /// A new app for another patch takes over the kept errors. An error it raised
 /// itself while starting stays and wins over an old one of the same cause.
 #[test]
-fn kept_errors_move_to_the_next_app() {
-    let mut old = Alerts::default();
-    old.error(Cause::AudioOutput, "lost");
-    old.error(Cause::AudioInput, "old input error");
-    let mut fresh = Alerts::default();
-    fresh.error(Cause::AudioInput, "new input error");
-    fresh.error(Cause::Other, "the recording stopped");
-    fresh.carry_kept_from(&mut old);
-    let kept: Vec<_> = fresh.kept().iter().map(|kept| kept.text.as_str()).collect();
+fn kept_errors_stay_for_the_next_patch() {
+    let mut alerts = Alerts::default();
+    alerts.error(Cause::AudioOutput, "lost");
+    alerts.error(Cause::AudioInput, "old input error");
+    alerts.begin_patch(String::new());
+    alerts.error(Cause::AudioInput, "new input error");
+    alerts.error(Cause::Other, "the recording stopped");
+    let kept: Vec<_> = alerts.kept().iter().map(|kept| kept.text.as_str()).collect();
     assert_eq!(
         kept,
         ["lost", "new input error", "the recording stopped"],
         "oldest first"
     );
-    assert!(old.kept().is_empty());
+}
+
+/// A new patch starts the status line and the one-time reports again.
+#[test]
+fn a_new_patch_starts_the_rest_again() {
+    let mut alerts = Alerts::default();
+    alerts.warn("said");
+    alerts.set_output_warnings(true, true);
+    assert!(alerts.recording_stopped(), "the first report");
+    assert!(!alerts.recording_stopped(), "only once");
+
+    alerts.begin_patch("a load note".to_string());
+
+    assert_eq!(alerts.status(), "a load note");
+    assert_eq!(alerts.severity(), Severity::Warning);
+    assert!(alerts.recording_stopped(), "the next patch reports it again");
 }
 
 /// The bar's words for each severity, as well as its colours (NFR-UX-03).

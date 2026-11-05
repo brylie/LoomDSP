@@ -2,17 +2,16 @@
 //! and loaded patch for each patch it opens (`docs/design/files.md`,
 //! `docs/design/autosave.md`).
 
-use crate::live::Live;
+use crate::session::{self, Started};
 use crate::{
-    App, Args, Loaded, Source, alerts, bench, devices, document, edits, files, gestures, layout, learn, matrix,
-    monitor, pointer, recovery, registry, run_is_driven, scene, session, settings, stream,
+    App, Args, Loaded, Source, alerts, bench, devices, document, files, layout, matrix, pointer, recovery, registry,
+    settings, stream,
 };
 use iced::{Color, Theme};
-use loom_canvas::PanelValues;
 use loom_core::{Controller, EngineConfig, EngineParts, ModuleId, TRANSPORT_MODULE, create_engine};
 use loom_host_desktop::AudioOutput;
 use loom_patch::{Metadata, Patch};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -176,10 +175,9 @@ impl App {
         self.autosave(Instant::now());
     }
 
-    /// Attaches audio and MIDI to a loaded patch and builds the app around it.
-    /// A rig that has MIDI inputs open already keeps them, pointed at the
-    /// new engine. Otherwise its inputs are opened, unless `connect_midi`
-    /// is false.
+    /// Builds the app around a loaded patch. A rig that has MIDI inputs open
+    /// already keeps them, pointed at the new engine. Otherwise its inputs are
+    /// opened, unless `connect_midi` is false.
     pub(crate) fn assemble(
         output: Result<AudioOutput, String>,
         sample_rate: f32,
@@ -189,106 +187,21 @@ impl App {
         mut rig: settings::Rig,
         connect_midi: bool,
     ) -> Self {
-        let Loaded {
-            controller,
-            engine,
-            midi: sender,
-            telemetry,
-            positions,
-            unknown_positions,
-            sizes,
-            info,
+        let status = loaded.status();
+        let Started {
+            session,
+            first_midi,
+            recording_stopped,
             fresh,
-            file,
-            stamp,
-            notes,
-        } = loaded;
-        let status = notes.join("; ");
-        let mut recording_stopped = None;
-        let load_notes = notes;
-
-        // Every MIDI input plays the patch, and the "Hold note" button works
-        // alongside them, so a keyboard is never hidden behind another port.
-        // The inputs are opened once the app is built, on its controller.
-        let first_midi = rig.attach(sender);
-        let midi = rig.midi_in.clone().expect("Rig::attach always sets midi_in");
-
-        let (audio, midi, audio_name, idle_engine) = match output {
-            Ok(mut output) => {
-                let label = format!("{} at {} Hz", output.name(), output.sample_rate());
-                rig.playing = (!args.fake_audio).then(|| devices::Playing::of(&output));
-                let refused = rig.record_into(&mut output);
-                match output.start(engine) {
-                    Ok(audio) => {
-                        if let Some(e) = refused {
-                            recording_stopped = Some(rig.end_recording(&e));
-                        }
-                        (Some(audio), Some(midi), label, None)
-                    }
-                    Err(e) => {
-                        rig.playing = None;
-                        (None, None, format!("no audio ({})", e.error), Some(e.engine))
-                    }
-                }
-            }
-            Err(e) => (None, None, format!("no audio ({e})"), Some(engine)),
-        };
-
-        let scene = scene::build(&controller, &positions, &sizes);
-        let mode_key = scene::mode_key(&controller);
-        let mut values = PanelValues::new();
-        scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
-        // The loaded patch may already have a cable on run, before any
-        // commit of the app's own (#413 review).
-        let run_driven = run_is_driven(&controller);
-        let session = session::PatchSession {
-            controller,
-            retry_commit: false,
-            positions,
-            unknown_positions,
-            sizes,
-            selection: BTreeSet::new(),
-            document: document::Document::new(info, file, stamp, load_notes),
-            patch_info: crate::patch_info::State::new(&Metadata::default()),
-            edits: edits::Edits::default(),
-            arrow_group_pending: false,
-            arrow_group_closed: false,
-            step_name: None,
-            gestures: gestures::Gestures::default(),
-            value_draft: None,
-            learn: learn::Learn::default(),
-            matrix: matrix::State::default(),
-            run_driven,
-            scene,
-            mode_key,
-            values,
-            lights: BTreeMap::new(),
-            meter_levels: std::collections::HashMap::new(),
-            clip_holds: crate::clip::ClipHolds::default(),
-            traces: loom_canvas::ScopeTraces::new(),
-            carrying: BTreeSet::new(),
-            full_traces: true,
-            visible_displays: Vec::new(),
-            engine: session::EngineLink {
-                stream: stream::Stream::new(
-                    audio,
-                    idle_engine,
-                    audio_name,
-                    sample_rate,
-                    stream::Playback::from_flags(args.no_audio, args.fake_audio),
-                    args.output_safety.unwrap_or(rig.store.saved().output_safety),
-                ),
-                monitor: monitor::Monitor::new(telemetry, sample_rate, generation),
-                live: {
-                    let mut live = Live::showing_activity();
-                    live.set_activity(rig.store.saved().show_activity);
-                    live
-                },
-                midi,
-                holding: false,
-                control_seen: None,
-            },
-        };
+        } = session::PatchSession::start(
+            loaded,
+            output,
+            sample_rate,
+            generation,
+            stream::Playback::from_flags(args.no_audio, args.fake_audio),
+            args.output_safety.unwrap_or(rig.store.saved().output_safety),
+            &mut rig,
+        );
         let mut app = Self {
             session,
             run_files: document::RunFiles::default(),
@@ -332,35 +245,54 @@ impl App {
             still: None,
             history_key: None,
         };
+        app.settle_session(first_midi, connect_midi, recording_stopped, fresh);
+        app
+    }
+
+    /// What a new session still needs from the app around it, once it is in
+    /// place: the engine idle if its stream failed, audio input, MIDI inputs,
+    /// the new patch's defaults, and its saved state.
+    pub(crate) fn settle_session(
+        &mut self,
+        first_midi: bool,
+        connect_midi: bool,
+        recording_stopped: Option<String>,
+        fresh: bool,
+    ) {
         if let Some(stopped) = recording_stopped {
-            app.alerts.error(alerts::Cause::Other, stopped);
+            self.alerts.error(alerts::Cause::Other, stopped);
         }
         // A stream that failed to start took the engine with it.
-        app.keep_engine_idle();
-        app.sync_audio_input();
-        app.send_panic_trigger();
-        if let Some(error) = app.connect_midi(first_midi, connect_midi) {
-            app.alerts.warn(error);
+        self.keep_engine_idle();
+        self.sync_audio_input();
+        self.send_panic_trigger();
+        if let Some(error) = self.connect_midi(first_midi, connect_midi) {
+            self.alerts.warn(error);
         }
         // A new patch credits the user and takes their default licence
         // (patch-metadata.md, Defaults).
         if fresh {
-            let saved = app.rig.store.saved();
+            let saved = self.rig.store.saved();
             let (author, licence) = (saved.author.clone(), saved.licence.clone());
-            app.session.document.start_new(&author, licence.as_deref());
+            self.session.document.start_new(&author, licence.as_deref());
         }
-        app.session.patch_info = crate::patch_info::State::new(app.session.document.info());
+        self.session.patch_info = crate::patch_info::State::new(self.session.document.info());
         // A patch just loaded is the one on disk.
-        app.session.edits.history.mark_saved();
-        app.session.document.mark_loaded(app.current_patch());
-        if app.alerts.status().is_empty() {
-            app.report();
+        self.session.edits.history.mark_saved();
+        let patch = self.current_patch();
+        self.session.document.mark_loaded(patch);
+        if self.alerts.status().is_empty() {
+            self.report();
         }
-        app
     }
 }
 
 impl Loaded {
+    /// What the status line says about this load, if anything.
+    pub(crate) fn status(&self) -> String {
+        self.notes.join("; ")
+    }
+
     /// Builds an engine and loads a patch into it. On failure nothing else
     /// is touched, so a failed open leaves the running patch alone.
     pub(crate) fn read(config: EngineConfig, test_modules: bool, source: Source) -> Result<Self, String> {
