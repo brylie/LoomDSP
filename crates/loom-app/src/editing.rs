@@ -423,7 +423,10 @@ impl App {
             return;
         };
         match clipboard::Group::from_text(&text, self.controller.registry()) {
-            Ok(group) => self.add_group(&group, browser::snap(world), "paste", "Pasted"),
+            Ok(group) => {
+                let at = browser::snap(world);
+                self.add_group(&group, (at.x, at.y), "paste", "Pasted");
+            }
             Err(why) => self.alerts.warn(why),
         }
     }
@@ -438,19 +441,14 @@ impl App {
         let Some(group) = self.selected_group("duplicate", true) else {
             return;
         };
-        let at = group.top_left().unwrap_or(Point::ORIGIN);
+        let at = group.top_left().unwrap_or((0.0, 0.0));
         let offset = clipboard::DUPLICATE_OFFSET;
-        self.add_group(
-            &group,
-            Point::new(at.x + offset, at.y + offset),
-            "duplicate",
-            "Duplicated",
-        );
+        self.add_group(&group, (at.0 + offset, at.1 + offset), "duplicate", "Duplicated");
     }
 
     /// Adds a group as one step and selects it, or changes nothing and says
     /// why.
-    pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: Point, verb: &str, done: &str) {
+    pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: (f32, f32), verb: &str, done: &str) {
         if let Err(why) = group.check(&self.controller) {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
             return;

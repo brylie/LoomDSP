@@ -6,10 +6,10 @@ fn parts() -> EngineParts {
 }
 
 /// Every module at a place of its own.
-fn spread(c: &Controller) -> BTreeMap<u32, Point> {
+fn spread(c: &Controller) -> BTreeMap<u32, (f32, f32)> {
     c.graph()
         .nodes()
-        .map(|(id, _)| (id.0, Point::new(id.0 as f32 * 240.0, 96.0)))
+        .map(|(id, _)| (id.0, (id.0 as f32 * 240.0, 96.0)))
         .collect()
 }
 
@@ -82,7 +82,7 @@ fn paste_adds_new_ids_with_values_cables_and_assignments_in_order() {
     let before: BTreeSet<u32> = c.graph().nodes().map(|(id, _)| id.0).collect();
     let group = Group::from_text(&text, c.registry()).unwrap();
     group.check(&c).unwrap();
-    let new = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    let new = group.add(&mut c, &mut positions, (1200.0, 600.0)).unwrap();
     c.commit().unwrap();
 
     assert_eq!(new.len(), 6);
@@ -104,8 +104,8 @@ fn paste_adds_new_ids_with_values_cables_and_assignments_in_order() {
         .collect();
     assert_eq!(sources, vec![new[3], new[4]], "assignments keep their order");
     // The group keeps its layout, with its top-left corner at the origin.
-    assert_eq!(positions[&new[0]], Point::new(1200.0, 600.0));
-    assert_eq!(positions[&new[1]], Point::new(1440.0, 600.0));
+    assert_eq!(positions[&new[0]], (1200.0, 600.0));
+    assert_eq!(positions[&new[1]], (1440.0, 600.0));
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn duplicate_keeps_incoming_links_and_drops_outgoing_ones() {
         .add(
             &mut c,
             &mut positions,
-            Point::new(at.x + DUPLICATE_OFFSET, at.y + DUPLICATE_OFFSET),
+            (at.0 + DUPLICATE_OFFSET, at.1 + DUPLICATE_OFFSET),
         )
         .unwrap();
     c.commit().unwrap();
@@ -177,7 +177,7 @@ fn duplicate_keeps_incoming_links_and_drops_outgoing_ones() {
     }
     assert_eq!(
         positions[&new_sine.0],
-        Point::new(positions[&sine.0].x + 24.0, positions[&sine.0].y + 24.0)
+        (positions[&sine.0].0 + 24.0, positions[&sine.0].1 + 24.0)
     );
 }
 
@@ -214,7 +214,7 @@ fn a_duplicated_voice_sounds_like_one_built_by_hand() {
         let first = voice(c);
         let mut positions = spread(c);
         let group = Group::from_selection(c.graph(), &positions, &ids(&first), true);
-        let new = group.add(c, &mut positions, Point::ORIGIN).unwrap();
+        let new = group.add(c, &mut positions, (0.0, 0.0)).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
         let join = c.add_module("loom.mix.join").unwrap();
         c.connect_named(join, "out", out, "in").unwrap();
@@ -241,15 +241,15 @@ fn paste_reads_hand_edited_text_and_ignores_midi_mappings() {
     let mut positions = BTreeMap::new();
     let group = Group::from_text(text, c.registry()).unwrap();
     assert_eq!(group.describe(), "2 modules");
-    let new = group.add(&mut c, &mut positions, Point::new(48.0, 48.0)).unwrap();
+    let new = group.add(&mut c, &mut positions, (48.0, 48.0)).unwrap();
     c.commit().unwrap();
     let gain = c.graph().node(ModuleId(new[0])).unwrap().params[0];
     assert_eq!(gain, 0.25);
     assert_eq!(c.graph().cables().count(), 1);
     assert_eq!(c.graph().midi_mappings().count(), 0);
     // Modules with no position go in a row at the paste point.
-    assert_eq!(positions[&new[0]].x, 48.0);
-    assert!(positions[&new[1]].x > positions[&new[0]].x);
+    assert_eq!(positions[&new[0]].0, 48.0);
+    assert!(positions[&new[1]].0 > positions[&new[0]].0);
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
     let text = Group::from_selection(c.graph(), &positions, &ids(&[id]), false).to_text();
     assert!(Patch::from_ron(&text).is_ok(), "clipboard remains patch text");
     let group = Group::from_text(&text, c.registry()).unwrap();
-    let new = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    let new = group.add(&mut c, &mut positions, (1200.0, 600.0)).unwrap();
     assert_eq!(
         c.graph().node(ModuleId(new[0])).unwrap().unknown.as_ref(),
         Some(&unknown)
@@ -324,7 +324,7 @@ fn copy_unknown_module_remaps_named_links() {
     let mut positions = spread(&c);
     let text = Group::from_selection(c.graph(), &positions, &ids(&[unknown, phase]), false).to_text();
     let group = Group::from_text(&text, c.registry()).unwrap();
-    let added = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    let added = group.add(&mut c, &mut positions, (1200.0, 600.0)).unwrap();
     let new_unknown = ModuleId(added[0]);
     let new_phase = ModuleId(added[1]);
     assert_eq!(
@@ -380,8 +380,8 @@ fn a_paste_larger_than_the_command_queue_goes_in_over_several_commits() {
 
     // Two copies of three modules do not fit in a queue of four.
     let group = Group::from_selection(c.graph(), &positions, &ids(&voice_ids), false);
-    group.add(c, &mut positions, Point::ORIGIN).unwrap();
-    group.add(c, &mut positions, Point::ORIGIN).unwrap();
+    group.add(c, &mut positions, (0.0, 0.0)).unwrap();
+    group.add(c, &mut positions, (0.0, 0.0)).unwrap();
     assert!(matches!(c.commit(), Err(LoomError::QueueFull)));
     assert!(c.has_uncommitted_changes());
     parts.engine.process(&mut [0.0; 16], &mut [0.0; 16]);
@@ -403,7 +403,7 @@ fn copy_and_paste_keep_control_ranges() {
     let text = Group::from_selection(c.graph(), &positions, &ids(&[mul]), false).to_text();
     assert!(text.contains(r#"ranges: {"gain": (-5.0, 5.0)}"#), "{text}");
     let group = Group::from_text(&text, c.registry()).unwrap();
-    let new = group.add(&mut c, &mut positions, Point::new(1200.0, 600.0)).unwrap();
+    let new = group.add(&mut c, &mut positions, (1200.0, 600.0)).unwrap();
     let node = c.graph().node(ModuleId(new[0])).unwrap();
     assert_eq!((node.params[0], node.range(0)), (4.0, Some(ParamRange::new(-5.0, 5.0))));
 }

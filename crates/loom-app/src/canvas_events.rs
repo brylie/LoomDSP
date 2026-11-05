@@ -90,7 +90,8 @@ impl App {
             CanvasEvent::Move { ids, delta } => {
                 for id in &ids {
                     if let Some(p) = self.positions.get_mut(id) {
-                        *p += delta;
+                        p.0 += delta.x;
+                        p.1 += delta.y;
                     }
                 }
                 self.scene.move_modules(&ids, delta);

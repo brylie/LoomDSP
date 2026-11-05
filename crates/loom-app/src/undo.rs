@@ -11,7 +11,6 @@
 //! of them in one step, with no per-edit inverse to keep in step with the
 //! controller.
 
-use iced::Point;
 use loom_canvas::CanvasEvent;
 use loom_core::{
     Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, MidiMappingOptions,
@@ -34,7 +33,7 @@ pub struct ModuleState {
     params: Vec<f32>,
     /// The selected control range of each parameter (control-ranges.md).
     ranges: Vec<Option<ParamRange>>,
-    position: Option<Point>,
+    position: Option<(f32, f32)>,
     /// Optional tile dimensions in grid units.
     size: Option<(u8, u8)>,
 }
@@ -63,14 +62,14 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Reads the patch.
-    pub fn take(controller: &Controller, positions: &BTreeMap<u32, Point>) -> Self {
+    pub fn take(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>) -> Self {
         Self::take_with_sizes(controller, positions, &BTreeMap::new())
     }
 
     /// Reads the patch and its saved tile dimensions.
     pub fn take_with_sizes(
         controller: &Controller,
-        positions: &BTreeMap<u32, Point>,
+        positions: &BTreeMap<u32, (f32, f32)>,
         sizes: &BTreeMap<u32, (u8, u8)>,
     ) -> Self {
         let graph = controller.graph();
@@ -387,7 +386,7 @@ pub fn apply(
     step: &Step,
     forward: bool,
     controller: &mut Controller,
-    positions: &mut BTreeMap<u32, Point>,
+    positions: &mut BTreeMap<u32, (f32, f32)>,
 ) -> Result<(), LoomError> {
     apply_with_sizes(step, forward, controller, positions, &mut BTreeMap::new())
 }
@@ -397,7 +396,7 @@ pub fn apply_with_sizes(
     step: &Step,
     forward: bool,
     controller: &mut Controller,
-    positions: &mut BTreeMap<u32, Point>,
+    positions: &mut BTreeMap<u32, (f32, f32)>,
     sizes: &mut BTreeMap<u32, (u8, u8)>,
 ) -> Result<(), LoomError> {
     fn sides<T>(pair: &Pair<T>, forward: bool) -> (&Option<T>, &Option<T>) {

@@ -5,25 +5,25 @@ fn parts() -> EngineParts {
     create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(48_000.0))
 }
 
-fn snap(c: &Controller, positions: &BTreeMap<u32, Point>) -> Snapshot {
+fn snap(c: &Controller, positions: &BTreeMap<u32, (f32, f32)>) -> Snapshot {
     Snapshot::take(c, positions)
 }
 
 /// Runs `change`, and returns the step it made.
-fn record(c: &mut Controller, positions: &mut BTreeMap<u32, Point>, change: impl FnOnce(&mut Controller)) -> Step {
+fn record(c: &mut Controller, positions: &mut BTreeMap<u32, (f32, f32)>, change: impl FnOnce(&mut Controller)) -> Step {
     let before = snap(c, positions);
     change(c);
     c.commit().unwrap();
     diff(&before, &snap(c, positions), &BTreeSet::new()).expect("the edit changed the patch")
 }
 
-fn undo(step: &Step, c: &mut Controller, positions: &mut BTreeMap<u32, Point>) {
+fn undo(step: &Step, c: &mut Controller, positions: &mut BTreeMap<u32, (f32, f32)>) {
     check(step, false, c).unwrap();
     apply(step, false, c, positions).unwrap();
     c.commit().unwrap();
 }
 
-fn redo(step: &Step, c: &mut Controller, positions: &mut BTreeMap<u32, Point>) {
+fn redo(step: &Step, c: &mut Controller, positions: &mut BTreeMap<u32, (f32, f32)>) {
     check(step, true, c).unwrap();
     apply(step, true, c, positions).unwrap();
     c.commit().unwrap();
@@ -35,7 +35,7 @@ fn undo_removes_an_added_module_and_redo_brings_it_back_with_its_id_and_place() 
     let mut positions = BTreeMap::new();
     let before = snap(&c, &positions);
     let id = c.add_module("loom.osc.sine").unwrap();
-    positions.insert(id.0, Point::new(40.0, 80.0));
+    positions.insert(id.0, (40.0, 80.0));
     c.commit().unwrap();
     let step = diff(&before, &snap(&c, &positions), &BTreeSet::new()).unwrap();
     assert_eq!(step.name(), "add Sine");
@@ -44,7 +44,7 @@ fn undo_removes_an_added_module_and_redo_brings_it_back_with_its_id_and_place() 
     assert!(!positions.contains_key(&id.0));
     redo(&step, &mut c, &mut positions);
     assert!(c.graph().node(id).is_some());
-    assert_eq!(positions[&id.0], Point::new(40.0, 80.0));
+    assert_eq!(positions[&id.0], (40.0, 80.0));
 }
 
 #[test]
@@ -228,11 +228,11 @@ fn undo_of_a_delete_brings_everything_back_and_the_output_is_bit_identical() {
 
         let mut edited = parts();
         let doomed = modulated_patch(&mut edited.controller);
-        let mut positions: BTreeMap<u32, Point> = edited
+        let mut positions: BTreeMap<u32, (f32, f32)> = edited
             .controller
             .graph()
             .nodes()
-            .map(|(id, _)| (id.0, Point::new(id.0 as f32 * 10.0, 0.0)))
+            .map(|(id, _)| (id.0, (id.0 as f32 * 10.0, 0.0)))
             .collect();
         let before = snap(&edited.controller, &positions);
         let ids: Vec<_> = edited.controller.graph().assignments().map(|(id, _)| id).collect();
@@ -312,15 +312,15 @@ fn undo_of_a_move_leaves_a_mapped_parameter_the_hardware_moved() {
         cutoff,
     )
     .unwrap();
-    let mut positions = BTreeMap::from([(id.0, Point::new(0.0, 0.0))]);
+    let mut positions = BTreeMap::from([(id.0, (0.0, 0.0))]);
     let before = snap(&c, &positions);
-    positions.insert(id.0, Point::new(30.0, 0.0));
+    positions.insert(id.0, (30.0, 0.0));
     let step = diff(&before, &snap(&c, &positions), &BTreeSet::new()).unwrap();
     assert_eq!(step.name(), "move SVF");
     // The performer turns the knob after the move.
     c.set_param(id, cutoff, 1234.0).unwrap();
     undo(&step, &mut c, &mut positions);
-    assert_eq!(positions[&id.0], Point::new(0.0, 0.0));
+    assert_eq!(positions[&id.0], (0.0, 0.0));
     assert_eq!(c.graph().node(id).unwrap().params[cutoff], 1234.0);
 }
 

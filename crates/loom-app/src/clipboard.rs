@@ -9,7 +9,6 @@
 //! Ids in a group only link its parts. A paste gives every module a new id
 //! from the controller and remaps the cables and assignments to it.
 
-use iced::Point;
 use loom_canvas::GRID;
 use loom_core::{
     Controller, Graph, InputRef, LoomError, ModuleDescriptor, ModuleId, ModuleRole, OutputRef, ParamRange, Polarity,
@@ -49,7 +48,7 @@ struct Member {
     params: Vec<f32>,
     /// The selected control range of each parameter, if it offers ranges.
     ranges: Vec<Option<ParamRange>>,
-    position: Option<Point>,
+    position: Option<(f32, f32)>,
     /// Optional saved tile dimensions in grid units.
     size: Option<(u8, u8)>,
 }
@@ -118,7 +117,7 @@ impl Group {
     /// exactly one, so a copy of it could never be added (clock.md).
     pub fn from_selection(
         graph: &Graph,
-        positions: &BTreeMap<u32, Point>,
+        positions: &BTreeMap<u32, (f32, f32)>,
         selection: &BTreeSet<u32>,
         incoming: bool,
     ) -> Self {
@@ -274,7 +273,7 @@ impl Group {
                 unknown,
                 params,
                 ranges,
-                position: module.position.map(|(x, y)| Point::new(x, y)),
+                position: module.position,
                 size: module.size,
             });
         }
@@ -362,7 +361,7 @@ impl Group {
                     kind: unknown.kind.clone(),
                     label: unknown.label.clone(),
                     params: unknown.params.clone(),
-                    position: member.position.map(|p| (p.x.round(), p.y.round())),
+                    position: member.position.map(|(x, y)| (x.round(), y.round())),
                     size: member.size,
                     ranges: unknown.ranges.clone(),
                 });
@@ -379,7 +378,7 @@ impl Group {
                     .filter(|(spec, value)| **value != spec.default)
                     .map(|(spec, value)| (spec.name.to_string(), *value))
                     .collect(),
-                position: member.position.map(|p| (p.x.round(), p.y.round())),
+                position: member.position.map(|(x, y)| (x.round(), y.round())),
                 size: member.size,
                 ranges: d
                     .params
@@ -482,11 +481,11 @@ impl Group {
     }
 
     /// The top-left corner of the modules that have a position.
-    pub fn top_left(&self) -> Option<Point> {
+    pub fn top_left(&self) -> Option<(f32, f32)> {
         self.modules
             .iter()
             .filter_map(|m| m.position)
-            .reduce(|a, b| Point::new(a.x.min(b.x), a.y.min(b.y)))
+            .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1)))
     }
 
     /// Checks that the group can be added, before anything changes
@@ -517,8 +516,8 @@ impl Group {
     pub fn add(
         &self,
         controller: &mut Controller,
-        positions: &mut BTreeMap<u32, Point>,
-        origin: Point,
+        positions: &mut BTreeMap<u32, (f32, f32)>,
+        origin: (f32, f32),
     ) -> Result<Vec<u32>, LoomError> {
         let mut added = Vec::with_capacity(self.modules.len());
         let result = self.add_into(controller, positions, origin, &mut added);
@@ -534,17 +533,17 @@ impl Group {
     fn add_into(
         &self,
         controller: &mut Controller,
-        positions: &mut BTreeMap<u32, Point>,
-        origin: Point,
+        positions: &mut BTreeMap<u32, (f32, f32)>,
+        origin: (f32, f32),
         added: &mut Vec<u32>,
     ) -> Result<(), LoomError> {
-        let top_left = self.top_left().unwrap_or(Point::ORIGIN);
+        let top_left = self.top_left().unwrap_or((0.0, 0.0));
         // Modules without a position go in a row below the others.
         let below = self
             .modules
             .iter()
             .filter_map(|m| m.position)
-            .map(|p| p.y - top_left.y + 10.0 * GRID)
+            .map(|p| p.1 - top_left.1 + 10.0 * GRID)
             .fold(0.0, f32::max);
         let mut unplaced = 0.0;
         let mut ids = BTreeMap::new();
@@ -578,9 +577,9 @@ impl Group {
                 controller.set_params(id, &changes)?;
             }
             let place = match member.position {
-                Some(p) => Point::new(origin.x + p.x - top_left.x, origin.y + p.y - top_left.y),
+                Some(p) => (origin.0 + p.0 - top_left.0, origin.1 + p.1 - top_left.1),
                 None => {
-                    let place = Point::new(origin.x + unplaced, origin.y + below);
+                    let place = (origin.0 + unplaced, origin.1 + below);
                     unplaced += loom_canvas::TILE_WIDTH + 4.0 * GRID;
                     place
                 }

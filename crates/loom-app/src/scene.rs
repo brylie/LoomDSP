@@ -916,7 +916,7 @@ pub fn control_part(
 
 /// Builds the scene for the controller's graph. Modules without a position
 /// are placed at the origin; call [`crate::layout::auto_layout`] first.
-pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &BTreeMap<u32, (u8, u8)>) -> Scene {
+pub fn build(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>, sizes: &BTreeMap<u32, (u8, u8)>) -> Scene {
     let graph = controller.graph();
     let delayed: BTreeSet<InputRef> = controller.last_report().inserted_delays().map(|(_, to)| *to).collect();
 
@@ -994,7 +994,7 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, Point>, sizes: &
                     description: format!("{}. {}", d.family.label(), d.description),
                     name: Some(d.id.to_string()),
                 },
-                position: positions.get(&id.0).copied().unwrap_or(Point::ORIGIN),
+                position: positions.get(&id.0).map_or(Point::ORIGIN, |&(x, y)| Point::new(x, y)),
                 inputs,
                 outputs,
                 panel: if node.unknown.is_some() {

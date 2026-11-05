@@ -684,6 +684,10 @@ impl Message {
     }
 }
 
+/// Each placeholder's position in its file, if it had one, and the position it
+/// was first shown at. While it stays there, saving writes the original.
+type UnknownPositions = BTreeMap<u32, (Option<(f32, f32)>, (f32, f32))>;
+
 /// What the player asks of the patch file. Each can ask about unsaved
 /// changes first (`docs/design/files.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -706,9 +710,9 @@ struct App {
     controller: Controller,
     /// A full command queue left fresh modules staged for a later commit.
     retry_commit: bool,
-    positions: BTreeMap<u32, Point>,
+    positions: BTreeMap<u32, (f32, f32)>,
     /// Original placeholder positions and their initial displayed positions.
-    unknown_positions: BTreeMap<u32, (Option<(f32, f32)>, Point)>,
+    unknown_positions: UnknownPositions,
     /// Saved tile dimensions in grid units, keyed by module ID.
     sizes: BTreeMap<u32, (u8, u8)>,
     scene: Scene,
@@ -845,9 +849,9 @@ struct Session {
     engine: loom_core::Engine,
     midi: loom_core::MidiSender,
     telemetry: loom_core::Telemetry,
-    positions: BTreeMap<u32, Point>,
+    positions: BTreeMap<u32, (f32, f32)>,
     /// Original and displayed placeholder positions for lossless saving.
-    unknown_positions: BTreeMap<u32, (Option<(f32, f32)>, Point)>,
+    unknown_positions: UnknownPositions,
     /// Tile dimensions carried with the patch between sessions.
     sizes: BTreeMap<u32, (u8, u8)>,
     /// The patch's name and metadata (patch-metadata.md).
@@ -867,7 +871,7 @@ impl App {
         let mut patch = Patch::from_graph(self.document.name(), self.controller.graph());
         patch.set_metadata(self.document.info().clone());
         for m in &mut patch.modules {
-            m.position = self.positions.get(&m.id).map(|p| (p.x.round(), p.y.round()));
+            m.position = self.positions.get(&m.id).map(|&(x, y)| (x.round(), y.round()));
             if let Some((original, initial)) = self.unknown_positions.get(&m.id)
                 && self.positions.get(&m.id) == Some(initial)
             {
@@ -1497,7 +1501,7 @@ impl App {
         self.close_slider_gesture();
         self.edit(|app| match app.controller.add_module(descriptor.id) {
             Ok(id) => {
-                app.positions.insert(id.0, world);
+                app.positions.insert(id.0, (world.x, world.y));
                 app.selection = BTreeSet::from([id.0]);
                 app.commit();
             }
@@ -1548,7 +1552,7 @@ impl App {
                 app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));
                 return;
             }
-            app.positions.insert(id.0, corner);
+            app.positions.insert(id.0, (corner.x, corner.y));
             app.selection = BTreeSet::from([id.0]);
             app.commit();
         });

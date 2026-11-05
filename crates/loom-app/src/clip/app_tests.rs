@@ -10,7 +10,7 @@ use loom_core::ModuleId;
 fn with_meter() -> (Ui, u32) {
     let mut ui = Ui::open("sine.ron");
     let meter = ui.app.controller.add_module("loom.display.meter").unwrap().0;
-    ui.app.positions.insert(meter, Point::new(600.0, 0.0));
+    ui.app.positions.insert(meter, (600.0, 0.0));
     ui.app.commit();
     ui.redraw();
     show(&mut ui, meter);
@@ -240,7 +240,7 @@ fn a_removed_module_forgets_its_state() {
 fn a_reset_of_one_meter_keeps_a_clip_on_another() {
     let (mut ui, first) = with_meter();
     let second = ui.app.controller.add_module("loom.display.meter").unwrap().0;
-    ui.app.positions.insert(second, Point::new(900.0, 0.0));
+    ui.app.positions.insert(second, (900.0, 0.0));
     ui.app.commit();
     ui.redraw();
     let _ = ui

@@ -1,12 +1,11 @@
 use super::*;
-use iced::Point;
 use loom_core::{Controller, EngineConfig, ModuleId, create_engine};
 use std::collections::BTreeMap;
 
 /// A controller with one filter, the filter's ID, its Cutoff index, and
 /// an empty set of positions. The engine half is dropped: the controller
 /// still sends its commands until the queue is full.
-fn filter() -> (Controller, ModuleId, usize, BTreeMap<u32, Point>) {
+fn filter() -> (Controller, ModuleId, usize, BTreeMap<u32, (f32, f32)>) {
     let mut c = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(48_000.0)).controller;
     let id = c.add_module("loom.filter.svf").unwrap();
     c.commit().unwrap();
@@ -15,7 +14,7 @@ fn filter() -> (Controller, ModuleId, usize, BTreeMap<u32, Point>) {
 }
 
 /// Starts an edit, as `App::begin_edit` does.
-fn begin(edits: &mut Edits, c: &Controller, positions: &BTreeMap<u32, Point>) {
+fn begin(edits: &mut Edits, c: &Controller, positions: &BTreeMap<u32, (f32, f32)>) {
     edits.begin(c.has_uncommitted_changes(), || Snapshot::take(c, positions));
 }
 
@@ -26,7 +25,7 @@ fn set(edits: &mut Edits, c: &mut Controller, id: ModuleId, index: usize, value:
 }
 
 /// Records the edit, as `App::record` does.
-fn record(edits: &mut Edits, c: &Controller, positions: &BTreeMap<u32, Point>) {
+fn record(edits: &mut Edits, c: &Controller, positions: &BTreeMap<u32, (f32, f32)>) {
     edits.record(None, || Snapshot::take(c, positions));
 }
 
@@ -35,7 +34,7 @@ fn record(edits: &mut Edits, c: &Controller, positions: &BTreeMap<u32, Point>) {
 fn edit(
     edits: &mut Edits,
     c: &mut Controller,
-    positions: &BTreeMap<u32, Point>,
+    positions: &BTreeMap<u32, (f32, f32)>,
     id: ModuleId,
     index: usize,
     value: f32,

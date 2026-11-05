@@ -493,7 +493,7 @@ fn resizing_scope_with_pointer_and_keyboard() {
     let target = ui.app.controller.add_module("loom.math.mul").unwrap();
     ui.app.controller.connect_named(scope, "out", target, "a").unwrap();
     ui.app.commit();
-    ui.app.positions.insert(scope.0, Point::new(300.0, 100.0));
+    ui.app.positions.insert(scope.0, (300.0, 100.0));
     ui.app.refresh();
     ui.app.edits.history.clear();
     ui.redraw();
@@ -2110,7 +2110,7 @@ fn focus_cutoff_field(ui: &mut Ui) -> (ModuleId, usize) {
 }
 
 /// The module's position, to see that a key did not move it.
-fn tile_position(ui: &Ui, id: ModuleId) -> Point {
+fn tile_position(ui: &Ui, id: ModuleId) -> (f32, f32) {
     ui.app.positions[&id.0]
 }
 

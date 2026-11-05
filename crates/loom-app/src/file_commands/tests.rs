@@ -5,7 +5,6 @@ use crate::recovery::tests::TempDir;
 use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
 use crate::{App, Source, alerts, control, controls, editing, help, live, settings};
-use iced::Point;
 use iced::keyboard::{Key, Modifiers};
 use loom_core::{OutputRef, OutputSafety, ProbeId};
 use std::sync::Arc;
@@ -26,8 +25,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
 
     // What goes with the patch.
     app.retry_commit = true;
-    app.positions.insert(added.0, Point::new(1.0, 2.0));
-    app.unknown_positions.insert(99, (None, Point::ORIGIN));
+    app.positions.insert(added.0, (1.0, 2.0));
+    app.unknown_positions.insert(99, (None, (0.0, 0.0)));
     app.sizes.insert(added.0, (4, 4));
     app.mode_key.push((99, 0, 1));
     app.gestures.toggle_adding((added.0, 0));

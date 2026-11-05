@@ -18,12 +18,12 @@ fn places_every_module_without_overlap() {
 }
 
 /// Whether the tile at `a` with size `sa` overlaps the one at `b`.
-fn overlaps(a: Point, sa: iced::Size, b: Point, sb: iced::Size) -> bool {
-    a.x < b.x + sb.width && b.x < a.x + sa.width && a.y < b.y + sb.height && b.y < a.y + sa.height
+fn overlaps(a: (f32, f32), sa: iced::Size, b: (f32, f32), sb: iced::Size) -> bool {
+    a.0 < b.0 + sb.width && b.0 < a.0 + sa.width && a.1 < b.1 + sb.height && b.1 < a.1 + sa.height
 }
 
 /// Asserts that no two tiles in the graph overlap.
-fn assert_no_overlap(controller: &Controller, positions: &BTreeMap<u32, Point>) {
+fn assert_no_overlap(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>) {
     let tiles: Vec<_> = controller
         .graph()
         .nodes()
@@ -61,7 +61,7 @@ fn engine() -> loom_core::EngineParts {
 }
 
 /// Places every module of the graph and returns the positions.
-fn place(controller: &Controller) -> BTreeMap<u32, Point> {
+fn place(controller: &Controller) -> BTreeMap<u32, (f32, f32)> {
     let mut positions = BTreeMap::new();
     auto_layout(controller, &mut positions);
     positions
@@ -83,8 +83,8 @@ fn a_chain_sits_on_one_row() {
     c.commit().unwrap();
     let p = place(c);
     let chain = [note, phase, saw, svf].map(|id| p[&id.0]);
-    assert!(chain.iter().all(|q| q.y == chain[0].y), "{chain:?}");
-    assert!(chain.windows(2).all(|w| w[0].x < w[1].x), "{chain:?}");
+    assert!(chain.iter().all(|q| q.1 == chain[0].1), "{chain:?}");
+    assert!(chain.windows(2).all(|w| w[0].0 < w[1].0), "{chain:?}");
 }
 
 /// A loop is opened where the signal enters it, even when the loop's
@@ -104,7 +104,7 @@ fn a_loop_opens_where_the_signal_enters() {
     c.connect_named(back, "out", add, "b").unwrap();
     c.commit().unwrap();
     let p = place(c);
-    let x = |id: ModuleId| p[&id.0].x;
+    let x = |id: ModuleId| p[&id.0].0;
     assert!(x(noise) < x(add), "the source comes first");
     assert!(x(add) < x(delay), "the loop starts where the noise enters");
     assert!(x(delay) < x(back), "only the return cable runs backwards");
@@ -126,7 +126,7 @@ fn the_audio_output_goes_last() {
     c.commit().unwrap();
     let p = place(c);
     for id in [note, phase, saw] {
-        assert!(p[&id.0].x < p[&out.0].x, "module {} is right of the output", id.0);
+        assert!(p[&id.0].0 < p[&out.0].0, "module {} is right of the output", id.0);
     }
 }
 
@@ -145,9 +145,9 @@ fn a_tile_sits_beside_its_source() {
     c.connect_named(upper, "out", from_upper, "a").unwrap();
     c.commit().unwrap();
     let p = place(c);
-    assert!(p[&upper.0].y < p[&lower.0].y);
-    assert_eq!(p[&from_upper.0].y, p[&upper.0].y, "level with its source");
-    assert!(p[&from_upper.0].y < p[&from_lower.0].y, "no crossing cables");
+    assert!(p[&upper.0].1 < p[&lower.0].1);
+    assert_eq!(p[&from_upper.0].1, p[&upper.0].1, "level with its source");
+    assert!(p[&from_upper.0].1 < p[&from_lower.0].1, "no crossing cables");
 }
 
 /// Modules that already have a position keep it, and new ones go
@@ -160,10 +160,10 @@ fn placed_modules_stay_and_new_ones_go_below() {
     let b = c.add_module("loom.math.mul").unwrap();
     c.connect_named(a, "out", b, "a").unwrap();
     c.commit().unwrap();
-    let mut positions = BTreeMap::from([(a.0, Point::new(240.0, 480.0))]);
+    let mut positions = BTreeMap::from([(a.0, (240.0, 480.0))]);
     auto_layout(c, &mut positions);
-    assert_eq!(positions[&a.0], Point::new(240.0, 480.0));
-    assert!(positions[&b.0].y > 480.0, "{:?}", positions[&b.0]);
+    assert_eq!(positions[&a.0], (240.0, 480.0));
+    assert!(positions[&b.0].1 > 480.0, "{:?}", positions[&b.0]);
 }
 
 /// Every example patch is placed with no overlap and on the grid
@@ -186,7 +186,7 @@ fn example_patches_are_placed_cleanly() {
         assert_eq!(positions.len(), parts.controller.graph().len(), "{path:?}");
         assert_no_overlap(&parts.controller, &positions);
         for p in positions.values() {
-            assert_eq!((p.x % GRID, p.y % GRID), (0.0, 0.0), "{path:?}: {p:?}");
+            assert_eq!((p.0 % GRID, p.1 % GRID), (0.0, 0.0), "{path:?}: {p:?}");
         }
         checked += 1;
     }
@@ -211,7 +211,7 @@ fn generated_layout_is_on_the_grid() {
     generated_layout(&parts.controller, &mut positions);
     assert_eq!(positions.len(), parts.controller.graph().len());
     for p in positions.values() {
-        assert_eq!(p.x % GRID, 0.0);
-        assert_eq!(p.y % GRID, 0.0);
+        assert_eq!(p.0 % GRID, 0.0);
+        assert_eq!(p.1 % GRID, 0.0);
     }
 }

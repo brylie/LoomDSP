@@ -1,7 +1,6 @@
 //! Automatic placement for modules without a saved position, and a
 //! generator for large test patches.
 
-use iced::Point;
 use loom_canvas::{GRID, TILE_WIDTH, tile_size};
 use loom_core::{Controller, LoomError, ModuleId, ModuleRole, Node};
 use std::cmp::{Ordering, Reverse};
@@ -53,7 +52,7 @@ type Sources = BTreeMap<u32, Vec<(usize, u32)>>;
 /// main source (the one feeding its first connected input) when there is
 /// room. New modules go below the modules that already have positions, so
 /// nothing overlaps.
-pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>) {
+pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, (f32, f32)>) {
     let graph = controller.graph();
     let mut sources: Sources = graph.nodes().map(|(id, _)| (id.0, Vec::new())).collect();
     for (from, to) in graph.cables() {
@@ -99,7 +98,7 @@ pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>
     }
     let starts = column_starts(&widths);
 
-    let top = positions.values().map(|p| p.y + 10.0 * GRID).fold(0.0, f32::max);
+    let top = positions.values().map(|p| p.1 + 10.0 * GRID).fold(0.0, f32::max);
     for (column, ids) in by_column.into_iter().enumerate() {
         // Rule 4: near the tiles that feed it. Tiles with no placed source
         // come last, by ID.
@@ -117,9 +116,9 @@ pub fn auto_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>
         for (_, id) in keyed {
             // Rule 5: level with the main source, or lower if a tile above
             // is in the way.
-            let main = sources[&id].iter().find_map(|(_, s)| positions.get(s)).map(|p| p.y);
+            let main = sources[&id].iter().find_map(|(_, s)| positions.get(s)).map(|p| p.1);
             let y = main.map_or(next_y, |y| y.max(next_y));
-            positions.insert(id, Point::new(starts[column], y));
+            positions.insert(id, (starts[column], y));
             let height = graph.node(ModuleId(id)).map_or(0.0, |node| size_of(node).height);
             next_y = y + height + GAP;
         }
@@ -161,8 +160,8 @@ fn columns_by_flow(sources: &Sources) -> BTreeMap<u32, usize> {
 
 /// The average top of the sources in `list` that already have a position,
 /// or `None` if none has.
-fn mean_source_y(list: &[(usize, u32)], positions: &BTreeMap<u32, Point>) -> Option<f32> {
-    let ys: Vec<f32> = list.iter().filter_map(|(_, s)| positions.get(s)).map(|p| p.y).collect();
+fn mean_source_y(list: &[(usize, u32)], positions: &BTreeMap<u32, (f32, f32)>) -> Option<f32> {
+    let ys: Vec<f32> = list.iter().filter_map(|(_, s)| positions.get(s)).map(|p| p.1).collect();
     (!ys.is_empty()).then(|| ys.iter().sum::<f32>() / ys.len() as f32)
 }
 
@@ -197,7 +196,7 @@ pub fn generate(controller: &mut Controller, n: usize) -> Result<(), LoomError> 
 
 /// Places voices of a generated patch in a grid of rows, one voice per row,
 /// wrapping into blocks so the patch is roughly as wide as it is tall.
-pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, Point>) {
+pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, (f32, f32)>) {
     let ids: Vec<u32> = controller.graph().nodes().map(|(id, _)| id.0).collect();
     let row_height = 6.0 * GRID + GAP;
     // One pitch for every column, wide enough for the widest tile.
@@ -209,7 +208,7 @@ pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, P
     let column = widest + COLUMN_GAP;
     // The first two modules (output and note) sit on the left.
     for (i, id) in ids.iter().take(2).enumerate() {
-        positions.insert(*id, Point::new(0.0, i as f32 * row_height));
+        positions.insert(*id, (0.0, i as f32 * row_height));
     }
     let voices: Vec<&[u32]> = ids[2.min(ids.len())..].chunks(4).collect();
     let per_block = ((voices.len() as f32).sqrt() * 1.6).ceil().max(1.0) as usize;
@@ -218,7 +217,7 @@ pub fn generated_layout(controller: &Controller, positions: &mut BTreeMap<u32, P
         let row = v % per_block;
         for (j, id) in voice.iter().enumerate() {
             let x = column * (1.5 + (block * 5 + j) as f32);
-            positions.insert(*id, Point::new((x / GRID).round() * GRID, row as f32 * row_height));
+            positions.insert(*id, ((x / GRID).round() * GRID, row as f32 * row_height));
         }
     }
 }

@@ -340,7 +340,7 @@ fn adding_from_the_browser_is_one_undo_step_at_the_snapped_point() {
     assert_eq!(app.controller.graph().nodes().count(), before + 1);
     let id = *app.selection.iter().next().expect("the new module is selected");
     assert_eq!(app.selection.len(), 1);
-    assert_eq!(app.positions[&id], Point::new(252.0, 132.0));
+    assert_eq!(app.positions[&id], (252.0, 132.0));
 
     app.undo();
     assert_eq!(app.controller.graph().nodes().count(), before);
@@ -861,8 +861,8 @@ fn two_selected(app: &mut App) -> (ModuleId, ModuleId) {
     let vca = app.controller.add_module("loom.math.mul").unwrap();
     app.controller.connect_named(sine, "out", vca, "a").unwrap();
     app.controller.set_param_named(vca, "gain", 0.4).unwrap();
-    app.positions.insert(sine.0, Point::new(0.0, 0.0));
-    app.positions.insert(vca.0, Point::new(240.0, 0.0));
+    app.positions.insert(sine.0, (0.0, 0.0));
+    app.positions.insert(vca.0, (240.0, 0.0));
     app.commit();
     app.edits.history.clear();
     app.selection = BTreeSet::from([sine.0, vca.0]);
@@ -927,7 +927,7 @@ fn resize_respects_limits_and_ignores_fixed_panels() {
 fn copy_and_paste_keep_tile_size() {
     let mut app = app();
     let id = app.controller.add_module("loom.display.scope").unwrap();
-    app.positions.insert(id.0, Point::ORIGIN);
+    app.positions.insert(id.0, (0.0, 0.0));
     app.sizes.insert(id.0, (24, 16));
     app.selection = BTreeSet::from([id.0]);
     app.commit();
@@ -963,8 +963,8 @@ fn a_paste_lands_at_the_snapped_point_is_selected_and_is_one_undo_step() {
     let new: Vec<u32> = app.selection.iter().copied().collect();
     assert_eq!(new.len(), 2, "only the pasted modules are selected");
     assert!(!new.contains(&sine.0) && !new.contains(&vca.0));
-    assert_eq!(app.positions[&new[0]], Point::new(600.0, 300.0));
-    assert_eq!(app.positions[&new[1]], Point::new(840.0, 300.0));
+    assert_eq!(app.positions[&new[0]], (600.0, 300.0));
+    assert_eq!(app.positions[&new[1]], (840.0, 300.0));
 
     app.undo();
     assert_eq!(app.controller.graph().nodes().count(), before);
@@ -990,7 +990,7 @@ fn duplicate_from_the_keyboard_is_one_step_offset_by_two_grid_units() {
     assert_eq!(step_name(&app).as_deref(), Some("duplicate 2 modules"));
     let first = *app.selection.iter().next().unwrap();
     assert_ne!(first, sine.0);
-    assert_eq!(app.positions[&first], Point::new(24.0, 24.0));
+    assert_eq!(app.positions[&first], (24.0, 24.0));
     app.undo();
     assert_eq!(app.controller.graph().nodes().count(), before);
 }
@@ -1149,7 +1149,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
     let mut app = app();
     let id = app.controller.add_module("loom.ui.button").unwrap();
     app.controller.set_param_named(id, "mode", 1.0).unwrap();
-    app.positions.insert(id.0, Point::new(0.0, 0.0));
+    app.positions.insert(id.0, (0.0, 0.0));
     app.commit();
     app.edits.history.clear();
     app.edits.history.mark_saved();

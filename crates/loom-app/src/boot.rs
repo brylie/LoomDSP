@@ -7,7 +7,7 @@ use crate::{
     App, Args, Session, Source, alerts, bench, devices, document, edits, files, gestures, layout, learn, matrix,
     monitor, pointer, recovery, registry, run_is_driven, scene, settings, stream,
 };
-use iced::{Color, Point, Theme};
+use iced::{Color, Theme};
 use loom_canvas::PanelValues;
 use loom_core::{Controller, EngineConfig, EngineParts, ModuleId, TRANSPORT_MODULE, create_engine};
 use loom_host_desktop::AudioOutput;
@@ -200,7 +200,7 @@ impl App {
                     original_unknown_positions.insert(m.id, m.position);
                 }
                 if let Some((x, y)) = m.position {
-                    positions.insert(m.id, Point::new(x, y));
+                    positions.insert(m.id, (x, y));
                 }
                 if let Some(size) = m.size {
                     sizes.insert(m.id, size);

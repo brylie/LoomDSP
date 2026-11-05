@@ -242,7 +242,7 @@ struct Shown {
 fn shown(
     options: &Options,
     controller: &mut Controller,
-    positions: &BTreeMap<u32, Point>,
+    positions: &BTreeMap<u32, (f32, f32)>,
     sizes: &BTreeMap<u32, (u8, u8)>,
     size: Size,
 ) -> Result<(Scene, Shown), String> {
