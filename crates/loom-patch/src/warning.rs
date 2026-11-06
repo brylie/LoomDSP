@@ -78,6 +78,14 @@ pub enum LoadWarning {
         /// The range both load with.
         loaded: ParamRange,
     },
+    /// Something inside a sub-patch definition loaded differently. The
+    /// inner module IDs are the definition's own.
+    InSubPatch {
+        /// The definition's name.
+        name: String,
+        /// What loaded differently inside it.
+        warning: Box<LoadWarning>,
+    },
 }
 
 impl LoadWarning {
@@ -85,6 +93,7 @@ impl LoadWarning {
     pub fn level(&self) -> LoadLevel {
         match self {
             Self::UnknownModules { .. } => LoadLevel::Warning,
+            Self::InSubPatch { warning, .. } => warning.level(),
             _ => LoadLevel::Note,
         }
     }
@@ -152,6 +161,7 @@ impl fmt::Display for LoadWarning {
                 f,
                 "module {module}: parameters `{param}` and `{partner}` share a range, and the saved ranges do not hold both values; they load with {loaded}"
             ),
+            Self::InSubPatch { name, warning } => write!(f, "in sub-patch \"{name}\": {warning}"),
         }
     }
 }

@@ -1371,6 +1371,22 @@ fn a_meter_says_its_value_past_its_range() {
     assert_eq!(widget.text, "Reduction: -60.0 dB");
 }
 
+/// Until the editor keeps the hierarchy (#51, slice 2), a patch with
+/// sub-patches does not open in the app, with a message that says so; a
+/// flat patch still does.
+#[test]
+fn a_patch_with_sub_patches_does_not_open_yet() {
+    let mut nested = Patch::new("Nested");
+    nested
+        .subpatches
+        .insert("voice".into(), loom_patch::SubPatch::new("Voice"));
+    let error = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(nested))).err();
+    assert_eq!(error.as_deref(), Some(crate::boot::SUBPATCHES_NOT_YET));
+    assert!(error.unwrap().contains("sub-patches"));
+    let flat = Patch::new("Flat");
+    assert!(Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(flat))).is_ok());
+}
+
 /// Saved tile dimensions survive session loading and patch creation.
 #[test]
 fn session_keeps_saved_tile_dimensions() {

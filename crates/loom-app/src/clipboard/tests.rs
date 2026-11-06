@@ -260,6 +260,13 @@ fn paste_refuses_text_it_cannot_add_whole() {
     let refuse = |text: &str| Group::from_text(text, registry).unwrap_err();
     assert_eq!(refuse("hello"), NOTHING_TO_PASTE);
     assert_eq!(refuse("Patch(version: 1)"), NOTHING_TO_PASTE);
+    // Sub-patches wait for the editor (#51, slice 2); an instance must not
+    // paste as a silent placeholder.
+    let nested = r#"Patch(version: 1, subpatches: {"v": SubPatch(metadata: Metadata(name: "Voice"))}, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"))])"#;
+    assert_eq!(refuse(nested), "Cannot paste: sub-patches are not supported yet");
+    let orphan =
+        r#"Patch(version: 1, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"))])"#;
+    assert_eq!(refuse(orphan), "Cannot paste: sub-patches are not supported yet");
     assert!(refuse("Patch(version: 99, modules: [(id: 1, kind: \"loom.osc.sine\")])").contains("newer"));
     let unknown = refuse("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])");
     assert!(

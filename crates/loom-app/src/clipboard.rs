@@ -179,6 +179,11 @@ impl Group {
         if patch.modules.is_empty() {
             return Err(NOTHING_TO_PASTE.to_string());
         }
+        // An instance is not a registered module, so resolving would paste
+        // it as a silent placeholder (#51, slice 2 adds the real thing).
+        if !patch.subpatches.is_empty() || patch.modules.iter().any(|m| m.is_instance() || m.subpatch.is_some()) {
+            return Err("Cannot paste: sub-patches are not supported yet".to_string());
+        }
         let ports = text
             .lines()
             .find_map(|line| line.strip_prefix(PORTS_COMMENT))

@@ -1,0 +1,79 @@
+// The subtractive example as three levels of sub-patch: the top patch holds
+// a Voice, the Voice holds a Filter. It renders bit-identically to
+// examples/patches/subtractive.ron (crates/loom-modules/tests/subpatches.rs).
+// The Filter stores a cutoff of 1000 Hz; the Voice exposes it without a
+// value, and only the top-level instance sets it to 300 Hz, so the two
+// renders match only when exposed values reach the inner parameter.
+// Lives in examples/dev until the app can open sub-patches (#51, slice 2).
+Patch(
+    version: 1,
+    metadata: Metadata(
+        name: "Nested subtractive",
+        license: "CC0-1.0",
+    ),
+    subpatches: {
+        "filter": SubPatch(
+            metadata: Metadata(name: "Filter"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 2, kind: "loom.struct.input@1", label: Some("gate")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 1000.0, "resonance": 0.6}),
+                // Filter envelope, scaled to +3 octaves (pitch units: 0.1 per octave).
+                PatchModule(id: 4, kind: "loom.env.envelope@1", params: {"decay": 0.4, "sustain": 0.2}),
+                PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+                PatchModule(id: 6, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (3, "in")),
+                PatchCable(from: (2, "out"), to: (4, "gate")),
+                PatchCable(from: (4, "out"), to: (5, "a")),
+                PatchCable(from: (5, "out"), to: (3, "cutoff")),
+                PatchCable(from: (3, "lowpass"), to: (6, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff", range: Some((20.0, 20000.0)))],
+        ),
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch")),
+                PatchModule(id: 2, kind: "loom.struct.input@1", label: Some("gate")),
+                PatchModule(id: 3, kind: "loom.phase.generator@1"),
+                PatchModule(id: 4, kind: "loom.osc.saw@1"),
+                PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("filter")),
+                // Amplitude envelope and VCA.
+                PatchModule(id: 6, kind: "loom.env.envelope@1", params: {"attack": 0.005, "release": 0.4}),
+                PatchModule(id: 7, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+                PatchModule(id: 8, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.output@1", label: Some("filter")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (3, "pitch")),
+                PatchCable(from: (3, "phase"), to: (4, "phase")),
+                PatchCable(from: (4, "out"), to: (5, "in")),
+                PatchCable(from: (2, "out"), to: (5, "gate")),
+                PatchCable(from: (2, "out"), to: (6, "gate")),
+                PatchCable(from: (5, "out"), to: (7, "a")),
+                PatchCable(from: (6, "out"), to: (7, "b")),
+                PatchCable(from: (7, "out"), to: (8, "in")),
+                PatchCable(from: (5, "out"), to: (9, "in")),
+            ],
+            // Passed up from the Filter, with no value of its own.
+            exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff")],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.midi.note@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), params: {"cutoff": 300.0}),
+        PatchModule(id: 9, kind: "loom.io.audio-out@1"),
+        // The patch transport: 120 BPM, 4/4, running.
+        PatchModule(id: 10, kind: "loom.clock.transport@1"),
+        // A scope on the filter's output, two levels down.
+        PatchModule(id: 11, kind: "loom.display.scope@1", params: {"window": 0.005}),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (1, "gate"), to: (2, "gate")),
+        PatchCable(from: (2, "out"), to: (9, "in")),
+        PatchCable(from: (2, "filter"), to: (11, "in")),
+    ],
+)

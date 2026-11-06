@@ -287,6 +287,10 @@ impl App {
     }
 }
 
+/// Why a patch with sub-patches does not open in the app yet.
+pub(crate) const SUBPATCHES_NOT_YET: &str =
+    "This patch has sub-patches, which the app cannot open yet. `loom render` plays it.";
+
 impl Loaded {
     /// What the status line says about this load, if anything.
     pub(crate) fn status(&self) -> String {
@@ -307,6 +311,12 @@ impl Loaded {
         let mut original_unknown_positions = BTreeMap::new();
         let mut notes = Vec::new();
         let mut load = |patch: &Patch, controller: &mut Controller| -> Result<Metadata, String> {
+            // Until the editor keeps the hierarchy (#51, slice 2), the app
+            // saves from the flat graph, and a save would lose the
+            // sub-patches. The command line plays them.
+            if !patch.subpatches.is_empty() {
+                return Err(SUBPATCHES_NOT_YET.to_string());
+            }
             notes = patch.load_into(controller).map_err(|e| e.to_string())?;
             for m in &patch.modules {
                 if controller

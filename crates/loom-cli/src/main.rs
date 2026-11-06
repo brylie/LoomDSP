@@ -397,6 +397,9 @@ fn check(path: &Path) -> Result<ExitCode> {
     }
     let report = c.last_report();
     println!("{}: \"{}\"", path.display(), patch.metadata.name);
+    if !patch.subpatches.is_empty() {
+        println!("  {} sub-patches, flattened", patch.subpatches.len());
+    }
     println!("  {} modules, {} cables", report.modules, c.graph().cables().count());
     if !report.skipped.is_empty() {
         let names: Vec<String> = report.skipped.iter().map(|&id| describe(c, id)).collect();
@@ -404,6 +407,18 @@ fn check(path: &Path) -> Result<ExitCode> {
     }
     for (module, param) in patch.transient_values(c.registry()) {
         println!("  note: module {module} saves `{param}`, a live control that is never saved; the value is ignored");
+    }
+    for (key, definition) in &patch.subpatches {
+        let name = if definition.metadata.name.is_empty() {
+            key
+        } else {
+            &definition.metadata.name
+        };
+        for (module, param) in definition.transient_values(c.registry()) {
+            println!(
+                "  note: in sub-patch \"{name}\", module {module} saves `{param}`, a live control that is never saved; the value is ignored"
+            );
+        }
     }
     if report.loops.is_empty() {
         println!("  no feedback loops");

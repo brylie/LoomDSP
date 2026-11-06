@@ -15,6 +15,7 @@
 
 use crate::level::LevelRef;
 use crate::{Metadata, PatchCable, PatchMidiMapping, PatchModulation, PatchModule, canonicalise_lists};
+use loom_core::Registry;
 use serde::{Deserialize, Serialize};
 
 /// The kind of a sub-patch instance (MT-STRUCT-01). Not a registered
@@ -91,8 +92,15 @@ impl SubPatch {
         canonicalise_lists(&mut self.modules, &mut self.cables, &mut self.midi);
     }
 
+    /// The saved values that loading ignores because their parameter is
+    /// transient, as `(module id, parameter name)` in this definition, as
+    /// [`crate::Patch::transient_values`] lists them for the top level.
+    pub fn transient_values(&self, registry: &Registry) -> Vec<(u32, String)> {
+        self.level().transient_values(registry)
+    }
+
     /// This definition as one level.
-    pub(crate) fn level(&self) -> LevelRef<'_> {
+    fn level(&self) -> LevelRef<'_> {
         LevelRef {
             modules: &self.modules,
             cables: &self.cables,

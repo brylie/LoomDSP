@@ -30,8 +30,8 @@
 #![warn(missing_docs)]
 
 use loom_core::{
-    Controller, Graph, InputRef, LoomError, MidiControl, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId,
-    ModuleNames, OutputRef, Polarity, Registry, TRANSPORT_MODULE,
+    Graph, InputRef, LoomError, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, ModuleNames, OutputRef, Polarity,
+    Registry,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -43,6 +43,8 @@ pub mod resolve;
 pub use resolve::{Layout, ResolveError, ResolveOptions, ResolvedModule};
 pub mod subpatch;
 pub use subpatch::{Exposed, INPUT_KIND, OUTPUT_KIND, SUBPATCH_KIND, SubPatch};
+pub mod flatten;
+pub use flatten::{Flat, FlatIds, FlatModule, ModulePath};
 pub mod warning;
 pub use warning::{LoadLevel, LoadWarning, RangeReason};
 
@@ -348,13 +350,76 @@ pub enum PatchError {
         /// The second Transport's module ID.
         second: u32,
     },
-    /// A parameter name does not exist on a module.
+    /// A parameter name does not exist on a module. For a sub-patch
+    /// instance, a name its definition does not expose, or any control
+    /// range.
     #[error("module {module}: unknown parameter `{param}`")]
     UnknownParam {
         /// Module ID in the patch.
         module: u32,
         /// Parameter name.
         param: String,
+    },
+    /// An instance names a definition the `subpatches` table does not have.
+    #[error("module {module}: there is no sub-patch `{key}`")]
+    UnknownSubPatch {
+        /// The instance's module ID.
+        module: u32,
+        /// The key it names.
+        key: String,
+    },
+    /// A `subpatch` on a module that is not an instance, or an instance
+    /// with no `subpatch`.
+    #[error("module {module}: `{kind}` and its `subpatch` field disagree; only `loom.struct.subpatch@1` has one")]
+    NotAnInstance {
+        /// The module's ID.
+        module: u32,
+        /// Its kind.
+        kind: String,
+    },
+    /// Two Patch inputs or two Patch outputs of one definition share a name.
+    #[error("two {direction} ports are called `{port}`; give one another label")]
+    DuplicatePort {
+        /// "input" or "output".
+        direction: &'static str,
+        /// The shared name.
+        port: String,
+    },
+    /// An `exposed` entry that cannot be used.
+    #[error("exposed parameter `{name}`: {reason}")]
+    BadExposed {
+        /// The exposed name.
+        name: String,
+        /// What is wrong with it.
+        reason: String,
+    },
+    /// A Transport inside a sub-patch definition. A patch has one, at the
+    /// top level (`docs/design/sub-patches.md`, rule 8).
+    #[error("module {module} is a Transport, and a sub-patch cannot hold one")]
+    TransportInSubPatch {
+        /// The module's ID in the definition.
+        module: u32,
+    },
+    /// A modulation assignment whose source is a Patch input's `out`.
+    /// Collapsing never makes one; expose the parameter instead.
+    #[error("module {module} is a Patch input, and an assignment cannot start at a port")]
+    AssignmentFromPort {
+        /// The Patch input's ID in the definition.
+        module: u32,
+    },
+    /// A definition that contains itself, directly or through others.
+    #[error("sub-patch {} contains itself", .path.join(" › "))]
+    SubPatchLoop {
+        /// The definitions' names along the loop, first to last.
+        path: Vec<String>,
+    },
+    /// An error inside a sub-patch definition, with the definition's name.
+    #[error("in sub-patch \"{name}\": {source}")]
+    InSubPatch {
+        /// The definition's name.
+        name: String,
+        /// What went wrong inside it. Module IDs are the definition's own.
+        source: Box<PatchError>,
     },
 }
 
@@ -438,98 +503,6 @@ impl Patch {
         registry: &Registry,
     ) -> Result<Option<loom_core::UnknownModule>, PatchError> {
         self.level().unknown_module(module, registry)
-    }
-
-    /// Adds every module and cable to a controller and commits.
-    ///
-    /// The controller should be empty. Module IDs from the file are kept.
-    /// Returns a [`LoadWarning`] for each thing that loaded differently from
-    /// the file: an unknown module, an added Transport, or a saved
-    /// control range that the parameter does not offer, or that does not
-    /// hold the saved value. Values never change (control-ranges.md, rule 7).
-    ///
-    /// Every patch has exactly one Transport (`docs/design/clock.md`). Two
-    /// fail with an error that names both. A patch without one gets one,
-    /// with a note, when the registry has the Transport module.
-    pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<LoadWarning>, PatchError> {
-        let mut notes = Vec::new();
-        let mut unknown_kinds = Vec::new();
-        let transports: Vec<u32> = self
-            .modules
-            .iter()
-            .filter(|m| {
-                loom_core::ModuleKind::parse(&m.kind).ok().is_some_and(|kind| {
-                    controller.registry().get(&kind.id).is_some_and(|descriptor| {
-                        descriptor.id == TRANSPORT_MODULE && descriptor.version == kind.version
-                    })
-                })
-            })
-            .map(|m| m.id)
-            .collect();
-        if let [first, second, ..] = transports[..] {
-            return Err(PatchError::TwoTransports { first, second });
-        }
-        let (modules, warnings) = self.resolve(controller.registry(), ResolveOptions::FILE)?;
-        notes.extend(warnings);
-        for module in &modules {
-            module.add_to(controller, ModuleId(module.id))?;
-            if let Some(unknown) = &module.unknown {
-                unknown_kinds.push(unknown.kind.clone());
-            }
-        }
-        if !unknown_kinds.is_empty() {
-            notes.push(LoadWarning::UnknownModules { kinds: unknown_kinds });
-        }
-        if transports.is_empty() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
-            let id = controller.add_module(TRANSPORT_MODULE)?;
-            notes.push(LoadWarning::TransportAdded { module: id.0 });
-        }
-        for cable in &self.cables {
-            controller.connect_named(ModuleId(cable.from.0), &cable.from.1, ModuleId(cable.to.0), &cable.to.1)?;
-        }
-        for assignment in &self.modulation {
-            let id = controller.add_assignment_named(
-                ModuleId(assignment.source.0),
-                &assignment.source.1,
-                ModuleId(assignment.target.0),
-                &assignment.target.1,
-                assignment.depth,
-            )?;
-            if let Some(polarity) = assignment.polarity {
-                controller.set_assignment_polarity(id, Some(polarity.into()))?;
-            }
-            if !assignment.enabled {
-                controller.set_assignment_enabled(id, false)?;
-            }
-        }
-        self.level().check_midi()?;
-        for mapping in &self.midi {
-            let control = MidiControl {
-                channel: mapping.channel,
-                controller: mapping.controller,
-            };
-            controller
-                .map_midi_named_with(
-                    control,
-                    ModuleId(mapping.target.0),
-                    &mapping.target.1,
-                    mapping.options(),
-                )
-                .map_err(|error| match error {
-                    LoomError::NoSuchParam { .. } => PatchError::UnknownParam {
-                        module: mapping.target.0,
-                        param: mapping.target.1.clone(),
-                    },
-                    LoomError::InvalidMidiOptions(reason) => PatchError::InvalidMidiMapping {
-                        module: mapping.target.0,
-                        param: mapping.target.1.clone(),
-                        reason,
-                    },
-                    other => PatchError::Engine(other),
-                })?;
-        }
-        controller.commit()?;
-        Ok(notes)
     }
 
     /// The saved values that [`Patch::load_into`] ignores because their

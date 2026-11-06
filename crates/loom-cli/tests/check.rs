@@ -60,6 +60,42 @@ fn unknown_module_is_reported_by_check_and_render() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A patch with sub-patches is flattened: `check` counts them and `render`
+/// writes audio (sub-patches.md, Flattening).
+#[test]
+fn nested_patches_check_and_render() {
+    let dir = std::env::temp_dir().join(format!("loom-cli-nested-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/nested-subtractive.ron");
+    let path = dir.join("nested.ron");
+    std::fs::copy(&source, &path).unwrap();
+    let wave = dir.join("render.wav");
+    let check = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(
+        check.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(stdout.contains("2 sub-patches, flattened"), "{stdout}");
+    assert!(stdout.contains("11 modules"), "{stdout}");
+    let render = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("render")
+        .arg(&path)
+        .arg("-o")
+        .arg(&wave)
+        .args(["--seconds", "0.01"])
+        .output()
+        .unwrap();
+    assert!(render.status.success(), "{}", String::from_utf8_lossy(&render.stderr));
+    assert!(wave.exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A missing patch file fails with the path, then the system's reason, as it
 /// did when `loom-patch` read files (#617).
 #[test]
