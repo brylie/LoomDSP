@@ -695,3 +695,30 @@ fn ports_at_the_top_level_are_ordinary_modules() {
     assert_eq!(flat.modules.len(), 2);
     assert_eq!(flat.cables.len(), 1);
 }
+
+/// The nested example's id table, as `docs/learn/flattening.md` shows it:
+/// top-level ids are kept, and inner modules take the next ids in visit
+/// order, depth first.
+#[test]
+fn the_nested_example_has_the_documented_id_table() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/nested-subtractive.ron");
+    let text = std::fs::read_to_string(path).unwrap();
+    let (_, ids) = flatten(&text);
+    let table: Vec<(String, u32)> = ids.paths().map(|(path, id)| (path.to_string(), id.0)).collect();
+    let expected = [
+        ("1", 1),
+        ("2", 2),
+        ("2 › 3", 12),
+        ("2 › 4", 13),
+        ("2 › 5 › 3", 14),
+        ("2 › 5 › 4", 15),
+        ("2 › 5 › 5", 16),
+        ("2 › 6", 17),
+        ("2 › 7", 18),
+        ("9", 9),
+        ("10", 10),
+        ("11", 11),
+    ];
+    let expected: Vec<(String, u32)> = expected.iter().map(|(p, id)| (p.to_string(), *id)).collect();
+    assert_eq!(table, expected);
+}

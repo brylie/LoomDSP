@@ -3,14 +3,14 @@
 How a player collapses part of a patch into one module with its own ports and panel, opens it to edit, saves it to a library, and builds abstractions with swappable slots and modes.
 
 - **Kind:** living specification.
-- **Status:** Agreed, M2. The choices marked "Settled" were made with the maintainer on 2026-11-01. Nothing is built yet.
+- **Status:** Agreed, M2. The choices marked "Settled" were made with the maintainer on 2026-11-01. The [patch file](#patch-file) and [flattening](#flattening) are Implemented (slice 1 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-06), without `library`, `roles`, `panel`, and the mode fields, which their slices add. Until the editor keeps the hierarchy (slice 2), the app refuses to open a patch that has sub-patches, with a message that `loom render` plays it; the command line flattens and plays them.
 - **Decision behind it:** [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md) (definitions, flattening, library items as patch files). [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) for roles and slots. [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) and [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) for the sub-patch's panel.
 - **Use case and requirements:** FR-ENCAP-01 to FR-ENCAP-10, FR-SDK-08, FR-PANEL-10, FR-PANEL-11, FR-LIB-24, FR-MOD-06. Settles OQ-20 and OQ-21.
 - **Builds on:** [Panels: exposed controls in a sub-patch](panels.md#exposed-controls-in-a-sub-patch) (what the surface shows), [Module data](module-data.md) (data in slots and copies), [Undo](undo.md), [Copy, paste, and duplicate](clipboard.md), [Changing a running patch](live-patching.md).
-- **Background:** none yet. An explainer on "flattening" and "abstraction" belongs in `docs/learn/` with the first build.
+- **Background:** [Flattening](../learn/flattening.md): how a sub-patch becomes plain modules, why a hierarchical engine was rejected, and why flat ids come from a table keyed by path. An explainer on "abstraction" belongs with roles and slots.
 - **Prior art:** Max has both private sub-patchers and shared file abstractions. Reaktor and Bitwig Grid nest containers. Design tools have "instances" of a shared component. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** [#51](https://github.com/brylie/LoomDSP/issues/51) (umbrella), [#76](https://github.com/brylie/LoomDSP/issues/76) (panel editor).
-- **Code:** none yet. Flattening goes in `crates/loom-patch`, next to the patch file types and the code that applies a patch to a `Controller`. `loom-core`'s `Graph` stays the flat engine graph with no file types (ADR-0002, ADR-0034). ADR-0031 left the crate open; settled with the maintainer on 2026-11-06 ([#651](https://github.com/brylie/LoomDSP/issues/651)).
+- **Code:** `crates/loom-patch/src/subpatch.rs` (the definition types), `flatten.rs` (flattening and the id table), `level.rs` (what the top patch and a definition share), and `crates/loom-modules/src/structure.rs` (the Patch input and output modules). Flattening lives in `crates/loom-patch`, next to the patch file types and the code that applies a patch to a `Controller`. `loom-core`'s `Graph` stays the flat engine graph with no file types (ADR-0002, ADR-0034). ADR-0031 left the crate open; settled with the maintainer on 2026-11-06 ([#651](https://github.com/brylie/LoomDSP/issues/651)).
 
 ## Goal
 
@@ -154,9 +154,10 @@ A sub-patch's mode is a setting in its inspector. The default is **single**.
 ```ron
 Patch(
     version: 1,
+    metadata: Metadata(name: "Voices"),
     subpatches: {
         "voice": SubPatch(
-            name: "Voice",
+            metadata: Metadata(name: "Voice"),
             modules: [
                 PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch")),
                 PatchModule(id: 2, kind: "loom.osc.saw@1"),
@@ -176,6 +177,8 @@ Patch(
 )
 ```
 
+- A definition's `metadata` is the same type as the patch's (name, description, authors, tags, licence), so a library item's credit travels with it ([#652](https://github.com/brylie/LoomDSP/issues/652)). Its name is what the player sees.
+
 - Module IDs are unique within one definition, not across the patch. *Why:* a definition copied into another patch keeps its own IDs.
 - Definition keys are made from the name and made unique ("voice", "voice 2"). They are not shown to the player. Each instance refers to its own key; no two instances share one.
 - An instance's `params` holds the values of its exposed parameters, by exposed name.
@@ -192,6 +195,15 @@ These rules are for implementers. The player never sees the flat graph.
 5. Stack copies, layer and select members, and slot parts expand into ordinary modules, with mixing or crossfade modules the flattener adds. Added modules are not shown and not saved.
 6. Flattening is deterministic: the same patch gives the same flat graph and the same IDs.
 7. The flattener never opens a file. It reads a linked library item through a `Library` trait that the caller implements: the desktop app reads the library folder, and a test or the web runtime passes a map. A missing item falls back to the stored copy (rule 5). *Why:* `loom-patch` must work on WebAssembly, which has no files (hard rule 6), and the loop check needs to read links while it follows them.
+8. **Ports with nothing behind them.** A cable or assignment from an instance output whose Patch output has no cable behind it is dropped; the outer input reads its default. A cable into an input port that feeds nothing inside is dropped too.
+9. **Pass-through ports.** A Patch output fed straight from a Patch input is a pass-through: the outer cable continues from whatever feeds the instance's input, through any number of levels. A pass-through fed by its own output carries nothing and is dropped.
+10. **An assignment never starts at a port.** A modulation assignment inside a definition whose source is a Patch input's `out` is refused. Collapsing never makes one (point 4 turns an outside-to-inside assignment into an exposed parameter).
+11. **Assignment order.** Each instance's inner assignments are added before the level's own, instances in id order, depth first, then the level's own in file order. The engine sums assignments on one parameter in that order, so collapsing must keep it (rule 2).
+12. **Exposed through levels.** `Exposed.module` may name a nested instance; `param` is then one of that instance's exposed names. The value is clamped to each level's range, outer first. An exposed value is written into the inner module before it is resolved, and a saved control range on that parameter is dropped, so the loader picks a range that holds the value (control-ranges.md, rule 7).
+13. **Port names are not made unique by the flattener.** Two Patch inputs or two Patch outputs of one definition with one name are an error. The editor makes names unique when collapsing (point 3). A Patch input or output with no label is called `in` or `out`.
+14. **An instance's `label`, `position`, and `size` are the editor's.** The flattener ignores them. An instance's `ranges` is refused, as any parameter the definition does not expose is.
+15. **At the top level, Patch input and output are ordinary modules**, as when a library file is opened on its own: the input outputs silence, the output reads its input and does nothing.
+16. **Errors and notes from inside a definition carry its name** and the inner module's own id, such as ``in sub-patch "Voice": module #3 has no input port `inn` ``. Unknown modules at every level are reported in one note.
 
 ## Rules
 
@@ -229,8 +241,8 @@ Copies, library, and linking:
 
 Engine:
 
-- [ ] A patch with three levels of nesting renders bit-identical to the same patch built flat, at block sizes 1, 77, and 512 (test).
-- [ ] A feedback loop that crosses a sub-patch boundary gets a unit delay, as a flat one does (test).
+- [x] A patch with three levels of nesting renders bit-identical to the same patch built flat, at block sizes 1, 77, and 512 (test: `crates/loom-modules/tests/subpatches.rs`).
+- [x] A feedback loop that crosses a sub-patch boundary gets a unit delay, as a flat one does (test: `crates/loom-modules/tests/subpatches.rs`).
 - [ ] Editing inside a sub-patch keeps the state of the other inner modules (test: a running oscillator's phase continues).
 - [ ] No allocation on the audio thread during a slot swap or a select change (`no_alloc` test).
 
