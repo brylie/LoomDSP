@@ -536,3 +536,53 @@ fn undo_keeps_midi_options() {
     redo(&step, &mut c, &mut positions);
     assert_eq!(options_of(&c, id, 1), Some(pickup_options()));
 }
+
+/// Undo of a delete brings back a known module's label (clipboard.md,
+/// rule 9).
+#[test]
+fn undo_of_a_delete_brings_back_a_known_module_label() {
+    let mut c = parts().controller;
+    let mut positions = BTreeMap::new();
+    let id = c.add_module("loom.osc.sine").unwrap();
+    c.set_label(id, Some("Lead".into()));
+    c.commit().unwrap();
+    let step = record(&mut c, &mut positions, |c| {
+        c.remove_module(id).unwrap();
+    });
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(c.graph().node(id).unwrap().label.as_deref(), Some("Lead"));
+}
+
+/// A change to only a label is one step, named for the module. A
+/// placeholder keeps the name it had before labels moved to every module.
+#[test]
+fn a_label_change_is_a_step_named_for_the_module() {
+    let mut c = parts().controller;
+    let mut positions = BTreeMap::new();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let missing = c
+        .add_unknown(loom_core::UnknownModule {
+            kind: "future.effect@1".into(),
+            params: BTreeMap::new(),
+            ranges: BTreeMap::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            parameters: Vec::new(),
+        })
+        .unwrap();
+    c.commit().unwrap();
+
+    let step = record(&mut c, &mut positions, |c| {
+        c.set_label(missing, Some("Shimmer".into()));
+    });
+    assert_eq!(step.name(), "label unknown module");
+    undo(&step, &mut c, &mut positions);
+    assert_eq!(c.graph().node(missing).unwrap().label, None);
+    redo(&step, &mut c, &mut positions);
+    assert_eq!(c.graph().node(missing).unwrap().label.as_deref(), Some("Shimmer"));
+
+    let step = record(&mut c, &mut positions, |c| {
+        c.set_label(sine, Some("Lead".into()));
+    });
+    assert_eq!(step.name(), "label Sine");
+}

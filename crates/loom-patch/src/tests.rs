@@ -589,3 +589,37 @@ fn bad_mapping_options_do_not_load() {
         assert!(error.to_string().contains("cutoff"), "{error}");
     }
 }
+
+/// A label on a known module or a placeholder loads onto the node and saves
+/// back exactly as written, spaces included (clipboard.md, rule 9).
+#[test]
+fn labels_survive_load_and_save_exactly() {
+    let text = r#"Patch(version: 1, modules: [
+        (id: 1, kind: "loom.math.mul@1", label: Some("Bass filter")),
+        (id: 2, kind: "loom.osc.sine@1", label: Some(" ")),
+        (id: 3, kind: "future.effect@9", label: Some("Shimmer")),
+        (id: 4, kind: "loom.osc.sine@1"),
+        (id: 5, kind: "loom.clock.transport@1"),
+    ])"#;
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    Patch::from_ron(text).unwrap().load_into(&mut parts.controller).unwrap();
+    let label = |id| parts.controller.graph().node(ModuleId(id)).unwrap().label.clone();
+    assert_eq!(label(1).as_deref(), Some("Bass filter"));
+    assert_eq!(
+        label(3).as_deref(),
+        Some("Shimmer"),
+        "a placeholder's label is on its node"
+    );
+    let saved = Patch::from_graph("", parts.controller.graph());
+    let labels: Vec<(u32, Option<&str>)> = saved.modules.iter().map(|m| (m.id, m.label.as_deref())).collect();
+    assert_eq!(
+        labels,
+        [
+            (1, Some("Bass filter")),
+            (2, Some(" ")),
+            (3, Some("Shimmer")),
+            (4, None),
+            (5, None)
+        ]
+    );
+}

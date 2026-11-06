@@ -503,7 +503,6 @@ impl Patch {
         }
         Ok(Some(loom_core::UnknownModule {
             kind: module.kind.clone(),
-            label: module.label.clone(),
             params: module.params.clone(),
             ranges: module.ranges.clone(),
             inputs,
@@ -545,10 +544,12 @@ impl Patch {
             let id = ModuleId(module.id);
             if let Some(unknown) = self.unknown_module(module, controller.registry())? {
                 controller.add_unknown_with_id(id, unknown)?;
+                controller.set_label(id, module.label.clone());
                 unknown_kinds.push(module.kind.clone());
                 continue;
             }
             controller.add_module_with_id(id, &module.kind)?;
+            controller.set_label(id, module.label.clone());
             notes.extend(Self::load_ranges(module, controller)?);
             let descriptor = controller.graph().node(id).map(|node| node.descriptor);
             for (name, &value) in &module.params {
@@ -751,7 +752,7 @@ impl Patch {
                 patch.modules.push(PatchModule {
                     id: id.0,
                     kind: unknown.kind.clone(),
-                    label: unknown.label.clone(),
+                    label: node.label.clone(),
                     params: unknown.params.clone(),
                     position: None,
                     size: None,
@@ -772,7 +773,7 @@ impl Patch {
             patch.modules.push(PatchModule {
                 id: id.0,
                 kind: node.descriptor.kind(),
-                label: None,
+                label: node.label.clone(),
                 params,
                 position: None,
                 size: None,

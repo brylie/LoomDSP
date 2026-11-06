@@ -166,7 +166,6 @@ fn unknown_module_outputs_silence_at_each_block_size() {
                 unknown,
                 loom_core::UnknownModule {
                     kind: "example.missing@1".into(),
-                    label: None,
                     params: Default::default(),
                     ranges: Default::default(),
                     inputs: vec!["signal".into()],

@@ -45,6 +45,8 @@ struct Member {
     descriptor: &'static ModuleDescriptor,
     /// Original data if this member is an unknown placeholder.
     unknown: Option<loom_core::UnknownModule>,
+    /// The user's label, exactly as written (clipboard.md, rule 9).
+    label: Option<String>,
     /// One value per parameter of the descriptor.
     params: Vec<f32>,
     /// The selected control range of each parameter, if it offers ranges.
@@ -149,6 +151,7 @@ impl Group {
                 id: id.0,
                 descriptor: node.descriptor,
                 unknown: node.unknown.clone(),
+                label: node.label.clone(),
                 params: node.descriptor.saved_values(&node.params),
                 ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                 position: positions.get(&id.0).copied(),
@@ -286,6 +289,7 @@ impl Group {
                 ranges,
                 position: module.position,
                 size: module.size,
+                label: module.label.clone(),
             });
         }
         modules.sort_by_key(|m| m.id);
@@ -350,7 +354,7 @@ impl Group {
                 patch.modules.push(PatchModule {
                     id: member.id,
                     kind: unknown.kind.clone(),
-                    label: unknown.label.clone(),
+                    label: member.label.clone(),
                     params: unknown.params.clone(),
                     position: member.position.map(|(x, y)| (x.round(), y.round())),
                     size: member.size,
@@ -361,7 +365,7 @@ impl Group {
             patch.modules.push(PatchModule {
                 id: member.id,
                 kind: d.kind(),
-                label: None,
+                label: member.label.clone(),
                 params: d
                     .params
                     .iter()
@@ -541,6 +545,7 @@ impl Group {
             } else {
                 controller.add_module(&member.descriptor.kind())?
             };
+            controller.set_label(id, member.label.clone());
             added.push(id.0);
             ids.insert(member.id, id);
             // Ranges first, so they never clamp a pasted value.

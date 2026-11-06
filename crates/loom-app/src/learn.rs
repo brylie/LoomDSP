@@ -336,7 +336,7 @@ pub fn param_name(controller: &Controller, (module, param): Param) -> String {
             if let Some(unknown) = &node.unknown {
                 return Some(format!(
                     "{} #{module} {}",
-                    unknown.label.as_deref().unwrap_or(&unknown.kind),
+                    node.label.as_deref().unwrap_or(&unknown.kind),
                     unknown.parameters.get(param)?
                 ));
             }

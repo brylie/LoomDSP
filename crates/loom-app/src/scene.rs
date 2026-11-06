@@ -983,9 +983,11 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>, siz
                 size: sizes.get(&id.0).copied(),
                 unknown: node.unknown.is_some(),
                 id: id.0,
+                // Only a placeholder shows its label for now; known modules
+                // keep theirs without showing it (clipboard.md, rule 9, #526).
                 title: node.unknown.as_ref().map_or_else(
                     || d.name.to_string(),
-                    |unknown| unknown.label.clone().unwrap_or_else(|| unknown.kind.clone()),
+                    |unknown| node.label.clone().unwrap_or_else(|| unknown.kind.clone()),
                 ),
                 accent: family_colour(d.family),
                 // The header's hover text: family first, so colour is

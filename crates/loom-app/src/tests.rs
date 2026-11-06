@@ -1414,7 +1414,6 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
             missing,
             loom_core::UnknownModule {
                 kind: "future.effect@1".into(),
-                label: Some("Missing".into()),
                 params: BTreeMap::from([("amount".into(), 0.5)]),
                 ranges: BTreeMap::new(),
                 inputs: vec!["in".into()],
@@ -1423,6 +1422,7 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
             },
         )
         .unwrap();
+    app.session.controller.set_label(missing, Some("Missing".into()));
     app.session
         .controller
         .connect_named(phase, "phase", missing, "in")

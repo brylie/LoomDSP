@@ -60,13 +60,15 @@ impl Controller {
         Ok(id)
     }
 
-    /// Sets a placeholder's saved label without changing its audio graph.
-    /// Returns false if the module is absent or is not a placeholder.
-    pub fn set_unknown_label(&mut self, id: ModuleId, label: Option<String>) -> bool {
-        let Some(unknown) = self.graph.nodes.get_mut(&id).and_then(|node| node.unknown.as_mut()) else {
+    /// Sets a module's label, kept exactly as given, so a file's label
+    /// saves back unchanged (clipboard.md, rule 9). The label is not part
+    /// of the audio graph, so nothing is compiled. Returns false if the
+    /// module is absent.
+    pub fn set_label(&mut self, id: ModuleId, label: Option<String>) -> bool {
+        let Some(node) = self.graph.nodes.get_mut(&id) else {
             return false;
         };
-        unknown.label = label;
+        node.label = label;
         true
     }
 

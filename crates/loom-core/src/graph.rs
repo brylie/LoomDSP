@@ -13,8 +13,6 @@ use std::fmt;
 pub struct UnknownModule {
     /// Original versioned module kind.
     pub kind: String,
-    /// Original optional user label.
-    pub label: Option<String>,
     /// Original parameter values, preserved even when they are defaults.
     pub params: BTreeMap<String, f32>,
     /// Original selected ranges, preserved without interpretation.
@@ -138,6 +136,10 @@ pub struct Node {
     pub descriptor: &'static ModuleDescriptor,
     /// Original data for an unknown module, if this node is a placeholder.
     pub unknown: Option<UnknownModule>,
+    /// The user's name for this module, kept exactly as written. `None` for
+    /// no label. Control thread data: the engine never reads it
+    /// (clipboard.md, rule 9).
+    pub label: Option<String>,
     /// Current parameter values, one per [`ModuleDescriptor::params`].
     pub params: Vec<f32>,
     /// Engine slot holding the instance. `None` for engine-handled roles.
@@ -166,6 +168,7 @@ impl Node {
         Self {
             descriptor,
             unknown: None,
+            label: None,
             params: descriptor.default_params(),
             slot,
             copy_slot: None,

@@ -30,7 +30,6 @@ fn placeholder() -> Held {
     Held {
         unknown: Some(UnknownModule {
             kind: "future.effect@3".into(),
-            label: None,
             params: BTreeMap::new(),
             ranges: BTreeMap::new(),
             inputs: vec!["input".into(), "side".into()],

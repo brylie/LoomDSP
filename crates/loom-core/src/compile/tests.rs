@@ -89,6 +89,7 @@ fn followers(count: u32) -> Graph {
             crate::Node {
                 descriptor: &FOLLOWER,
                 unknown: None,
+                label: None,
                 params: Vec::new(),
                 slot: Some(i as usize),
                 ranges: Vec::new(),
@@ -321,6 +322,7 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static crate::ModuleDescriptor)
     let node = crate::Node {
         descriptor,
         unknown: None,
+        label: None,
         params: descriptor.default_params(),
         slot: Some(id as usize),
         copy_slot: None,

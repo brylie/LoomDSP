@@ -102,6 +102,7 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static ModuleDescriptor) -> Mod
         crate::Node {
             descriptor,
             unknown: None,
+            label: None,
             params: Vec::new(),
             slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize),
             ranges: Vec::new(),

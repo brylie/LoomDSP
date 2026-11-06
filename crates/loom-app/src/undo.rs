@@ -30,6 +30,8 @@ pub struct ModuleState {
     descriptor: &'static ModuleDescriptor,
     /// Owned data for an unavailable module.
     unknown: Option<loom_core::UnknownModule>,
+    /// The user's label, for every module (clipboard.md, rule 9).
+    label: Option<String>,
     params: Vec<f32>,
     /// The selected control range of each parameter (control-ranges.md).
     ranges: Vec<Option<ParamRange>>,
@@ -42,6 +44,7 @@ impl PartialEq for ModuleState {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.descriptor, other.descriptor)
             && self.unknown == other.unknown
+            && self.label == other.label
             && self.params == other.params
             && self.ranges == other.ranges
             && self.position == other.position
@@ -82,6 +85,7 @@ impl Snapshot {
                         ModuleState {
                             descriptor: node.descriptor,
                             unknown: node.unknown.clone(),
+                            label: node.label.clone(),
                             // A transient value is a live gesture, not an
                             // edit, so undo sees it at its default
                             // (transient-params.md).
@@ -306,16 +310,16 @@ fn name(step: &Step) -> String {
     }) {
         return format!("resize {}", module.descriptor.name);
     }
-    if step.modules.values().any(|(old, new)| {
+    if let Some((_, Some(module))) = step.modules.values().find(|(old, new)| {
         old.as_ref()
-            .and_then(|module| module.unknown.as_ref())
-            .map(|unknown| &unknown.label)
-            != new
-                .as_ref()
-                .and_then(|module| module.unknown.as_ref())
-                .map(|unknown| &unknown.label)
+            .zip(new.as_ref())
+            .is_some_and(|(old, new)| old.label != new.label)
     }) {
-        return "label unknown module".to_string();
+        return if module.unknown.is_some() {
+            "label unknown module".to_string()
+        } else {
+            format!("label {}", module.descriptor.name)
+        };
     }
     // A new range, with or without the value it clamped.
     for (old, new) in step.modules.values() {
@@ -442,9 +446,8 @@ pub fn apply_with_sizes(
             } else {
                 controller.add_module_with_id(ModuleId(id), &state.descriptor.kind())?;
             }
-        } else if let Some(unknown) = &state.unknown {
-            controller.set_unknown_label(ModuleId(id), unknown.label.clone());
         }
+        controller.set_label(ModuleId(id), state.label.clone());
         // Ranges before values, so a range never clamps a value the step
         // sets.
         for (index, range) in state.ranges.iter().enumerate() {

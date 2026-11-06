@@ -676,7 +676,6 @@ fn placeholder_label_is_editable_and_undoable() {
         .controller
         .add_unknown(loom_core::UnknownModule {
             kind: "future.effect@1".into(),
-            label: None,
             params: Default::default(),
             ranges: Default::default(),
             inputs: vec![],

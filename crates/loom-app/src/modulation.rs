@@ -121,7 +121,8 @@ pub fn module_name(graph: &Graph, module: ModuleId) -> String {
     match graph.node(module) {
         Some(node) => format!(
             "{} #{}",
-            node.unknown.as_ref().map_or(node.descriptor.name, |unknown| unknown
+            // Only a placeholder is named by its label for now (#526).
+            node.unknown.as_ref().map_or(node.descriptor.name, |unknown| node
                 .label
                 .as_deref()
                 .unwrap_or(&unknown.kind)),

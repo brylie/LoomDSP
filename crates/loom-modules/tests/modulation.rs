@@ -290,7 +290,6 @@ fn unknown_source_never_moves_a_modulated_parameter() {
             source,
             loom_core::UnknownModule {
                 kind: "missing.source@1".into(),
-                label: None,
                 params: Default::default(),
                 ranges: Default::default(),
                 inputs: vec![],
@@ -326,7 +325,6 @@ fn unknown_target_keeps_the_feedback_edge() {
             missing,
             loom_core::UnknownModule {
                 kind: "missing.source@1".into(),
-                label: None,
                 params: Default::default(),
                 ranges: Default::default(),
                 inputs: vec![],

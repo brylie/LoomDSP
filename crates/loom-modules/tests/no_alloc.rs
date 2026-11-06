@@ -38,7 +38,6 @@ fn unknown_module_never_allocates() {
         .controller
         .add_unknown(loom_core::UnknownModule {
             kind: "future.effect@1".into(),
-            label: None,
             params: Default::default(),
             ranges: Default::default(),
             inputs: vec!["in".into()],

@@ -124,7 +124,6 @@ fn stereo_cables_through_an_unknown_module_stay_silent() {
         .controller
         .add_unknown(loom_core::UnknownModule {
             kind: "future.effect@1".into(),
-            label: None,
             params: Default::default(),
             ranges: Default::default(),
             inputs: vec!["in".into()],

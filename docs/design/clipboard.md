@@ -154,7 +154,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 - [ ] Ctrl/Cmd+C, X, V, and D act on the text, not the patch, while the module browser's search field is open. (manual)
 - [ ] Copy, paste, and duplicate work while a panel control has focus. (manual)
 - [x] Paste and duplicate do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
-- [ ] A known module's label, including one that is only spaces, survives copy and paste, duplicate, save and open, and undo of a delete (rule 9; clipboard, patch, and undo tests).
+- [x] A known module's label, including one that is only spaces, survives copy and paste, duplicate, save and open, and undo of a delete (rule 9; clipboard, patch, and undo tests).
 
 ## Out of scope
 

@@ -332,7 +332,7 @@ impl App {
                 if let Some(value) = self.session.gestures.take_label(module) {
                     let label = (!value.is_empty()).then_some(value);
                     self.edit(|app| {
-                        if app.session.controller.set_unknown_label(ModuleId(module), label) {
+                        if app.session.controller.set_label(ModuleId(module), label) {
                             app.refresh();
                         }
                     });
@@ -442,7 +442,7 @@ impl App {
                     .session
                     .gestures
                     .label_draft(id)
-                    .map_or_else(|| unknown.label.clone().unwrap_or_default(), str::to_string),
+                    .map_or_else(|| node.label.clone().unwrap_or_default(), str::to_string),
                 params: unknown
                     .params
                     .iter()

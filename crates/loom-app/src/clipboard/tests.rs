@@ -280,7 +280,6 @@ fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
     let id = ModuleId(71);
     let unknown = loom_core::UnknownModule {
         kind: "future.effect@4".into(),
-        label: Some("Missing".into()),
         params: BTreeMap::from([("gain".into(), 0.7)]),
         ranges: BTreeMap::from([("gain".into(), (0.0, 2.0))]),
         inputs: vec!["audio".into(), "gate".into()],
@@ -288,6 +287,7 @@ fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
         parameters: vec!["gain".into()],
     };
     c.add_unknown_with_id(id, unknown.clone()).unwrap();
+    c.set_label(id, Some("Missing".into()));
     let mut positions = spread(&c);
     let text = Group::from_selection(c.graph(), &positions, &ids(&[id]), false).to_text();
     assert!(Patch::from_ron(&text).is_ok(), "clipboard remains patch text");
@@ -296,6 +296,10 @@ fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
     assert_eq!(
         c.graph().node(ModuleId(new[0])).unwrap().unknown.as_ref(),
         Some(&unknown)
+    );
+    assert_eq!(
+        c.graph().node(ModuleId(new[0])).unwrap().label.as_deref(),
+        Some("Missing")
     );
 }
 
@@ -308,7 +312,6 @@ fn copy_unknown_module_remaps_named_links() {
         unknown,
         loom_core::UnknownModule {
             kind: "future.effect@1".into(),
-            label: None,
             params: BTreeMap::new(),
             ranges: BTreeMap::new(),
             inputs: vec!["unused".into(), "in".into()],
@@ -406,4 +409,31 @@ fn copy_and_paste_keep_control_ranges() {
     let new = group.add(&mut c, &mut positions, (1200.0, 600.0)).unwrap();
     let node = c.graph().node(ModuleId(new[0])).unwrap();
     assert_eq!((node.params[0], node.range(0)), (4.0, Some(ParamRange::new(-5.0, 5.0))));
+}
+
+/// A known module's label goes with it through copy and paste, and through
+/// duplicate, exactly as written (clipboard.md, rule 9).
+#[test]
+fn copy_paste_and_duplicate_keep_a_known_module_label() {
+    let mut c = parts().controller;
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let plain = c.add_module("loom.osc.sine").unwrap();
+    c.set_label(sine, Some(" Lead ".into()));
+    c.commit().unwrap();
+    let mut positions = spread(&c);
+    let label = |c: &Controller, id: u32| c.graph().node(ModuleId(id)).unwrap().label.clone();
+
+    let text = Group::from_selection(c.graph(), &positions, &ids(&[sine, plain]), false).to_text();
+    assert!(text.contains(r#"label: Some(" Lead ")"#), "{text}");
+    let pasted = Group::from_text(&text, c.registry())
+        .unwrap()
+        .add(&mut c, &mut positions, (1200.0, 600.0))
+        .unwrap();
+    assert_eq!(label(&c, pasted[0]).as_deref(), Some(" Lead "));
+    assert_eq!(label(&c, pasted[1]), None);
+
+    let duplicated = Group::from_selection(c.graph(), &positions, &ids(&[sine]), true)
+        .add(&mut c, &mut positions, (1400.0, 600.0))
+        .unwrap();
+    assert_eq!(label(&c, duplicated[0]).as_deref(), Some(" Lead "));
 }
