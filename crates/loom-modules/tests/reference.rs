@@ -8,7 +8,7 @@
 use loom_core::{MidiEvent, ModuleRole, TransportSettings};
 use loom_modules::{
     ALL, clock, display, dynamics, env, eq, filter, gate, io, level, lfo, logic, math, midi, mix, osc, phase, rand,
-    route, time, transport, ui,
+    route, structure, time, transport, ui,
 };
 use loom_test::{Harness, Signal, reference};
 
@@ -594,6 +594,21 @@ fn random_walk() {
         .check(reference!("random_walk"));
 }
 
+/// Reference render for `loom.struct.input`: silence at the top level.
+#[test]
+fn struct_input() {
+    Harness::new(&structure::INPUT)
+        .seconds(0.01)
+        .check(reference!("struct_input"));
+}
+
+/// `loom.struct.output` has no outputs, so there is nothing to render;
+/// the harness still runs it at every block size.
+#[test]
+fn struct_output() {
+    Harness::new(&structure::OUTPUT).seconds(0.01).check_block_sizes();
+}
+
 #[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
@@ -656,6 +671,8 @@ fn every_dsp_module_has_a_reference_test() {
         &transport::TRANSPORT,
         &display::SPECTRUM,
         &display::XY,
+        &structure::INPUT,
+        &structure::OUTPUT,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {

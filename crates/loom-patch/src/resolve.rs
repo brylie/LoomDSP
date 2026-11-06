@@ -185,6 +185,7 @@ impl ResolvedModule {
             return PatchModule {
                 id: self.id,
                 kind: unknown.kind.clone(),
+                subpatch: None,
                 label: self.label.clone(),
                 params: unknown.params.clone(),
                 position,
@@ -196,6 +197,7 @@ impl ResolvedModule {
         PatchModule {
             id: self.id,
             kind: self.descriptor.kind(),
+            subpatch: None,
             label: self.label.clone(),
             params: specs
                 .iter()

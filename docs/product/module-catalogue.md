@@ -279,8 +279,8 @@ These depend on how notes travel on cables (OQ-16).
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-STRUCT-01 | Sub-patch | A group of modules collapsed into one, with its own ports and panel. Modes: single, layer (all members run and mix), select (one member runs, chosen by a control), and stack (N copies, each with its own spread values). | Spread | M2 | FR-ENCAP-01, FR-ENCAP-10 | Specified ([sub-patches](../design/sub-patches.md)) |
-| MT-STRUCT-02 | Patch input and output | Ports inside a sub-patch that become its outer ports. | | M2 | FR-ENCAP-01 | Specified ([sub-patches](../design/sub-patches.md)) |
+| MT-STRUCT-01 | Sub-patch | A group of modules collapsed into one, with its own ports and panel. Modes: single, layer (all members run and mix), select (one member runs, chosen by a control), and stack (N copies, each with its own spread values). | Spread | M2 | FR-ENCAP-01, FR-ENCAP-10 | Built in part: the file format and flattening ([sub-patches](../design/sub-patches.md)); the editor, library, slots, and modes follow |
+| MT-STRUCT-02 | Patch input and output | Ports inside a sub-patch that become its outer ports. | | M2 | FR-ENCAP-01 | Built (`loom.struct.input`, `loom.struct.output`) |
 | MT-STRUCT-03 | Slot | A place inside an abstraction that holds any module or sub-patch that fills a given role. Swapped from a menu, with cables kept. | | M2 | FR-ENCAP-08 | Specified ([sub-patches](../design/sub-patches.md)) |
 | MT-STRUCT-04 | Effect chain (abstraction) | Several effect slots in series, each with its own mix. | | M2 | FR-ENCAP-08 | Planned |
 | MT-ARR-01 | Note cycle | Plays a stored note pattern that is N bars long, read from the bar phase, and fires an end trigger. | | M3 | FR-LIB-20 | Specified ([arrangement](../design/arrangement.md)) |

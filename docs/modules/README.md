@@ -100,6 +100,8 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [MIDI Controller](loom.midi.controller.md) | `loom.midi.controller` | Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1. |
 | [MIDI Note](loom.midi.note.md) | `loom.midi.note` | Monophonic note input (last-note priority). Pitch includes pitch bend. |
 | [Macro](loom.ui.macro.md) | `loom.ui.macro` | One knob whose value is a signal. Assign it to many parameters, so one knob shapes a whole sound. |
+| [Patch Input](loom.struct.input.md) | `loom.struct.input` | An input port of a sub-patch. Inside a sub-patch, cables into the port continue from here; at the top level it outputs silence. |
+| [Patch Output](loom.struct.output.md) | `loom.struct.output` | An output port of a sub-patch. Inside a sub-patch, the cable into it continues out of the port; at the top level it does nothing. |
 | [Scope](loom.display.scope.md) | `loom.display.scope` | Shows its input over time. Passes the input through unchanged. |
 | [Spectrum](loom.display.spectrum.md) | `loom.display.spectrum` | Shows the frequency content of its input. Passes the input through unchanged. |
 | [XY Scope](loom.display.xy.md) | `loom.display.xy` | Shows one signal against another. Passes both inputs through unchanged. |

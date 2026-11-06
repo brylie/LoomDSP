@@ -41,6 +41,8 @@ pub mod metadata;
 pub use metadata::Metadata;
 pub mod resolve;
 pub use resolve::{Layout, ResolveError, ResolveOptions, ResolvedModule};
+pub mod subpatch;
+pub use subpatch::{Exposed, INPUT_KIND, OUTPUT_KIND, SUBPATCH_KIND, SubPatch};
 pub mod warning;
 pub use warning::{LoadLevel, LoadWarning, RangeReason};
 
@@ -58,6 +60,11 @@ pub struct Patch {
     /// its patch.
     #[serde(default)]
     pub metadata: Metadata,
+    /// Sub-patch definitions by key (`docs/design/sub-patches.md`, Patch
+    /// file). A key is made from the definition's name and is not shown.
+    /// Omitted when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subpatches: BTreeMap<String, SubPatch>,
     /// Modules.
     #[serde(default)]
     pub modules: Vec<PatchModule>,
@@ -79,6 +86,11 @@ pub struct PatchModule {
     pub id: u32,
     /// Module type as `"id@version"`.
     pub kind: String,
+    /// For a sub-patch instance ([`SUBPATCH_KIND`]), the key of its
+    /// definition in [`Patch::subpatches`]. Then `params` holds the values
+    /// of the definition's exposed parameters, by exposed name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpatch: Option<String>,
     /// Optional user label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -355,6 +367,7 @@ impl Patch {
                 name: name.into(),
                 ..Metadata::default()
             },
+            subpatches: BTreeMap::new(),
             modules: Vec::new(),
             cables: Vec::new(),
             modulation: Vec::new(),
@@ -372,9 +385,14 @@ impl Patch {
     pub fn to_ron(&self) -> Result<String, PatchError> {
         let mut canonical = self.clone();
         canonical.canonicalise();
+        // One depth limit covers the whole file. A flat patch keeps each
+        // module, cable, and mapping on one line. A definition sits two
+        // levels down, so a nested patch needs two more, or every list in
+        // a definition would print as one line.
+        let depth = if self.subpatches.is_empty() { 2 } else { 4 };
         let config = ron::ser::PrettyConfig::new()
             .struct_names(true)
-            .depth_limit(2)
+            .depth_limit(depth)
             .separate_tuple_members(false)
             .indentor("    ");
         let mut text = ron::ser::to_string_pretty(&canonical, config)?;
@@ -388,10 +406,10 @@ impl Patch {
     /// and the engine adds them in id order, so a reloaded patch sums its
     /// assignments the same way as the patch that was saved.
     pub fn canonicalise(&mut self) {
-        self.modules.sort_by_key(|m| m.id);
-        self.cables.sort_by(|a, b| (a.to.0, &a.to.1).cmp(&(b.to.0, &b.to.1)));
-        self.midi
-            .sort_by(|a, b| (a.target.0, &a.target.1).cmp(&(b.target.0, &b.target.1)));
+        canonicalise_lists(&mut self.modules, &mut self.cables, &mut self.midi);
+        for definition in self.subpatches.values_mut() {
+            definition.canonicalise();
+        }
     }
 
     /// Upgrades an older patch to [`CURRENT_VERSION`].
@@ -575,6 +593,18 @@ impl Patch {
         patch.canonicalise();
         patch
     }
+}
+
+/// Sorts one level's lists into canonical order: modules by ID, cables by
+/// input, MIDI mappings by target. Modulation is left in file order.
+pub(crate) fn canonicalise_lists(
+    modules: &mut [PatchModule],
+    cables: &mut [PatchCable],
+    midi: &mut [PatchMidiMapping],
+) {
+    modules.sort_by_key(|m| m.id);
+    cables.sort_by(|a, b| (a.to.0, &a.to.1).cmp(&(b.to.0, &b.to.1)));
+    midi.sort_by(|a, b| (a.target.0, &a.target.1).cmp(&(b.target.0, &b.target.1)));
 }
 
 fn port_name(graph: &Graph, output: OutputRef) -> String {

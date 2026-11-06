@@ -31,6 +31,7 @@ pub mod osc;
 pub mod phase;
 pub mod rand;
 pub mod route;
+pub mod structure;
 #[cfg(feature = "test-modules")]
 pub mod test_modules;
 pub mod time;
@@ -99,6 +100,8 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &ui::MACRO,
     &time::DELAY,
     &time::ALLPASS,
+    &structure::INPUT,
+    &structure::OUTPUT,
 ];
 
 // Every built-in port and parameter has a label and a description, or this

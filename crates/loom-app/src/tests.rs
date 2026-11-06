@@ -1378,6 +1378,7 @@ fn session_keeps_saved_tile_dimensions() {
     patch.modules.push(loom_patch::PatchModule {
         id: 7,
         kind: "loom.display.scope@1".into(),
+        subpatch: None,
         label: None,
         params: Default::default(),
         position: None,
