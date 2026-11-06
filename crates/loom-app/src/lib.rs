@@ -7,6 +7,8 @@
 //! A library, so that tests under `tests/` can import `ui_test::Ui` with the
 //! `test-ui` feature. The program in `src/bin/loom-app.rs` calls [`run`].
 
+#[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+mod a11y;
 mod alerts;
 mod audio_watch;
 #[cfg(test)]
@@ -237,7 +239,11 @@ pub fn run() -> iced::Result {
     let start = move || {
         let mut app = App::new(args.clone());
         app.remember_opened_at_start(&args);
-        app
+        #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+        let start = a11y::attach().map(Message::A11y);
+        #[cfg(not(all(feature = "a11y-spike", target_os = "macos")))]
+        let start = Task::none();
+        (app, start)
     };
     let result = iced::application(start, App::update, App::view)
         .title(App::title)
@@ -415,6 +421,9 @@ enum Message {
         text: Option<String>,
         generation: u64,
     },
+    /// Spike: the accessibility tree beside Iced (`a11y.rs`).
+    #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+    A11y(a11y::Event),
 }
 
 /// The Transport module and the index of its `run` parameter, if the patch
@@ -476,6 +485,9 @@ impl Message {
     /// No wildcard, on purpose: a new message must choose a side.
     fn allowed_during_question(&self) -> bool {
         match self {
+            // Spike: screen reader actions wait like clicks; the rest keeps the tree current.
+            #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+            Self::A11y(event) => !matches!(event, a11y::Event::Action(_)),
             Self::Question(_)
             // Never asked: `update` routes it before this check, and each
             // message it becomes is checked on its own.
@@ -1233,6 +1245,8 @@ impl App {
                 self.type_after_focus_check(call, &text, focused);
                 Task::none()
             }
+            #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+            Message::A11y(event) => self.a11y_event(event),
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -1412,6 +1426,8 @@ impl App {
             | Message::TypeFocus { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
+            #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+            Message::A11y(_) => {}
             Message::ShowHelp => {
                 if self.overlays.help.is_none() {
                     let descriptor = self
