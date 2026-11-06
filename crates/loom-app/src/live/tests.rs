@@ -1,13 +1,15 @@
 use super::*;
 use loom_core::{EngineConfig, EngineParts, ModuleId, create_engine};
-use loom_patch::Patch;
 use std::time::Duration;
 
 /// The sine example: a free-running sine on module 3, silent envelope.
 fn sine_patch() -> EngineParts {
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/patches/sine.ron");
-    Patch::load(path).unwrap().load_into(&mut parts.controller).unwrap();
+    crate::patch_file::load(path)
+        .unwrap()
+        .load_into(&mut parts.controller)
+        .unwrap();
     parts
 }
 
@@ -139,7 +141,10 @@ fn reading(probe: u32, frames: u32, peak: f32, rms: f32) -> MeterReading {
 fn meters_on_the_subtractive_patch_rise_fall_and_change_colour() {
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(48_000.0));
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/patches/subtractive.ron");
-    Patch::load(path).unwrap().load_into(&mut parts.controller).unwrap();
+    crate::patch_file::load(path)
+        .unwrap()
+        .load_into(&mut parts.controller)
+        .unwrap();
     let mut level_meter = |module: u32, output: &str| {
         let meter = parts.controller.add_module("loom.display.meter").unwrap();
         parts

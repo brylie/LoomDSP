@@ -166,7 +166,7 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     dialogs::answer_add_author(Some(false));
     assert!(app.save());
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
-    let saved = loom_patch::Patch::load(&patch).unwrap();
+    let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.authors, ["Ada Lovelace"]);
     assert_eq!(saved.tags, ["drone"]);
     assert_eq!(saved.license.as_deref(), Some("CC-BY-4.0"));
@@ -184,7 +184,7 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     );
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     assert_eq!(
-        loom_patch::Patch::load(&patch).unwrap().authors,
+        crate::patch_file::load(&patch).unwrap().authors,
         ["Ada Lovelace", "Sam Rivera"]
     );
     assert!(!app.unsaved());
@@ -236,7 +236,7 @@ fn metadata_edits_are_saved() {
     assert!(app.unsaved());
     assert!(app.save());
     assert!(!app.unsaved());
-    let saved = loom_patch::Patch::load(&patch).unwrap();
+    let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.description, "Soft.");
     assert_eq!(saved.tags, ["ambient"]);
     let _ = std::fs::remove_dir_all(dir);

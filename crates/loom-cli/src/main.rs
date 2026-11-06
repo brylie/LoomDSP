@@ -210,7 +210,10 @@ fn main() -> ExitCode {
 }
 
 fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)> {
-    let patch = Patch::load(path)?;
+    // The CLI only reads patches; saving lives in the app (`loom-app`'s
+    // `patch_file`). The error names the path, then the system's reason.
+    let text = std::fs::read_to_string(path).map_err(|source| format!("{}: {source}", path.display()))?;
+    let patch = Patch::from_ron(&text)?;
     let mut parts = create_engine(loom_modules::registry(), config);
     // What loaded differently from the file, such as a saved control range
     // that was not kept (control-ranges.md, rule 7). The patch still plays.

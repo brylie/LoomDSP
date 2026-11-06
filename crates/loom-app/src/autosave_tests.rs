@@ -131,7 +131,7 @@ fn a_knob_turn_is_copied_after_two_seconds() {
     app.autosave(seen + Duration::from_millis(1500));
     assert!(!dir.join("patch.ron").exists(), "not before 2 s");
     settle(&mut app, seen + recovery::QUIET, |_| dir.join("info.ron").is_file());
-    let copy = Patch::load(dir.join("patch.ron")).unwrap();
+    let copy = crate::patch_file::load(dir.join("patch.ron")).unwrap();
     assert_eq!(copy, app.current_patch(), "the copy holds the new value");
     let info: recovery::Info = ron::from_str(&fs::read_to_string(dir.join("info.ron")).unwrap()).unwrap();
     assert_eq!(info.file.as_deref(), Some(setup.file().as_path()));

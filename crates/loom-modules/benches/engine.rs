@@ -107,7 +107,7 @@ fn patches(c: &mut Criterion) {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/patches")
             .join(name);
-        let patch = Patch::load(path).unwrap();
+        let patch = Patch::from_ron(&std::fs::read_to_string(path).unwrap()).unwrap();
         let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
         patch.load_into(&mut parts.controller).unwrap();
         parts.midi.send(MidiEvent::note_on(0, 0, 60, 100));

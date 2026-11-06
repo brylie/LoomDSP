@@ -552,7 +552,7 @@ fn modulation_patch_differs_from_the_same_patch_without_assignments() {
         output_safety: loom_core::OutputSafety::Off,
         ..EngineConfig::with_sample_rate(SAMPLE_RATE)
     };
-    let patch = loom_patch::Patch::load(patch_path("modulation.ron")).expect("example patch loads");
+    let patch = common::load_patch(&patch_path("modulation.ron"));
     assert_eq!(patch.modulation.len(), 2, "an LFO and an envelope on the cutoff");
     let play = |patch: &loom_patch::Patch| {
         let mut parts = loom_core::create_engine(loom_modules::registry(), config());

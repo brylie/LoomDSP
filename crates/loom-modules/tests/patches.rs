@@ -15,7 +15,6 @@ mod common;
 
 use common::{Note, SAMPLE_RATE, patch_path, render};
 use loom_core::{EngineConfig, OutputSafety, create_engine};
-use loom_patch::Patch;
 use loom_test::check_channels;
 use std::path::{Path, PathBuf};
 
@@ -62,7 +61,7 @@ fn play(patch: &Path, buffer: usize) -> Vec<Vec<f32>> {
         output_safety: OutputSafety::Off,
         ..EngineConfig::with_sample_rate(SAMPLE_RATE)
     };
-    let loaded = Patch::load(patch).unwrap_or_else(|e| panic!("{} loads: {e}", patch.display()));
+    let loaded = common::load_patch(patch);
     let mut parts = create_engine(loom_modules::registry(), config);
     loaded
         .load_into(&mut parts.controller)

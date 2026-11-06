@@ -205,7 +205,7 @@ fn example_patches_keep_their_values() {
         if path.extension().is_none_or(|e| e != "ron") {
             continue;
         }
-        let patch = Patch::load(&path).unwrap();
+        let patch = Patch::from_ron(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
         let notes = patch.load_into(&mut parts.controller).unwrap();
         assert!(notes.is_empty(), "{}: {notes:?}", path.display());
@@ -392,46 +392,6 @@ fn modulation_round_trips_and_old_patches_load() {
 
 /// The engine adds assignments on one parameter in id order. Float sums
 /// depend on order, so a reloaded patch must keep it (review on #133).
-#[test]
-fn save_replaces_the_file_and_leaves_no_temporary() {
-    let dir = std::env::temp_dir().join(format!("loom-patch-save-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("p.ron");
-    std::fs::write(&path, "old").unwrap();
-    let patch = Patch::new("Saved");
-    patch.save(&path).unwrap();
-    assert_eq!(Patch::load(&path).unwrap().name, "Saved");
-    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temporary file is left");
-    // A target that cannot be written reports the error and keeps the old file.
-    let missing = dir.join("no-such-folder").join("p.ron");
-    assert!(matches!(patch.save(&missing), Err(PatchError::Io { .. })));
-    // A read-only target is refused and keeps its content.
-    let mut perms = std::fs::metadata(&path).unwrap().permissions();
-    perms.set_readonly(true);
-    std::fs::set_permissions(&path, perms.clone()).unwrap();
-    assert!(matches!(Patch::new("Other").save(&path), Err(PatchError::Io { .. })));
-    assert_eq!(Patch::load(&path).unwrap().name, "Saved");
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(false);
-    std::fs::set_permissions(&path, perms).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn save_through_a_symlink_updates_the_target() {
-    let dir = std::env::temp_dir().join(format!("loom-patch-link-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let real = dir.join("real.ron");
-    let link = dir.join("link.ron");
-    Patch::new("First").save(&real).unwrap();
-    std::os::unix::fs::symlink(&real, &link).unwrap();
-    Patch::new("Second").save(&link).unwrap();
-    assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
-    assert_eq!(Patch::load(&real).unwrap().name, "Second");
-    std::fs::remove_dir_all(&dir).unwrap();
-}
-
 #[test]
 fn assignment_order_survives_save_and_load() {
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());

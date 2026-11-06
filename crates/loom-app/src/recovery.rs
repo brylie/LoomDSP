@@ -231,7 +231,7 @@ impl Orphan {
 
     /// Reads the copy.
     pub fn load(&self) -> Result<Patch, String> {
-        Patch::load(self.patch_path()).map_err(|e| e.to_string())
+        crate::patch_file::load(self.patch_path()).map_err(|e| e.to_string())
     }
 
     /// Deletes the folder: the user chose Discard, or the copy now lives on
@@ -433,7 +433,7 @@ fn perform(dir: &Path, job: &Job) -> Result<(), String> {
             if old.is_none_or(|old| old.file != info.file) {
                 remove_copy(dir).map_err(|e| e.to_string())?;
             }
-            patch.save(dir.join(PATCH)).map_err(|e| e.to_string())?;
+            crate::patch_file::save(patch, dir.join(PATCH)).map_err(|e| e.to_string())?;
             let text = ron::ser::to_string_pretty(info, ron::ser::PrettyConfig::new()).map_err(|e| e.to_string())?;
             write_atomic(&dir.join(INFO), &text).map_err(|e| e.to_string())
         }

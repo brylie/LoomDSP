@@ -6,10 +6,12 @@ use super::*;
 fn telemetry_stream_reports_a_watched_meter() {
     use iced::futures::StreamExt;
     use loom_core::{EngineConfig, ModuleId, ProbeKind, create_engine};
-    use loom_patch::Patch;
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/patches/sine.ron");
-    Patch::load(path).unwrap().load_into(&mut parts.controller).unwrap();
+    crate::patch_file::load(path)
+        .unwrap()
+        .load_into(&mut parts.controller)
+        .unwrap();
     let output = parts.controller.output_ref(ModuleId(3), "out").unwrap();
     let probe = parts.controller.add_probe(output, ProbeKind::Meter).unwrap();
     parts.controller.commit().unwrap();

@@ -116,7 +116,7 @@ fn capture_a_stop_with_input_rate(
     };
     let mut parts = create_engine(loom_modules::registry(), config);
     let patch = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/dev/check-dc.ron");
-    loom_patch::Patch::load(patch)
+    loom_patch::Patch::from_ron(&std::fs::read_to_string(patch).unwrap())
         .unwrap()
         .load_into(&mut parts.controller)
         .unwrap();

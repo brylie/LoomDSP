@@ -178,7 +178,7 @@ fn example_patches_are_placed_cleanly() {
             continue;
         }
         let mut parts = engine();
-        loom_patch::Patch::load(&path)
+        crate::patch_file::load(&path)
             .unwrap()
             .load_into(&mut parts.controller)
             .unwrap();

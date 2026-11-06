@@ -9,7 +9,7 @@ The desktop app keeps a recovery copy of the open patch while it has unsaved cha
 - **Background:** none.
 - **Prior art:** most desktop editors keep a hidden copy of unsaved work and offer it after a crash. We use only that convention: a quiet background copy, and a question at the next start.
 - **Issues:** [#15](https://github.com/brylie/LoomDSP/issues/15).
-- **Code:** `crates/loom-app/src/recovery.rs` (folders, locks, the writer thread, the schedule, the offer), `App::boot` and `App::restored` in `boot.rs`, `App::autosave` in `lib.rs`, and `RunFiles` in `document.rs`. It reuses `Patch::from_graph` and `Patch::save` from `loom-patch`, finds the folders with `etcetera`, and formats times with `jiff`. Tests: `recovery/tests.rs` and `autosave_tests.rs`.
+- **Code:** `crates/loom-app/src/recovery.rs` (folders, locks, the writer thread, the schedule, the offer), `App::boot` and `App::restored` in `boot.rs`, `App::autosave` in `lib.rs`, and `RunFiles` in `document.rs`. It reuses `Patch::from_graph` from `loom-patch` and `patch_file::save` from `loom-app`, finds the folders with `etcetera`, and formats times with `jiff`. Tests: `recovery/tests.rs` and `autosave_tests.rs`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -189,7 +189,7 @@ If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` R
 
 1. On the UI thread, the app builds the patch data with `Patch::from_graph` and the module positions, as Save does. This is a copy of plain data and is fast.
 2. It sends that data to a **recovery writer thread**: one plain `std::thread` that the app starts with the session and stops at exit. The channel holds one pending copy. A newer copy replaces an older one that the writer has not started.
-3. The writer turns the patch into RON text and writes `patch.ron` through `Patch::save` (a temporary file and a rename, so a crash during the write leaves the old copy whole), then `info.ron` the same way.
+3. The writer turns the patch into RON text and writes `patch.ron` through `patch_file::save` (a temporary file and a rename, so a crash during the write leaves the old copy whole), then `info.ron` the same way.
 4. The writer sends the result back to the UI thread, which reads it at its next check.
 
 **`patch.ron` and `info.ron` always belong to the same patch.** The writer deletes them together whenever the copy is deleted (a save, New, Open, Don't Save), `info.ron` first, then `patch.ron`. Their content only changes together at those moments: between them, a new write changes `patch.ron` and only the `written` time in `info.ron`. A write whose `info.ron` would name another file than the one on disk (a delete it replaced in the writer's queue never ran) deletes the old pair first. So after a crash the folder holds a matching pair, `patch.ron` alone, or `info.ron` alone. `patch.ron` without `info.ron`, or with an `info.ron` that does not parse, is offered as a patch never saved, with no current file and the time of `patch.ron` itself. `info.ron` without `patch.ron` is an orphan with no copy, and is deleted. *Why:* a crash between the two writes must never pair a new patch with an old file path, because Save would then overwrite the wrong file.

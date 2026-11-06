@@ -1,0 +1,106 @@
+//! Reading and writing patch files on disk.
+//!
+//! `loom-patch` only turns a patch into text and back, so it builds for
+//! WebAssembly, which has no files (AGENTS.md, hard rule 6). The app is the
+//! only part of LoomDSP that saves a patch, so the file code lives here.
+
+use loom_patch::{Patch, PatchError};
+use std::fmt;
+use std::path::Path;
+
+/// A patch file that could not be read or written.
+#[derive(Debug)]
+pub enum PatchFileError {
+    /// The file could not be read or written.
+    Io {
+        /// The path as the caller gave it.
+        path: String,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+    /// The text is not a patch this build can use.
+    Patch(PatchError),
+}
+
+impl fmt::Display for PatchFileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, source } => write!(f, "{path}: {source}"),
+            Self::Patch(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for PatchFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Patch(error) => Some(error),
+        }
+    }
+}
+
+impl From<PatchError> for PatchFileError {
+    fn from(error: PatchError) -> Self {
+        Self::Patch(error)
+    }
+}
+
+/// Reads a patch file.
+pub fn load(path: impl AsRef<Path>) -> Result<Patch, PatchFileError> {
+    let path = path.as_ref();
+    let text = std::fs::read_to_string(path).map_err(|source| PatchFileError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    Ok(Patch::from_ron(&text)?)
+}
+
+/// Writes a patch file.
+///
+/// The text goes to a new temporary file in the same folder first, then
+/// replaces the target by a rename. A full disk or a failed write cannot
+/// leave a half-written patch where a good one was. It does not promise
+/// the data survives a power loss. The temporary name is
+/// unique to this process and is never an existing file, so another
+/// save or a backup is never overwritten. A read-only target is refused,
+/// and the target keeps its permissions.
+pub fn save(patch: &Patch, path: impl AsRef<Path>) -> Result<(), PatchFileError> {
+    use std::io::Write;
+    let path = path.as_ref();
+    let text = patch.to_ron()?;
+    // Write through a symlink to its target, as a plain write would. A
+    // rename over the link would replace the link itself.
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let target = resolved.as_path();
+    let io = |source| PatchFileError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    let existing = std::fs::metadata(target).ok();
+    if existing.as_ref().is_some_and(|m| m.permissions().readonly()) {
+        return Err(io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the file is read-only",
+        )));
+    }
+    let name = target.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    let temp = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .and_then(|()| match &existing {
+            Some(meta) => std::fs::set_permissions(&temp, meta.permissions()),
+            None => Ok(()),
+        })
+        .and_then(|()| std::fs::rename(&temp, target));
+    written.map_err(|source| {
+        let _ = std::fs::remove_file(&temp);
+        io(source)
+    })
+}
+
+#[cfg(test)]
+mod tests;

@@ -26,7 +26,7 @@ impl App {
     pub(crate) fn write_to(&mut self, path: PathBuf) -> bool {
         self.offer_credit();
         let patch = self.current_patch();
-        match patch.save(&path) {
+        match crate::patch_file::save(&patch, &path) {
             Ok(()) => {
                 self.alerts.clear(alerts::Cause::File);
                 self.alerts.say(format!("saved {}", path.display()));

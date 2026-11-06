@@ -46,6 +46,7 @@ mod monitor;
 mod overlays;
 mod panic;
 mod param;
+mod patch_file;
 mod patch_info;
 mod patches;
 mod pointer;

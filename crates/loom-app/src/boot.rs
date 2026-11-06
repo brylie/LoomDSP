@@ -339,7 +339,7 @@ impl Loaded {
             Source::File(path) => {
                 // Stamped before reading: a change after this shows as a change.
                 let stamp = recovery::Stamp::of(path);
-                let patch = Patch::load(path).map_err(|e| e.to_string())?;
+                let patch = crate::patch_file::load(path).map_err(|e| e.to_string())?;
                 let info = load(&patch, &mut controller)?;
                 (info, Some(path.to_path_buf()), stamp)
             }

@@ -122,6 +122,12 @@ description = "Check that tests live in their own files, not inline in code modu
 # The first command tests the check itself on small example crates.
 run = ["sh scripts/test-check-test-placement.sh", "sh scripts/check-test-placement.sh"]
 
+[tasks.portable]
+description = "Check that the portable crates use no files, processes, threads, or clocks (hard rule 6)"
+# A grep, because the wasm build cannot catch these: std builds them as
+# stubs there. The first command tests the check itself on a small crate.
+run = ["sh scripts/test-check-portable.sh", "sh scripts/check-portable.sh"]
+
 [tasks.worktree-targets]
 description = "Test worktree target ownership and orphan pruning"
 run = "sh scripts/test-worktree-targets.sh"
@@ -148,4 +154,4 @@ run = "cargo run -p loom-cli -- modules --markdown docs/modules"
 description = "Run the checks CI runs (all but msrv and the three-OS test matrix)"
 # coverage runs every test except doc tests, so `test` is not listed again;
 # `doctest` covers the rest.
-depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]
+depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]

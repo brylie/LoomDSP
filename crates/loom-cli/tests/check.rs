@@ -59,3 +59,18 @@ fn unknown_module_is_reported_by_check_and_render() {
     assert!(wave.exists());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A missing patch file fails with the path, then the system's reason, as it
+/// did when `loom-patch` read files (#617).
+#[test]
+fn check_names_a_missing_file() {
+    let path = std::env::temp_dir().join("loom-cli-no-such-patch.ron");
+    let out = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.starts_with(&format!("error: {}: ", path.display())), "{stderr}");
+}

@@ -128,7 +128,7 @@ pub fn load_raw(name: &str) -> EngineParts {
 }
 
 pub fn load_with(name: &str, config: EngineConfig) -> EngineParts {
-    let patch = Patch::load(patch_path(name)).expect("example patch loads");
+    let patch = load_patch(&patch_path(name));
     let mut parts = create_engine(loom_modules::registry(), config);
     patch.load_into(&mut parts.controller).expect("example patch is valid");
     parts
@@ -288,4 +288,11 @@ pub fn one_note() -> Vec<Note> {
         on: 100,
         off: 24_000,
     }]
+}
+
+/// Reads and parses a patch file. `loom-patch` reads no files (AGENTS.md,
+/// hard rule 6), so the tests read the text themselves.
+pub fn load_patch(path: &std::path::Path) -> Patch {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    Patch::from_ron(&text).unwrap_or_else(|e| panic!("{} parses: {e}", path.display()))
 }

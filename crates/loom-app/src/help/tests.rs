@@ -203,7 +203,7 @@ fn example_button_saves_the_old_patch_when_requested() {
     ui.press();
     ui.release();
     let _ = ui.app.update(Message::Question(QuestionMessage::Answer(Answer::Save)));
-    let saved = loom_patch::Patch::load(&destination).expect("old patch was saved");
+    let saved = crate::patch_file::load(&destination).expect("old patch was saved");
     let gain = saved.modules.iter().find(|module| module.id == 5).unwrap().params["gain"];
     assert_eq!(gain, value);
     assert!(

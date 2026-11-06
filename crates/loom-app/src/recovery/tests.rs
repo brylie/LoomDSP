@@ -504,7 +504,7 @@ fn a_write_for_another_file_clears_the_old_pair_first() {
     perform(&dir, &write(&a, "a")).unwrap();
     // The same file again keeps the pair while it writes.
     perform(&dir, &write(&a, "a2")).unwrap();
-    assert_eq!(Patch::load(dir.join(PATCH)).unwrap(), patch("a2"));
+    assert_eq!(crate::patch_file::load(dir.join(PATCH)).unwrap(), patch("a2"));
     // Make the next patch write fail: a folder where the temp file goes.
     fs::create_dir(dir.join(format!(".{PATCH}.{}.tmp", std::process::id()))).unwrap();
     assert!(perform(&dir, &write(&b, "b")).is_err());

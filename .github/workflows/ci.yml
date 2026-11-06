@@ -386,6 +386,16 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: mise run test-placement
 
+  portable:
+    name: Portable crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v5
+      - run: mise run portable
+
   # Code metrics for the architecture review skill: sizes, cognitive
   # complexity per function (rust-code-analysis), churn, and the rule checks.
   # Informational: the report goes to the job summary and an artifact, and
@@ -416,7 +426,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status, test-placement]
+    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status, test-placement, portable]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed
