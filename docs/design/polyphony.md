@@ -67,6 +67,8 @@ What the player sees.
 
 7. **Voices are never downmixed by the engine.** A module that wants one signal from a bundle has a `Voices` input, or sits after a Voice merge, which offers sum, average, last, lowest, and highest. Audio Out is the one exception (rule 9). *Why:* the stereo downmix exists so that a mono module can sit on a stereo cable without a thought. There is no one right way to fold eight voices into one, and an averaged pitch is never what a player meant, so the choice stays with the player.
 
+   A modulation assignment from a bundle follows the same rule and the stereo one ([stereo](stereo.md), rule 17, [modulation](modulation.md)): an assignment never makes its target run per voice. When the target already runs per voice, each copy reads its own voice of the source; when the target runs as one, it reads voice 1. *Why:* an assignment is not a cable, so it cannot decide a module's width, and this rule rules out a mean. A player who wants eight voices of modulation into one parameter patches a Voice merge first.
+
 8. **Widths are found with the stereo work queue, to a fixed point.** Start with every module at one voice, queue every module with a `Voices` output, and apply rules 4 and 5 outward until nothing changes. A module's voice count only grows, so each module is queued at most 16 times in theory and once in practice. *Why:* [stereo](stereo.md), rule 8, for the same reason: inside a feedback loop the widths depend on each other.
 
 9. **Audio Out sums the voices** of a bundle on each side, before the output safety stage. Probes, scopes, meters, lights, displays, and modulation live values read voice 1, as they read stereo copy 0 ([stereo](stereo.md), rule 16). Hover text on a port names the width (`8 voices`, `8 voices, stereo`). *Why sum:* a chord played into the output should be a chord. The mean would make one note of eight 18 dB quiet. *Why voice 1:* the module has one panel, and voice 1 always exists.
@@ -215,13 +217,13 @@ These check the model. Only the first is built in M2.
 
 ### A keyboard into an 8-voice synth (M2)
 
-Note input (`voices` 8, Oldest) → Phase generator → Saw → SVF → Amplifier → Voice merge (Sum) → Audio Out. Note input's `gate` goes to an Envelope, whose `out` goes to the Amplifier's gain and to Note input's `level`. These are today's modules with today's ports; their `pitch`, `phase`, and `gate` inputs are `Downmix`, which rule 3 leaves as it is.
+Note input (`voices` 8, Oldest) `pitch` → Phase generator `pitch` → Saw `phase` → SVF `in` → Amplifier `in` → Voice merge `in` (Sum) → Audio Out. Note input's `gate` goes to an Envelope's `gate`, whose `out` goes to the Amplifier's `level` input and to Note input's `level`. These are today's modules with today's ports; the `pitch`, `phase`, `gate`, and `level` inputs are `Downmix`, which rule 3 leaves as it is.
 
 1. The compiler finds a `Voices` output on Note input, so the Phase generator, Saw, SVF, Envelope, and Amplifier run as 8 copies each (rule 4), and Voice merge and Note input, which have `Voices` inputs, run as one.
-2. Eight keys down: the allocator gives each a voice in the order the notes arrived. Each gate rises on its note's frame; each pitch holds; each velocity scales the envelope.
+2. Eight keys down: the allocator gives each a voice in the order the notes arrived. Each gate rises on its note's frame and each pitch holds. Velocity is output per voice too; this chain does not patch it, but a second Amplifier with `velocity` on its `level` input would scale each voice by it.
 3. A ninth key: no voice is free. Oldest steals the voice whose note started first; its gate is low on that frame and high on the next with the new pitch. Switching Mode to Quietest would steal the voice whose envelope has decayed furthest instead, because Note input reads all 8 levels in one instance.
 4. A key up: its gate drops, the envelope releases, the voice holds its pitch, and the voice is free. The next key takes the voice free longest.
-5. A mono LFO into the filter's cutoff modulation: every copy reads it (rule 6). Voice spread after the bundle into the Phase generator's pitch offset: each copy gets its own detune.
+5. A mono LFO into the SVF's `cutoff` input: every copy reads it (rule 6). A Voice spread between Note input's `pitch` and the Phase generator's `pitch`: each copy adds its own detune.
 6. Voice merge sums the 8 amplifiers' outputs into one audio cable into Audio Out.
 
 ### A chord sequencer into the same synth (M3)
