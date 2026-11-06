@@ -387,9 +387,11 @@ static NAME_MODE: LazyLock<NameMode> = LazyLock::new(|| match std::env::var("LOO
 pub fn action(snapshot: &UiSnapshot, request: &ActionRequest) -> Vec<CanvasEvent> {
     let target = request.target_node;
     if request.action == Action::Focus {
-        let module = (target.0 >> 16).checked_sub(1);
+        // Only a tile that is still on screen: the tree may be a step behind.
+        let module = (target.0 >> 16).checked_sub(1).map(|m| m as u32);
         return module
-            .map(|m| vec![CanvasEvent::Select(vec![m as u32])])
+            .filter(|m| snapshot.tiles.iter().any(|t| t.id == *m))
+            .map(|m| vec![CanvasEvent::Select(vec![m])])
             .unwrap_or_default();
     }
     let Some((module, index)) = widget_of(target) else {
@@ -400,6 +402,7 @@ pub fn action(snapshot: &UiSnapshot, request: &ActionRequest) -> Vec<CanvasEvent
         .iter()
         .find(|t| t.id == module)
         .and_then(|t| t.widgets.get(index))
+        .filter(|w| !w.hidden)
     else {
         return Vec::new();
     };
@@ -451,6 +454,12 @@ impl crate::App {
                 Task::none()
             }
             Event::Action(request) => {
+                // An open panel owns input, as it does for the pointer: the
+                // canvas behind it does not change.
+                if !self.no_overlay() {
+                    eprintln!("a11y: -> ignored, a panel owns input");
+                    return Task::none();
+                }
                 let events = action(&self.ui_snapshot(), &request);
                 eprintln!("a11y: -> {events:?}");
                 // A set is one turn of a knob: one change, then let go, so it

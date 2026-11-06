@@ -121,3 +121,39 @@ fn unknown_targets_do_nothing() {
     );
     assert!(action(&snapshot, &request(Action::Click, widget_node(module, knob), None)).is_empty());
 }
+
+/// Focus on a tile that is no longer in the snapshot selects nothing.
+#[test]
+fn focus_on_a_removed_tile_does_nothing() {
+    let (app, module, _) = app_with_filter();
+    let mut snapshot = app.ui_snapshot();
+    snapshot.tiles.retain(|t| t.id != module);
+    assert!(action(&snapshot, &request(Action::Focus, tile_node(module), None)).is_empty());
+}
+
+/// A hidden control cannot be changed, though its index still exists.
+#[test]
+fn hidden_widgets_ignore_actions() {
+    let (app, module, knob) = app_with_filter();
+    let mut snapshot = app.ui_snapshot();
+    let tile = snapshot.tiles.iter_mut().find(|t| t.id == module).unwrap();
+    tile.widgets[knob].hidden = true;
+    assert!(action(&snapshot, &request(Action::Increment, widget_node(module, knob), None)).is_empty());
+}
+
+/// While a panel owns input, a screen reader action leaves the patch alone.
+#[test]
+fn actions_wait_while_a_panel_owns_input() {
+    let (mut app, module, knob) = app_with_filter();
+    app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
+    assert!(!app.no_overlay(), "the recent list owns input");
+    let before = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
+    let _ = app.a11y_event(Event::Action(request(
+        Action::Increment,
+        widget_node(module, knob),
+        None,
+    )));
+    let after = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
+    assert_eq!(before, after);
+    assert!(!app.unsaved(), "no edit was made");
+}

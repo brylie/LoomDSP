@@ -68,7 +68,7 @@ What this means for a real version:
 
 ## Findings
 
-1. **The ADR-0028 objection is much weaker in this form.** The tree is a second projection of `ui_snapshot`, not a second description written by hand. A new control appears in the tree as soon as it appears in the snapshot. The snapshot is already what the app's tests check, so drift between screen and tree would show up as a failing snapshot test, not silently.
+1. **The ADR-0028 objection is much weaker in this form.** The tree is a second projection of `ui_snapshot`, not a second description written by hand. A new control appears in the tree as soon as it appears in the snapshot, so names, positions, and values cannot fall out of step with the screen. Roles and actions still can. The spike maps each widget kind to a role by hand in `widget_node_for`, and radios, segmented switches, and selects fall through to read-only labels: shown on screen, but not operable from the tree. The snapshot tests do not catch that, and the spike's tree test covers only a knob. A real version needs a test that every interactive widget kind gets an operable role.
 2. **No fork of Iced was needed.** Iced 0.14 gives the raw window handle through `window::run`, and the scale factor through `window::scale_factor`. That is enough for AccessKit's subclassing adapter.
 3. **Actions are cheap to add.** Each one maps to a canvas event that already exists, so undo, autosave, MIDI feedback, and the "unsaved" mark work with no extra code.
 4. **The view models are not complete enough yet.** The toolbar, the inspector, the module browser, and overlays are not in `ui_snapshot` in a form the tree can use (the Undo button could only be clicked by position). ADR-0028 already asks each view model to carry an accessible name, value, and state; the spike shows which are missing.
@@ -76,11 +76,12 @@ What this means for a real version:
 ## Open problems
 
 1. **Keyboard focus.** The tree always reports focus on the window. Canvas focus (`#101`, the focus enum from #659) and Iced's text-field focus must map to a node, or a screen reader will not follow the keyboard.
-2. **Focus selects.** Mapping AccessKit's Focus action on a tile to selection is convenient, but an assistive tool that only inspects may change the selection. In the test, the Transport tile was selected afterwards; the cause was not pinned down.
-3. **Refreshing.** The 500 ms rebuild is polling, against "redraw only on visible change" (NFR-PERF-04). A real version would rebuild only after a message that changes the snapshot, send only changed nodes, and stop when the screen reader leaves (`deactivate_accessibility`, not handled yet).
-4. **Node IDs** pack the module ID and widget index into 64 bits. They are stable while a module exists, but they would need care for inspector rows, overlays, and the browser.
-5. **Attach order.** AccessKit documents that the adapter must attach before the window is first shown. It worked after, but a real version should open the window hidden, attach, and then show it, so it does not rely on luck.
-6. **Iced's own support later.** If Iced adds AccessKit, its adapter and ours would compete for the same view. A real version needs a way to switch to Iced's when it arrives.
+2. **Panels over the canvas.** While a panel owns input (the module browser, Preferences, help), the spike ignores screen reader actions on the canvas, as the panel blocks the pointer. The tree still shows the canvas controls as if they could be changed. A real version should hide them from the tree, or mark them disabled, while a panel owns input.
+3. **Focus selects.** Mapping AccessKit's Focus action on a tile to selection is convenient, but an assistive tool that only inspects may change the selection. In the test, the Transport tile was selected afterwards; the cause was not pinned down.
+4. **Refreshing.** The 500 ms rebuild is polling, against "redraw only on visible change" (NFR-PERF-04). A real version would rebuild only after a message that changes the snapshot, send only changed nodes, and stop when the screen reader leaves (`deactivate_accessibility`, not handled yet).
+5. **Node IDs** pack the module ID and widget index into 64 bits. They are stable while a module exists, but they would need care for inspector rows, overlays, and the browser.
+6. **Attach order.** AccessKit documents that the adapter must attach before the window is first shown. It worked after, but a real version should open the window hidden, attach, and then show it, so it does not rely on luck.
+7. **Iced's own support later.** If Iced adds AccessKit, its adapter and ours would compete for the same view. A real version needs a way to switch to Iced's when it arrives.
 
 ## Suggested next step
 
