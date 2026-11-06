@@ -39,9 +39,30 @@ About 430 lines in `a11y.rs`, plus 18 lines of wiring in `lib.rs` and `subscript
 | Increment and SetValue | Unit tests in `a11y/tests.rs` through `App::update` | **Yes**, as one undo step, clamped to 0..1. Not checked from outside the process (below). |
 | Default build unchanged | `cargo clippy -p loom-app --all-targets -D warnings` with and without the feature; `cargo deny check` | Clean. `accesskit` and `accesskit_macos` are MIT OR Apache-2.0. |
 
+### VoiceOver session (same day, by the maintainer)
+
+A first try with VoiceOver on, with action logging added (`a11y: ...` lines on stderr):
+
+1. **The name was not read.** On the Phase tile's Tune knob, VoiceOver said the value and the role ("0.000 st, circular slider"), but not "Tune". AccessKit's macOS adapter gives the name to macOS only as the accessibility title, and never sets the accessibility label, which Apple documents as a control's name. VoiceOver seems to skip the title on a slider. `LOOM_A11Y_NAME=value` and `=help` try two workarounds; neither has been listened to yet.
+2. **The knob could not be changed while its value was text.** VoiceOver seemed to move the value and then fall back, and the log showed that the app received no action at all. AccessKit reports the text value in place of the numeric one when both are set, so VoiceOver had no number to step.
+3. **With a number-only value (`LOOM_A11Y_VALUE=number`), it works.** VoiceOver sent about 300 `SetValue` requests while the knob was turned up and down. Every one became a `SetControl` on the right module and widget. The knob reached 0 and 1, and values stayed in range.
+
+What the log shows about how VoiceOver adjusts a slider:
+
+- It uses `SetValue` with a number it computes itself, not `Increment` or `Decrement`.
+- It steps by 1% of the range (0.01), and ignores the node's step (0.05).
+- When a key is held, the step doubles on each repeat (0.01, 0.02, 0.04, 0.08, 0.16, ...), so a held key crosses most of the range in under a second.
+- Requests often arrive in bursts of three to eight before the app's reply, so VoiceOver keeps its own running value.
+
+What this means for a real version:
+
+- **Spoken value against stepping.** With a number, VoiceOver can step the knob but cannot say the unit ("800 Hz"). With text, it says the unit but cannot step. Native AppKit sliders solve this with a separate spoken value description. AccessKit's macOS adapter does not expose one. Both this and the missing name are gaps in AccessKit's macOS adapter, and fixing them upstream would help every Rust app that uses it.
+- **Undo.** Each request is its own undo step: one VoiceOver session made about 300. Screen reader edits should group like arrow-key edits (`docs/design/undo.md`), which close a group 500 ms after the last step.
+- **Step size.** 1% steps are fine for a continuous knob. Stepped parameters (octave, note value, a mode switch) need their own step, or a role that VoiceOver steps one option at a time.
+
 ### Not checked
 
-- **VoiceOver itself.** Nobody listened to it speak. The next step needs a person at the keyboard with VoiceOver on.
+- **The name workarounds** (`LOOM_A11Y_NAME`), and how a number-only value sounds.
 - **Values and Increment from outside.** Scripting the accessibility API from a shell needs the "assistive access" permission in System Settings, which was not granted. In-process tests cover the logic; the platform side is unverified.
 - **Windows and Linux.** AccessKit has adapters for both. The Windows adapter also attaches to an existing window; the Linux one runs beside it. Not tried.
 
