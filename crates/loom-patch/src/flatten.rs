@@ -22,6 +22,12 @@ use loom_core::{Controller, LoomError, MidiControl, ModuleId, ModuleNames, Regis
 use std::collections::BTreeMap;
 use std::fmt;
 
+/// The most levels of sub-patch a patch may nest. Flattening recurses once
+/// per level, so a bound keeps a hand-made file from exhausting the stack.
+/// With one instance per definition, the flat graph is never larger than
+/// the file's definitions put together, so no other bound is needed.
+pub const MAX_DEPTH: usize = 64;
+
 /// Where a flat module came from: the ids of the instances it is inside,
 /// from the top level down, then its own id in its level. A top-level
 /// module's path is its id alone.
@@ -649,6 +655,9 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
         });
     };
     let name = definition.metadata.name.clone();
+    if ctx.stack.len() >= MAX_DEPTH {
+        return Err(PatchError::TooDeep { max: MAX_DEPTH });
+    }
     if let Some(start) = ctx.stack.iter().position(|(k, _)| k == key) {
         let mut loop_path: Vec<String> = ctx.stack[start..].iter().map(|(_, n)| n.clone()).collect();
         loop_path.push(name);

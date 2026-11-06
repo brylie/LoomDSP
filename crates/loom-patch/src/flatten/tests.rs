@@ -756,3 +756,34 @@ fn the_nested_example_has_the_documented_id_table() {
     let expected: Vec<(String, u32)> = expected.iter().map(|(p, id)| (p.to_string(), *id)).collect();
     assert_eq!(table, expected);
 }
+
+/// A chain of definitions deeper than [`MAX_DEPTH`] is refused rather
+/// than recursed into; one just within the bound flattens.
+#[test]
+fn nesting_deeper_than_the_bound_is_refused() {
+    let chain = |levels: usize| {
+        let mut definitions = Vec::new();
+        for i in 0..levels {
+            let inner = if i + 1 < levels {
+                format!(
+                    r#"PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("d{}"))"#,
+                    i + 1
+                )
+            } else {
+                r#"PatchModule(id: 1, kind: "loom.osc.sine@1")"#.to_string()
+            };
+            definitions.push(format!(
+                r#""d{i}": SubPatch(metadata: Metadata(name: "D{i}"), modules: [{inner}])"#
+            ));
+        }
+        format!(
+            r#"Patch(version: 1, subpatches: {{{}}}, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("d0"))])"#,
+            definitions.join(", ")
+        )
+    };
+    let (flat, _) = flatten(&chain(MAX_DEPTH));
+    assert_eq!(flat.modules.len(), 1);
+    assert_eq!(flat.modules[0].path.0.len(), MAX_DEPTH + 1);
+    let error = refuse(&chain(MAX_DEPTH + 1)).to_string();
+    assert!(error.ends_with("sub-patches nest more than 64 levels deep"), "{error}");
+}

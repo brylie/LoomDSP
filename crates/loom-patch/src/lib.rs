@@ -427,6 +427,13 @@ pub enum PatchError {
         /// The input's name.
         port: String,
     },
+    /// Sub-patches nested deeper than [`flatten::MAX_DEPTH`] levels. A
+    /// bound keeps a hand-made file from exhausting the stack.
+    #[error("sub-patches nest more than {max} levels deep")]
+    TooDeep {
+        /// The most levels allowed.
+        max: usize,
+    },
     /// A definition that contains itself, directly or through others.
     #[error("sub-patch {} contains itself", .path.join(" › "))]
     SubPatchLoop {
@@ -607,10 +614,13 @@ impl Patch {
 /// One level as RON text, with each module, cable, and mapping on one
 /// line and a newline at the end.
 fn pretty<T: Serialize>(value: &T) -> Result<String, PatchError> {
+    // One line ending everywhere: RON would write CRLF on Windows, and a
+    // canonical file must not depend on where it was saved.
     let config = ron::ser::PrettyConfig::new()
         .struct_names(true)
         .depth_limit(2)
         .separate_tuple_members(false)
+        .new_line("\n")
         .indentor("    ");
     let mut text = ron::ser::to_string_pretty(value, config)?;
     text.push('\n');
