@@ -89,7 +89,7 @@ How a patch holds one tuning and a set of scales, how pitch modules follow them 
 
 - Tunings with more than 64 classes ([panel widgets, open points](panel-widgets.md#open-points)).
 - Tunings that change on a trigger. Only the scale switches.
-- Retuning MIDI input notes to the tuning (the note input stays 12-note until the note model is settled, OQ-16).
+- Retuning MIDI input notes to the tuning. The note model is settled ([polyphony](polyphony.md), ADR-0038), so this can now be specified; it is not part of M2's note input.
 - Keyboard mapping files (Scala `.kbm`).
 
 ## Open points

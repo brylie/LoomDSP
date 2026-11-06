@@ -147,7 +147,7 @@ A sub-patch's mode is a setting in its inspector. The default is **single**.
 - **Spread** (TR-04): in stack mode, the player picks exposed parameters to spread and a spread amount for each. Copy `i` of `N` gets the parameter's value plus the amount times an offset evenly spaced from -1 to 1 (copy 0 at -1, the last at +1; one copy has offset 0). The result is clamped to the parameter's range.
 - **Stereo spread:** an option in stack mode. With it on, each output becomes stereo (ADR-0020): copy `i` is panned by the same offset, equal power. *Why:* unison is stereo more often than not.
 - Copies and members share the definition's data ([module data](module-data.md)).
-- Stack mode is not polyphony. Voices, voice allocation, and per-voice notes have their own specification (FR-VOICE-*).
+- Stack mode is not polyphony. Voices, voice allocation, and per-voice notes are in the [polyphony](polyphony.md) specification (FR-VOICE-*). A stacked sub-patch fed a bundle runs copies times voices ([polyphony](polyphony.md#the-voice-count), rule 13).
 
 ### Patch file
 
@@ -256,7 +256,7 @@ Roles, slots, and modes:
 
 ## Out of scope
 
-- Polyphony and voice allocation (FR-VOICE-*). They get their own specification. Stack mode is not voices.
+- Polyphony and voice allocation (FR-VOICE-*): the [polyphony](polyphony.md) specification. Stack mode is not voices.
 - The panel editor's tools: placing, aligning, and grouping widgets ([#76](https://github.com/brylie/LoomDSP/issues/76), [panels](panels.md#the-panel-editor)).
 - Embedding a sub-patch's panel inside its parent's panel (FR-PANEL-08). After the panel editor.
 - Watching library files while a patch is open.

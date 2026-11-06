@@ -9,7 +9,7 @@ How modules keep data beyond parameters (curves, patterns, and audio), how it is
 - **Builds on:** [Panel widgets: data kinds](panel-widgets.md#data-kinds) (what each kind holds and its limits), [Undo](undo.md), [Open, Save, and Save As](files.md), [Autosave](autosave.md), [Copy, paste, and duplicate](clipboard.md), [Stereo cables](stereo.md).
 - **Background:** none yet.
 - **Prior art:** DAWs keep audio in a project folder next to the project file. Named only to explain the convention.
-- **Issues:** [#50](https://github.com/brylie/LoomDSP/issues/50). Users of the data: [#281](https://github.com/brylie/LoomDSP/issues/281) (curve), [#287](https://github.com/brylie/LoomDSP/issues/287) (pattern), [#288](https://github.com/brylie/LoomDSP/issues/288) (buffer and waveform).
+- **Issues:** [#50](https://github.com/brylie/LoomDSP/issues/50). Users of the data: [#281](https://github.com/brylie/LoomDSP/issues/281) (curve), [#287](https://github.com/brylie/LoomDSP/issues/287) (pattern), [#288](https://github.com/brylie/LoomDSP/issues/288) (buffer and waveform). The [polyphony](polyphony.md) specification ([#665](https://github.com/brylie/LoomDSP/issues/665)) asked for [room for notes and chords](#room-for-notes-and-chords).
 - **Code:** none yet.
 
 ## Goal
@@ -54,6 +54,30 @@ PatchModule(id: 6, kind: "loom.osc.wavetable@1", data: {
 - A slot that still has its default is not written. *Why:* patches stay short, and the example patches do not change when a module gains a slot.
 - A slot with `saved: false` is never written.
 - A value that does not fit the slot (too many points, a step past the end) is cut to fit when loading, and the status bar says so. *Why:* a patch must always open.
+- Each kind is one variant of one tagged enum (`Curve`, `Pattern`, `Buffer`), and each pattern lane is one variant of another (`Gates`, `Values`). *Why:* a new kind or a new lane kind is then a new variant, which old patches never contain, so adding one is not a format change. [Room for notes and chords](#room-for-notes-and-chords) relies on this.
+
+### Room for notes and chords
+
+**Settled** with the maintainer on 2026-11-06, from the [polyphony](polyphony.md) specification. Two things are reserved for M3, so that adding them later is a new variant and not a format change. Neither is built or agreed in detail here: the fields below show the shape, and their exact rules come with the modules that use them.
+
+- **A Notes kind.** A clip of notes, as the Note cycle (MT-ARR-01) and the piano roll (MT-SEQ-03) store it. Each note has a pitch (0.1 per octave, as on a cable), a start and a length in beats, a velocity from 0 to 1, and a chance from 0 to 1 that it plays (default 1). Expression that changes over a note's length (pressure, slide) is an open point for M3. The kind has a fixed capacity, as the others do, so a clip is built on the control thread and swapped in whole.
+- **A Chords lane** in a pattern, beside `Gates` and `Values`. Each step holds a chord written as a root and a shape, where the root is a note name or a step of the patch scale ([scale and tuning](scale-and-tuning.md)), and a voicing: an inversion and an octave spread. The lane stores the symbol. The Chord module (MT-NOTE-02) turns it into pitches when the patch plays, so a step written as a scale step follows a scale change ([polyphony: chords](polyphony.md#chords)).
+
+```ron
+PatchModule(id: 8, kind: "loom.arr.notecycle@1", data: {
+    "clip": Notes(length_bars: 4, notes: [
+        Note(pitch: 0.0, start: 0.0, length: 1.0, velocity: 0.8),
+        Note(pitch: 0.4, start: 0.5, length: 2.0, velocity: 0.6, chance: 0.5),
+    ]),
+}),
+PatchModule(id: 9, kind: "loom.seq.lanes@1", data: {
+    "pattern": Pattern(lanes: [
+        Chords(steps: 8, chords: {0: Chord(root: Name("C"), shape: "major"), 7: Chord(root: Degree(5), shape: "7", inversion: 1)}),
+    ]),
+}),
+```
+
+*Why reserve now:* the polyphony specification follows a chord sequencer and a note cycle end to end, and both store notes. Settling that they fit the `data` map, and how, before slice 1 ships means slice 1's format does not move when M3 adds them. *Why not build now:* their editors and readers are M3 modules, and a kind nobody reads cannot be tested.
 
 ## Buffer data
 
@@ -139,6 +163,7 @@ M2 (curve and pattern, recording):
 - Converting data between kinds or between parts.
 - Editing audio (cut, fade, normalise). The waveform widget only sets markers.
 - Compressed audio formats (FLAC) in the sidecar folder.
+- The Notes kind and the Chords lane themselves: their editors, their readers, and their exact fields. They are [reserved](#room-for-notes-and-chords) here and built in M3 with the Note cycle, the piano roll, and the chord sequencer.
 
 ## Open points
 

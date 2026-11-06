@@ -103,7 +103,7 @@ Scope:
 - Modulators as modules (FR-LIB-12), including drawn modulation curves.
 - Module data beyond parameters, for patterns and samples (FR-LIB-19, OQ-17).
 - Cable styles for stereo, polyphony, and inserted delays (FR-CANVAS-12).
-- Design spike: how notes travel on cables (OQ-16), so M3 can build note effects on a settled model.
+- How notes travel on cables (OQ-16): decided as per-voice signals in [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md), so M3 builds note effects on a settled model. No spike was needed.
 - Roles, slots, and traits (ADR-0017): a specification first, then slots in abstractions, sub-patch modes, role-bound panel widgets, and traits in the SDK (FR-ENCAP-08 to 10, FR-PANEL-11, FR-SDK-07, 08). Patch-wide scale and tuning (FR-LIB-29).
 - The catalogue's M2 module types, including the first abstractions: a synth voice and an effect chain with swappable slots.
 - Patch authors, tags, and licence, and a browser for the user's own patches that filters by them (FR-FILE-08 to 10, FR-SHARE-06, ADR-0023, [specification](../design/patch-metadata.md)).
@@ -126,7 +126,7 @@ Scope:
   - Built-in abstractions made from them: Looper Group, Part, Song Sequencer (FR-LIB-21, FR-LIB-24).
 - Scenes: snapshots of module states, switched by triggers, with morph time (FR-LIB-23).
 - Sequencers, including polymetric multi-output step sequencers (FR-LIB-14).
-- Note effects, on the model chosen in OQ-16 (FR-LIB-13).
+- Note effects, on per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md), FR-LIB-13).
 - Modulation curves over bars and sections (FR-LIB-16), on the M1 transport and clock modules.
 - Record the live output to an audio file while performing (FR-SHARE-03).
 - Seeded melody and rhythm generators (FR-LIB-28), and the rest of the catalogue's M3 module types.

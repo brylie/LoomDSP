@@ -20,7 +20,7 @@ All primitives follow the signal model: timing is **phase**, events are **gates*
 
 | Module | Inputs | Outputs | Behaviour |
 |---|---|---|---|
-| **Note Cycle** | bar phase, play (gate) | pitch, gate, velocity, end (trigger) | Plays a stored note pattern that is *length* bars long. Mono first; polyphony follows OQ-16. |
+| **Note Cycle** | bar phase, play (gate) | pitch, gate, velocity, end (trigger) | Plays a stored note pattern that is *length* bars long. Mono first; the polyphonic version has a voice count and outputs a bundle ([polyphony](polyphony.md#a-note-cycle-with-overlapping-notes-m3)). |
 | **Audio Cycle** | bar phase, play (gate) | left, right, end (trigger) | Plays a stored audio loop that is *length* bars long. Fades over a few milliseconds when play changes, to avoid clicks. Recording follows OQ-15. |
 | **Clock Divide** | trigger, reset | trigger | Fires on every Nth incoming trigger. "Loop twice, then move on." |
 | **Counter** | trigger, reset | phase, wrap (trigger) | Counts triggers from 0 to N-1. The phase output is count ÷ N, so any phase-reading module can follow it. Wrap fires when the count returns to 0. |

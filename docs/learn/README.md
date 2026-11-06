@@ -30,6 +30,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Reading an XY scope](reading-an-xy-scope.md) | What one signal against another shows, why a circle means a quarter cycle, what stereo width looks like, and why samples must be paired. |
 | [Reading a spectrum](reading-a-spectrum.md) | What an FFT gives, why a window is needed, why low columns hold no bin, and why the line falls slowly. |
 | [Repeatable randomness](repeatable-randomness.md) | Why a random part plays the same after a reload, why a small seed needs mixing, why each lane has its own stream, and why a walk bounces. |
+| [Voices and polyphony](voices-and-polyphony.md) | What a voice is, why a bundle's width is inferred from the source, why a polysynth steals and which voice it takes, why a stolen note is one sample late, why a chord change keeps its shared notes, and why there is no event cable. |
 | [Flattening](flattening.md) | How a sub-patch becomes plain modules before the engine sees it, why a box that runs a box was rejected, and why flat ids come from a table keyed by path. |
 
 ## Writing one

@@ -179,7 +179,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 - **Hysteresis:** to move from the current note to a neighbour, `in` must pass the midpoint between them by 10% of the gap. *Why:* a slow or noisy input near a midpoint never flickers between two notes. On the first frame, an exact tie picks the lower note.
 - **Mode** is a setting, not chosen by a cable on `trigger`. Continuous: `out` follows `in` all the time. On trigger: `in` is snapped and held on each rising edge of `trigger` (rule 3).
 - **`changed`** is a one-sample trigger whenever `out` moves to another note, including after a key change. *Why:* it can fire an envelope, so a quantiser plays notes by itself.
-- Snapping to the notes being held waits for the note model (OQ-16).
+- Snapping to the notes being held is not in this version. Held notes arrive as per-voice gates and pitches ([polyphony](polyphony.md), ADR-0038), so a later version can read them from a polyphonic input.
 
 ## Multi-lane sequencer (MT-SEQ-01)
 
