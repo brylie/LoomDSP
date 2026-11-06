@@ -16,7 +16,7 @@ Each entry is a **module type**, not a module ID. A type says what a module does
 - **Catalogue IDs** look like `MT-FILTER-02` (MT for "module type"). They are stable, like requirement IDs: if an entry is dropped, mark it **Withdrawn** instead of reusing the ID. Issues say "Implements MT-FILTER-02", so the link survives renames.
 - **Primitive** entries are modules with one job. **Abstraction** entries are open patches made from primitives (FR-LIB-24): they work as one module, and you can open and change them.
 - **Traits** are shared options, listed by name. They are defined in [Traits](#traits).
-- **Phase** follows the use case the type unblocks: M1 for the subtractive tutorial (UC1), M2 for panels, sub-patches, and live play (UC2, UC3), M3 for self-arranging sets (UC8), M4 for the rest.
+- **Phase** follows the use case the type unblocks: M1 for the subtractive tutorial (UC1), M2 for panels, sub-patches, and live play (UC2, UC3), M3 for self-arranging sets and for sequencing chords and note clips (UC8, UC10), M4 for the rest.
 - **Req.** links to the requirement that covers the type, or says **New** when no requirement covers it yet.
 - **Status** is **Built** (with its module IDs), **Built in part** (some of the described behaviour is built; the status names what is missing), **Specified** (in a design specification), or **Planned**.
 
@@ -210,6 +210,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates, a Markov chain, or rule systems such as L-systems and cellular automata. | Seed, Scale awareness, Timebase | M3 | FR-LIB-28 | Planned |
 | MT-SEQ-05 | Note file player | Plays a stored note file in step with the transport. | Timebase | M4 | New | Planned |
 | MT-SEQ-06 | Style generator (abstraction) | A bass line, chord part, or drum part from a seed and a style setting, built from a generator and sequencer lanes. | Seed | M4 | FR-LIB-28 | Planned |
+| MT-SEQ-07 | Chord sequencer (abstraction) | Steps through a progression of chords and plays every note of each. A step names its chord (C major, A minor 7) or a step of the patch scale (the fourth chord), with a voicing: inversion and octave spread. Built from a sequencer's pitch and value lanes and a Chord module. | Timebase, Scale awareness | M3 | New | Planned |
 
 ## Note effects
 
@@ -218,7 +219,7 @@ These depend on how notes travel on cables (OQ-16).
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-NOTE-01 | Arpeggiator | Plays held notes one at a time in a pattern. | Timebase, Seed | M3 | FR-LIB-13 | Planned |
-| MT-NOTE-02 | Chord | Adds notes at set intervals, or scale steps, to each incoming note. | Scale awareness | M3 | FR-LIB-13 | Planned |
+| MT-NOTE-02 | Chord | Adds notes at set intervals, or scale steps, to each incoming note. The chord shape can also come from a control input, so a sequencer can change it on every step. | Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-03 | Strum | Spreads the notes of a chord in time. | | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-04 | Note repeat | Repeats notes: as fading echoes, at a steady rate while held, or speeding up or slowing down like a bouncing ball. | Timebase, Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-05 | Note variation | Small random changes to timing, velocity, and pitch, and a chance that a note plays at all. | Seed, Scale awareness | M3 | FR-LIB-13 | Planned |

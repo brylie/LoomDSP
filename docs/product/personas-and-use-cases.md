@@ -143,3 +143,17 @@ Requirements: FR-LIB-14, FR-LIB-20 to FR-LIB-24. Decisions: ADR-0011, ADR-0012. 
 5. Someone else changes the patch and shares it on. Both original authors stay credited, and their name is added after them.
 
 Requirements: FR-FILE-08 to FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09. Decision: ADR-0023. Specification: [patch metadata](../design/patch-metadata.md).
+
+### UC10. Sequence chords and note clips (Ilmari, Tomas)
+
+Goal: a chord progression and a set of note clips play an 8-voice instrument, and patched logic decides which clip plays next. In a clip launcher a clip is a closed box. Here a clip is a module: its notes can go through note effects, its chords can follow the patch scale, and any patched rule can pick what comes next.
+
+1. Add a Chord Sequencer with eight steps. Write a progression by name: C major, A minor 7, F major 7, G 7. Write the last step as "the fifth chord of the scale" instead of by name.
+2. Connect it to an 8-voice synth voice. When the chord changes, notes the two chords share keep sounding on the same voice, so their envelopes do not restart.
+3. Add a Strum between them, so each chord rolls from the lowest note to the highest.
+4. Add a polyphonic Note Cycle, 4 bars long. Record a melody with overlapping notes into it from a MIDI keyboard, quantised to the beat. Fix two notes by hand in its note editor.
+5. Make three more note cycles with variations. A Looper Group plays them round robin, as in UC8, while the chord sequencer runs on.
+6. Change the patch scale with a trigger. The step written as a scale step follows the new scale. The steps written by name stay as written.
+7. Send the same notes out as MIDI to a hardware synth.
+
+Requirements: FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-LIB-13, FR-LIB-19, FR-LIB-20, FR-LIB-21, FR-LIB-29, FR-MIDI-04. Open questions: OQ-15 (recording), OQ-16 (how notes travel on cables). Specifications: [arrangement](../design/arrangement.md), [scale and tuning](../design/scale-and-tuning.md), and the polyphony spec to come ([#665](https://github.com/brylie/LoomDSP/issues/665)).

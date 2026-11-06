@@ -4,7 +4,7 @@ How LoomDSP builds arrangements inside the grid: loops that rotate, parts that f
 
 - **Kind:** living specification. It changes as modules are built and tested.
 - **Decision behind it:** [ADR-0012](../adr/0012-arrangement-from-phase-driven-primitives.md) (arrangement from phase-driven primitives). Builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals) and [ADR-0011](../adr/0011-everything-is-a-module.md) (everything is a module).
-- **Use case:** [UC8](../product/personas-and-use-cases.md) (Ilmari, the generative musician).
+- **Use cases:** [UC8](../product/personas-and-use-cases.md) (Ilmari, the generative musician), and [UC10](../product/personas-and-use-cases.md) for polyphonic note cycles.
 - **Requirements:** FR-LIB-16, FR-LIB-19 to FR-LIB-22, FR-LIB-24.
 - **Issues:** [#47](https://github.com/brylie/LoomDSP/issues/47) to [#55](https://github.com/brylie/LoomDSP/issues/55), and [#39](https://github.com/brylie/LoomDSP/issues/39).
 
