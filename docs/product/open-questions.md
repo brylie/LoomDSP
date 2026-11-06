@@ -22,6 +22,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-20 | How roles are named and versioned | Namespaced IDs with a version (`loom.role.filter@1`). A new version only adds optional parameters. A part may fill several roles, and may map role names to its own. | FR-SDK-08, ADR-0017, [sub-patches](../design/sub-patches.md#roles) |
 | OQ-21 | What carries across a slot swap | Parameters by role name. Each part keeps its own data in the patch, restored on swap back, never converted. A swap is one undo step. | FR-ENCAP-08, [sub-patches](../design/sub-patches.md#slots) |
 | OQ-22 | Is the scale a module or a patch setting? | Like the transport: the engine holds one tuning and one active scale per patch, read without cables. A Scale and tuning module stores up to 8 scales and switches them from a trigger. | FR-LIB-29, ADR-0033, [scale and tuning](../design/scale-and-tuning.md) |
+| OQ-16 | How notes travel on cables | Per-voice signals only: pitch, gate, velocity, and expression in a polyphonic bundle, which is an inferred cable width as stereo is, with voices run as module copies. No event cable kind. Every module that makes or changes notes allocates voices with one shared algorithm. Decided without the planned prototype, because the engine already runs copies and lands events on their sample. | FR-SIG-08, FR-LIB-13, ADR-0038, [polyphony](../design/polyphony.md) |
 
 ## Open
 
@@ -52,18 +53,6 @@ Each open item lists the options and a current leaning. Close an item by writing
 - **Leaning:** record into memory allocated when the looper is created or resized (on the control thread), with a maximum loop length per looper. Saving loops to disk, and loading them, happens on a control thread. Long-form recording to disk is out of scope for now.
 - Decide the maximum lengths and memory budget in M3.
 
-### OQ-16. How notes travel on cables
-
-Note effects (arpeggiators, chords, quantise) need notes to move between modules (ADR-0011). Triggers such as "loop finished" are already gate signals and need no new cable kind.
-
-| Option | For | Against |
-|---|---|---|
-| Per-voice signals (pitch, gate, velocity as polyphonic audio-rate signals), as in Bitwig's Grid | Fits the "patch anything" signal model (ADR-0007). Anything can modulate notes. | Chords and arpeggios need voice allocation in every note module. Note timing is tied to voice slots. |
-| Event cables: a new cable kind carrying sample-timestamped note events | Exact timing, any number of notes, natural for MIDI effects and the timeline. | A second kind of cable. Breaks "every cable is f32" and needs its own scheduling. |
-| Both, with converter modules (events to voices and back) | Each module uses the natural form. | More concepts for users to learn. |
-
-- **Leaning:** both, with event cables shown as their own colour and automatic conversion where an event output meets a signal input. Needs a design spike in M2, before note effects are built in M3.
-
 ### OQ-18. How third-party modules are distributed
 
 VCV Rack's ecosystem works because people can install modules without building the program (FR-SHARE-05). Our current rule is "compile modules in, no runtime loading of native code" (FR-SDK-04), for safety and portability.
@@ -90,7 +79,7 @@ VCV Rack's ecosystem works because people can install modules without building t
 | R-09 | Building our own canvas (ADR-0010) takes much longer than estimated. | Medium | High | Iced keeps text, windowing, and ordinary widgets. Build a measured prototype first, with performance gates on the reference laptop. Keep the scope of the first version small. |
 | R-10 | Strict dependency rules leave a gap with no acceptable crate. | Medium | Medium | Licence rules are strict (Must). AI-policy preference is soft (Should). We can use a permissive crate even if we cannot contribute to it. |
 | R-11 | "Everything is a module" makes the library very large, and the project spreads thin. | High | High | Grow by phase, following the [module catalogue](module-catalogue.md). Prioritise modules for live performance. Build primitives, shared traits, and open abstractions instead of one fixed module per device (ADR-0017). Make the module SDK good enough that the community can add modules. |
-| R-12 | Note handling (OQ-16) is decided late and forces rework in modules already built. | Medium | High | Design spike before the first note effect. Keep MIDI note input behind one module until then. |
+| R-12 | Note handling (OQ-16) is decided late and forces rework in modules already built. | Low | High | Decided in M2 (ADR-0038): per-voice signals, which the engine already runs as copies. No prototype was built, so the first M3 note effect is the test of the model. If it needs events, a superseding ADR adds an event cable kind beside per-voice signals, and nothing built on bundles changes. |
 | R-13 | No way to install third-party modules without rebuilding slows the community (OQ-18). | Medium | Medium | Ship a strong built-in library first. Decide OQ-18 early in M4. |
 
 ## Notes on the background research

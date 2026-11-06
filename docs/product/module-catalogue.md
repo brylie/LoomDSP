@@ -214,7 +214,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 ## Note effects
 
-These depend on how notes travel on cables (OQ-16).
+Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md)): a gate, a pitch, a velocity, and expression, one value per voice in a polyphonic bundle. Every type here takes and gives notes in that form, and allocates voices with the shared allocator ([polyphony](../design/polyphony.md#allocation)).
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|

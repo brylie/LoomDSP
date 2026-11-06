@@ -73,3 +73,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0035](0035-pure-dsp-algorithms-in-loom-dsp.md) | Pure DSP algorithms live in `loom-dsp`, and modules wrap them | Accepted |
 | [0036](0036-a-seeded-route-keeps-both-sides-together.md) | A seeded module that chooses a route makes the same picks on both sides | Accepted |
 | [0037](0037-finite-inputs-hold-at-the-largest-finite-value.md) | When finite inputs overflow, a module's result holds at the largest finite value | Accepted |
+| [0038](0038-notes-travel-as-per-voice-signals.md) | Notes travel as per-voice signals in a polyphonic bundle, which is an inferred cable width | Accepted |

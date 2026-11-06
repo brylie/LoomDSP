@@ -525,7 +525,7 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 **Not in the baseline.** These catalogue entries need a view of their own. Each gets its own spec when its module is designed, and joins the set then if a second module needs it.
 
 - A note editor with notes of any length and pitch: MT-SEQ-03 piano roll, MT-ARR-01 note cycle.
-- A playable keyboard: MT-UI-04. Waits on how notes travel on cables (OQ-16). The keys layout of the step grid is not this. It edits a set of pitch classes and sends no notes.
+- A playable keyboard: MT-UI-04. It sends notes as per-voice signals, like Note input ([polyphony](polyphony.md), ADR-0038). The keys layout of the step grid is not this. It edits a set of pitch classes and sends no notes.
 - A note and controller monitor list: MT-VIEW-04 beyond its readouts.
 - A diagram of states: MT-LOGIC-07.
 - A list of sections: MT-ARR-07.
