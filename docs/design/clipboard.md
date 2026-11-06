@@ -134,6 +134,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 6. **A patch keeps exactly one transport.** The Transport module ([clock](clock.md)) is never added by a paste or duplicate. Copy still writes it to the clipboard, so its cables and assignments have an end. On paste, cables and assignments from the copied transport connect to the patch's own transport, and the copied tempo and time signature are ignored. Duplicate skips a selected transport and treats it as outside the selection. If only the transport is selected, duplicate does nothing and the status bar says why. *Why:* a patch has exactly one transport, and a group copied with Select All should keep its clock cables in the other patch. This rule applies once the Transport module exists.
 7. **The keys do not reach the canvas while a text field is being edited.** In the module browser's search field and in other text fields, Ctrl/Cmd+C, X, V, and D act on the text. *Why:* the same rule as undo ([undo](undo.md#commands)). The text field has its own clipboard.
 8. **The keys do not clash with panel focus.** Panel focus uses Tab, the arrows, Space, Enter, and Escape without modifiers ([panels](panels.md#interaction-68)). Copy, cut, paste, and duplicate use Ctrl or Cmd, so they work the same with or without a focused control. *Why:* [#101](https://github.com/brylie/LoomDSP/issues/101) orders the keys; these keys need no place in that order.
+9. **A module's label goes where the module goes.** Copy, cut, paste, and duplicate keep each module's label exactly as written, and so do open, save, and undo. An empty label is no label. The app does not show labels on known modules yet ([#526](https://github.com/brylie/LoomDSP/issues/526)), but it never drops one. *Why:* a label is the user's work, and sub-patches name their ports by the label of a Patch input or output ([sub-patches](sub-patches.md#patch-file)).
 
 ## Acceptance criteria
 
@@ -153,6 +154,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 - [ ] Ctrl/Cmd+C, X, V, and D act on the text, not the patch, while the module browser's search field is open. (manual)
 - [ ] Copy, paste, and duplicate work while a panel control has focus. (manual)
 - [x] Paste and duplicate do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
+- [ ] A known module's label, including one that is only spaces, survives copy and paste, duplicate, save and open, and undo of a delete (rule 9; clipboard, patch, and undo tests).
 
 ## Out of scope
 
@@ -160,7 +162,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 - **Paste with incoming cables** ("paste with connections"). Only duplicate keeps them. Revisit if users ask.
 - **Copying parameter values alone**, from one module to another of the same type.
 - **Other clipboard formats**, such as an image of the selection.
-- **Module labels.** The patch format has them, but the app does not show them yet. When it does, they are copied with the module.
+- **Showing and editing labels on known modules.** The app keeps them (rule 9) but does not show them yet ([#526](https://github.com/brylie/LoomDSP/issues/526)).
 
 ## Open points
 

@@ -10,7 +10,7 @@ How a player collapses part of a patch into one module with its own ports and pa
 - **Background:** none yet. An explainer on "flattening" and "abstraction" belongs in `docs/learn/` with the first build.
 - **Prior art:** Max has both private sub-patchers and shared file abstractions. Reaktor and Bitwig Grid nest containers. Design tools have "instances" of a shared component. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** [#51](https://github.com/brylie/LoomDSP/issues/51) (umbrella), [#76](https://github.com/brylie/LoomDSP/issues/76) (panel editor).
-- **Code:** none yet.
+- **Code:** none yet. Flattening goes in `crates/loom-patch`, next to the patch file types and the code that applies a patch to a `Controller`. `loom-core`'s `Graph` stays the flat engine graph with no file types (ADR-0002, ADR-0034). ADR-0031 left the crate open; settled with the maintainer on 2026-11-06 ([#651](https://github.com/brylie/LoomDSP/issues/651)).
 
 ## Goal
 
@@ -191,6 +191,7 @@ These rules are for implementers. The player never sees the flat graph.
 4. Each flat module gets a `ModuleId` from a table keyed by its path (instance IDs, then the inner ID). A path keeps its ID across edits, so its state survives. A removed path's ID is not reused in the session.
 5. Stack copies, layer and select members, and slot parts expand into ordinary modules, with mixing or crossfade modules the flattener adds. Added modules are not shown and not saved.
 6. Flattening is deterministic: the same patch gives the same flat graph and the same IDs.
+7. The flattener never opens a file. It reads a linked library item through a `Library` trait that the caller implements: the desktop app reads the library folder, and a test or the web runtime passes a map. A missing item falls back to the stored copy (rule 5). *Why:* `loom-patch` must work on WebAssembly, which has no files (hard rule 6), and the loop check needs to read links while it follows them.
 
 ## Rules
 
