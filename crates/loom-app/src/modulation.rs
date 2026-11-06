@@ -4,6 +4,7 @@
 
 use crate::App;
 use loom_canvas::ModulationMark;
+use loom_core::ModuleNames;
 use loom_core::{Assignment, AssignmentId, Graph, ModuleId, OutputRef, ParamSpec, Polarity, WidgetKind};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -134,27 +135,14 @@ pub fn module_name(graph: &Graph, module: ModuleId) -> String {
 pub fn source_name(graph: &Graph, source: OutputRef) -> String {
     let label = graph
         .node(source.module)
-        .and_then(|n| {
-            n.unknown.as_ref().map_or_else(
-                || n.descriptor.outputs.get(source.port).map(|p| p.label),
-                |unknown| unknown.outputs.get(source.port).map(String::as_str),
-            )
-        })
+        .and_then(|n| n.output_label(source.port))
         .unwrap_or("?");
     format!("{}: {label}", module_name(graph, source.module))
 }
 
 /// "module name #id: parameter label".
 pub fn target_name(graph: &Graph, target: ModuleId, param: usize) -> String {
-    let label = graph
-        .node(target)
-        .and_then(|n| {
-            n.unknown.as_ref().map_or_else(
-                || n.descriptor.params.get(param).map(|p| p.label),
-                |unknown| unknown.parameters.get(param).map(String::as_str),
-            )
-        })
-        .unwrap_or("?");
+    let label = graph.node(target).and_then(|n| n.parameter_label(param)).unwrap_or("?");
     format!("{}: {label}", module_name(graph, target))
 }
 

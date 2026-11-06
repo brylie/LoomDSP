@@ -42,36 +42,22 @@ impl Controller {
     /// Resolves an output port by name.
     pub fn output_ref(&self, module: ModuleId, name: &str) -> Result<OutputRef, LoomError> {
         let node = self.node(module)?;
-        let port = node
-            .unknown
-            .as_ref()
-            .map_or_else(
-                || node.descriptor.output_index(name),
-                |unknown| unknown.outputs.iter().position(|port| port == name),
-            )
-            .ok_or_else(|| LoomError::NoSuchPort {
-                module,
-                direction: "output",
-                port: name.to_string(),
-            })?;
+        let port = node.output_index(name).ok_or_else(|| LoomError::NoSuchPort {
+            module,
+            direction: "output",
+            port: name.to_string(),
+        })?;
         Ok(OutputRef { module, port })
     }
 
     /// Resolves an input port by name.
     pub fn input_ref(&self, module: ModuleId, name: &str) -> Result<InputRef, LoomError> {
         let node = self.node(module)?;
-        let port = node
-            .unknown
-            .as_ref()
-            .map_or_else(
-                || node.descriptor.input_index(name),
-                |unknown| unknown.inputs.iter().position(|port| port == name),
-            )
-            .ok_or_else(|| LoomError::NoSuchPort {
-                module,
-                direction: "input",
-                port: name.to_string(),
-            })?;
+        let port = node.input_index(name).ok_or_else(|| LoomError::NoSuchPort {
+            module,
+            direction: "input",
+            port: name.to_string(),
+        })?;
         Ok(InputRef { module, port })
     }
 }

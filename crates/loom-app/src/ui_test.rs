@@ -49,6 +49,7 @@ use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
 use loom_canvas::{CanvasView, PortRef};
 use loom_core::ModuleId;
+use loom_core::ModuleNames;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;

@@ -1,6 +1,7 @@
 //! Turning names in commands into what the app shows: ports, controls on screen, keys, and buttons.
 
 use super::*;
+use loom_core::ModuleNames;
 
 /// The most moves a `drag` takes.
 pub(super) const MAX_DRAG_STEPS: u32 = 1000;

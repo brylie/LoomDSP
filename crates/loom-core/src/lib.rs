@@ -28,6 +28,7 @@ mod live;
 mod midi;
 mod midi_map;
 mod module;
+mod names;
 mod panic;
 mod registry;
 pub mod safety;
@@ -54,6 +55,7 @@ pub use midi_map::{
     MidiWaiting, NoteOnSeen,
 };
 pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testing};
+pub use names::ModuleNames;
 pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
 pub use safety::OutputSafety;

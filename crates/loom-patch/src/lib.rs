@@ -31,7 +31,7 @@
 
 use loom_core::{
     Controller, Graph, InputRef, LoomError, MidiControl, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId,
-    OutputRef, ParamRange, Polarity, Registry, TRANSPORT_MODULE,
+    ModuleNames, OutputRef, ParamRange, Polarity, Registry, TRANSPORT_MODULE,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -835,39 +835,21 @@ pub fn ranges_to_save(node: &loom_core::Node) -> BTreeMap<String, (f32, f32)> {
 }
 
 fn port_name(graph: &Graph, output: OutputRef) -> String {
-    graph
-        .node(output.module)
-        .map(|n| {
-            n.unknown.as_ref().map_or_else(
-                || n.descriptor.outputs[output.port].name.to_string(),
-                |unknown| unknown.outputs[output.port].clone(),
-            )
-        })
-        .unwrap_or_default()
+    name_of(graph, output.module, |n| n.output_name(output.port))
 }
 
 fn input_name(graph: &Graph, input: InputRef) -> String {
-    graph
-        .node(input.module)
-        .map(|n| {
-            n.unknown.as_ref().map_or_else(
-                || n.descriptor.inputs[input.port].name.to_string(),
-                |unknown| unknown.inputs[input.port].clone(),
-            )
-        })
-        .unwrap_or_default()
+    name_of(graph, input.module, |n| n.input_name(input.port))
 }
 
 fn param_name(graph: &Graph, module: ModuleId, index: usize) -> String {
-    graph
-        .node(module)
-        .and_then(|n| {
-            n.unknown.as_ref().map_or_else(
-                || n.descriptor.params.get(index).map(|param| param.name.to_string()),
-                |unknown| unknown.parameters.get(index).cloned(),
-            )
-        })
-        .unwrap_or_default()
+    name_of(graph, module, |n| n.parameter_name(index))
+}
+
+/// A saved name from one of the module's [`ModuleNames`] lookups, or an
+/// empty string when the module or the index is gone.
+fn name_of(graph: &Graph, module: ModuleId, name: impl Fn(&loom_core::Node) -> Option<&str>) -> String {
+    graph.node(module).and_then(name).unwrap_or_default().to_string()
 }
 
 #[cfg(test)]

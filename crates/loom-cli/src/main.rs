@@ -11,6 +11,7 @@ mod help_pages;
 mod midi_port;
 
 use clap::{Parser, Subcommand};
+use loom_core::ModuleNames;
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, Registry, create_engine};
 use loom_host_desktop::{AudioOptions, AudioOutput, StatsSnapshot};
 use loom_patch::Patch;

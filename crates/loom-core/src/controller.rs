@@ -37,6 +37,7 @@ use crate::midi_map::{
     ControlChangeSeen, ControlOutcome, ControlState, MidiControl, MidiFeedback, MidiMapping, MidiMappingId,
     MidiMappingOptions, MidiReader, MidiWaiting, later,
 };
+use crate::names::ModuleNames;
 use crate::registry::Registry;
 use crate::safety::OutputSafety;
 use crate::telemetry::{PairProbe, ProbeId, ProbeKind, Telemetry, TelemetrySender};
@@ -358,16 +359,10 @@ impl Controller {
 
     fn param_index(&self, module: ModuleId, name: &str) -> Result<usize, LoomError> {
         let node = self.node(module)?;
-        node.unknown
-            .as_ref()
-            .map_or_else(
-                || node.descriptor.param_index(name),
-                |unknown| unknown.parameters.iter().position(|param| param == name),
-            )
-            .ok_or_else(|| LoomError::NoSuchParam {
-                module,
-                param: name.to_string(),
-            })
+        node.parameter_index(name).ok_or_else(|| LoomError::NoSuchParam {
+            module,
+            param: name.to_string(),
+        })
     }
 
     /// Checks a parameter that modulation or a MIDI mapping will drive. A
@@ -390,10 +385,7 @@ impl Controller {
 
     fn check_param(&self, module: ModuleId, index: usize) -> Result<(), LoomError> {
         let node = self.node(module)?;
-        let count = node
-            .unknown
-            .as_ref()
-            .map_or(node.descriptor.params.len(), |unknown| unknown.parameters.len());
+        let count = node.parameter_count();
         if index >= count {
             return Err(LoomError::NoSuchParam {
                 module,

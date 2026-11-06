@@ -2,6 +2,7 @@
 //! pointers the engine reads.
 
 use super::*;
+use crate::names::ModuleNames;
 
 /// Builds the [`Schedule`] from the plan. Operations are made the first time
 /// a step needs them, so they are stored in the order they run.

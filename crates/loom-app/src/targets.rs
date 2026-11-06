@@ -15,6 +15,7 @@
 //! history.
 
 use loom_canvas::{ControlPart, PORT_HIT_RADIUS, PanelValues, PortRef, Scene};
+use loom_core::ModuleNames;
 use loom_core::{Graph, ModuleId};
 
 /// The prefix that names a light or a meter only.

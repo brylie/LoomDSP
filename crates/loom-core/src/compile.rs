@@ -39,6 +39,7 @@ use crate::descriptor::{Channels, ModuleRole, ParamSpec, Polarity, PortDefault};
 use crate::graph::{AssignmentId, Graph, InputRef, ModuleId, Node, OutputRef};
 use crate::midi_map::{MidiMapOp, MidiMappingId};
 use crate::module::RightPtr;
+use crate::names::ModuleNames;
 use crate::signal::SignalType;
 use crate::telemetry::{PairProbe, ProbeId, ProbeKind};
 use crate::width::{self, Width, Widths};

@@ -3,6 +3,7 @@
 //! meets mono reads a downmix, and an unconnected input reads its default.
 
 use super::*;
+use crate::names::ModuleNames;
 
 /// A modulation assignment the graph can schedule.
 pub(super) struct CompiledAssignment {

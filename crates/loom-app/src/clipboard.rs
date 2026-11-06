@@ -10,6 +10,7 @@
 //! from the controller and remaps the cables and assignments to it.
 
 use loom_canvas::GRID;
+use loom_core::ModuleNames;
 use loom_core::{
     Controller, Graph, InputRef, LoomError, ModuleDescriptor, ModuleId, ModuleRole, OutputRef, ParamRange, Polarity,
     Registry,
@@ -51,6 +52,16 @@ struct Member {
     position: Option<(f32, f32)>,
     /// Optional saved tile dimensions in grid units.
     size: Option<(u8, u8)>,
+}
+
+impl ModuleNames for Member {
+    fn descriptor(&self) -> &'static ModuleDescriptor {
+        self.descriptor
+    }
+
+    fn unknown(&self) -> Option<&loom_core::UnknownModule> {
+        self.unknown.as_ref()
+    }
 }
 
 /// Where a cable or an assignment starts.
@@ -287,12 +298,7 @@ impl Group {
         let output = |(id, name): &(u32, String)| {
             let member = module(*id)?;
             let port = member
-                .unknown
-                .as_ref()
-                .map_or_else(
-                    || member.descriptor.output_index(name),
-                    |unknown| unknown.outputs.iter().position(|port| port == name),
-                )
+                .output_index(name)
                 .ok_or_else(|| format!("{} has no output `{name}`", member.descriptor.name))?;
             Ok::<_, String>(Source::Inside(*id, port))
         };
@@ -302,12 +308,7 @@ impl Group {
             .map(|cable| {
                 let member = module(cable.to.0)?;
                 let port = member
-                    .unknown
-                    .as_ref()
-                    .map_or_else(
-                        || member.descriptor.input_index(&cable.to.1),
-                        |unknown| unknown.inputs.iter().position(|port| port == &cable.to.1),
-                    )
+                    .input_index(&cable.to.1)
                     .ok_or_else(|| format!("{} has no input `{}`", member.descriptor.name, cable.to.1))?;
                 Ok(Cable {
                     from: output(&cable.from)?,
@@ -321,17 +322,7 @@ impl Group {
             .map(|assignment| {
                 let member = module(assignment.target.0)?;
                 let param = member
-                    .unknown
-                    .as_ref()
-                    .map_or_else(
-                        || member.descriptor.param_index(&assignment.target.1),
-                        |unknown| {
-                            unknown
-                                .parameters
-                                .iter()
-                                .position(|param| param == &assignment.target.1)
-                        },
-                    )
+                    .parameter_index(&assignment.target.1)
                     .ok_or_else(|| format!("{} has no parameter `{}`", member.descriptor.name, assignment.target.1))?;
                 Ok(Modulation {
                     source: output(&assignment.source)?,
@@ -395,10 +386,7 @@ impl Group {
             let member = self.member(id).expect("a group's cables stay inside it");
             (
                 id,
-                member.unknown.as_ref().map_or_else(
-                    || member.descriptor.outputs[port].name.to_string(),
-                    |unknown| unknown.outputs[port].clone(),
-                ),
+                member.output_name(port).expect("a group's outputs exist").to_string(),
             )
         };
         for cable in &self.cables {
@@ -409,10 +397,10 @@ impl Group {
                     from: output_name(id, port),
                     to: (
                         cable.to.0,
-                        member.unknown.as_ref().map_or_else(
-                            || member.descriptor.inputs[cable.to.1].name.to_string(),
-                            |unknown| unknown.inputs[cable.to.1].clone(),
-                        ),
+                        member
+                            .input_name(cable.to.1)
+                            .expect("a group's inputs exist")
+                            .to_string(),
                     ),
                 });
             }
@@ -425,10 +413,10 @@ impl Group {
                     source: output_name(id, port),
                     target: (
                         assignment.target.0,
-                        member.unknown.as_ref().map_or_else(
-                            || member.descriptor.params[assignment.target.1].name.to_string(),
-                            |unknown| unknown.parameters[assignment.target.1].clone(),
-                        ),
+                        member
+                            .parameter_name(assignment.target.1)
+                            .expect("a group's parameters exist")
+                            .to_string(),
                     ),
                     depth: assignment.depth,
                     polarity: assignment.polarity.map(PatchPolarity::from),

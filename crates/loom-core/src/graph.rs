@@ -150,6 +150,16 @@ pub struct Node {
     pub(crate) copy_slot: Option<usize>,
 }
 
+impl crate::ModuleNames for Node {
+    fn descriptor(&self) -> &'static ModuleDescriptor {
+        self.descriptor
+    }
+
+    fn unknown(&self) -> Option<&UnknownModule> {
+        self.unknown.as_ref()
+    }
+}
+
 impl Node {
     /// A node with default parameter values and default ranges.
     pub(crate) fn new(descriptor: &'static ModuleDescriptor, slot: Option<usize>) -> Self {
@@ -161,44 +171,6 @@ impl Node {
             copy_slot: None,
             ranges: descriptor.params.iter().map(ParamSpec::default_range).collect(),
         }
-    }
-
-    /// Number of named input ports, including placeholder ports.
-    pub fn input_count(&self) -> usize {
-        self.unknown
-            .as_ref()
-            .map_or(self.descriptor.inputs.len(), |unknown| unknown.inputs.len())
-    }
-
-    /// Number of named output ports, including placeholder ports.
-    pub fn output_count(&self) -> usize {
-        self.unknown
-            .as_ref()
-            .map_or(self.descriptor.outputs.len(), |unknown| unknown.outputs.len())
-    }
-
-    /// The saved name of an input, including a placeholder input.
-    pub fn input_name(&self, index: usize) -> Option<&str> {
-        self.unknown.as_ref().map_or_else(
-            || self.descriptor.inputs.get(index).map(|p| p.name),
-            |unknown| unknown.inputs.get(index).map(String::as_str),
-        )
-    }
-
-    /// The saved name of an output, including a placeholder output.
-    pub fn output_name(&self, index: usize) -> Option<&str> {
-        self.unknown.as_ref().map_or_else(
-            || self.descriptor.outputs.get(index).map(|p| p.name),
-            |unknown| unknown.outputs.get(index).map(String::as_str),
-        )
-    }
-
-    /// The saved name of a parameter, including a placeholder parameter.
-    pub fn parameter_name(&self, index: usize) -> Option<&str> {
-        self.unknown.as_ref().map_or_else(
-            || self.descriptor.params.get(index).map(|p| p.name),
-            |unknown| unknown.parameters.get(index).map(String::as_str),
-        )
     }
 
     /// The selected control range of parameter `index`, if it offers ranges.

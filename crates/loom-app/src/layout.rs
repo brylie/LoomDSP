@@ -2,6 +2,7 @@
 //! generator for large test patches.
 
 use loom_canvas::{GRID, TILE_WIDTH, tile_size};
+use loom_core::ModuleNames;
 use loom_core::{Controller, LoomError, ModuleId, ModuleRole, Node};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeMap;

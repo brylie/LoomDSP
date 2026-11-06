@@ -35,7 +35,7 @@ const fn port(name: &'static str) -> PortSpec {
 }
 
 /// An input and a parameter share the name `cutoff`, like on a filter.
-pub(super) static NAMED: ModuleDescriptor = ModuleDescriptor {
+pub(crate) static NAMED: ModuleDescriptor = ModuleDescriptor {
     id: "test.named",
     version: 1,
     name: "Named",
