@@ -88,8 +88,9 @@ Structured data that a module keeps beyond its parameters comes in three shared 
 | Data kind | What it holds | Editor | Used by, for example |
 |---|---|---|---|
 | Curve | Up to 64 points with a bend per segment, and optional named markers | Curve | Segment envelope, curve reader, drawn transfer curve, drawn LFO shape |
-| Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. A slot can also give each step attributes: chance (0 to 1), repeat (1 to 4), and accent (on or off). | Step grid | Multi-lane sequencer, parameter sequencer, matrix, a set of pitch classes (a scale) |
+| Pattern | Up to 8 lanes of up to 64 steps. Each lane holds gates or values. A slot can also give each step attributes: chance (0 to 1), repeat (1 to 4), and accent (on or off). A chord lane is reserved for M3 ([module data](module-data.md#room-for-notes-and-chords)). | Step grid | Multi-lane sequencer, parameter sequencer, matrix, a set of pitch classes (a scale) |
 | Buffer | Audio frames, mono or stereo, up to a maximum length the module declares. Up to 64 slice points. A module can set a frame length, so the buffer holds a table of frames. | Waveform | Buffer, buffer reader, slice map, grain engine, audio cycle |
+| Notes (reserved, M3) | A clip of notes with a pitch, start, length, velocity, and chance. Not a kind yet: the patch format leaves room for it ([module data](module-data.md#room-for-notes-and-chords)), and its editor gets its own specification with the note cycle. | Note editor (not in the baseline, see below) | Note cycle, piano roll |
 
 - A module declares its data slots by name and kind, as it declares parameters. A widget binds to a slot by name. The registry refuses a curve widget on a pattern slot.
 - The limits above are fixed capacities. *Why:* new data is built on the control thread and swapped into the engine whole (ADR-0001), so the audio thread never allocates. A fixed capacity also keeps every editor's layout predictable. The numbers are leanings, to settle with [#50](https://github.com/brylie/LoomDSP/issues/50).
