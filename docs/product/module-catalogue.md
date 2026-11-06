@@ -136,10 +136,10 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-VOICE-01 | Voice merge | Turns a polyphonic signal into one signal: sum, average, last voice, lowest, or highest. | | M2 | FR-VOICE-03 | Planned |
-| MT-VOICE-02 | Voice split and fill | Separates the voices of a polyphonic signal, sets a fixed value per voice, or copies one signal to every voice. | | M2 | FR-VOICE-03 | Planned |
-| MT-VOICE-03 | Voice spread | Gives each voice a different value from one control, by an even spread, a series, or a seeded random set. | Spread, Seed | M2 | New | Planned |
-| MT-VOICE-04 | Voice assigner | Redistributes notes across voices, or doubles them into unison voices. | | M2 | FR-VOICE-02 | Planned |
+| MT-VOICE-01 | Voice merge | Turns a polyphonic signal into one signal: sum, average, last voice, lowest, or highest. | | M2 | FR-VOICE-03 | Specified ([polyphony](../design/polyphony.md#voice-merge-mt-voice-01)) |
+| MT-VOICE-02 | Voice split | Separates the voices of a polyphonic signal into outputs. Copying one signal to every voice needs no module: a mono cable feeds every voice. | | M2 | FR-VOICE-03 | Specified ([polyphony](../design/polyphony.md#voice-split-mt-voice-02)) |
+| MT-VOICE-03 | Voice spread | Gives each voice a different value from one control, by an even spread, a series, or a seeded random set. | Spread, Seed | M2 | New | Specified ([polyphony](../design/polyphony.md#voice-spread-mt-voice-03)) |
+| MT-VOICE-04 | Voice assigner | Redistributes notes across voices, or doubles them into unison voices. | | M2 | FR-VOICE-02 | Specified ([polyphony](../design/polyphony.md#voice-assigner-mt-voice-04)) |
 
 ## Envelopes and modulation sources
 
@@ -301,7 +301,7 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 |---|---|---|---|---|---|---|
 | MT-IO-01 | Audio output | Sends a signal to an interface channel or host output. | | M0 | FR-LIB-07 | Built (`loom.io.audio-out`) |
 | MT-IO-02 | Audio input | Brings audio from an interface channel or host input into the patch. | | M1 | FR-LIB-07 | Specified (`loom.io.audio-in`, [audio input](../design/audio-input.md)) |
-| MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | M0 | FR-LIB-07 | Built in part (`loom.midi.note`: one voice; per-voice output comes with polyphony in M2) |
+| MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | M0 | FR-LIB-07 | Built in part (`loom.midi.note`: one voice; the voice count, stealing modes, and per-voice pressure and timbre are specified in [polyphony](../design/polyphony.md#note-input-mt-io-03), M2) |
 | MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | M1 | FR-LIB-07 | Built (`loom.midi.controller`, [M1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
 | MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | M2 | FR-VOICE-04 | Planned |
 | MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | M2 | FR-MIDI-04 | Planned |

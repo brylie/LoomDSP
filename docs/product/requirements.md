@@ -26,7 +26,7 @@ See ADR-0007 for the full signal model.
 | FR-SIG-05 | Pitch signals use LoomDSP's own documented scale (proposal: 0.1 per octave, 0.0 at a reference note). Helpers convert to and from Hz and MIDI note numbers. | Must | M1 | 0.1 per octave keeps 20 octaves inside the normalised -1 to 1 range, so pitch can modulate anything and anything can modulate pitch. |
 | FR-SIG-06 | Gate signals treat values above 0.5 as high. A trigger output is high for one sample; trigger inputs count rising edges (ADR-0007). | Must | M1 | Simple, documented threshold. Any signal can act as a trigger. |
 | FR-SIG-07 | Channel count (mono or stereo) is inferred per cable when the graph is built. Stereo flows only where a stereo source exists. Mono inputs receiving stereo are handled per module (sum or process both channels). | Must | M1 | Stereo matters mainly for audio. Computing two channels on every modulation cable wastes CPU. |
-| FR-SIG-08 | Cables can carry a polyphonic bundle (one value per active voice). | Must | M2 | Polyphony is required for most instruments. |
+| FR-SIG-08 | Cables can carry a polyphonic bundle (one value per active voice). | Must | M2 | Polyphony is required for most instruments. A bundle is an inferred cable width, as stereo is (ADR-0038, [polyphony](../design/polyphony.md)). |
 | FR-SIG-09 | Every port declares a nominal range (for example 0 to 1 or -1 to 1), by default its signal type's convention. The range is a hint: it is shown to the player, and never enforced or clipped. | Should | M1 | Players need to know what a cable usually carries. Modulation also needs each output's polarity ([port ranges](../design/port-ranges.md)). |
 
 ## 2. DSP graph and engine (`GRAPH`)
@@ -47,10 +47,10 @@ See ADR-0007 for the full signal model.
 
 | ID | Requirement | Priority | Phase | Rationale |
 |---|---|---|---|---|
-| FR-VOICE-01 | A patch or sub-patch can be marked polyphonic with a voice count. | Must | M2 | Standard instrument need. |
-| FR-VOICE-02 | Voice allocation supports at least oldest-steal, quietest-steal, and mono/legato modes. | Must | M2 | Different instruments need different behaviour. |
-| FR-VOICE-03 | Modules exist to merge voices into one signal and to send one signal to all voices. | Must | M2 | Users need to mix voices and share global modulation. |
-| FR-VOICE-04 | Per-voice values for MIDI note, velocity, pressure, and MPE dimensions are available as signals. | Should | M2 | Expressive control is a key reason to build custom instruments. |
+| FR-VOICE-01 | A patch or sub-patch can be marked polyphonic with a voice count. | Must | M2 | Standard instrument need. Met by a voice count on the module that allocates voices: a patch or sub-patch is polyphonic wherever a bundle flows ([polyphony](../design/polyphony.md#the-voice-count), rule 12). |
+| FR-VOICE-02 | Voice allocation supports at least oldest-steal, quietest-steal, and mono/legato modes. | Must | M2 | Different instruments need different behaviour. [Polyphony](../design/polyphony.md#allocation), rule 20. |
+| FR-VOICE-03 | Modules exist to merge voices into one signal and to send one signal to all voices. | Must | M2 | Users need to mix voices and share global modulation. Voice merge (MT-VOICE-01); a mono cable feeds every voice with no module ([polyphony](../design/polyphony.md#bundles), rule 6). |
+| FR-VOICE-04 | Per-voice values for MIDI note, velocity, pressure, and MPE dimensions are available as signals. | Should | M2 | Expressive control is a key reason to build custom instruments. [Polyphony](../design/polyphony.md#allocation), rule 28. |
 
 ## 4. Modulation (`MOD`)
 

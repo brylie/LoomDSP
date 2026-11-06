@@ -156,4 +156,4 @@ Goal: a chord progression and a set of note clips play an 8-voice instrument, an
 6. Change the patch scale with a trigger. The step written as a scale step follows the new scale. The steps written by name stay as written.
 7. Send the same notes out as MIDI to a hardware synth.
 
-Requirements: FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-LIB-13, FR-LIB-19, FR-LIB-20, FR-LIB-21, FR-LIB-29, FR-MIDI-04. Open questions: OQ-15 (recording), OQ-16 (how notes travel on cables). Specifications: [arrangement](../design/arrangement.md), [scale and tuning](../design/scale-and-tuning.md), and the polyphony spec to come ([#665](https://github.com/brylie/LoomDSP/issues/665)).
+Requirements: FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-LIB-13, FR-LIB-19, FR-LIB-20, FR-LIB-21, FR-LIB-29, FR-MIDI-04. Open questions: OQ-15 (recording); OQ-16 (how notes travel on cables) is settled by ADR-0038. Specifications: [polyphony](../design/polyphony.md), which follows this use case's chord sequencer and note cycle end to end, [arrangement](../design/arrangement.md), and [scale and tuning](../design/scale-and-tuning.md).
