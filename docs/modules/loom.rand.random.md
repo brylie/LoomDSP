@@ -64,7 +64,7 @@ A pitch that wanders on each beat, from a walk with a short glide.
 ```ron
 Patch(
     version: 1,
-    name: "Wandering Tone",
+    metadata: Metadata(name: "Wandering Tone"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1"),
         PatchModule(id: 2, kind: "loom.phase.scale@1", params: {"multiply": 4}),

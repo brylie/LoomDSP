@@ -46,7 +46,7 @@ Supplies a fixed control voltage to open a filter cutoff.
 ```ron
 Patch(
     version: 1,
-    name: "Fixed Offset",
+    metadata: Metadata(name: "Fixed Offset"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.saw@1"),

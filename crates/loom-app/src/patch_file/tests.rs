@@ -10,7 +10,7 @@ fn save_replaces_the_file_and_leaves_no_temporary() {
     std::fs::write(&path, "old").unwrap();
     let patch = Patch::new("Saved");
     save(&patch, &path).unwrap();
-    assert_eq!(load(&path).unwrap().name, "Saved");
+    assert_eq!(load(&path).unwrap().metadata.name, "Saved");
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temporary file is left");
     // A target that cannot be written reports the error and keeps the old file.
     let missing = dir.join("no-such-folder").join("p.ron");
@@ -23,7 +23,7 @@ fn save_replaces_the_file_and_leaves_no_temporary() {
         save(&Patch::new("Other"), &path),
         Err(PatchFileError::Io { .. })
     ));
-    assert_eq!(load(&path).unwrap().name, "Saved");
+    assert_eq!(load(&path).unwrap().metadata.name, "Saved");
     #[allow(clippy::permissions_set_readonly_false)]
     perms.set_readonly(false);
     std::fs::set_permissions(&path, perms).unwrap();
@@ -42,7 +42,7 @@ fn save_through_a_symlink_updates_the_target() {
     std::os::unix::fs::symlink(&real, &link).unwrap();
     save(&Patch::new("Second"), &link).unwrap();
     assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
-    assert_eq!(load(&real).unwrap().name, "Second");
+    assert_eq!(load(&real).unwrap().metadata.name, "Second");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

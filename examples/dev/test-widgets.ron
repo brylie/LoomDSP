@@ -9,7 +9,7 @@
 // each kind of control.
 Patch(
     version: 1,
-    name: "Test widgets",
+    metadata: Metadata(name: "Test widgets"),
     modules: [
         PatchModule(id: 1, kind: "test.panel@1", params: {"level": 1.0, "on": 1.0}),
         PatchModule(id: 2, kind: "test.panel@1", params: {"level": 0.25, "cutoff": 200.0, "steps": 3.0}),

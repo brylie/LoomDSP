@@ -396,7 +396,7 @@ fn check(path: &Path) -> Result<ExitCode> {
         println!("  unknown module {id}: {kind}");
     }
     let report = c.last_report();
-    println!("{}: \"{}\"", path.display(), patch.name);
+    println!("{}: \"{}\"", path.display(), patch.metadata.name);
     println!("  {} modules, {} cables", report.modules, c.graph().cables().count());
     if !report.skipped.is_empty() {
         let names: Vec<String> = report.skipped.iter().map(|&id| describe(c, id)).collect();
@@ -546,7 +546,7 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         midi: mut sender,
         ..
     } = parts;
-    println!("patch:  {} ({})", patch.name, path.display());
+    println!("patch:  {} ({})", patch.metadata.name, path.display());
     println!(
         "audio:  {} at {} Hz, {} channels, buffer {}",
         output.name(),

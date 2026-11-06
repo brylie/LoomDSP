@@ -41,7 +41,7 @@ Divides an LFO signal by a constant to scale down its amplitude.
 ```ron
 Patch(
     version: 1,
-    name: "Divide Signal",
+    metadata: Metadata(name: "Divide Signal"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 2, "shape": 1}),
         PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": 2}),

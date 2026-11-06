@@ -153,7 +153,7 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     let patch = dir.join("drone.ron");
     std::fs::write(
         &patch,
-        r#"Patch(version: 1, name: "Drone", authors: ["Ada Lovelace"], tags: ["drone"], license: "CC-BY-4.0")"#,
+        r#"Patch(version: 1, metadata: Metadata(name: "Drone", authors: ["Ada Lovelace"], tags: ["drone"], license: "CC-BY-4.0"))"#,
     )
     .unwrap();
     let mut args = args_with(&dir, r#"(author: "Sam Rivera")"#);
@@ -167,9 +167,9 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     assert!(app.save());
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     let saved = crate::patch_file::load(&patch).unwrap();
-    assert_eq!(saved.authors, ["Ada Lovelace"]);
-    assert_eq!(saved.tags, ["drone"]);
-    assert_eq!(saved.license.as_deref(), Some("CC-BY-4.0"));
+    assert_eq!(saved.metadata.authors, ["Ada Lovelace"]);
+    assert_eq!(saved.metadata.tags, ["drone"]);
+    assert_eq!(saved.metadata.license.as_deref(), Some("CC-BY-4.0"));
     assert!(app.save());
     assert_eq!(dialogs::asked(), []);
 
@@ -184,7 +184,7 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     );
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     assert_eq!(
-        crate::patch_file::load(&patch).unwrap().authors,
+        crate::patch_file::load(&patch).unwrap().metadata.authors,
         ["Ada Lovelace", "Sam Rivera"]
     );
     assert!(!app.unsaved());
@@ -228,7 +228,11 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
 fn metadata_edits_are_saved() {
     let dir = folder("save");
     let patch = dir.join("pad.ron");
-    std::fs::write(&patch, r#"Patch(version: 1, name: "Pad", description: "Soft.")"#).unwrap();
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, metadata: Metadata(name: "Pad", description: "Soft."))"#,
+    )
+    .unwrap();
     let mut args = crate::tests::app_args();
     args.patch = Some(patch.clone());
     let mut app = App::new(args);
@@ -237,8 +241,8 @@ fn metadata_edits_are_saved() {
     assert!(app.save());
     assert!(!app.unsaved());
     let saved = crate::patch_file::load(&patch).unwrap();
-    assert_eq!(saved.description, "Soft.");
-    assert_eq!(saved.tags, ["ambient"]);
+    assert_eq!(saved.metadata.description, "Soft.");
+    assert_eq!(saved.metadata.tags, ["ambient"]);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -253,7 +257,7 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
     let dir = folder("window");
     std::fs::write(
         dir.join("drone.ron"),
-        r#"Patch(version: 1, name: "Low Drone", authors: ["Ada Lovelace"], tags: ["drone"], license: "CC-BY-4.0")"#,
+        r#"Patch(version: 1, metadata: Metadata(name: "Low Drone", authors: ["Ada Lovelace"], tags: ["drone"], license: "CC-BY-4.0"))"#,
     )
     .unwrap();
     let args = args_with(

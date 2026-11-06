@@ -5,8 +5,10 @@
 // Turn the gain up and the tone turns to noise. Why: docs/learn/feedback-fm.md
 Patch(
     version: 1,
-    name: "FM feedback",
-    license: "CC0-1.0",
+    metadata: Metadata(
+        name: "FM feedback",
+        license: "CC0-1.0",
+    ),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.math.add@1"),

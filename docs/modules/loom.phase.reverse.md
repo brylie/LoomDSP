@@ -44,7 +44,7 @@ A saw read backward, so its ramp falls instead of rising.
 ```ron
 Patch(
     version: 1,
-    name: "Backward Saw",
+    metadata: Metadata(name: "Backward Saw"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.phase.reverse@1"),

@@ -40,7 +40,7 @@ Connects a sine oscillator directly to the stereo output.
 ```ron
 Patch(
     version: 1,
-    name: "Direct Output",
+    metadata: Metadata(name: "Direct Output"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

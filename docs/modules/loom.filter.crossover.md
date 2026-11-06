@@ -58,7 +58,7 @@ Noise split in two, with only the low and high bands sent on, so the middle is g
 ```ron
 Patch(
     version: 1,
-    name: "Noise Without Its Middle",
+    metadata: Metadata(name: "Noise Without Its Middle"),
     modules: [
         PatchModule(id: 1, kind: "loom.osc.noise@1"),
         PatchModule(id: 2, kind: "loom.filter.crossover@1", params: {"low_split": 300, "high_split": 3000}),

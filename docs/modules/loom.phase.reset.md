@@ -43,7 +43,7 @@ A wave that starts again from zero on every beat, whatever the running phase was
 ```ron
 Patch(
     version: 1,
-    name: "Restarted Wave",
+    metadata: Metadata(name: "Restarted Wave"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1"),
         PatchModule(id: 2, kind: "loom.phase.scale@1", params: {"multiply": 4}),

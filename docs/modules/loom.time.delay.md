@@ -51,7 +51,7 @@ Applies an echo delay to an envelope-shaped oscillator pulse.
 ```ron
 Patch(
     version: 1,
-    name: "Echo Delay",
+    metadata: Metadata(name: "Echo Delay"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

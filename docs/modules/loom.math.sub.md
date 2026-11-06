@@ -41,7 +41,7 @@ Subtracts an envelope from a steady value to create an inverted modulation conto
 ```ron
 Patch(
     version: 1,
-    name: "Inverted Envelope",
+    metadata: Metadata(name: "Inverted Envelope"),
     modules: [
         PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1}),
         PatchModule(id: 2, kind: "loom.env.envelope@1", params: {"attack": 0.05, "decay": 0.2, "sustain": 0.3, "release": 0.3}),

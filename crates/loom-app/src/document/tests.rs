@@ -131,7 +131,7 @@ fn a_new_patch_takes_the_defaults_and_edits_show_as_unsaved() {
     document.edit_info(|info| info.tags.push("drone".into()));
     assert!(document.info_unsaved());
     let mut patch = Patch::new("Patch");
-    patch.tags = vec!["drone".into()];
+    patch.metadata.tags = vec!["drone".into()];
     document.saved(PathBuf::from("drone.ron"), patch);
     assert!(!document.info_unsaved());
 }

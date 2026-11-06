@@ -62,7 +62,7 @@ A short noise hit on 3 of 8 steps in each bar.
 ```ron
 Patch(
     version: 1,
-    name: "Three in Eight",
+    metadata: Metadata(name: "Three in Eight"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1"),
         PatchModule(id: 2, kind: "loom.gate.euclid@1", params: {"steps": 8, "hits": 3}),

@@ -7,7 +7,7 @@
 //! ```ron
 //! Patch(
 //!     version: 1,
-//!     name: "Simple sine",
+//!     metadata: Metadata(name: "Simple sine"),
 //!     modules: [
 //!         (id: 1, kind: "loom.midi.note@1"),
 //!         (id: 2, kind: "loom.phase.generator@1"),
@@ -36,6 +36,7 @@ use loom_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+mod level;
 pub mod metadata;
 pub use metadata::Metadata;
 pub mod resolve;
@@ -52,29 +53,11 @@ pub const CURRENT_VERSION: u32 = 1;
 pub struct Patch {
     /// Format version. See [`CURRENT_VERSION`].
     pub version: u32,
-    /// Display name.
+    /// Name, description, authors, tags, and licence
+    /// (`docs/design/patch-metadata.md`). Always written, so a file names
+    /// its patch.
     #[serde(default)]
-    pub name: String,
-    /// Free text for the patch author.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub description: String,
-    /// Who made it, in credit order (`docs/design/patch-metadata.md`).
-    /// Omitted when empty, like the other metadata fields.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub authors: Vec<String>,
-    /// Tags for finding the patch again. Kept as written; filters compare
-    /// their tidy form ([`metadata::tidy_tag`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    /// An SPDX licence expression, kept as written even when it is not
-    /// valid (patch-metadata.md, rule 1). Spelled as SPDX spells it.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "metadata::serialize_licence",
-        deserialize_with = "metadata::deserialize_licence"
-    )]
-    pub license: Option<String>,
+    pub metadata: Metadata,
     /// Modules.
     #[serde(default)]
     pub modules: Vec<PatchModule>,
@@ -368,43 +351,15 @@ impl Patch {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             version: CURRENT_VERSION,
-            name: name.into(),
-            description: String::new(),
-            authors: Vec::new(),
-            tags: Vec::new(),
-            license: None,
+            metadata: Metadata {
+                name: name.into(),
+                ..Metadata::default()
+            },
             modules: Vec::new(),
             cables: Vec::new(),
             modulation: Vec::new(),
             midi: Vec::new(),
         }
-    }
-
-    /// The patch's metadata: name, description, authors, tags, licence.
-    pub fn metadata(&self) -> Metadata {
-        Metadata {
-            name: self.name.clone(),
-            description: self.description.clone(),
-            authors: self.authors.clone(),
-            tags: self.tags.clone(),
-            license: self.license.clone(),
-        }
-    }
-
-    /// Replaces the patch's metadata, name included.
-    pub fn set_metadata(&mut self, metadata: Metadata) {
-        let Metadata {
-            name,
-            description,
-            authors,
-            tags,
-            license,
-        } = metadata;
-        self.name = name;
-        self.description = description;
-        self.authors = authors;
-        self.tags = tags;
-        self.license = license;
     }
 
     /// Parses RON text and migrates it to the current version.
@@ -464,53 +419,7 @@ impl Patch {
         module: &PatchModule,
         registry: &Registry,
     ) -> Result<Option<loom_core::UnknownModule>, PatchError> {
-        if !module.kind.contains('@') {
-            return Err(LoomError::InvalidKind(module.kind.clone()).into());
-        }
-        let kind = loom_core::ModuleKind::parse(&module.kind)?;
-        if registry
-            .get(&kind.id)
-            .is_some_and(|descriptor| descriptor.version == kind.version)
-        {
-            return Ok(None);
-        }
-        let mut inputs = Vec::new();
-        let mut outputs = Vec::new();
-        let mut parameters: Vec<String> = module.params.keys().cloned().collect();
-        let push = |items: &mut Vec<String>, name: &str| {
-            if !items.iter().any(|existing| existing == name) {
-                items.push(name.to_string());
-            }
-        };
-        for cable in &self.cables {
-            if cable.to.0 == module.id {
-                push(&mut inputs, &cable.to.1);
-            }
-            if cable.from.0 == module.id {
-                push(&mut outputs, &cable.from.1);
-            }
-        }
-        for assignment in &self.modulation {
-            if assignment.source.0 == module.id {
-                push(&mut outputs, &assignment.source.1);
-            }
-            if assignment.target.0 == module.id {
-                push(&mut parameters, &assignment.target.1);
-            }
-        }
-        for mapping in &self.midi {
-            if mapping.target.0 == module.id {
-                push(&mut parameters, &mapping.target.1);
-            }
-        }
-        Ok(Some(loom_core::UnknownModule {
-            kind: module.kind.clone(),
-            params: module.params.clone(),
-            ranges: module.ranges.clone(),
-            inputs,
-            outputs,
-            parameters,
-        }))
+        self.level().unknown_module(module, registry)
     }
 
     /// Adds every module and cable to a controller and commits.
@@ -575,7 +484,7 @@ impl Patch {
                 controller.set_assignment_enabled(id, false)?;
             }
         }
-        self.check_midi()?;
+        self.level().check_midi()?;
         for mapping in &self.midi {
             let control = MidiControl {
                 channel: mapping.channel,
@@ -609,46 +518,7 @@ impl Patch {
     /// parameter is transient, as `(module id, parameter name)`. A module
     /// kind the registry does not know is skipped; loading reports it.
     pub fn transient_values(&self, registry: &Registry) -> Vec<(u32, String)> {
-        self.modules
-            .iter()
-            .filter_map(|module| {
-                let kind = loom_core::ModuleKind::parse(&module.kind).ok()?;
-                let descriptor = registry.get(&kind.id)?;
-                (kind.version == descriptor.version).then_some((module, descriptor))
-            })
-            .flat_map(|(module, descriptor)| {
-                module
-                    .params
-                    .keys()
-                    .filter(|name| {
-                        descriptor
-                            .param_index(name)
-                            .is_some_and(|i| descriptor.params[i].is_transient())
-                    })
-                    .map(|name| (module.id, name.clone()))
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
-
-    /// Refuses two MIDI mappings on one parameter or one control. The
-    /// controller would quietly keep the last one, which hides the mistake.
-    fn check_midi(&self) -> Result<(), PatchError> {
-        let mut targets = std::collections::BTreeSet::new();
-        let mut controls = std::collections::BTreeSet::new();
-        for mapping in &self.midi {
-            if !targets.insert(&mapping.target) {
-                return Err(PatchError::DuplicateMidiMapping {
-                    what: format!("parameter `{}` of module {}", mapping.target.1, mapping.target.0),
-                });
-            }
-            if !controls.insert((mapping.channel, mapping.controller)) {
-                return Err(PatchError::DuplicateMidiMapping {
-                    what: format!("controller {} on channel {}", mapping.controller, mapping.channel),
-                });
-            }
-        }
-        Ok(())
+        self.level().transient_values(registry)
     }
 
     /// Builds a patch from a graph. Only non-default parameters are saved.

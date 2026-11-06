@@ -48,7 +48,7 @@ Converts a decibel value into linear gain for an amplifier.
 ```ron
 Patch(
     version: 1,
-    name: "dB to level",
+    metadata: Metadata(name: "dB to level"),
     modules: [
         PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": -6}),
         PatchModule(id: 2, kind: "loom.math.convert@1", params: {"mode": 0}),

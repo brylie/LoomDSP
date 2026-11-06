@@ -346,7 +346,7 @@ fn a_copy_that_does_not_load_is_kept() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let crashed = edit_and_keep(&mut app);
     drop(app);
-    let unknown = r#"Patch(version: 1, name: "x", modules: [PatchModule(id: 1, kind: "loom.osc.sine@1", params: {"missing": 1.0})])"#;
+    let unknown = r#"Patch(version: 1, metadata: Metadata(name: "x"), modules: [PatchModule(id: 1, kind: "loom.osc.sine@1", params: {"missing": 1.0})])"#;
     fs::write(crashed.join("patch.ron"), unknown).unwrap();
     assert!(Patch::from_ron(unknown).is_ok(), "the copy reads");
 
@@ -376,7 +376,7 @@ fn restore_reports_unknown_modules() {
     drop(app);
     fs::write(
         crashed.join("patch.ron"),
-        r#"Patch(version: 1, name: "x", modules: [PatchModule(id: 1, kind: "future.effect@1")])"#,
+        r#"Patch(version: 1, metadata: Metadata(name: "x"), modules: [PatchModule(id: 1, kind: "future.effect@1")])"#,
     )
     .unwrap();
     let mut answer = Answer::new(Choice::Restore);

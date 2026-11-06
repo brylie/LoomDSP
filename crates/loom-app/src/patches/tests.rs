@@ -10,13 +10,13 @@ fn library(name: &str) -> PathBuf {
     let write = |file: &str, text: &str| std::fs::write(dir.join(file), text).unwrap();
     write(
         "drone.ron",
-        r#"Patch(version: 1, name: "Low Drone", description: "Slow filter", authors: ["Ada Lovelace"], tags: ["drone", "fm"], license: "CC-BY-NC-4.0")"#,
+        r#"Patch(version: 1, metadata: Metadata(name: "Low Drone", description: "Slow filter", authors: ["Ada Lovelace"], tags: ["drone", "fm"], license: "CC-BY-NC-4.0"))"#,
     );
     write(
         "live/bass.ron",
-        r#"Patch(version: 1, name: "Bass", authors: ["Sam Rivera"], tags: ["drone"], license: "MIT")"#,
+        r#"Patch(version: 1, metadata: Metadata(name: "Bass", authors: ["Sam Rivera"], tags: ["drone"], license: "MIT"))"#,
     );
-    write("pad.ron", r#"Patch(version: 1, name: "Pad")"#);
+    write("pad.ron", r#"Patch(version: 1, metadata: Metadata(name: "Pad"))"#);
     write("broken.ron", "not a patch");
     write(".drone.ron.123.tmp", "Patch(version: 1)");
     write("notes.txt", "Patch(version: 1)");
@@ -284,7 +284,10 @@ fn generated(name: &str, count: usize) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     for i in 0..count {
-        let text = format!(r#"Patch(version: 1, name: "Patch {i}", tags: ["tag-{}"])"#, i % 7);
+        let text = format!(
+            r#"Patch(version: 1, metadata: Metadata(name: "Patch {i}", tags: ["tag-{}"]))"#,
+            i % 7
+        );
         std::fs::write(dir.join(format!("{i}.ron")), text).unwrap();
     }
     dir

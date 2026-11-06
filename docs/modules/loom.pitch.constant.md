@@ -46,7 +46,7 @@ Sets an oscillator to play a fixed pitch 7 semitones above middle C.
 ```ron
 Patch(
     version: 1,
-    name: "Fixed Fifth Pitch",
+    metadata: Metadata(name: "Fixed Fifth Pitch"),
     modules: [
         PatchModule(id: 1, kind: "loom.pitch.constant@1", params: {"semitones": 7}),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

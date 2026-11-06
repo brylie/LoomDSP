@@ -323,7 +323,7 @@ impl Loaded {
                     sizes.insert(m.id, size);
                 }
             }
-            Ok(patch.metadata())
+            Ok(patch.metadata.clone())
         };
         let named = |name: String| Metadata {
             name,

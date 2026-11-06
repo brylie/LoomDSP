@@ -49,7 +49,7 @@ Filters pink noise with a resonant filter to create wind textures.
 ```ron
 Patch(
     version: 1,
-    name: "Wind Noise",
+    metadata: Metadata(name: "Wind Noise"),
     modules: [
         PatchModule(id: 1, kind: "loom.osc.noise@1", params: {"colour": 1, "seed": 42}),
         PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 500, "resonance": 0.6}),

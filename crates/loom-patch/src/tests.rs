@@ -5,7 +5,7 @@ const SIMPLE: &str = r#"
 // Comments are allowed.
 Patch(
     version: 1,
-    name: "Simple sine",
+    metadata: Metadata(name: "Simple sine"),
     modules: [
         (id: 3, kind: "loom.osc.sine@1"),
         (id: 1, kind: "loom.midi.note@1"),
@@ -264,7 +264,7 @@ fn tile_size_round_trips_and_old_patches_load() {
 #[test]
 fn unknown_module_preserves_named_links_and_settings() {
     let text = r#"Patch(
-            version: 1, name: "Missing",
+            version: 1, metadata: Metadata(name: "Missing"),
             modules: [
                 (id: 1, kind: "future.effect@3", label: Some("Future"), params: {"amount": 0.3}, ranges: {"amount": (0.0, 2.0)}),
                 (id: 2, kind: "loom.phase.generator@1"),
@@ -346,7 +346,7 @@ fn rejects_newer_versions() {
 const MODULATED: &str = r#"
 Patch(
     version: 1,
-    name: "Modulated",
+    metadata: Metadata(name: "Modulated"),
     modules: [
         (id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
         (id: 2, kind: "loom.env.envelope@1"),
@@ -425,7 +425,7 @@ fn assignment_order_survives_save_and_load() {
 const MAPPED: &str = r#"
 Patch(
     version: 1,
-    name: "Mapped",
+    metadata: Metadata(name: "Mapped"),
     modules: [
         (id: 1, kind: "loom.filter.svf@1"),
         (id: 2, kind: "loom.clock.transport@1"),

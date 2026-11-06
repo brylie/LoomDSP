@@ -4,11 +4,13 @@ use crate::Patch;
 /// A patch with authors, tags, and a licence, as the spec shows it.
 const WITH_METADATA: &str = r#"Patch(
     version: 1,
-    name: "Low Drone",
-    description: "Two detuned sines through a slow filter.",
-    authors: ["Ada Lovelace", "Sam Rivera"],
-    tags: ["drone", "ambient", "fm"],
-    license: "CC-BY-SA-4.0",
+    metadata: Metadata(
+        name: "Low Drone",
+        description: "Two detuned sines through a slow filter.",
+        authors: ["Ada Lovelace", "Sam Rivera"],
+        tags: ["drone", "ambient", "fm"],
+        license: "CC-BY-SA-4.0",
+    ),
     modules: [(id: 1, kind: "loom.osc.sine@1")],
 )
 "#;
@@ -28,9 +30,9 @@ fn a_patch_without_metadata_writes_no_new_fields() {
 #[test]
 fn metadata_survives_load_and_save_exactly() {
     let patch = Patch::from_ron(WITH_METADATA).unwrap();
-    assert_eq!(patch.authors, ["Ada Lovelace", "Sam Rivera"]);
-    assert_eq!(patch.tags, ["drone", "ambient", "fm"]);
-    assert_eq!(patch.license.as_deref(), Some("CC-BY-SA-4.0"));
+    assert_eq!(patch.metadata.authors, ["Ada Lovelace", "Sam Rivera"]);
+    assert_eq!(patch.metadata.tags, ["drone", "ambient", "fm"]);
+    assert_eq!(patch.metadata.license.as_deref(), Some("CC-BY-SA-4.0"));
     let text = patch.to_ron().unwrap();
     assert!(text.contains(r#"license: "CC-BY-SA-4.0""#), "{text}");
     assert_eq!(Patch::from_ron(&text).unwrap(), patch);
@@ -40,9 +42,9 @@ fn metadata_survives_load_and_save_exactly() {
 /// and saves unchanged. Tags are kept as written, too (rule 1).
 #[test]
 fn an_unrecognised_licence_is_kept_as_written() {
-    let text = r#"Patch(version: 1, tags: ["Not Tidy"], license: "my own terms")"#;
+    let text = r#"Patch(version: 1, metadata: Metadata(tags: ["Not Tidy"], license: "my own terms"))"#;
     let patch = Patch::from_ron(text).unwrap();
-    let licence = Licence::of(patch.license.as_deref());
+    let licence = Licence::of(patch.metadata.license.as_deref());
     assert_eq!(licence, Licence::Unrecognised("my own terms".to_string()));
     assert_eq!(licence.short(), "Unrecognised licence");
     let saved = patch.to_ron().unwrap();
@@ -54,11 +56,8 @@ fn an_unrecognised_licence_is_kept_as_written() {
 #[test]
 fn metadata_reads_without_the_modules() {
     let metadata = Metadata::from_ron(WITH_METADATA).unwrap();
-    assert_eq!(metadata, Patch::from_ron(WITH_METADATA).unwrap().metadata());
+    assert_eq!(metadata, Patch::from_ron(WITH_METADATA).unwrap().metadata);
     assert_eq!(metadata.name, "Low Drone");
-    let mut patch = Patch::new("Other");
-    patch.set_metadata(metadata.clone());
-    assert_eq!(patch.metadata(), metadata);
 }
 
 /// Acceptance and rule 5: typed text is tidied, duplicates are stored

@@ -4,8 +4,10 @@
 // The loop still runs one sample at a time.
 Patch(
     version: 1,
-    name: "FM feedback with explicit delay",
-    license: "CC0-1.0",
+    metadata: Metadata(
+        name: "FM feedback with explicit delay",
+        license: "CC0-1.0",
+    ),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.math.add@1"),

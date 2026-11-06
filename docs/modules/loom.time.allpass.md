@@ -53,7 +53,7 @@ Smears the phase of a pulse tone through an all-pass filter.
 ```ron
 Patch(
     version: 1,
-    name: "Allpass Diffuser",
+    metadata: Metadata(name: "Allpass Diffuser"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.pulse@1", params: {"width": 0.1}),

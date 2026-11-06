@@ -56,7 +56,7 @@ Displays an LFO triangle wave before it modulates a filter cutoff.
 ```ron
 Patch(
     version: 1,
-    name: "Scope Waveform",
+    metadata: Metadata(name: "Scope Waveform"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"shape": 1}),
         PatchModule(id: 2, kind: "loom.display.scope@1"),

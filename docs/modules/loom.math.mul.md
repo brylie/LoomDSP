@@ -51,7 +51,7 @@ Ring-modulates two oscillators together for bell-like metallic timbres.
 ```ron
 Patch(
     version: 1,
-    name: "Ring Modulation",
+    metadata: Metadata(name: "Ring Modulation"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1", params: {"tune": 0}),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

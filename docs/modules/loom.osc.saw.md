@@ -42,7 +42,7 @@ Plays a raw sawtooth wave driven by a phase generator.
 ```ron
 Patch(
     version: 1,
-    name: "Saw Voice",
+    metadata: Metadata(name: "Saw Voice"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1", params: {"tune": -12}),
         PatchModule(id: 2, kind: "loom.osc.saw@1"),

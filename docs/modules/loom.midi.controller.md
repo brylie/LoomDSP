@@ -54,7 +54,7 @@ The modulation wheel opens a filter on a saw.
 ```ron
 Patch(
     version: 1,
-    name: "Mod Wheel Filter",
+    metadata: Metadata(name: "Mod Wheel Filter"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

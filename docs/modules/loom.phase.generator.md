@@ -53,7 +53,7 @@ Drives both a sine oscillator and a saw oscillator from a single phase source.
 ```ron
 Patch(
     version: 1,
-    name: "Dual Oscillator Phase",
+    metadata: Metadata(name: "Dual Oscillator Phase"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

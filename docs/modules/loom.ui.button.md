@@ -50,7 +50,7 @@ Controls an audio mute or envelope gate with a toggle button.
 ```ron
 Patch(
     version: 1,
-    name: "Manual Gate Button",
+    metadata: Metadata(name: "Manual Gate Button"),
     modules: [
         PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 0, "on": 1}),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

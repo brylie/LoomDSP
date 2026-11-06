@@ -70,7 +70,7 @@ A clock with some hits taken out, playing a short envelope on a sine wave.
 ```ron
 Patch(
     version: 1,
-    name: "Sometimes",
+    metadata: Metadata(name: "Sometimes"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1"),
         PatchModule(id: 2, kind: "loom.phase.scale@1", params: {"multiply": 8}),

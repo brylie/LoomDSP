@@ -53,7 +53,7 @@ Triggers an envelope whenever an LFO rises above a fixed threshold.
 ```ron
 Patch(
     version: 1,
-    name: "LFO Comparator",
+    metadata: Metadata(name: "LFO Comparator"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 2}),
         PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": 0.5}),

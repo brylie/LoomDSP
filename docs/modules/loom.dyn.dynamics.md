@@ -88,7 +88,7 @@ A held saw that ducks on each note, with an envelope as the key.
 ```ron
 Patch(
     version: 1,
-    name: "Ducked Saw",
+    metadata: Metadata(name: "Ducked Saw"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

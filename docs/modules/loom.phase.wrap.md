@@ -50,7 +50,7 @@ Folds an amplified sine wave to generate wavefolded distortion harmonics.
 ```ron
 Patch(
     version: 1,
-    name: "Wavefolder",
+    metadata: Metadata(name: "Wavefolder"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

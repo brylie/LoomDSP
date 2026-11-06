@@ -51,7 +51,7 @@ Connects the first input pair to the audio output.
 ```ron
 Patch(
     version: 1,
-    name: "Live input",
+    metadata: Metadata(name: "Live input"),
     modules: [
         PatchModule(id: 1, kind: "loom.io.audio-in@1"),
         PatchModule(id: 2, kind: "loom.io.audio-out@1"),

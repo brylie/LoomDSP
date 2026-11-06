@@ -52,7 +52,7 @@ Adds pitch glide between incoming MIDI notes.
 ```ron
 Patch(
     version: 1,
-    name: "Portamento",
+    metadata: Metadata(name: "Portamento"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.level.slew@1", params: {"rise": 0.1, "fall": 0.1}),

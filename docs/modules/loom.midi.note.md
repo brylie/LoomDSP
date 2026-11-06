@@ -51,7 +51,7 @@ Plays a monophonic synthesizer voice from incoming MIDI notes.
 ```ron
 Patch(
     version: 1,
-    name: "Monophonic Synth",
+    metadata: Metadata(name: "Monophonic Synth"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1", params: {"channel": 0, "bend-range": 2}),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

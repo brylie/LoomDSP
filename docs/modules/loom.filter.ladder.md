@@ -58,7 +58,7 @@ A saw through the ladder, with an envelope opening the cutoff on every note.
 ```ron
 Patch(
     version: 1,
-    name: "Ladder Sweep",
+    metadata: Metadata(name: "Ladder Sweep"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

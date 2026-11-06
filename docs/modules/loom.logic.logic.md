@@ -55,7 +55,7 @@ Combines two gate signals with an And operation to trigger an envelope only when
 ```ron
 Patch(
     version: 1,
-    name: "Coincidence Gate",
+    metadata: Metadata(name: "Coincidence Gate"),
     modules: [
         PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 0, "on": 1}),
         PatchModule(id: 2, kind: "loom.midi.note@1"),

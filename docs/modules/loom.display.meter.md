@@ -56,7 +56,7 @@ Measures the output of an oscillator before sending it to the main audio output.
 ```ron
 Patch(
     version: 1,
-    name: "Metered Sine",
+    metadata: Metadata(name: "Metered Sine"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

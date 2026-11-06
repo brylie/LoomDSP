@@ -54,7 +54,7 @@ Divides a fast clock to trigger an envelope every 4th pulse.
 ```ron
 Patch(
     version: 1,
-    name: "Clock Divider",
+    metadata: Metadata(name: "Clock Divider"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 8, "shape": 4}),
         PatchModule(id: 2, kind: "loom.logic.divide@1", params: {"n": 4, "offset": 0}),

@@ -53,7 +53,7 @@ Modulates oscillator amplitude with an LFO.
 ```ron
 Patch(
     version: 1,
-    name: "Tremolo",
+    metadata: Metadata(name: "Tremolo"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

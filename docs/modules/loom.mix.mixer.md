@@ -67,7 +67,7 @@ Mixes three oscillator waveforms into a composite voice.
 ```ron
 Patch(
     version: 1,
-    name: "Four Channel Mix",
+    metadata: Metadata(name: "Four Channel Mix"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.saw@1"),

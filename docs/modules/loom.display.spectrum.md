@@ -53,7 +53,7 @@ Shows a saw wave's harmonics, with the filter cutting the highest ones.
 ```ron
 Patch(
     version: 1,
-    name: "Spectrum of a Saw",
+    metadata: Metadata(name: "Spectrum of a Saw"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.saw@1"),

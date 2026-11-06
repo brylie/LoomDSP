@@ -53,7 +53,7 @@ Two sines that share one phase, a quarter of a cycle apart, one on each side.
 ```ron
 Patch(
     version: 1,
-    name: "Quarter Cycle Apart",
+    metadata: Metadata(name: "Quarter Cycle Apart"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.phase.shift@1", params: {"offset": 0.25}),

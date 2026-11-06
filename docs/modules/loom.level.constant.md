@@ -48,7 +48,7 @@ Attenuates an oscillator signal by 6 dB before sending it to audio out.
 ```ron
 Patch(
     version: 1,
-    name: "Fixed Level Attenuation",
+    metadata: Metadata(name: "Fixed Level Attenuation"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

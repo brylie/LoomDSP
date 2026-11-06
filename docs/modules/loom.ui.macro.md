@@ -48,7 +48,7 @@ One knob that opens the filter and raises the drive together. Turn **Value** up.
 ```ron
 Patch(
     version: 1,
-    name: "One Knob Filter",
+    metadata: Metadata(name: "One Knob Filter"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.saw@1"),

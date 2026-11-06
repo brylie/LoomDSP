@@ -2,7 +2,7 @@
 // that listen for a click while audio restarts (docs/dev/manual-checks).
 Patch(
     version: 1,
-    name: "Check: drone",
+    metadata: Metadata(name: "Check: drone"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

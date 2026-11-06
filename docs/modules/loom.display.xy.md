@@ -59,7 +59,7 @@ Draws a circle from an LFO's two outputs, a quarter cycle apart.
 ```ron
 Patch(
     version: 1,
-    name: "XY Circle",
+    metadata: Metadata(name: "XY Circle"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 50.0}),
         PatchModule(id: 2, kind: "loom.display.xy@1"),

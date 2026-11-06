@@ -38,11 +38,13 @@ The three fields are optional and are left out of the file when empty, so a patc
 ```ron
 Patch(
     version: 1,
-    name: "Low Drone",
-    description: "Two detuned sines through a slow filter.",
-    authors: ["Ada Lovelace", "Sam Rivera"],
-    tags: ["drone", "ambient", "fm"],
-    license: "CC-BY-SA-4.0",
+    metadata: Metadata(
+        name: "Low Drone",
+        description: "Two detuned sines through a slow filter.",
+        authors: ["Ada Lovelace", "Sam Rivera"],
+        tags: ["drone", "ambient", "fm"],
+        license: "CC-BY-SA-4.0",
+    ),
     modules: [ ... ],
     cables: [ ... ],
 )

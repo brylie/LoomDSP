@@ -52,7 +52,7 @@ Converts a bipolar LFO into a unipolar envelope to modulate filter cutoff.
 ```ron
 Patch(
     version: 1,
-    name: "Bipolar to Unipolar",
+    metadata: Metadata(name: "Bipolar to Unipolar"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 1}),
         PatchModule(id: 2, kind: "loom.level.scale@1", params: {"factor": 0.5, "offset": 0.5}),

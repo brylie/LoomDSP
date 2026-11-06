@@ -59,7 +59,7 @@ Plays a short noise burst on every eighth note.
 ```ron
 Patch(
     version: 1,
-    name: "Eighth Notes",
+    metadata: Metadata(name: "Eighth Notes"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.clock@1", params: {"rate": 15, "width": 10}),
         PatchModule(id: 2, kind: "loom.env.envelope@1", params: {"attack": 0.001, "decay": 0.05, "sustain": 0, "release": 0.05}),

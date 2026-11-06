@@ -2,8 +2,10 @@
 // Play it with: loom play examples/patches/sine.ron
 Patch(
     version: 1,
-    name: "Sine",
-    license: "CC0-1.0",
+    metadata: Metadata(
+        name: "Sine",
+        license: "CC0-1.0",
+    ),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

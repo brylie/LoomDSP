@@ -40,7 +40,7 @@ Feedback FM oscillator loop broken by a 1-sample delay.
 ```ron
 Patch(
     version: 1,
-    name: "Feedback Loop",
+    metadata: Metadata(name: "Feedback Loop"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

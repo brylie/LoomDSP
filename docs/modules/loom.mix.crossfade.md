@@ -53,7 +53,7 @@ Fades smoothly between a saw oscillator and a pulse oscillator.
 ```ron
 Patch(
     version: 1,
-    name: "Oscillator Crossfade",
+    metadata: Metadata(name: "Oscillator Crossfade"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.saw@1"),

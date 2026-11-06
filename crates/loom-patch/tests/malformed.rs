@@ -147,7 +147,11 @@ fn edge_cases_load_safely() {
     // Deep nesting, which must not overflow the stack.
     let deep = 100_000;
     cases.push((
-        format!("Patch(version: 1, name: {}{})", "[".repeat(deep), "]".repeat(deep)),
+        format!(
+            "Patch(version: 1, metadata: Metadata(name: {}{}))",
+            "[".repeat(deep),
+            "]".repeat(deep)
+        ),
         false,
     ));
     cases.push((
@@ -155,7 +159,13 @@ fn edge_cases_load_safely() {
         false,
     ));
     // A very long string.
-    cases.push((format!("Patch(version: 1, name: \"{}\")", "x".repeat(1_000_000)), true));
+    cases.push((
+        format!(
+            "Patch(version: 1, metadata: Metadata(name: \"{}\"))",
+            "x".repeat(1_000_000)
+        ),
+        true,
+    ));
     // Only a check that the cases mean what they say: what matters is
     // that none of them panics.
     let wrong: Vec<String> = cases

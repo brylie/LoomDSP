@@ -41,7 +41,7 @@ This patch joins two constants and splits them again.
 ```ron
 Patch(
     version: 1,
-    name: "Stereo channels",
+    metadata: Metadata(name: "Stereo channels"),
     modules: [
         PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.25}),
         PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": -0.5}),

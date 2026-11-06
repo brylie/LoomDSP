@@ -42,7 +42,7 @@ Generates a pure sine tone driven by a phase generator.
 ```ron
 Patch(
     version: 1,
-    name: "Pure Sine",
+    metadata: Metadata(name: "Pure Sine"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.sine@1"),

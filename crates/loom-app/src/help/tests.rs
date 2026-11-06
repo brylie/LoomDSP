@@ -30,6 +30,35 @@ fn bundled_help_examples_load() {
     }
 }
 
+/// Every bundled help example and every example patch names its patch in
+/// `metadata`. `Patch` skips unknown fields, so a `name` left at the top
+/// level after the format change (#652) would load as an empty name and
+/// no other test would notice.
+#[test]
+fn bundled_and_example_patches_name_themselves_in_metadata() {
+    let app = tests::app();
+    for descriptor in &app.modules {
+        let example = Help::new(descriptor).model.example.expect(descriptor.id);
+        let patch = loom_patch::Patch::from_ron(&example).expect(descriptor.id);
+        assert!(
+            !patch.metadata.name.is_empty(),
+            "{}: example has no name",
+            descriptor.id
+        );
+    }
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for folder in ["patches", "dev"] {
+        for entry in std::fs::read_dir(examples.join(folder)).expect("examples folder") {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|e| e == "ron") {
+                let text = std::fs::read_to_string(&path).expect("example");
+                let patch = loom_patch::Patch::from_ron(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                assert!(!patch.metadata.name.is_empty(), "{} has no name", path.display());
+            }
+        }
+    }
+}
+
 /// A registry module with no bundled notes has no example action.
 #[test]
 fn modules_without_notes_have_no_example() {

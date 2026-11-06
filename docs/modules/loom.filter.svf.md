@@ -56,7 +56,7 @@ Filters a sawtooth wave with resonance, controlled by a MIDI note.
 ```ron
 Patch(
     version: 1,
-    name: "Resonant Filter",
+    metadata: Metadata(name: "Resonant Filter"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

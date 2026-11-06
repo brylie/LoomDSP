@@ -3,7 +3,7 @@
 // pointer checks with the control channel (check-pin-badge.jsonl).
 Patch(
     version: 1,
-    name: "Check: modulated",
+    metadata: Metadata(name: "Check: modulated"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

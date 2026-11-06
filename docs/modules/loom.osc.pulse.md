@@ -50,7 +50,7 @@ Plays a pulse wave driven by a phase generator.
 ```ron
 Patch(
     version: 1,
-    name: "Pulse Voice",
+    metadata: Metadata(name: "Pulse Voice"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.pulse@1", params: {"width": 0.25}),

@@ -59,7 +59,7 @@ Applies slow sine modulation to filter cutoff.
 ```ron
 Patch(
     version: 1,
-    name: "Filter LFO",
+    metadata: Metadata(name: "Filter LFO"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"sync": 0, "rate": 0.5, "shape": 0}),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

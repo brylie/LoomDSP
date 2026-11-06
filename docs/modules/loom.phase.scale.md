@@ -53,7 +53,7 @@ Generates a sub-octave phase ramp by dividing the master phase by 2.
 ```ron
 Patch(
     version: 1,
-    name: "Sub Octave Phase",
+    metadata: Metadata(name: "Sub Octave Phase"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.phase.scale@1", params: {"multiply": 1, "divide": 2}),

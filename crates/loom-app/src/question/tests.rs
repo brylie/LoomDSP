@@ -72,7 +72,7 @@ fn a_clean_patch_is_not_asked_about() {
 fn each_way_of_dropping_the_patch_asks() {
     let dir = TempDir::new("question-open");
     let other = dir.0.join("other.ron");
-    std::fs::write(&other, r#"Patch(version: 1, name: "Other")"#).unwrap();
+    std::fs::write(&other, r#"Patch(version: 1, metadata: Metadata(name: "Other"))"#).unwrap();
 
     // New.
     let mut ui = changed();
@@ -385,7 +385,11 @@ fn the_gate_keeps_the_music_going() {
 #[test]
 fn rows_still_reach_a_browser_under_the_question() {
     let dir = TempDir::new("question-rows");
-    std::fs::write(dir.0.join("a.ron"), r#"Patch(version: 1, name: "A")"#).unwrap();
+    std::fs::write(
+        dir.0.join("a.ron"),
+        r#"Patch(version: 1, metadata: Metadata(name: "A"))"#,
+    )
+    .unwrap();
     let mut app = App::new(app_args());
     let mut preferences = app.rig.store.saved().clone();
     preferences.library = Some(dir.0.clone());

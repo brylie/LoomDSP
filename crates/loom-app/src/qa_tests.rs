@@ -44,7 +44,7 @@ fn example(name: &str) -> PathBuf {
 }
 
 /// Full-scale noise times 4 into both outputs.
-const NOISE_GAIN_4: &str = r#"Patch(version: 1, name: "Noise gain 4", modules: [
+const NOISE_GAIN_4: &str = r#"Patch(version: 1, metadata: Metadata(name: "Noise gain 4"), modules: [
     PatchModule(id: 1, kind: "loom.osc.noise@1"),
     PatchModule(id: 2, kind: "loom.math.mul@1", params: {"gain": 4.0}),
     PatchModule(id: 3, kind: "loom.io.audio-out@1"),
@@ -54,7 +54,7 @@ const NOISE_GAIN_4: &str = r#"Patch(version: 1, name: "Noise gain 4", modules: [
 ])"#;
 
 /// A Constant of 1.0 into both outputs: DC.
-const CONSTANT_ONE: &str = r#"Patch(version: 1, name: "Constant", modules: [
+const CONSTANT_ONE: &str = r#"Patch(version: 1, metadata: Metadata(name: "Constant"), modules: [
     PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
     PatchModule(id: 2, kind: "loom.io.audio-out@1"),
 ], cables: [

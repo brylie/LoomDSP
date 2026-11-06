@@ -77,7 +77,7 @@ A saw with its rumble cut, a dip in the middle, and a little more air.
 ```ron
 Patch(
     version: 1,
-    name: "EQ on a Saw",
+    metadata: Metadata(name: "EQ on a Saw"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.phase.generator@1"),

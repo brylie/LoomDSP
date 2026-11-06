@@ -51,7 +51,7 @@ Restricts an LFO swing between 0 and 0.8.
 ```ron
 Patch(
     version: 1,
-    name: "Clamped LFO",
+    metadata: Metadata(name: "Clamped LFO"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 2}),
         PatchModule(id: 2, kind: "loom.level.clamp@1", params: {"low": 0, "high": 0.8}),

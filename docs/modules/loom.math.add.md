@@ -49,7 +49,7 @@ Adds an LFO vibrato to a keyboard pitch before the oscillator phase generator.
 ```ron
 Patch(
     version: 1,
-    name: "Pitch Vibrato",
+    metadata: Metadata(name: "Pitch Vibrato"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.mod.lfo@1", params: {"rate": 5}),

@@ -233,7 +233,7 @@ impl Document {
 
     /// Notes that `patch` is what the file holds now, as after a load.
     pub fn mark_loaded(&mut self, patch: Patch) {
-        self.saved_info = patch.metadata();
+        self.saved_info = patch.metadata.clone();
         self.saved_content = Some(patch);
     }
 
@@ -244,7 +244,7 @@ impl Document {
         self.file = Some(path);
         self.shown_name = None;
         self.save_hint = None;
-        self.saved_info = patch.metadata();
+        self.saved_info = patch.metadata.clone();
         self.saved_content = Some(patch);
     }
 

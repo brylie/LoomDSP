@@ -91,7 +91,7 @@ Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.
 ```ron
 Patch(
     version: 1,
-    name: "",
+    metadata: Metadata(name: ""),
     modules: [
         (id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 800.0}, position: (240.0, 96.0)),
         (id: 7, kind: "loom.env.envelope@1", position: (240.0, 0.0)),

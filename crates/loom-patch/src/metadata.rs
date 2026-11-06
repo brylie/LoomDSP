@@ -15,12 +15,9 @@ pub const MAX_TAGS: usize = 20;
 /// A tag is at most this many characters long (rule 5).
 pub const MAX_TAG_CHARS: usize = 32;
 
-/// The metadata fields of a patch file, read without its modules.
-///
-/// The patch browser reads only these, so a folder of large patches stays
-/// quick to list. Unknown fields, such as `modules`, are skipped.
+/// The metadata of a patch: one field of [`crate::Patch`], and of a
+/// sub-patch definition, so no struct repeats these fields (#652).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename = "Patch")]
 pub struct Metadata {
     /// Display name.
     #[serde(default)]
@@ -44,27 +41,34 @@ pub struct Metadata {
     pub license: Option<String>,
 }
 
+/// The head of a patch file: the one field the browser reads.
+///
+/// The patch browser reads only this, so a folder of large patches stays
+/// quick to list. Unknown fields, such as `modules`, are skipped.
+#[derive(Deserialize)]
+#[serde(rename = "Patch")]
+struct Head {
+    #[serde(default)]
+    metadata: Metadata,
+}
+
 impl Metadata {
-    /// Reads the metadata of a patch file's text. A file that is not a
-    /// patch, or whose metadata fields have the wrong shape, is an error.
+    /// Reads the metadata of a patch file's text without its modules. A
+    /// file that is not a patch, or whose metadata fields have the wrong
+    /// shape, is an error.
     pub fn from_ron(text: &str) -> Result<Self, ron::error::SpannedError> {
-        ron::from_str(text)
+        ron::from_str::<Head>(text).map(|head| head.metadata)
     }
 }
 
 /// Writes a present licence as a plain string, as SPDX tools expect:
 /// `license: "MIT"`, not `license: Some("MIT")`.
-pub(crate) fn serialize_licence<S: serde::Serializer>(
-    value: &Option<String>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
+fn serialize_licence<S: serde::Serializer>(value: &Option<String>, serializer: S) -> Result<S::Ok, S::Error> {
     value.as_deref().unwrap_or_default().serialize(serializer)
 }
 
 /// Reads a plain licence string, leaving a missing field to its default.
-pub(crate) fn deserialize_licence<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error> {
+fn deserialize_licence<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
     String::deserialize(deserializer).map(Some)
 }
 

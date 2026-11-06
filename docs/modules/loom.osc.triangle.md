@@ -42,7 +42,7 @@ Plays a mellow triangle tone through audio out.
 ```ron
 Patch(
     version: 1,
-    name: "Triangle Voice",
+    metadata: Metadata(name: "Triangle Voice"),
     modules: [
         PatchModule(id: 1, kind: "loom.phase.generator@1"),
         PatchModule(id: 2, kind: "loom.osc.triangle@1"),

@@ -56,7 +56,7 @@ Toggles an audio gate on and off with each press of a button.
 ```ron
 Patch(
     version: 1,
-    name: "Toggle Memory",
+    metadata: Metadata(name: "Toggle Memory"),
     modules: [
         PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 1}),
         PatchModule(id: 2, kind: "loom.logic.memory@1", params: {"mode": 1}),

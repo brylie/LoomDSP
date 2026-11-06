@@ -8,8 +8,10 @@
 // Play it with: loom play examples/patches/modulation.ron
 Patch(
     version: 1,
-    name: "Modulation",
-    license: "CC0-1.0",
+    metadata: Metadata(
+        name: "Modulation",
+        license: "CC0-1.0",
+    ),
     modules: [
         // Keyboard: pitch and gate.
         PatchModule(id: 1, kind: "loom.midi.note@1"),

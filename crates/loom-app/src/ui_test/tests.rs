@@ -791,7 +791,7 @@ fn unknown_positions_round_trip_until_moved() {
     let path = std::env::temp_dir().join(format!("loom-unknown-positions-{}.ron", std::process::id()));
     std::fs::write(
         &path,
-        r#"Patch(version: 1, name: "Missing", modules: [
+        r#"Patch(version: 1, metadata: Metadata(name: "Missing"), modules: [
         (id: 1, kind: "future.one@1"),
         (id: 2, kind: "future.two@1", position: Some((17.25, 45.5))),
         (id: 3, kind: "loom.clock.transport@1")
@@ -839,7 +839,7 @@ fn dragging_cables_to_unknown_ports_is_refused() {
     let path = std::env::temp_dir().join(format!("loom-unknown-drag-{}.ron", std::process::id()));
     std::fs::write(
         &path,
-        r#"Patch(version: 1, name: "Missing", modules: [
+        r#"Patch(version: 1, metadata: Metadata(name: "Missing"), modules: [
         (id: 1, kind: "future.effect@1", position: Some((480.0, 100.0))),
         (id: 2, kind: "loom.phase.generator@1", position: Some((100.0, 100.0))),
         (id: 3, kind: "loom.clock.transport@1", position: Some((100.0, 300.0)))

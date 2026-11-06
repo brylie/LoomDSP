@@ -57,7 +57,7 @@ fn copy_writes_a_versioned_patch_with_inside_cables_and_assignments_only() {
     let patch = Patch::from_ron(&text).unwrap();
 
     assert_eq!(patch.version, loom_patch::CURRENT_VERSION);
-    assert!(patch.name.is_empty());
+    assert!(patch.metadata.name.is_empty());
     let copied: Vec<u32> = patch.modules.iter().map(|m| m.id).collect();
     assert_eq!(copied, vec![sine.0, lfo_phase.0, lfo_a.0, vca.0]);
     let lfo = patch.modules.iter().find(|m| m.id == lfo_phase.0).unwrap();
@@ -230,7 +230,7 @@ fn a_duplicated_voice_sounds_like_one_built_by_hand() {
 fn paste_reads_hand_edited_text_and_ignores_midi_mappings() {
     let text = r#"Patch(
         version: 1,
-        name: "Somebody's patch",
+        metadata: Metadata(name: "Somebody's patch"),
         modules: [
             (id: 10, kind: "loom.math.mul", params: {"gain": 0.25}),
             (id: 20, kind: "loom.osc.sine"),

@@ -68,7 +68,7 @@ Three pitches of one oscillator, stepped by the beat. The pitches stay exact, be
 ```ron
 Patch(
     version: 1,
-    name: "Three Note Run",
+    metadata: Metadata(name: "Three Note Run"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1"),
         PatchModule(id: 2, kind: "loom.pitch.constant@1", params: {"semitones": 0}),

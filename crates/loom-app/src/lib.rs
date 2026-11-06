@@ -682,7 +682,7 @@ impl App {
             }
         };
         let mut patch = Patch::from_graph_with(session.document.name(), session.controller.graph(), layout);
-        patch.set_metadata(session.document.info().clone());
+        patch.metadata = session.document.info().clone();
         patch
     }
 

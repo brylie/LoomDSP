@@ -69,7 +69,7 @@ Starts and stops the patch from a button: patch a toggle Button into **run** and
 ```ron
 Patch(
     version: 1,
-    name: "Start and stop",
+    metadata: Metadata(name: "Start and stop"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.transport@1", params: {"tempo": 96}),
         PatchModule(id: 2, kind: "loom.ui.button@1", params: {"on": 1}),

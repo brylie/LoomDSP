@@ -52,7 +52,7 @@ Smooths white noise through a lowpass filter.
 ```ron
 Patch(
     version: 1,
-    name: "Filtered Noise",
+    metadata: Metadata(name: "Filtered Noise"),
     modules: [
         PatchModule(id: 1, kind: "loom.osc.noise@1"),
         PatchModule(id: 2, kind: "loom.filter.onepole@1", params: {"cutoff": 800}),

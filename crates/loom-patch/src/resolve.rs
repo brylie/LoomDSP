@@ -11,6 +11,7 @@
 //!
 //! Control thread only. Nothing here runs on the audio thread.
 
+use crate::level::LevelRef;
 use crate::{LoadWarning, Patch, PatchError, PatchModule, RangeReason};
 use loom_core::{
     Controller, LoomError, ModuleDescriptor, ModuleId, ModuleNames, Node, ParamRange, ParamSpec, Registry,
@@ -227,17 +228,40 @@ impl Patch {
         registry: &Registry,
         options: ResolveOptions,
     ) -> Result<(Vec<ResolvedModule>, Vec<LoadWarning>), ResolveError> {
-        let mut modules = Vec::with_capacity(self.modules.len());
-        let mut warnings = Vec::new();
-        for module in &self.modules {
-            modules.push(self.resolve_module(module, registry, options, &mut warnings)?);
-        }
-        Ok((modules, warnings))
+        self.level().resolve(registry, options)
     }
 
     /// Resolves one module of this patch. A placeholder takes its ports
     /// from this patch's cables, assignments, and MIDI mappings.
     pub fn resolve_module(
+        &self,
+        module: &PatchModule,
+        registry: &Registry,
+        options: ResolveOptions,
+        warnings: &mut Vec<LoadWarning>,
+    ) -> Result<ResolvedModule, ResolveError> {
+        self.level().resolve_module(module, registry, options, warnings)
+    }
+}
+
+impl LevelRef<'_> {
+    /// Resolves every module of this level, in file order.
+    pub(crate) fn resolve(
+        &self,
+        registry: &Registry,
+        options: ResolveOptions,
+    ) -> Result<(Vec<ResolvedModule>, Vec<LoadWarning>), ResolveError> {
+        let mut modules = Vec::with_capacity(self.modules.len());
+        let mut warnings = Vec::new();
+        for module in self.modules {
+            modules.push(self.resolve_module(module, registry, options, &mut warnings)?);
+        }
+        Ok((modules, warnings))
+    }
+
+    /// Resolves one module of this level. A placeholder takes its ports
+    /// from this level's cables, assignments, and MIDI mappings.
+    pub(crate) fn resolve_module(
         &self,
         module: &PatchModule,
         registry: &Registry,
@@ -295,7 +319,7 @@ impl Patch {
         // them for `loom check`.
         let params = descriptor.saved_values(&values);
         let ranges = (0..descriptor.params.len())
-            .map(|index| Self::resolve_range(module, descriptor, &params, index, warnings))
+            .map(|index| resolve_range(module, descriptor, &params, index, warnings))
             .collect();
         Ok(ResolvedModule {
             id: module.id,
@@ -307,54 +331,54 @@ impl Patch {
             layout,
         })
     }
+}
 
-    /// The range parameter `index` loads with, chosen so it holds the value
-    /// (control-ranges.md, rule 7), with a warning when the saved range was
-    /// not kept. `None` for a parameter that offers no ranges.
-    fn resolve_range(
-        module: &PatchModule,
-        descriptor: &'static ModuleDescriptor,
-        params: &[f32],
-        index: usize,
-        warnings: &mut Vec<LoadWarning>,
-    ) -> Option<ParamRange> {
-        let saved_of = |spec: &ParamSpec| {
-            module
-                .ranges
-                .get(spec.name)
-                .map(|&(min, max)| ParamRange::new(min, max))
-        };
-        let value_of = |spec: &ParamSpec| {
-            descriptor
-                .param_index(spec.name)
-                .map_or(spec.default, |at| spec.clamp(params[at]))
-        };
-        let spec = &descriptor.params[index];
-        let (range, reported) = descriptor.load_range(index, saved_of, value_of)?;
-        match (reported, descriptor.range_partner(index), saved_of(spec)) {
-            // Said once for the pair (control-ranges.md, Ranges on a range
-            // widget).
-            (true, Some(partner), _) if index < partner => warnings.push(LoadWarning::SharedRangeNotKept {
-                module: module.id,
-                param: spec.name.to_string(),
-                partner: descriptor.params[partner].name.to_string(),
-                loaded: range,
-            }),
-            (true, None, Some(saved)) => warnings.push(LoadWarning::RangeNotKept {
-                module: module.id,
-                param: spec.name.to_string(),
-                saved,
-                reason: if spec.options.ranges.contains(&saved) {
-                    RangeReason::DoesNotHold { value: value_of(spec) }
-                } else {
-                    RangeReason::NotOffered
-                },
-                loaded: range,
-            }),
-            _ => {}
-        }
-        Some(range)
+/// The range parameter `index` loads with, chosen so it holds the value
+/// (control-ranges.md, rule 7), with a warning when the saved range was
+/// not kept. `None` for a parameter that offers no ranges.
+fn resolve_range(
+    module: &PatchModule,
+    descriptor: &'static ModuleDescriptor,
+    params: &[f32],
+    index: usize,
+    warnings: &mut Vec<LoadWarning>,
+) -> Option<ParamRange> {
+    let saved_of = |spec: &ParamSpec| {
+        module
+            .ranges
+            .get(spec.name)
+            .map(|&(min, max)| ParamRange::new(min, max))
+    };
+    let value_of = |spec: &ParamSpec| {
+        descriptor
+            .param_index(spec.name)
+            .map_or(spec.default, |at| spec.clamp(params[at]))
+    };
+    let spec = &descriptor.params[index];
+    let (range, reported) = descriptor.load_range(index, saved_of, value_of)?;
+    match (reported, descriptor.range_partner(index), saved_of(spec)) {
+        // Said once for the pair (control-ranges.md, Ranges on a range
+        // widget).
+        (true, Some(partner), _) if index < partner => warnings.push(LoadWarning::SharedRangeNotKept {
+            module: module.id,
+            param: spec.name.to_string(),
+            partner: descriptor.params[partner].name.to_string(),
+            loaded: range,
+        }),
+        (true, None, Some(saved)) => warnings.push(LoadWarning::RangeNotKept {
+            module: module.id,
+            param: spec.name.to_string(),
+            saved,
+            reason: if spec.options.ranges.contains(&saved) {
+                RangeReason::DoesNotHold { value: value_of(spec) }
+            } else {
+                RangeReason::NotOffered
+            },
+            loaded: range,
+        }),
+        _ => {}
     }
+    Some(range)
 }
 
 #[cfg(test)]

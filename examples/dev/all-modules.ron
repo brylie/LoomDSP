@@ -4,7 +4,7 @@
 // The modules are in help-page order, six to a row; Transport is top right.
 Patch(
     version: 1,
-    name: "All modules",
+    metadata: Metadata(name: "All modules"),
     modules: [
         PatchModule(id: 1, kind: "loom.clock.clock@1", position: Some((0.0, 0.0))),
         PatchModule(id: 2, kind: "loom.display.meter@1", position: Some((320.0, 0.0))),

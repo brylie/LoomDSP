@@ -48,7 +48,7 @@ Fires sample-and-hold random values once per cycle of an LFO phase.
 ```ron
 Patch(
     version: 1,
-    name: "Phase Clock",
+    metadata: Metadata(name: "Phase Clock"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 4}),
         PatchModule(id: 2, kind: "loom.phase.trigger@1"),

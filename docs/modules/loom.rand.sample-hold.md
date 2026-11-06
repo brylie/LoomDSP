@@ -51,7 +51,7 @@ Samples noise on every clock pulse to generate stepped random pitches.
 ```ron
 Patch(
     version: 1,
-    name: "Random Arpeggiator",
+    metadata: Metadata(name: "Random Arpeggiator"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 6, "shape": 4}),
         PatchModule(id: 2, kind: "loom.osc.noise@1"),

@@ -12,7 +12,11 @@ fn patches(dir: &Path, count: usize) -> Vec<PathBuf> {
     (0..count)
         .map(|i| {
             let path = dir.join(format!("{i}.ron"));
-            std::fs::write(&path, format!(r#"Patch(version: 1, name: "Patch {i}")"#)).unwrap();
+            std::fs::write(
+                &path,
+                format!(r#"Patch(version: 1, metadata: Metadata(name: "Patch {i}"))"#),
+            )
+            .unwrap();
             path
         })
         .collect()
