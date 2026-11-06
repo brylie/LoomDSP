@@ -436,7 +436,7 @@ impl App {
         }
         self.overlays.close_preferences();
         if several {
-            let notes = self.session.document.load_notes().join("; ");
+            let notes = join_notes(self.session.document.load_notes());
             let name = files::display_name(Some(path));
             let notes = if notes.is_empty() {
                 notes
@@ -533,13 +533,19 @@ impl App {
     }
 }
 
+/// The load notes as the status line shows them: each one's text, joined
+/// by semicolons.
+pub(crate) fn join_notes(notes: &[loom_patch::LoadWarning]) -> String {
+    notes.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ")
+}
+
 /// `opened <path>`, followed by the load notes when there are any, so a note
 /// about what loaded differently stays in view.
-pub(crate) fn opened_status(path: &std::path::Path, notes: &[String]) -> String {
+pub(crate) fn opened_status(path: &std::path::Path, notes: &[loom_patch::LoadWarning]) -> String {
     if notes.is_empty() {
         format!("opened {}", path.display())
     } else {
-        format!("opened {}: {}", path.display(), notes.join("; "))
+        format!("opened {}: {}", path.display(), join_notes(notes))
     }
 }
 

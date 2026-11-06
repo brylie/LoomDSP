@@ -218,10 +218,9 @@ fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)
     // What loaded differently from the file, such as a saved control range
     // that was not kept (control-ranges.md, rule 7). The patch still plays.
     for note in patch.load_into(&mut parts.controller)? {
-        let level = if note.contains("not in this version:") {
-            "warning"
-        } else {
-            "note"
+        let level = match note.level() {
+            loom_patch::LoadLevel::Warning => "warning",
+            loom_patch::LoadLevel::Note => "note",
         };
         eprintln!("{level}: {note}");
     }

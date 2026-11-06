@@ -400,7 +400,13 @@ fn dropping_several_keeps_the_load_notes() {
     let files = patches(&dir.0, 1);
     let mut app = app();
     drop_files(&mut app, &[files[0].clone(), dir.0.join("other.wav")]);
-    let note = app.session.document.load_notes().first().expect("a load note").clone();
+    let note = app
+        .session
+        .document
+        .load_notes()
+        .first()
+        .expect("a load note")
+        .to_string();
     let status = app.alerts.status();
     assert!(
         status.starts_with("Opened \"0.ron\". Drop one patch at a time."),

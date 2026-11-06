@@ -26,8 +26,12 @@ Patch(
 fn load_text(text: &str) -> (Controller, Vec<String>) {
     let patch = Patch::from_ron(text).unwrap();
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
-    let mut notes = patch.load_into(&mut parts.controller).unwrap();
-    notes.retain(|note| !note.contains("no Transport"));
+    let notes = patch.load_into(&mut parts.controller).unwrap();
+    let notes = notes
+        .iter()
+        .filter(|note| !matches!(note, LoadWarning::TransportAdded { .. }))
+        .map(ToString::to_string)
+        .collect();
     (parts.controller, notes)
 }
 
@@ -40,11 +44,7 @@ fn every_patch_loads_with_exactly_one_transport() {
     let patch = Patch::from_ron(r#"Patch(version: 1, modules: [(id: 3, kind: "loom.math.mul@1")])"#).unwrap();
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
     let notes = patch.load_into(&mut parts.controller).unwrap();
-    assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(
-        notes[0].contains("no Transport") && notes[0].contains("module 4"),
-        "{notes:?}"
-    );
+    assert_eq!(notes, [LoadWarning::TransportAdded { module: 4 }]);
     assert_eq!(parts.controller.transport_module(), Some(ModuleId(4)));
 
     let two = Patch::from_ron(
@@ -280,7 +280,9 @@ fn unknown_module_preserves_named_links_and_settings() {
     let patch = Patch::from_ron(text).unwrap();
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
     let notes = patch.load_into(&mut parts.controller).unwrap();
-    assert!(notes.iter().any(|note| note.contains("future.effect@3")));
+    assert!(notes.iter().any(
+        |note| matches!(note, LoadWarning::UnknownModules { kinds } if kinds.iter().any(|k| k.contains("future.effect@3")))
+    ));
     let node = parts.controller.graph().node(ModuleId(1)).unwrap();
     let unknown = node.unknown.as_ref().unwrap();
     assert_eq!(unknown.inputs, ["input"]);

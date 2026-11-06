@@ -115,12 +115,17 @@ pub struct Document {
     /// way, so the autosave timer can stop.
     settled: bool,
     /// What loaded differently, from the last load.
-    load_notes: Vec<String>,
+    load_notes: Vec<loom_patch::LoadWarning>,
 }
 
 impl Document {
     /// A patch just loaded from `file`, or with no file.
-    pub fn new(info: Metadata, file: Option<PathBuf>, stamp: Option<recovery::Stamp>, load_notes: Vec<String>) -> Self {
+    pub fn new(
+        info: Metadata,
+        file: Option<PathBuf>,
+        stamp: Option<recovery::Stamp>,
+        load_notes: Vec<loom_patch::LoadWarning>,
+    ) -> Self {
         Self {
             saved_info: info.clone(),
             info,
@@ -194,7 +199,7 @@ impl Document {
     }
 
     /// What loaded differently, from the last load.
-    pub fn load_notes(&self) -> &[String] {
+    pub fn load_notes(&self) -> &[loom_patch::LoadWarning] {
         &self.load_notes
     }
 

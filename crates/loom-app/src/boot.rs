@@ -166,7 +166,7 @@ impl App {
             _ => format!("Restored unsaved changes from {when}."),
         });
         for note in self.session.document.load_notes() {
-            if note.contains("not in this version:") {
+            if matches!(note, loom_patch::LoadWarning::UnknownModules { .. }) {
                 self.alerts.append_warning(&format!(" {note}"));
             }
         }
@@ -290,7 +290,7 @@ impl App {
 impl Loaded {
     /// What the status line says about this load, if anything.
     pub(crate) fn status(&self) -> String {
-        self.notes.join("; ")
+        crate::file_commands::join_notes(&self.notes)
     }
 
     /// Builds an engine and loads a patch into it. On failure nothing else

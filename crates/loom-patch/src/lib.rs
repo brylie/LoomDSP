@@ -38,6 +38,8 @@ use std::collections::BTreeMap;
 
 pub mod metadata;
 pub use metadata::Metadata;
+pub mod warning;
+pub use warning::{LoadLevel, LoadWarning, RangeReason};
 
 /// The patch format version this build writes.
 pub const CURRENT_VERSION: u32 = 1;
@@ -513,14 +515,15 @@ impl Patch {
     /// Adds every module and cable to a controller and commits.
     ///
     /// The controller should be empty. Module IDs from the file are kept.
-    /// Returns notes about what loaded differently from the file: a saved
+    /// Returns a [`LoadWarning`] for each thing that loaded differently from
+    /// the file: an unknown module, an added Transport, or a saved
     /// control range that the parameter does not offer, or that does not
     /// hold the saved value. Values never change (control-ranges.md, rule 7).
     ///
     /// Every patch has exactly one Transport (`docs/design/clock.md`). Two
     /// fail with an error that names both. A patch without one gets one,
     /// with a note, when the registry has the Transport module.
-    pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<String>, PatchError> {
+    pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<LoadWarning>, PatchError> {
         let mut notes = Vec::new();
         let mut unknown_kinds = Vec::new();
         let transports: Vec<u32> = self
@@ -570,37 +573,11 @@ impl Patch {
             }
         }
         if !unknown_kinds.is_empty() {
-            let mut distinct = Vec::new();
-            for kind in &unknown_kinds {
-                if !distinct.contains(&kind) {
-                    distinct.push(kind);
-                }
-            }
-            let names = distinct
-                .iter()
-                .take(3)
-                .map(|kind| format!("`{kind}`"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let more = distinct.len().saturating_sub(3);
-            let extra = if more > 0 {
-                format!(" and {more} more")
-            } else {
-                String::new()
-            };
-            let noun = if unknown_kinds.len() == 1 {
-                "module is"
-            } else {
-                "modules are"
-            };
-            notes.push(format!("{} {noun} not in this version: {names}{extra}. They make no sound. Their settings are kept when you save. Open the patch in a newer LoomDSP to play them.", unknown_kinds.len()));
+            notes.push(LoadWarning::UnknownModules { kinds: unknown_kinds });
         }
         if transports.is_empty() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
             let id = controller.add_module(TRANSPORT_MODULE)?;
-            notes.push(format!(
-                "the patch had no Transport, so one was added as module {} (120 BPM, 4/4, running)",
-                id.0
-            ));
+            notes.push(LoadWarning::TransportAdded { module: id.0 });
         }
         for cable in &self.cables {
             controller.connect_named(ModuleId(cable.from.0), &cable.from.1, ModuleId(cable.to.0), &cable.to.1)?;
@@ -653,7 +630,7 @@ impl Patch {
     /// Selects each parameter's control range before its value is set, so
     /// the range never clamps a saved value (rule 7). Returns a note for
     /// each saved range that was not kept.
-    fn load_ranges(module: &PatchModule, controller: &mut Controller) -> Result<Vec<String>, PatchError> {
+    fn load_ranges(module: &PatchModule, controller: &mut Controller) -> Result<Vec<LoadWarning>, PatchError> {
         let id = ModuleId(module.id);
         let descriptor = controller
             .graph()
@@ -668,10 +645,10 @@ impl Patch {
         for name in module.ranges.keys() {
             let index = descriptor.param_index(name).ok_or_else(|| unknown(name))?;
             if descriptor.params[index].options.ranges.is_empty() {
-                notes.push(format!(
-                    "module {}: parameter `{name}` offers no ranges, so its saved range is ignored",
-                    module.id
-                ));
+                notes.push(LoadWarning::RangeIgnored {
+                    module: module.id,
+                    param: name.clone(),
+                });
             }
         }
         for (index, spec) in descriptor.params.iter().enumerate() {
@@ -693,22 +670,25 @@ impl Patch {
                 // Said once for the pair (control-ranges.md, Ranges on a range
                 // widget).
                 if index < partner {
-                    notes.push(format!(
-                        "module {}: parameters `{}` and `{}` share a range, and the saved ranges do not hold both values; they load with {range}",
-                        module.id, spec.name, descriptor.params[partner].name
-                    ));
+                    notes.push(LoadWarning::SharedRangeNotKept {
+                        module: module.id,
+                        param: spec.name.to_string(),
+                        partner: descriptor.params[partner].name.to_string(),
+                        loaded: range,
+                    });
                 }
             } else if reported && let Some(saved) = saved {
-                notes.push(format!(
-                    "module {}: parameter `{}` was saved with range {saved}, which {}; it loads with {range}",
-                    module.id,
-                    spec.name,
-                    if spec.options.ranges.contains(&saved) {
-                        format!("does not hold its value {value}")
+                notes.push(LoadWarning::RangeNotKept {
+                    module: module.id,
+                    param: spec.name.to_string(),
+                    saved,
+                    reason: if spec.options.ranges.contains(&saved) {
+                        RangeReason::DoesNotHold { value }
                     } else {
-                        "it does not offer".to_string()
-                    }
-                ));
+                        RangeReason::NotOffered
+                    },
+                    loaded: range,
+                });
             }
             if controller.graph().node(id).and_then(|n| n.range(index)) != Some(range) {
                 controller.set_range(id, index, range)?;

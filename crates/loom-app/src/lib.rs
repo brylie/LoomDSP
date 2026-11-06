@@ -661,7 +661,7 @@ struct Loaded {
     stamp: Option<recovery::Stamp>,
     /// What loaded differently from the file, such as a saved control
     /// range that was not kept (control-ranges.md, rule 7).
-    notes: Vec<String>,
+    notes: Vec<loom_patch::LoadWarning>,
 }
 
 impl App {
