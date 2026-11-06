@@ -2827,3 +2827,10 @@ fn tab_steps_forward_and_shift_tab_back() {
     assert_eq!(step("one", true), Id::new("three"), "backward wraps");
     assert_eq!(step("other", false), Id::new("other"), "a field not listed stays");
 }
+
+/// Without the accessibility spike, opening the window starts no task.
+#[cfg(not(all(feature = "a11y-spike", target_os = "macos")))]
+#[test]
+fn start_task_is_empty_without_the_spike() {
+    assert_eq!(App::start_task().units(), 0);
+}

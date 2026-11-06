@@ -239,11 +239,7 @@ pub fn run() -> iced::Result {
     let start = move || {
         let mut app = App::new(args.clone());
         app.remember_opened_at_start(&args);
-        #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
-        let start = a11y::attach().map(Message::A11y);
-        #[cfg(not(all(feature = "a11y-spike", target_os = "macos")))]
-        let start = Task::none();
-        (app, start)
+        (app, App::start_task())
     };
     let result = iced::application(start, App::update, App::view)
         .title(App::title)
