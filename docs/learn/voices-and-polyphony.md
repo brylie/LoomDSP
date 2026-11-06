@@ -35,6 +35,8 @@ Here is a chain, with the width of each cable:
 | Envelope `out` → Voice merge `in` | 8 voices | Voice merge reads every voice itself. |
 | Voice merge `out` → Audio Out | 1 voice | Voice merge summed them. |
 
+Notice that the saw's phase input and the envelope's gate input are declared `Downmix` for stereo, so that a stereo patch does not run them twice for a control signal that is the same on both sides. Voices are the opposite case: a gate differs per voice by definition. So a bundle copies a module whatever its inputs declare, and the stereo declaration keeps its stereo meaning inside each voice. Today's modules become polyphonic without a change.
+
 The mono LFO into a copied module is the common case, and it is free: every copy reads the same cable. That is the "send one signal to all voices" that FR-VOICE-03 asks for, and it needs no module, for the same reason a mono cable into a stereo filter needs none.
 
 ## Why a polysynth steals
@@ -46,7 +48,7 @@ Eight voices, nine keys. Something has to give. There is no right answer, only c
 
 Hardware polysynths of the 1980s settled both of these, and every software synth since has copied them; LoomDSP names them in its own words.
 
-A subtler rule is **which free voice to take** when there is one. Taking the voice that has been free the longest is the kind choice: its release tail is the oldest and the least audible when it is cut, and the voices wear evenly. The naive choice, the lowest-numbered free voice, makes voice 0 do most of the work and cut most of the tails.
+A subtler rule is **which free voice to take** when there is one. Taking the voice that has been free the longest is the kind choice: its release tail is the oldest and the least audible when it is cut, and the voices wear evenly. The naive choice, the lowest-numbered free voice, makes voice 1 do most of the work and cut most of the tails.
 
 ## Why a stolen note is one sample late
 
@@ -75,5 +77,5 @@ The cost is real and was paid on purpose: every module that makes or changes not
 ## Compared with other systems
 
 - **Eurorack** has no polyphony as such. A polyphonic patch is N copies of the same modules, patched by hand, with a MIDI-to-CV interface handing out notes to N sets of pitch and gate jacks. LoomDSP's copies are those N module sets, made for you.
-- **VCV Rack** carries up to 16 voices on one cable, and modules declare whether they handle polyphony. A module that does not handle it reads voice 0. LoomDSP instead copies the module, so every module handles it.
+- **VCV Rack** carries up to 16 voices on one cable, and modules declare whether they handle polyphony. A module that does not handle it reads the first voice. LoomDSP instead copies the module, so every module handles it.
 - **Bitwig's Grid** runs the whole grid once per voice, with a voice count on the device and a few "global" modules outside the voices. LoomDSP infers which modules are per voice from the cables, so the LFO before the filter is global without being moved anywhere.

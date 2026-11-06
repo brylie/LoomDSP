@@ -40,7 +40,7 @@ Forces:
 **Notes travel as per-voice signals (option 1), and a polyphonic bundle is an inferred cable width whose voices run as module copies (option a).** There is no event cable kind.
 
 - A cable's width is a voice count from 1 to 16, found when the graph compiles from the module that makes the bundle, never stored in a patch. Stereo stays as it is: a voice can be stereo, so a cable's channel count is voices times sides.
-- A module fed a bundle on a `PerChannel` input runs as one copy per voice. A `Downmix` input reads one value from the voices by its signal type. A mono cable into a polyphonic module feeds every voice. A new voice copy starts from `reset`, not from another voice's state.
+- A module fed a bundle on any input runs as one copy per voice, unless the input is declared to read every voice (Voice merge, a source's `level`). The stereo meanings of `PerChannel` and `Downmix` are unchanged inside a voice, so today's modules, whose control inputs are `Downmix` for stereo reasons, become polyphonic with no change. The engine never folds voices into one; Voice merge and Audio Out do. A mono cable into a polyphonic module feeds every voice. A new voice copy starts from `reset`, not from another voice's state.
 - A note is a gate that rises on its sample, with a pitch, a velocity, and expression held on sibling cables of the same width. Every module that makes or changes notes allocates voices with one shared algorithm in `loom-dsp`, so the cost of option 1 is paid once.
 - The voice count lives on the module that allocates (Note input, Voice assigner, and the note sources), not on the patch.
 
