@@ -2,7 +2,7 @@
 
 - **Kind:** Research snapshot. Non-normative.
 - **Date:** 2026-11-04, on `main` at a671e30 (after #611).
-- **Follows:** none. This is the first architecture snapshot. The external review of November 2026 was filed straight into issues #616 to #630, and its lessons are in `.claude/skills/review-architecture/references/lenses.md`.
+- **Follows:** none. This is the first architecture snapshot. The external review of November 2026 was filed straight into issues #614 to #630, and its lessons are in `.claude/skills/review-architecture/references/lenses.md`.
 - **Used by:** #651 (finding 1) and #652 (finding 2), filed 2026-11-05. The "Already filed" evidence was posted as comments on #617, #621, #526, and #441 on 2026-11-06.
 
 This review reads `crates/loom-patch` and the seams it shares with `loom-core`, `loom-app`, and `loom-cli`, with two questions from the maintainer: does the crate still respect the portable-crate rule (AGENTS.md hard rule 6), and does anything in it belong somewhere else before sub-patches (#51, ADR-0031) start. Do not update this snapshot later; write a new one after the fixes, and read its "Deliberate" and "Already filed" sections first.
