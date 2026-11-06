@@ -1,5 +1,5 @@
 use super::*;
-use loom_core::{EngineConfig, create_engine};
+use loom_core::{EngineConfig, ParamRange, create_engine};
 
 const SIMPLE: &str = r#"
 // Comments are allowed.

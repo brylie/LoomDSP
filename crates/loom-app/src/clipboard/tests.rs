@@ -1,4 +1,5 @@
 use super::*;
+use loom_core::ParamRange;
 use loom_core::{EngineConfig, EngineParts, MidiControl, create_engine};
 
 fn parts() -> EngineParts {

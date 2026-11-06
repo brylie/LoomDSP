@@ -667,17 +667,22 @@ struct Loaded {
 impl App {
     /// The patch as it would be saved now.
     fn current_patch(&self) -> Patch {
-        let mut patch = Patch::from_graph(self.session.document.name(), self.session.controller.graph());
-        patch.set_metadata(self.session.document.info().clone());
-        for m in &mut patch.modules {
-            m.position = self.session.positions.get(&m.id).map(|&(x, y)| (x.round(), y.round()));
-            if let Some((original, initial)) = self.session.unknown_positions.get(&m.id)
-                && self.session.positions.get(&m.id) == Some(initial)
-            {
-                m.position = *original;
+        let session = &self.session;
+        let layout = |id: loom_core::ModuleId| {
+            let shown = session.positions.get(&id.0);
+            let position = match session.unknown_positions.get(&id.0) {
+                // A placeholder nobody moved keeps the position from its
+                // file, exactly (unknown-modules.md, rule 1).
+                Some((original, initial)) if shown == Some(initial) => *original,
+                _ => shown.map(|&(x, y)| (x.round(), y.round())),
+            };
+            loom_patch::Layout {
+                position,
+                size: session.sizes.get(&id.0).copied(),
             }
-            m.size = self.session.sizes.get(&m.id).copied();
-        }
+        };
+        let mut patch = Patch::from_graph_with(session.document.name(), session.controller.graph(), layout);
+        patch.set_metadata(session.document.info().clone());
         patch
     }
 
