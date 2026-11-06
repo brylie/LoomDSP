@@ -83,6 +83,30 @@ fn nested_patches_check_and_render() {
     );
     assert!(stdout.contains("2 sub-patches, flattened"), "{stdout}");
     assert!(stdout.contains("11 modules"), "{stdout}");
+    // A module inside a definition is named by its own id and its
+    // sub-patch, since its flat id appears nowhere in the file.
+    let skipped = dir.join("skipped.ron");
+    std::fs::write(
+        &skipped,
+        r#"Patch(version: 1, subpatches: {"v": SubPatch(metadata: Metadata(name: "Voice"), modules: [PatchModule(id: 4, kind: "loom.osc.sine@1")])},
+            modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v")), PatchModule(id: 2, kind: "loom.io.audio-out@1")])"#,
+    )
+    .unwrap();
+    let check = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("check")
+        .arg(&skipped)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(
+        check.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        stdout.contains("not processed, no path to the output: Sine 4 in Voice"),
+        "{stdout}"
+    );
     let render = Command::new(env!("CARGO_BIN_EXE_loom"))
         .arg("render")
         .arg(&path)

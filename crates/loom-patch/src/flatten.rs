@@ -201,6 +201,9 @@ struct Context<'a> {
     unknown_kinds: Vec<String>,
     /// The definitions being flattened, outermost first: keys and names.
     stack: Vec<(String, String)>,
+    /// Each definition key and the first instance that used it. No two
+    /// instances share a definition (sub-patches.md, Patch file).
+    used: BTreeMap<String, ModulePath>,
 }
 
 /// A module of one level, sorted into what flattening does with it.
@@ -241,6 +244,7 @@ impl Patch {
             warnings: Vec::new(),
             unknown_kinds: Vec::new(),
             stack: Vec::new(),
+            used: BTreeMap::new(),
         };
         let inner = flatten_level(&mut ctx, self.level(), &ModulePath(Vec::new()), None)?;
         let mut warnings = ctx.warnings;
@@ -534,7 +538,17 @@ fn flatten_level(
         members: &members,
         feeds: &feeds,
     };
+    // Inside a definition, two cables into one input are refused: a flat
+    // patch keeps the later one, and flattening would not keep that order
+    // across the boundary.
+    let mut fed = std::collections::BTreeSet::new();
     for cable in level.cables {
+        if !top && !fed.insert(&cable.to) {
+            return Err(PatchError::TwoCablesIntoOneInput {
+                module: cable.to.0,
+                port: cable.to.1.clone(),
+            });
+        }
         let source = lookup.source_of(&cable.from, &mut Vec::new())?;
         match members.get(&cable.to.0) {
             Some(Member::Output(name)) => {
@@ -640,6 +654,14 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
         loop_path.push(name);
         return Err(PatchError::SubPatchLoop { path: loop_path });
     }
+    let child_path = path.child(module.id);
+    if let Some(first) = ctx.used.insert(key.clone(), child_path.clone()) {
+        return Err(PatchError::SharedSubPatch {
+            key: key.clone(),
+            first: first.to_string(),
+            second: child_path.to_string(),
+        });
+    }
     if !module.ranges.is_empty() {
         let param = module.ranges.keys().next().expect("not empty").clone();
         return Err(PatchError::UnknownParam {
@@ -678,7 +700,6 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
         midi: &definition.midi,
     };
     ctx.stack.push((key.clone(), name.clone()));
-    let child_path = path.child(module.id);
     let first_new_warning = ctx.warnings.len();
     let result = flatten_level(ctx, inside, &child_path, Some(definition));
     ctx.stack.pop();

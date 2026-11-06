@@ -211,11 +211,27 @@ fn a_pass_through_port_continues_from_outside() {
                 ],
                 cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
             ),
+            "thru 2": SubPatch(
+                metadata: Metadata(name: "Thru"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                    PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+            ),
+            "thru 3": SubPatch(
+                metadata: Metadata(name: "Thru"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                    PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+            ),
             "outer": SubPatch(
                 metadata: Metadata(name: "Outer"),
                 modules: [
                     PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
-                    PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("thru")),
+                    PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("thru 2")),
                     PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out")),
                 ],
                 cables: [
@@ -229,7 +245,7 @@ fn a_pass_through_port_continues_from_outside() {
             PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("thru")),
             PatchModule(id: 3, kind: "loom.struct.subpatch@1", subpatch: Some("outer")),
             PatchModule(id: 4, kind: "loom.math.mul@1"),
-            PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("thru")),
+            PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("thru 3")),
         ],
         cables: [
             PatchCable(from: (1, "out"), to: (2, "in")),
@@ -607,12 +623,30 @@ fn every_mistake_is_refused_by_name() {
             r#"in sub-patch "Def": module 2 is a Patch input, and an assignment cannot start at a port"#,
         ),
         (
-            wrap(r#"modules: [PatchModule(id: 2, kind: "loom.osc.sine@1")]"#, r#", PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("d"), params: {"gain": 1.0})"#),
+            r#"Patch(version: 1, subpatches: { "d": SubPatch(metadata: Metadata(name: "Def")) }, modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("d"), params: {"gain": 1.0})])"#.into(),
             "module 2: unknown parameter `gain`",
         ),
         (
-            wrap(r#"modules: [PatchModule(id: 2, kind: "loom.osc.sine@1")]"#, r#", PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("d"), ranges: {"x": (0.0, 1.0)})"#),
+            r#"Patch(version: 1, subpatches: { "d": SubPatch(metadata: Metadata(name: "Def")) }, modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("d"), ranges: {"x": (0.0, 1.0)})])"#.into(),
             "module 2: unknown parameter `x`",
+        ),
+        (
+            wrap(r#"modules: []"#, r#", PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("d"))"#),
+            "sub-patch `d` is used by modules 1 and 2, and each instance has a definition of its own",
+        ),
+        (
+            r#"Patch(version: 1, subpatches: {
+                "d": SubPatch(metadata: Metadata(name: "Def")),
+                "o": SubPatch(metadata: Metadata(name: "Outer"), modules: [PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("d"))]),
+            }, modules: [
+                PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("d")),
+                PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("o")),
+            ])"#.into(),
+            "sub-patch `d` is used by modules 1 and 2 › 5",
+        ),
+        (
+            wrap(r#"modules: [PatchModule(id: 2, kind: "loom.struct.input@1"), PatchModule(id: 3, kind: "loom.osc.sine@1"), PatchModule(id: 4, kind: "loom.math.mul@1")], cables: [PatchCable(from: (3, "out"), to: (4, "a")), PatchCable(from: (2, "out"), to: (4, "a"))]"#, ""),
+            r#"in sub-patch "Def": two cables go into input `a` of module 4"#,
         ),
         (
             wrap(r#"modules: [PatchModule(id: 2, kind: "loom.osc.sine@1"), PatchModule(id: 3, kind: "loom.osc.sine@1")], cables: [PatchCable(from: (2, "out"), to: (3, "inn"))]"#, ""),

@@ -15,6 +15,7 @@ use loom_core::ModuleNames;
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, Registry, create_engine};
 use loom_host_desktop::{AudioOptions, AudioOutput, StatsSnapshot};
 use loom_patch::Patch;
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -376,17 +377,62 @@ fn devices() -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn describe(controller: &Controller, id: ModuleId) -> String {
+/// Where each module that came from inside a sub-patch is, by flat id:
+/// its own id in its definition and the sub-patches it is in, such as
+/// `4 in Voice › Filter`. A top-level module is not listed.
+fn inside(patch: &Patch, registry: &loom_core::Registry) -> BTreeMap<ModuleId, String> {
+    let mut ids = loom_patch::FlatIds::new();
+    let Ok(_) = patch.flatten(registry, &mut ids) else {
+        return BTreeMap::new();
+    };
+    let mut where_ = BTreeMap::new();
+    for (path, id) in ids.paths() {
+        let (own, instances) = match path.0.split_last() {
+            Some((own, instances)) if !instances.is_empty() => (own, instances),
+            _ => continue,
+        };
+        let mut names = Vec::new();
+        let mut level: Option<&loom_patch::SubPatch> = None;
+        for instance in instances {
+            let modules = level.map_or(&patch.modules, |definition| &definition.modules);
+            let Some(key) = modules
+                .iter()
+                .find(|m| m.id == *instance)
+                .and_then(|m| m.subpatch.as_deref())
+            else {
+                break;
+            };
+            let Some(definition) = patch.subpatches.get(key) else {
+                break;
+            };
+            names.push(if definition.metadata.name.is_empty() {
+                key.to_string()
+            } else {
+                definition.metadata.name.clone()
+            });
+            level = Some(definition);
+        }
+        where_.insert(id, format!("{own} in {}", names.join(" › ")));
+    }
+    where_
+}
+
+/// A module's type and id for `check`. A module inside a sub-patch is
+/// named by its own id and the sub-patches it is in, since its flat id
+/// appears nowhere in the file.
+fn describe(controller: &Controller, inside: &BTreeMap<ModuleId, String>, id: ModuleId) -> String {
+    let place = inside.get(&id).cloned().unwrap_or_else(|| id.to_string());
     controller
         .graph()
         .node(id)
-        .map(|n| format!("{} {id}", n.descriptor.name))
-        .unwrap_or_else(|| id.to_string())
+        .map(|n| format!("{} {place}", n.descriptor.name))
+        .unwrap_or_else(|| place)
 }
 
 fn check(path: &Path) -> Result<ExitCode> {
     let (patch, parts) = load_engine(path, EngineConfig::default())?;
     let c = &parts.controller;
+    let inside = inside(&patch, c.registry());
     let unknown: Vec<_> = c
         .graph()
         .nodes()
@@ -402,7 +448,7 @@ fn check(path: &Path) -> Result<ExitCode> {
     }
     println!("  {} modules, {} cables", report.modules, c.graph().cables().count());
     if !report.skipped.is_empty() {
-        let names: Vec<String> = report.skipped.iter().map(|&id| describe(c, id)).collect();
+        let names: Vec<String> = report.skipped.iter().map(|&id| describe(c, &inside, id)).collect();
         println!("  not processed, no path to the output: {}", names.join(", "));
     }
     for (module, param) in patch.transient_values(c.registry()) {
@@ -424,7 +470,7 @@ fn check(path: &Path) -> Result<ExitCode> {
         println!("  no feedback loops");
     }
     for (i, feedback) in report.loops.iter().enumerate() {
-        let names: Vec<String> = feedback.modules.iter().map(|&id| describe(c, id)).collect();
+        let names: Vec<String> = feedback.modules.iter().map(|&id| describe(c, &inside, id)).collect();
         let status = if feedback.modules.iter().all(|id| report.skipped.contains(id)) {
             "not processed"
         } else {
@@ -438,8 +484,8 @@ fn check(path: &Path) -> Result<ExitCode> {
             if let Some(assignment) = c.graph().assignment(*id) {
                 println!(
                     "    inserted a 1-sample delay on modulation: {} -> {}",
-                    describe(c, assignment.source.module),
-                    describe(c, assignment.target)
+                    describe(c, &inside, assignment.source.module),
+                    describe(c, &inside, assignment.target)
                 );
             }
         }
@@ -452,8 +498,8 @@ fn check(path: &Path) -> Result<ExitCode> {
             let in_name = graph.node(to.module).and_then(|n| n.input_name(to.port)).unwrap_or("?");
             println!(
                 "    inserted a 1-sample delay: {} `{out_name}` -> {} `{in_name}`",
-                describe(c, from.module),
-                describe(c, to.module)
+                describe(c, &inside, from.module),
+                describe(c, &inside, to.module)
             );
         }
     }

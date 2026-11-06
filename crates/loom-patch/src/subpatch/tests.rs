@@ -49,20 +49,37 @@ fn the_spec_example_round_trips() {
     assert!(text.contains("range: Some((200.0, 2000.0))"), "{text}");
 }
 
-/// A nested file prints each module and cable of a definition on its own
-/// line, so a diff shows one change per line.
+/// A nested file prints each module, cable, and mapping on its own line,
+/// at the top level and inside each definition, so a diff shows one
+/// change per line.
 #[test]
-fn a_definition_prints_one_module_per_line() {
-    let text = Patch::from_ron(VOICE).unwrap().to_ron().unwrap();
+fn a_nested_file_prints_one_module_per_line_at_every_level() {
+    let mut patch = Patch::from_ron(VOICE).unwrap();
+    patch.cables.push(crate::PatchCable {
+        from: (7, "out".into()),
+        to: (7, "pitch".into()),
+    });
+    let text = patch.to_ron().unwrap();
     let module_lines = text
         .lines()
         .filter(|line| line.trim_start().starts_with("PatchModule(id:"))
         .count();
-    assert_eq!(module_lines, 4, "{text}");
+    assert_eq!(module_lines, 5, "{text}");
     assert!(
         text.contains("\n                PatchCable(from: (2, \"out\"), to: (3, \"in\")),\n"),
         "{text}"
     );
+    assert!(
+        text.contains("\n        PatchCable(from: (7, \"out\"), to: (7, \"pitch\")),\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "\n        PatchModule(id: 7, kind: \"loom.struct.subpatch@1\", subpatch: Some(\"voice\"), params: {\"cutoff\": 1200.0}),\n"
+        ),
+        "{text}"
+    );
+    assert_eq!(Patch::from_ron(&text).unwrap(), patch);
 }
 
 /// A flat patch's text does not change: no `subpatches` table, no

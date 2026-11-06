@@ -407,6 +407,26 @@ pub enum PatchError {
         /// The Patch input's ID in the definition.
         module: u32,
     },
+    /// Two instances name one definition. Every instance has its own
+    /// (`docs/design/sub-patches.md`, rule 3: no action at a distance).
+    #[error("sub-patch `{key}` is used by modules {first} and {second}, and each instance has a definition of its own")]
+    SharedSubPatch {
+        /// The shared key.
+        key: String,
+        /// The first instance's path.
+        first: String,
+        /// The second instance's path.
+        second: String,
+    },
+    /// Two cables into one input inside a definition. A flat patch keeps
+    /// the later one; a sub-patch must not depend on that.
+    #[error("two cables go into input `{port}` of module {module}")]
+    TwoCablesIntoOneInput {
+        /// The module's ID in the definition.
+        module: u32,
+        /// The input's name.
+        port: String,
+    },
     /// A definition that contains itself, directly or through others.
     #[error("sub-patch {} contains itself", .path.join(" › "))]
     SubPatchLoop {
@@ -447,21 +467,37 @@ impl Patch {
     }
 
     /// Canonical RON text.
+    ///
+    /// Every module, cable, and mapping sits on one line, at the top level
+    /// and inside each definition, so a diff shows one change per line.
+    /// RON has one depth limit for a whole file, so the top level and each
+    /// definition are printed on their own and joined.
     pub fn to_ron(&self) -> Result<String, PatchError> {
         let mut canonical = self.clone();
         canonical.canonicalise();
-        // One depth limit covers the whole file. A flat patch keeps each
-        // module, cable, and mapping on one line. A definition sits two
-        // levels down, so a nested patch needs two more, or every list in
-        // a definition would print as one line.
-        let depth = if self.subpatches.is_empty() { 2 } else { 4 };
-        let config = ron::ser::PrettyConfig::new()
-            .struct_names(true)
-            .depth_limit(depth)
-            .separate_tuple_members(false)
-            .indentor("    ");
-        let mut text = ron::ser::to_string_pretty(&canonical, config)?;
-        text.push('\n');
+        let definitions = std::mem::take(&mut canonical.subpatches);
+        let mut text = pretty(&canonical)?;
+        if !definitions.is_empty() {
+            let mut table = String::from("    subpatches: {\n");
+            for (key, definition) in &definitions {
+                table.push_str("        ");
+                table.push_str(&ron::to_string(key)?);
+                table.push_str(": ");
+                for (i, line) in pretty(definition)?.lines().enumerate() {
+                    if i > 0 {
+                        table.push_str("        ");
+                    }
+                    table.push_str(line);
+                    table.push('\n');
+                }
+                // The definition ended with ")\n"; it is one entry of the table.
+                table.pop();
+                table.push_str(",\n");
+            }
+            table.push_str("    },\n");
+            let modules = text.find("    modules: [").expect("a patch always writes its modules");
+            text.insert_str(modules, &table);
+        }
         Ok(text)
     }
 
@@ -566,6 +602,19 @@ impl Patch {
         patch.canonicalise();
         patch
     }
+}
+
+/// One level as RON text, with each module, cable, and mapping on one
+/// line and a newline at the end.
+fn pretty<T: Serialize>(value: &T) -> Result<String, PatchError> {
+    let config = ron::ser::PrettyConfig::new()
+        .struct_names(true)
+        .depth_limit(2)
+        .separate_tuple_members(false)
+        .indentor("    ");
+    let mut text = ron::ser::to_string_pretty(value, config)?;
+    text.push('\n');
+    Ok(text)
 }
 
 /// Sorts one level's lists into canonical order: modules by ID, cables by
