@@ -339,8 +339,38 @@ fn widget_node_for(widget: &Widget) -> Node {
     if !widget.text.is_empty() {
         node.set_value(widget.text.clone());
     }
+    // Experiment: AccessKit's macOS adapter exposes the name only as the
+    // accessibility title, and VoiceOver did not read it on a knob. Try
+    // other places for the name, chosen at launch with LOOM_A11Y_NAME.
+    match *NAME_MODE {
+        NameMode::Title => {}
+        NameMode::Help => node.set_description(widget.label.clone()),
+        NameMode::Value => node.set_value(if widget.text.is_empty() {
+            widget.label.clone()
+        } else {
+            format!("{}, {}", widget.label, widget.text)
+        }),
+    }
     node
 }
+
+/// Where a control's name goes, for the VoiceOver experiment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NameMode {
+    /// Only AccessKit's label, which macOS gets as the title (the default).
+    Title,
+    /// Also the description, which macOS gets as help, read after a pause.
+    Help,
+    /// Also at the start of the value: "Tune, 0.000 st".
+    Value,
+}
+
+/// The name mode from `LOOM_A11Y_NAME` (`title`, `help`, or `value`).
+static NAME_MODE: LazyLock<NameMode> = LazyLock::new(|| match std::env::var("LOOM_A11Y_NAME").as_deref() {
+    Ok("help") => NameMode::Help,
+    Ok("value") => NameMode::Value,
+    _ => NameMode::Title,
+});
 
 /// What the app should do for a screen reader's request: canvas events,
 /// in order. Empty when the request is not one the spike handles.
