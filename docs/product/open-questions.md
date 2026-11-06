@@ -41,11 +41,13 @@ Each open item lists the options and a current leaning. Close an item by writing
 - Plugins draw inside a window owned by the DAW. Iced normally creates its own window through `winit`.
 - `nice-plug-iced` shows this is possible, but it sits inside RustAudio and its AI policy.
 - **Action:** research when plugin export is scheduled (deferred). A small "embed Iced in a parent window" crate could be another published primitive (FR-SDK-06).
+- Trade-offs of leaving Iced for our own UI stack, and when to revisit: [research snapshot, 2026-11](../research/2026-11-own-ui-stack-tradeoffs.md).
 
 ### OQ-14. Iced version churn
 
 - Iced is pre-1.0 and has breaking changes between releases. `iced_nodegraph` must keep up.
 - **Leaning:** pin versions. Upgrade once per Iced release, in a dedicated issue.
+- Trade-offs of leaving Iced for our own UI stack, and when to revisit: [research snapshot, 2026-11](../research/2026-11-own-ui-stack-tradeoffs.md).
 
 ### OQ-15. Looper recording
 
