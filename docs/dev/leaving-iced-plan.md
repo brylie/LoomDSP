@@ -2,6 +2,7 @@
 
 - **Kind:** Implementation plan, written to be handed to a coding agent. It is not a decision and not a specification.
 - **Date:** 2026-11-06, at commit `6091e52`.
+- **Issue:** [#683](https://github.com/brylie/LoomDSP/issues/683) covers the whole move, all phases.
 - **Background:** [Our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md) and [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md).
 - **Decisions it touches:** [ADR-0009](../adr/0009-ui-stack-iced.md) (Iced for the UI), [ADR-0010](../adr/0010-own-patch-canvas.md) (our own canvas), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0028](../adr/0028-app-accessibility-waits-for-iced.md) (accessibility waits for Iced).
 
@@ -88,7 +89,7 @@ No code. This phase needs the maintainer.
    - the test harness and the control channel contract.
 
    Each open behaviour question (for example, how a held arrow key steps a knob for a screen reader) is listed and answered by the maintainer before the phase that needs it.
-3. **File one issue per phase**, with Priority and Size set, linked to the ADR.
+3. **Link the ADR and the spec from issue #683.** One issue covers all phases. Each phase's pull request says `Part of #683`, and the last one closes it.
 
 Done when the ADR is Accepted and the spec's sections for phase 1 are Agreed.
 
