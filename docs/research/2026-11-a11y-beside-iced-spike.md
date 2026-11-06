@@ -58,11 +58,11 @@ What this means for a real version:
 
 - **Spoken value against stepping.** With a number, VoiceOver can step the knob but cannot say the unit ("800 Hz"). With text, it says the unit but cannot step. Native AppKit sliders solve this with a separate spoken value description. AccessKit's macOS adapter does not expose one. Both this and the missing name are gaps in AccessKit's macOS adapter, and fixing them upstream would help every Rust app that uses it.
 - **Undo.** Each request is its own undo step: one VoiceOver session made about 300. Screen reader edits should group like arrow-key edits (`docs/design/undo.md`), which close a group 500 ms after the last step.
-- **Step size.** 1% steps are fine for a continuous knob. Stepped parameters (octave, note value, a mode switch) need their own step, or a role that VoiceOver steps one option at a time.
+- **Step size.** Single presses moved the knob smoothly, 1% at a time. A held key did not: the doubling step made the knob leap (for example 0.32, 0.40, 0.56, 0.88, 1.0), and the maintainer heard the change as "not smooth". One fix is to read each `SetValue` only as a direction and move a fixed step. That gives an even glide, but it removes the speed-up some screen reader users rely on to cross a range quickly, so it needs a listening test. It was not built. Stepped parameters (octave, note value, a mode switch) need their own step, or a role that VoiceOver steps one option at a time.
 
 ### Not checked
 
-- **The name workarounds** (`LOOM_A11Y_NAME`), and how a number-only value sounds.
+- **The name workarounds** (`LOOM_A11Y_NAME`). They were built but not listened to.
 - **Values and Increment from outside.** Scripting the accessibility API from a shell needs the "assistive access" permission in System Settings, which was not granted. In-process tests cover the logic; the platform side is unverified.
 - **Windows and Linux.** AccessKit has adapters for both. The Windows adapter also attaches to an existing window; the Linux one runs beside it. Not tried.
 
@@ -84,4 +84,9 @@ What this means for a real version:
 
 ## Suggested next step
 
-The spike answers questions 1 to 3 with yes on macOS. Before any decision, one session with VoiceOver on, by a person, should check that the tiles and knobs are read and can be changed with the keyboard. If that holds, the decision to build this properly belongs in a new ADR that supersedes ADR-0028, with a specification that covers focus, refresh, node IDs, and the views still missing from the snapshot.
+The spike stopped after the VoiceOver session. It answers questions 1 to 3 with yes on macOS, and a person using VoiceOver could reach the tiles and turn a knob with the keyboard. It also showed that a usable version needs more than our own code:
+
+1. **Upstream in AccessKit's macOS adapter:** set the accessibility label from the node's name, and give a slider a spoken value description beside its number. Without both, VoiceOver either cannot say the name and unit or cannot step the knob.
+2. **In LoomDSP:** group screen reader edits into undo steps like arrow-key edits, choose a step policy for held keys and for stepped parameters, and the open problems above.
+
+If the project takes this further, the decision to build it properly belongs in a new ADR that supersedes ADR-0028, with a specification that covers focus, refresh, node IDs, value and step policy, and the views still missing from the snapshot. The spike code stays behind the `a11y-spike` feature as a reference, off by default.
