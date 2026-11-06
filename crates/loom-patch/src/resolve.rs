@@ -66,9 +66,6 @@ pub struct ResolvedModule {
     /// One value per parameter of the descriptor. Transient parameters are
     /// released (transient-params.md).
     pub params: Vec<f32>,
-    /// The parameters the file sets, by index, in the file's name order.
-    /// Transient ones are left out. Loading sets exactly these.
-    pub file_params: Vec<usize>,
     /// The control range of each parameter, or `None` for one that offers
     /// no ranges.
     pub ranges: Vec<Option<ParamRange>>,
@@ -133,20 +130,28 @@ impl ResolvedModule {
             unknown: node.unknown.clone(),
             label: node.label.clone(),
             params: node.descriptor.saved_values(&node.params),
-            file_params: Vec::new(),
             ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
             layout,
         }
     }
 
-    /// Adds this module to `controller` as `id`, with its label, its
-    /// ranges, then the values the file sets. Ranges come first, so a range
-    /// never clamps a saved value (control-ranges.md, rule 7).
+    /// Adds this module to `controller` as `id`, then [`Self::apply_to`].
+    /// Loading a patch keeps the file's IDs this way.
     pub fn add_to(&self, controller: &mut Controller, id: ModuleId) -> Result<(), PatchError> {
         match &self.unknown {
             Some(unknown) => controller.add_unknown_with_id(id, unknown.clone())?,
             None => controller.add_module_with_id(id, &self.descriptor.kind())?,
         }
+        Ok(self.apply_to(controller, id)?)
+    }
+
+    /// Gives module `id`, just added with this module's kind, its label,
+    /// its ranges, then its values. Ranges come first, so a range never
+    /// clamps a value (control-ranges.md, rule 7). A new module starts at
+    /// its defaults, so only values that differ are set, and never a
+    /// transient one (transient-params.md). Loading, pasting, and
+    /// flattening all add modules through this.
+    pub fn apply_to(&self, controller: &mut Controller, id: ModuleId) -> Result<(), LoomError> {
         controller.set_label(id, self.label.clone());
         for (index, range) in self.ranges.iter().enumerate() {
             if let Some(range) = *range
@@ -155,8 +160,17 @@ impl ResolvedModule {
                 controller.set_range(id, index, range)?;
             }
         }
-        for &index in &self.file_params {
-            controller.set_param(id, index, self.params[index])?;
+        let changes: Vec<(usize, f32)> = self
+            .descriptor
+            .params
+            .iter()
+            .zip(&self.params)
+            .enumerate()
+            .filter(|(_, (spec, value))| **value != spec.default && !spec.is_transient())
+            .map(|(index, (_, value))| (index, *value))
+            .collect();
+        if !changes.is_empty() {
+            controller.set_params(id, &changes)?;
         }
         Ok(())
     }
@@ -248,7 +262,6 @@ impl Patch {
                 unknown: Some(unknown),
                 label: module.label.clone(),
                 params: Vec::new(),
-                file_params: Vec::new(),
                 ranges: Vec::new(),
                 layout,
             });
@@ -273,17 +286,13 @@ impl Patch {
             }
         }
         let mut values = descriptor.default_params();
-        let mut file_params = Vec::new();
         for (name, &value) in &module.params {
             let index = descriptor.param_index(name).ok_or_else(|| unknown_param(name))?;
             values[index] = value;
-            // A saved value for a transient parameter is ignored: the module
-            // starts released (transient-params.md). `transient_values`
-            // lists them for `loom check`.
-            if !descriptor.params[index].is_transient() {
-                file_params.push(index);
-            }
         }
+        // A saved value for a transient parameter is ignored: the module
+        // starts released (transient-params.md). `transient_values` lists
+        // them for `loom check`.
         let params = descriptor.saved_values(&values);
         let ranges = (0..descriptor.params.len())
             .map(|index| Self::resolve_range(module, descriptor, &params, index, warnings))
@@ -294,7 +303,6 @@ impl Patch {
             unknown: None,
             label: module.label.clone(),
             params,
-            file_params,
             ranges,
             layout,
         })

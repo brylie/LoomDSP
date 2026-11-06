@@ -623,3 +623,21 @@ fn labels_survive_load_and_save_exactly() {
         ]
     );
 }
+
+/// An empty label is no label: it loads as none and saves with no label
+/// (clipboard.md, rule 9). A label of spaces is kept.
+#[test]
+fn an_empty_label_loads_as_no_label() {
+    let text = r#"Patch(version: 1, modules: [
+        (id: 1, kind: "loom.osc.sine@1", label: Some("")),
+        (id: 2, kind: "future.effect@9", label: Some("")),
+        (id: 3, kind: "loom.clock.transport@1"),
+    ])"#;
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    Patch::from_ron(text).unwrap().load_into(&mut parts.controller).unwrap();
+    for id in [1, 2] {
+        assert_eq!(parts.controller.graph().node(ModuleId(id)).unwrap().label, None);
+    }
+    let saved = Patch::from_graph("", parts.controller.graph()).to_ron().unwrap();
+    assert!(!saved.contains("label"), "{saved}");
+}

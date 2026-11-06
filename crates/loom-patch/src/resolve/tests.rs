@@ -97,7 +97,42 @@ fn a_transient_value_is_released_and_not_set() {
     let hold = module.descriptor.param_index("hold").unwrap();
     let mode = module.descriptor.param_index("mode").unwrap();
     assert_eq!(module.params[hold], module.descriptor.params[hold].default);
-    assert_eq!(module.file_params, [mode]);
+    assert_eq!(module.params[mode], 1.0);
+    let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    module.add_to(&mut parts.controller, ModuleId(7)).unwrap();
+    let node = parts.controller.graph().node(ModuleId(7)).unwrap();
+    assert_eq!(node.params[mode], 1.0);
+    assert_eq!(node.params[hold], module.descriptor.params[hold].default, "not set");
+}
+
+/// A module read from a graph can be added again, with its values, its
+/// ranges, and its label: what the clipboard and the sub-patch flattener
+/// do (#651).
+#[test]
+fn a_module_from_a_graph_adds_back_with_its_values_ranges_and_label() {
+    let new_engine = || loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
+    let mut from = new_engine();
+    let id = from.controller.add_module("loom.math.add").unwrap();
+    let node = from.controller.graph().node(id).unwrap();
+    let offset = node.descriptor.param_index("offset").unwrap();
+    let wide = node.descriptor.params[offset]
+        .options
+        .ranges
+        .iter()
+        .copied()
+        .find(|range| Some(*range) != node.descriptor.params[offset].default_range())
+        .expect("Add's offset offers a second range");
+    from.controller.set_range(id, offset, wide).unwrap();
+    from.controller.set_param(id, offset, wide.max).unwrap();
+    from.controller.set_label(id, Some("Sum".into()));
+    let module = ResolvedModule::from_node(id, from.controller.graph().node(id).unwrap(), Layout::default());
+
+    let mut to = new_engine();
+    module.add_to(&mut to.controller, ModuleId(40)).unwrap();
+    let added = to.controller.graph().node(ModuleId(40)).unwrap();
+    assert_eq!(added.params[offset], wide.max);
+    assert_eq!(added.range(offset), Some(wide));
+    assert_eq!(added.label.as_deref(), Some("Sum"));
 }
 
 /// Every example patch resolves the same way for a file and for the

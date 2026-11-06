@@ -442,30 +442,10 @@ impl Group {
             } else {
                 controller.add_module(&member.descriptor.kind())?
             };
-            controller.set_label(id, member.label.clone());
             added.push(id.0);
             ids.insert(member.id, id);
-            // Ranges first, so they never clamp a pasted value.
-            for (index, range) in member.ranges.iter().enumerate() {
-                let current = controller.graph().node(id).and_then(|n| n.range(index));
-                if let Some(range) = *range
-                    && current != Some(range)
-                {
-                    controller.set_range(id, index, range)?;
-                }
-            }
-            let changes: Vec<(usize, f32)> = member
-                .descriptor
-                .params
-                .iter()
-                .zip(&member.params)
-                .enumerate()
-                .filter(|(_, (spec, value))| **value != spec.default)
-                .map(|(index, (_, value))| (index, *value))
-                .collect();
-            if !changes.is_empty() {
-                controller.set_params(id, &changes)?;
-            }
+            // Label, ranges, then values, as a patch loads.
+            member.apply_to(controller, id)?;
             let place = match member.layout.position {
                 Some(p) => (origin.0 + p.0 - top_left.0, origin.1 + p.1 - top_left.1),
                 None => {
