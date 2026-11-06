@@ -41,7 +41,7 @@ What is new concerns sub-patches. The crate holds one conversion from file names
 | 1 | loom-patch, loom-app | Boundaries, shape | Two name-to-module conversions (loom-patch's bound to an empty `Controller`, the clipboard's as plain data), and no decided home for the flattener ADR-0031 needs | Medium | M |
 | 2 | loom-patch | Duplication | `Metadata` repeats `Patch`'s five metadata fields and serde attributes, copied by hand in two methods; sub-patch definitions would be a third copy | Low | S |
 
-The findings that are already filed, with new evidence, follow the two above under "Already filed". Two of them (#617 and #526) change order because of sub-patches.
+The findings that are already filed, with new evidence, follow the two above under "Already filed". Three of them change order because of sub-patches: #621 and #526 move ahead of slice 1, and #617 moves ahead of slice 4.
 
 ## Findings
 
@@ -85,7 +85,7 @@ Things that look like debt and are decisions. None has grown in cost except wher
 
 ## Already filed
 
-With the new evidence this review adds. Two change order because of sub-patches.
+With the new evidence this review adds. Three change order because of sub-patches: #621 and #526 move ahead of slice 1, and #617 ahead of slice 4.
 
 - **#617, `loom-patch` reads and writes files and calls `std::process::id`.** Confirmed at `lib.rs:340` (`load`) and `:376-402` (`save`). New evidence: (a) `docs/dev/architecture.md:37` states the contradiction itself: the job is "Loads, saves, and migrates patch files" and the rule is "Same as `loom-core`" (no files), while `loom-analysis` two rows down is "Desktop only: it reads WAV files", so the project already uses "reads files" as the dividing line; (b) the app has a second temp-file-and-rename writer, `recovery::write_atomic` (`crates/loom-app/src/recovery.rs:446-451`), which differs from `Patch::save` (no `create_new`, no pid in the temp name, no read-only refusal, no permission copy): harmless today because the recovery folder is locked per instance (autosave.md), but if option 2 of #617 is chosen, `write_atomic` is the shared home, not a third copy; (c) sub-patches slice 4 adds library reads and writes ("Save to library", "On load, if the library file differs"), and the library folder is a preference (`preferences.md`), so the desktop side will need the file layer anyway. Recommendation: settle #617 before slice 4, with option 2 (the file layer beside `write_atomic`, `Patch` keeping `from_ron` and `to_ron`), and add the grep check it asks for so rule 6 stops relying on a build that cannot fail.
 - **#621, `load_into` reports warnings as strings matched by substring.** Confirmed: `lib.rs:577` formats the unknown-module note, `boot.rs:170` and `cli/main.rs:218` find it with `contains("not in this version:")`. New evidence: sub-patches.md adds at least four more status messages that would travel the same channel ("Updated from the library: …", "its Transport was left out; connect its clock ports", "is now a copy", and the refused self-containing definition), and the app will need to tell them apart. Do #621 before slice 1.
