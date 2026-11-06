@@ -54,6 +54,13 @@ Measured at commit `6091e52`.
 6. **Clean room.** The agent may read the source of dependencies accepted under ADR-0006, which includes Iced, `winit`, `wgpu`, `cosmic-text`, and AccessKit. It must not read the source of other audio applications or other UI frameworks that are not dependencies.
 7. **Same versions during the move.** Use the `winit` and `wgpu` versions Iced 0.14 already pulls in, so the lock file never holds two of either.
 8. **Parity gates** at the end of every phase (below). A phase is done only when they pass.
+9. **Build the layer for reuse.** The new UI crates are candidates for publishing later (FR-SDK-06), and could serve other audio tools beside LoomDSP. So:
+   - `loom-ui-core` and `loom-ui` never depend on `loom-core`, `loom-patch`, `loom-canvas`, or `loom-app`. They know about windows, input, layout, text, widgets, and accessibility, not about patches or modules.
+   - The shell (phase 2.2) and the runtime (phase 2.1) take the app as a trait or generic parameter, not as `loom_app::App`.
+   - The instanced shape renderer from `canvas.wgsl`, if it moves into `loom-ui` for phase 3, stays free of patch types. The patch canvas keeps its own crate on top of it.
+   - Each crate gets a crate-level doc comment and an example program that does not use LoomDSP.
+
+   Publishing waits until the API settles. This rule only keeps the door open, so publishing later does not need a second refactor.
 
 ### Parity gates
 
