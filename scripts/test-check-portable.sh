@@ -47,6 +47,9 @@ fails "a renamed import of fs"
 case_dir lib.rs 'use std::{io, thread as t};\n'
 fails "a renamed import of thread in a group"
 
+case_dir lib.rs 'use std::{\n    fs as disk,\n    io,\n};\npub fn f() { let _ = disk::read("x"); }\n'
+fails "a renamed import of fs in a group split over lines"
+
 case_dir lib.rs 'pub fn f() -> u32 { std::process::id() }\n'
 fails "a process call"
 
@@ -83,6 +86,19 @@ passes "a use line with a name that only contains fs"
 if sh "$script" "$scratch/no-such-crate" > /dev/null 2>&1; then
     echo "expected to fail: a crate folder with no src" >&2
     exit 1
+fi
+
+# A folder `find` cannot read fails the check. Root can read anything, so
+# the case only runs as another user.
+if [ "$(id -u)" -ne 0 ]; then
+    case_dir lib.rs 'pub fn f() {}\n' hidden/a.rs 'pub fn g() { let _ = std::fs::read("x"); }\n'
+    chmod 000 "$scratch/a/src/hidden"
+    if sh "$script" "$scratch/a" > /dev/null 2>&1; then
+        chmod 755 "$scratch/a/src/hidden"
+        echo "expected to fail: a folder find cannot read" >&2
+        exit 1
+    fi
+    chmod 755 "$scratch/a/src/hidden"
 fi
 
 echo "check-portable.sh: all cases behave"

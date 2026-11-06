@@ -9,9 +9,11 @@
 # `fs::`, `process::`, `thread::`, `Instant`, or `SystemTime`, or is a `use`
 # line that names `fs`, `process`, or `thread`. Matching the short path
 # catches grouped imports, such as `use std::{fs, io};` followed by
-# `fs::read(..)`. Matching `use` lines catches renamed imports, such as
-# `use std::fs as disk;`. Comment lines are skipped. A crate folder with no
-# `src` fails the check, so a typo cannot skip a crate.
+# `fs::read(..)`. Matching `use` lines and `fs as` catches renamed
+# imports, such as `use std::fs as disk;`, also inside a `use` group that
+# rustfmt splits over several lines. Comment lines are skipped. A crate
+# folder with no `src`, or a folder `find` cannot read, fails the check, so
+# no crate is skipped without notice.
 #
 # Test files are skipped: `tests.rs`, `*_tests.rs`, and files under a
 # `tests` folder. Test placement (scripts/check-test-placement.sh) keeps
@@ -32,6 +34,7 @@ fi
 word='([^A-Za-z0-9_]|$)'
 pattern="(^|[^A-Za-z0-9_])(fs|process|thread)::|(^|[^A-Za-z0-9_])(Instant|SystemTime)$word"
 pattern="$pattern|^[[:space:]]*(pub(\\([a-z]+\\))? )?use [^;]*[^A-Za-z0-9_](fs|process|thread)$word"
+pattern="$pattern|(^|[^A-Za-z0-9_])(fs|process|thread) as [A-Za-z_]"
 
 for crate in "$@"; do
     if [ ! -d "$crate/src" ]; then
@@ -40,10 +43,20 @@ for crate in "$@"; do
     fi
 done
 
-found=$(
+# Listed first, on its own, so a `find` error stops the check instead of
+# being hidden inside the pipe below.
+files=$(
     for crate in "$@"; do
-        find "$crate/src" -name '*.rs' ! -name 'tests.rs' ! -name '*_tests.rs' ! -path '*/tests/*'
-    done | sort | while read -r file; do
+        find "$crate/src" -name '*.rs' ! -name 'tests.rs' ! -name '*_tests.rs' ! -path '*/tests/*' || exit 1
+    done
+) || {
+    echo "Could not list every source file to check." >&2
+    exit 1
+}
+
+found=$(
+    printf '%s\n' "$files" | sort | while read -r file; do
+        [ -n "$file" ] || continue
         grep -n -E "$pattern" "$file" /dev/null || true
     done | grep -v -E '^[^:]+:[0-9]+:[[:space:]]*//' || true
 )
