@@ -52,6 +52,24 @@ ADR-0009 listed a custom wgpu or Vello renderer as an option and noted the cost:
 6. **Web target.** ADR-0009 counts Iced's WebGPU support as a reason to choose it. `winit` and `wgpu` also run in browsers, so the target stays possible, but the glue is ours.
 7. **Focus of a small team.** LoomDSP is in early alpha with a small team. Time spent on a toolkit is time not spent on modules, the patch format, or live performance. New contributors would also learn a toolkit with no documentation outside this repository.
 
+## How Iced says it is run
+
+The Iced book has a [philosophy chapter](https://book.iced.rs/philosophy.html), read on 2026-11-06. In summary, it says:
+
+- Iced is its author's personal project, not a community effort, a business, or a brand.
+- The author builds and reviews every feature, and does not hand features to other contributors.
+- New contributors get no special welcome, and adoption is not a goal.
+- Breaking changes come whenever the design improves. A stable API is not a goal.
+
+What this means for LoomDSP:
+
+1. **Churn is policy, not a phase (OQ-14).** We should not expect Iced to settle at 1.0 into a stable API. Each upgrade may break our widgets, the `Ui` harness, the screenshot path, and the control channel.
+2. **We cannot plan on contributing what we need.** ADR-0028 waits for Iced to add AccessKit. Under this policy, that comes only if and when the author builds it. Offering a pull request is unlikely to speed it up.
+3. **Documentation will stay thin.** Promotion and onboarding are not goals, so our own docs must explain the parts of Iced we depend on.
+4. **The policy is stated openly.** That is useful. It lets us judge the risk now rather than discover it later.
+
+None of this is a criticism of the project. It is a fact about the dependency that we should plan around, the same as its licence or its platform support.
+
 ## What exists around Iced (†)
 
 Checked through web search on 2026-11-06. None of this was verified against source.
