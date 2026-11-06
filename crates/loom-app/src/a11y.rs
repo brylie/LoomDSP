@@ -121,6 +121,11 @@ struct Actions;
 
 impl ActionHandler for Actions {
     fn do_action(&mut self, request: ActionRequest) {
+        // Spike: log what the screen reader asks for, to see how it adjusts a knob.
+        eprintln!(
+            "a11y: {:?} on node {:#x}, data {:?}",
+            request.action, request.target_node.0, request.data
+        );
         send(Event::Action(request));
     }
 }
@@ -335,8 +340,10 @@ fn widget_node_for(widget: &Widget) -> Node {
         _ => Node::new(Role::Label),
     };
     node.set_label(widget.label.clone());
-    // The value as the screen shows it, with its unit ("800 Hz").
-    if !widget.text.is_empty() {
+    // The value as the screen shows it, with its unit ("800 Hz"). Experiment:
+    // LOOM_A11Y_VALUE=number leaves it out, so macOS reports the numeric value
+    // (AccessKit prefers text when both are set) and VoiceOver can step it.
+    if !widget.text.is_empty() && !*NUMBER_VALUE {
         node.set_value(widget.text.clone());
     }
     // Experiment: AccessKit's macOS adapter exposes the name only as the
@@ -364,6 +371,9 @@ enum NameMode {
     /// Also at the start of the value: "Tune, 0.000 st".
     Value,
 }
+
+/// True when `LOOM_A11Y_VALUE=number`: report controls by number only.
+static NUMBER_VALUE: LazyLock<bool> = LazyLock::new(|| std::env::var("LOOM_A11Y_VALUE").as_deref() == Ok("number"));
 
 /// The name mode from `LOOM_A11Y_NAME` (`title`, `help`, or `value`).
 static NAME_MODE: LazyLock<NameMode> = LazyLock::new(|| match std::env::var("LOOM_A11Y_NAME").as_deref() {
@@ -442,6 +452,7 @@ impl crate::App {
             }
             Event::Action(request) => {
                 let events = action(&self.ui_snapshot(), &request);
+                eprintln!("a11y: -> {events:?}");
                 // A set is one turn of a knob: one change, then let go, so it
                 // is one undo step (as the control channel's `set`).
                 let turned = events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. }));
