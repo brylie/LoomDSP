@@ -125,3 +125,15 @@ fn a_new_definition_is_empty() {
     assert_eq!(voice.metadata.name, "Voice");
     assert!(voice.modules.is_empty() && voice.exposed.is_empty());
 }
+
+/// The definitions table goes before the `modules` line, never inside a
+/// string that happens to hold that text.
+#[test]
+fn a_name_that_looks_like_the_modules_line_does_not_move_the_table() {
+    let mut patch = Patch::from_ron(VOICE).unwrap();
+    patch.metadata.name = "a    modules: [b".into();
+    patch.metadata.description = "\n    modules: [".into();
+    let text = patch.to_ron().unwrap();
+    assert_eq!(Patch::from_ron(&text).unwrap(), patch);
+    assert!(text.contains("\n    subpatches: {\n"), "{text}");
+}

@@ -502,8 +502,12 @@ impl Patch {
                 table.push_str(",\n");
             }
             table.push_str("    },\n");
-            let modules = text.find("    modules: [").expect("a patch always writes its modules");
-            text.insert_str(modules, &table);
+            // At a line start: a string value cannot hold a raw newline, so
+            // this cannot match inside a name or description.
+            let modules = text
+                .find("\n    modules: [")
+                .expect("a patch always writes its modules");
+            text.insert_str(modules + 1, &table);
         }
         Ok(text)
     }
