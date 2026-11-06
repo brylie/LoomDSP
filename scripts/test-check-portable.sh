@@ -99,6 +99,15 @@ if [ "$(id -u)" -ne 0 ]; then
         exit 1
     fi
     chmod 755 "$scratch/a/src/hidden"
+
+    case_dir lib.rs 'pub fn f() {}\n' locked.rs 'pub fn g() { let _ = std::fs::read("x"); }\n'
+    chmod 000 "$scratch/a/src/locked.rs"
+    if sh "$script" "$scratch/a" > /dev/null 2>&1; then
+        chmod 644 "$scratch/a/src/locked.rs"
+        echo "expected to fail: a source file the check cannot read" >&2
+        exit 1
+    fi
+    chmod 644 "$scratch/a/src/locked.rs"
 fi
 
 echo "check-portable.sh: all cases behave"

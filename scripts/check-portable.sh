@@ -12,8 +12,8 @@
 # `fs::read(..)`. Matching `use` lines and `fs as` catches renamed
 # imports, such as `use std::fs as disk;`, also inside a `use` group that
 # rustfmt splits over several lines. Comment lines are skipped. A crate
-# folder with no `src`, or a folder `find` cannot read, fails the check, so
-# no crate is skipped without notice.
+# folder with no `src`, or a folder or file the check cannot read, fails
+# the check, so no source is skipped without notice.
 #
 # Test files are skipped: `tests.rs`, `*_tests.rs`, and files under a
 # `tests` folder. Test placement (scripts/check-test-placement.sh) keeps
@@ -54,12 +54,24 @@ files=$(
     exit 1
 }
 
-found=$(
-    printf '%s\n' "$files" | sort | while read -r file; do
-        [ -n "$file" ] || continue
-        grep -n -E "$pattern" "$file" /dev/null || true
-    done | grep -v -E '^[^:]+:[0-9]+:[[:space:]]*//' || true
-)
+# grep exits 1 when nothing matches and 2 when it cannot read the file.
+# Only the first is a pass. The loop reads a here-document, not a pipe, so
+# `exit` leaves the script.
+matches=""
+while read -r file; do
+    [ -n "$file" ] || continue
+    if lines=$(grep -n -E "$pattern" "$file" /dev/null); then
+        matches="$matches$lines
+"
+    elif [ "$?" -ne 1 ]; then
+        echo "Could not read $file" >&2
+        exit 1
+    fi
+done <<SOURCES
+$(printf '%s\n' "$files" | sort)
+SOURCES
+
+found=$(printf '%s' "$matches" | grep -v -E '^[^:]+:[0-9]+:[[:space:]]*//' || true)
 
 if [ -n "$found" ]; then
     echo "$found"
