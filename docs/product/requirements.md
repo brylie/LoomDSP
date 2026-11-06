@@ -49,7 +49,7 @@ See ADR-0007 for the full signal model.
 |---|---|---|---|---|
 | FR-VOICE-01 | A patch or sub-patch can be marked polyphonic with a voice count. | Must | M2 | Standard instrument need. Met by a voice count on the module that allocates voices: a patch or sub-patch is polyphonic wherever a bundle flows ([polyphony](../design/polyphony.md#the-voice-count), rule 12). |
 | FR-VOICE-02 | Voice allocation supports at least oldest-steal, quietest-steal, and mono/legato modes. | Must | M2 | Different instruments need different behaviour. [Polyphony](../design/polyphony.md#allocation), rule 20. |
-| FR-VOICE-03 | Modules exist to merge voices into one signal and to send one signal to all voices. | Must | M2 | Users need to mix voices and share global modulation. Voice merge (MT-VOICE-01); a mono cable feeds every voice with no module ([polyphony](../design/polyphony.md#bundles), rule 6). |
+| FR-VOICE-03 | A module exists to merge voices into one signal. A mono cable feeds every voice of a polyphonic module. | Must | M2 | Users need to mix voices and share global modulation. Voice merge (MT-VOICE-01); the fan-out needs no module ([polyphony](../design/polyphony.md#bundles), rule 6). Reworded with the polyphony spec: the original asked for a module to send one signal to all voices. |
 | FR-VOICE-04 | Per-voice values for MIDI note, velocity, pressure, and MPE dimensions are available as signals. | Should | M2 | Expressive control is a key reason to build custom instruments. [Polyphony](../design/polyphony.md#allocation), rule 28. |
 
 ## 4. Modulation (`MOD`)

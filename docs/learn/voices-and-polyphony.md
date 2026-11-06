@@ -37,7 +37,7 @@ Here is a chain, with the width of each cable:
 
 Notice that the saw's phase input and the envelope's gate input are declared `Downmix` for stereo, so that a stereo patch does not run them twice for a control signal that is the same on both sides. Voices are the opposite case: a gate differs per voice by definition. So a bundle copies a module whatever its inputs declare, and the stereo declaration keeps its stereo meaning inside each voice. Today's modules become polyphonic without a change.
 
-The mono LFO into a copied module is the common case, and it is free: every copy reads the same cable. That is the "send one signal to all voices" that FR-VOICE-03 asks for, and it needs no module, for the same reason a mono cable into a stereo filter needs none.
+The mono LFO into a copied module is the common case, and it is free: every copy reads the same cable. That is the fan-out FR-VOICE-03 asks for, and it needs no module, for the same reason a mono cable into a stereo filter needs none.
 
 ## Why a polysynth steals
 
