@@ -71,3 +71,21 @@ fn bad_text_reports_the_patch_error() {
     assert!(error.to_string().starts_with("invalid patch:"), "{error}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A leftover temporary file with this save's name makes the save fail,
+/// and the save leaves that file alone: it did not create it.
+#[test]
+fn a_save_never_removes_a_temporary_file_it_did_not_create() {
+    let dir = std::env::temp_dir().join(format!("loom-app-patch-stale-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("p.ron");
+    let stale = dir.join(format!(".p.ron.{}.tmp", std::process::id()));
+    std::fs::write(&stale, "someone else's").unwrap();
+    assert!(matches!(
+        save(&Patch::new("New"), &path),
+        Err(PatchFileError::Io { .. })
+    ));
+    assert_eq!(std::fs::read_to_string(&stale).unwrap(), "someone else's");
+    assert!(!path.exists(), "nothing was written");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

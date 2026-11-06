@@ -86,11 +86,16 @@ pub fn save(patch: &Patch, path: impl AsRef<Path>) -> Result<(), PatchFileError>
     }
     let name = target.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
     let temp = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    let written = std::fs::OpenOptions::new()
+    // An open that fails returns at once: the temporary name may belong to
+    // a file this save did not create, and cleanup must not remove it.
+    let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&temp)
-        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .map_err(io)?;
+    let written = file.write_all(text.as_bytes());
+    drop(file);
+    let written = written
         .and_then(|()| match &existing {
             Some(meta) => std::fs::set_permissions(&temp, meta.permissions()),
             None => Ok(()),

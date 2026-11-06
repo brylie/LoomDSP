@@ -6,9 +6,12 @@
 # source can catch it.
 #
 # Under each portable crate's `src`, a line fails when it names
-# `fs::`, `process::`, `thread::`, `Instant`, or `SystemTime`. Matching the
-# short path catches grouped imports too, such as `use std::{fs, io};`
-# followed by `fs::read(..)`. Comment lines are skipped.
+# `fs::`, `process::`, `thread::`, `Instant`, or `SystemTime`, or is a `use`
+# line that names `fs`, `process`, or `thread`. Matching the short path
+# catches grouped imports, such as `use std::{fs, io};` followed by
+# `fs::read(..)`. Matching `use` lines catches renamed imports, such as
+# `use std::fs as disk;`. Comment lines are skipped. A crate folder with no
+# `src` fails the check, so a typo cannot skip a crate.
 #
 # Test files are skipped: `tests.rs`, `*_tests.rs`, and files under a
 # `tests` folder. Test placement (scripts/check-test-placement.sh) keeps
@@ -26,7 +29,16 @@ if [ "$#" -eq 0 ]; then
     set -- crates/loom-core crates/loom-dsp crates/loom-modules crates/loom-patch crates/loom-rt
 fi
 
-pattern='(^|[^A-Za-z0-9_])(fs|process|thread)::|(^|[^A-Za-z0-9_])(Instant|SystemTime)([^A-Za-z0-9_]|$)'
+word='([^A-Za-z0-9_]|$)'
+pattern="(^|[^A-Za-z0-9_])(fs|process|thread)::|(^|[^A-Za-z0-9_])(Instant|SystemTime)$word"
+pattern="$pattern|^[[:space:]]*(pub(\\([a-z]+\\))? )?use [^;]*[^A-Za-z0-9_](fs|process|thread)$word"
+
+for crate in "$@"; do
+    if [ ! -d "$crate/src" ]; then
+        echo "No source folder to check: $crate/src" >&2
+        exit 1
+    fi
+done
 
 found=$(
     for crate in "$@"; do

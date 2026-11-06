@@ -41,6 +41,12 @@ fails "a std::fs call"
 case_dir lib.rs 'use std::{fs, io};\npub fn f() { let _ = fs::read("x"); }\n'
 fails "a grouped import of fs"
 
+case_dir lib.rs 'use std::fs as disk;\npub fn f() { let _ = disk::read("x"); }\n'
+fails "a renamed import of fs"
+
+case_dir lib.rs 'use std::{io, thread as t};\n'
+fails "a renamed import of thread in a group"
+
 case_dir lib.rs 'pub fn f() -> u32 { std::process::id() }\n'
 fails "a process call"
 
@@ -70,5 +76,13 @@ passes "a *_tests.rs file"
 
 case_dir lib.rs 'mod foo;\n' foo.rs 'pub fn f() { let _ = std::fs::read("x"); }\n'
 fails "a call in a module file"
+
+case_dir lib.rs 'use crate::fsm::Machine;\npub mod fsm { pub struct Machine; }\n'
+passes "a use line with a name that only contains fs"
+
+if sh "$script" "$scratch/no-such-crate" > /dev/null 2>&1; then
+    echo "expected to fail: a crate folder with no src" >&2
+    exit 1
+fi
 
 echo "check-portable.sh: all cases behave"
