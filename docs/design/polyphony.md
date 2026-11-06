@@ -144,6 +144,7 @@ The [rules for M2 modules](p2-modules.md#rules-for-all-modules-here) apply.
 | Panel | `voices` as a number. `mode` as a segmented control showing the choices the count uses. |
 
 - With `voices` at 1 the module behaves exactly as it does today in Retrigger mode. *Why:* existing patches and reference renders do not change.
+- `pressure` and `timbre` are the catalogue's Expression input (MT-IO-05), on this module rather than a separate one. *Why:* expression has to reach the voice that plays its note, and only the module that allocated the voice knows which that is.
 - MPE: the module follows the MPE zone on its channel when the device announces one, and each member channel's bend, pressure, and timbre reach the voice playing that channel's note.
 
 ### Voice merge (MT-VOICE-01)

@@ -303,7 +303,7 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-IO-02 | Audio input | Brings audio from an interface channel or host input into the patch. | | M1 | FR-LIB-07 | Specified (`loom.io.audio-in`, [audio input](../design/audio-input.md)) |
 | MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | M0 | FR-LIB-07 | Built in part (`loom.midi.note`: one voice; the voice count, stealing modes, and per-voice pressure and timbre are specified in [polyphony](../design/polyphony.md#note-input-mt-io-03), M2) |
 | MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | M1 | FR-LIB-07 | Built (`loom.midi.controller`, [M1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
-| MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | M2 | FR-VOICE-04 | Planned |
+| MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | M2 | FR-VOICE-04 | Specified as outputs of Note input, `pressure` and `timbre` (slide is the same MPE dimension), so that expression follows the same voices as the notes ([polyphony](../design/polyphony.md#note-input-mt-io-03), rule 28). No separate module. |
 | MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | M2 | FR-MIDI-04 | Planned |
 | MT-IO-07 | Controller output | Sends a signal out as a MIDI controller value. | | M2 | FR-MIDI-04 | Planned |
 | MT-IO-08 | Key state | Reports whether a given key is held, or how many keys are held. | | M2 | New | Planned |
