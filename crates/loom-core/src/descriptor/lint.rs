@@ -204,3 +204,6 @@ impl ConstMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

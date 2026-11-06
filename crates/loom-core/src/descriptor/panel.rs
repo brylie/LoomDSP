@@ -961,3 +961,6 @@ impl ModuleDescriptor {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

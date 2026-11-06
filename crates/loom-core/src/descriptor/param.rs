@@ -567,3 +567,6 @@ impl ParamSpec {
         self.clamp(value)
     }
 }
+
+#[cfg(test)]
+mod tests;

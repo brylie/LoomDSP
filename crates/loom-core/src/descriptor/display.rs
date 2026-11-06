@@ -140,3 +140,6 @@ pub enum DisplayKind {
 
 /// Most display values one module can publish.
 pub const MAX_DISPLAYS: usize = 4;
+
+#[cfg(test)]
+mod tests;
