@@ -44,6 +44,9 @@ pub struct UiSnapshot {
     pub redo: Option<String>,
     /// The selected module IDs.
     pub selection: Vec<u32>,
+    /// The names along the shown level's path, outermost first: what the
+    /// breadcrumb bar shows. Empty at the top level.
+    pub level: Vec<String>,
     /// How far from a port's centre a click still hits it, in world units.
     /// The canvas widens it when zoomed out below 7 / 9 (about 0.78).
     pub port_hit_radius: f32,
@@ -650,6 +653,7 @@ impl App {
             undo: self.session.edits.history.undo_step().map(|s| s.name().to_string()),
             redo: self.session.edits.history.redo_step().map(|s| s.name().to_string()),
             selection: self.session.selection.iter().copied().collect(),
+            level: self.session.hierarchy.path_names(&self.session.level),
             port_hit_radius: PORT_HIT_RADIUS,
             tiles,
             cables,

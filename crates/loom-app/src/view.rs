@@ -28,6 +28,10 @@ impl App {
                     .map(|output| (output.module.0, output.port)),
             )
             .frame_key(self.frame_key)
+            .level(
+                self.session.level_key,
+                self.session.cameras.get(&self.session.level).copied(),
+            )
             .browser_key(self.browser_key)
             .focus_policy(self.canvas_focus_policy())
             .arrow_group(match self.session.edits.arrow_group() {
@@ -49,9 +53,13 @@ impl App {
             self.right_panel(),
         ];
 
+        // The breadcrumb slot is always there, empty at the top level, so the
+        // canvas keeps its place in the widget tree and with it its state
+        // (the camera) when a level opens or closes.
         let main = column![
             self.toolbar(),
             rule::horizontal(1),
+            self.breadcrumb(),
             body,
             rule::horizontal(1),
             self.stats_bar()
@@ -120,6 +128,36 @@ impl App {
         let listening = self.listening();
         let on_input = move |event: iced::Event, status| crate::input_owner::heard_messages(&event, status, listening);
         pointer::Injector::new(layers, self, on_input).into()
+    }
+
+    /// The breadcrumb bar, shown only while a sub-patch is open: `Patch ›
+    /// Voice › Filter`, each name a button that shows that level
+    /// (sub-patches.md, Make, open, and dissolve). At the top level it is
+    /// an empty column of no height.
+    pub(crate) fn breadcrumb(&self) -> Element<'_, Message> {
+        let level = &self.session.level;
+        if level.is_root() {
+            return column![].into();
+        }
+        let names = self.session.hierarchy.path_names(level);
+        let mut bar = row![
+            button(text("Patch").size(style::CONTROL))
+                .style(style::plain)
+                .on_press(Message::OpenLevel(loom_patch::ModulePath::root()))
+        ]
+        .spacing(2)
+        .align_y(iced::Alignment::Center)
+        .padding([2, 8]);
+        for (depth, name) in names.into_iter().enumerate() {
+            let target = level.prefix(depth + 1);
+            bar = bar.push(text("›").size(style::CONTROL).color(style::QUIET));
+            bar = bar.push(
+                button(text(name).size(style::CONTROL))
+                    .style(style::plain)
+                    .on_press(Message::OpenLevel(target)),
+            );
+        }
+        column![bar, rule::horizontal(1)].into()
     }
 
     /// The toolbar: the patch name, then buttons in groups (file, add,

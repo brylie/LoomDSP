@@ -6,10 +6,12 @@ use loom_canvas::{
     CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue,
     PortShape, PortView, Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
+use loom_core::ModuleNames;
 use loom_core::{
     Controller, DisplayKind, InputRef, ModuleDescriptor, ModuleId, OutputRef, ParamSpec, PortDefault, PortSpec,
     SignalType, WidgetKind,
 };
+use loom_patch::{Direction, End, Hierarchy, ModulePath, Tile};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Segments across a result preview. About one world unit per segment on a
@@ -914,11 +916,33 @@ pub fn control_part(
     }
 }
 
-/// Builds the scene for the controller's graph. Modules without a position
-/// are placed at the origin; call [`crate::layout::auto_layout`] first.
-pub fn build(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>, sizes: &BTreeMap<u32, (u8, u8)>) -> Scene {
+/// Builds the scene of a flat patch at its top level, for tests.
+#[cfg(test)]
+pub fn build_flat(
+    controller: &Controller,
+    positions: &BTreeMap<u32, (f32, f32)>,
+    sizes: &BTreeMap<u32, (u8, u8)>,
+) -> Scene {
+    let mut hierarchy = Hierarchy::flat();
+    hierarchy.adopt(controller.graph());
+    build(controller, &hierarchy, &ModulePath::root(), positions, sizes)
+}
+
+/// Builds the scene of one level: its modules as tiles, each nested
+/// sub-patch as a tile with its name and ports, each Patch input and
+/// output of the level as a port tile, and the cables between them as the
+/// level shows them (sub-patches.md, Editor model). A modulation line is
+/// drawn only between two modules of the level.
+pub fn build(
+    controller: &Controller,
+    hierarchy: &Hierarchy,
+    level: &ModulePath,
+    positions: &BTreeMap<u32, (f32, f32)>,
+    sizes: &BTreeMap<u32, (u8, u8)>,
+) -> Scene {
     let graph = controller.graph();
     let delayed: BTreeSet<InputRef> = controller.last_report().inserted_delays().map(|(_, to)| *to).collect();
+    let on_level = |id: ModuleId| hierarchy.level_of(id) == *level;
 
     // Assignments each output drives, counting those that are off.
     let mut badges: BTreeMap<OutputRef, u32> = BTreeMap::new();
@@ -928,8 +952,9 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>, siz
     // Inputs with a cable: they no longer follow their default, so they
     // show no clock mark (panels.md, Clock mark on transport inputs).
     let cabled: BTreeSet<InputRef> = graph.cables().map(|(_, to)| to).collect();
-    let modules = graph
+    let mut modules: Vec<ModuleView> = graph
         .nodes()
+        .filter(|(id, _)| on_level(*id))
         .map(|(id, node)| {
             let d = node.descriptor;
             let mut inputs: Vec<PortView> = d
@@ -1012,34 +1037,204 @@ pub fn build(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>, siz
         })
         .collect();
 
-    let cables = graph
-        .cables()
-        .filter_map(|(from, to)| {
-            let source = graph.node(from.module)?;
-            let target = graph.node(to.module)?;
-            let from_signal = source
-                .descriptor
-                .outputs
-                .get(from.port)
-                .map_or(SignalType::Modulation, |port| port.signal);
-            let to_signal = target
-                .descriptor
-                .inputs
-                .get(to.port)
-                .map_or(SignalType::Modulation, |port| port.signal);
+    // The sub-patch and port tiles of the level. A port is coloured by the
+    // signal behind it: the inner input it feeds, or the output behind it.
+    let signal_into = |end: &End| -> SignalType {
+        hierarchy
+            .inputs_behind(graph, level, end)
+            .first()
+            .and_then(|(id, name)| {
+                let node = graph.node(*id)?;
+                node.input_index(name).and_then(|i| node.descriptor.inputs.get(i))
+            })
+            .map_or(SignalType::Modulation, |spec| spec.signal)
+    };
+    let signal_from = |end: &End| -> SignalType {
+        hierarchy
+            .source_behind(graph, level, end)
+            .and_then(|(id, name)| {
+                let node = graph.node(id)?;
+                node.output_index(&name).and_then(|i| node.descriptor.outputs.get(i))
+            })
+            .map_or(SignalType::Modulation, |spec| spec.signal)
+    };
+    let tile_port = |name: &str, signal: SignalType, description: &str| PortView {
+        label: name.to_string(),
+        hover: HoverText::new(name, description, name),
+        colour: signal_colour(signal),
+        shape: signal_shape(signal),
+        badge: 0,
+        follows_transport: None,
+    };
+    let place = |id: ModuleId| positions.get(&id.0).map_or(Point::ORIGIN, |&(x, y)| Point::new(x, y));
+    let structure = family_colour(loom_core::Family::Interface);
+    for (id, tile) in hierarchy.structural_tiles(level) {
+        let lid = hierarchy.path_of(id).last();
+        let view = match tile {
+            Tile::Instance(_) => {
+                let name = hierarchy.tile_name(id).unwrap_or_default();
+                let (inputs, outputs) = hierarchy.instance_ports(id);
+                ModuleView {
+                    id: id.0,
+                    title: name.clone(),
+                    hover: HoverText {
+                        description: format!("Sub-patch. {name} is a patch inside this one. Double-click to open it."),
+                        name: Some(loom_patch::SUBPATCH_KIND.to_string()),
+                    },
+                    accent: structure,
+                    position: place(id),
+                    size: sizes.get(&id.0).copied(),
+                    unknown: false,
+                    inputs: inputs
+                        .iter()
+                        .map(|(_, port)| {
+                            tile_port(port, signal_into(&(lid, port.clone())), "An input of the sub-patch.")
+                        })
+                        .collect(),
+                    outputs: outputs
+                        .iter()
+                        .map(|(_, port)| {
+                            tile_port(port, signal_from(&(lid, port.clone())), "An output of the sub-patch.")
+                        })
+                        .collect(),
+                    panel: PanelView {
+                        width: 10,
+                        height: 2,
+                        widgets: Vec::new(),
+                    },
+                }
+            }
+            Tile::Port(direction, name) => {
+                let d = controller.registry().resolve(direction.kind()).ok();
+                let description = match direction {
+                    Direction::Input => "A Patch input: what comes in through this port of the sub-patch.",
+                    Direction::Output => "A Patch output: what goes out through this port of the sub-patch.",
+                };
+                let (inputs, outputs) = match direction {
+                    Direction::Input => (
+                        Vec::new(),
+                        vec![tile_port("out", signal_into(&(lid, "out".to_string())), description)],
+                    ),
+                    Direction::Output => (
+                        vec![tile_port("in", signal_from(&(lid, "in".to_string())), description)],
+                        Vec::new(),
+                    ),
+                };
+                ModuleView {
+                    id: id.0,
+                    title: name,
+                    hover: HoverText {
+                        description: d.map_or_else(
+                            || description.to_string(),
+                            |d| format!("{}. {}", d.family.label(), d.description),
+                        ),
+                        name: Some(direction.kind().to_string()),
+                    },
+                    accent: d.map_or(structure, |d| family_colour(d.family)),
+                    position: place(id),
+                    size: sizes.get(&id.0).copied(),
+                    unknown: false,
+                    inputs,
+                    outputs,
+                    panel: d.map_or_else(
+                        || PanelView {
+                            width: 10,
+                            height: 2,
+                            widgets: Vec::new(),
+                        },
+                        |d| panel_for(d, &[]),
+                    ),
+                }
+            }
+            Tile::Module => continue,
+        };
+        modules.push(view);
+    }
+
+    // The port an end of the level names on its tile: a module's by name,
+    // an instance's by its place in the port list, a port tile's one port.
+    let port_of = |end: &End, input: bool| -> Option<(u32, usize, SignalType)> {
+        let id = hierarchy.id_at(level, end.0)?;
+        if let Some(node) = graph.node(id) {
+            let (index, signal) = if input {
+                let i = node.input_index(&end.1)?;
+                (
+                    i,
+                    node.descriptor
+                        .inputs
+                        .get(i)
+                        .map_or(SignalType::Modulation, |p| p.signal),
+                )
+            } else {
+                let i = node.output_index(&end.1)?;
+                (
+                    i,
+                    node.descriptor
+                        .outputs
+                        .get(i)
+                        .map_or(SignalType::Modulation, |p| p.signal),
+                )
+            };
+            return Some((id.0, index, signal));
+        }
+        match hierarchy.tile(graph, id)? {
+            Tile::Instance(_) => {
+                let (inputs, outputs) = hierarchy.instance_ports(id);
+                let list = if input { inputs } else { outputs };
+                let index = list.iter().position(|(_, name)| *name == end.1)?;
+                let signal = if input { signal_into(end) } else { signal_from(end) };
+                Some((id.0, index, signal))
+            }
+            Tile::Port(direction, _) => {
+                let fits = match direction {
+                    Direction::Input => !input && end.1 == "out",
+                    Direction::Output => input && end.1 == "in",
+                };
+                fits.then(|| (id.0, 0, if input { signal_from(end) } else { signal_into(end) }))
+            }
+            Tile::Module => None,
+        }
+    };
+    let cables = hierarchy
+        .level_cables(graph, level)
+        .into_iter()
+        .filter_map(|cable| {
+            let (from_id, from_index, from_signal) = port_of(&cable.from, false)?;
+            let (to_id, to_index, to_signal) = port_of(&cable.to, true)?;
+            // A unit delay is marked where the engine put it: on a module's
+            // input, or on the first inner input behind a port.
+            let delayed_at = if graph.node(ModuleId(to_id)).is_some() {
+                Some(InputRef {
+                    module: ModuleId(to_id),
+                    port: to_index,
+                })
+            } else {
+                hierarchy
+                    .inputs_behind(graph, level, &cable.to)
+                    .first()
+                    .and_then(|(id, name)| {
+                        graph
+                            .node(*id)?
+                            .input_index(name)
+                            .map(|port| InputRef { module: *id, port })
+                    })
+            };
             Some(CableView {
-                from: (from.module.0, from.port),
-                to: (to.module.0, to.port),
+                from: (from_id, from_index),
+                to: (to_id, to_index),
                 colour_from: signal_colour(from_signal),
                 colour_to: signal_colour(to_signal),
-                delayed: delayed.contains(&to),
+                delayed: delayed_at.is_some_and(|input| delayed.contains(&input)),
             })
         })
         .collect();
 
-    // One line per assignment, to the control bound to its parameter.
+    // One line per assignment between two modules of the level, to the
+    // control bound to its parameter. A line that crosses a boundary
+    // waits for the surface panel (sub-patches.md, Editor model).
     let modulations = graph
         .assignments()
+        .filter(|(_, a)| on_level(a.source.module) && on_level(a.target))
         .filter_map(|(id, a)| {
             let d = graph.node(a.target)?.descriptor;
             let name = d.params.get(a.param)?.name;

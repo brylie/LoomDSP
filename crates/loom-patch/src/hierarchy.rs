@@ -474,10 +474,13 @@ impl Hierarchy {
         (strip(inputs), strip(outputs))
     }
 
-    /// The flat id of the tile with level id `lid` at `level`, if there is
-    /// one in the table.
+    /// The flat id of the tile with level id `lid` at `level`. At the top
+    /// level the two are the same number, so a module the table never saw
+    /// is found too.
     pub fn id_at(&self, level: &ModulePath, lid: u32) -> Option<ModuleId> {
-        self.ids.get(&level.child(lid))
+        self.ids
+            .get(&level.child(lid))
+            .or_else(|| level.is_root().then_some(ModuleId(lid)))
     }
 
     /// The cables a level shows, in its ids: the graph's cables between two
@@ -1163,10 +1166,7 @@ impl Hierarchy {
 
         // What the level showed, before anything moves.
         let shown = self.level_cables(graph, level);
-        let member_ids: Vec<ModuleId> = members
-            .iter()
-            .filter_map(|lid| self.ids.get(&level.child(*lid)))
-            .collect();
+        let member_ids: Vec<ModuleId> = members.iter().filter_map(|lid| self.id_at(level, *lid)).collect();
 
         // Members move inside, keeping their level ids.
         for lid in &members {
@@ -1515,9 +1515,7 @@ impl Hierarchy {
 
     /// True when an end of `level` is a module of the graph.
     fn is_module_end(&self, graph: &Graph, level: &ModulePath, end: &End) -> bool {
-        self.ids
-            .get(&level.child(end.0))
-            .is_some_and(|id| graph.node(id).is_some())
+        self.id_at(level, end.0).is_some_and(|id| graph.node(id).is_some())
     }
 
     /// Restores a snapshot of the hierarchy, keeping the ids the table has

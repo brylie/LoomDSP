@@ -242,6 +242,8 @@ struct Shown {
 fn shown(
     options: &Options,
     controller: &mut Controller,
+    hierarchy: &loom_patch::Hierarchy,
+    level: &loom_patch::ModulePath,
     positions: &BTreeMap<u32, (f32, f32)>,
     sizes: &BTreeMap<u32, (u8, u8)>,
     size: Size,
@@ -253,7 +255,7 @@ fn shown(
         None => None,
     };
     let controller = &*controller;
-    let scene = crate::scene::build(controller, positions, sizes);
+    let scene = crate::scene::build(controller, hierarchy, level, positions, sizes);
 
     let focus = options
         .focus
@@ -316,6 +318,8 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
     let (scene, shown) = shown(
         options,
         &mut loaded.controller,
+        &loaded.hierarchy,
+        &loom_patch::ModulePath::root(),
         &loaded.positions,
         &loaded.sizes,
         logical,
@@ -358,6 +362,8 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     let (scene, shown) = shown(
         options,
         &mut app.session.controller,
+        &app.session.hierarchy,
+        &app.session.level,
         &app.session.positions,
         &app.session.sizes,
         canvas.bounds.size(),

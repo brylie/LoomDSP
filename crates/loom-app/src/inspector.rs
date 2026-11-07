@@ -64,8 +64,36 @@ pub enum Inspector {
     Module(ModuleRows),
     /// A missing module and its preserved, read-only data.
     Unknown(UnknownRows),
+    /// A sub-patch tile: its name and ports (sub-patches.md, Editor model).
+    SubPatch(SubPatchRows),
+    /// A Patch input or output tile inside a sub-patch.
+    Port(PortRows),
     /// The selected module is gone. Nothing is shown.
     Empty,
+}
+
+/// The inspector's view of a sub-patch tile.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SubPatchRows {
+    /// The tile's id.
+    pub id: u32,
+    /// The definition's name.
+    pub name: String,
+    /// The input ports, in order.
+    pub inputs: Vec<String>,
+    /// The output ports, in order.
+    pub outputs: Vec<String>,
+}
+
+/// The inspector's view of a port tile.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PortRows {
+    /// The tile's id.
+    pub id: u32,
+    /// "Patch input" or "Patch output".
+    pub direction: String,
+    /// The port's name, which the sub-patch tile shows outside.
+    pub name: String,
 }
 
 /// The inspector's view of a placeholder.
@@ -406,6 +434,30 @@ impl App {
             (Some(&id), None) => id,
             (Some(_), Some(_)) => return Inspector::Several(self.session.selection.len()),
         };
+        let hierarchy = &self.session.hierarchy;
+        match hierarchy.tile(graph, ModuleId(id)) {
+            Some(loom_patch::Tile::Instance(_)) => {
+                let (inputs, outputs) = hierarchy.instance_ports(ModuleId(id));
+                return Inspector::SubPatch(SubPatchRows {
+                    id,
+                    name: hierarchy.tile_name(ModuleId(id)).unwrap_or_default(),
+                    inputs: inputs.into_iter().map(|(_, name)| name).collect(),
+                    outputs: outputs.into_iter().map(|(_, name)| name).collect(),
+                });
+            }
+            Some(loom_patch::Tile::Port(direction, name)) => {
+                return Inspector::Port(PortRows {
+                    id,
+                    direction: match direction {
+                        loom_patch::Direction::Input => "Patch input",
+                        loom_patch::Direction::Output => "Patch output",
+                    }
+                    .to_string(),
+                    name,
+                });
+            }
+            _ => {}
+        }
         let Some(node) = graph.node(ModuleId(id)) else {
             return Inspector::Empty;
         };
@@ -730,6 +782,27 @@ pub fn view<'a>(
             rows.into()
         }
         Inspector::Module(m) => module_view(m, drop_row, dragging),
+        Inspector::SubPatch(s) => {
+            let mut rows = column![
+                text(s.name).size(style::HEADING),
+                text("Sub-patch").size(style::BODY).color(DIM),
+            ]
+            .spacing(6);
+            for (label, ports) in [("Inputs", s.inputs), ("Outputs", s.outputs)] {
+                if !ports.is_empty() {
+                    rows = rows.push(text(format!("{label}: {}", ports.join(", "))).size(style::BODY));
+                }
+            }
+            rows = rows.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(s.id)));
+            rows.into()
+        }
+        Inspector::Port(p) => column![
+            text(p.name).size(style::HEADING),
+            text(p.direction).size(style::BODY).color(DIM),
+            text("A port of this sub-patch. Its name is the port's label on the tile outside.").size(style::BODY),
+        ]
+        .spacing(6)
+        .into(),
     };
     // The scrollbar takes its own space, so it never covers a value.
     container(scrollable(container(content).padding(12)).spacing(4))

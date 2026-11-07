@@ -35,3 +35,24 @@ impl App {
         self.show_level(&inside);
     }
 }
+
+impl App {
+    /// Shows the level above the one shown. At the top, nothing.
+    pub(crate) fn go_up(&mut self) {
+        if let Some(parent) = self.session.level.parent() {
+            self.show_level(&parent);
+        }
+    }
+
+    /// Opens the selected sub-patch, when exactly one tile is selected and
+    /// it is one (Ctrl+Enter).
+    pub(crate) fn open_selected(&mut self) {
+        let mut selected = self.session.selection.iter();
+        if let (Some(&id), None) = (selected.next(), selected.next()) {
+            self.open_tile(id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -292,6 +292,11 @@ enum Message {
     HelpLink(String),
     /// Close the tile menu.
     CloseTileMenu,
+    /// Show a level of the patch: the top, or the inside of a sub-patch
+    /// (the breadcrumb bar).
+    OpenLevel(loom_patch::ModulePath),
+    /// Open the sub-patch tile with this id.
+    OpenTile(u32),
     /// A message for the open module browser.
     Browser(browser::Message),
     /// A message for the open probe menu.
@@ -535,6 +540,8 @@ impl Message {
             | Self::HelpExample
             | Self::HelpLink(_)
             | Self::CloseTileMenu
+            | Self::OpenLevel(_)
+            | Self::OpenTile(_)
             | Self::Browser(_)
             | Self::ProbeMenu(_)
             | Self::AddProbe { .. }
@@ -770,8 +777,17 @@ impl App {
 
     /// Rebuilds the scene after the graph changed.
     fn refresh(&mut self) {
+        // A module added straight to the controller is a top-level module
+        // the hierarchy must know (ADR-0039, invariant 1).
+        self.session.hierarchy.adopt(self.session.controller.graph());
         layout::auto_layout(&self.session.controller, &mut self.session.positions);
-        self.session.scene = scene::build(&self.session.controller, &self.session.positions, &self.session.sizes);
+        self.session.scene = scene::build(
+            &self.session.controller,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.positions,
+            &self.session.sizes,
+        );
         self.session.mode_key = scene::mode_key(&self.session.controller);
         self.refresh_values();
         self.refresh_learn();
@@ -785,7 +801,13 @@ impl App {
         // (ADR-0030). Rare: a mode click, never a knob turn.
         let mode_key = scene::mode_key(&self.session.controller);
         if mode_key != self.session.mode_key {
-            self.session.scene = scene::build(&self.session.controller, &self.session.positions, &self.session.sizes);
+            self.session.scene = scene::build(
+                &self.session.controller,
+                &self.session.hierarchy,
+                &self.session.level,
+                &self.session.positions,
+                &self.session.sizes,
+            );
             self.session.mode_key = mode_key;
         }
         let mut shown: scene::ShownValues = self
@@ -1462,6 +1484,11 @@ impl App {
                     self.reset_clip(meter, true);
                 }
             }
+            Message::OpenLevel(level) => self.show_level(&level),
+            Message::OpenTile(id) => {
+                self.overlays.close_tile_menu();
+                self.open_tile(id);
+            }
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
                 self.overlays.help = self
@@ -1658,6 +1685,13 @@ impl App {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
             }) if self.session.learn.is_on() => self.stop_learning(),
+            // Escape with nothing else using it goes up one level
+            // (sub-patches.md, Make, open, and dissolve): the canvas took it
+            // first for a drag, pinned lines, control focus, or a selection.
+            Message::Key(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            }) if self.no_overlay() && !self.session.level.is_root() => self.go_up(),
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if modifiers.command() => {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
@@ -1684,6 +1718,8 @@ impl App {
                         self.history_key = Some(true)
                     }
                     iced::keyboard::Key::Character(",") => self.toggle_preferences(),
+                    // Ctrl+Enter or Cmd+Enter opens the selected sub-patch.
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => self.open_selected(),
                     _ => {}
                 }
             }
@@ -1763,6 +1799,7 @@ Right-click an output or a cable to add a scope or a meter fed by it.\n\
 Click a modulation badge to pin its lines; click again or press Escape to hide them.\n\
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
 Cmd/Ctrl+Z undoes, and Cmd/Ctrl+Shift+Z redoes.\n\
+Double-click a sub-patch's header, or press Cmd/Ctrl+Enter with it selected, to open it. Escape with nothing selected goes back up; so does a name in the breadcrumb bar.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
 
 #[cfg(test)]

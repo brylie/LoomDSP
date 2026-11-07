@@ -186,7 +186,7 @@ impl PatchSession {
             Err(e) => (None, None, format!("no audio ({e})"), Some(engine)),
         };
 
-        let scene = scene::build(&controller, &positions, &sizes);
+        let scene = scene::build(&controller, &hierarchy, &ModulePath::root(), &positions, &sizes);
         let mode_key = scene::mode_key(&controller);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &BTreeMap::new());

@@ -9,7 +9,7 @@ fn stereo_cable_hover_follows_the_compile_report() {
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.connect_named(join, "out", out, "in").unwrap();
     c.commit().unwrap();
-    let scene = build(c, &BTreeMap::new(), &BTreeMap::new());
+    let scene = build_flat(c, &BTreeMap::new(), &BTreeMap::new());
     assert!(
         scene.module(join.0).unwrap().outputs[0]
             .hover
@@ -25,7 +25,7 @@ fn stereo_cable_hover_follows_the_compile_report() {
     let input = c.input_ref(out, "in").unwrap();
     c.disconnect(input).unwrap();
     c.commit().unwrap();
-    let scene = build(c, &BTreeMap::new(), &BTreeMap::new());
+    let scene = build_flat(c, &BTreeMap::new(), &BTreeMap::new());
     assert!(
         !scene.module(out.0).unwrap().inputs[0]
             .hover
@@ -248,7 +248,7 @@ fn headers_show_their_family() {
     for (kind, _) in cases {
         parts.controller.add_module(kind).unwrap();
     }
-    let scene = build(&parts.controller, &BTreeMap::new(), &BTreeMap::new());
+    let scene = build_flat(&parts.controller, &BTreeMap::new(), &BTreeMap::new());
     for (tile, (kind, family)) in scene.modules().iter().zip(cases) {
         assert_eq!(tile.accent, family_colour(family), "{kind}");
         assert!(
@@ -638,18 +638,18 @@ fn changing_the_view_widens_the_tile_and_moves_its_output() {
     let c = &mut parts.controller;
     let meter = c.add_module("loom.display.meter").unwrap();
     c.commit().unwrap();
-    let plain = build(c, &BTreeMap::new(), &BTreeMap::new());
+    let plain = build_flat(c, &BTreeMap::new(), &BTreeMap::new());
     let key = mode_key(c);
     let narrow = plain.module(meter.0).unwrap().width();
     let port = plain.module(meter.0).unwrap().output_position(0);
     let view = c.graph().node(meter).unwrap().descriptor.param_index("view").unwrap();
     c.set_param(meter, view, 1.0).unwrap();
     assert_ne!(mode_key(c), key, "the scene must be rebuilt");
-    let wide = build(c, &BTreeMap::new(), &BTreeMap::new());
+    let wide = build_flat(c, &BTreeMap::new(), &BTreeMap::new());
     assert!(wide.module(meter.0).unwrap().width() > narrow);
     assert!(wide.module(meter.0).unwrap().output_position(0).x > port.x);
     c.set_param(meter, view, 0.0).unwrap();
-    let back = build(c, &BTreeMap::new(), &BTreeMap::new());
+    let back = build_flat(c, &BTreeMap::new(), &BTreeMap::new());
     assert_eq!(back.module(meter.0).unwrap().width(), narrow);
 }
 
@@ -662,7 +662,7 @@ fn a_plain_meter_still_grows_wider() {
     let meter = c.add_module("loom.display.meter").unwrap();
     c.commit().unwrap();
     let sizes = BTreeMap::from([(meter.0, (30, 20))]);
-    let scene = build(c, &BTreeMap::new(), &sizes);
+    let scene = build_flat(c, &BTreeMap::new(), &sizes);
     let module = scene.module(meter.0).unwrap();
     let rect = module.widget_bounds(0).unwrap();
     assert!(rect.width > 3.0 * loom_canvas::GRID, "wider");
@@ -680,7 +680,7 @@ fn a_resized_history_takes_the_room() {
     c.set_param(meter, view, 1.0).unwrap();
     c.commit().unwrap();
     let sizes = BTreeMap::from([(meter.0, (40, 20))]);
-    let scene = build(c, &BTreeMap::new(), &sizes);
+    let scene = build_flat(c, &BTreeMap::new(), &sizes);
     let module = scene.module(meter.0).unwrap();
     assert_eq!(module.widget_bounds(0).unwrap().width, 3.0 * loom_canvas::GRID);
     let history = module.widget_bounds(1).unwrap();
