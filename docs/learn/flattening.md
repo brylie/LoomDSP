@@ -91,6 +91,14 @@ The record and the graph must never disagree about a cable. So every change to t
 
 One id space makes this simple to use. An instance tile and a port tile have flat ids of their own, from the same table as the modules, so the canvas, the selection, and the undo history handle them as they handle any tile. At the top level a tile's id in the file is its flat id; inside a definition, the table maps the path to the flat id.
 
+## Why the order of assignments matters
+
+Several modulation assignments on one parameter add up. The engine starts at zero and adds each assignment's depth times its source, in the order of the assignments' ids, which is the order they were made in. With two assignments the order does not matter: `a + b` and `b + a` are the same number, bit for bit, because adding two floating-point numbers is commutative. With three it does: `(a + b) + c` and `(c + a) + b` can differ in the last bit, because floating-point addition is not associative. Nobody hears that bit, but the determinism rule says the same patch must give the same output, and a patch that reloads to a different last bit breaks it.
+
+A nested file cannot write the order the player made. Each level lists its own assignments, so the flattener has to pick: it adds each sub-patch's inner assignments before the level's own (rule 11). A player who first modulates an exposed cutoff from outside, then adds a source inside, has made the outer one first, but the file loads the inner one first.
+
+The editor settles this on its own side. After every change to the hierarchy, and after every assignment is added, `sync` compares the live order on each parameter with the order the file would load, and gives a new id to any assignment that sits too early, so the live order is the file's. In the usual case that is the one outer assignment, moved behind the new inner one, at the moment the player adds it. The only other time the order can change is a collapse that moves some of three or more assignments on one parameter inside: the sum is then summed in the file's order from the collapse on, which is the exception written into rule 2 of the specification. A save and reload never changes it.
+
 ## How other tools do it
 
 Max has both private sub-patchers and shared abstractions in files, and runs them in one scheduler. Reaktor and Bitwig Grid nest containers and compile them into one program for the audio thread. The common thread is the same as here: the nesting is for the person, and the engine runs something flat. LoomDSP names the step, flattening, and keeps it in one portable crate so that the command-line renderer and a future browser build play sub-patches without the app.

@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-m1) and [Level meters and audio load](#level-meters-and-audio-load-m1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Agreed (M2, 2026-11-01). [Default panels](#default-panels) is Draft.
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-m1) and [Level meters and audio load](#level-meters-and-audio-load-m1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Agreed (M2, 2026-11-01). [Default panels](#default-panels) is Draft, except its flow and wrap rules, which are Agreed (2026-11-07).
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -784,8 +784,10 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ### Layout
 
+**Status:** The flow and wrap rules (the second and third bullets) are Agreed (2026-11-07) and Implemented for the derived sub-patch surface. The order of data editors and choice widgets, and everything else in Default panels, is still Draft.
+
 - Data editors come first, each on its own row, at the full panel width. Then choice widgets (segmented controls, select lists), then the other parameter widgets in the order the parameters are declared. Then the display values, in their declared order ([Panel layout](#panel-layout)).
-- Widgets flow left to right on the panel grid and wrap at 12 grid units, four knobs wide. Each row is as tall as its tallest widget. Leaning: check the width against real modules and the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)).
+- Widgets flow left to right on the panel grid and wrap at 12 grid units, four knobs wide. Each row is as tall as its tallest widget.
 - The panel's size is the space its widgets fill. A module with nothing to show gets an empty panel, as today.
 - Focus order is the order above, so Tab follows what the user reads.
 - *Why declaration order:* the author already puts parameters in a meaningful order for the inspector. Deriving from it keeps the tile and the inspector alike.
@@ -807,7 +809,7 @@ A hint is an option on the parameter, in `ParamOptions`. It names one widget fro
 
 ## Exposed controls in a sub-patch
 
-**Status:** Agreed, M2 (2026-11-01), with [sub-patches](sub-patches.md). The derived panel for a sub-patch with no designed panel uses the [Default panels layout](#layout-1), which is still Draft; until it is agreed, build the derived sub-patch panel last. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
+**Status:** Agreed, M2 (2026-11-01), with [sub-patches](sub-patches.md). Implemented for parameters (slice 3 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-07): display values and data slots wait for the widgets that would show them. The derived panel for a sub-patch with no designed panel places the exposed items by the Agreed flow and wrap rules of the [Default panels layout](#layout-1), in the order they were exposed. Decision: [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md). Requirements: FR-ENCAP-03, FR-PANEL-03, FR-PANEL-09.
 
 A sub-patch's surface is made of the same widgets as its inside. *Why:* a user who enters a sub-patch, or leaves it, must not have to learn a new set of widgets. The knob outside is the knob inside, and so is the light, the scope, and the curve.
 
@@ -821,13 +823,14 @@ A sub-patch's surface is made of the same widgets as its inside. *Why:* a user w
 
 ### Acceptance criteria: exposed controls
 
-- [ ] Exposing a parameter shown as a fader puts a fader on the sub-patch surface (`Ui` harness).
-- [ ] Turning the surface control moves the inner control, and the reverse. One undo step reverts either (`Ui` harness).
-- [ ] A sub-patch with three exposed parameters and no designed panel shows three widgets in the order exposed.
-- [ ] An exposed control inside the sub-patch has its mark and its "Exposed as" hover text (UI snapshot).
-- [ ] A light and a curve exposed from inside a sub-patch show on its surface. The light follows the inner display value, and a point dragged on the surface curve moves on the inner curve. One undo step reverts it (`Ui` harness).
+- [x] Exposing a parameter shown as a fader puts a fader on the sub-patch surface (`Ui` harness: `crates/loom-app/src/levels/tests.rs`, `exposing_a_fader_puts_a_fader_on_the_surface`).
+- [x] Turning the surface control moves the inner control, and the reverse. One undo step reverts either (`Ui` harness: `crates/loom-app/src/levels/tests.rs`, `surface_and_inner_controls_move_together_and_undo_as_one`).
+- [x] A sub-patch with three exposed parameters and no designed panel shows three widgets in the order exposed (test: `crates/loom-app/src/surface/tests.rs`, `three_exposed_parameters_make_three_widgets_in_exposure_order`).
+- [x] An exposed control inside the sub-patch has its mark and its "Exposed as" hover text (UI snapshot and scene: `crates/loom-app/src/surface/tests.rs`, `an_exposed_control_inside_has_its_mark_and_hover_text`; `crates/loom-app/src/levels/tests.rs`, `exposing_a_fader_puts_a_fader_on_the_surface`).
+- [ ] A light and a curve exposed from inside a sub-patch show on its surface. The light follows the inner display value, and a point dragged on the surface curve moves on the inner curve. One undo step reverts it (`Ui` harness). Waits for display values and data slots to be exposable; slice 3 exposes parameters only.
 
 ## Open points
 
 - How third-party modules add display kinds through the SDK.
+- Derived panels: check the 12-unit wrap width against real modules and the estimated label widths ([#120](https://github.com/brylie/LoomDSP/issues/120)).
 - A derived display value gets a light. Once display values carry a unit and range ([#118](https://github.com/brylie/LoomDSP/issues/118)), should those with a unit get a readout or a meter instead?
