@@ -201,7 +201,12 @@ impl App {
                     // The live values this frame draws, even when nothing
                     // else asks for frames.
                     crate::scene::update_live_values(&mut self.session.values, &self.session.controller);
-                    match sampling.record(self.session.controller.graph(), &self.session.values, now) {
+                    match sampling.record(
+                        self.session.controller.graph(),
+                        &self.session.hierarchy,
+                        &self.session.values,
+                        now,
+                    ) {
                         Err(error) => call.answer(Err(error)),
                         Ok(true) => call.answer(Ok(fields(json!({ "frames": sampling.frames })))),
                         Ok(false) => waiting.push(Pending {
@@ -838,29 +843,40 @@ impl App {
                 "`{target}` is not a control, light, or meter; use `module:name`, like `4:cutoff`"
             ));
         };
-        let node = self
-            .session
-            .controller
-            .graph()
-            .node(ModuleId(module))
-            .ok_or_else(|| format!("no module {module}"))?;
-        let widgets = node.descriptor.panel.widgets;
-        let widget = widgets.iter().position(|w| w.binds(name)).ok_or_else(|| {
-            format!(
-                "module {module} ({}) has no control, light, or meter `{name}`",
-                node.descriptor.name
-            )
-        })?;
+        let graph = self.session.controller.graph();
+        let (widget, part, meter) = match graph.node(ModuleId(module)) {
+            Some(node) => {
+                let widgets = node.descriptor.panel.widgets;
+                let widget = widgets.iter().position(|w| w.binds(name)).ok_or_else(|| {
+                    format!(
+                        "module {module} ({}) has no control, light, or meter `{name}`",
+                        node.descriptor.name
+                    )
+                })?;
+                let part = if widgets[widget].second() == Some(name) {
+                    ControlPart::Second
+                } else {
+                    ControlPart::Main
+                };
+                (widget, part, widgets[widget].kind == WidgetKind::Meter)
+            }
+            // A sub-patch tile's surface: its exposed parameters, by name.
+            None => {
+                let widget = crate::surface::find_control(graph, &self.session.hierarchy, module, name).ok_or_else(
+                    || match self.session.hierarchy.tile_name(ModuleId(module)) {
+                        Some(tile) => format!("module {module} ({tile}) has no control `{name}`"),
+                        None => format!("no module {module}"),
+                    },
+                )?;
+                (widget, ControlPart::Main, false)
+            }
+        };
         Ok(Sampling {
             module,
             widget,
             name: name.to_string(),
-            part: if widgets[widget].second() == Some(name) {
-                ControlPart::Second
-            } else {
-                ControlPart::Main
-            },
-            meter: widgets[widget].kind == WidgetKind::Meter,
+            part,
+            meter,
             ms,
             start: None,
             frames: Vec::new(),

@@ -1798,7 +1798,10 @@ fn the_inspector_selects_a_control_range() {
         .iter()
         .position(|w| w.binds("gain"))
         .unwrap();
-    let (_, _, spec) = scene::control_param(&app.session.controller, mul.0, widget).unwrap();
+    let spec = app
+        .control_target(mul.0, widget, loom_canvas::ControlPart::Main)
+        .unwrap()
+        .spec;
     assert_eq!((spec.min, spec.max), (-0.1, 0.1));
     assert!(
         (spec.denormalize(0.51) - spec.denormalize(0.5) - 0.002).abs() < 1e-6,

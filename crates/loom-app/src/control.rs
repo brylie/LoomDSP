@@ -334,7 +334,13 @@ pub(crate) struct Sampling {
 impl Sampling {
     /// Records the frame at `now`. True once the time is up: that frame is
     /// not recorded, so every entry is inside the asked time.
-    fn record(&mut self, graph: &Graph, values: &PanelValues, now: Instant) -> Result<bool, String> {
+    fn record(
+        &mut self,
+        graph: &Graph,
+        hierarchy: &loom_patch::Hierarchy,
+        values: &PanelValues,
+        now: Instant,
+    ) -> Result<bool, String> {
         let start = *self.start.get_or_insert(now);
         let elapsed = now.duration_since(start);
         if elapsed >= Duration::from_millis(self.ms) {
@@ -342,10 +348,7 @@ impl Sampling {
         }
         // The value table keeps a removed module's last values, so ask the
         // graph whether the widget is still drawn.
-        let drawn = graph
-            .node(ModuleId(self.module))
-            .and_then(|node| node.descriptor.panel.widgets.get(self.widget))
-            .is_some_and(|w| w.binds(&self.name));
+        let drawn = crate::surface::widget_binds(graph, hierarchy, self.module, self.widget, &self.name);
         let value = values
             .get(self.module, self.widget)
             .filter(|_| drawn)

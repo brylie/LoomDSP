@@ -3,7 +3,7 @@
 //! control for MIDI learn (`docs/design/midi-learn.md`,
 //! `docs/design/modulation.md`).
 
-use crate::{App, Message, learn, modulation, scene};
+use crate::{App, Message, learn, modulation};
 use loom_core::{MidiMappingOptions, ModuleId, OutputRef};
 use std::time::Instant;
 
@@ -294,15 +294,16 @@ impl App {
 
     /// Why text typed on a canvas control is not a value, if it is not.
     pub(crate) fn typed_check(&self, module: u32, widget: usize, text: &str) -> Result<(), String> {
-        let (index, _, _) =
-            crate::scene::control_param(&self.session.controller, module, widget).ok_or("no such control")?;
+        let target = self
+            .control_target(module, widget, loom_canvas::ControlPart::Main)
+            .ok_or("no such control")?;
         let node = self
             .session
             .controller
             .graph()
-            .node(ModuleId(module))
+            .node(target.module)
             .ok_or("no such module")?;
-        let spec = node.descriptor.params.get(index).ok_or("no such parameter")?;
+        let spec = node.descriptor.params.get(target.index).ok_or("no such parameter")?;
         spec.parse_value_text(text).map(|_| ()).map_err(|why| why.to_string())
     }
 
@@ -509,9 +510,10 @@ impl App {
         pinned: Option<loom_canvas::PortRef>,
         delta: f32,
     ) {
-        let Some((param, _, _)) = scene::control_part(&self.session.controller, module, widget, part) else {
+        let Some(target) = self.control_target(module, widget, part) else {
             return;
         };
+        let (module, param) = (target.module, target.index);
         let graph = self.session.controller.graph();
         let picked = self.session.gestures.pick_depth(|| {
             let pinned = pinned.map(|p| OutputRef {
@@ -521,7 +523,7 @@ impl App {
             let selected = (self.session.selection.len() == 1)
                 .then(|| self.session.selection.iter().next().map(|&id| ModuleId(id)))
                 .flatten();
-            match modulation::drag_target(graph, ModuleId(module), param, pinned, selected) {
+            match modulation::drag_target(graph, module, param, pinned, selected) {
                 Ok(id) => Some(id),
                 Err(why) => {
                     self.alerts.warn(why.to_string());

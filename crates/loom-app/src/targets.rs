@@ -17,6 +17,7 @@
 use loom_canvas::{ControlPart, PORT_HIT_RADIUS, PanelValues, PortRef, Scene};
 use loom_core::ModuleNames;
 use loom_core::{Graph, ModuleId};
+use loom_patch::{Hierarchy, Tile};
 
 /// The prefix that names a light or a meter only.
 pub const DISPLAY_PREFIX: &str = "display:";
@@ -45,11 +46,13 @@ pub enum Part {
 /// Finds `name` on module `module`, in the order of rule 10: parameter,
 /// output, input, then display value. `display:NAME` finds a display
 /// value only, `input:NAME` an input, `output:NAME` an output, and
-/// `badge:NAME` an output's badge.
-pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
-    let node = graph
-        .node(ModuleId(module))
-        .ok_or_else(|| format!("no module {module}"))?;
+/// `badge:NAME` an output's badge. On a sub-patch tile a parameter is an
+/// exposed name, and the ports are the tile's; a port tile has its one
+/// port.
+pub fn find(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str) -> Result<Part, String> {
+    let Some(node) = graph.node(ModuleId(module)) else {
+        return find_on_tile(graph, hierarchy, module, name);
+    };
     let descriptor = node.descriptor;
     let widgets = descriptor.panel.widgets;
     let display = |name: &str| {
@@ -119,44 +122,105 @@ pub fn find(graph: &Graph, module: u32, name: &str) -> Result<Part, String> {
         })
 }
 
+/// Finds `name` on a tile that is not a graph module: a sub-patch tile's
+/// exposed parameter or port, or a port tile's one port, in the order of
+/// rule 10.
+fn find_on_tile(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str) -> Result<Part, String> {
+    let id = ModuleId(module);
+    let tile = hierarchy.tile(graph, id).ok_or_else(|| format!("no module {module}"))?;
+    let tile_name = hierarchy.tile_name(id).unwrap_or_default();
+    let port = |name: &str, output: bool| tile_port(graph, hierarchy, module, name, output);
+    for (prefix, output) in [(INPUT_PREFIX, false), (OUTPUT_PREFIX, true)] {
+        if let Some(name) = name.strip_prefix(prefix) {
+            let kind = if output { "output" } else { "input" };
+            return port(name, output).ok_or_else(|| format!("module {module} ({tile_name}) has no {kind} `{name}`"));
+        }
+    }
+    if name.starts_with(DISPLAY_PREFIX) || name.starts_with(BADGE_PREFIX) {
+        return Err(format!(
+            "module {module} ({tile_name}) has no light, meter, or badge `{name}`"
+        ));
+    }
+    let control = match tile {
+        Tile::Instance(_) => {
+            crate::surface::find_control(graph, hierarchy, module, name).map(|i| Part::Control(module, i))
+        }
+        _ => None,
+    };
+    control
+        .or_else(|| port(name, true))
+        .or_else(|| port(name, false))
+        .ok_or_else(|| format!("module {module} ({tile_name}) has no control or port `{name}`"))
+}
+
+/// The port named `name` facing `output` on a tile that is not a graph
+/// module: one of a sub-patch tile's ports, or a port tile's one port.
+fn tile_port(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str, output: bool) -> Option<Part> {
+    let id = ModuleId(module);
+    let index = match hierarchy.tile(graph, id)? {
+        Tile::Instance(_) => {
+            let (inputs, outputs) = hierarchy.instance_ports(id);
+            let list = if output { outputs } else { inputs };
+            list.iter().position(|(_, port)| port == name)?
+        }
+        Tile::Port(direction, _) => {
+            let faces_out = direction == loom_patch::Direction::Input;
+            (faces_out == output && direction.own_port() == name).then_some(0)?
+        }
+        Tile::Module => return None,
+    };
+    Some(Part::Port(PortRef { module, output, index }))
+}
+
+/// The name of a port on a tile, by its place: a module's port, a sub-patch
+/// tile's, or a port tile's one port.
+fn port_name(graph: &Graph, hierarchy: &Hierarchy, port: PortRef) -> Option<String> {
+    let id = ModuleId(port.module);
+    if let Some(node) = graph.node(id) {
+        return Some(if port.output {
+            node.output_name(port.index)?.to_string()
+        } else {
+            node.input_name(port.index)?.to_string()
+        });
+    }
+    match hierarchy.tile(graph, id)? {
+        Tile::Instance(_) => {
+            let (inputs, outputs) = hierarchy.instance_ports(id);
+            let list = if port.output { outputs } else { inputs };
+            Some(list.get(port.index)?.1.clone())
+        }
+        Tile::Port(direction, _) => {
+            let faces_out = direction == loom_patch::Direction::Input;
+            (faces_out == port.output && port.index == 0).then(|| direction.own_port().to_string())
+        }
+        Tile::Module => None,
+    }
+}
+
 /// The name that finds `part` again: `MODULE:NAME` when that finds it, or
 /// else the name with the prefix of its kind (`display:`, `input:`,
 /// `output:`), for a part whose name something earlier in rule 10 also
 /// has. A badge always has `badge:`. `None` when the module or the part is
 /// gone.
-pub fn name(graph: &Graph, part: Part) -> Option<String> {
-    let (module, plain) = match part {
-        Part::Control(module, widget) | Part::Display(module, widget) => (
-            module,
-            graph
-                .node(ModuleId(module))?
-                .descriptor
-                .panel
-                .widgets
-                .get(widget)?
-                .bind(),
-        ),
-        Part::Second(module, widget) => (
-            module,
-            graph
-                .node(ModuleId(module))?
-                .descriptor
-                .panel
-                .widgets
-                .get(widget)?
-                .second()?,
-        ),
-        Part::Port(port) | Part::Badge(port) => {
-            let node = graph.node(ModuleId(port.module))?;
-            (
-                port.module,
-                if port.output {
-                    node.output_name(port.index)?
-                } else {
-                    node.input_name(port.index)?
-                },
-            )
+pub fn name(graph: &Graph, hierarchy: &Hierarchy, part: Part) -> Option<String> {
+    let plain: String = match part {
+        Part::Control(module, widget) | Part::Display(module, widget) => {
+            crate::surface::widget_name(graph, hierarchy, module, widget)?
         }
+        Part::Second(module, widget) => graph
+            .node(ModuleId(module))?
+            .descriptor
+            .panel
+            .widgets
+            .get(widget)?
+            .second()?
+            .to_string(),
+        Part::Port(port) | Part::Badge(port) => port_name(graph, hierarchy, port)?,
+    };
+    let plain = plain.as_str();
+    let module = match part {
+        Part::Control(module, _) | Part::Second(module, _) | Part::Display(module, _) => module,
+        Part::Port(port) | Part::Badge(port) => port.module,
     };
     if let Part::Display(_, widget) = part {
         let widgets = graph.node(ModuleId(module))?.descriptor.panel.widgets;
@@ -170,7 +234,7 @@ pub fn name(graph: &Graph, part: Part) -> Option<String> {
     }
     let prefix = match part {
         Part::Badge(_) => return Some(format!("{module}:{BADGE_PREFIX}{plain}")),
-        _ if find(graph, module, plain) == Ok(part) => "",
+        _ if find(graph, hierarchy, module, plain) == Ok(part) => "",
         Part::Display(..) => DISPLAY_PREFIX,
         Part::Port(port) if port.output => OUTPUT_PREFIX,
         Part::Port(_) => INPUT_PREFIX,

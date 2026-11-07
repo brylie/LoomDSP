@@ -260,11 +260,11 @@ fn shown(
     let focus = options
         .focus
         .as_ref()
-        .map(|target| find_control(controller, target))
+        .map(|target| find_control(controller, hierarchy, target))
         .transpose()?;
     let point = |p: &Pointer| match p {
         Pointer::World(p) => Ok(*p),
-        Pointer::Named(target) => find_point(controller, &scene, target),
+        Pointer::Named(target) => find_point(controller, hierarchy, &scene, target),
     };
     let pointer = options.pointer.as_ref().map(point).transpose()?;
     let pinned = options
@@ -275,13 +275,13 @@ fn shown(
     let depth = options
         .depth
         .as_ref()
-        .map(|t| find_control(controller, t))
+        .map(|t| find_control(controller, hierarchy, t))
         .transpose()?;
 
     // During an arc drag, the knob's arc shows only the assignment being
     // changed, as in the app.
     let dragging = depth
-        .map(|knob| depth_assignment(controller, knob, pinned, focus))
+        .map(|knob| depth_assignment(controller, hierarchy, knob, pinned, focus))
         .transpose()?;
 
     let centre = options.center.as_ref().map(point).transpose()?.or(pointer).or_else(|| {
@@ -471,26 +471,32 @@ fn descriptor(controller: &Controller, module: u32) -> Result<&'static loom_core
         .ok_or_else(|| format!("no module {module} in the patch"))
 }
 
-/// The widget index of the control bound to a parameter. Panel widgets on
-/// the canvas keep the descriptor's order.
-pub(crate) fn find_control(controller: &Controller, target: &Named) -> Result<(u32, usize), String> {
-    let descriptor = descriptor(controller, target.module)?;
-    control_index(descriptor, &target.name)
+/// The widget index of the control bound to a parameter, by its name on a
+/// module tile or its exposed name on a sub-patch tile. Panel widgets on
+/// the canvas keep the descriptor's order, and surface widgets the order
+/// the items were exposed.
+pub(crate) fn find_control(
+    controller: &Controller,
+    hierarchy: &loom_patch::Hierarchy,
+    target: &Named,
+) -> Result<(u32, usize), String> {
+    let graph = controller.graph();
+    crate::surface::find_control(graph, hierarchy, target.module, &target.name)
         .map(|index| (target.module, index))
         .ok_or_else(|| {
-            format!(
-                "module {} ({}) has no control for parameter `{}`",
-                target.module, descriptor.name, target.name
-            )
+            let tile = hierarchy.tile_name(ModuleId(target.module)).or_else(|| {
+                graph
+                    .node(ModuleId(target.module))
+                    .map(|n| n.descriptor.name.to_string())
+            });
+            match tile {
+                Some(name) => format!(
+                    "module {} ({name}) has no control for parameter `{}`",
+                    target.module, target.name
+                ),
+                None => format!("no module {} in the patch", target.module),
+            }
         })
-}
-
-fn control_index(descriptor: &loom_core::ModuleDescriptor, param: &str) -> Option<usize> {
-    descriptor
-        .panel
-        .widgets
-        .iter()
-        .position(|w| w.is_control() && w.binds(param))
 }
 
 /// The port with this name. An output wins over an input of the same name.
@@ -540,9 +546,13 @@ fn pick_up(controller: &mut Controller, target: &Named) -> Result<(PortRef, bool
 
 /// The world point of a named control, port, light, or meter's centre,
 /// looked up in the order of rule 10 (`crate::targets`).
-fn find_point(controller: &Controller, scene: &Scene, target: &Named) -> Result<Point, String> {
-    descriptor(controller, target.module)?;
-    let part = crate::targets::find(controller.graph(), target.module, &target.name)?;
+fn find_point(
+    controller: &Controller,
+    hierarchy: &loom_patch::Hierarchy,
+    scene: &Scene,
+    target: &Named,
+) -> Result<Point, String> {
+    let part = crate::targets::find(controller.graph(), hierarchy, target.module, &target.name)?;
     let mut values = PanelValues::new();
     crate::scene::update_panel_values(&mut values, controller, &BTreeMap::new());
     crate::targets::world_bounds(scene, &values, part)
@@ -567,19 +577,26 @@ fn find_pin(controller: &Controller, scene: &Scene, target: &Named) -> Result<Po
 /// it. The focused module stands in for the selection.
 fn depth_assignment(
     controller: &Controller,
+    hierarchy: &loom_patch::Hierarchy,
     knob: (u32, usize),
     pinned: Option<PortRef>,
     focus: Option<(u32, usize)>,
 ) -> Result<loom_core::AssignmentId, String> {
     let (module, widget) = knob;
-    let (param, kind, spec) =
-        crate::scene::control_param(controller, module, widget).ok_or("not a parameter control")?;
+    let target = crate::surface::control_target(
+        controller.graph(),
+        hierarchy,
+        module,
+        widget,
+        loom_canvas::ControlPart::Main,
+    )
+    .ok_or("not a parameter control")?;
     // Only a control that shows a range has one to drag. Other controls set
     // their depth in the inspector.
-    if !kind.has_range() {
+    if !target.kind.has_range() {
         return Err(format!(
             "the control for {module}:{} is not a knob, a fader, an XY pad, or a range, so it has no range to drag",
-            spec.name
+            target.spec.name
         ));
     }
     let pinned = pinned.map(|p| OutputRef {
@@ -587,7 +604,7 @@ fn depth_assignment(
         port: p.index,
     });
     let selected = focus.map(|(module, _)| ModuleId(module));
-    crate::modulation::drag_target(controller.graph(), ModuleId(module), param, pinned, selected)
+    crate::modulation::drag_target(controller.graph(), target.module, target.index, pinned, selected)
         .map_err(|why| format!("no arc drag on {module}: {why}"))
 }
 

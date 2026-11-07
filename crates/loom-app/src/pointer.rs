@@ -723,6 +723,7 @@ impl App {
         let typed = inner.seen.as_ref()?.typed.as_ref()?;
         let target = crate::targets::name(
             self.session.controller.graph(),
+            &self.session.hierarchy,
             crate::targets::Part::Control(typed.module, typed.widget),
         )?;
         Some(TypedFieldState {
@@ -741,14 +742,11 @@ impl App {
         }
         let seen = inner.seen.clone().unwrap_or_default();
         let graph = self.session.controller.graph();
-        let part = |part| crate::targets::name(graph, part);
+        let hierarchy = &self.session.hierarchy;
+        let part = |part| crate::targets::name(graph, hierarchy, part);
         let port = |p: PortRef| part(crate::targets::Part::Port(p));
         let widget = |module: u32, widget: usize| {
-            let control = graph
-                .node(loom_core::ModuleId(module))
-                .and_then(|n| n.descriptor.panel.widgets.get(widget))
-                .is_some_and(|w| w.is_control());
-            if control {
+            if crate::surface::is_control(graph, hierarchy, module, widget) {
                 part(crate::targets::Part::Control(module, widget))
             } else {
                 part(crate::targets::Part::Display(module, widget))
@@ -770,11 +768,7 @@ impl App {
             Hit::Badge(p) => part(crate::targets::Part::Badge(p)).map(|target| HoverState::Badge { target }),
             Hit::Widget { module, widget: w } => {
                 let target = widget(module, w)?;
-                let control = graph
-                    .node(loom_core::ModuleId(module))
-                    .and_then(|n| n.descriptor.panel.widgets.get(w))
-                    .is_some_and(|w| w.is_control());
-                Some(if control {
+                Some(if crate::surface::is_control(graph, hierarchy, module, w) {
                     HoverState::Control { target }
                 } else {
                     HoverState::Display { target }

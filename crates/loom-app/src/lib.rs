@@ -70,6 +70,7 @@ mod spectrum;
 mod stream;
 mod style;
 mod subscriptions;
+mod surface;
 mod targets;
 #[cfg(any(test, feature = "test-ui"))]
 #[allow(dead_code, reason = "the crate's unit tests use the rest of this harness")]

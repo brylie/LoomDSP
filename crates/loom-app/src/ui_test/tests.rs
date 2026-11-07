@@ -1263,8 +1263,11 @@ fn a_fader_sets_a_float_value_and_takes_an_assignment() {
         "{moved}: a small drag makes a small change, with no snap"
     );
 
-    let (_, kind, spec) =
-        crate::scene::control_param(&ui.app.session.controller, id.0, widget_of(&ui, id, "tall")).unwrap();
+    let target = ui
+        .app
+        .control_target(id.0, widget_of(&ui, id, "tall"), loom_canvas::ControlPart::Main)
+        .unwrap();
+    let (kind, spec) = (target.kind, target.spec);
     assert_eq!(kind, loom_core::WidgetKind::Fader { vertical: true });
     let position = crate::scene::control_position(kind, &spec, 1_000.0);
     assert!(position > 0.0 && position < 1.0, "through the logarithmic mapping");
@@ -1553,7 +1556,7 @@ fn each_axis_of_an_xy_pad_has_its_own_text() {
 
 /// A handle of the range on a new `test.panel`, in window coordinates.
 fn handle(ui: &mut Ui, id: ModuleId, name: &str) -> Point {
-    let part = crate::targets::find(ui.app.session.controller.graph(), id.0, name).unwrap();
+    let part = crate::targets::find(ui.app.session.controller.graph(), &ui.app.session.hierarchy, id.0, name).unwrap();
     let world = crate::targets::world_bounds(&ui.app.session.scene, &ui.app.session.values, part).unwrap();
     ui.canvas().to_window(world.center())
 }
@@ -1944,11 +1947,12 @@ fn a_range_reports_both_values_and_names_each_handle() {
     );
 
     let graph = ui.app.session.controller.graph();
-    let low = crate::targets::find(graph, id.0, "span_low").unwrap();
-    let high = crate::targets::find(graph, id.0, "span_high").unwrap();
+    let hierarchy = &ui.app.session.hierarchy;
+    let low = crate::targets::find(graph, hierarchy, id.0, "span_low").unwrap();
+    let high = crate::targets::find(graph, hierarchy, id.0, "span_high").unwrap();
     assert_ne!(low, high);
     assert_eq!(
-        crate::targets::name(graph, high),
+        crate::targets::name(graph, hierarchy, high),
         Some(format!("{}:span_high", id.0)),
         "the name finds it again"
     );
@@ -2003,7 +2007,11 @@ fn a_number_steps_by_one_and_shows_the_base_value() {
     assert_eq!(count(&ui), 17.0, "40 pixels at 4 pixels per value");
 
     let widget = widget_of(&ui, id, "tempo");
-    let (_, kind, spec) = crate::scene::control_param(&ui.app.session.controller, id.0, widget).unwrap();
+    let target = ui
+        .app
+        .control_target(id.0, widget, loom_canvas::ControlPart::Main)
+        .unwrap();
+    let (kind, spec) = (target.kind, target.spec);
     assert_eq!(kind, loom_core::WidgetKind::Number);
     let value = ui.app.session.values.get(id.0, widget).unwrap();
     assert_eq!(value.text, crate::param::format(&spec, 120.0), "the base value");

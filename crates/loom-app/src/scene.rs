@@ -3,8 +3,8 @@
 use crate::clip::ClipHolds;
 use iced::{Color, Point};
 use loom_canvas::{
-    CableView, ControlPart, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue,
-    PortShape, PortView, Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
+    CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue, PortShape, PortView,
+    Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
 use loom_core::ModuleNames;
 use loom_core::{
@@ -879,41 +879,6 @@ pub fn scope_outputs(controller: &Controller, modules: &[u32]) -> Vec<ScopeOutpu
         }
     }
     scopes
-}
-
-/// The parameter a control is bound to, limited to its selected range, if
-/// the module and widget exist.
-///
-/// A button in momentary mode is bound to its hold, and otherwise to its
-/// latch (clock.md, Button details).
-pub fn control_param(controller: &Controller, module: u32, widget: usize) -> Option<(usize, WidgetKind, ParamSpec)> {
-    let node = controller.graph().node(ModuleId(module))?;
-    let d = node.descriptor;
-    let w = d.panel.widgets.get(widget)?;
-    let index = d.control_param(w, &node.params)?;
-    // The control spans the selected range (control-ranges.md, rule 4).
-    Some((index, w.kind, node.spec(index)?))
-}
-
-/// As [`control_param`], for one value of a control. [`ControlPart::Main`] is
-/// the control's parameter, and [`ControlPart::Second`] the second parameter
-/// of an XY pad or a range. [`ControlPart::Both`] names no one parameter.
-pub fn control_part(
-    controller: &Controller,
-    module: u32,
-    widget: usize,
-    part: ControlPart,
-) -> Option<(usize, WidgetKind, ParamSpec)> {
-    match part {
-        ControlPart::Main => control_param(controller, module, widget),
-        ControlPart::Both => None,
-        ControlPart::Second => {
-            let node = controller.graph().node(ModuleId(module))?;
-            let w = node.descriptor.panel.widgets.get(widget)?;
-            let index = node.descriptor.param_index(w.second()?)?;
-            Some((index, w.kind, node.spec(index)?))
-        }
-    }
 }
 
 /// Builds the scene of a flat patch at its top level, for tests.

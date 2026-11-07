@@ -146,6 +146,7 @@ fn pointer_and_center_find_lights_and_meters() {
         .unwrap();
     let point = find_point(
         &app.session.controller,
+        &app.session.hierarchy,
         &app.session.scene,
         &named(format!("{env}:level")),
     )
@@ -153,6 +154,7 @@ fn pointer_and_center_find_lights_and_meters() {
     assert_eq!(point, bounds(env, light).center());
     let point = find_point(
         &app.session.controller,
+        &app.session.hierarchy,
         &app.session.scene,
         &named(format!("{meter}:display:out")),
     )
@@ -160,6 +162,7 @@ fn pointer_and_center_find_lights_and_meters() {
     assert_eq!(point, bounds(meter, 0).center());
     let port = find_point(
         &app.session.controller,
+        &app.session.hierarchy,
         &app.session.scene,
         &named(format!("{meter}:out")),
     )

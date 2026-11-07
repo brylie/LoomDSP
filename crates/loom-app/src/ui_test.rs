@@ -513,8 +513,8 @@ impl Ui {
             module,
             name: param.to_string(),
         };
-        let (_, widget) =
-            screenshot::find_control(&self.app.session.controller, &target).unwrap_or_else(|e| panic!("{e}"));
+        let (_, widget) = screenshot::find_control(&self.app.session.controller, &self.app.session.hierarchy, &target)
+            .unwrap_or_else(|e| panic!("{e}"));
         self.app
             .session
             .scene

@@ -168,10 +168,15 @@ fn a_button_shows_the_parameter_its_mode_chooses() {
     let mut controller = parts.controller;
     let id = controller.add_module("loom.ui.button").unwrap();
     controller.set_param_named(id, "on", 1.0).unwrap();
-    let (index, _, _) = control_param(&controller, id.0, 0).unwrap();
+    let flat = loom_patch::Hierarchy::flat();
+    let index = crate::surface::control_target(controller.graph(), &flat, id.0, 0, loom_canvas::ControlPart::Main)
+        .unwrap()
+        .index;
     assert_eq!(controller.graph().node(id).unwrap().descriptor.params[index].name, "on");
     controller.set_param_named(id, "mode", 1.0).unwrap();
-    let (index, _, spec) = control_param(&controller, id.0, 0).unwrap();
+    let target =
+        crate::surface::control_target(controller.graph(), &flat, id.0, 0, loom_canvas::ControlPart::Main).unwrap();
+    let (index, spec) = (target.index, target.spec);
     assert_eq!(spec.name, "hold");
     let node = controller.graph().node(id).unwrap();
     // The latch is kept, and the hold is released.

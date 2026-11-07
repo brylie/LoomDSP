@@ -53,7 +53,12 @@ fn the_snapshot_reports_it() {
     let widget = tile.widgets.iter().find(|w| w.kind == "xy_scope").expect("the widget");
     assert_eq!(widget.text, "XY scope of X and Y");
     assert!(widget.bounds.is_some());
-    let part = crate::targets::find(ui.app.session.controller.graph(), xy, "display:x_out");
+    let part = crate::targets::find(
+        ui.app.session.controller.graph(),
+        &ui.app.session.hierarchy,
+        xy,
+        "display:x_out",
+    );
     assert_eq!(part, Ok(crate::targets::Part::Display(xy, 0)));
 }
 

@@ -148,12 +148,12 @@ impl App {
                 widget,
                 part,
             } => {
-                if let Some((index, _, _)) = scene::control_part(&self.session.controller, module, widget, part) {
+                if let Some(target) = self.control_target(module, widget, part) {
                     let source = OutputRef {
                         module: ModuleId(from.module),
                         port: from.index,
                     };
-                    self.assign(source, ModuleId(module), index);
+                    self.assign(source, target.module, target.index);
                 }
             }
             CanvasEvent::DragDepth {
@@ -182,15 +182,15 @@ impl App {
                 part,
                 position,
             } => {
-                if let Some((index, kind, spec)) = scene::control_part(&self.session.controller, module, widget, part) {
-                    let value = scene::control_value(kind, &spec, position);
-                    self.set_param(module, index, value);
+                if let Some(target) = self.control_target(module, widget, part) {
+                    let value = scene::control_value(target.kind, &target.spec, position);
+                    self.set_param(target.module.0, target.index, value);
                 }
             }
             CanvasEvent::TypedValue { module, widget, text } => {
-                if let Some((index, _, _)) = scene::control_param(&self.session.controller, module, widget) {
+                if let Some(target) = self.control_target(module, widget, ControlPart::Main) {
                     // The canvas checked the text before it sent it.
-                    if let Err(why) = self.apply_typed_value(module, index, &text) {
+                    if let Err(why) = self.apply_typed_value(target.module.0, target.index, &text) {
                         self.alerts.warn(why);
                     }
                 }
@@ -212,22 +212,20 @@ impl App {
                     std::slice::from_ref(&part)
                 };
                 for &part in parts {
-                    if let Some((index, _, spec)) = scene::control_part(&self.session.controller, module, widget, part)
-                    {
-                        self.set_param(module, index, spec.default);
+                    if let Some(target) = self.control_target(module, widget, part) {
+                        self.set_param(target.module.0, target.index, target.spec.default);
                     }
                 }
             }
             CanvasEvent::Learn { module, widget } => {
                 // One press cannot say which of two values the player means
                 // (midi-learn.md, Making a mapping).
-                let two = scene::control_param(&self.session.controller, module, widget)
-                    .is_some_and(|(_, kind, _)| kind.is_two_numbers());
-                if two {
+                let target = self.control_target(module, widget, ControlPart::Main);
+                if target.as_ref().is_some_and(|t| t.kind.is_two_numbers()) {
                     self.alerts
                         .say("This control has two values. Arm each one in the inspector.".to_string());
-                } else if let Some((index, _, _)) = scene::control_param(&self.session.controller, module, widget) {
-                    self.arm((module, index));
+                } else if let Some(target) = target {
+                    self.arm((target.module.0, target.index));
                 }
             }
             CanvasEvent::ProbeMenu {
