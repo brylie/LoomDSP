@@ -25,6 +25,8 @@ fn labels_follow_mappings_and_the_armed_control() {
 
     let view = view(
         controller,
+        &loom_patch::Hierarchy::flat(),
+        &loom_patch::ModulePath::root(),
         Some(Armed {
             param: (filter.0, resonance),
             serial: None,
@@ -92,11 +94,19 @@ fn a_removed_module_disarms_its_parameter() {
     let mut learn = Learn::default();
     learn.start();
     learn.arm((filter.0, cutoff), None);
-    learn.refresh(controller);
+    learn.refresh(
+        controller,
+        &loom_patch::Hierarchy::flat(),
+        &loom_patch::ModulePath::root(),
+    );
     assert!(learn.shown().unwrap().armed.is_some());
 
     controller.remove_module(filter).unwrap();
-    learn.refresh(controller);
+    learn.refresh(
+        controller,
+        &loom_patch::Hierarchy::flat(),
+        &loom_patch::ModulePath::root(),
+    );
     assert!(learn.armed().is_none());
     assert!(learn.shown().unwrap().armed.is_none());
 }

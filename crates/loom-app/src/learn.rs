@@ -6,6 +6,7 @@ use iced::futures::Stream;
 use iced::futures::channel::mpsc;
 use loom_canvas::{ControlPart, LearnView};
 use loom_core::{Controller, MidiMapping, MidiReader, MidiWaiting, ModuleId};
+use loom_patch::{Hierarchy, ModulePath};
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
@@ -276,22 +277,24 @@ impl Learn {
         self.on.then_some(&self.view)
     }
 
-    /// Rebuilds what the canvas shows, after mappings or the armed parameter
-    /// changed. A removed module disarms its parameter.
-    pub fn refresh(&mut self, controller: &Controller) {
+    /// Rebuilds what the canvas shows, after mappings, the armed parameter,
+    /// or the shown level changed. A removed module disarms its parameter.
+    pub fn refresh(&mut self, controller: &Controller, hierarchy: &Hierarchy, level: &ModulePath) {
         if self
             .armed
             .is_some_and(|armed| controller.graph().node(ModuleId(armed.param.0)).is_none())
         {
             self.armed = None;
         }
-        self.view = view(controller, self.armed);
+        self.view = view(controller, hierarchy, level, self.armed);
     }
 }
 
 /// What learn mode shows on the canvas: the armed control and a label on
-/// every mapped control.
-pub fn view(controller: &Controller, armed: Option<Armed>) -> LearnView {
+/// every mapped control, on module tiles and on the surface controls of
+/// the sub-patch tiles of `level`, which stand for inner parameters
+/// (sub-patches.md, Exposing).
+pub fn view(controller: &Controller, hierarchy: &Hierarchy, level: &ModulePath, armed: Option<Armed>) -> LearnView {
     let graph = controller.graph();
     let mut view = LearnView::default();
     for (id, node) in graph.nodes() {
@@ -319,6 +322,27 @@ pub fn view(controller: &Controller, armed: Option<Armed>) -> LearnView {
                 view.armed = Some((id.0, widget));
             }
             if let Some((_, mapping)) = graph.midi_mapping_of(id, param) {
+                view.labels
+                    .insert((id.0, widget), format!("CC {}", mapping.control.controller));
+            }
+        }
+    }
+    // The surface controls of the level's sub-patch tiles stand for inner
+    // parameters, which are not on this level, so they take the armed mark
+    // and the labels here.
+    for (id, tile) in hierarchy.structural_tiles(level) {
+        if !matches!(tile, loom_patch::Tile::Instance(_)) {
+            continue;
+        }
+        let count = hierarchy.definition_of(id).map_or(0, |d| d.exposed.len());
+        for widget in 0..count {
+            let Some(target) = crate::surface::control_target(graph, hierarchy, id.0, widget, ControlPart::Main) else {
+                continue;
+            };
+            if armed.is_some_and(|a| a.param == (target.module.0, target.index)) {
+                view.armed = Some((id.0, widget));
+            }
+            if let Some((_, mapping)) = graph.midi_mapping_of(target.module, target.index) {
                 view.labels
                     .insert((id.0, widget), format!("CC {}", mapping.control.controller));
             }

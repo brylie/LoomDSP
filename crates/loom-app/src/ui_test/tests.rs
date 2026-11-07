@@ -1470,7 +1470,12 @@ fn learn_mode_arms_nothing_on_an_xy_pad() {
         assert!(ui.app.ui_snapshot().status.contains("inspector"), "{key:?} says why");
     }
     let widget = widget_of(&ui, id, "pad_x");
-    let view = crate::learn::view(&ui.app.session.controller, ui.app.session.learn.armed());
+    let view = crate::learn::view(
+        &ui.app.session.controller,
+        &ui.app.session.hierarchy,
+        &ui.app.session.level,
+        ui.app.session.learn.armed(),
+    );
     assert!(!view.labels.contains_key(&(id.0, widget)));
 }
 

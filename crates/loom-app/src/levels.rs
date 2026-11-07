@@ -100,16 +100,17 @@ impl App {
         }
     }
 
-    /// Runs `change` on a copy of the hierarchy, makes the controller's
-    /// cables follow it, and keeps it only when both worked. Returns
-    /// whether it did; a refusal is in the status bar.
+    /// Runs `change` on a copy of the hierarchy, with the graph to read,
+    /// makes the controller's cables and assignment order follow it, and
+    /// keeps it only when both worked. Returns whether it did; a refusal is
+    /// in the status bar.
     pub(crate) fn change_hierarchy(
         &mut self,
         verb: &str,
-        change: impl FnOnce(&mut Hierarchy) -> Result<(), String>,
+        change: impl FnOnce(&mut Hierarchy, &loom_core::Graph) -> Result<(), String>,
     ) -> bool {
         let mut candidate = self.session.hierarchy.clone();
-        if let Err(why) = change(&mut candidate) {
+        if let Err(why) = change(&mut candidate, self.session.controller.graph()) {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
             return false;
         }
@@ -133,7 +134,7 @@ impl App {
         let level = self.session.level.clone();
         // A direct cable into the same input yields to the record: the
         // sync replaces it, so nothing is removed before the check passes.
-        if self.change_hierarchy("connect", |h| {
+        if self.change_hierarchy("connect", |h, _| {
             h.connect(&level, from_end, to_end);
             Ok(())
         }) {
@@ -146,7 +147,7 @@ impl App {
     pub(crate) fn disconnect_through_hierarchy(&mut self, to: PortRef) {
         let Some(to_end) = self.level_end(to) else { return };
         let level = self.session.level.clone();
-        if self.change_hierarchy("disconnect", |h| {
+        if self.change_hierarchy("disconnect", |h, _| {
             h.disconnect(&level, &to_end);
             Ok(())
         }) {
@@ -395,7 +396,7 @@ impl App {
         ));
         self.edit(|app| {
             let mut added = None;
-            if app.change_hierarchy("add a port", |h| {
+            if app.change_hierarchy("add a port", |h, _| {
                 added = Some(
                     h.add_port(&level, direction, direction.own_port_fallback())
                         .map_err(|e| e.to_string())?,
@@ -411,19 +412,151 @@ impl App {
         true
     }
 
-    /// True when an assignment from `source` onto `target` would cross a
-    /// sub-patch boundary, or start at a port tile: refused with the
-    /// reason in the status bar (rule 4).
-    pub(crate) fn refuses_assignment(&mut self, source: OutputRef, target: ModuleId) -> bool {
+    /// True when an assignment from `source` onto parameter `index` of
+    /// `target` is refused, with the reason in the status bar: the source is
+    /// a port tile, or the target is on another level and no sub-patch tile
+    /// of the source's level exposes it (rule 4; sub-patches.md, Editor
+    /// model). Through an exposed parameter the assignment reaches inside.
+    pub(crate) fn refuses_assignment(&mut self, source: OutputRef, target: ModuleId, index: usize) -> bool {
         let session = &self.session;
         let graph = session.controller.graph();
-        let crosses = graph.node(source.module).is_none()
-            || graph.node(target).is_none()
-            || session.hierarchy.level_of(source.module) != session.hierarchy.level_of(target);
-        if crosses {
+        let allowed = graph.node(source.module).is_some()
+            && graph.node(target).is_some_and(|node| {
+                let source_level = session.hierarchy.level_of(source.module);
+                source_level == session.hierarchy.level_of(target)
+                    || node.descriptor.params.get(index).is_some_and(|spec| {
+                        session
+                            .hierarchy
+                            .surface_for(&source_level, &(target, spec.name.to_string()))
+                            .is_some()
+                    })
+            });
+        if !allowed {
             self.alerts.warn(NO_MODULATION_ACROSS.to_string());
         }
-        crosses
+        !allowed
+    }
+
+    /// After an assignment is added or retargeted in a nested patch: puts
+    /// the live assignments on each parameter in the order the file loads
+    /// them (sub-patches.md, Editor model). A flat patch has that order
+    /// already. False, with the reason in the status bar, when the
+    /// hierarchy could not be written.
+    pub(crate) fn sync_hierarchy(&mut self, verb: &str) -> bool {
+        if self.session.hierarchy.is_flat() {
+            return true;
+        }
+        self.change_hierarchy(verb, |_, _| Ok(()))
+    }
+
+    /// What an Expose on row `index` of tile `tile` names: the enclosing
+    /// level, the tile's id in it, the parameter or exposed name, and the
+    /// label the step takes. A module's row names its parameter; a
+    /// sub-patch tile's row names its surface item.
+    fn exposure_target(&self, tile: u32, index: usize) -> Option<(ModulePath, u32, String, String)> {
+        let session = &self.session;
+        let graph = session.controller.graph();
+        let id = ModuleId(tile);
+        let level = session.hierarchy.level_of(id);
+        let lid = session.hierarchy.path_of(id).last();
+        if let Some(node) = graph.node(id) {
+            let spec = node.descriptor.params.get(index)?;
+            return Some((level, lid, spec.name.to_string(), spec.label.to_string()));
+        }
+        let exposed = session.hierarchy.definition_of(id)?.exposed.get(index)?;
+        Some((level, lid, exposed.name.clone(), exposed.name.clone()))
+    }
+
+    /// Expose, from the inspector: puts row `index` of tile `tile` on the
+    /// enclosing sub-patch's surface, as one undo step (sub-patches.md,
+    /// Exposing).
+    pub(crate) fn expose(&mut self, tile: u32, index: usize) {
+        self.close_slider_gesture();
+        let Some((level, member, param, label)) = self.exposure_target(tile, index) else {
+            return;
+        };
+        let surface = self
+            .session
+            .hierarchy
+            .definition_at(&level)
+            .map(|d| d.metadata.name.clone());
+        self.session.step_name = Some(format!("expose {label}"));
+        self.edit(|app| {
+            let mut name = None;
+            if app.change_hierarchy("expose", |h, graph| {
+                name = Some(h.expose(graph, &level, member, &param)?);
+                Ok(())
+            }) && app.commit()
+                && let (Some(name), Some(surface)) = (name, surface)
+            {
+                app.alerts.say(format!("{name} is exposed on {surface}"));
+            }
+        });
+    }
+
+    /// Unexpose, from the inspector: takes the `index`th surface item off the
+    /// sub-patch tile `tile`, and off every surface above that re-exposed
+    /// it, and with it every assignment onto the parameter from another
+    /// level, as one undo step (sub-patches.md, Exposing).
+    pub(crate) fn unexpose(&mut self, tile: u32, index: usize) {
+        self.close_slider_gesture();
+        let hierarchy = &self.session.hierarchy;
+        let Some(exposed) = hierarchy
+            .definition_of(ModuleId(tile))
+            .and_then(|d| d.exposed.get(index).cloned())
+        else {
+            return;
+        };
+        let inside = hierarchy.path_of(ModuleId(tile));
+        // The flat parameter the surface item stood for, for the assignments.
+        let target = self
+            .control_target(tile, index, loom_canvas::ControlPart::Main)
+            .map(|t| (t.module, t.index));
+        let label = exposed.name.clone();
+        self.session.step_name = Some(format!("unexpose {label}"));
+        self.edit(|app| {
+            if !app.change_hierarchy("unexpose", |h, _| {
+                h.unexpose(&inside, exposed.module, &exposed.param);
+                Ok(())
+            }) {
+                return;
+            }
+            if let Some((module, param)) = target {
+                let graph = app.session.controller.graph();
+                let own_level = app.session.hierarchy.level_of(module);
+                let crossing: Vec<loom_core::AssignmentId> = graph
+                    .assignments()
+                    .filter(|(_, a)| {
+                        a.target == module
+                            && a.param == param
+                            && app.session.hierarchy.level_of(a.source.module) != own_level
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                for id in crossing {
+                    let _ = app.session.controller.remove_assignment(id);
+                }
+            }
+            if app.commit() {
+                app.alerts.say(format!("{label} is no longer exposed"));
+            }
+        });
+    }
+
+    /// Renames the sub-patch of tile `tile`, from its inspector, as one undo
+    /// step. The tile, the breadcrumb, and the file follow; the definition's
+    /// key stays.
+    pub(crate) fn rename_subpatch(&mut self, tile: u32, name: &str) {
+        self.close_slider_gesture();
+        if self.session.hierarchy.tile_name(ModuleId(tile)).as_deref() == Some(name.trim()) {
+            return;
+        }
+        self.session.step_name = Some("rename sub-patch".to_string());
+        self.edit(|app| {
+            if app.change_hierarchy("rename", |h, _| h.rename(ModuleId(tile), name)) {
+                app.commit();
+            }
+        });
     }
 
     /// The tiles of the selection that are sub-patches or ports, which the

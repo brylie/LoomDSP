@@ -776,6 +776,24 @@ impl Hierarchy {
         Some((self.ids.get(&level)?, entry.name.clone()))
     }
 
+    /// The outermost surface that exposes `param` of the tile `member`,
+    /// through every level above it: that instance tile and the index of
+    /// its surface item. `None` when nothing exposes it.
+    pub fn outermost_surface(&self, member: ModuleId, param: &str) -> Option<(ModuleId, usize)> {
+        let mut found = None;
+        let mut at = (member, param.to_string());
+        while let Some((instance, name)) = self.exposure_of(at.0, &at.1) {
+            let index = self
+                .definition_of(instance)?
+                .exposed
+                .iter()
+                .position(|e| e.name == name)?;
+            found = Some((instance, index));
+            at = (instance, name);
+        }
+        found
+    }
+
     /// The instance tile on `level` whose exposures reach the flat
     /// parameter `target`, through any depth, and the index of the exposed
     /// entry on its surface. `None` when `target` is on `level` itself or

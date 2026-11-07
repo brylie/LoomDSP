@@ -618,7 +618,7 @@ impl App {
                 }
                 let copies: std::collections::BTreeMap<u32, u32> =
                     originals.iter().copied().zip(ids.iter().copied()).collect();
-                app.change_hierarchy("duplicate", |h| {
+                app.change_hierarchy("duplicate", |h, _| {
                     for (from, original, input) in through_ports {
                         if let Some(copy) = copies.get(&original) {
                             h.connect(&level, from, (h.path_of(ModuleId(*copy)).last(), input));

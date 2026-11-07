@@ -14,7 +14,7 @@ use iced::widget::{
     tooltip,
 };
 use iced::{Element, Length, Task, Theme};
-use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, WidgetKind};
+use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, ParamSpec, WidgetKind};
 use serde::Serialize;
 
 /// What the inspector's controls send. The control channel sends the two that
@@ -47,6 +47,18 @@ pub(crate) enum Message {
     UnknownLabelApply { module: u32 },
     /// The eligible parameter currently under an output drag.
     DropRow(Option<(u32, usize)>),
+    /// Puts a parameter on the enclosing sub-patch's surface: parameter
+    /// `index` of module `module`, or the `index`th surface item of the
+    /// sub-patch tile `module`, exposed one level further out
+    /// (sub-patches.md, Exposing).
+    Expose { module: u32, index: usize },
+    /// Takes the `index`th surface item off the sub-patch tile `module`,
+    /// and off every surface above that re-exposed it.
+    Unexpose { module: u32, index: usize },
+    /// Edit a sub-patch's name without changing the patch yet.
+    SubPatchNameDraft { module: u32, value: String },
+    /// Apply the sub-patch's name as one undo step.
+    SubPatchNameApply { module: u32 },
 }
 
 /// Width of a parameter's value field, in pixels.
@@ -77,12 +89,48 @@ pub enum Inspector {
 pub struct SubPatchRows {
     /// The tile's id.
     pub id: u32,
-    /// The definition's name.
+    /// The definition's name, or the name being typed for it.
     pub name: String,
     /// The input ports, in order.
     pub inputs: Vec<String>,
     /// The output ports, in order.
     pub outputs: Vec<String>,
+    /// One row per exposed parameter, in exposure order: the inner
+    /// parameter's row, named by its surface name (sub-patches.md,
+    /// Exposing).
+    pub params: Vec<ExposedRow>,
+}
+
+/// A surface item's row on a sub-patch tile's inspector.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExposedRow {
+    /// The inner module whose parameter the row edits.
+    pub module: u32,
+    /// The surface name, shown in place of the parameter's label.
+    pub label: String,
+    /// The Unexpose button for this tile's own surface. The row's own
+    /// `exposure` is for the enclosing sub-patch, when there is one.
+    pub own: ExposureRow,
+    /// The parameter's row, with the inner parameter's index.
+    pub row: ParamRow,
+}
+
+/// The Expose or Unexpose button on a parameter's row (sub-patches.md,
+/// Exposing). The button names the surface it acts on: "Expose on Voice",
+/// or "as Cutoff" and "Unexpose on Voice".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExposureRow {
+    /// The tile the message names: for Expose, the row's own tile (a
+    /// module, or a sub-patch tile whose surface item is exposed further
+    /// out); for Unexpose, the sub-patch tile whose surface holds the item.
+    pub module: u32,
+    /// The row's index on that tile: the parameter's index on a module, or
+    /// the item's index on the sub-patch's surface.
+    pub index: usize,
+    /// The surface name it is exposed as, or `None` when it is not exposed.
+    pub name: Option<String>,
+    /// The name of the sub-patch whose surface the button acts on.
+    pub surface: String,
 }
 
 /// The inspector's view of a port tile.
@@ -185,6 +233,10 @@ pub struct ParamRow {
     /// Whether a dragged output can target this row.
     #[serde(skip)]
     pub accepts_drop: bool,
+    /// The Expose or Unexpose button, for a parameter inside a sub-patch.
+    /// `None` at the top level, which has no surface.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<ExposureRow>,
 }
 
 /// A MIDI mapping's options on a parameter's row (midi-learn.md, Mapping
@@ -370,6 +422,14 @@ impl App {
                 let allowed = !self.session.learn.is_on();
                 self.session.gestures.hover_row(row, allowed);
             }
+            Message::Expose { module, index } => self.expose(module, index),
+            Message::Unexpose { module, index } => self.unexpose(module, index),
+            Message::SubPatchNameDraft { module, value } => self.session.gestures.draft_label(module, value),
+            Message::SubPatchNameApply { module } => {
+                if let Some(value) = self.session.gestures.take_label(module) {
+                    self.rename_subpatch(module, &value);
+                }
+            }
             Message::Param {
                 module,
                 index,
@@ -425,6 +485,159 @@ impl App {
 }
 
 impl App {
+    /// One parameter's row: parameter `index` of module `id`, edited
+    /// through `spec` (the module's selected control range, or the exposed
+    /// range on a sub-patch surface), with `exposure` as its Expose button
+    /// and the Range selector only when `show_range`. `None` when the module
+    /// is gone.
+    fn param_row(
+        &self,
+        id: u32,
+        index: usize,
+        spec: &ParamSpec,
+        exposure: Option<ExposureRow>,
+        show_range: bool,
+    ) -> Option<ParamRow> {
+        let graph = self.session.controller.graph();
+        let node = graph.node(ModuleId(id))?;
+        let d = node.descriptor;
+        let value = *node.params.get(index)?;
+        let range = spec.options.ranges.first().filter(|_| show_range).map(|_| RangeRow {
+            choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
+            selected: node
+                .range(index)
+                .and_then(|r| spec.options.ranges.iter().position(|&o| o == r)),
+        });
+        // Hovering the label shows what the canvas hover text shows
+        // (panels.md, Labels and hover text).
+        let hover = loom_canvas::HoverText::new(spec.label, spec.description, spec.name);
+        let mapping = graph
+            .midi_mapping_of(ModuleId(id), index)
+            .map(|(_, m)| m.control.to_string());
+        let mapping_options = graph.midi_mapping_of(ModuleId(id), index).map(|(_, m)| {
+            let draft = self.session.learn.range_draft((id, index));
+            MappingRow {
+                mode: mode_name(m.options.mode),
+                encoding: encoding_of(m.options.mode).map(encoding_name),
+                low: draft.map_or_else(|| m.options.low.to_string(), |d| d.low.clone()),
+                high: draft.map_or_else(|| m.options.high.to_string(), |d| d.high.clone()),
+                range_error: draft.and_then(|d| d.error.clone()),
+                invert: m.options.invert,
+                open: self.session.learn.options_open((id, index)),
+                // Only a slider has a travel to mark, and a learn
+                // mode row has no slider (midi-learn.md, Mapping modes).
+                ghost: self
+                    .session
+                    .learn
+                    .ghosts()
+                    .shown()
+                    .get(&(id, index))
+                    .copied()
+                    .filter(|_| spec.options.choices.is_empty() && !self.session.learn.is_on()),
+                options: m.options,
+            }
+        });
+        let mode = if self.session.learn.is_on() {
+            // In learn mode a row arms its parameter, and its value
+            // does not change (midi-learn.md).
+            let armed = self.session.learn.is_armed((id, index));
+            let detail = match (armed, &mapping) {
+                (true, _) => "Waiting for MIDI...".to_string(),
+                (false, Some(control)) => control.clone(),
+                (false, None) => param::format(spec, value),
+            };
+            ParamMode::Learn { armed, detail }
+        } else {
+            ParamMode::Edit {
+                position: spec.normalize(value),
+                step: param::slider_step(spec),
+                control: ParamControl::of(spec, value),
+                assignments: self.assignment_rows(id, index),
+                adding: (self.session.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
+            }
+        };
+        let unused = (!d.is_shown(index, &node.params)).then(|| {
+            let mode = spec.options.shown_when.and_then(|w| d.param_index(w.param));
+            match mode.map(|m| (&d.params[m], node.params[m])) {
+                Some((mode, value)) => match mode.choice_name(value) {
+                    Some(choice) => format!("Not used in {choice}"),
+                    // An on and off switch, such as Scope's Auto.
+                    None => format!(
+                        "Not used while {} is {}",
+                        mode.label,
+                        if value > 0.5 { "on" } else { "off" }
+                    ),
+                },
+                None => "Not used in this mode".to_string(),
+            }
+        });
+        let shown = param::format(spec, value);
+        let field = (matches!(mode, ParamMode::Edit { .. }) && spec.options.choices.is_empty()).then(|| {
+            match self
+                .session
+                .value_draft
+                .as_ref()
+                .filter(|d| d.module == id && d.index == index)
+            {
+                Some(value) => ValueField {
+                    text: value.draft.text.clone(),
+                    error: value.draft.error().map(str::to_string),
+                },
+                None => ValueField {
+                    text: shown.clone(),
+                    error: None,
+                },
+            }
+        });
+        Some(ParamRow {
+            index,
+            label: spec.label,
+            description: spec.description,
+            name: hover.name,
+            unused,
+            field,
+            value: shown,
+            mapping,
+            mapping_options,
+            range,
+            mode,
+            accepts_drop: {
+                let bound = d.panel.widgets.iter().filter(|w| w.binds(spec.name));
+                bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
+            },
+            exposure,
+        })
+    }
+
+    /// The Expose or Unexpose button of a row inside a sub-patch: for
+    /// `param` of the tile `tile` (a module's parameter, or a sub-patch
+    /// tile's surface item named `param`), where `index` is what the
+    /// button's message names. `None` at the top level, which has no
+    /// surface to expose onto.
+    fn exposure_row(&self, tile: u32, index: usize, param: &str) -> Option<ExposureRow> {
+        let hierarchy = &self.session.hierarchy;
+        let level = hierarchy.level_of(ModuleId(tile));
+        let surface = hierarchy.definition_at(&level)?.metadata.name.clone();
+        Some(match hierarchy.exposure_of(ModuleId(tile), param) {
+            // Unexpose names the item on the enclosing tile's surface.
+            Some((enclosing, name)) => ExposureRow {
+                module: enclosing.0,
+                index: hierarchy
+                    .definition_of(enclosing)
+                    .and_then(|d| d.exposed.iter().position(|e| e.name == name))
+                    .unwrap_or(index),
+                name: Some(name),
+                surface,
+            },
+            None => ExposureRow {
+                module: tile,
+                index,
+                name: None,
+                surface,
+            },
+        })
+    }
+
     /// The inspector's content for the current selection.
     pub(crate) fn inspector_model(&self) -> Inspector {
         let graph = self.session.controller.graph();
@@ -438,11 +651,52 @@ impl App {
         match hierarchy.tile(graph, ModuleId(id)) {
             Some(loom_patch::Tile::Instance(_)) => {
                 let (inputs, outputs) = hierarchy.instance_ports(ModuleId(id));
+                // Each surface item is the inner parameter's row, keyed by
+                // the inner module and parameter, so every row message
+                // works on it unchanged; the Expose button names the tile
+                // and the item, for exposing one level further out.
+                let params = hierarchy
+                    .definition_of(ModuleId(id))
+                    .map_or_else(Vec::new, |definition| {
+                        definition
+                            .exposed
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, exposed)| {
+                                let target = crate::surface::control_target(
+                                    graph,
+                                    hierarchy,
+                                    id,
+                                    index,
+                                    loom_canvas::ControlPart::Main,
+                                )?;
+                                let exposure = self.exposure_row(id, index, &exposed.name);
+                                let row =
+                                    self.param_row(target.module.0, target.index, &target.spec, exposure, false)?;
+                                Some(ExposedRow {
+                                    module: target.module.0,
+                                    label: exposed.name.clone(),
+                                    own: ExposureRow {
+                                        module: id,
+                                        index,
+                                        name: Some(exposed.name.clone()),
+                                        surface: hierarchy.tile_name(ModuleId(id)).unwrap_or_default(),
+                                    },
+                                    row,
+                                })
+                            })
+                            .collect()
+                    });
                 return Inspector::SubPatch(SubPatchRows {
                     id,
-                    name: hierarchy.tile_name(ModuleId(id)).unwrap_or_default(),
+                    name: self
+                        .session
+                        .gestures
+                        .label_draft(id)
+                        .map_or_else(|| hierarchy.tile_name(ModuleId(id)).unwrap_or_default(), str::to_string),
                     inputs: inputs.into_iter().map(|(_, name)| name).collect(),
                     outputs: outputs.into_iter().map(|(_, name)| name).collect(),
+                    params,
                 });
             }
             Some(loom_patch::Tile::Port(direction, name)) => {
@@ -507,120 +761,19 @@ impl App {
         let params = d
             .params
             .iter()
-            .zip(&node.params)
             .enumerate()
             // A transient parameter has no row: it is played on its panel
             // widget only (transient-params.md).
-            .filter(|(_, (spec, _))| !spec.is_transient())
-            .map(|(index, (_, &value))| {
+            .filter(|(_, spec)| !spec.is_transient())
+            .filter_map(|(index, _)| {
                 // The control spans the selected range (control-ranges.md).
-                let spec = &node
-                    .spec(index)
-                    .expect("node.spec covers every parameter index of the node");
-                let range = spec.options.ranges.first().map(|_| RangeRow {
-                    choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
-                    selected: node
-                        .range(index)
-                        .and_then(|r| spec.options.ranges.iter().position(|&o| o == r)),
-                });
-                // Hovering the label shows what the canvas hover text shows
-                // (panels.md, Labels and hover text).
-                let hover = loom_canvas::HoverText::new(spec.label, spec.description, spec.name);
-                let mapping = graph
-                    .midi_mapping_of(ModuleId(id), index)
-                    .map(|(_, m)| m.control.to_string());
-                let mapping_options = graph.midi_mapping_of(ModuleId(id), index).map(|(_, m)| {
-                    let draft = self.session.learn.range_draft((id, index));
-                    MappingRow {
-                        mode: mode_name(m.options.mode),
-                        encoding: encoding_of(m.options.mode).map(encoding_name),
-                        low: draft.map_or_else(|| m.options.low.to_string(), |d| d.low.clone()),
-                        high: draft.map_or_else(|| m.options.high.to_string(), |d| d.high.clone()),
-                        range_error: draft.and_then(|d| d.error.clone()),
-                        invert: m.options.invert,
-                        open: self.session.learn.options_open((id, index)),
-                        // Only a slider has a travel to mark, and a learn
-                        // mode row has no slider (midi-learn.md, Mapping modes).
-                        ghost: self
-                            .session
-                            .learn
-                            .ghosts()
-                            .shown()
-                            .get(&(id, index))
-                            .copied()
-                            .filter(|_| spec.options.choices.is_empty() && !self.session.learn.is_on()),
-                        options: m.options,
-                    }
-                });
-                let mode = if self.session.learn.is_on() {
-                    // In learn mode a row arms its parameter, and its value
-                    // does not change (midi-learn.md).
-                    let armed = self.session.learn.is_armed((id, index));
-                    let detail = match (armed, &mapping) {
-                        (true, _) => "Waiting for MIDI...".to_string(),
-                        (false, Some(control)) => control.clone(),
-                        (false, None) => param::format(spec, value),
-                    };
-                    ParamMode::Learn { armed, detail }
-                } else {
-                    ParamMode::Edit {
-                        position: spec.normalize(value),
-                        step: param::slider_step(spec),
-                        control: ParamControl::of(spec, value),
-                        assignments: self.assignment_rows(id, index),
-                        adding: (self.session.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
-                    }
-                };
-                let unused = (!d.is_shown(index, &node.params)).then(|| {
-                    let mode = spec.options.shown_when.and_then(|w| d.param_index(w.param));
-                    match mode.map(|m| (&d.params[m], node.params[m])) {
-                        Some((mode, value)) => match mode.choice_name(value) {
-                            Some(choice) => format!("Not used in {choice}"),
-                            // An on and off switch, such as Scope's Auto.
-                            None => format!(
-                                "Not used while {} is {}",
-                                mode.label,
-                                if value > 0.5 { "on" } else { "off" }
-                            ),
-                        },
-                        None => "Not used in this mode".to_string(),
-                    }
-                });
-                let shown = param::format(spec, value);
-                let field = (matches!(mode, ParamMode::Edit { .. }) && spec.options.choices.is_empty()).then(|| {
-                    match self
-                        .session
-                        .value_draft
-                        .as_ref()
-                        .filter(|d| d.module == id && d.index == index)
-                    {
-                        Some(value) => ValueField {
-                            text: value.draft.text.clone(),
-                            error: value.draft.error().map(str::to_string),
-                        },
-                        None => ValueField {
-                            text: shown.clone(),
-                            error: None,
-                        },
-                    }
-                });
-                ParamRow {
-                    index,
-                    label: spec.label,
-                    description: spec.description,
-                    name: hover.name,
-                    unused,
-                    field,
-                    value: shown,
-                    mapping,
-                    mapping_options,
-                    range,
-                    mode,
-                    accepts_drop: {
-                        let bound = d.panel.widgets.iter().filter(|w| w.binds(spec.name));
-                        bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
-                    },
-                }
+                let spec = node.spec(index)?;
+                // Inside a sub-patch the row can expose its parameter. An
+                // exposed parameter's control range is the surface's, so
+                // its Range selector hides (flattening rule 12).
+                let exposure = self.exposure_row(id, index, spec.name);
+                let exposed = exposure.as_ref().is_some_and(|e| e.name.is_some());
+                self.param_row(id, index, &spec, exposure, !exposed)
             })
             .collect();
         Inspector::Module(ModuleRows {
@@ -787,8 +940,13 @@ pub fn view<'a>(
         }
         Inspector::Module(m) => module_view(m, drop_row, dragging),
         Inspector::SubPatch(s) => {
+            let id = s.id;
+            // The name is edited in place, as a placeholder's label is, and
+            // applied with Enter (sub-patches.md, Editor model).
             let mut rows = column![
-                text(s.name).size(style::HEADING),
+                text_input("Sub-patch name", &s.name)
+                    .on_input(move |value| AppMessage::Inspector(Message::SubPatchNameDraft { module: id, value }))
+                    .on_submit(AppMessage::Inspector(Message::SubPatchNameApply { module: id })),
                 text("Sub-patch").size(style::BODY).color(DIM),
             ]
             .spacing(6);
@@ -797,7 +955,24 @@ pub fn view<'a>(
                     rows = rows.push(text(format!("{label}: {}", ports.join(", "))).size(style::BODY));
                 }
             }
-            rows = rows.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(s.id)));
+            rows = rows.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(id)));
+            if s.params.is_empty() {
+                rows = rows.push(
+                    text("Nothing exposed. Open it and press Expose on a parameter.")
+                        .size(style::BODY)
+                        .color(DIM),
+                );
+            }
+            for exposed in s.params {
+                rows = rows.push(param_row_view(
+                    exposed.module,
+                    exposed.label,
+                    exposed.row,
+                    Some(exposed.own),
+                    drop_row,
+                    dragging,
+                ));
+            }
             rows.into()
         }
         Inspector::Port(p) => column![
@@ -834,106 +1009,8 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         items = items.push(text("No parameters.").size(style::BODY).color(DIM));
     }
     for p in m.params {
-        let index = p.index;
-        let accepts_drop = p.accepts_drop;
-        let unmap = AppMessage::Learn(crate::learn::Message::Unmap { module: id, index });
-        let ghost = p.mapping_options.as_ref().and_then(|row| row.ghost);
-        let line: Element<'a, AppMessage> = match p.mode {
-            ParamMode::Learn { armed, detail } => {
-                let arm = button(row![
-                    text(p.label).size(style::BODY),
-                    space::horizontal(),
-                    text(detail).size(style::BODY)
-                ])
-                .width(Length::Fill)
-                .style(if armed { style::primary } else { style::secondary })
-                .on_press(AppMessage::Learn(crate::learn::Message::Arm((id, index))));
-                // A mapping can be removed or changed in learn mode too.
-                let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
-                if p.mapping.is_some() {
-                    line = line.push(options_button(id, index));
-                    line = line.push(remove_button("Remove MIDI mapping", unmap));
-                }
-                match p.mapping_options.filter(|row| row.open) {
-                    Some(mapping) => column![line, mapping_rows(id, index, mapping)].spacing(2).into(),
-                    None => line.into(),
-                }
-            }
-            ParamMode::Edit {
-                position,
-                step,
-                control,
-                assignments,
-                adding,
-            } => {
-                let mut tip = column![text(p.description).size(style::BODY)].spacing(4);
-                if let Some(name) = p.name {
-                    tip = tip.push(text(name).size(style::SMALL).color(DIM));
-                }
-                let mut rows = column![
-                    row![
-                        tooltip(
-                            text(p.label).size(style::BODY),
-                            container(tip).padding(6).max_width(260).style(container::rounded_box),
-                            tooltip::Position::Top,
-                        ),
-                        space::horizontal(),
-                        text(p.unused.unwrap_or_default()).size(style::SMALL).color(DIM),
-                        value_field(id, index, p.field, p.value),
-                    ]
-                    .spacing(6),
-                    match p.range {
-                        Some(range) => row![
-                            with_ghost(value_control(id, index, control, position, step), ghost),
-                            range_view(id, index, range),
-                        ]
-                        .spacing(6)
-                        .align_y(iced::Alignment::Center)
-                        .into(),
-                        None => with_ghost(value_control(id, index, control, position, step), ghost),
-                    },
-                ]
-                .spacing(2);
-                if let Some(control) = p.mapping {
-                    rows = rows.push(
-                        row![
-                            text(control).size(style::SMALL).color(DIM),
-                            space::horizontal(),
-                            options_button(id, index),
-                            remove_button("Remove MIDI mapping", unmap),
-                        ]
-                        .spacing(4)
-                        .align_y(iced::Alignment::Center),
-                    );
-                }
-                if let Some(mapping) = p.mapping_options.filter(|row| row.open) {
-                    rows = rows.push(mapping_rows(id, index, mapping));
-                }
-                let editor: Element<'a, AppMessage> = container(rows)
-                    .width(Length::Fill)
-                    .style(move |theme: &Theme| {
-                        let mut style = container::Style::default();
-                        if dragging && drop_row == Some((id, index)) {
-                            style.background = Some(theme.extended_palette().primary.weak.color.into());
-                            style.border.radius = 4.0.into();
-                        }
-                        style
-                    })
-                    .into();
-                let editor: Element<'a, AppMessage> = if accepts_drop {
-                    mouse_area(editor)
-                        .on_enter(AppMessage::Inspector(Message::DropRow(Some((id, index)))))
-                        .on_exit(AppMessage::Inspector(Message::DropRow(None)))
-                        .into()
-                } else {
-                    editor
-                };
-                column![editor, modulation_view(id, index, assignments, adding)]
-                    .spacing(2)
-                    .into()
-            }
-        };
-        items = items.push(line);
+        let label = p.label.to_string();
+        items = items.push(param_row_view(id, label, p, None, drop_row, dragging));
     }
     if !m.drives.is_empty() {
         items = items.push(drives_view(m.drives));
@@ -961,6 +1038,155 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         ));
     }
     items.into()
+}
+
+/// One parameter's row, as the module inspector and a sub-patch tile's
+/// inspector draw it: its label line (with the Expose button inside a
+/// sub-patch), its value control, mapping lines, and assignments. `label`
+/// is the parameter's label, or the surface name on a sub-patch tile.
+fn param_row_view<'a>(
+    id: u32,
+    label: String,
+    p: ParamRow,
+    own: Option<ExposureRow>,
+    drop_row: Option<(u32, usize)>,
+    dragging: bool,
+) -> Element<'a, AppMessage> {
+    let index = p.index;
+    let accepts_drop = p.accepts_drop;
+    let unmap = AppMessage::Learn(crate::learn::Message::Unmap { module: id, index });
+    let ghost = p.mapping_options.as_ref().and_then(|row| row.ghost);
+    let line: Element<'a, AppMessage> = match p.mode {
+        ParamMode::Learn { armed, detail } => {
+            let arm = button(row![
+                text(label.clone()).size(style::BODY),
+                space::horizontal(),
+                text(detail).size(style::BODY)
+            ])
+            .width(Length::Fill)
+            .style(if armed { style::primary } else { style::secondary })
+            .on_press(AppMessage::Learn(crate::learn::Message::Arm((id, index))));
+            // A mapping can be removed or changed in learn mode too.
+            let mut line = row![arm].spacing(4).align_y(iced::Alignment::Center);
+            if p.mapping.is_some() {
+                line = line.push(options_button(id, index));
+                line = line.push(remove_button("Remove MIDI mapping", unmap));
+            }
+            match p.mapping_options.filter(|row| row.open) {
+                Some(mapping) => column![line, mapping_rows(id, index, mapping)].spacing(2).into(),
+                None => line.into(),
+            }
+        }
+        ParamMode::Edit {
+            position,
+            step,
+            control,
+            assignments,
+            adding,
+        } => {
+            let mut tip = column![text(p.description).size(style::BODY)].spacing(4);
+            if let Some(name) = p.name {
+                tip = tip.push(text(name).size(style::SMALL).color(DIM));
+            }
+            // The label, then the Expose button inside a sub-patch, then
+            // the value field at the right.
+            let mut head = row![tooltip(
+                text(label.clone()).size(style::BODY),
+                container(tip).padding(6).max_width(260).style(container::rounded_box),
+                tooltip::Position::Top,
+            )]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+            for exposure in own.into_iter().chain(p.exposure) {
+                head = head.push(expose_button(exposure));
+            }
+            head = head
+                .push(space::horizontal())
+                .push(text(p.unused.unwrap_or_default()).size(style::SMALL).color(DIM))
+                .push(value_field(id, index, p.field, p.value));
+            let mut rows = column![
+                head,
+                match p.range {
+                    Some(range) => row![
+                        with_ghost(value_control(id, index, control, position, step), ghost),
+                        range_view(id, index, range),
+                    ]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                    None => with_ghost(value_control(id, index, control, position, step), ghost),
+                },
+            ]
+            .spacing(2);
+            if let Some(control) = p.mapping {
+                rows = rows.push(
+                    row![
+                        text(control).size(style::SMALL).color(DIM),
+                        space::horizontal(),
+                        options_button(id, index),
+                        remove_button("Remove MIDI mapping", unmap),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+            if let Some(mapping) = p.mapping_options.filter(|row| row.open) {
+                rows = rows.push(mapping_rows(id, index, mapping));
+            }
+            let editor: Element<'a, AppMessage> = container(rows)
+                .width(Length::Fill)
+                .style(move |theme: &Theme| {
+                    let mut style = container::Style::default();
+                    if dragging && drop_row == Some((id, index)) {
+                        style.background = Some(theme.extended_palette().primary.weak.color.into());
+                        style.border.radius = 4.0.into();
+                    }
+                    style
+                })
+                .into();
+            let editor: Element<'a, AppMessage> = if accepts_drop {
+                mouse_area(editor)
+                    .on_enter(AppMessage::Inspector(Message::DropRow(Some((id, index)))))
+                    .on_exit(AppMessage::Inspector(Message::DropRow(None)))
+                    .into()
+            } else {
+                editor
+            };
+            column![editor, modulation_view(id, index, assignments, adding)]
+                .spacing(2)
+                .into()
+        }
+    };
+    line
+}
+
+/// The button on a parameter's row that puts it on the enclosing sub-patch's
+/// surface, or takes it off again, saying what it is exposed as
+/// (sub-patches.md, Exposing).
+fn expose_button<'a>(exposure: ExposureRow) -> Element<'a, AppMessage> {
+    let ExposureRow {
+        module,
+        index,
+        name,
+        surface,
+    } = exposure;
+    match name {
+        Some(name) => row![
+            text(format!("as {name}")).size(style::SMALL).color(DIM),
+            button(text(format!("Unexpose on {surface}")).size(style::SMALL))
+                .style(style::plain)
+                .padding(1)
+                .on_press(AppMessage::Inspector(Message::Unexpose { module, index })),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        None => button(text(format!("Expose on {surface}")).size(style::SMALL))
+            .style(style::plain)
+            .padding(1)
+            .on_press(AppMessage::Inspector(Message::Expose { module, index }))
+            .into(),
+    }
 }
 
 /// The small button beside a mapping's ×, which opens its options rows.

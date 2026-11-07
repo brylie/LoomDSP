@@ -11,7 +11,9 @@ impl App {
     /// Rebuilds what learn mode shows, after mappings or the armed
     /// parameter changed. A removed module disarms its parameter.
     pub(crate) fn refresh_learn(&mut self) {
-        self.session.learn.refresh(&self.session.controller);
+        self.session
+            .learn
+            .refresh(&self.session.controller, &self.session.hierarchy, &self.session.level);
     }
 
     /// Turns learn mode on or off, or arms a parameter.
@@ -124,6 +126,7 @@ impl App {
                     .midi_mappings()
                     .find(|(i, _)| *i == id)
                     .map(|(_, m)| *m);
+                self.cover_exposed_range(ModuleId(module), index);
                 self.session.learn.disarm();
                 self.commit();
                 if let Some(mapping) = mapping {
@@ -139,6 +142,46 @@ impl App {
         }
         if !self.session.edits.gesture_open() {
             self.record();
+        }
+    }
+
+    /// A mapping learned on a parameter that a sub-patch surface exposes
+    /// with a narrower range covers that range, so hardware cannot leave it
+    /// either (sub-patches.md, Exposing). A Relative mapping has no span to
+    /// set, and a parameter with no exposed range keeps the defaults.
+    fn cover_exposed_range(&mut self, module: ModuleId, index: usize) {
+        let graph = self.session.controller.graph();
+        let Some(node) = graph.node(module) else { return };
+        let Some(spec) = node.descriptor.params.get(index) else {
+            return;
+        };
+        let Some((tile, item)) = self.session.hierarchy.outermost_surface(module, spec.name) else {
+            return;
+        };
+        let Some((min, max)) = self.session.hierarchy.exposed_target(tile, item).and_then(|t| t.range) else {
+            return;
+        };
+        let Some((_, mapping)) = graph.midi_mapping_of(module, index) else {
+            return;
+        };
+        if matches!(mapping.options.mode, loom_core::MidiMode::Relative(_)) {
+            return;
+        }
+        let Some(control) = node.spec(index) else { return };
+        let (low, high) = (
+            control.normalize(min).clamp(0.0, 1.0),
+            control.normalize(max).clamp(0.0, 1.0),
+        );
+        if low >= high {
+            return;
+        }
+        let options = loom_core::MidiMappingOptions {
+            low,
+            high,
+            ..mapping.options
+        };
+        if let Err(e) = self.session.controller.set_midi_options(module, index, options) {
+            self.alerts.warn(e.to_string());
         }
     }
 
@@ -473,7 +516,7 @@ impl App {
     /// assignment).
     pub(crate) fn assign(&mut self, source: OutputRef, target: ModuleId, index: usize) {
         // Nothing crosses a level except through exposed items (rule 4).
-        if self.refuses_assignment(source, target) {
+        if self.refuses_assignment(source, target, index) {
             return;
         }
         let graph = self.session.controller.graph();
@@ -490,7 +533,13 @@ impl App {
         }
         let depth = modulation::default_depth(&spec);
         match self.session.controller.add_assignment(source, target, index, depth) {
-            Ok(_) => {
+            Ok(id) => {
+                // In a nested patch the new assignment takes its place in the
+                // file's order (sub-patches.md, Editor model).
+                if !self.sync_hierarchy("assign") {
+                    let _ = self.session.controller.remove_assignment(id);
+                    return;
+                }
                 if self.commit() {
                     self.alerts
                         .say(format!("{from} modulates {to}, {}", modulation::depth_text(depth)));

@@ -749,12 +749,23 @@ impl App {
     }
 
     /// Applies a source or target change as a single undoable graph edit.
-    fn matrix_retarget(&mut self, id: AssignmentId, source: Option<OutputRef>, target: Option<(ModuleId, usize)>) {
+    /// The new pair must be one a drop could make: nothing crosses a
+    /// sub-patch boundary except through an exposed parameter (rule 4).
+    pub(crate) fn matrix_retarget(
+        &mut self,
+        id: AssignmentId,
+        source: Option<OutputRef>,
+        target: Option<(ModuleId, usize)>,
+    ) {
         let Some(old) = self.session.controller.graph().assignment(id).copied() else {
             return;
         };
         let source = source.unwrap_or(old.source);
         let (module, param) = target.unwrap_or((old.target, old.param));
+        if self.refuses_assignment(source, module, param) {
+            self.session.matrix.edit = None;
+            return;
+        }
         if self
             .session
             .controller
@@ -773,6 +784,9 @@ impl App {
         self.edit(
             |app| match app.session.controller.retarget_assignment(id, source, module, param) {
                 Ok(()) => {
+                    // The moved assignment takes its place in the file's
+                    // order (sub-patches.md, Editor model).
+                    app.sync_hierarchy("retarget");
                     app.commit();
                 }
                 Err(e) => app.alerts.warn(e.to_string()),
