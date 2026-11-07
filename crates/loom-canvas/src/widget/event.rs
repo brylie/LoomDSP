@@ -195,6 +195,15 @@ pub enum CanvasEvent {
         /// inside it.
         area: Rectangle,
     },
+    /// A tile's header was double-clicked: open what the tile holds. The
+    /// app opens a sub-patch tile and ignores it on a plain module. No
+    /// move starts, so the second press leaves no drag open.
+    OpenTile(u32),
+    /// The view changed: at the end of a pan drag, after each wheel or key
+    /// zoom step, and after the canvas framed the scene. Never sent per
+    /// pointer move, so the app can keep one camera per level without a
+    /// message for every frame of a drag.
+    Camera(Camera),
     /// A tile was right-clicked without moving.
     TileMenu {
         /// The module under the pointer.

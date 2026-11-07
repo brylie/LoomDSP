@@ -95,6 +95,10 @@ pub struct PatchCanvas<'a, Message> {
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     frame_key: u64,
     browser_key: u64,
+    /// The level shown, and its camera when the app has one. See
+    /// [`PatchCanvas::level`].
+    level_key: u64,
+    level_camera: Option<Camera>,
     animate: bool,
     learn: Option<&'a LearnView>,
     /// The row selected in the modulation matrix, without changing the pin.
@@ -264,6 +268,8 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             on_event: Box::new(on_event),
             frame_key: 0,
             browser_key: 0,
+            level_key: 0,
+            level_camera: None,
             animate: false,
             learn: None,
             matrix_line: None,
@@ -357,6 +363,19 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// this key changes (for example after loading a patch).
     pub fn frame_key(mut self, key: u64) -> Self {
         self.frame_key = key;
+        self
+    }
+
+    /// Says which level of a nested patch the scene shows, and the camera
+    /// that level had when it was last shown, if any. When the key changes,
+    /// the canvas adopts that camera, or frames the scene when there is
+    /// none (a first visit), and reports [`CanvasEvent::Camera`]. A
+    /// [`frame_key`](Self::frame_key) change still frames the scene, and
+    /// wins over a camera given here. The default key 0 never changes, so
+    /// a caller that shows one level needs nothing.
+    pub fn level(mut self, key: u64, camera: Option<Camera>) -> Self {
+        self.level_key = key;
+        self.level_camera = camera;
         self
     }
 
@@ -567,6 +586,9 @@ enum Interaction {
         /// away from it. A release while it is set is a click, which may
         /// open the probe menu.
         click: Option<Point>,
+        /// The view at the press. The release reports the view only when
+        /// it differs, so a click or a drag back to the start says nothing.
+        start: Camera,
     },
     Moving {
         ids: Vec<u32>,
@@ -687,6 +709,8 @@ struct State {
     /// The canvas size at the last event, for key handling that needs it.
     size: Size,
     framed_key: Option<u64>,
+    /// The level key last shown, so a change is seen on the next redraw.
+    level_key: Option<u64>,
     interaction: Interaction,
     /// A release after CursorLeft cannot target the inspector until the
     /// window reports CursorEntered again.
@@ -722,6 +746,9 @@ struct State {
     /// The last press on empty canvas, in screen coordinates, for
     /// double-click.
     last_empty_click: Option<(Instant, Point)>,
+    /// The last press on a tile's header, for double-click: when, the
+    /// module, and where on screen.
+    last_header_click: Option<(Instant, u32, Point)>,
     /// The last press on a meter with a clip light, for double-click: when,
     /// the module, the widget, and where on screen.
     last_meter_click: Option<(Instant, u32, usize, Point)>,

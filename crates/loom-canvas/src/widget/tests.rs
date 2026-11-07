@@ -340,6 +340,7 @@ fn no_hover_text_during_a_drag() {
         Interaction::Panning {
             last: Point::ORIGIN,
             click: None,
+            start: Camera::default(),
         },
     ];
     for interaction in drags {
@@ -1346,6 +1347,7 @@ fn no_typed_field_opens_during_a_drag() {
         interaction: Interaction::Panning {
             last: Point::ORIGIN,
             click: None,
+            start: Camera::default(),
         },
         ..State::default()
     };
@@ -3811,4 +3813,197 @@ fn a_focused_xy_pad_does_not_use_space() {
     let at = scene.module(1).unwrap().bounds().center();
     let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
     assert_eq!(events, vec![CanvasEvent::ToggleRun]);
+}
+
+/// The second press of a double-click, with the command modifier held.
+fn command_key(named: keyboard::key::Named) -> Event {
+    let mut event = key_event(named, true);
+    if let Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) = &mut event {
+        *modifiers = keyboard::Modifiers::COMMAND;
+    }
+    event
+}
+
+/// Drives one event and says whether the canvas captured it.
+fn captured(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> bool {
+    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let mut messages = Vec::new();
+    let mut shell = Shell::new(&mut messages);
+    canvas.handle(state, event, bounds, mouse::Cursor::Available(at), &mut shell);
+    shell.event_status() == iced::event::Status::Captured
+}
+
+/// A double-click on a tile's header opens the tile and starts no move,
+/// so a pointer move after it drags nothing (sub-patches.md, Opening a
+/// sub-patch).
+#[test]
+fn a_header_double_click_opens_the_tile_and_starts_no_move() {
+    let scene = chain();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let tile = scene.module(1).unwrap().bounds();
+    let header = Point::new(tile.center_x(), tile.y + HEADER * 0.5);
+    let mut state = State::default();
+    let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+    let first = drive(&canvas, &mut state, &click(mouse::Button::Left), header);
+    assert_eq!(first, vec![CanvasEvent::GestureStart], "a single press still moves");
+    drive(&canvas, &mut state, &released, header);
+    let second = drive(&canvas, &mut state, &click(mouse::Button::Left), header);
+    assert_eq!(second, vec![CanvasEvent::OpenTile(1)]);
+    assert!(matches!(state.interaction, Interaction::Idle), "no drag is left open");
+    let away = header + Vector::new(100.0, 100.0);
+    let moved = drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::CursorMoved { position: away }),
+        away,
+    );
+    assert!(moved.is_empty(), "{moved:?}");
+    let up = drive(&canvas, &mut state, &released, away);
+    assert!(up.is_empty(), "{up:?}");
+}
+
+/// A double-click below the header keeps today's behaviour: the second
+/// press starts a move like the first.
+#[test]
+fn a_double_click_on_the_tile_body_opens_nothing() {
+    let scene = chain();
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let tile = scene.module(1).unwrap().bounds();
+    let body = tile.center();
+    assert!(body.y >= tile.y + HEADER, "the centre is below the header");
+    let mut state = State::default();
+    let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+    drive(&canvas, &mut state, &click(mouse::Button::Left), body);
+    drive(&canvas, &mut state, &released, body);
+    let second = drive(&canvas, &mut state, &click(mouse::Button::Left), body);
+    assert_eq!(second, vec![CanvasEvent::GestureStart]);
+    assert!(matches!(state.interaction, Interaction::Moving { .. }));
+}
+
+/// A pan reports the view once, when the drag ends, never per move.
+#[test]
+fn the_end_of_a_pan_drag_reports_the_camera_once() {
+    let scene = chain();
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let mut state = State::default();
+    let start = Point::new(400.0, 300.0);
+    let mut events = drive(&canvas, &mut state, &click(mouse::Button::Middle), start);
+    for step in 1..=3 {
+        let to = start + Vector::new(10.0 * step as f32, 5.0 * step as f32);
+        events.extend(drive(
+            &canvas,
+            &mut state,
+            &Event::Mouse(mouse::Event::CursorMoved { position: to }),
+            to,
+        ));
+    }
+    assert!(events.is_empty(), "nothing before the release: {events:?}");
+    let end = start + Vector::new(30.0, 15.0);
+    let released = drive(
+        &canvas,
+        &mut state,
+        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)),
+        end,
+    );
+    assert_eq!(released, vec![CanvasEvent::Camera(state.camera)]);
+    assert_eq!(state.camera.origin, Point::new(-30.0, -15.0));
+}
+
+/// A wheel zoom step and the frame key both report the view.
+#[test]
+fn a_zoom_step_and_a_frame_report_the_camera() {
+    let scene = chain();
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let mut state = State::default();
+    let at = Point::new(200.0, 150.0);
+    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+    });
+    let zoomed = drive(&canvas, &mut state, &wheel, at);
+    assert_eq!(zoomed, vec![CanvasEvent::Camera(state.camera)]);
+    assert!(state.camera.zoom > 1.0);
+    let framed = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Home, true), at);
+    assert_eq!(framed, vec![CanvasEvent::Camera(state.camera)]);
+}
+
+/// A new level takes the camera the app kept for it, and frames the scene
+/// when the app has none; both say which view is now in use, and report
+/// the lights on screen again, as a new patch does. The same key again
+/// changes nothing.
+#[test]
+fn a_level_change_adopts_its_camera_or_frames_the_scene() {
+    let cameras = |events: Vec<CanvasEvent>| -> Vec<CanvasEvent> {
+        events
+            .into_iter()
+            .filter(|e| matches!(e, CanvasEvent::Camera(_)))
+            .collect()
+    };
+    let scene = chain();
+    let none = BTreeSet::new();
+    let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+    let kept = Camera {
+        origin: Point::new(-120.0, 80.0),
+        zoom: 1.5,
+    };
+    let shown = || State {
+        framed_key: Some(0),
+        level_key: Some(0),
+        reported_lights: Some(Vec::new()),
+        reported_full_traces: Some(true),
+        ..State::default()
+    };
+    let adopt = PatchCanvas::new(&scene, &none, |e| e).level(1, Some(kept));
+    let mut state = shown();
+    let events = drive(&adopt, &mut state, &redraw, Point::ORIGIN);
+    assert_eq!(state.camera, kept);
+    assert!(events.contains(&CanvasEvent::VisibleDisplays(Vec::new())), "{events:?}");
+    assert_eq!(cameras(events), vec![CanvasEvent::Camera(kept)]);
+    assert_eq!(state.level_key, Some(1));
+    let again = drive(&adopt, &mut state, &redraw, Point::ORIGIN);
+    assert!(again.is_empty(), "{again:?}");
+
+    let first_visit = PatchCanvas::new(&scene, &none, |e| e).level(2, None);
+    let mut state = shown();
+    state.camera = kept;
+    let events = drive(&first_visit, &mut state, &redraw, Point::ORIGIN);
+    let mut framed = kept;
+    framed.frame_readable(scene.bounds().unwrap(), Size::new(800.0, 600.0), READABLE_ZOOM);
+    assert_eq!(state.camera, framed);
+    assert_eq!(cameras(events), vec![CanvasEvent::Camera(framed)]);
+}
+
+/// Ctrl+Enter (Cmd+Enter on macOS) is the app's shortcut to open a
+/// sub-patch, so the canvas leaves it alone. Plain Enter still focuses the
+/// first control of the selected tile.
+#[test]
+fn command_enter_is_left_to_the_app() {
+    let mut m = module(1, 0.0);
+    m.panel = panel();
+    let scene = Scene::new(vec![m], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let at = scene.module(1).unwrap().bounds().center();
+    let mut state = State::default();
+    assert!(!captured(
+        &canvas,
+        &mut state,
+        &command_key(keyboard::key::Named::Enter),
+        at
+    ));
+    assert_eq!(state.focus.control(), None);
+    let plain = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    assert!(plain.is_empty(), "{plain:?}");
+    assert_eq!(state.focus.control(), Some((1, 0)));
+    // With a control focused, Ctrl+Enter is still not the canvas's.
+    assert!(!captured(
+        &canvas,
+        &mut state,
+        &command_key(keyboard::key::Named::Enter),
+        at
+    ));
+    assert_eq!(state.focus.control(), Some((1, 0)));
 }

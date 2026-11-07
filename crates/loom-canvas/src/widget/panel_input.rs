@@ -577,10 +577,13 @@ impl<Message> PatchCanvas<'_, Message> {
             shell.capture_event();
             return true;
         }
+        // Ctrl+Enter (Cmd+Enter on macOS) and a command-modified Escape are
+        // the app's: they open and leave a sub-patch (sub-patches.md).
+        let command = modifiers.command();
         let used = match key.as_ref() {
             // Escape hides pinned lines before it does anything else
             // (modulation.md, Lines).
-            keyboard::Key::Named(Named::Escape) if self.pin(state).is_some() => {
+            keyboard::Key::Named(Named::Escape) if !command && self.pin(state).is_some() => {
                 state.pinned = None;
                 true
             }
@@ -629,17 +632,17 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.emit(shell, CanvasEvent::Select(vec![order[next].id]));
                 true
             }
-            keyboard::Key::Named(Named::Escape) if state.focus.control().is_some() => {
+            keyboard::Key::Named(Named::Escape) if !command && state.focus.control().is_some() => {
                 state.focus.clear();
                 // In MIDI learn mode, Escape also ends the mode, so the app
                 // must see it too.
                 self.learn.is_none()
             }
-            keyboard::Key::Named(Named::Escape) if !self.selection.is_empty() && self.learn.is_none() => {
+            keyboard::Key::Named(Named::Escape) if !command && !self.selection.is_empty() && self.learn.is_none() => {
                 self.emit(shell, CanvasEvent::Select(Vec::new()));
                 true
             }
-            keyboard::Key::Named(Named::Enter) if state.focus.control().is_none() => {
+            keyboard::Key::Named(Named::Enter) if !command && state.focus.control().is_none() => {
                 let Some(module) = selected.and_then(|id| self.scene.module(id)) else {
                     return false;
                 };
@@ -654,7 +657,7 @@ impl<Message> PatchCanvas<'_, Message> {
             // With nothing focused, Space still toggles Run below: that is
             // the transport, not a parameter.
             keyboard::Key::Named(Named::Space | Named::Enter)
-                if self.learn.is_some() && state.focus.control().is_some() =>
+                if !command && self.learn.is_some() && state.focus.control().is_some() =>
             {
                 if !repeat && let Some((module, widget)) = state.focus.control() {
                     self.emit(shell, CanvasEvent::Learn { module, widget });
@@ -775,7 +778,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 true
             }
-            keyboard::Key::Named(named @ (Named::Space | Named::Enter)) => {
+            keyboard::Key::Named(named @ (Named::Space | Named::Enter)) if !command => {
                 if let Some((module, widget)) = state.focus.control() {
                     let position = self.position(module, widget);
                     let one_number = self

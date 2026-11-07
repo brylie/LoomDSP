@@ -11,6 +11,7 @@ impl<Message> PatchCanvas<'_, Message> {
             camera: still.camera,
             // Already framed, so the first redraw keeps this camera.
             framed_key: Some(self.frame_key),
+            level_key: Some(self.level_key),
             // Focus as after a Tab press, so the ring and the value show.
             focus: still.focus.map_or(focus::FocusState::None, |(module, widget)| {
                 focus::FocusState::at(module, widget, true, focus::FocusMode::Browse)
@@ -146,12 +147,17 @@ impl<Message> PatchCanvas<'_, Message> {
                     let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     self.open_browser(state.camera.to_world(centre), centre, bounds, shell);
                 }
-                if new_frame && bounds.width > 0.0 {
-                    if let Some(world) = self.scene.bounds() {
-                        state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
+                let new_level = state.level_key != Some(self.level_key);
+                if (new_frame || new_level) && bounds.width > 0.0 {
+                    // A new patch frames as always. A new level takes the
+                    // camera it had, and frames on its first visit.
+                    match self.level_camera.filter(|_| !new_frame) {
+                        Some(camera) => state.camera = camera,
+                        None => self.frame(state, bounds.size()),
                     }
                     state.framed_key = Some(self.frame_key);
-                    state.focus.close_typing();
+                    state.level_key = Some(self.level_key);
+                    state.focus.clear();
                     // A new frame key means a new patch: its lights have to
                     // be reported again, even if the list looks the same.
                     state.reported_lights = None;
@@ -160,6 +166,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     // land on an unrelated output.
                     state.pinned = None;
                     shell.request_redraw();
+                    self.emit(shell, CanvasEvent::Camera(state.camera));
                 }
                 if self.animate {
                     let (start, base) = *state.animation.get_or_insert((*now, state.camera));
@@ -223,6 +230,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         if let Some(world) = self.scene.bounds() {
                             state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                             shell.request_redraw();
+                            self.emit(shell, CanvasEvent::Camera(state.camera));
                         }
                         shell.capture_event();
                     }
@@ -232,6 +240,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         let at = screen.unwrap_or(Point::new(bounds.width / 2.0, bounds.height / 2.0));
                         state.camera.zoom_to(at, 1.0);
                         shell.request_redraw();
+                        self.emit(shell, CanvasEvent::Camera(state.camera));
                         shell.capture_event();
                     }
                     keyboard::Key::Character("a") if modifiers.command() => {
@@ -269,6 +278,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 // shows again only after the pointer rests anew.
                 state.hover_text.restart(Instant::now());
                 state.hover = Some(self.scene.hit(state.camera.to_world(screen), state.hit_radius()));
+                // Each wheel event is one step of a zoom or a trackpad pan,
+                // and nothing marks its end, so each one reports the view.
+                self.emit(shell, CanvasEvent::Camera(state.camera));
                 shell.request_redraw();
                 shell.capture_event();
             }
@@ -294,12 +306,14 @@ impl<Message> PatchCanvas<'_, Message> {
                         state.interaction = Interaction::Panning {
                             last: screen,
                             click: None,
+                            start: state.camera,
                         };
                     }
                     mouse::Button::Right => {
                         state.interaction = Interaction::Panning {
                             last: screen,
                             click: Some(screen),
+                            start: state.camera,
                         };
                     }
                     mouse::Button::Left => {
@@ -318,7 +332,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
                 let mut redraw = false;
                 match &mut state.interaction {
-                    Interaction::Panning { last, click } => {
+                    Interaction::Panning { last, click, .. } => {
                         let delta = screen - *last;
                         *last = screen;
                         if click.is_some_and(|start| start.distance(screen) > CLICK_SLOP) {
@@ -588,8 +602,14 @@ impl<Message> PatchCanvas<'_, Message> {
                             self.open_probe_menu(state, world, screen, bounds, shell);
                         }
                     }
+                    // The pan is over: the app learns the view once, not on
+                    // every move, and not at all if the view is where it was.
+                    Interaction::Panning { click: None, start, .. } => {
+                        if state.camera != start {
+                            self.emit(shell, CanvasEvent::Camera(state.camera));
+                        }
+                    }
                     Interaction::Idle
-                    | Interaction::Panning { .. }
                     | Interaction::Moving { .. }
                     | Interaction::Turning { .. }
                     | Interaction::Pad { .. }
@@ -900,6 +920,22 @@ impl<Message> PatchCanvas<'_, Message> {
                 if &selection != self.selection {
                     self.emit(shell, CanvasEvent::Select(selection.iter().copied().collect()));
                 }
+                // A second press on the header opens the tile. No move
+                // begins, so nothing is left dragging after the release
+                // (sub-patches.md, Opening a sub-patch).
+                let on_header = self
+                    .scene
+                    .module(id)
+                    .is_some_and(|m| world.y >= m.position.y && world.y < m.position.y + HEADER);
+                let last = state.last_header_click.take();
+                if on_header {
+                    let again = last.is_some_and(|(at, m, point)| m == id && double_click(Some((at, point)), screen));
+                    if again {
+                        self.emit(shell, CanvasEvent::OpenTile(id));
+                        return;
+                    }
+                    state.last_header_click = Some((Instant::now(), id, screen));
+                }
                 // A meter's clip light clears on release, so a drag from it
                 // moves the tile and leaves it lit. A second press on the
                 // meter resets it. Far out neither is drawn, so a press only
@@ -951,6 +987,14 @@ impl<Message> PatchCanvas<'_, Message> {
                     base,
                 };
             }
+        }
+    }
+
+    /// Frames the whole scene at a readable zoom. A scene with no modules
+    /// keeps the camera it has.
+    fn frame(&self, state: &mut State, size: Size) {
+        if let Some(world) = self.scene.bounds() {
+            state.camera.frame_readable(world, size, READABLE_ZOOM);
         }
     }
 
