@@ -701,3 +701,282 @@ fn two_assignments_to_one_parameter_expose_it_once() {
     let (again, _) = load(&saved);
     assert_eq!(again.graph().assignments().count(), 2);
 }
+
+/// Expose, as the inspector does it: the envelope's attack inside the
+/// Voice gets a surface name from its label, its own value is stored for
+/// the file, the instance carries the live value, and the saved file
+/// loads with the new surface entry. Unexpose takes it off again and the
+/// file is back to what was loaded.
+#[test]
+fn exposing_and_unexposing_a_parameter_round_trip_through_the_file() {
+    let file = nested_example();
+    let (mut controller, mut hierarchy) = load(&file);
+    let voice = ModulePath::top(2);
+    assert_eq!(
+        hierarchy.expose(controller.graph(), &ModulePath::root(), 2, "cutoff"),
+        Err(EXPOSE_INSIDE_ONLY.to_string())
+    );
+    assert!(hierarchy.expose(controller.graph(), &voice, 6, "nothing").is_err());
+    assert!(
+        hierarchy.expose(controller.graph(), &voice, 1, "out").is_err(),
+        "a port"
+    );
+    let name = hierarchy.expose(controller.graph(), &voice, 6, "attack").unwrap();
+    assert_eq!(name, "Attack");
+    // Exposing it again changes nothing.
+    assert_eq!(
+        hierarchy.expose(controller.graph(), &voice, 6, "attack").unwrap(),
+        "Attack"
+    );
+    let definition = hierarchy.definition_at(&voice).unwrap();
+    assert_eq!(definition.exposed.len(), 2);
+    assert_eq!(definition.defaults[&(6, "attack".to_string())].value, Some(0.005));
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    let instance = saved.modules.iter().find(|m| m.id == 2).unwrap();
+    assert_eq!(instance.params.get("Attack"), Some(&0.005));
+    let envelope = saved.subpatches["voice"].modules.iter().find(|m| m.id == 6).unwrap();
+    assert!(envelope.ranges.is_empty(), "a default control range is not written");
+    assert!(
+        saved.subpatches["voice"]
+            .exposed
+            .iter()
+            .any(|e| e.name == "Attack" && e.module == 6 && e.param == "attack")
+    );
+    let (_, again) = load(&saved);
+    assert_eq!(
+        again.exposed_target(ModuleId(2), 1).map(|t| t.param),
+        Some("attack".to_string())
+    );
+
+    assert!(hierarchy.unexpose(&voice, 6, "attack"));
+    assert!(!hierarchy.unexpose(&voice, 6, "attack"));
+    let definition = hierarchy.definition_at(&voice).unwrap();
+    assert_eq!(definition.exposed.len(), 1);
+    assert!(!definition.defaults.contains_key(&(6, "attack".to_string())));
+    hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(text(&written(&hierarchy, &controller, &file.metadata)), text(&file));
+}
+
+/// Unexposing on the Voice takes the filter's cutoff off the Voice's
+/// surface and leaves the Filter's own exposure; the inner instance then
+/// carries the live value, so the sound stays. Unexposing inside the
+/// Filter takes both off, since the Voice's entry had nothing left to
+/// stand for, and the filter module keeps the live value.
+#[test]
+fn unexposing_at_one_level_leaves_the_exposures_below() {
+    let file = nested_example();
+    let voice = ModulePath::top(2);
+    let filter = voice.child(5);
+
+    let (mut controller, mut hierarchy) = load(&file);
+    assert!(
+        !hierarchy.unexpose(&ModulePath::root(), 2, "cutoff"),
+        "the top has no surface"
+    );
+    assert!(hierarchy.unexpose(&voice, 5, "cutoff"));
+    assert!(hierarchy.definition_at(&voice).unwrap().exposed.is_empty());
+    assert_eq!(hierarchy.definition_at(&filter).unwrap().exposed.len(), 1);
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert!(saved.modules.iter().find(|m| m.id == 2).unwrap().params.is_empty());
+    let inner_instance = saved.subpatches["voice"].modules.iter().find(|m| m.id == 5).unwrap();
+    assert_eq!(inner_instance.params.get("cutoff"), Some(&300.0));
+    assert_eq!(reloaded_cutoff(&saved), 300.0);
+
+    let (mut controller, mut hierarchy) = load(&file);
+    assert!(hierarchy.unexpose(&filter, 3, "cutoff"));
+    assert!(hierarchy.definition_at(&voice).unwrap().exposed.is_empty());
+    assert!(hierarchy.definition_at(&filter).unwrap().exposed.is_empty());
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    let svf = saved.subpatches["filter"].modules.iter().find(|m| m.id == 3).unwrap();
+    assert_eq!(svf.params.get("cutoff"), Some(&300.0));
+    assert_eq!(reloaded_cutoff(&saved), 300.0);
+}
+
+/// What a surface control stands for, and the way back: the Voice's one
+/// surface entry is the filter's cutoff two levels down, with the range
+/// the Filter gives it; the filter's cutoff is exposed on the Filter tile,
+/// and that on the Voice tile; and from the top level the filter's cutoff
+/// is reached through the Voice tile's first control.
+#[test]
+fn surface_lookups_resolve_through_levels() {
+    let (_, hierarchy) = load(&nested_example());
+    let voice = ModulePath::top(2);
+    let filter_tile = hierarchy.id_at(&voice, 5).unwrap();
+    let svf = hierarchy.id_at(&voice.child(5), 3).unwrap();
+    let target = hierarchy.exposed_target(ModuleId(2), 0).unwrap();
+    assert_eq!(
+        (target.module, target.param.as_str(), target.range),
+        (svf, "cutoff", Some((20.0, 20000.0)))
+    );
+    assert!(hierarchy.exposed_target(ModuleId(2), 1).is_none());
+    assert!(hierarchy.exposed_target(svf, 0).is_none(), "a module has no surface");
+    assert_eq!(
+        hierarchy.exposure_of(svf, "cutoff"),
+        Some((filter_tile, "cutoff".to_string()))
+    );
+    assert_eq!(
+        hierarchy.exposure_of(filter_tile, "cutoff"),
+        Some((ModuleId(2), "cutoff".to_string()))
+    );
+    assert_eq!(hierarchy.exposure_of(svf, "resonance"), None);
+    assert_eq!(
+        hierarchy.exposure_of(ModuleId(2), "cutoff"),
+        None,
+        "the top has no surface"
+    );
+    let cutoff = (svf, "cutoff".to_string());
+    assert_eq!(
+        hierarchy.surface_for(&ModulePath::root(), &cutoff),
+        Some((ModuleId(2), 0))
+    );
+    assert_eq!(hierarchy.surface_for(&voice, &cutoff), Some((filter_tile, 0)));
+    assert_eq!(hierarchy.surface_for(&voice.child(5), &cutoff), None, "its own level");
+    assert_eq!(
+        hierarchy.surface_for(&ModulePath::root(), &(svf, "resonance".to_string())),
+        None
+    );
+}
+
+/// Ranges through levels: the surface range is the overlap of each
+/// level's range, and the value is clamped to each in turn, which gives
+/// the same number. Ranges that do not overlap give the innermost one.
+#[test]
+fn exposed_ranges_overlap_outer_then_inner() {
+    let mut file = nested_example();
+    file.subpatches.get_mut("voice").unwrap().exposed[0].range = Some((100.0, 500.0));
+    file.modules
+        .iter_mut()
+        .find(|m| m.id == 2)
+        .unwrap()
+        .params
+        .insert("cutoff".into(), 5000.0);
+    let (controller, hierarchy) = load(&file);
+    let voice = ModulePath::top(2);
+    // The Voice's entry: its own range, then the Filter's behind it.
+    let exposed = hierarchy.definition_at(&voice).unwrap().exposed[0].clone();
+    assert_eq!(hierarchy.exposed_range(&voice, &exposed), Some((100.0, 500.0)));
+    assert_eq!(
+        hierarchy.exposed_value(controller.graph(), &voice, &exposed),
+        Some(500.0)
+    );
+    assert_eq!(
+        hierarchy.exposed_target(ModuleId(2), 0).unwrap().range,
+        Some((100.0, 500.0))
+    );
+    // The Filter's own entry is only its own range.
+    let inner = hierarchy.definition_at(&voice.child(5)).unwrap().exposed[0].clone();
+    assert_eq!(hierarchy.exposed_range(&voice.child(5), &inner), Some((20.0, 20000.0)));
+
+    file.subpatches.get_mut("voice").unwrap().exposed[0].range = Some((1.0, 10.0));
+    file.modules
+        .iter_mut()
+        .find(|m| m.id == 2)
+        .unwrap()
+        .params
+        .insert("cutoff".into(), 5.0);
+    let (_, hierarchy) = load(&file);
+    let exposed = hierarchy.definition_at(&voice).unwrap().exposed[0].clone();
+    assert_eq!(
+        hierarchy.exposed_range(&voice, &exposed),
+        Some((20.0, 20000.0)),
+        "disjoint ranges: the inner clamp is applied last"
+    );
+    assert_eq!(
+        hierarchy.exposed_target(ModuleId(2), 0).unwrap().range,
+        Some((20.0, 20000.0))
+    );
+}
+
+/// Renaming a sub-patch changes what the tile and the file show, and keeps
+/// the definition's key, which the player never sees.
+#[test]
+fn renaming_a_sub_patch_changes_its_name_and_keeps_its_key() {
+    let (controller, mut hierarchy) = load(&nested_example());
+    hierarchy.rename(ModuleId(2), " Lead voice ").unwrap();
+    assert_eq!(hierarchy.tile_name(ModuleId(2)), Some("Lead voice".to_string()));
+    assert!(hierarchy.rename(ModuleId(2), "  ").is_err());
+    assert!(
+        hierarchy.rename(ModuleId(1), "Note").is_err(),
+        "a module is not a sub-patch"
+    );
+    let saved = written(&hierarchy, &controller, &Metadata::default());
+    assert_eq!(saved.subpatches["voice"].metadata.name, "Lead voice");
+    assert!(saved.modules.iter().any(|m| m.subpatch.as_deref() == Some("voice")));
+}
+
+/// Assignments on one parameter from both sides of a boundary sum in the
+/// order the file loads them, inner first, whatever order they were made
+/// in: the sync moves the outer ones behind the inner one, giving new ids
+/// only to those, keeps their options, moves nothing on a second pass, and
+/// the saved file reloads in the same order (Editor model, Assignment
+/// order is kept canonical).
+#[test]
+fn sync_puts_assignments_in_file_order_and_renumbers_only_the_movers() {
+    let (mut controller, mut hierarchy) = load_text(FLAT);
+    let made = hierarchy
+        .collapse(controller.graph(), &ModulePath::root(), &[2, 3, 4])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let inside = ModulePath::top(made.instance.0);
+    let svf = hierarchy.id_at(&inside, 4).unwrap();
+    let saw = hierarchy.id_at(&inside, 3).unwrap();
+    hierarchy.expose(controller.graph(), &inside, 4, "cutoff").unwrap();
+    let cutoff = controller.graph().node(svf).unwrap().parameter_index("cutoff").unwrap();
+    let out = |module: ModuleId| OutputRef { module, port: 0 };
+    // Outside first: the LFO, then the note. Then inside: the saw.
+    let lfo = controller.add_assignment(out(ModuleId(5)), svf, cutoff, 0.1).unwrap();
+    let note = controller.add_assignment(out(ModuleId(1)), svf, cutoff, 0.3).unwrap();
+    controller.set_assignment_enabled(note, false).unwrap();
+    let inner = controller.add_assignment(out(saw), svf, cutoff, 0.7).unwrap();
+    controller
+        .set_assignment_polarity(inner, Some(loom_core::Polarity::Unipolar))
+        .unwrap();
+    assert!(lfo < note && note < inner);
+
+    hierarchy.sync(&mut controller).unwrap();
+    let live: Vec<(AssignmentId, OutputRef, f32)> = controller
+        .graph()
+        .assignments()
+        .map(|(id, a)| (id, a.source, a.depth))
+        .collect();
+    assert_eq!(live.len(), 3);
+    assert_eq!(live[0], (inner, out(saw), 0.7), "the inner assignment keeps its id");
+    assert_eq!((live[1].1, live[1].2), (out(ModuleId(5)), 0.1));
+    assert_eq!((live[2].1, live[2].2), (out(ModuleId(1)), 0.3));
+    assert!(
+        live[1].0 > inner && live[2].0 > live[1].0,
+        "the outer ones moved behind it"
+    );
+    let graph = controller.graph();
+    assert!(
+        !graph.assignment(live[2].0).unwrap().enabled,
+        "options travel with a moved assignment"
+    );
+    assert_eq!(
+        graph.assignment(inner).unwrap().polarity,
+        Some(loom_core::Polarity::Unipolar)
+    );
+    let ids: Vec<AssignmentId> = live.iter().map(|(id, _, _)| *id).collect();
+    hierarchy.sync(&mut controller).unwrap();
+    let again: Vec<AssignmentId> = controller.graph().assignments().map(|(id, _)| id).collect();
+    assert_eq!(again, ids, "a second sync moves nothing");
+
+    let saved = written(&hierarchy, &controller, &Metadata::default());
+    let (reloaded, reloaded_h) = load(&saved);
+    let order: Vec<(ModulePath, f32)> = reloaded
+        .graph()
+        .assignments()
+        .map(|(_, a)| (reloaded_h.path_of(a.source.module), a.depth))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (inside.child(3), 0.7),
+            (ModulePath::top(5), 0.1),
+            (ModulePath::top(1), 0.3)
+        ]
+    );
+}

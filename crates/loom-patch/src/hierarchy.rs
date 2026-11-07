@@ -26,7 +26,7 @@ use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
     PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SUBPATCH_KIND, SubPatch,
 };
-use loom_core::{Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, TRANSPORT_MODULE};
+use loom_core::{AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, TRANSPORT_MODULE};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The name a new sub-patch gets when it is made, made unique with a
@@ -185,6 +185,24 @@ pub struct Removed {
     /// forget.
     pub tiles: Vec<ModuleId>,
 }
+
+/// What an exposed entry of an instance tile stands for: the flat module
+/// and parameter it moves, through any nesting, and the range the surface
+/// gives it (sub-patches.md, Exposing).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExposedTarget {
+    /// The flat module whose parameter the surface control moves.
+    pub module: ModuleId,
+    /// That parameter's name.
+    pub param: String,
+    /// The narrowest range of every level on the way in, as a finite span,
+    /// or `None` when no level narrows it. See [`Hierarchy::exposed_range`].
+    pub range: Option<(f32, f32)>,
+}
+
+/// The status bar text when Expose is asked at the top level, which has no
+/// surface to expose onto.
+pub const EXPOSE_INSIDE_ONLY: &str = "Expose works inside a sub-patch";
 
 /// The hierarchy of the open patch.
 #[derive(Debug, Clone, PartialEq)]
@@ -673,7 +691,8 @@ impl Hierarchy {
     }
 
     /// The live value of an exposed parameter of the instance at `path`,
-    /// read through any nesting and clamped to the exposed range.
+    /// read through any nesting and clamped to each level's range on the
+    /// way in, outer first, as the flattener writes it (flattening rule 12).
     pub fn exposed_value(&self, graph: &Graph, instance: &ModulePath, exposed: &Exposed) -> Option<f32> {
         let (id, param) = self.resolve_exposed(instance, exposed)?;
         let node = graph.node(id)?;
@@ -684,7 +703,96 @@ impl Hierarchy {
                 node.descriptor.saved_values(&node.params)[index]
             }
         };
-        Some(clamp_exposed(value, exposed.range))
+        Some(
+            self.range_chain(instance, exposed)
+                .into_iter()
+                .fold(value, |value, range| clamp_exposed(value, Some(range))),
+        )
+    }
+
+    /// Every finite range on the way from an exposed entry of the instance
+    /// at `instance` to the flat parameter, outer first.
+    fn range_chain(&self, instance: &ModulePath, exposed: &Exposed) -> Vec<(f32, f32)> {
+        let mut chain = Vec::new();
+        if let Some(range) = exposed.range.filter(|r| is_span(*r)) {
+            chain.push(range);
+        }
+        let member = instance.child(exposed.module);
+        if let Some(definition) = self.definition_at(&member)
+            && let Some(through) = definition.exposed.iter().find(|e| e.name == exposed.param)
+        {
+            chain.extend(self.range_chain(&member, through));
+        }
+        chain
+    }
+
+    /// The range a surface control for `exposed` spans: the overlap of
+    /// every level's range on the way in, or `None` when no level narrows
+    /// it. Clamping to each range in turn (as [`Hierarchy::exposed_value`]
+    /// does) gives the same value as clamping to the overlap, so the
+    /// control and the saved value agree. Ranges that do not overlap, which
+    /// only a hand-written file can make, give the innermost one, because
+    /// its clamp is applied last.
+    pub fn exposed_range(&self, instance: &ModulePath, exposed: &Exposed) -> Option<(f32, f32)> {
+        self.range_chain(instance, exposed)
+            .into_iter()
+            .reduce(|(min, max), (inner_min, inner_max)| {
+                let overlap = (min.max(inner_min), max.min(inner_max));
+                if is_span(overlap) {
+                    overlap
+                } else {
+                    (inner_min, inner_max)
+                }
+            })
+    }
+
+    /// What the `index`th exposed entry of the instance tile `instance`
+    /// stands for, or `None` when the tile is not an instance or has no
+    /// such entry.
+    pub fn exposed_target(&self, instance: ModuleId, index: usize) -> Option<ExposedTarget> {
+        let path = self.ids.path_of(instance)?;
+        let definition = self.definition_at(path)?;
+        let exposed = definition.exposed.get(index)?;
+        let (module, param) = self.resolve_exposed(path, exposed)?;
+        Some(ExposedTarget {
+            module,
+            param,
+            range: self.exposed_range(path, exposed),
+        })
+    }
+
+    /// The instance tile one level up that exposes `param` of the tile
+    /// `member` (a module's parameter, or a nested instance's exposed
+    /// name), and the name it has on that surface. `None` at the top level
+    /// or when it is not exposed.
+    pub fn exposure_of(&self, member: ModuleId, param: &str) -> Option<(ModuleId, String)> {
+        let path = self.ids.path_of(member)?;
+        let level = path.parent()?;
+        let definition = self.definition_at(&level)?;
+        let entry = definition
+            .exposed
+            .iter()
+            .find(|e| e.module == path.last() && e.param == param)?;
+        Some((self.ids.get(&level)?, entry.name.clone()))
+    }
+
+    /// The instance tile on `level` whose exposures reach the flat
+    /// parameter `target`, through any depth, and the index of the exposed
+    /// entry on its surface. `None` when `target` is on `level` itself or
+    /// no exposure reaches it. A parameter exposed twice resolves to the
+    /// first entry.
+    pub fn surface_for(&self, level: &ModulePath, target: &(ModuleId, String)) -> Option<(ModuleId, usize)> {
+        let target_level = self.level_of(target.0);
+        if target_level == *level || !target_level.starts_with(level) {
+            return None;
+        }
+        let instance = target_level.prefix(level.0.len() + 1);
+        let definition = self.definition_at(&instance)?;
+        let index = definition
+            .exposed
+            .iter()
+            .position(|e| self.resolve_exposed(&instance, e).as_ref() == Some(target))?;
+        Some((self.ids.get(&instance)?, index))
     }
 
     /// The patch as it would be saved: every level's modules, ports,
@@ -940,7 +1048,11 @@ impl Hierarchy {
     /// Makes the controller's cables the ones the file would load: the
     /// hierarchy is written out, flattened with the flattener itself (which
     /// also refuses what a file could not hold), and the difference in
-    /// cables is applied. A refusal changes nothing. The caller commits.
+    /// cables is applied. It also puts the live assignments on each
+    /// parameter in the order the file loads them (flattening rule 11),
+    /// giving a new id only to one that must move, so the sum plays the
+    /// same after save and reload (sub-patches.md, Editor model). A
+    /// refusal changes nothing. The caller commits.
     pub fn sync(&mut self, controller: &mut Controller) -> Result<(), PatchError> {
         self.sync_without(controller, &[])
     }
@@ -980,6 +1092,7 @@ impl Hierarchy {
         for (from, to) in desired.difference(&current) {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
+        order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
         debug_assert_eq!(
             self.implied,
             desired.difference(&self.direct_cables(&patch)).cloned().collect(),
@@ -1036,6 +1149,103 @@ impl Hierarchy {
             .map(|(_, port)| port.name.as_str())
             .collect();
         unique_name(base, |name| taken.contains(name))
+    }
+
+    /// Exposes `param` of the member `member` of the definition at `level`
+    /// on that definition's surface (sub-patches.md, Exposing). The member
+    /// is a module, and `param` one of its parameters, or a nested
+    /// instance, and `param` one of its exposed names. Returns the surface
+    /// name: the parameter's label, made unique. A parameter already
+    /// exposed keeps its name and nothing changes. Refused at the top
+    /// level, for a port, for a transient parameter, and for a name the
+    /// member does not have. The caller syncs and commits.
+    pub fn expose(&mut self, graph: &Graph, level: &ModulePath, member: u32, param: &str) -> Result<String, String> {
+        let Some(key) = self.instances.get(level).map(|i| i.key.clone()) else {
+            return Err(EXPOSE_INSIDE_ONLY.to_string());
+        };
+        let path = level.child(member);
+        let (label, stored) = if let Some(definition) = self.definition_at(&path) {
+            let Some(through) = definition.exposed.iter().find(|e| e.name == param).cloned() else {
+                return Err(format!("{} exposes no `{param}`", definition.metadata.name));
+            };
+            let value = self.exposed_value(graph, &path, &through);
+            (param.to_string(), Stored { value, range: None })
+        } else if self.ports.contains_key(&path) {
+            return Err("a port has no parameters".to_string());
+        } else {
+            let Some(node) = self.ids.get(&path).and_then(|id| graph.node(id)) else {
+                return Err(format!("there is no module {member}"));
+            };
+            match &node.unknown {
+                Some(unknown) => {
+                    let Some(&value) = unknown.params.get(param) else {
+                        return Err(format!("{} has no parameter `{param}`", unknown.kind));
+                    };
+                    (
+                        param.to_string(),
+                        Stored {
+                            value: Some(value),
+                            range: None,
+                        },
+                    )
+                }
+                None => {
+                    let Some(index) = node.parameter_index(param) else {
+                        return Err(format!("{} has no parameter `{param}`", node.descriptor.name));
+                    };
+                    let spec = &node.descriptor.params[index];
+                    if spec.is_transient() {
+                        return Err(format!("{} is a live gesture, not a value to expose", spec.label));
+                    }
+                    (
+                        spec.label.to_string(),
+                        Stored {
+                            value: Some(node.descriptor.saved_values(&node.params)[index]),
+                            range: stored_range(node, index),
+                        },
+                    )
+                }
+            }
+        };
+        Ok(self.expose_on(&key, member, param, &label, None, stored))
+    }
+
+    /// Takes `param` of the member `member` off the surface of the
+    /// definition at `level`, and off every surface above that re-exposed
+    /// it. Exposures below, inside a nested member, stay. Returns whether
+    /// it was exposed. The caller removes the assignments that reached it
+    /// from other levels, syncs, and commits.
+    pub fn unexpose(&mut self, level: &ModulePath, member: u32, param: &str) -> bool {
+        let exposed = self
+            .definition_at(level)
+            .is_some_and(|d| d.exposed.iter().any(|e| e.module == member && e.param == param));
+        if exposed {
+            self.drop_exposed(level, member, Some(&[param.to_string()]));
+        }
+        exposed
+    }
+
+    /// Renames the definition of the instance tile `instance`. The name is
+    /// what the tile, the breadcrumb, and the inspector show; the
+    /// definition's key stays, since it is not shown. An empty name is
+    /// refused.
+    pub fn rename(&mut self, instance: ModuleId, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("a sub-patch needs a name".to_string());
+        }
+        let key = self
+            .ids
+            .path_of(instance)
+            .and_then(|path| self.instances.get(path))
+            .map(|i| i.key.clone())
+            .ok_or_else(|| "select a sub-patch to rename".to_string())?;
+        let definition = self
+            .definitions
+            .get_mut(&key)
+            .expect("every instance has its definition");
+        definition.metadata.name = name.to_string();
+        Ok(())
     }
 
     /// Records a cable on `level` from `from` to `to`, where at least one
@@ -1349,7 +1559,7 @@ impl Hierarchy {
                 } else {
                     let node = graph.node(assignment.target);
                     let value = node.map(|n| n.descriptor.saved_values(&n.params)[assignment.param]);
-                    let range = node.and_then(|n| n.range(assignment.param)).map(|r| (r.min, r.max));
+                    let range = node.and_then(|n| stored_range(n, assignment.param));
                     (param.clone(), Stored { value, range })
                 };
                 let label = graph
@@ -1717,9 +1927,74 @@ fn apply_stored(module: &mut PatchModule, param: &str, stored: &Stored) {
 /// `value` clamped to an exposed range, when the range is a finite span.
 fn clamp_exposed(value: f32, range: Option<(f32, f32)>) -> f32 {
     match range {
-        Some((min, max)) if min.is_finite() && max.is_finite() && min < max => value.clamp(min, max),
+        Some(range) if is_span(range) => value.clamp(range.0, range.1),
         _ => value,
     }
+}
+
+/// The control range of parameter `index` as the file would write it: the
+/// selected one, unless it is the parameter's default range, which the
+/// file leaves out (control-ranges.md, rule 7).
+fn stored_range(node: &loom_core::Node, index: usize) -> Option<(f32, f32)> {
+    let range = node.range(index)?;
+    let default = node
+        .descriptor
+        .params
+        .get(index)
+        .and_then(|spec| spec.options.default_range);
+    (Some(range) != default).then_some((range.min, range.max))
+}
+
+/// True for a finite range with its minimum below its maximum: the only
+/// kind the flattener accepts and a control can span.
+fn is_span((min, max): (f32, f32)) -> bool {
+    min.is_finite() && max.is_finite() && min < max
+}
+
+/// Puts the live assignments on each parameter in the order `canonical`
+/// lists them, which is the order the file loads them: each instance's
+/// inner ones first, then the level's own (flattening rule 11). The engine
+/// sums assignments on one parameter in id order, so an assignment whose
+/// id is below the one before it in that order is removed and added again
+/// with a fresh id; every other one keeps its id. A live assignment the
+/// file does not hold is left alone.
+fn order_assignments(controller: &mut Controller, canonical: &[PatchModulation]) -> Result<(), loom_core::LoomError> {
+    let graph = controller.graph();
+    let live: BTreeMap<(End, End), AssignmentId> = graph
+        .assignments()
+        .map(|(id, a)| {
+            let source = (a.source.module.0, crate::port_name(graph, a.source));
+            let target = (a.target.0, crate::param_name(graph, a.target, a.param));
+            ((source, target), id)
+        })
+        .collect();
+    let mut groups: BTreeMap<End, Vec<AssignmentId>> = BTreeMap::new();
+    for entry in canonical {
+        if let Some(&id) = live.get(&(entry.source.clone(), entry.target.clone())) {
+            groups.entry(entry.target.clone()).or_default().push(id);
+        }
+    }
+    for ids in groups.into_values() {
+        let mut last: Option<AssignmentId> = None;
+        for id in ids {
+            let placed = match last {
+                Some(last) if id <= last => {
+                    let moved = controller.remove_assignment(id)?;
+                    let fresh = controller.add_assignment(moved.source, moved.target, moved.param, moved.depth)?;
+                    if moved.polarity.is_some() {
+                        controller.set_assignment_polarity(fresh, moved.polarity)?;
+                    }
+                    if !moved.enabled {
+                        controller.set_assignment_enabled(fresh, false)?;
+                    }
+                    fresh
+                }
+                _ => id,
+            };
+            last = Some(placed);
+        }
+    }
+    Ok(())
 }
 
 /// `base`, or `base 2`, `base 3`, and so on, the first that `taken` does

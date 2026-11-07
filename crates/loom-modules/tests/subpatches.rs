@@ -7,7 +7,7 @@
 mod common;
 
 use common::{Note, SAMPLE_RATE, load_patch, patch_path, render, render_with};
-use loom_core::{EngineConfig, EngineParts, ModuleId, OutputSafety, create_engine};
+use loom_core::{EngineConfig, EngineParts, ModuleId, ModuleNames, OutputSafety, create_engine};
 use loom_patch::Patch;
 
 /// Length of each render: 0.2 s, as the golden patch tests use.
@@ -166,4 +166,174 @@ fn an_edit_inside_keeps_the_state_of_the_other_inner_modules() {
     assert!(added);
     assert!(left.iter().any(|&s| s != 0.0));
     assert!(left == e_left && right == e_right, "the edit changed the sound");
+}
+
+/// A flat patch whose filter cutoff three sources can modulate: an LFO and
+/// an envelope outside the part that collapses, and the saw inside it.
+const THREE_SOURCES: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Three sources"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.midi.note@1"),
+        PatchModule(id: 2, kind: "loom.phase.generator@1"),
+        PatchModule(id: 3, kind: "loom.osc.saw@1"),
+        PatchModule(id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 800.0, "resonance": 0.5}),
+        PatchModule(id: 5, kind: "loom.mod.lfo@1", params: {"rate": 3.0}),
+        PatchModule(id: 6, kind: "loom.env.envelope@1", params: {"attack": 0.01, "decay": 0.1, "sustain": 0.3}),
+        PatchModule(id: 9, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 10, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (1, "gate"), to: (6, "gate")),
+        PatchCable(from: (4, "lowpass"), to: (9, "in")),
+    ],
+)"#;
+
+/// An engine with output safety off, as [`load`] makes, and nothing in it.
+fn empty_engine() -> EngineParts {
+    create_engine(
+        loom_modules::registry(),
+        EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+        },
+    )
+}
+
+/// The [`THREE_SOURCES`] patch loaded as the editor loads it, with its
+/// hierarchy, and an output on module `module`.
+fn three_sources() -> (EngineParts, loom_patch::Hierarchy, Patch) {
+    use loom_patch::{FlatIds, Hierarchy};
+    let flat = Patch::from_ron(THREE_SOURCES).unwrap();
+    let mut parts = empty_engine();
+    let mut ids = FlatIds::new();
+    flat.load_with_ids(&mut parts.controller, &mut ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&flat, parts.controller.graph(), ids).unwrap();
+    (parts, hierarchy, flat)
+}
+
+/// An output reference on the first output of `module`.
+fn out(module: u32) -> loom_core::OutputRef {
+    loom_core::OutputRef {
+        module: ModuleId(module),
+        port: 0,
+    }
+}
+
+/// Three assignments on one cutoff, two from outside the sub-patch and one
+/// from inside, made outer first. The engine sums them in id order, and
+/// with three terms the order changes the last bits, so the live sum
+/// differs from what the saved file loads unless the sync reorders them.
+/// After the sync the render is bit-identical to the reloaded file's
+/// (sub-patches.md, Editor model, Assignment order is kept canonical).
+#[test]
+fn assignments_from_both_sides_sum_as_the_file_loads_them() {
+    use loom_patch::{Layout, ModulePath};
+    // The editor's steps, with and without the sync that follows an
+    // assignment, each in a fresh engine so the renders start cold.
+    let build = |sync: bool| {
+        let (mut parts, mut hierarchy, _) = three_sources();
+        let made = hierarchy
+            .collapse(parts.controller.graph(), &ModulePath::root(), &[2, 3, 4])
+            .unwrap();
+        hierarchy.sync(&mut parts.controller).unwrap();
+        let inside = ModulePath::top(made.instance.0);
+        hierarchy
+            .expose(parts.controller.graph(), &inside, 4, "cutoff")
+            .unwrap();
+        hierarchy.sync(&mut parts.controller).unwrap();
+        let svf = hierarchy.id_at(&inside, 4).unwrap();
+        let saw = hierarchy.id_at(&inside, 3).unwrap();
+        let cutoff = parts
+            .controller
+            .graph()
+            .node(svf)
+            .unwrap()
+            .parameter_index("cutoff")
+            .unwrap();
+        parts.controller.add_assignment(out(5), svf, cutoff, 0.13).unwrap();
+        parts.controller.add_assignment(out(6), svf, cutoff, 0.31).unwrap();
+        parts.controller.add_assignment(out(saw.0), svf, cutoff, 0.07).unwrap();
+        if sync {
+            hierarchy.sync(&mut parts.controller).unwrap();
+        }
+        parts.controller.commit().unwrap();
+        (parts, hierarchy)
+    };
+    let (mut unsynced, _) = build(false);
+    let (mut synced, hierarchy) = build(true);
+    let order: Vec<ModulePath> = synced
+        .controller
+        .graph()
+        .assignments()
+        .map(|(_, a)| hierarchy.path_of(a.source.module))
+        .collect();
+    assert_eq!(order[0].0.len(), 2, "the inner assignment sums first");
+    let mut saved = hierarchy.unflatten(synced.controller.graph(), |_| Layout::default());
+    saved.metadata.name = "saved".to_string();
+    let (left, right) = render(&mut synced, FRAMES, 64, &[NOTE]);
+    let (r_left, r_right) = render(&mut load(&saved), FRAMES, 64, &[NOTE]);
+    assert!(left.iter().any(|&s| s != 0.0));
+    assert!(
+        left == r_left && right == r_right,
+        "the reloaded file plays what was heard"
+    );
+    let (u_left, _) = render(&mut unsynced, FRAMES, 64, &[NOTE]);
+    assert!(u_left != left, "without the sync the sum order differs from the file's");
+}
+
+/// Collapsing with three assignments on one parameter, one of whose
+/// sources goes inside, puts the inner one first in the live order (rule
+/// 2's exception), and the saved file plays exactly what plays after the
+/// collapse.
+#[test]
+fn a_collapse_with_three_sources_reloads_as_it_plays() {
+    use loom_patch::{Layout, ModulePath};
+    let (mut parts, mut hierarchy, _) = three_sources();
+    let cutoff = parts
+        .controller
+        .graph()
+        .node(ModuleId(4))
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    // The saw's assignment sits between the two outer ones.
+    parts
+        .controller
+        .add_assignment(out(5), ModuleId(4), cutoff, 0.13)
+        .unwrap();
+    parts
+        .controller
+        .add_assignment(out(3), ModuleId(4), cutoff, 0.07)
+        .unwrap();
+    parts
+        .controller
+        .add_assignment(out(6), ModuleId(4), cutoff, 0.31)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    let made = hierarchy
+        .collapse(parts.controller.graph(), &ModulePath::root(), &[2, 3, 4])
+        .unwrap();
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    let inside = ModulePath::top(made.instance.0);
+    let order: Vec<ModulePath> = parts
+        .controller
+        .graph()
+        .assignments()
+        .map(|(_, a)| hierarchy.path_of(a.source.module))
+        .collect();
+    assert_eq!(order, [inside.child(3), ModulePath::top(5), ModulePath::top(6)]);
+    let mut saved = hierarchy.unflatten(parts.controller.graph(), |_| Layout::default());
+    saved.metadata.name = "saved".to_string();
+    let (left, right) = render(&mut parts, FRAMES, 64, &[NOTE]);
+    let (r_left, r_right) = render(&mut load(&saved), FRAMES, 64, &[NOTE]);
+    assert!(left.iter().any(|&s| s != 0.0));
+    assert!(
+        left == r_left && right == r_right,
+        "the reloaded file plays what plays after the collapse"
+    );
 }
