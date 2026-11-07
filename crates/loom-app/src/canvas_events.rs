@@ -125,7 +125,7 @@ impl App {
                     module: ModuleId(to.module),
                     port: to.index,
                 };
-                let through_port = self.fed_through_port(input);
+                let through_port = self.link_into_shown(to);
                 match self.session.controller.connect(output, input) {
                     Ok(_) => {
                         // The record that held the old cable goes with it,
@@ -168,7 +168,7 @@ impl App {
                     module: ModuleId(port.module),
                     port: port.index,
                 };
-                if self.session.controller.graph().node(input.module).is_none() || self.fed_through_port(input) {
+                if self.session.controller.graph().node(input.module).is_none() || self.link_into_shown(port) {
                     // The cable is a boundary record: on a port or sub-patch
                     // tile, or into a module from a port.
                     self.disconnect_through_hierarchy(port);

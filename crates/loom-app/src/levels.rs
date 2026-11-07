@@ -4,7 +4,7 @@
 use crate::{App, Message, browser};
 use iced::{Point, Rectangle};
 use loom_canvas::{GRID, PortRef, TILE_WIDTH};
-use loom_core::{InputRef, ModuleId, OutputRef, TRANSPORT_MODULE};
+use loom_core::{ModuleId, OutputRef, TRANSPORT_MODULE};
 use loom_patch::{Direction, End, Hierarchy, INPUT_KIND, ModulePath, OUTPUT_KIND, Tile};
 use std::collections::BTreeSet;
 
@@ -154,15 +154,13 @@ impl App {
         }
     }
 
-    /// True when the cable into `input` is there only because a boundary
-    /// record implies it, so the canvas shows it from a port tile.
-    pub(crate) fn fed_through_port(&self, input: InputRef) -> bool {
-        let session = &self.session;
-        session
-            .controller
-            .graph()
-            .source_of(input)
-            .is_some_and(|from| session.hierarchy.is_implied(session.controller.graph(), from, input))
+    /// True when a boundary record on the shown level feeds the input
+    /// `to`: the canvas draws that cable from a port or sub-patch tile,
+    /// whether or not the graph holds a cable for it (a port with nothing
+    /// behind it has the record and no cable).
+    pub(crate) fn link_into_shown(&self, to: PortRef) -> bool {
+        self.level_end(to)
+            .is_some_and(|end| self.session.hierarchy.has_link_into(&self.session.level, &end))
     }
 
     /// Takes tiles out of the patch: modules, with their cables; ports,

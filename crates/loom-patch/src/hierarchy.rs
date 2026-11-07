@@ -1049,6 +1049,12 @@ impl Hierarchy {
         });
     }
 
+    /// True when a link on `level` feeds `to`, whether or not the graph holds
+    /// a cable for it: a port with nothing behind it still has its record.
+    pub fn has_link_into(&self, level: &ModulePath, to: &End) -> bool {
+        self.link_into(level, to).is_some()
+    }
+
     /// Removes the link into `to` on `level`. True when there was one.
     pub fn disconnect(&mut self, level: &ModulePath, to: &End) -> bool {
         let before = self.links.len();

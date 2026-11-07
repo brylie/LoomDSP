@@ -724,3 +724,93 @@ fn deleting_everything_keeps_the_transport_and_its_cable_into_a_port() {
             .any(|c| c.to == (2, "phase".to_string()))
     );
 }
+
+/// A cable from a module replaces the record from a port that nothing
+/// feeds outside: the record goes although the graph never held a cable
+/// for it, so the canvas shows one cable and the file keeps the module's.
+#[test]
+fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
+    use loom_canvas::{CanvasEvent, PortRef};
+    let mut app = nested_app();
+    app.show_level(&voice());
+    let sine = app.session.hierarchy.id_at(&voice(), 2).unwrap();
+    // A new Patch input, unconnected outside, into the sine's phase.
+    let input = app
+        .modules
+        .iter()
+        .copied()
+        .find(|d| d.id == "loom.struct.input")
+        .unwrap();
+    app.add_module(input, Point::new(0.0, 400.0));
+    let port = *app.session.selection.iter().next().unwrap();
+    app.canvas_event(CanvasEvent::Connect {
+        from: PortRef {
+            module: port,
+            output: true,
+            index: 0,
+        },
+        to: PortRef {
+            module: sine.0,
+            output: false,
+            index: 0,
+        },
+    });
+    let phase = loom_core::InputRef { module: sine, port: 0 };
+    assert_eq!(
+        app.session.controller.graph().source_of(phase),
+        None,
+        "nothing stands behind the new port"
+    );
+    assert_eq!(app.ui_snapshot().cables.len(), 2, "the record is drawn all the same");
+
+    // An LFO inside the Voice, cabled into the same input.
+    let lfo = app.modules.iter().copied().find(|d| d.id == "loom.mod.lfo").unwrap();
+    app.add_module(lfo, Point::new(0.0, 600.0));
+    let lfo = *app.session.selection.iter().next().unwrap();
+    app.canvas_event(CanvasEvent::Connect {
+        from: PortRef {
+            module: lfo,
+            output: true,
+            index: 0,
+        },
+        to: PortRef {
+            module: sine.0,
+            output: false,
+            index: 0,
+        },
+    });
+    assert_eq!(
+        app.session.controller.graph().source_of(phase),
+        Some(loom_core::OutputRef {
+            module: ModuleId(lfo),
+            port: 0
+        })
+    );
+    let shown = app.ui_snapshot().cables;
+    assert_eq!(
+        shown.iter().filter(|c| c.to.module == sine.0).count(),
+        1,
+        "one cable into the sine"
+    );
+    let saved = app.current_patch();
+    let into_phase: Vec<_> = saved.subpatches["voice"]
+        .cables
+        .iter()
+        .filter(|c| c.to == (2, "phase".to_string()))
+        .collect();
+    assert_eq!(into_phase.len(), 1);
+    assert_eq!(
+        into_phase[0].from.0,
+        app.session.hierarchy.path_of(ModuleId(lfo)).last()
+    );
+    // And the file loads with that cable.
+    let (reloaded, _) = {
+        let patch = saved.clone();
+        let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+        (loaded.controller, loaded.hierarchy)
+    };
+    assert_eq!(
+        reloaded.graph().cables().count(),
+        app.session.controller.graph().cables().count()
+    );
+}
