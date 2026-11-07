@@ -167,9 +167,11 @@ impl App {
     }
 
     /// A mapping learned on a parameter that a sub-patch surface exposes
-    /// with a narrower range covers that range, so hardware cannot leave it
-    /// either (sub-patches.md, Exposing). A Relative mapping has no span to
-    /// set, and a parameter with no exposed range keeps the defaults.
+    /// with a narrower range covers that range, so hardware stays in it
+    /// (sub-patches.md, Exposing). A Relative mapping has no span to set,
+    /// and a parameter with no exposed range keeps the defaults. A stopgap:
+    /// the engine will clamp what every mapping sets to the exposed range
+    /// (the spec's "MIDI stays in the range too"), and this goes then.
     fn cover_exposed_range(&mut self, module: ModuleId, index: usize) {
         let graph = self.session.controller.graph();
         let Some(node) = graph.node(module) else { return };
