@@ -1613,8 +1613,9 @@ fn input_ref(graph: &Graph, end: &End) -> Option<InputRef> {
 }
 
 impl Direction {
-    /// The port name a Patch input or output takes when it has no label.
-    fn own_port_fallback(self) -> &'static str {
+    /// The port name a Patch input or output takes when it has no label:
+    /// "in" or "out".
+    pub fn own_port_fallback(self) -> &'static str {
         match self {
             Self::Input => "in",
             Self::Output => "out",

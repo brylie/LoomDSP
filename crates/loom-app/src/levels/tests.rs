@@ -242,3 +242,381 @@ fn visiting_a_level_is_not_an_edit() {
     assert_eq!(app.current_patch(), before);
     assert!(app.session.edits.history.undo_step().is_none());
 }
+
+/// A flat patch: a note into a phase generator and a sine, into the audio
+/// output, with the Transport.
+const FLAT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Flat"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.midi.note@1", position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.phase.generator@1", position: Some((192.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.osc.sine@1", position: Some((384.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1", position: Some((576.0, 0.0))),
+        PatchModule(id: 5, kind: "loom.clock.transport@1", position: Some((0.0, 240.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+    ],
+)"#;
+
+/// The app with `text` open, no audio.
+fn app_with(text: &str) -> App {
+    let patch = Patch::from_ron(text).unwrap();
+    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+    App::assemble(
+        Err("test".to_string()),
+        48_000.0,
+        loaded,
+        1,
+        &crate::tests::app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    )
+}
+
+/// The graph's cables as (output, input) pairs.
+fn graph_cables(app: &App) -> Vec<(loom_core::OutputRef, loom_core::InputRef)> {
+    app.session.controller.graph().cables().collect()
+}
+
+/// Ctrl+G makes one sub-patch tile of the selection, with a port for each
+/// cable that crossed, and changes no cable of the graph. Undo brings the
+/// modules back; redo makes the tile again with the same id.
+#[test]
+fn ctrl_g_makes_a_sub_patch_and_undo_brings_the_modules_back() {
+    let mut ui = Ui::with_app(app_with(FLAT));
+    let before = graph_cables(&ui.app);
+    let saved = ui.app.current_patch();
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2, 3])));
+    ui.tap(keyboard::Key::Character("g".into()), Modifiers::COMMAND);
+    let snapshot = ui.app.ui_snapshot();
+    let tile = snapshot
+        .tiles
+        .iter()
+        .find(|t| t.title == "Sub-patch")
+        .expect("the new tile");
+    assert_eq!(
+        tile.inputs.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+        ["Pitch"]
+    );
+    assert_eq!(
+        tile.outputs.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+        ["Out"]
+    );
+    assert!(!snapshot.tiles.iter().any(|t| t.title == "Sine"));
+    assert_eq!(snapshot.selection, [tile.id]);
+    assert_eq!(snapshot.status, "Made Sub-patch from 2 modules");
+    assert_eq!(snapshot.undo.as_deref(), Some("make sub-patch"));
+    assert_eq!(graph_cables(&ui.app), before, "the sound did not change");
+    assert_eq!(ui.app.current_patch().subpatches.len(), 1);
+    // The tile stands where the members were.
+    assert_eq!(ui.app.session.positions[&tile.id], (192.0, 0.0));
+
+    ui.app.undo();
+    assert!(ui.app.session.hierarchy.is_flat());
+    assert_eq!(ui.app.current_patch(), saved);
+    assert_eq!(graph_cables(&ui.app), before);
+    let selected: Vec<u32> = ui.app.session.selection.iter().copied().collect();
+    assert_eq!(selected, [2, 3], "the members are selected again");
+
+    ui.app.redo();
+    let again = ui.app.ui_snapshot();
+    assert_eq!(again.tiles.iter().filter(|t| t.title == "Sub-patch").count(), 1);
+    assert_eq!(again.selection, [tile.id]);
+    assert_eq!(ui.app.current_patch().subpatches.len(), 1);
+}
+
+/// Dissolving the tile gives the modules and cables back, where the tile
+/// was, as the patch was before.
+#[test]
+fn dissolve_gives_the_modules_back_where_the_tile_was() {
+    let mut ui = Ui::with_app(app_with(FLAT));
+    let saved = ui.app.current_patch();
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2, 3])));
+    ui.tap(keyboard::Key::Character("g".into()), Modifiers::COMMAND);
+    assert_eq!(ui.app.current_patch().subpatches.len(), 1);
+    ui.tap(
+        keyboard::Key::Character("g".into()),
+        Modifiers::COMMAND | Modifiers::SHIFT,
+    );
+    assert!(ui.app.session.hierarchy.is_flat());
+    assert_eq!(ui.app.current_patch(), saved);
+    let snapshot = ui.app.ui_snapshot();
+    assert_eq!(snapshot.selection, [2, 3]);
+    assert_eq!(snapshot.status, "Dissolved Sub-patch");
+    assert_eq!(snapshot.undo.as_deref(), Some("dissolve Sub-patch"));
+    // With a plain module selected, there is nothing to dissolve.
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
+    ui.tap(
+        keyboard::Key::Character("g".into()),
+        Modifiers::COMMAND | Modifiers::SHIFT,
+    );
+    assert_eq!(ui.app.ui_snapshot().status, "Select one sub-patch to dissolve");
+}
+
+/// Selecting only the Transport makes nothing, and says why.
+#[test]
+fn the_transport_alone_makes_no_sub_patch() {
+    let mut app = app_with(FLAT);
+    app.session.selection = [5].into_iter().collect();
+    app.make_subpatch();
+    assert!(app.session.hierarchy.is_flat());
+    assert_eq!(app.ui_snapshot().status, loom_patch::hierarchy::NOTHING_TO_COLLAPSE);
+}
+
+/// Inside a sub-patch the Transport is refused, and a Patch input from the
+/// browser becomes a port of the sub-patch, which its tile shows outside.
+#[test]
+fn inside_a_sub_patch_the_transport_is_refused_and_a_patch_input_is_a_port() {
+    let mut app = nested_app();
+    app.show_level(&voice());
+    let transport = app
+        .modules
+        .iter()
+        .copied()
+        .find(|d| d.id == "loom.clock.transport")
+        .unwrap();
+    app.add_module(transport, Point::new(0.0, 400.0));
+    assert_eq!(app.ui_snapshot().status, super::NO_TRANSPORT_INSIDE);
+    assert_eq!(app.session.controller.graph().nodes().count(), 4);
+
+    let input = app
+        .modules
+        .iter()
+        .copied()
+        .find(|d| d.id == "loom.struct.input")
+        .unwrap();
+    app.add_module(input, Point::new(0.0, 400.0));
+    assert_eq!(
+        app.session.controller.graph().nodes().count(),
+        4,
+        "a port is not a module"
+    );
+    let added = *app.session.selection.iter().next().expect("the port is selected");
+    assert_eq!(
+        app.session
+            .hierarchy
+            .tile(app.session.controller.graph(), ModuleId(added)),
+        Some(loom_patch::Tile::Port(loom_patch::Direction::Input, "in".to_string()))
+    );
+    assert_eq!(app.ui_snapshot().undo.as_deref(), Some("add Patch input"));
+    app.show_level(&ModulePath::root());
+    let tile = app
+        .ui_snapshot()
+        .tiles
+        .into_iter()
+        .find(|t| t.title == "Voice")
+        .unwrap();
+    assert_eq!(
+        tile.inputs.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+        ["pitch", "in"]
+    );
+    let definition = &app.current_patch().subpatches["voice"];
+    assert_eq!(
+        definition
+            .modules
+            .iter()
+            .filter(|m| m.kind == loom_patch::INPUT_KIND)
+            .count(),
+        2
+    );
+}
+
+/// A modulation from another level, or from a port tile, is refused.
+#[test]
+fn a_modulation_across_a_boundary_is_refused() {
+    let mut app = nested_app();
+    let sine = app.session.hierarchy.id_at(&voice(), 2).unwrap();
+    let note_pitch = loom_core::OutputRef {
+        module: ModuleId(1),
+        port: 0,
+    };
+    app.assign(note_pitch, sine, 0);
+    assert_eq!(app.ui_snapshot().status, super::NO_MODULATION_ACROSS);
+    assert_eq!(app.session.controller.graph().assignments().count(), 0);
+    let port = app.session.hierarchy.id_at(&voice(), 1).unwrap();
+    app.assign(loom_core::OutputRef { module: port, port: 0 }, sine, 0);
+    assert_eq!(app.session.controller.graph().assignments().count(), 0);
+}
+
+/// Copy, cut, and duplicate refuse a selection with a sub-patch tile.
+#[test]
+fn copy_of_a_sub_patch_tile_is_refused() {
+    let mut app = nested_app();
+    app.session.selection = [1, 2].into_iter().collect();
+    assert!(app.copy().is_none());
+    assert_eq!(app.ui_snapshot().status, super::NO_COPY_YET);
+    assert!(app.cut().is_none());
+    assert_eq!(app.ui_snapshot().status, "Cannot cut a sub-patch yet");
+    app.duplicate();
+    assert_eq!(app.ui_snapshot().status, "Cannot duplicate a sub-patch yet");
+    assert_eq!(app.session.controller.graph().nodes().count(), 4);
+}
+
+/// Inside a sub-patch, the cable from a port into a module can be taken
+/// away and put back, and outside, a new cable into the sub-patch's port
+/// replaces the one there. The graph follows each time.
+#[test]
+fn cables_through_a_port_are_removed_replaced_and_restored() {
+    use loom_canvas::{CanvasEvent, PortRef};
+    let mut app = nested_app();
+    let sine = app.session.hierarchy.id_at(&voice(), 2).unwrap();
+    let phase = loom_core::InputRef { module: sine, port: 0 };
+    let into_phase = |app: &App| app.session.controller.graph().source_of(phase);
+    assert_eq!(
+        into_phase(&app),
+        Some(loom_core::OutputRef {
+            module: ModuleId(1),
+            port: 0
+        })
+    );
+
+    app.show_level(&voice());
+    app.canvas_event(CanvasEvent::Disconnect(PortRef {
+        module: sine.0,
+        output: false,
+        index: 0,
+    }));
+    assert_eq!(into_phase(&app), None, "the port no longer feeds the sine");
+    assert_eq!(app.ui_snapshot().cables.len(), 1);
+    let port = app.session.hierarchy.id_at(&voice(), 1).unwrap();
+    app.canvas_event(CanvasEvent::Connect {
+        from: PortRef {
+            module: port.0,
+            output: true,
+            index: 0,
+        },
+        to: PortRef {
+            module: sine.0,
+            output: false,
+            index: 0,
+        },
+    });
+    assert_eq!(
+        into_phase(&app),
+        Some(loom_core::OutputRef {
+            module: ModuleId(1),
+            port: 0
+        })
+    );
+    assert_eq!(app.ui_snapshot().cables.len(), 2);
+
+    // Outside: the note's gate replaces its pitch on the Voice's port.
+    app.show_level(&ModulePath::root());
+    app.canvas_event(CanvasEvent::Connect {
+        from: PortRef {
+            module: 1,
+            output: true,
+            index: 1,
+        },
+        to: PortRef {
+            module: 2,
+            output: false,
+            index: 0,
+        },
+    });
+    assert_eq!(
+        into_phase(&app),
+        Some(loom_core::OutputRef {
+            module: ModuleId(1),
+            port: 1
+        })
+    );
+    let saved = app.current_patch();
+    assert!(
+        saved
+            .cables
+            .iter()
+            .any(|c| c.from == (1, "gate".to_string()) && c.to == (2, "pitch".to_string()))
+    );
+    assert!(!saved.cables.iter().any(|c| c.from == (1, "pitch".to_string())));
+    // And taking it away outside leaves the sine unfed.
+    app.canvas_event(CanvasEvent::Disconnect(PortRef {
+        module: 2,
+        output: false,
+        index: 0,
+    }));
+    assert_eq!(into_phase(&app), None);
+    assert_eq!(app.ui_snapshot().undo.as_deref(), Some("remove cable"));
+}
+
+/// Deleting a sub-patch tile removes everything inside it; undo brings
+/// the tile, its inside, and its ports back.
+#[test]
+fn deleting_a_sub_patch_tile_removes_its_inside() {
+    let mut app = nested_app();
+    let sine = app.session.hierarchy.id_at(&voice(), 2).unwrap();
+    app.session.selection = [2].into_iter().collect();
+    app.edit(|app| {
+        app.delete_modules(&[2]);
+    });
+    assert_eq!(app.session.controller.graph().nodes().count(), 3);
+    assert!(app.session.hierarchy.is_flat());
+    assert!(app.session.controller.graph().node(sine).is_none());
+    assert!(!app.session.positions.contains_key(&2));
+    assert!(graph_cables(&app).is_empty());
+
+    app.undo();
+    assert_eq!(app.session.controller.graph().nodes().count(), 4);
+    assert!(!app.session.hierarchy.is_flat());
+    assert!(app.session.positions.contains_key(&2));
+    assert_eq!(graph_cables(&app).len(), 2);
+    let tile = app
+        .ui_snapshot()
+        .tiles
+        .into_iter()
+        .find(|t| t.title == "Voice")
+        .unwrap();
+    assert_eq!(tile.inputs.len(), 1);
+    assert_eq!(tile.outputs.len(), 1);
+}
+
+/// Duplicating a module inside a sub-patch keeps the cable that came in
+/// through a port: the copy is fed from the same port.
+#[test]
+fn duplicate_inside_a_sub_patch_keeps_the_cable_from_the_port() {
+    let mut app = nested_app();
+    app.show_level(&voice());
+    let sine = app.session.hierarchy.id_at(&voice(), 2).unwrap();
+    app.session.selection = [sine.0].into_iter().collect();
+    app.duplicate();
+    assert_eq!(app.session.controller.graph().nodes().count(), 5);
+    let copy = *app.session.selection.iter().next().expect("the copy is selected");
+    assert_ne!(copy, sine.0);
+    assert_eq!(app.session.hierarchy.level_of(ModuleId(copy)), voice());
+    let fed = app.session.controller.graph().source_of(loom_core::InputRef {
+        module: ModuleId(copy),
+        port: 0,
+    });
+    assert_eq!(
+        fed,
+        Some(loom_core::OutputRef {
+            module: ModuleId(1),
+            port: 0
+        })
+    );
+    let saved = app.current_patch();
+    let definition = &saved.subpatches["voice"];
+    assert_eq!(
+        definition
+            .cables
+            .iter()
+            .filter(|c| c.from == (1, "out".to_string()))
+            .count(),
+        2
+    );
+    assert_eq!(app.ui_snapshot().undo.as_deref(), Some("duplicate Sine"));
+}
+
+/// The tile menu offers Open and Dissolve on a sub-patch, and Make
+/// sub-patch on a module.
+#[test]
+fn the_tile_menu_knows_sub_patches() {
+    let app = nested_app();
+    let labels = |id: u32| app.tile_menu_items(id).into_iter().map(|(l, _)| l).collect::<Vec<_>>();
+    assert_eq!(labels(2), ["Open", "Dissolve sub-patch"]);
+    assert_eq!(labels(1), ["Help", "Make sub-patch"]);
+}

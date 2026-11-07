@@ -471,6 +471,10 @@ impl App {
     /// parameter adds nothing (`docs/design/modulation.md`, Making an
     /// assignment).
     pub(crate) fn assign(&mut self, source: OutputRef, target: ModuleId, index: usize) {
+        // Nothing crosses a level except through exposed items (rule 4).
+        if self.refuses_assignment(source, target) {
+            return;
+        }
         let graph = self.session.controller.graph();
         let Some(spec) = graph.node(target).and_then(|n| n.spec(index)) else {
             return;

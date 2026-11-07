@@ -109,6 +109,14 @@ impl App {
                 }
             }
             CanvasEvent::Connect { from, to } => {
+                let graph = self.session.controller.graph();
+                let both_modules =
+                    graph.node(ModuleId(from.module)).is_some() && graph.node(ModuleId(to.module)).is_some();
+                if !both_modules {
+                    // A port or sub-patch tile at one end: a boundary record.
+                    self.connect_through_hierarchy(from, to);
+                    return;
+                }
                 let output = OutputRef {
                     module: ModuleId(from.module),
                     port: from.index,
@@ -117,6 +125,17 @@ impl App {
                     module: ModuleId(to.module),
                     port: to.index,
                 };
+                // The cable into the input goes, also when a port held it.
+                if self.fed_through_port(input) {
+                    let to_end = self.level_end(to);
+                    let level = self.session.level.clone();
+                    if let Some(to_end) = to_end {
+                        self.change_hierarchy("connect", |h| {
+                            h.disconnect(&level, &to_end);
+                            Ok(())
+                        });
+                    }
+                }
                 match self.session.controller.connect(output, input) {
                     Ok(_) => {
                         self.commit();
@@ -150,7 +169,11 @@ impl App {
                     module: ModuleId(port.module),
                     port: port.index,
                 };
-                if self.session.controller.disconnect(input).is_ok() {
+                if self.session.controller.graph().node(input.module).is_none() || self.fed_through_port(input) {
+                    // The cable is a boundary record: on a port or sub-patch
+                    // tile, or into a module from a port.
+                    self.disconnect_through_hierarchy(port);
+                } else if self.session.controller.disconnect(input).is_ok() {
                     self.commit();
                 }
             }

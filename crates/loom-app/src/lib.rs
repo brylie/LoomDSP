@@ -297,6 +297,10 @@ enum Message {
     OpenLevel(loom_patch::ModulePath),
     /// Open the sub-patch tile with this id.
     OpenTile(u32),
+    /// Make a sub-patch of the selection and this tile (the tile menu).
+    MakeSubPatch(u32),
+    /// Dissolve this sub-patch tile (the tile menu).
+    DissolveSubPatch(u32),
     /// A message for the open module browser.
     Browser(browser::Message),
     /// A message for the open probe menu.
@@ -542,6 +546,8 @@ impl Message {
             | Self::CloseTileMenu
             | Self::OpenLevel(_)
             | Self::OpenTile(_)
+            | Self::MakeSubPatch(_)
+            | Self::DissolveSubPatch(_)
             | Self::Browser(_)
             | Self::ProbeMenu(_)
             | Self::AddProbe { .. }
@@ -1371,6 +1377,14 @@ impl App {
     /// it, as one undo step.
     fn add_module(&mut self, descriptor: &'static ModuleDescriptor, world: Point) {
         self.close_slider_gesture();
+        if let Some(why) = self.refuses_kind(descriptor.id) {
+            self.alerts.warn(why.to_string());
+            return;
+        }
+        // Inside a sub-patch, a Patch input or output is a port of it.
+        if self.add_port_tile(&descriptor.kind(), world) {
+            return;
+        }
         self.edit(|app| match app.session.new_module(descriptor.id) {
             Ok(id) => {
                 app.session.positions.insert(id.0, (world.x, world.y));
@@ -1488,6 +1502,16 @@ impl App {
             Message::OpenTile(id) => {
                 self.overlays.close_tile_menu();
                 self.open_tile(id);
+            }
+            Message::MakeSubPatch(id) => {
+                self.overlays.close_tile_menu();
+                self.session.selection.insert(id);
+                self.make_subpatch();
+            }
+            Message::DissolveSubPatch(id) => {
+                self.overlays.close_tile_menu();
+                self.session.selection = BTreeSet::from([id]);
+                self.dissolve_subpatch();
             }
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
@@ -1718,6 +1742,11 @@ impl App {
                         self.history_key = Some(true)
                     }
                     iced::keyboard::Key::Character(",") => self.toggle_preferences(),
+                    // Ctrl+G makes a sub-patch; with Shift it dissolves one.
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") && modifiers.shift() => {
+                        self.dissolve_subpatch()
+                    }
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") => self.make_subpatch(),
                     // Ctrl+Enter or Cmd+Enter opens the selected sub-patch.
                     iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => self.open_selected(),
                     _ => {}
@@ -1799,6 +1828,7 @@ Right-click an output or a cable to add a scope or a meter fed by it.\n\
 Click a modulation badge to pin its lines; click again or press Escape to hide them.\n\
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\
 Cmd/Ctrl+Z undoes, and Cmd/Ctrl+Shift+Z redoes.\n\
+Cmd/Ctrl+G makes a sub-patch of the selection; Cmd/Ctrl+Shift+G dissolves the selected one.\n\
 Double-click a sub-patch's header, or press Cmd/Ctrl+Enter with it selected, to open it. Escape with nothing selected goes back up; so does a name in the breadcrumb bar.\n\
 MIDI learn: click a control, then move a knob on your controller. Escape ends it.";
 

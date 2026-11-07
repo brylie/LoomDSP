@@ -383,6 +383,16 @@ impl Group {
             .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1)))
     }
 
+    /// Drops the cables from outside the group that `drop` says. A cable a
+    /// port implies is not the graph's to copy: the caller adds it back as
+    /// a boundary record from the same port.
+    pub fn drop_outside_cables(&mut self, drop: impl Fn(OutputRef, (u32, usize)) -> bool) {
+        self.cables.retain(|cable| match cable.from {
+            Source::Outside(from) => !drop(from, cable.to),
+            Source::Inside(..) => true,
+        });
+    }
+
     /// Checks that the group can be added, before anything changes
     /// (rule 5). Module types and names were checked when the group was
     /// read, so what is left is room in the patch. Only normal modules take

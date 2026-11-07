@@ -5,7 +5,7 @@ use crate::{App, Message, RightTab, alerts, browser, clipboard, undo};
 use iced::advanced::widget::operation::{self, Focusable, Outcome};
 use iced::advanced::widget::{Id, Operation};
 use iced::{Point, Task};
-use loom_core::{LoomError, ModuleId};
+use loom_core::{InputRef, LoomError, ModuleId};
 use std::collections::BTreeSet;
 
 /// Why toolbar Undo or Redo is disabled.
@@ -458,13 +458,9 @@ impl App {
     /// Removes modules and commits. Returns false if the commit failed; the
     /// status bar then holds the error.
     pub(crate) fn delete_modules(&mut self, ids: &[u32]) -> bool {
-        for id in ids {
-            if self.session.controller.remove_module(ModuleId(*id)).is_ok() {
-                self.session.positions.remove(id);
-                self.session.selection.remove(id);
-            }
-        }
-        self.commit()
+        // Through the hierarchy: a sub-patch tile takes its inside with it,
+        // and a port its cables.
+        self.delete_tiles(ids)
     }
 
     /// The clipboard command a message asks for: `'c'`, `'x'`, or `'d'`
@@ -504,6 +500,12 @@ impl App {
     /// The selected modules, or `None` and a status bar note when nothing
     /// is selected.
     pub(crate) fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
+        // The clipboard cannot carry a sub-patch or a port yet
+        // (sub-patches.md, Editor model).
+        if self.structural_in_selection() {
+            self.alerts.warn(crate::levels::NO_COPY_YET.replace("copy", verb));
+            return None;
+        }
         let group = clipboard::Group::from_selection(
             self.session.controller.graph(),
             &self.session.positions,
@@ -569,17 +571,75 @@ impl App {
         if self.session.edits.gesture_open() {
             return;
         }
-        let Some(group) = self.selected_group("duplicate", true) else {
+        let Some(mut group) = self.selected_group("duplicate", true) else {
             return;
         };
+        // A cable that comes in through a port is a boundary record, not a
+        // graph cable the copy could take: it is added back as a record
+        // from the same port (sub-patches.md, Editor model).
+        let level = self.session.level.clone();
+        let (graph, hierarchy) = (self.session.controller.graph(), &self.session.hierarchy);
+        group.drop_outside_cables(|from, to| {
+            hierarchy.is_implied(
+                graph,
+                from,
+                InputRef {
+                    module: ModuleId(to.0),
+                    port: to.1,
+                },
+            )
+        });
+        let originals: Vec<u32> = self.session.selection.iter().copied().collect();
+        let through_ports: Vec<(loom_patch::End, u32, String)> = hierarchy
+            .level_cables(graph, &level)
+            .into_iter()
+            .filter(|cable| cable.link)
+            .filter_map(|cable| {
+                let id = hierarchy.id_at(&level, cable.to.0)?;
+                originals.contains(&id.0).then_some((cable.from, id.0, cable.to.1))
+            })
+            .collect();
         let at = group.top_left().unwrap_or((0.0, 0.0));
         let offset = clipboard::DUPLICATE_OFFSET;
-        self.add_group(&group, (at.0 + offset, at.1 + offset), "duplicate", "Duplicated");
+        self.add_group_then(
+            &group,
+            (at.0 + offset, at.1 + offset),
+            "duplicate",
+            "Duplicated",
+            |app, ids| {
+                if through_ports.is_empty() {
+                    return;
+                }
+                let copies: std::collections::BTreeMap<u32, u32> =
+                    originals.iter().copied().zip(ids.iter().copied()).collect();
+                app.change_hierarchy("duplicate", |h| {
+                    for (from, original, input) in through_ports {
+                        if let Some(copy) = copies.get(&original) {
+                            h.connect(&level, from, (h.path_of(ModuleId(*copy)).last(), input));
+                        }
+                    }
+                    Ok(())
+                });
+            },
+        );
     }
 
     /// Adds a group as one step and selects it, or changes nothing and says
     /// why.
     pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: (f32, f32), verb: &str, done: &str) {
+        self.add_group_then(group, origin, verb, done, |_, _| {});
+    }
+
+    /// [`App::add_group`], with `finish` run on the new ids inside the same
+    /// step, before the commit.
+    pub(crate) fn add_group_then(
+        &mut self,
+        group: &clipboard::Group,
+        origin: (f32, f32),
+        verb: &str,
+        done: &str,
+        finish: impl FnOnce(&mut Self, &[u32]),
+    ) {
         if let Err(why) = group.check(&self.session.controller) {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
             return;
@@ -595,6 +655,7 @@ impl App {
             ) {
                 Ok(ids) => {
                     group.apply_sizes(&ids, &mut app.session.sizes);
+                    finish(app, &ids);
                     app.session.selection = ids.into_iter().collect();
                     if app.commit() {
                         app.alerts.say(format!("{done} {}", group.describe()));

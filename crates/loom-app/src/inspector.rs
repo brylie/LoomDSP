@@ -678,8 +678,12 @@ impl App {
     /// already drives the parameter cannot be picked.
     fn sources(&self, module: u32, index: usize) -> Vec<SourceRow> {
         let graph = self.session.controller.graph();
+        let hierarchy = &self.session.hierarchy;
+        // Only this level's modules: nothing crosses a level (rule 4).
+        let level = hierarchy.level_of(ModuleId(module));
         modulation::sources(graph)
             .into_iter()
+            .filter(|source| hierarchy.level_of(source.module) == level)
             .map(|source| SourceRow {
                 source,
                 name: modulation::source_name(graph, source),

@@ -89,9 +89,11 @@ impl App {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::CloseTileMenu)
                 .on_right_press(Message::CloseTileMenu);
-            let menu = container(button("Help").on_press(Message::ShowModuleHelp(module)).width(140))
-                .padding(4)
-                .style(container::rounded_box);
+            let mut items = column![].spacing(2);
+            for (label, message) in self.tile_menu_items(module) {
+                items = items.push(button(label).on_press(message).width(160));
+            }
+            let menu = container(items).padding(4).style(container::rounded_box);
             layers = layers
                 .push(outside)
                 .push(iced::widget::pin(iced::widget::opaque(menu)).position(at));
