@@ -139,3 +139,41 @@ fn prefixes_and_errors() {
         .is_err()
     );
 }
+
+/// On a sub-patch tile a name finds a surface control by its exposed name
+/// and a port by its name, with the `input:` and `output:` prefixes, and
+/// the name round-trips; a port tile inside has its one port. Displays and
+/// badges are not on these tiles.
+#[test]
+fn names_find_sub_patch_tiles_and_port_tiles() {
+    let ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    let graph = ui.app.session.controller.graph();
+    let h = &ui.app.session.hierarchy;
+    let port = |module, output, index| Part::Port(PortRef { module, output, index });
+    assert_eq!(find(graph, h, 2, "cutoff"), Ok(Part::Control(2, 0)));
+    assert_eq!(find(graph, h, 2, "pitch"), Ok(port(2, false, 0)));
+    assert_eq!(find(graph, h, 2, "gate"), Ok(port(2, false, 1)));
+    assert_eq!(find(graph, h, 2, "out"), Ok(port(2, true, 0)));
+    assert_eq!(find(graph, h, 2, "filter"), Ok(port(2, true, 1)));
+    assert_eq!(find(graph, h, 2, "output:out"), Ok(port(2, true, 0)));
+    assert_eq!(find(graph, h, 2, "input:pitch"), Ok(port(2, false, 0)));
+    assert!(find(graph, h, 2, "input:out").unwrap_err().contains("no input `out`"));
+    assert!(find(graph, h, 2, "display:cutoff").unwrap_err().contains("no light"));
+    assert!(find(graph, h, 2, "badge:out").is_err());
+    assert!(find(graph, h, 2, "nonsense").unwrap_err().contains("(Voice)"));
+    assert_eq!(name(graph, h, Part::Control(2, 0)), Some("2:cutoff".to_string()));
+    assert_eq!(name(graph, h, port(2, false, 0)), Some("2:pitch".to_string()));
+    assert_eq!(name(graph, h, port(2, true, 1)), Some("2:filter".to_string()));
+    assert_eq!(name(graph, h, Part::Control(2, 9)), None);
+    assert_eq!(name(graph, h, port(2, true, 9)), None);
+
+    let voice = loom_patch::ModulePath::top(2);
+    let input = h.id_at(&voice, 1).unwrap().0;
+    let output = h.id_at(&voice, 8).unwrap().0;
+    assert_eq!(find(graph, h, input, "out"), Ok(port(input, true, 0)));
+    assert!(find(graph, h, input, "in").is_err(), "a Patch input has no input");
+    assert_eq!(find(graph, h, output, "in"), Ok(port(output, false, 0)));
+    assert_eq!(name(graph, h, port(input, true, 0)), Some(format!("{input}:out")));
+    assert_eq!(name(graph, h, port(input, false, 0)), None);
+    assert_eq!(find(graph, h, 999, "cutoff"), Err("no module 999".to_string()));
+}

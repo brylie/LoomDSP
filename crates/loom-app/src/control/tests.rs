@@ -2301,3 +2301,28 @@ fn an_audio_command_leaves_an_open_panel_alone() {
         crate::preferences::DeviceChoice::Named("Fake B".into())
     );
 }
+
+/// `locate` and `sample` reach a sub-patch tile's surface control by its
+/// exposed name, and its ports by their names, as they reach a module's.
+#[test]
+fn locate_and_sample_find_a_surface_control() {
+    let mut ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        text: None,
+    };
+    let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
+    let knob = locate(&ui.app, "2:cutoff", &found).unwrap();
+    assert!(near(knob.center(), ui.control(2, "cutoff")));
+    let pitch = locate(&ui.app, "2:pitch", &found).unwrap();
+    assert!(near(pitch.center(), ui.input(2, "pitch")));
+    assert!(locate(&ui.app, "2:resonance", &found).is_err(), "not exposed");
+
+    let sample = run_playing(&mut ui.app, r#"{"cmd": "sample", "target": "2:cutoff", "ms": 50}"#).unwrap();
+    let frames = sample["frames"].as_array().unwrap();
+    assert!(!frames.is_empty());
+    let position = frames[0]["position"].as_f64().unwrap();
+    assert!(position > 0.0 && position < 1.0, "300 Hz in 20 to 20000: {position}");
+    let error = run(&mut ui.app, r#"{"cmd": "sample", "target": "2:resonance", "ms": 50}"#).unwrap_err();
+    assert!(error.contains("(Voice) has no control `resonance`"), "{error}");
+}

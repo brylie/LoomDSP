@@ -47,9 +47,10 @@ use iced::{Event, Point, Rectangle, Size, Task, keyboard, mouse, window};
 use iced_runtime::Action;
 use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
-use loom_canvas::{CanvasView, PortRef};
+use loom_canvas::CanvasView;
+// The harness tests reach these through `use super::*`.
+#[cfg(test)]
 use loom_core::ModuleId;
-use loom_core::ModuleNames;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -463,27 +464,29 @@ impl Ui {
         self.port(module, name, false)
     }
 
+    /// The centre of a port on any tile: a module's, a sub-patch tile's, or
+    /// a port tile's one port, by name and direction.
     fn port(&mut self, module: u32, name: &str, output: bool) -> Point {
-        let node = self
-            .app
-            .session
-            .controller
-            .graph()
-            .node(ModuleId(module))
-            .expect("module in the patch");
-        let count = if output {
-            node.output_count()
+        let prefix = if output {
+            crate::targets::OUTPUT_PREFIX
         } else {
-            node.input_count()
+            crate::targets::INPUT_PREFIX
         };
-        let index = (0..count)
-            .find(|&index| if output { node.output_name(index) } else { node.input_name(index) } == Some(name))
-            .unwrap_or_else(|| panic!("module {module} has no port `{name}`"));
+        let part = crate::targets::find(
+            self.app.session.controller.graph(),
+            &self.app.session.hierarchy,
+            module,
+            &format!("{prefix}{name}"),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let crate::targets::Part::Port(port) = part else {
+            panic!("module {module}: `{name}` is not a port");
+        };
         let world = self
             .app
             .session
             .scene
-            .port_position(PortRef { module, output, index })
+            .port_position(port)
             .expect("the scene has every port in the graph");
         self.canvas().to_window(world)
     }
