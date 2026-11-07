@@ -791,10 +791,20 @@ impl App {
                     if app.sync_hierarchy("retarget") {
                         app.commit();
                     } else {
+                        // The sync may have renamed the assignment before it
+                        // failed, so the moved one is found by its pair,
+                        // which is unique (checked above).
+                        let moved = app
+                            .session
+                            .controller
+                            .graph()
+                            .assignments()
+                            .find(|(_, a)| a.source == source && a.target == module && a.param == param)
+                            .map_or(id, |(id, _)| id);
                         let _ = app
                             .session
                             .controller
-                            .retarget_assignment(id, old.source, old.target, old.param);
+                            .retarget_assignment(moved, old.source, old.target, old.param);
                     }
                 }
                 Err(e) => app.alerts.warn(e.to_string()),

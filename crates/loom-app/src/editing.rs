@@ -365,12 +365,16 @@ impl App {
                 // player sees what was undone (sub-patches.md, Undo across
                 // levels). The graph's cables follow the restored hierarchy.
                 self.show_level(&self.session.hierarchy.nearest_level(step.level()));
-                if let Err(e) = self.session.hierarchy.sync(&mut self.session.controller) {
-                    // Both sides of the step were recorded together, so they
-                    // cannot disagree: a failure here is a bug in a record.
-                    debug_assert!(false, "a restored hierarchy must sync: {e}");
-                    self.alerts
-                        .warn(format!("Cannot {} {}: {e}", verb.to_lowercase(), step.name()));
+                match self.session.hierarchy.sync(&mut self.session.controller) {
+                    Ok(renamed) => self.assignments_renumbered(&renamed),
+                    Err(e) => {
+                        // Both sides of the step were recorded together, so
+                        // they cannot disagree: a failure here is a bug in a
+                        // record.
+                        debug_assert!(false, "a restored hierarchy must sync: {e}");
+                        self.alerts
+                            .warn(format!("Cannot {} {}: {e}", verb.to_lowercase(), step.name()));
+                    }
                 }
                 // What the step touched, if it is still on this level, is
                 // selected.

@@ -129,7 +129,7 @@ impl App {
     /// After a sync gave assignments new ids: what keeps an id follows,
     /// so the matrix's selection and edit and an arc drag in progress
     /// still mean the same assignment.
-    fn assignments_renumbered(&mut self, renamed: &[(loom_core::AssignmentId, loom_core::AssignmentId)]) {
+    pub(crate) fn assignments_renumbered(&mut self, renamed: &[(loom_core::AssignmentId, loom_core::AssignmentId)]) {
         for &(old, new) in renamed {
             if self.session.matrix.selected == Some(old) {
                 self.session.matrix.selected = Some(new);
@@ -204,10 +204,14 @@ impl App {
             modules.extend(removed.modules);
             gone.extend(removed.tiles);
         }
-        if let Err(e) = candidate.sync_without(&mut self.session.controller, &modules) {
-            self.alerts.warn(format!("Cannot delete: {e}"));
-            return false;
-        }
+        let renamed = match candidate.sync_without(&mut self.session.controller, &modules) {
+            Ok(renamed) => renamed,
+            Err(e) => {
+                self.alerts.warn(format!("Cannot delete: {e}"));
+                return false;
+            }
+        };
+        self.assignments_renumbered(&renamed);
         for module in &modules {
             let _ = self.session.controller.remove_module(*module);
         }
