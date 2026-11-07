@@ -181,9 +181,15 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     pub(crate) fn begin_edit(&mut self) {
-        let (controller, positions, sizes) = (&self.session.controller, &self.session.positions, &self.session.sizes);
+        let (controller, hierarchy, level, positions, sizes) = (
+            &self.session.controller,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.positions,
+            &self.session.sizes,
+        );
         self.session.edits.begin(controller.has_uncommitted_changes(), || {
-            undo::Snapshot::take_with_sizes(controller, positions, sizes)
+            undo::Snapshot::take_full(controller, hierarchy, level, positions, sizes)
         });
     }
 
@@ -191,20 +197,32 @@ impl App {
     pub(crate) fn record(&mut self) {
         // A command's name is for this step only, also when no step is made.
         let step_name = self.session.step_name.take();
-        let (controller, positions, sizes) = (&self.session.controller, &self.session.positions, &self.session.sizes);
+        let (controller, hierarchy, level, positions, sizes) = (
+            &self.session.controller,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.positions,
+            &self.session.sizes,
+        );
         self.session.edits.record(step_name, || {
-            undo::Snapshot::take_with_sizes(controller, positions, sizes)
+            undo::Snapshot::take_full(controller, hierarchy, level, positions, sizes)
         });
     }
 
     /// Closes the open gesture, of either kind, and records it.
     pub(crate) fn end_gesture(&mut self) {
         let step_name = self.session.step_name.take();
-        let (controller, positions, sizes) = (&self.session.controller, &self.session.positions, &self.session.sizes);
+        let (controller, hierarchy, level, positions, sizes) = (
+            &self.session.controller,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.positions,
+            &self.session.sizes,
+        );
         self.session
             .edits
             .end_gesture(controller.has_uncommitted_changes(), step_name, || {
-                undo::Snapshot::take_with_sizes(controller, positions, sizes)
+                undo::Snapshot::take_full(controller, hierarchy, level, positions, sizes)
             });
     }
 
@@ -328,10 +346,11 @@ impl App {
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
         self.session.learn.disarm();
-        let applied = undo::apply_with_sizes(
+        let applied = undo::apply_full(
             &step,
             forward,
             &mut self.session.controller,
+            &mut self.session.hierarchy,
             &mut self.session.positions,
             &mut self.session.sizes,
         );
@@ -342,17 +361,31 @@ impl App {
                 } else {
                     self.session.edits.history.undone();
                 }
-                // What the step touched, if it still exists, is selected.
+                // The level the edit was made on is shown first, so the
+                // player sees what was undone (sub-patches.md, Undo across
+                // levels). The graph's cables follow the restored hierarchy.
+                self.show_level(&self.session.hierarchy.nearest_level(step.level()));
+                if let Err(e) = self.session.hierarchy.sync(&mut self.session.controller) {
+                    self.alerts
+                        .warn(format!("Cannot {} {}: {e}", verb.to_lowercase(), step.name()));
+                }
+                // What the step touched, if it is still on this level, is
+                // selected.
                 let touched: BTreeSet<u32> = step
                     .touched_modules()
-                    .filter(|&id| self.session.controller.graph().node(ModuleId(id)).is_some())
+                    .filter(|&id| on_shown_level(&self.session, id))
                     .collect();
                 if !touched.is_empty() {
                     self.session.selection = touched;
                 }
-                self.session
+                let kept: BTreeSet<u32> = self
+                    .session
                     .selection
-                    .retain(|&id| self.session.controller.graph().node(ModuleId(id)).is_some());
+                    .iter()
+                    .copied()
+                    .filter(|&id| on_shown_level(&self.session, id))
+                    .collect();
+                self.session.selection = kept;
                 if self.commit() {
                     self.alerts.say(format!("{verb}: {}", step.name()));
                 } else {
@@ -552,8 +585,14 @@ impl App {
             return;
         }
         self.session.step_name = Some(format!("{verb} {}", group.describe()));
-        self.edit(
-            |app| match group.add(&mut app.session.controller, &mut app.session.positions, origin) {
+        self.edit(|app| {
+            match group.add(
+                &mut app.session.controller,
+                &mut app.session.hierarchy,
+                &app.session.level,
+                &mut app.session.positions,
+                origin,
+            ) {
                 Ok(ids) => {
                     group.apply_sizes(&ids, &mut app.session.sizes);
                     app.session.selection = ids.into_iter().collect();
@@ -567,9 +606,15 @@ impl App {
                     app.commit();
                     app.alerts.warn(format!("Cannot {verb}: {e}"));
                 }
-            },
-        );
+            }
+        });
         // `record` clears it, but an edit inside a gesture does not record.
         self.session.step_name = None;
     }
+}
+
+/// True when `id` is a tile on the level the canvas shows.
+fn on_shown_level(session: &crate::session::PatchSession, id: u32) -> bool {
+    let id = ModuleId(id);
+    session.hierarchy.tile(session.controller.graph(), id).is_some() && session.hierarchy.level_of(id) == session.level
 }

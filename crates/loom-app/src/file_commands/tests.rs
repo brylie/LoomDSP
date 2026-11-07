@@ -117,6 +117,10 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     } = &app;
     let PatchSession {
         controller,
+        hierarchy,
+        level,
+        cameras,
+        level_key,
         retry_commit,
         positions,
         unknown_positions,
@@ -154,8 +158,12 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         control_seen,
     } = engine;
 
-    // A new patch: only its Transport.
+    // A new patch: only its Transport, at the top level.
     assert_eq!(controller.graph().nodes().count(), 1);
+    assert!(hierarchy.is_flat());
+    assert!(level.is_root());
+    assert!(cameras.is_empty());
+    assert_eq!(*level_key, 0);
     assert_eq!(scene.modules().len(), 1);
     assert!(!retry_commit);
     assert!(!positions.contains_key(&added.0));

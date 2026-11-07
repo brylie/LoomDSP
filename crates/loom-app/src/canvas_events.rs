@@ -255,6 +255,11 @@ impl App {
             }
             // The app reads the clipboard first, in `update`.
             CanvasEvent::Paste { .. } => {}
+            CanvasEvent::OpenTile(id) => self.open_tile(id),
+            // Each level keeps its camera for the session.
+            CanvasEvent::Camera(camera) => {
+                self.session.cameras.insert(self.session.level.clone(), camera);
+            }
         }
     }
 }

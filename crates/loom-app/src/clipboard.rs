@@ -13,7 +13,8 @@ use loom_canvas::GRID;
 use loom_core::ModuleNames;
 use loom_core::{Controller, Graph, InputRef, LoomError, ModuleId, ModuleRole, OutputRef, Polarity, Registry};
 use loom_patch::{
-    Layout, Patch, PatchCable, PatchError, PatchModulation, PatchPolarity, ResolveError, ResolveOptions, ResolvedModule,
+    Hierarchy, Layout, ModulePath, Patch, PatchCable, PatchError, PatchModulation, PatchPolarity, ResolveError,
+    ResolveOptions, ResolvedModule,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -410,11 +411,13 @@ impl Group {
     pub fn add(
         &self,
         controller: &mut Controller,
+        hierarchy: &mut Hierarchy,
+        level: &ModulePath,
         positions: &mut BTreeMap<u32, (f32, f32)>,
         origin: (f32, f32),
     ) -> Result<Vec<u32>, LoomError> {
         let mut added = Vec::with_capacity(self.modules.len());
-        let result = self.add_into(controller, positions, origin, &mut added);
+        let result = self.add_into(controller, hierarchy, level, positions, origin, &mut added);
         if result.is_err() {
             for id in &added {
                 let _ = controller.remove_module(ModuleId(*id));
@@ -427,6 +430,8 @@ impl Group {
     fn add_into(
         &self,
         controller: &mut Controller,
+        hierarchy: &mut Hierarchy,
+        level: &ModulePath,
         positions: &mut BTreeMap<u32, (f32, f32)>,
         origin: (f32, f32),
         added: &mut Vec<u32>,
@@ -441,12 +446,19 @@ impl Group {
             .fold(0.0, f32::max);
         let mut unplaced = 0.0;
         let mut ids = BTreeMap::new();
+        hierarchy.adopt(controller.graph());
         for member in &self.modules {
-            let id = if let Some(unknown) = &member.unknown {
-                controller.add_unknown(unknown.clone())?
+            // Ids come from the hierarchy's table, at the shown level
+            // (ADR-0039, invariant 1).
+            let (_, id) = hierarchy.new_module(level).map_err(|e| match e {
+                PatchError::Engine(e) => e,
+                other => LoomError::InvalidKind(other.to_string()),
+            })?;
+            if let Some(unknown) = &member.unknown {
+                controller.add_unknown_with_id(id, unknown.clone())?;
             } else {
-                controller.add_module(&member.descriptor.kind())?
-            };
+                controller.add_module_with_id(id, &member.descriptor.kind())?;
+            }
             added.push(id.0);
             ids.insert(member.id, id);
             // Label, ranges, then values, as a patch loads.

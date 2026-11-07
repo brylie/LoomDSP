@@ -31,7 +31,7 @@ pub const MAX_DEPTH: usize = 64;
 /// Where a flat module came from: the ids of the instances it is inside,
 /// from the top level down, then its own id in its level. A top-level
 /// module's path is its id alone.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModulePath(pub Vec<u32>);
 
 impl ModulePath {

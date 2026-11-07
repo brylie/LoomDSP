@@ -335,6 +335,52 @@ impl Hierarchy {
         self.instances.is_empty()
     }
 
+    /// The name a tile shows: a definition's name for an instance, a port's
+    /// name for a port. `None` for a module or an id no tile has.
+    pub fn tile_name(&self, id: ModuleId) -> Option<String> {
+        let path = self.ids.path_of(id)?;
+        if let Some(definition) = self.definition_at(path) {
+            return Some(definition.metadata.name.clone());
+        }
+        self.ports.get(path).map(|port| port.name.clone())
+    }
+
+    /// The level nearest to `level` that still exists: `level` itself, or
+    /// the longest prefix of it that is the top or an instance.
+    pub fn nearest_level(&self, level: &ModulePath) -> ModulePath {
+        (0..=level.0.len())
+            .rev()
+            .map(|n| level.prefix(n))
+            .find(|prefix| prefix.is_root() || self.instances.contains_key(prefix))
+            .unwrap_or_else(ModulePath::root)
+    }
+
+    /// Each tile's layout as `patch` wrote it, by flat id: the top level's
+    /// modules, and every definition's through its instance.
+    pub fn layouts(&self, patch: &Patch) -> Vec<(ModuleId, Layout)> {
+        let mut levels: Vec<(ModulePath, &[PatchModule])> = vec![(ModulePath::root(), &patch.modules)];
+        for (path, instance) in &self.instances {
+            if let Some(definition) = patch.subpatches.get(&instance.key) {
+                levels.push((path.clone(), &definition.modules));
+            }
+        }
+        let mut layouts = Vec::new();
+        for (level, modules) in levels {
+            for module in modules {
+                if let Some(id) = self.ids.get(&level.child(module.id)) {
+                    layouts.push((
+                        id,
+                        Layout {
+                            position: module.position,
+                            size: module.size,
+                        },
+                    ));
+                }
+            }
+        }
+        layouts
+    }
+
     /// The path of a tile: the table's, or a top-level path for a graph
     /// module the table never saw.
     pub fn path_of(&self, id: ModuleId) -> ModulePath {

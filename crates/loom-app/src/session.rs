@@ -14,10 +14,10 @@ use crate::{
     Loaded, clip, controls, devices, document, edits, gestures, learn, lights, matrix, monitor, patch_info,
     run_is_driven, scene, settings, stream,
 };
-use loom_canvas::{PanelValues, Scene};
-use loom_core::{Controller, OutputRef, OutputSafety, ProbeId};
+use loom_canvas::{Camera, PanelValues, Scene};
+use loom_core::{Controller, ModuleId, OutputRef, OutputSafety, ProbeId};
 use loom_host_desktop::{AudioOutput, CallbackStats, SharedMidi};
-use loom_patch::Metadata;
+use loom_patch::{Hierarchy, Metadata, ModulePath};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -29,6 +29,18 @@ pub(crate) type UnknownPositions = BTreeMap<u32, (Option<(f32, f32)>, (f32, f32)
 /// it, and the engine that plays it.
 pub(crate) struct PatchSession {
     pub(crate) controller: Controller,
+    /// The sub-patch hierarchy beside the flat graph (ADR-0039): where
+    /// each module sits, the definitions, the instance and port tiles, and
+    /// the cables through ports. Every tile id comes from its table.
+    pub(crate) hierarchy: Hierarchy,
+    /// The level the canvas shows: the top, or the inside of a sub-patch.
+    pub(crate) level: ModulePath,
+    /// Each level's camera, kept for the session (sub-patches.md, Make,
+    /// open, and dissolve). A level not here is framed when first shown.
+    pub(crate) cameras: BTreeMap<ModulePath, Camera>,
+    /// Changes when the shown level does, so the canvas adopts that
+    /// level's camera.
+    pub(crate) level_key: u64,
     /// A full command queue left fresh modules staged for a later commit.
     pub(crate) retry_commit: bool,
     pub(crate) positions: BTreeMap<u32, (f32, f32)>,
@@ -132,6 +144,7 @@ impl PatchSession {
     ) -> Started {
         let Loaded {
             controller,
+            hierarchy,
             engine,
             midi: sender,
             telemetry,
@@ -182,6 +195,10 @@ impl PatchSession {
         let run_driven = run_is_driven(&controller);
         let session = Self {
             controller,
+            hierarchy,
+            level: ModulePath::root(),
+            cameras: BTreeMap::new(),
+            level_key: 0,
             retry_commit: false,
             positions,
             unknown_positions,
@@ -225,5 +242,21 @@ impl PatchSession {
             recording_stopped,
             fresh,
         }
+    }
+}
+
+impl PatchSession {
+    /// Adds a module of `kind` to the shown level, with its id from the
+    /// hierarchy's table: the only way the app gives out a module id
+    /// (ADR-0039, invariant 1). The caller places it and commits.
+    pub(crate) fn new_module(&mut self, kind: &str) -> Result<ModuleId, String> {
+        // A module added straight to the controller (tests, generated
+        // patches) is a top-level module the table must know first.
+        self.hierarchy.adopt(self.controller.graph());
+        let (_, id) = self.hierarchy.new_module(&self.level).map_err(|e| e.to_string())?;
+        self.controller
+            .add_module_with_id(id, kind)
+            .map_err(|e| e.to_string())?;
+        Ok(id)
     }
 }

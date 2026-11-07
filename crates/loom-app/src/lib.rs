@@ -39,6 +39,7 @@ mod input_watch;
 mod inspector;
 mod layout;
 mod learn;
+mod levels;
 mod licence_chooser;
 mod lights;
 mod live;
@@ -653,6 +654,8 @@ enum Source<'a> {
 /// An engine and the patch loaded into it, before audio is attached.
 struct Loaded {
     controller: Controller,
+    /// The sub-patch hierarchy read with the patch (ADR-0039).
+    hierarchy: loom_patch::Hierarchy,
     engine: loom_core::Engine,
     midi: loom_core::MidiSender,
     telemetry: loom_core::Telemetry,
@@ -676,9 +679,9 @@ impl App {
     /// The patch as it would be saved now.
     fn current_patch(&self) -> Patch {
         let session = &self.session;
-        let layout = |id: loom_core::ModuleId| {
-            let shown = session.positions.get(&id.0);
-            let position = match session.unknown_positions.get(&id.0) {
+        let layout = |id: u32| {
+            let shown = session.positions.get(&id);
+            let position = match session.unknown_positions.get(&id) {
                 // A placeholder nobody moved keeps the position from its
                 // file, exactly (unknown-modules.md, rule 1).
                 Some((original, initial)) if shown == Some(initial) => *original,
@@ -686,10 +689,12 @@ impl App {
             };
             loom_patch::Layout {
                 position,
-                size: session.sizes.get(&id.0).copied(),
+                size: session.sizes.get(&id).copied(),
             }
         };
-        let mut patch = Patch::from_graph_with(session.document.name(), session.controller.graph(), layout);
+        // Through the hierarchy, so the sub-patches are written as the file
+        // holds them (ADR-0039, invariant 5).
+        let mut patch = session.hierarchy.unflatten(session.controller.graph(), layout);
         patch.metadata = session.document.info().clone();
         patch
     }
@@ -1344,7 +1349,7 @@ impl App {
     /// it, as one undo step.
     fn add_module(&mut self, descriptor: &'static ModuleDescriptor, world: Point) {
         self.close_slider_gesture();
-        self.edit(|app| match app.session.controller.add_module(descriptor.id) {
+        self.edit(|app| match app.session.new_module(descriptor.id) {
             Ok(id) => {
                 app.session.positions.insert(id.0, (world.x, world.y));
                 app.session.selection = BTreeSet::from([id.0]);
@@ -1383,7 +1388,7 @@ impl App {
         self.close_slider_gesture();
         self.session.step_name = Some(probe.verb().to_string());
         self.edit(|app| {
-            let id = match app.session.controller.add_module(descriptor.id) {
+            let id = match app.session.new_module(descriptor.id) {
                 Ok(id) => id,
                 Err(e) => {
                     app.alerts.warn(format!("Cannot {}: {e}", probe.verb()));

@@ -16,10 +16,15 @@ use loom_core::{
     Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, MidiMappingOptions,
     ModuleDescriptor, ModuleId, ModuleRole, OutputRef, ParamRange,
 };
+use loom_patch::{Hierarchy, ModulePath};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What a mapping is, leaving out its session id: the control and its options.
 type MidiLink = (MidiControl, MidiMappingOptions);
+
+/// Where a tile that is not a module (an instance or a port) sits: its
+/// position and its saved size.
+type TileLayout = (Option<(f32, f32)>, Option<(u8, u8)>);
 
 /// The history keeps this many steps. The oldest is dropped first.
 pub const LIMIT: usize = 200;
@@ -61,22 +66,54 @@ pub struct Snapshot {
     /// The control mapped to each parameter and its options, by module and
     /// parameter. Mapping IDs are left out: no step refers to them.
     midi: BTreeMap<(u32, usize), MidiLink>,
+    /// The sub-patch hierarchy (ADR-0039): collapsing and dissolving change
+    /// only this.
+    hierarchy: Hierarchy,
+    /// Where the instance and port tiles sit, by flat id.
+    layouts: BTreeMap<u32, TileLayout>,
+    /// The level the canvas showed when the snapshot was taken, which is
+    /// the level an edit is made on.
+    level: ModulePath,
 }
 
 impl Snapshot {
-    /// Reads the patch.
+    /// Reads a flat patch with no saved sizes: for tests and for replaying
+    /// a graph into a new engine.
     pub fn take(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>) -> Self {
         Self::take_with_sizes(controller, positions, &BTreeMap::new())
     }
 
-    /// Reads the patch and its saved tile dimensions.
+    /// Reads a flat patch and its saved tile dimensions.
     pub fn take_with_sizes(
         controller: &Controller,
         positions: &BTreeMap<u32, (f32, f32)>,
         sizes: &BTreeMap<u32, (u8, u8)>,
     ) -> Self {
+        let mut hierarchy = Hierarchy::flat();
+        hierarchy.adopt(controller.graph());
+        Self::take_full(controller, &hierarchy, &ModulePath::root(), positions, sizes)
+    }
+
+    /// Reads the patch: the graph, the hierarchy, and where every tile
+    /// sits, with `level` the one the canvas shows.
+    pub fn take_full(
+        controller: &Controller,
+        hierarchy: &Hierarchy,
+        level: &ModulePath,
+        positions: &BTreeMap<u32, (f32, f32)>,
+        sizes: &BTreeMap<u32, (u8, u8)>,
+    ) -> Self {
         let graph = controller.graph();
+        let layouts = positions
+            .keys()
+            .chain(sizes.keys())
+            .filter(|id| graph.node(ModuleId(**id)).is_none())
+            .map(|&id| (id, (positions.get(&id).copied(), sizes.get(&id).copied())))
+            .collect();
         Self {
+            hierarchy: hierarchy.clone(),
+            layouts,
+            level: level.clone(),
             modules: graph
                 .nodes()
                 .map(|(id, node)| {
@@ -117,6 +154,15 @@ pub struct Step {
     cables: BTreeMap<InputRef, Pair<OutputRef>>,
     assignments: BTreeMap<AssignmentId, Pair<Assignment>>,
     midi: BTreeMap<(u32, usize), Pair<MidiLink>>,
+    /// The hierarchy before and after, when it changed.
+    hierarchy: Option<(Hierarchy, Hierarchy)>,
+    /// Instance and port tiles that moved, appeared, or went.
+    layouts: BTreeMap<u32, Pair<TileLayout>>,
+    /// Tiles whose level changed: the members of a collapse or a dissolve.
+    moved: BTreeSet<u32>,
+    /// The level the edit was made on, which undo and redo show
+    /// (sub-patches.md, Undo across levels).
+    level: ModulePath,
 }
 
 impl Step {
@@ -131,9 +177,19 @@ impl Step {
         self.name = name;
     }
 
-    /// The modules the step touched.
+    /// The tiles the step touched: modules whose state changed, instance
+    /// and port tiles that moved, and tiles that changed level.
     pub fn touched_modules(&self) -> impl Iterator<Item = u32> + '_ {
-        self.modules.keys().copied()
+        self.modules
+            .keys()
+            .chain(self.layouts.keys())
+            .chain(self.moved.iter())
+            .copied()
+    }
+
+    /// The level the edit was made on.
+    pub fn level(&self) -> &ModulePath {
+        &self.level
     }
 }
 
@@ -188,7 +244,30 @@ pub fn diff(before: &Snapshot, after: &Snapshot, touched: &BTreeSet<(u32, usize)
         cables: BTreeMap::new(),
         assignments: BTreeMap::new(),
         midi: BTreeMap::new(),
+        hierarchy: (before.hierarchy != after.hierarchy).then(|| (before.hierarchy.clone(), after.hierarchy.clone())),
+        layouts: BTreeMap::new(),
+        moved: BTreeSet::new(),
+        level: before.level.clone(),
     };
+    for id in before
+        .layouts
+        .keys()
+        .chain(after.layouts.keys())
+        .collect::<BTreeSet<_>>()
+    {
+        let (old, new) = (before.layouts.get(id), after.layouts.get(id));
+        if old != new {
+            step.layouts.insert(*id, (old.copied(), new.copied()));
+        }
+    }
+    if step.hierarchy.is_some() {
+        // A tile whose path changed moved to another level.
+        for (path, id) in before.hierarchy.ids().paths() {
+            if after.hierarchy.ids().path_of(id).is_some_and(|now| now != path) {
+                step.moved.insert(id.0);
+            }
+        }
+    }
     for id in before
         .modules
         .keys()
@@ -231,16 +310,38 @@ pub fn diff(before: &Snapshot, after: &Snapshot, touched: &BTreeSet<(u32, usize)
             step.midi.insert(*key, (old.copied(), new.copied()));
         }
     }
-    if step.modules.is_empty() && step.cables.is_empty() && step.assignments.is_empty() && step.midi.is_empty() {
+    if step.modules.is_empty()
+        && step.cables.is_empty()
+        && step.assignments.is_empty()
+        && step.midi.is_empty()
+        && step.hierarchy.is_none()
+        && step.layouts.is_empty()
+    {
         return None;
     }
-    step.name = name(&step);
+    step.name = name(&step, &after.hierarchy);
     Some(step)
 }
 
 /// Names a step in the words the user sees on screen.
-fn name(step: &Step) -> String {
+fn name(step: &Step, hierarchy: &Hierarchy) -> String {
     let count = |n: usize, one: String, noun: &str| if n == 1 { one } else { format!("{n} {noun}") };
+    if step.modules.is_empty() && step.cables.is_empty() && step.assignments.is_empty() && step.midi.is_empty() {
+        // Only tiles moved, or only the hierarchy changed. A command that
+        // changes the hierarchy names its own step.
+        if step.hierarchy.is_some() {
+            return "change sub-patch".to_string();
+        }
+        let first = step
+            .layouts
+            .keys()
+            .next()
+            .and_then(|id| hierarchy.tile_name(ModuleId(*id)));
+        return format!(
+            "move {}",
+            count(step.layouts.len(), first.unwrap_or_else(|| "tile".to_string()), "tiles")
+        );
+    }
     let added: Vec<&ModuleState> = step
         .modules
         .values()
@@ -384,22 +485,35 @@ pub fn check(step: &Step, forward: bool, controller: &Controller) -> Result<(), 
     Ok(())
 }
 
-/// Applies one side of a step: the new values going forward (redo), the old
-/// ones going back (undo). The caller commits afterwards.
+/// Applies one side of a step to a flat patch: the new values going
+/// forward (redo), the old ones going back (undo). The caller commits
+/// afterwards.
 pub fn apply(
     step: &Step,
     forward: bool,
     controller: &mut Controller,
     positions: &mut BTreeMap<u32, (f32, f32)>,
 ) -> Result<(), LoomError> {
-    apply_with_sizes(step, forward, controller, positions, &mut BTreeMap::new())
+    let mut hierarchy = Hierarchy::flat();
+    hierarchy.adopt(controller.graph());
+    apply_full(
+        step,
+        forward,
+        controller,
+        &mut hierarchy,
+        positions,
+        &mut BTreeMap::new(),
+    )
 }
 
-/// Applies a step, including the tile sizes captured in it.
-pub fn apply_with_sizes(
+/// Applies a step: the hierarchy side first, then the graph, then where
+/// the instance and port tiles sit. The caller syncs the hierarchy and
+/// commits afterwards.
+pub fn apply_full(
     step: &Step,
     forward: bool,
     controller: &mut Controller,
+    hierarchy: &mut Hierarchy,
     positions: &mut BTreeMap<u32, (f32, f32)>,
     sizes: &mut BTreeMap<u32, (u8, u8)>,
 ) -> Result<(), LoomError> {
@@ -408,6 +522,29 @@ pub fn apply_with_sizes(
             (&pair.0, &pair.1)
         } else {
             (&pair.1, &pair.0)
+        }
+    }
+
+    if let Some((before, after)) = &step.hierarchy {
+        hierarchy.restore(if forward { after } else { before });
+    }
+    for (&id, pair) in &step.layouts {
+        let (_, want) = sides(pair, forward);
+        match want {
+            Some((position, size)) => {
+                match position {
+                    Some(position) => positions.insert(id, *position),
+                    None => positions.remove(&id),
+                };
+                match size {
+                    Some(size) => sizes.insert(id, *size),
+                    None => sizes.remove(&id),
+                };
+            }
+            None => {
+                positions.remove(&id);
+                sizes.remove(&id);
+            }
         }
     }
 

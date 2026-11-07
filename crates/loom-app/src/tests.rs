@@ -1371,18 +1371,49 @@ fn a_meter_says_its_value_past_its_range() {
     assert_eq!(widget.text, "Reduction: -60.0 dB");
 }
 
-/// Until the editor keeps the hierarchy (#51, slice 2), a patch with
-/// sub-patches does not open in the app, with a message that says so; a
-/// flat patch still does.
+/// A patch with sub-patches opens: the engine gets the flat graph and the
+/// session keeps the hierarchy, with every tile's layout by its flat id
+/// (ADR-0039).
 #[test]
-fn a_patch_with_sub_patches_does_not_open_yet() {
-    let mut nested = Patch::new("Nested");
-    nested
-        .subpatches
-        .insert("voice".into(), loom_patch::SubPatch::new("Voice"));
-    let error = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(nested))).err();
-    assert_eq!(error.as_deref(), Some(crate::boot::SUBPATCHES_NOT_YET));
-    assert!(error.unwrap().contains("sub-patches"));
+fn a_patch_with_sub_patches_opens() {
+    let text = r#"Patch(
+        version: 1,
+        metadata: Metadata(name: "Nested"),
+        subpatches: {
+            "voice": SubPatch(
+                metadata: Metadata(name: "Voice"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch"), position: Some((10.0, 20.0))),
+                    PatchModule(id: 2, kind: "loom.osc.sine@1", position: Some((30.0, 40.0)), size: (12, 6)),
+                    PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [
+                    PatchCable(from: (1, "out"), to: (2, "phase")),
+                    PatchCable(from: (2, "out"), to: (3, "in")),
+                ],
+            ),
+        },
+        modules: [
+            PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), position: Some((50.0, 60.0))),
+            PatchModule(id: 2, kind: "loom.io.audio-out@1"),
+            PatchModule(id: 3, kind: "loom.clock.transport@1"),
+        ],
+        cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+    )"#;
+    let nested = Patch::from_ron(text).unwrap();
+    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(nested))).unwrap();
+    assert!(!loaded.hierarchy.is_flat());
+    assert_eq!(
+        loaded.controller.graph().nodes().count(),
+        3,
+        "the sine, the output, and the Transport"
+    );
+    let sine = loaded.hierarchy.id_at(&loom_patch::ModulePath::top(1), 2).unwrap();
+    assert_eq!(loaded.positions.get(&sine.0), Some(&(30.0, 40.0)));
+    assert_eq!(loaded.sizes.get(&sine.0), Some(&(12, 6)));
+    assert_eq!(loaded.positions.get(&1), Some(&(50.0, 60.0)), "the instance tile");
+    let port = loaded.hierarchy.id_at(&loom_patch::ModulePath::top(1), 1).unwrap();
+    assert_eq!(loaded.positions.get(&port.0), Some(&(10.0, 20.0)), "the port tile");
     let flat = Patch::new("Flat");
     assert!(Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(flat))).is_ok());
 }

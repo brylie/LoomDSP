@@ -8,9 +8,9 @@ use crate::{
     settings, stream,
 };
 use iced::{Color, Theme};
-use loom_core::{Controller, EngineConfig, EngineParts, ModuleId, TRANSPORT_MODULE, create_engine};
+use loom_core::{Controller, EngineConfig, EngineParts, TRANSPORT_MODULE, create_engine};
 use loom_host_desktop::AudioOutput;
-use loom_patch::{Metadata, Patch};
+use loom_patch::{FlatIds, Hierarchy, Metadata, ModulePath, Patch};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -287,10 +287,6 @@ impl App {
     }
 }
 
-/// Why a patch with sub-patches does not open in the app yet.
-pub(crate) const SUBPATCHES_NOT_YET: &str =
-    "This patch has sub-patches, which the app cannot open yet. `loom render` plays it.";
-
 impl Loaded {
     /// What the status line says about this load, if anything.
     pub(crate) fn status(&self) -> String {
@@ -310,27 +306,22 @@ impl Loaded {
         let mut sizes = BTreeMap::new();
         let mut original_unknown_positions = BTreeMap::new();
         let mut notes = Vec::new();
+        let mut hierarchy = Hierarchy::flat();
         let mut load = |patch: &Patch, controller: &mut Controller| -> Result<Metadata, String> {
-            // Until the editor keeps the hierarchy (#51, slice 2), the app
-            // saves from the flat graph, and a save would lose the
-            // sub-patches. The command line plays them.
-            if !patch.subpatches.is_empty() {
-                return Err(SUBPATCHES_NOT_YET.to_string());
-            }
-            notes = patch.load_into(controller).map_err(|e| e.to_string())?;
-            for m in &patch.modules {
-                if controller
-                    .graph()
-                    .node(ModuleId(m.id))
-                    .is_some_and(|node| node.unknown.is_some())
-                {
-                    original_unknown_positions.insert(m.id, m.position);
+            // The flat graph plays; the hierarchy keeps the sub-patches and
+            // gives every tile its id (ADR-0039).
+            let mut ids = FlatIds::new();
+            notes = patch.load_with_ids(controller, &mut ids).map_err(|e| e.to_string())?;
+            hierarchy = Hierarchy::from_patch(patch, controller.graph(), ids).map_err(|e| e.to_string())?;
+            for (id, layout) in hierarchy.layouts(patch) {
+                if controller.graph().node(id).is_some_and(|node| node.unknown.is_some()) {
+                    original_unknown_positions.insert(id.0, layout.position);
                 }
-                if let Some((x, y)) = m.position {
-                    positions.insert(m.id, (x, y));
+                if let Some((x, y)) = layout.position {
+                    positions.insert(id.0, (x, y));
                 }
-                if let Some(size) = m.size {
-                    sizes.insert(m.id, size);
+                if let Some(size) = layout.size {
+                    sizes.insert(id.0, size);
                 }
             }
             Ok(patch.metadata.clone())
@@ -358,8 +349,12 @@ impl Loaded {
         };
         // Every patch has one Transport (clock.md). A loaded file gets one
         // in `load_into`; a new or generated patch gets it here.
+        hierarchy.adopt(controller.graph());
         if controller.transport_module().is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
-            controller.add_module(TRANSPORT_MODULE).map_err(|e| e.to_string())?;
+            let (_, id) = hierarchy.new_module(&ModulePath::root()).map_err(|e| e.to_string())?;
+            controller
+                .add_module_with_id(id, TRANSPORT_MODULE)
+                .map_err(|e| e.to_string())?;
             controller.commit().map_err(|e| e.to_string())?;
         }
         layout::auto_layout(&controller, &mut positions);
@@ -372,6 +367,7 @@ impl Loaded {
         }
         Ok(Self {
             controller,
+            hierarchy,
             engine,
             midi,
             telemetry,
