@@ -980,3 +980,38 @@ fn sync_puts_assignments_in_file_order_and_renumbers_only_the_movers() {
         ]
     );
 }
+
+/// Two assignments from one source onto one parameter, which only a
+/// hand-written file makes, are matched to the file's entries in id order:
+/// the first sync settles the order behind the inner assignment and reports
+/// the ids it changed, and a second sync changes nothing.
+#[test]
+fn duplicate_assignments_settle_in_one_sync() {
+    let (mut controller, mut hierarchy) = load_text(FLAT);
+    let made = hierarchy
+        .collapse(controller.graph(), &ModulePath::root(), &[2, 3, 4])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let inside = ModulePath::top(made.instance.0);
+    let svf = hierarchy.id_at(&inside, 4).unwrap();
+    let saw = hierarchy.id_at(&inside, 3).unwrap();
+    hierarchy.expose(controller.graph(), &inside, 4, "cutoff").unwrap();
+    let cutoff = controller.graph().node(svf).unwrap().parameter_index("cutoff").unwrap();
+    let out = |module: ModuleId| OutputRef { module, port: 0 };
+    let first = controller.add_assignment(out(ModuleId(5)), svf, cutoff, 0.1).unwrap();
+    let second = controller.add_assignment(out(ModuleId(5)), svf, cutoff, 0.2).unwrap();
+    let inner = controller.add_assignment(out(saw), svf, cutoff, 0.3).unwrap();
+
+    let renamed = hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(renamed.iter().map(|(old, _)| *old).collect::<Vec<_>>(), [first, second]);
+    let ids: Vec<AssignmentId> = controller.graph().assignments().map(|(id, _)| id).collect();
+    assert_eq!(ids[0], inner);
+    let depths: Vec<f32> = controller.graph().assignments().map(|(_, a)| a.depth).collect();
+    assert_eq!(depths, [0.3, 0.1, 0.2], "the duplicates keep their order");
+    assert!(
+        hierarchy.sync(&mut controller).unwrap().is_empty(),
+        "a settled order stays settled"
+    );
+    let again: Vec<AssignmentId> = controller.graph().assignments().map(|(id, _)| id).collect();
+    assert_eq!(again, ids);
+}

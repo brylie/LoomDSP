@@ -145,6 +145,27 @@ impl App {
         }
     }
 
+    /// `value` clamped to the range a sub-patch surface gives parameter
+    /// `index` of `module`, when a surface exposes it with a narrower range
+    /// (sub-patches.md, Exposing); the value itself otherwise.
+    pub(crate) fn exposure_clamp(&self, module: u32, index: usize, value: f32) -> f32 {
+        let hierarchy = &self.session.hierarchy;
+        let graph = self.session.controller.graph();
+        let Some(spec) = graph
+            .node(ModuleId(module))
+            .and_then(|n| n.descriptor.params.get(index))
+        else {
+            return value;
+        };
+        let Some((tile, item)) = hierarchy.outermost_surface(ModuleId(module), spec.name) else {
+            return value;
+        };
+        match hierarchy.exposed_target(tile, item).and_then(|t| t.range) {
+            Some((min, max)) => value.clamp(min, max),
+            None => value,
+        }
+    }
+
     /// A mapping learned on a parameter that a sub-patch surface exposes
     /// with a narrower range covers that range, so hardware cannot leave it
     /// either (sub-patches.md, Exposing). A Relative mapping has no span to
@@ -309,6 +330,10 @@ impl App {
         let node = self.session.controller.graph().node(id).ok_or("no such module")?;
         let spec = node.descriptor.params.get(index).ok_or("no such parameter")?;
         let value = spec.parse_value_text(text).map_err(|why| why.to_string())?;
+        // Clamped to an exposed range first, so the range selector is not
+        // widened for a value the parameter cannot take.
+        let value = self.exposure_clamp(module, index, value);
+        let node = self.session.controller.graph().node(id).ok_or("no such module")?;
         let outside = node
             .spec(index)
             .is_some_and(|selected| !(selected.min..=selected.max).contains(&value));
@@ -462,6 +487,10 @@ impl App {
 
     /// Sets a parameter from a control on a tile or in the inspector.
     pub(crate) fn set_param(&mut self, module: u32, index: usize, value: f32) {
+        // A parameter a sub-patch surface exposes with a narrower range
+        // stays in it, whichever control, field, or row wrote it
+        // (sub-patches.md, Exposing).
+        let value = self.exposure_clamp(module, index, value);
         if let Err(e) = self.session.controller.set_param(ModuleId(module), index, value) {
             self.alerts.warn(e.to_string());
         }

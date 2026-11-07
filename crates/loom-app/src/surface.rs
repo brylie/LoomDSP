@@ -240,6 +240,13 @@ pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -
             let target = control_target(graph, hierarchy, instance.0, index, ControlPart::Main);
             let kind = surface_kind(graph, hierarchy, instance, index);
             let (description, controls) = inner_text(graph, hierarchy, &path, exposed);
+            // A surface item the enclosing sub-patch exposes again is an
+            // exposed control too, with the mark and the note.
+            let further = hierarchy.exposure_of(instance, &exposed.name).map(|(_, name)| name);
+            let note = match &further {
+                Some(name) => format!("Controls {controls}. Exposed as {name}"),
+                None => format!("Controls {controls}"),
+            };
             WidgetView {
                 kind: view_kind(kind, target.as_ref().map(|t| &t.spec)),
                 x: 0,
@@ -248,10 +255,10 @@ pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -
                 hover: HoverText {
                     description,
                     name: None,
-                    note: Some(format!("Controls {controls}")),
+                    note: Some(note),
                 },
                 hidden: false,
-                exposed: false,
+                exposed: further.is_some(),
             }
         })
         .collect();

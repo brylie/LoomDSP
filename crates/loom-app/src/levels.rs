@@ -114,12 +114,33 @@ impl App {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
             return false;
         }
-        if let Err(e) = candidate.sync(&mut self.session.controller) {
-            self.alerts.warn(format!("Cannot {verb}: {e}"));
-            return false;
-        }
+        let renamed = match candidate.sync(&mut self.session.controller) {
+            Ok(renamed) => renamed,
+            Err(e) => {
+                self.alerts.warn(format!("Cannot {verb}: {e}"));
+                return false;
+            }
+        };
         self.session.hierarchy = candidate;
+        self.assignments_renumbered(&renamed);
         true
+    }
+
+    /// After a sync gave assignments new ids: what keeps an id follows,
+    /// so the matrix's selection and edit and an arc drag in progress
+    /// still mean the same assignment.
+    fn assignments_renumbered(&mut self, renamed: &[(loom_core::AssignmentId, loom_core::AssignmentId)]) {
+        for &(old, new) in renamed {
+            if self.session.matrix.selected == Some(old) {
+                self.session.matrix.selected = Some(new);
+            }
+            if let Some(edit) = &mut self.session.matrix.edit
+                && edit.id == old
+            {
+                edit.id = new;
+            }
+            self.session.gestures.renumber_depth(old, new);
+        }
     }
 
     /// Connects an output to an input where at least one end is a port or
@@ -258,8 +279,9 @@ impl App {
                 app.rekey_cameras(&old, &new);
             }
             match candidate.sync(&mut app.session.controller) {
-                Ok(()) => {
+                Ok(renamed) => {
                     app.session.hierarchy = candidate;
+                    app.assignments_renumbered(&renamed);
                     app.session.selection = BTreeSet::from([made.instance.0]);
                     if app.commit() {
                         app.alerts.say(format!(
@@ -334,8 +356,9 @@ impl App {
             }
             app.session.cameras.remove(&inside);
             match candidate.sync(&mut app.session.controller) {
-                Ok(()) => {
+                Ok(renamed) => {
                     app.session.hierarchy = candidate;
+                    app.assignments_renumbered(&renamed);
                     app.session.selection = undone.members.iter().map(|id| id.0).collect();
                     if app.commit() {
                         app.alerts.say(format!("Dissolved {}", undone.name));
@@ -521,19 +544,30 @@ impl App {
             }) {
                 return;
             }
+            // The assignments onto the parameter that no surface of their
+            // source's level reaches any more go with the exposure; one
+            // through a surface below stays (rule 4).
             if let Some((module, param)) = target {
                 let graph = app.session.controller.graph();
-                let own_level = app.session.hierarchy.level_of(module);
-                let crossing: Vec<loom_core::AssignmentId> = graph
+                let hierarchy = &app.session.hierarchy;
+                let name = graph
+                    .node(module)
+                    .and_then(|n| n.descriptor.params.get(param))
+                    .map(|spec| spec.name.to_string());
+                let own_level = hierarchy.level_of(module);
+                let stranded: Vec<loom_core::AssignmentId> = graph
                     .assignments()
+                    .filter(|(_, a)| a.target == module && a.param == param)
                     .filter(|(_, a)| {
-                        a.target == module
-                            && a.param == param
-                            && app.session.hierarchy.level_of(a.source.module) != own_level
+                        let source_level = hierarchy.level_of(a.source.module);
+                        source_level != own_level
+                            && name.as_ref().is_none_or(|name| {
+                                hierarchy.surface_for(&source_level, &(module, name.clone())).is_none()
+                            })
                     })
                     .map(|(id, _)| id)
                     .collect();
-                for id in crossing {
+                for id in stranded {
                     let _ = app.session.controller.remove_assignment(id);
                 }
             }

@@ -785,15 +785,32 @@ impl App {
             |app| match app.session.controller.retarget_assignment(id, source, module, param) {
                 Ok(()) => {
                     // The moved assignment takes its place in the file's
-                    // order (sub-patches.md, Editor model).
-                    app.sync_hierarchy("retarget");
-                    app.commit();
+                    // order (sub-patches.md, Editor model), which can give
+                    // it a new id. A hierarchy that cannot be written puts
+                    // the assignment back.
+                    if app.sync_hierarchy("retarget") {
+                        app.commit();
+                    } else {
+                        let _ = app
+                            .session
+                            .controller
+                            .retarget_assignment(id, old.source, old.target, old.param);
+                    }
                 }
                 Err(e) => app.alerts.warn(e.to_string()),
             },
         );
         self.session.matrix.edit = None;
-        self.matrix_select(id, self.session.matrix.cell);
+        // The moved assignment, under whatever id it has now: the pair is
+        // unique, as checked above.
+        let moved = self
+            .session
+            .controller
+            .graph()
+            .assignments()
+            .find(|(_, a)| a.source == source && a.target == module && a.param == param)
+            .map_or(id, |(id, _)| id);
+        self.matrix_select(moved, self.session.matrix.cell);
     }
 
     /// Creates the two picked endpoints with the normal app assignment path.

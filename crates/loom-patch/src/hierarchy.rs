@@ -1070,8 +1070,9 @@ impl Hierarchy {
     /// parameter in the order the file loads them (flattening rule 11),
     /// giving a new id only to one that must move, so the sum plays the
     /// same after save and reload (sub-patches.md, Editor model). A
-    /// refusal changes nothing. The caller commits.
-    pub fn sync(&mut self, controller: &mut Controller) -> Result<(), PatchError> {
+    /// refusal changes nothing. The caller commits. Returns the assignments
+    /// that got a new id, as (old, new), so what keeps an id can follow.
+    pub fn sync(&mut self, controller: &mut Controller) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
         self.sync_without(controller, &[])
     }
 
@@ -1079,7 +1080,11 @@ impl Hierarchy {
     /// modules were gone: a delete checks and settles the cables first,
     /// while the modules are still in the graph, so a refusal changes
     /// nothing. The cables into and out of them are disconnected.
-    pub fn sync_without(&mut self, controller: &mut Controller, skip: &[ModuleId]) -> Result<(), PatchError> {
+    pub fn sync_without(
+        &mut self,
+        controller: &mut Controller,
+        skip: &[ModuleId],
+    ) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
         let skip: BTreeSet<ModuleId> = skip.iter().copied().collect();
         self.adopt(controller.graph());
         // What the links imply, from the links alone: a cable the graph
@@ -1110,13 +1115,13 @@ impl Hierarchy {
         for (from, to) in desired.difference(&current) {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
-        order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
+        let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
         debug_assert_eq!(
             self.implied,
             desired.difference(&self.direct_cables(&patch)).cloned().collect(),
             "the links imply the same cables both ways"
         );
-        Ok(())
+        Ok(renamed)
     }
 
     /// The next free id in a level: one above every id the level ever had.
@@ -1974,24 +1979,30 @@ fn is_span((min, max): (f32, f32)) -> bool {
 /// inner ones first, then the level's own (flattening rule 11). The engine
 /// sums assignments on one parameter in id order, so an assignment whose
 /// id is below the one before it in that order is removed and added again
-/// with a fresh id; every other one keeps its id. A live assignment the
-/// file does not hold is left alone.
-fn order_assignments(controller: &mut Controller, canonical: &[PatchModulation]) -> Result<(), loom_core::LoomError> {
+/// with a fresh id; every other one keeps its id. Two assignments from one
+/// source onto one parameter, which only a hand-written file makes, are
+/// matched to the file's entries in id order, so a settled order stays
+/// settled. A live assignment the file does not hold is left alone.
+/// Returns the ids that changed, as (old, new).
+fn order_assignments(
+    controller: &mut Controller,
+    canonical: &[PatchModulation],
+) -> Result<Vec<(AssignmentId, AssignmentId)>, loom_core::LoomError> {
     let graph = controller.graph();
-    let live: BTreeMap<(End, End), AssignmentId> = graph
-        .assignments()
-        .map(|(id, a)| {
-            let source = (a.source.module.0, crate::port_name(graph, a.source));
-            let target = (a.target.0, crate::param_name(graph, a.target, a.param));
-            ((source, target), id)
-        })
-        .collect();
+    let mut live: BTreeMap<(End, End), Vec<AssignmentId>> = BTreeMap::new();
+    for (id, a) in graph.assignments() {
+        let source = (a.source.module.0, crate::port_name(graph, a.source));
+        let target = (a.target.0, crate::param_name(graph, a.target, a.param));
+        live.entry((source, target)).or_default().push(id);
+    }
     let mut groups: BTreeMap<End, Vec<AssignmentId>> = BTreeMap::new();
     for entry in canonical {
-        if let Some(&id) = live.get(&(entry.source.clone(), entry.target.clone())) {
+        let ids = live.get_mut(&(entry.source.clone(), entry.target.clone()));
+        if let Some(id) = ids.and_then(|ids| (!ids.is_empty()).then(|| ids.remove(0))) {
             groups.entry(entry.target.clone()).or_default().push(id);
         }
     }
+    let mut renamed = Vec::new();
     for ids in groups.into_values() {
         let mut last: Option<AssignmentId> = None;
         for id in ids {
@@ -2005,6 +2016,7 @@ fn order_assignments(controller: &mut Controller, canonical: &[PatchModulation])
                     if !moved.enabled {
                         controller.set_assignment_enabled(fresh, false)?;
                     }
+                    renamed.push((id, fresh));
                     fresh
                 }
                 _ => id,
@@ -2012,7 +2024,7 @@ fn order_assignments(controller: &mut Controller, canonical: &[PatchModulation])
             last = Some(placed);
         }
     }
-    Ok(())
+    Ok(renamed)
 }
 
 /// `base`, or `base 2`, `base 3`, and so on, the first that `taken` does

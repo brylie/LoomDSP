@@ -294,3 +294,30 @@ fn a_line_across_the_boundary_ends_at_the_surface_control() {
     let inside = scene_of(&controller, &hierarchy, &positions, &ModulePath::top(1));
     assert!(inside.modulations().is_empty());
 }
+
+/// Inside the Voice, the Filter tile's surface control is exposed on the
+/// Voice too: it carries the mark and its note says so. The Voice's own
+/// surface control, at the top, is not exposed further.
+#[test]
+fn a_surface_item_exposed_further_out_has_the_mark() {
+    let (controller, hierarchy) = nested();
+    let voice = ModulePath::top(2);
+    let scene = crate::scene::build(&controller, &hierarchy, &voice, &BTreeMap::new(), &BTreeMap::new());
+    let filter_tile = hierarchy.id_at(&voice, 5).unwrap();
+    let control = &scene.module(filter_tile.0).unwrap().panel.widgets[0];
+    assert!(control.exposed);
+    assert_eq!(
+        control.hover.note.as_deref(),
+        Some("Controls SVF › Cutoff. Exposed as cutoff")
+    );
+    let top = crate::scene::build(
+        &controller,
+        &hierarchy,
+        &ModulePath::root(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+    let control = &top.module(2).unwrap().panel.widgets[0];
+    assert!(!control.exposed);
+    assert_eq!(control.hover.note.as_deref(), Some("Controls Filter › cutoff"));
+}

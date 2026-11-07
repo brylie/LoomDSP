@@ -117,6 +117,14 @@ impl Gestures {
         *self.depth_drag.get_or_insert_with(pick)
     }
 
+    /// Follows an assignment the hierarchy sync gave a new id, so an arc
+    /// drag in progress keeps changing the same assignment.
+    pub fn renumber_depth(&mut self, old: AssignmentId, new: AssignmentId) {
+        if self.depth_drag == Some(Some(old)) {
+            self.depth_drag = Some(Some(new));
+        }
+    }
+
     /// Shows an arc drag on `target`, for a screenshot of one.
     pub fn show_depth(&mut self, target: Option<AssignmentId>) {
         self.depth_drag = Some(target);
