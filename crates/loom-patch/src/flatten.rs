@@ -51,6 +51,46 @@ impl ModulePath {
     pub fn is_top(&self) -> bool {
         self.0.len() == 1
     }
+
+    /// The path of the top level itself: no instance at all.
+    pub fn root() -> Self {
+        Self(Vec::new())
+    }
+
+    /// True for the top level's own path.
+    pub fn is_root(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The level this path is on: the path without its last id. `None`
+    /// for the root.
+    pub fn parent(&self) -> Option<Self> {
+        let (_, parent) = self.0.split_last()?;
+        Some(Self(parent.to_vec()))
+    }
+
+    /// The id in its level: the last element. 0 for the root, which has
+    /// no id.
+    pub fn last(&self) -> u32 {
+        self.0.last().copied().unwrap_or(0)
+    }
+
+    /// True when this path is `prefix` or lies under it.
+    pub fn starts_with(&self, prefix: &Self) -> bool {
+        self.0.starts_with(&prefix.0)
+    }
+
+    /// The first `n` ids.
+    pub fn prefix(&self, n: usize) -> Self {
+        Self(self.0[..n.min(self.0.len())].to_vec())
+    }
+
+    /// This path with `old` at its start replaced by `new`.
+    pub fn replace_prefix(&self, old: &Self, new: &Self) -> Self {
+        let mut ids = new.0.clone();
+        ids.extend_from_slice(&self.0[old.0.len().min(self.0.len())..]);
+        Self(ids)
+    }
 }
 
 impl fmt::Display for ModulePath {
@@ -138,6 +178,43 @@ impl FlatIds {
     /// Every path and its id, in path order.
     pub fn paths(&self) -> impl Iterator<Item = (&ModulePath, ModuleId)> {
         self.by_path.iter().map(|(path, id)| (path, *id))
+    }
+
+    /// The id `path` has, if it has one. Hands out nothing.
+    pub fn get(&self, path: &ModulePath) -> Option<ModuleId> {
+        self.by_path.get(path).copied()
+    }
+
+    /// The next id the table would hand out.
+    pub fn next_free(&self) -> u32 {
+        self.next
+    }
+
+    /// A new top-level path and its id, which are the same number: the
+    /// editor gives a new top-level module its id here, never from the
+    /// controller, so no inner module can take it later.
+    pub fn next_top(&mut self) -> Result<ModuleId, PatchError> {
+        let id = ModuleId(self.next);
+        if id > ModuleId::MAX {
+            return Err(LoomError::ModuleIdOutOfRange(id).into());
+        }
+        self.reserve(ModulePath::top(id.0), id)?;
+        Ok(id)
+    }
+
+    /// Moves the id of `old` to `new`, which must be free: the module
+    /// keeps its id and its state while it changes level (collapsing and
+    /// dissolving).
+    pub fn rename(&mut self, old: &ModulePath, new: ModulePath) -> Result<(), PatchError> {
+        if let Some(taken) = self.by_path.get(&new) {
+            return Err(LoomError::DuplicateModuleId(*taken).into());
+        }
+        let Some(id) = self.by_path.remove(old) else {
+            return Ok(());
+        };
+        self.by_path.insert(new.clone(), id);
+        self.by_id.insert(id, new);
+        Ok(())
     }
 }
 
@@ -285,9 +362,18 @@ impl Patch {
     /// fail with an error that names both. A patch without one gets one,
     /// with a note, when the registry has the Transport module.
     pub fn load_into(&self, controller: &mut Controller) -> Result<Vec<LoadWarning>, PatchError> {
-        let mut ids = FlatIds::new();
-        let flat = self.flatten(controller.registry(), &mut ids)?;
-        flat.apply_to(controller, &mut ids)
+        self.load_with_ids(controller, &mut FlatIds::new())
+    }
+
+    /// [`Patch::load_into`] with the id table kept: the editor keeps it
+    /// for the session, so every tile has a flat id (ADR-0039).
+    pub fn load_with_ids(
+        &self,
+        controller: &mut Controller,
+        ids: &mut FlatIds,
+    ) -> Result<Vec<LoadWarning>, PatchError> {
+        let flat = self.flatten(controller.registry(), ids)?;
+        flat.apply_to(controller, ids)
     }
 }
 
@@ -727,7 +813,7 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
 
 /// The port name a Patch input or output gives its sub-patch: its label,
 /// else `fallback`.
-fn port_name(module: &PatchModule, fallback: &str) -> String {
+pub(crate) fn port_name(module: &PatchModule, fallback: &str) -> String {
     module
         .label
         .as_deref()

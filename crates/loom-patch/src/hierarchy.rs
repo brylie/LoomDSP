@@ -1,0 +1,1582 @@
+//! The editor's sub-patch hierarchy, kept beside the flat graph
+//! (`docs/design/sub-patches.md`, Editor model; ADR-0039).
+//!
+//! The engine runs the flat graph a [`Controller`] holds, and that graph is
+//! the only home of parameters, cables, assignments, and MIDI mappings. A
+//! [`Hierarchy`] records what the flat graph cannot say: where each module
+//! sits (its [`ModulePath`]), the definitions, the instance and port tiles,
+//! and the cables of each level that touch a port or an instance, in that
+//! level's ids. Collapsing and dissolving change only this record, so the
+//! sound never changes and every inner module keeps its state.
+//!
+//! Saving is [`Hierarchy::unflatten`], the inverse of [`Patch::flatten`].
+//! [`Hierarchy::sync`] recomputes the flat cables the boundary records
+//! imply with the flattener itself and applies the difference to the
+//! controller, so what plays is always what the file would load.
+//!
+//! Every tile on any canvas has a flat id from the one [`FlatIds`] table:
+//! a module's, an instance's, or a port's. At the top level a tile's id in
+//! its level is its flat id. Inside a definition, level ids are the
+//! definition's own and the table maps the path to the flat id.
+//!
+//! Control thread only. Nothing here opens a file.
+
+use crate::flatten::{FlatIds, ModulePath, port_name};
+use crate::{
+    Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
+    PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SUBPATCH_KIND, SubPatch,
+};
+use loom_core::{Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, TRANSPORT_MODULE};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// The name a new sub-patch gets when it is made, made unique with a
+/// number ("Sub-patch 2").
+pub const DEFAULT_NAME: &str = "Sub-patch";
+
+/// The status bar text when only the Transport, or nothing, is selected
+/// (Collapsing, point 6).
+pub const NOTHING_TO_COLLAPSE: &str = "Select modules to make a sub-patch: the Transport stays at the top level";
+
+/// One end of a cable at one level: the id of a module, instance, or port
+/// in that level, and a port name.
+pub type End = (u32, String);
+
+/// The ports of an instance tile facing one way: each port tile's flat id
+/// and its name, in level-id order.
+pub type PortList = Vec<(ModuleId, String)>;
+
+/// Which way a port of a definition faces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Direction {
+    /// A Patch input: a cable from outside comes in through it.
+    Input,
+    /// A Patch output: a cable from inside goes out through it.
+    Output,
+}
+
+impl Direction {
+    /// The module kind that stands for this port in a file.
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::Input => INPUT_KIND,
+            Self::Output => OUTPUT_KIND,
+        }
+    }
+
+    /// The name of the one port a port tile has: `out` on a Patch input,
+    /// `in` on a Patch output.
+    pub fn own_port(self) -> &'static str {
+        match self {
+            Self::Input => "out",
+            Self::Output => "in",
+        }
+    }
+}
+
+/// A port of a definition: a Patch input or output tile inside it, and a
+/// port on its instance's tile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Port {
+    /// Which way it faces.
+    pub direction: Direction,
+    /// Its name, which is the label of the Patch input or output module.
+    pub name: String,
+}
+
+/// An instance tile: which definition it uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Instance {
+    /// The key in the `subpatches` table.
+    pub key: String,
+    /// The instance's own label, if the file gave one.
+    pub label: Option<String>,
+}
+
+/// What a definition's file text stores for a parameter whose live value
+/// belongs to an outer instance: the inner module's own value and range
+/// (ADR-0039, invariant 6). Flattening writes the instance's value over
+/// them, so the graph alone cannot restore the file.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Stored {
+    /// The value written in the definition, if any.
+    pub value: Option<f32>,
+    /// The control range written in the definition, if any.
+    pub range: Option<(f32, f32)>,
+}
+
+/// A definition: the inside of one instance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Definition {
+    /// Its name and credits. The name is what the player sees.
+    pub metadata: Metadata,
+    /// The parameters it exposes, in exposure order.
+    pub exposed: Vec<Exposed>,
+    /// The definition-side value and range of each exposed parameter, by
+    /// the member's level id and the parameter (or exposed) name.
+    pub defaults: BTreeMap<(u32, String), Stored>,
+}
+
+/// A cable of one level that touches a port tile or an instance port, in
+/// that level's ids. Ordered by level and then by the input it feeds, so
+/// the one cable into an input is found by range.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Link {
+    /// The level the cable is drawn on: the instance path, empty at the top.
+    pub level: ModulePath,
+    /// The input end.
+    pub to: End,
+    /// The output end.
+    pub from: End,
+}
+
+/// What a flat id stands for on a canvas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tile {
+    /// A module of the flat graph.
+    Module,
+    /// An instance tile, with its definition key.
+    Instance(String),
+    /// A port tile of a definition.
+    Port(Direction, String),
+}
+
+/// One cable as a level shows it, in that level's ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LevelCable {
+    /// The output end.
+    pub from: End,
+    /// The input end.
+    pub to: End,
+    /// True for a boundary record; false for a cable the graph holds
+    /// between two modules of the level.
+    pub link: bool,
+}
+
+/// What collapsing made (Collapsing, points 1 to 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Collapsed {
+    /// The new instance tile.
+    pub instance: ModuleId,
+    /// The new Patch input tiles, in port order.
+    pub inputs: Vec<ModuleId>,
+    /// The new Patch output tiles, in port order.
+    pub outputs: Vec<ModuleId>,
+    /// The tiles that moved inside.
+    pub members: Vec<ModuleId>,
+}
+
+/// What dissolving did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dissolved {
+    /// The definition's name, for the step name.
+    pub name: String,
+    /// The tiles that came back out, now at the parent level.
+    pub members: Vec<ModuleId>,
+    /// The tiles that are gone: the instance and its ports.
+    pub removed: Vec<ModuleId>,
+}
+
+/// What removing a tile takes with it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Removed {
+    /// Flat modules the controller must remove.
+    pub modules: Vec<ModuleId>,
+    /// Every tile that is gone, modules included: positions and sizes to
+    /// forget.
+    pub tiles: Vec<ModuleId>,
+}
+
+/// The hierarchy of the open patch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hierarchy {
+    ids: FlatIds,
+    definitions: BTreeMap<String, Definition>,
+    instances: BTreeMap<ModulePath, Instance>,
+    ports: BTreeMap<ModulePath, Port>,
+    links: BTreeSet<Link>,
+    /// The flat cables the links imply, as (output, input) in flat ids and
+    /// port names, from the last sync or load.
+    implied: BTreeSet<(End, End)>,
+}
+
+impl Default for Hierarchy {
+    fn default() -> Self {
+        Self::flat()
+    }
+}
+
+impl Hierarchy {
+    /// The hierarchy of a flat patch: no definitions, a fresh id table.
+    pub fn flat() -> Self {
+        Self::with_ids(FlatIds::new())
+    }
+
+    /// A flat hierarchy over an id table that already holds the graph's
+    /// modules.
+    pub fn with_ids(ids: FlatIds) -> Self {
+        Self {
+            ids,
+            definitions: BTreeMap::new(),
+            instances: BTreeMap::new(),
+            ports: BTreeMap::new(),
+            links: BTreeSet::new(),
+            implied: BTreeSet::new(),
+        }
+    }
+
+    /// Reads the hierarchy of `patch` after it was flattened with `ids`
+    /// into `graph`: every instance and port gets a flat id in path order,
+    /// the definitions keep their exposed parameters and stored values,
+    /// and the boundary cables become links.
+    pub fn from_patch(patch: &Patch, graph: &Graph, ids: FlatIds) -> Result<Self, PatchError> {
+        let mut hierarchy = Self::with_ids(ids);
+        hierarchy.read_level(&patch.modules, &patch.cables, &ModulePath::root(), &patch.subpatches)?;
+        hierarchy.adopt(graph);
+        hierarchy.implied = graph_cables(graph)
+            .difference(&hierarchy.direct_cables(patch))
+            .cloned()
+            .collect();
+        Ok(hierarchy)
+    }
+
+    /// One level of a file: its instances (recursively), its ports, and
+    /// its links.
+    fn read_level(
+        &mut self,
+        modules: &[PatchModule],
+        cables: &[PatchCable],
+        level: &ModulePath,
+        table: &BTreeMap<String, SubPatch>,
+    ) -> Result<(), PatchError> {
+        let mut structural = BTreeSet::new();
+        let mut sorted: Vec<&PatchModule> = modules.iter().collect();
+        sorted.sort_by_key(|m| m.id);
+        for module in sorted {
+            let path = level.child(module.id);
+            if module.is_instance() || module.subpatch.is_some() {
+                let Some(key) = module.subpatch.clone() else {
+                    return Err(PatchError::NotAnInstance {
+                        module: module.id,
+                        kind: module.kind.clone(),
+                    });
+                };
+                let Some(definition) = table.get(&key) else {
+                    return Err(PatchError::UnknownSubPatch {
+                        module: module.id,
+                        key: key.clone(),
+                    });
+                };
+                self.ids.id_of(&path)?;
+                self.instances.insert(
+                    path.clone(),
+                    Instance {
+                        key: key.clone(),
+                        label: module.label.clone(),
+                    },
+                );
+                self.definitions.insert(
+                    key,
+                    Definition {
+                        metadata: definition.metadata.clone(),
+                        exposed: definition.exposed.clone(),
+                        defaults: defaults_of(definition),
+                    },
+                );
+                self.read_level(&definition.modules, &definition.cables, &path, table)?;
+                structural.insert(module.id);
+            } else if !level.is_root() && (module.kind == INPUT_KIND || module.kind == OUTPUT_KIND) {
+                let direction = if module.kind == INPUT_KIND {
+                    Direction::Input
+                } else {
+                    Direction::Output
+                };
+                self.ids.id_of(&path)?;
+                self.ports.insert(
+                    path,
+                    Port {
+                        direction,
+                        name: port_name(module, direction.own_port_fallback()),
+                    },
+                );
+                structural.insert(module.id);
+            }
+        }
+        for cable in cables {
+            if structural.contains(&cable.from.0) || structural.contains(&cable.to.0) {
+                self.links.insert(Link {
+                    level: level.clone(),
+                    to: cable.to.clone(),
+                    from: cable.from.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Gives every graph module the table does not know a top-level path.
+    /// A module added straight to the controller is a top-level module.
+    pub fn adopt(&mut self, graph: &Graph) {
+        for (id, _) in graph.nodes() {
+            if self.ids.path_of(id).is_none() {
+                // Refused only when another path owns the id, which a
+                // module the controller holds never has.
+                let _ = self.ids.reserve(ModulePath::top(id.0), id);
+            }
+        }
+    }
+
+    /// The id table.
+    pub fn ids(&self) -> &FlatIds {
+        &self.ids
+    }
+
+    /// True when the patch has no sub-patch.
+    pub fn is_flat(&self) -> bool {
+        self.instances.is_empty()
+    }
+
+    /// The path of a tile: the table's, or a top-level path for a graph
+    /// module the table never saw.
+    pub fn path_of(&self, id: ModuleId) -> ModulePath {
+        self.ids.path_of(id).cloned().unwrap_or_else(|| ModulePath::top(id.0))
+    }
+
+    /// The level a tile is shown on.
+    pub fn level_of(&self, id: ModuleId) -> ModulePath {
+        self.path_of(id).parent().unwrap_or_else(ModulePath::root)
+    }
+
+    /// What a flat id stands for, or `None` for an id no live tile has.
+    pub fn tile(&self, graph: &Graph, id: ModuleId) -> Option<Tile> {
+        if graph.node(id).is_some() {
+            return Some(Tile::Module);
+        }
+        let path = self.ids.path_of(id)?;
+        if let Some(instance) = self.instances.get(path) {
+            return Some(Tile::Instance(instance.key.clone()));
+        }
+        self.ports
+            .get(path)
+            .map(|port| Tile::Port(port.direction, port.name.clone()))
+    }
+
+    /// The definition of an instance tile.
+    pub fn definition_of(&self, instance: ModuleId) -> Option<&Definition> {
+        let path = self.ids.path_of(instance)?;
+        self.definition_at(path)
+    }
+
+    /// The definition shown at `level`, or `None` at the top.
+    pub fn definition_at(&self, level: &ModulePath) -> Option<&Definition> {
+        let instance = self.instances.get(level)?;
+        self.definitions.get(&instance.key)
+    }
+
+    /// The names along a level's path, outermost first, for the breadcrumb.
+    pub fn path_names(&self, level: &ModulePath) -> Vec<String> {
+        (1..=level.0.len())
+            .filter_map(|n| {
+                let prefix = ModulePath(level.0[..n].to_vec());
+                self.definition_at(&prefix).map(|d| d.metadata.name.clone())
+            })
+            .collect()
+    }
+
+    /// The instance and port tiles of a level, in level-id order, each with
+    /// what it is.
+    pub fn structural_tiles(&self, level: &ModulePath) -> Vec<(ModuleId, Tile)> {
+        let mut tiles: Vec<(u32, ModuleId, Tile)> = Vec::new();
+        for (path, instance) in &self.instances {
+            if path.parent().as_ref() == Some(level)
+                && let Some(id) = self.ids.get(path)
+            {
+                tiles.push((path.last(), id, Tile::Instance(instance.key.clone())));
+            }
+        }
+        for (path, port) in &self.ports {
+            if path.parent().as_ref() == Some(level)
+                && let Some(id) = self.ids.get(path)
+            {
+                tiles.push((path.last(), id, Tile::Port(port.direction, port.name.clone())));
+            }
+        }
+        tiles.sort_by_key(|(lid, _, _)| *lid);
+        tiles.into_iter().map(|(_, id, tile)| (id, tile)).collect()
+    }
+
+    /// The ports of an instance's tile, inputs then outputs, each in
+    /// level-id order: the port tile's flat id and its name.
+    pub fn instance_ports(&self, instance: ModuleId) -> (PortList, PortList) {
+        let Some(path) = self.ids.path_of(instance) else {
+            return (Vec::new(), Vec::new());
+        };
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+        for (port_path, port) in &self.ports {
+            if port_path.parent().as_ref() != Some(path) {
+                continue;
+            }
+            let Some(id) = self.ids.get(port_path) else { continue };
+            match port.direction {
+                Direction::Input => inputs.push((port_path.last(), id, port.name.clone())),
+                Direction::Output => outputs.push((port_path.last(), id, port.name.clone())),
+            }
+        }
+        inputs.sort_by_key(|(lid, _, _)| *lid);
+        outputs.sort_by_key(|(lid, _, _)| *lid);
+        let strip = |list: Vec<(u32, ModuleId, String)>| list.into_iter().map(|(_, id, name)| (id, name)).collect();
+        (strip(inputs), strip(outputs))
+    }
+
+    /// The flat id of the tile with level id `lid` at `level`, if there is
+    /// one in the table.
+    pub fn id_at(&self, level: &ModulePath, lid: u32) -> Option<ModuleId> {
+        self.ids.get(&level.child(lid))
+    }
+
+    /// The cables a level shows, in its ids: the graph's cables between two
+    /// of its modules (those the links do not imply), then the links.
+    pub fn level_cables(&self, graph: &Graph, level: &ModulePath) -> Vec<LevelCable> {
+        let mut cables = Vec::new();
+        for (from, to) in graph.cables() {
+            let (from_end, to_end) = cable_ends(graph, from, to);
+            if self.implied.contains(&(from_end.clone(), to_end.clone())) {
+                continue;
+            }
+            let (from_path, to_path) = (self.path_of(from.module), self.path_of(to.module));
+            if from_path.parent().as_ref() == Some(level) && to_path.parent().as_ref() == Some(level) {
+                cables.push(LevelCable {
+                    from: (from_path.last(), from_end.1),
+                    to: (to_path.last(), to_end.1),
+                    link: false,
+                });
+            }
+        }
+        for link in self.links_at(level) {
+            cables.push(LevelCable {
+                from: link.from.clone(),
+                to: link.to.clone(),
+                link: true,
+            });
+        }
+        cables
+    }
+
+    /// True when the graph holds `from` to `to` only because a link
+    /// implies it.
+    pub fn is_implied(&self, graph: &Graph, from: OutputRef, to: InputRef) -> bool {
+        self.implied.contains(&cable_ends(graph, from, to))
+    }
+
+    /// The flat output that stands behind an end of `level`: a module's
+    /// output itself, what is behind an instance's output port, or what
+    /// feeds a Patch input from outside. `None` when nothing does.
+    pub fn source_behind(&self, graph: &Graph, level: &ModulePath, end: &End) -> Option<(ModuleId, String)> {
+        self.source_behind_guarded(graph, level, end, &mut Vec::new())
+    }
+
+    fn source_behind_guarded(
+        &self,
+        graph: &Graph,
+        level: &ModulePath,
+        end: &End,
+        seen: &mut Vec<(ModulePath, End)>,
+    ) -> Option<(ModuleId, String)> {
+        let key = (level.clone(), end.clone());
+        if seen.contains(&key) {
+            return None;
+        }
+        seen.push(key);
+        let path = level.child(end.0);
+        if let Some(port) = self.ports.get(&path) {
+            if port.direction != Direction::Input || end.1 != "out" {
+                return None;
+            }
+            // What feeds the instance's port, one level up.
+            let parent = level.parent()?;
+            let link = self.link_into(&parent, &(level.last(), port.name.clone()))?;
+            return self.source_behind_guarded(graph, &parent, &link.from, seen);
+        }
+        if self.instances.contains_key(&path) {
+            let port_path = self.port_path(&path, Direction::Output, &end.1)?;
+            let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
+            return self.source_behind_guarded(graph, &path, &link.from, seen);
+        }
+        let id = self.ids.get(&path)?;
+        graph.node(id)?;
+        Some((id, end.1.clone()))
+    }
+
+    /// The flat inputs that stand behind an input end of `level`: a
+    /// module's input itself, every inner input an instance's port feeds,
+    /// or what a Patch output feeds outside.
+    pub fn inputs_behind(&self, graph: &Graph, level: &ModulePath, end: &End) -> Vec<(ModuleId, String)> {
+        let mut found = Vec::new();
+        self.inputs_behind_guarded(graph, level, end, &mut Vec::new(), &mut found);
+        found
+    }
+
+    fn inputs_behind_guarded(
+        &self,
+        graph: &Graph,
+        level: &ModulePath,
+        end: &End,
+        seen: &mut Vec<(ModulePath, End)>,
+        found: &mut Vec<(ModuleId, String)>,
+    ) {
+        let key = (level.clone(), end.clone());
+        if seen.contains(&key) {
+            return;
+        }
+        seen.push(key);
+        let path = level.child(end.0);
+        if let Some(port) = self.ports.get(&path) {
+            if port.direction != Direction::Output || end.1 != "in" {
+                return;
+            }
+            let Some(parent) = level.parent() else { return };
+            let outside = (level.last(), port.name.clone());
+            for link in self.links_from(&parent, &outside) {
+                self.inputs_behind_guarded(graph, &parent, &link.to, seen, found);
+            }
+            return;
+        }
+        if self.instances.contains_key(&path) {
+            let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
+                return;
+            };
+            let inside = (port_path.last(), "out".to_string());
+            for link in self.links_from(&path, &inside) {
+                self.inputs_behind_guarded(graph, &path, &link.to, seen, found);
+            }
+            return;
+        }
+        if let Some(id) = self.ids.get(&path)
+            && graph.node(id).is_some()
+        {
+            found.push((id, end.1.clone()));
+        }
+    }
+
+    /// The path of the port tile named `name` facing `direction` inside
+    /// the instance at `instance`.
+    fn port_path(&self, instance: &ModulePath, direction: Direction, name: &str) -> Option<ModulePath> {
+        self.ports
+            .iter()
+            .find(|(path, port)| {
+                path.parent().as_ref() == Some(instance) && port.direction == direction && port.name == name
+            })
+            .map(|(path, _)| path.clone())
+    }
+
+    /// The links drawn on `level`.
+    fn links_at(&self, level: &ModulePath) -> impl Iterator<Item = &Link> {
+        let level = level.clone();
+        self.links.iter().filter(move |link| link.level == level)
+    }
+
+    /// The one link into `to` on `level`.
+    fn link_into(&self, level: &ModulePath, to: &End) -> Option<&Link> {
+        self.links_at(level).find(|link| link.to == *to)
+    }
+
+    /// The links out of `from` on `level`.
+    fn links_from(&self, level: &ModulePath, from: &End) -> impl Iterator<Item = &Link> {
+        let from = from.clone();
+        self.links_at(level).filter(move |link| link.from == from)
+    }
+
+    /// The exposed name of `instance` that stands for the flat parameter
+    /// `target`, through any depth of nesting.
+    pub fn exposed_name_for(&self, instance: &ModulePath, target: &(ModuleId, String)) -> Option<String> {
+        let definition = self.definition_at(instance)?;
+        definition
+            .exposed
+            .iter()
+            .find(|e| self.resolve_exposed(instance, e).as_ref() == Some(target))
+            .map(|e| e.name.clone())
+    }
+
+    /// The flat module and parameter an exposed entry of the definition at
+    /// `instance` stands for.
+    pub fn resolve_exposed(&self, instance: &ModulePath, exposed: &Exposed) -> Option<(ModuleId, String)> {
+        let member = instance.child(exposed.module);
+        if let Some(definition) = self.definition_at(&member) {
+            let inner = definition.exposed.iter().find(|e| e.name == exposed.param)?;
+            return self.resolve_exposed(&member, inner);
+        }
+        Some((self.ids.get(&member)?, exposed.param.clone()))
+    }
+
+    /// The name of the output port of `instance` behind which the flat
+    /// output `source` stands.
+    pub fn port_for_output(&self, graph: &Graph, instance: &ModulePath, source: &(ModuleId, String)) -> Option<String> {
+        let parent = instance.parent()?;
+        self.ports
+            .iter()
+            .filter(|(path, port)| path.parent().as_ref() == Some(instance) && port.direction == Direction::Output)
+            .find(|(_, port)| {
+                self.source_behind(graph, &parent, &(instance.last(), port.name.clone()))
+                    .as_ref()
+                    == Some(source)
+            })
+            .map(|(_, port)| port.name.clone())
+    }
+
+    /// The live value of an exposed parameter of the instance at `path`,
+    /// read through any nesting and clamped to the exposed range.
+    pub fn exposed_value(&self, graph: &Graph, instance: &ModulePath, exposed: &Exposed) -> Option<f32> {
+        let (id, param) = self.resolve_exposed(instance, exposed)?;
+        let node = graph.node(id)?;
+        let value = match &node.unknown {
+            Some(unknown) => *unknown.params.get(&param)?,
+            None => {
+                let index = node.parameter_index(&param)?;
+                node.descriptor.saved_values(&node.params)[index]
+            }
+        };
+        Some(clamp_exposed(value, exposed.range))
+    }
+
+    /// The patch as it would be saved: every level's modules, ports,
+    /// instances, cables, assignments, and mappings in the level's ids,
+    /// with `layout` giving each tile's position and size by flat id.
+    /// The patch's own metadata is left for the caller.
+    pub fn unflatten(&self, graph: &Graph, layout: impl Fn(u32) -> Layout) -> Patch {
+        self.unflatten_with(graph, layout, true)
+    }
+
+    /// [`Hierarchy::unflatten`], with or without the graph's own cables. Without
+    /// them, the file holds only what the links say, so flattening it gives
+    /// exactly the cables the links imply.
+    fn unflatten_with(&self, graph: &Graph, layout: impl Fn(u32) -> Layout, direct: bool) -> Patch {
+        let mut levels: BTreeMap<ModulePath, Level> = BTreeMap::new();
+        levels.entry(ModulePath::root()).or_default();
+        for path in self.instances.keys() {
+            levels.entry(path.clone()).or_default();
+        }
+
+        // Modules, with the definition-side values of exposed parameters.
+        for (id, node) in graph.nodes() {
+            let path = self.path_of(id);
+            let level = path.parent().unwrap_or_else(ModulePath::root);
+            let mut module = ResolvedModule::from_node(id, node, layout(id.0)).write();
+            module.id = path.last();
+            if let Some(definition) = self.definition_at(&level) {
+                for ((member, param), stored) in &definition.defaults {
+                    if *member == module.id {
+                        apply_stored(&mut module, param, stored);
+                    }
+                }
+            }
+            levels.entry(level).or_default().modules.push(module);
+        }
+        // Ports.
+        for (path, port) in &self.ports {
+            let Some(level) = path.parent() else { continue };
+            let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
+            levels.entry(level).or_default().modules.push(PatchModule {
+                id: path.last(),
+                kind: port.direction.kind().to_string(),
+                subpatch: None,
+                label: Some(port.name.clone()),
+                params: BTreeMap::new(),
+                position,
+                size,
+                ranges: BTreeMap::new(),
+            });
+        }
+        // Instances, with their exposed values.
+        for (path, instance) in &self.instances {
+            let Some(level) = path.parent() else { continue };
+            let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
+            levels.entry(level.clone()).or_default().modules.push(PatchModule {
+                id: path.last(),
+                kind: SUBPATCH_KIND.to_string(),
+                subpatch: Some(instance.key.clone()),
+                label: instance.label.clone(),
+                params: self.instance_values(graph, path),
+                position,
+                size,
+                ranges: BTreeMap::new(),
+            });
+        }
+        // Cables: the graph's between two modules of one level, unless a
+        // link implies them, then the links.
+        for (from, to) in graph.cables().filter(|_| direct) {
+            let (from_end, to_end) = cable_ends(graph, from, to);
+            if self.implied.contains(&(from_end.clone(), to_end.clone())) {
+                continue;
+            }
+            let (from_path, to_path) = (self.path_of(from.module), self.path_of(to.module));
+            if from_path.parent() != to_path.parent() {
+                // A cable across a boundary that no link made: the file has
+                // no place for it (rule 4).
+                continue;
+            }
+            let level = from_path.parent().unwrap_or_else(ModulePath::root);
+            levels.entry(level).or_default().cables.push(PatchCable {
+                from: (from_path.last(), from_end.1),
+                to: (to_path.last(), to_end.1),
+            });
+        }
+        for link in &self.links {
+            levels.entry(link.level.clone()).or_default().cables.push(PatchCable {
+                from: link.from.clone(),
+                to: link.to.clone(),
+            });
+        }
+        // Assignments: within a level as they are; across levels through
+        // the exposed name or the output port they cross.
+        for (_, assignment) in graph.assignments() {
+            let Some(entry) = self.assignment_entry(graph, assignment) else {
+                continue;
+            };
+            levels.entry(entry.0).or_default().modulation.push(entry.1);
+        }
+        // Mappings live with their module.
+        for (_, mapping) in graph.midi_mappings() {
+            let path = self.path_of(mapping.target);
+            let level = path.parent().unwrap_or_else(ModulePath::root);
+            let param = crate::param_name(graph, mapping.target, mapping.param);
+            levels
+                .entry(level)
+                .or_default()
+                .midi
+                .push(crate::midi_entry(mapping, (path.last(), param)));
+        }
+
+        let mut patch = Patch::new("");
+        let top = levels.remove(&ModulePath::root()).unwrap_or_default();
+        patch.modules = top.modules;
+        patch.cables = top.cables;
+        patch.modulation = top.modulation;
+        patch.midi = top.midi;
+        for (path, instance) in &self.instances {
+            let Some(definition) = self.definitions.get(&instance.key) else {
+                continue;
+            };
+            let level = levels.remove(path).unwrap_or_default();
+            patch.subpatches.insert(
+                instance.key.clone(),
+                SubPatch {
+                    metadata: definition.metadata.clone(),
+                    modules: level.modules,
+                    cables: level.cables,
+                    modulation: level.modulation,
+                    midi: level.midi,
+                    exposed: definition.exposed.clone(),
+                },
+            );
+        }
+        patch.canonicalise();
+        patch
+    }
+
+    /// The `params` of the instance at `path`: the live value of each
+    /// exposed parameter the outer level does not expose again, else the
+    /// stored definition-side value.
+    fn instance_values(&self, graph: &Graph, path: &ModulePath) -> BTreeMap<String, f32> {
+        let mut values = BTreeMap::new();
+        let Some(definition) = self.definition_at(path) else {
+            return values;
+        };
+        let outer = path.parent().and_then(|level| self.definition_at(&level));
+        for exposed in &definition.exposed {
+            let stored = outer.and_then(|outer| outer.defaults.get(&(path.last(), exposed.name.clone())));
+            let value = match stored {
+                Some(stored) => stored.value,
+                None => self.exposed_value(graph, path, exposed),
+            };
+            if let Some(value) = value {
+                values.insert(exposed.name.clone(), value);
+            }
+        }
+        values
+    }
+
+    /// An assignment as its level writes it, or `None` when it crosses a
+    /// boundary that no exposed parameter or port explains.
+    fn assignment_entry(
+        &self,
+        graph: &Graph,
+        assignment: &loom_core::Assignment,
+    ) -> Option<(ModulePath, PatchModulation)> {
+        let source_path = self.path_of(assignment.source.module);
+        let target_path = self.path_of(assignment.target);
+        let source_level = source_path.parent().unwrap_or_else(ModulePath::root);
+        let target_level = target_path.parent().unwrap_or_else(ModulePath::root);
+        let output = crate::port_name(graph, assignment.source);
+        let param = crate::param_name(graph, assignment.target, assignment.param);
+        let (level, source, target) = if source_level == target_level {
+            (source_level, (source_path.last(), output), (target_path.last(), param))
+        } else if target_level.starts_with(&source_level) {
+            // The target is inside an instance of the source's level.
+            let instance = target_level.prefix(source_level.0.len() + 1);
+            let name = self.exposed_name_for(&instance, &(assignment.target, param))?;
+            (source_level, (source_path.last(), output), (instance.last(), name))
+        } else if source_level.starts_with(&target_level) {
+            // The source is inside an instance of the target's level.
+            let instance = source_level.prefix(target_level.0.len() + 1);
+            let port = self.port_for_output(graph, &instance, &(assignment.source.module, output))?;
+            (target_level, (instance.last(), port), (target_path.last(), param))
+        } else {
+            return None;
+        };
+        Some((
+            level,
+            PatchModulation {
+                source,
+                target,
+                depth: assignment.depth,
+                polarity: assignment.polarity.map(PatchPolarity::from),
+                enabled: assignment.enabled,
+            },
+        ))
+    }
+
+    /// The flat cables of `patch` that are cables between two modules of
+    /// one level, in flat ids and names.
+    fn direct_cables(&self, patch: &Patch) -> BTreeSet<(End, End)> {
+        let mut direct = BTreeSet::new();
+        let mut levels: Vec<(ModulePath, &[PatchModule], &[PatchCable])> =
+            vec![(ModulePath::root(), &patch.modules, &patch.cables)];
+        for (path, instance) in &self.instances {
+            if let Some(definition) = patch.subpatches.get(&instance.key) {
+                levels.push((path.clone(), &definition.modules, &definition.cables));
+            }
+        }
+        for (level, modules, cables) in levels {
+            let structural: BTreeSet<u32> = modules
+                .iter()
+                .filter(|m| {
+                    m.is_instance()
+                        || m.subpatch.is_some()
+                        || (!level.is_root() && (m.kind == INPUT_KIND || m.kind == OUTPUT_KIND))
+                })
+                .map(|m| m.id)
+                .collect();
+            for cable in cables {
+                if structural.contains(&cable.from.0) || structural.contains(&cable.to.0) {
+                    continue;
+                }
+                if let (Some(from), Some(to)) = (
+                    self.ids.get(&level.child(cable.from.0)),
+                    self.ids.get(&level.child(cable.to.0)),
+                ) {
+                    direct.insert(((from.0, cable.from.1.clone()), (to.0, cable.to.1.clone())));
+                }
+            }
+        }
+        direct
+    }
+
+    /// Makes the controller's cables the ones the file would load: the
+    /// hierarchy is written out, flattened with the flattener itself (which
+    /// also refuses what a file could not hold), and the difference in
+    /// cables is applied. A refusal changes nothing. The caller commits.
+    pub fn sync(&mut self, controller: &mut Controller) -> Result<(), PatchError> {
+        self.adopt(controller.graph());
+        // What the links imply, from the links alone: a cable the graph
+        // holds for a link that is gone must be written as direct now.
+        let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), false);
+        let mut scratch = self.ids.clone();
+        let flat = links_only.flatten(controller.registry(), &mut scratch)?;
+        self.implied = flat
+            .cables
+            .iter()
+            .map(|cable| (cable.from.clone(), cable.to.clone()))
+            .collect();
+        let patch = self.unflatten(controller.graph(), |_| Layout::default());
+        let mut scratch = self.ids.clone();
+        let flat = patch.flatten(controller.registry(), &mut scratch)?;
+        let desired: BTreeSet<(End, End)> = flat
+            .cables
+            .iter()
+            .map(|cable| (cable.from.clone(), cable.to.clone()))
+            .collect();
+        let current = graph_cables(controller.graph());
+        for (_, to) in current.difference(&desired) {
+            let input = input_ref(controller.graph(), to);
+            if let Some(input) = input {
+                controller.disconnect(input)?;
+            }
+        }
+        for (from, to) in desired.difference(&current) {
+            controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
+        }
+        debug_assert_eq!(
+            self.implied,
+            desired.difference(&self.direct_cables(&patch)).cloned().collect(),
+            "the links imply the same cables both ways"
+        );
+        Ok(())
+    }
+
+    /// The next free id in a level: one above every id the level ever had.
+    pub fn next_level_id(&self, level: &ModulePath) -> u32 {
+        self.ids
+            .paths()
+            .filter(|(path, _)| path.parent().as_ref() == Some(level))
+            .map(|(path, _)| path.last())
+            .max()
+            .map_or(1, |max| max + 1)
+    }
+
+    /// A path and flat id for a new module at `level`. At the top the two
+    /// ids are the same number; inside, the level id is the definition's
+    /// next and the flat id the table's.
+    pub fn new_module(&mut self, level: &ModulePath) -> Result<(ModulePath, ModuleId), PatchError> {
+        if level.is_root() {
+            let id = self.ids.next_top()?;
+            return Ok((ModulePath::top(id.0), id));
+        }
+        let path = level.child(self.next_level_id(level));
+        let id = self.ids.id_of(&path)?;
+        Ok((path, id))
+    }
+
+    /// Adds a port to the definition at `level`, named `name` made unique
+    /// among the ports facing the same way ("in", "in 2"). Returns its
+    /// tile id. Refused at the top level, which has no definition.
+    pub fn add_port(&mut self, level: &ModulePath, direction: Direction, name: &str) -> Result<ModuleId, PatchError> {
+        if level.is_root() {
+            return Err(PatchError::NotAnInstance {
+                module: 0,
+                kind: direction.kind().to_string(),
+            });
+        }
+        let name = self.unique_port_name(level, direction, name);
+        let (path, id) = self.new_module(level)?;
+        self.ports.insert(path, Port { direction, name });
+        Ok(id)
+    }
+
+    /// `base` made unique among the ports of `level` facing `direction`.
+    fn unique_port_name(&self, level: &ModulePath, direction: Direction, base: &str) -> String {
+        let taken: BTreeSet<&str> = self
+            .ports
+            .iter()
+            .filter(|(path, port)| path.parent().as_ref() == Some(level) && port.direction == direction)
+            .map(|(_, port)| port.name.as_str())
+            .collect();
+        unique_name(base, |name| taken.contains(name))
+    }
+
+    /// Records a cable on `level` from `from` to `to`, where at least one
+    /// end is a port or instance. Any cable into `to` on this level goes.
+    pub fn connect(&mut self, level: &ModulePath, from: End, to: End) {
+        self.disconnect(level, &to);
+        self.links.insert(Link {
+            level: level.clone(),
+            to,
+            from,
+        });
+    }
+
+    /// Removes the link into `to` on `level`. True when there was one.
+    pub fn disconnect(&mut self, level: &ModulePath, to: &End) -> bool {
+        let before = self.links.len();
+        self.links.retain(|link| !(link.level == *level && link.to == *to));
+        self.links.len() != before
+    }
+
+    /// Takes a tile out: a module loses its links; a port goes with its
+    /// links; an instance goes with everything inside it. The table keeps
+    /// every path, so no id is given out again.
+    pub fn remove(&mut self, graph: &Graph, id: ModuleId) -> Removed {
+        let mut removed = Removed::default();
+        let Some(path) = self.ids.path_of(id).cloned() else {
+            if graph.node(id).is_some() {
+                removed.modules.push(id);
+                removed.tiles.push(id);
+            }
+            return removed;
+        };
+        let level = path.parent().unwrap_or_else(ModulePath::root);
+        let lid = path.last();
+        if self.instances.contains_key(&path) {
+            // Everything under the instance, deepest first.
+            let under: Vec<ModulePath> = self
+                .ids
+                .paths()
+                .filter(|(p, _)| p.starts_with(&path) && **p != path)
+                .map(|(p, _)| p.clone())
+                .collect();
+            for inner in &under {
+                let Some(inner_id) = self.ids.get(inner) else { continue };
+                if let Some(instance) = self.instances.remove(inner) {
+                    self.definitions.remove(&instance.key);
+                    removed.tiles.push(inner_id);
+                } else if self.ports.remove(inner).is_some() {
+                    removed.tiles.push(inner_id);
+                } else if graph.node(inner_id).is_some() {
+                    removed.modules.push(inner_id);
+                    removed.tiles.push(inner_id);
+                }
+            }
+            self.links.retain(|link| !link.level.starts_with(&path));
+            if let Some(instance) = self.instances.remove(&path) {
+                self.definitions.remove(&instance.key);
+            }
+        } else if self.ports.remove(&path).is_none() && graph.node(id).is_some() {
+            removed.modules.push(id);
+        }
+        self.links
+            .retain(|link| !(link.level == level && (link.from.0 == lid || link.to.0 == lid)));
+        removed.tiles.push(id);
+        removed
+    }
+
+    /// Moves every path under `old` to the same place under `new`: the
+    /// table, the instances, the ports, and the links drawn inside.
+    fn rename_prefix(&mut self, old: &ModulePath, new: &ModulePath) -> Result<(), PatchError> {
+        let moved: Vec<ModulePath> = self
+            .ids
+            .paths()
+            .filter(|(path, _)| path.starts_with(old))
+            .map(|(path, _)| path.clone())
+            .collect();
+        for path in moved {
+            let target = path.replace_prefix(old, new);
+            self.ids.rename(&path, target.clone())?;
+            if let Some(instance) = self.instances.remove(&path) {
+                self.instances.insert(target.clone(), instance);
+            }
+            if let Some(port) = self.ports.remove(&path) {
+                self.ports.insert(target, port);
+            }
+        }
+        self.links = self
+            .links
+            .iter()
+            .cloned()
+            .map(|mut link| {
+                if link.level.starts_with(old) {
+                    link.level = link.level.replace_prefix(old, new);
+                }
+                link
+            })
+            .collect();
+        Ok(())
+    }
+
+    /// Collapses the selected tiles of `level` into a new sub-patch
+    /// (Collapsing, points 1 to 7). The Transport, the ports of this
+    /// level, and Patch input and output modules at the top count as
+    /// outside. Nothing in the graph changes; the caller places the new
+    /// tiles and syncs.
+    pub fn collapse(&mut self, graph: &Graph, level: &ModulePath, selection: &[u32]) -> Result<Collapsed, String> {
+        let is_outside_kind = |id: ModuleId| {
+            graph.node(id).is_some_and(|node| {
+                node.descriptor.id == TRANSPORT_MODULE
+                    || (level.is_root()
+                        && (node.descriptor.kind() == INPUT_KIND || node.descriptor.kind() == OUTPUT_KIND))
+            })
+        };
+        let mut members: BTreeSet<u32> = BTreeSet::new();
+        for &id in selection {
+            let id = ModuleId(id);
+            if self.level_of(id) != *level || is_outside_kind(id) {
+                continue;
+            }
+            let path = self.path_of(id);
+            if graph.node(id).is_some() || self.instances.contains_key(&path) {
+                members.insert(path.last());
+            }
+        }
+        if members.is_empty() {
+            return Err(NOTHING_TO_COLLAPSE.to_string());
+        }
+
+        // The definition and its instance.
+        let name = unique_name(DEFAULT_NAME, |name| {
+            self.definitions.values().any(|d| d.metadata.name == name)
+        });
+        let key = unique_name(&name.to_lowercase(), |key| self.definitions.contains_key(key));
+        let (instance_path, instance_id) = self.new_module(level).map_err(|e| e.to_string())?;
+        let ilid = instance_path.last();
+        self.instances.insert(
+            instance_path.clone(),
+            Instance {
+                key: key.clone(),
+                label: None,
+            },
+        );
+        self.definitions.insert(
+            key.clone(),
+            Definition {
+                metadata: Metadata {
+                    name,
+                    ..Metadata::default()
+                },
+                exposed: Vec::new(),
+                defaults: BTreeMap::new(),
+            },
+        );
+
+        // What the level showed, before anything moves.
+        let shown = self.level_cables(graph, level);
+        let member_ids: Vec<ModuleId> = members
+            .iter()
+            .filter_map(|lid| self.ids.get(&level.child(*lid)))
+            .collect();
+
+        // Members move inside, keeping their level ids.
+        for lid in &members {
+            self.rename_prefix(&level.child(*lid), &instance_path.child(*lid))
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Cables: inside stays inside, a crossing cable gets a port.
+        let mut inputs: BTreeMap<End, (u32, String)> = BTreeMap::new();
+        let mut outputs: BTreeMap<End, (u32, String)> = BTreeMap::new();
+        let mut input_tiles = Vec::new();
+        let mut output_tiles = Vec::new();
+        for cable in shown {
+            let (from_in, to_in) = (members.contains(&cable.from.0), members.contains(&cable.to.0));
+            match (from_in, to_in) {
+                (true, true) => {
+                    if cable.link {
+                        self.links.remove(&Link {
+                            level: level.clone(),
+                            to: cable.to.clone(),
+                            from: cable.from.clone(),
+                        });
+                        self.links.insert(Link {
+                            level: instance_path.clone(),
+                            to: cable.to,
+                            from: cable.from,
+                        });
+                    }
+                }
+                (false, true) => {
+                    if cable.link {
+                        self.links.remove(&Link {
+                            level: level.clone(),
+                            to: cable.to.clone(),
+                            from: cable.from.clone(),
+                        });
+                    }
+                    let port = match inputs.get(&cable.from) {
+                        Some(port) => port.clone(),
+                        None => {
+                            let label = self.inner_port_label(graph, &instance_path, &cable.to, Direction::Input);
+                            let id = self
+                                .add_port(&instance_path, Direction::Input, &label)
+                                .map_err(|e| e.to_string())?;
+                            input_tiles.push(id);
+                            let path = self.ids.path_of(id).cloned().expect("just added");
+                            let port = (path.last(), self.ports[&path].name.clone());
+                            inputs.insert(cable.from.clone(), port.clone());
+                            port
+                        }
+                    };
+                    self.links.insert(Link {
+                        level: level.clone(),
+                        to: (ilid, port.1.clone()),
+                        from: cable.from,
+                    });
+                    self.links.insert(Link {
+                        level: instance_path.clone(),
+                        to: cable.to,
+                        from: (port.0, "out".to_string()),
+                    });
+                }
+                (true, false) => {
+                    if cable.link {
+                        self.links.remove(&Link {
+                            level: level.clone(),
+                            to: cable.to.clone(),
+                            from: cable.from.clone(),
+                        });
+                    }
+                    let port = self
+                        .output_port_for(graph, &instance_path, &cable.from, &mut outputs, &mut output_tiles)
+                        .map_err(|e| e.to_string())?;
+                    self.links.insert(Link {
+                        level: level.clone(),
+                        to: cable.to,
+                        from: (ilid, port.1.clone()),
+                    });
+                }
+                (false, false) => {}
+            }
+        }
+
+        // Assignments across the new boundary (point 4).
+        let mut exposed_names: BTreeSet<String> = BTreeSet::new();
+        for (_, assignment) in graph.assignments() {
+            let source_inside = self.path_of(assignment.source.module).starts_with(&instance_path);
+            let target_inside = self.path_of(assignment.target).starts_with(&instance_path);
+            let param = crate::param_name(graph, assignment.target, assignment.param);
+            if !source_inside && target_inside && self.level_of(assignment.source.module) == *level {
+                let target_path = self.path_of(assignment.target);
+                let member = instance_path.child(target_path.0[instance_path.0.len()]);
+                let (inner_param, stored) = if self.instances.contains_key(&member) {
+                    let Some(name) = self.exposed_name_for(&member, &(assignment.target, param.clone())) else {
+                        continue;
+                    };
+                    let value = self
+                        .definition_at(&member)
+                        .and_then(|d| d.exposed.iter().find(|e| e.name == name).cloned())
+                        .and_then(|e| self.exposed_value(graph, &member, &e));
+                    (name, Stored { value, range: None })
+                } else {
+                    let node = graph.node(assignment.target);
+                    let value = node.map(|n| n.descriptor.saved_values(&n.params)[assignment.param]);
+                    let range = node.and_then(|n| n.range(assignment.param)).map(|r| (r.min, r.max));
+                    (param.clone(), Stored { value, range })
+                };
+                let label = graph
+                    .node(assignment.target)
+                    .and_then(|n| n.descriptor.params.get(assignment.param))
+                    .map_or(inner_param.clone(), |spec| spec.label.to_string());
+                let name = unique_name(&label, |name| exposed_names.contains(name));
+                exposed_names.insert(name.clone());
+                let definition = self.definitions.get_mut(&key).expect("just inserted");
+                definition.exposed.push(Exposed {
+                    name,
+                    module: member.last(),
+                    param: inner_param.clone(),
+                    range: None,
+                });
+                definition.defaults.insert((member.last(), inner_param), stored);
+            } else if source_inside && !target_inside && self.level_of(assignment.target) == *level {
+                let source_path = self.path_of(assignment.source.module);
+                let member = instance_path.child(source_path.0[instance_path.0.len()]);
+                let output = crate::port_name(graph, assignment.source);
+                let end = if self.instances.contains_key(&member) {
+                    match self.port_for_output(graph, &member, &(assignment.source.module, output)) {
+                        Some(port) => (member.last(), port),
+                        None => continue,
+                    }
+                } else {
+                    (member.last(), output)
+                };
+                self.output_port_for(graph, &instance_path, &end, &mut outputs, &mut output_tiles)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
+        Ok(Collapsed {
+            instance: instance_id,
+            inputs: input_tiles,
+            outputs: output_tiles,
+            members: member_ids,
+        })
+    }
+
+    /// The output port of the new definition at `instance` that `from`
+    /// (an end inside it) feeds, made when `from` has none yet. Returns the
+    /// port's level id and name.
+    fn output_port_for(
+        &mut self,
+        graph: &Graph,
+        instance: &ModulePath,
+        from: &End,
+        made: &mut BTreeMap<End, (u32, String)>,
+        tiles: &mut Vec<ModuleId>,
+    ) -> Result<(u32, String), PatchError> {
+        if let Some(port) = made.get(from) {
+            return Ok(port.clone());
+        }
+        let label = self.inner_port_label(graph, instance, from, Direction::Output);
+        let id = self.add_port(instance, Direction::Output, &label)?;
+        tiles.push(id);
+        let path = self.ids.path_of(id).cloned().expect("just added");
+        let port = (path.last(), self.ports[&path].name.clone());
+        made.insert(from.clone(), port.clone());
+        self.links.insert(Link {
+            level: instance.clone(),
+            to: (port.0, "in".to_string()),
+            from: from.clone(),
+        });
+        Ok(port)
+    }
+
+    /// The label a new port takes from the inner end it stands for
+    /// (Collapsing, point 3): a module's port label, or a nested
+    /// instance's port name.
+    fn inner_port_label(&self, graph: &Graph, level: &ModulePath, end: &End, direction: Direction) -> String {
+        let path = level.child(end.0);
+        if self.instances.contains_key(&path) {
+            return end.1.clone();
+        }
+        let Some(node) = self.ids.get(&path).and_then(|id| graph.node(id)) else {
+            return end.1.clone();
+        };
+        let spec = match direction {
+            Direction::Input => node.input_index(&end.1).and_then(|i| node.descriptor.inputs.get(i)),
+            Direction::Output => node.output_index(&end.1).and_then(|i| node.descriptor.outputs.get(i)),
+        };
+        spec.map_or_else(|| end.1.clone(), |spec| spec.label.to_string())
+    }
+
+    /// Puts an instance's inside back into its level (the reverse of
+    /// collapsing). Cables through its ports become cables of the level.
+    /// Nothing in the graph changes; the caller places the tiles and
+    /// syncs.
+    pub fn dissolve(&mut self, graph: &Graph, instance: ModuleId) -> Result<Dissolved, String> {
+        let Some(instance_path) = self.ids.path_of(instance).cloned() else {
+            return Err("Select a sub-patch to dissolve".to_string());
+        };
+        let Some(record) = self.instances.get(&instance_path).cloned() else {
+            return Err("Select a sub-patch to dissolve".to_string());
+        };
+        let name = self
+            .definitions
+            .get(&record.key)
+            .map(|d| d.metadata.name.clone())
+            .unwrap_or_default();
+        let level = instance_path.parent().unwrap_or_else(ModulePath::root);
+        let ilid = instance_path.last();
+
+        // The members and the ports of the inside.
+        let mut members: Vec<ModulePath> = Vec::new();
+        let mut ports: Vec<(ModulePath, Port)> = Vec::new();
+        for (path, id) in self.ids.paths() {
+            if path.parent().as_ref() != Some(&instance_path) {
+                continue;
+            }
+            if let Some(port) = self.ports.get(path) {
+                ports.push((path.clone(), port.clone()));
+            } else if self.instances.contains_key(path) || graph.node(id).is_some() {
+                members.push(path.clone());
+            }
+        }
+
+        // The cables each port joins, in the ids of the two levels.
+        let outside_source = |port: &Port| -> Option<End> {
+            self.link_into(&level, &(ilid, port.name.clone()))
+                .map(|l| l.from.clone())
+        };
+        let outside_dests = |port: &Port| -> Vec<End> {
+            self.links_from(&level, &(ilid, port.name.clone()))
+                .map(|l| l.to.clone())
+                .collect()
+        };
+        let mut joins: Vec<(End, End)> = Vec::new();
+        for (path, port) in &ports {
+            match port.direction {
+                Direction::Input => {
+                    let Some(source) = outside_source(port) else { continue };
+                    for link in self.links_from(&instance_path, &(path.last(), "out".to_string())) {
+                        // Straight into an output port: a pass-through.
+                        if let Some(out) = ports
+                            .iter()
+                            .find(|(p, q)| p.last() == link.to.0 && q.direction == Direction::Output)
+                        {
+                            for dest in outside_dests(&out.1) {
+                                joins.push((source.clone(), dest));
+                            }
+                        } else {
+                            joins.push((source.clone(), link.to.clone()));
+                        }
+                    }
+                }
+                Direction::Output => {
+                    let Some(link) = self.link_into(&instance_path, &(path.last(), "in".to_string())) else {
+                        continue;
+                    };
+                    if ports
+                        .iter()
+                        .any(|(p, q)| p.last() == link.from.0 && q.direction == Direction::Input)
+                    {
+                        continue; // Handled from the input side.
+                    }
+                    for dest in outside_dests(port) {
+                        joins.push((link.from.clone(), dest));
+                    }
+                }
+            }
+        }
+        let inside_links: Vec<Link> = self
+            .links_at(&instance_path)
+            .filter(|link| {
+                !ports
+                    .iter()
+                    .any(|(p, _)| p.last() == link.from.0 || p.last() == link.to.0)
+            })
+            .cloned()
+            .collect();
+
+        // New level ids: kept when the level never had them, else the next.
+        let mut renamed: BTreeMap<u32, u32> = BTreeMap::new();
+        let mut next = self.next_level_id(&level);
+        for path in &members {
+            let lid = path.last();
+            let new = if level.is_root() {
+                self.ids.get(path).map_or(lid, |id| id.0)
+            } else if self.ids.get(&level.child(lid)).is_none() && !renamed.values().any(|v| *v == lid) {
+                lid
+            } else {
+                next += 1;
+                next - 1
+            };
+            renamed.insert(lid, new);
+        }
+        let rename = |end: &End| -> End { (renamed.get(&end.0).copied().unwrap_or(end.0), end.1.clone()) };
+
+        // Take the ports, their links, and the instance out.
+        let mut removed = vec![instance];
+        for (path, _) in &ports {
+            if let Some(id) = self.ids.get(path) {
+                removed.push(id);
+            }
+            self.ports.remove(path);
+        }
+        self.links.retain(|link| link.level != instance_path);
+        self.links
+            .retain(|link| !(link.level == level && (link.from.0 == ilid || link.to.0 == ilid)));
+        self.instances.remove(&instance_path);
+        self.definitions.remove(&record.key);
+
+        // Move the members out.
+        let mut member_ids = Vec::new();
+        for path in &members {
+            if let Some(id) = self.ids.get(path) {
+                member_ids.push(id);
+            }
+            let new = level.child(renamed[&path.last()]);
+            self.rename_prefix(path, &new).map_err(|e| e.to_string())?;
+        }
+        for link in inside_links {
+            self.links.insert(Link {
+                level: level.clone(),
+                to: rename(&link.to),
+                from: rename(&link.from),
+            });
+        }
+        for (from, to) in joins {
+            let (from, to) = (rename(&from), rename(&to));
+            if self.is_module_end(graph, &level, &from) && self.is_module_end(graph, &level, &to) {
+                // The graph holds it already; it becomes a direct cable.
+                continue;
+            }
+            self.links.insert(Link {
+                level: level.clone(),
+                to,
+                from,
+            });
+        }
+        Ok(Dissolved {
+            name,
+            members: member_ids,
+            removed,
+        })
+    }
+
+    /// True when an end of `level` is a module of the graph.
+    fn is_module_end(&self, graph: &Graph, level: &ModulePath, end: &End) -> bool {
+        self.ids
+            .get(&level.child(end.0))
+            .is_some_and(|id| graph.node(id).is_some())
+    }
+
+    /// Restores a snapshot of the hierarchy, keeping the ids the table has
+    /// handed out since: no id is ever given out twice (undo.md, rule 5).
+    pub fn restore(&mut self, snapshot: &Hierarchy) {
+        let next = self.ids.next_free();
+        *self = snapshot.clone();
+        self.ids.reserve_id(ModuleId(next.saturating_sub(1)));
+    }
+}
+
+/// One level of a patch being written.
+#[derive(Default)]
+struct Level {
+    modules: Vec<PatchModule>,
+    cables: Vec<PatchCable>,
+    modulation: Vec<PatchModulation>,
+    midi: Vec<PatchMidiMapping>,
+}
+
+/// The definition-side value and range of each exposed parameter.
+fn defaults_of(definition: &SubPatch) -> BTreeMap<(u32, String), Stored> {
+    let mut defaults = BTreeMap::new();
+    for exposed in &definition.exposed {
+        let Some(member) = definition.modules.iter().find(|m| m.id == exposed.module) else {
+            continue;
+        };
+        let stored = Stored {
+            value: member.params.get(&exposed.param).copied(),
+            range: member.ranges.get(&exposed.param).copied(),
+        };
+        defaults.insert((exposed.module, exposed.param.clone()), stored);
+    }
+    defaults
+}
+
+/// Writes a stored value and range into a module entry.
+fn apply_stored(module: &mut PatchModule, param: &str, stored: &Stored) {
+    match stored.value {
+        Some(value) => {
+            module.params.insert(param.to_string(), value);
+        }
+        None => {
+            module.params.remove(param);
+        }
+    }
+    match stored.range {
+        Some(range) => {
+            module.ranges.insert(param.to_string(), range);
+        }
+        None => {
+            module.ranges.remove(param);
+        }
+    }
+}
+
+/// `value` clamped to an exposed range, when the range is a finite span.
+fn clamp_exposed(value: f32, range: Option<(f32, f32)>) -> f32 {
+    match range {
+        Some((min, max)) if min.is_finite() && max.is_finite() && min < max => value.clamp(min, max),
+        _ => value,
+    }
+}
+
+/// `base`, or `base 2`, `base 3`, and so on, the first that `taken` does
+/// not report.
+fn unique_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|n| format!("{base} {n}"))
+        .find(|name| !taken(name))
+        .expect("some number is free")
+}
+
+/// A cable's ends in flat ids and port names.
+fn cable_ends(graph: &Graph, from: OutputRef, to: InputRef) -> (End, End) {
+    (
+        (from.module.0, crate::port_name(graph, from)),
+        (to.module.0, crate::input_name(graph, to)),
+    )
+}
+
+/// Every cable of the graph, in flat ids and port names.
+fn graph_cables(graph: &Graph) -> BTreeSet<(End, End)> {
+    graph.cables().map(|(from, to)| cable_ends(graph, from, to)).collect()
+}
+
+/// The input an end names, by index.
+fn input_ref(graph: &Graph, end: &End) -> Option<InputRef> {
+    let module = ModuleId(end.0);
+    let port = graph.node(module)?.input_index(&end.1)?;
+    Some(InputRef { module, port })
+}
+
+impl Direction {
+    /// The port name a Patch input or output takes when it has no label.
+    fn own_port_fallback(self) -> &'static str {
+        match self {
+            Self::Input => "in",
+            Self::Output => "out",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

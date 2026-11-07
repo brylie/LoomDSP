@@ -45,6 +45,11 @@ pub mod subpatch;
 pub use subpatch::{Exposed, INPUT_KIND, OUTPUT_KIND, SUBPATCH_KIND, SubPatch};
 pub mod flatten;
 pub use flatten::{Flat, FlatIds, FlatModule, ModulePath};
+pub mod hierarchy;
+pub use hierarchy::{
+    Collapsed, Definition, Direction, Dissolved, End, Hierarchy, Instance, LevelCable, Link, Port, Removed, Stored,
+    Tile,
+};
 pub mod warning;
 pub use warning::{LoadLevel, LoadWarning, RangeReason};
 
@@ -593,22 +598,8 @@ impl Patch {
             });
         }
         for (_, mapping) in graph.midi_mappings() {
-            patch.midi.push(PatchMidiMapping {
-                target: (mapping.target.0, param_name(graph, mapping.target, mapping.param)),
-                channel: mapping.control.channel,
-                controller: mapping.control.controller,
-                mode: match mapping.options.mode {
-                    MidiMode::Absolute => PatchMidiMode::Absolute,
-                    MidiMode::Pickup => PatchMidiMode::Pickup,
-                    MidiMode::Relative(encoding) => PatchMidiMode::Relative(match encoding {
-                        MidiEncoding::Offset64 => PatchMidiEncoding::Offset64,
-                        MidiEncoding::TwosComplement => PatchMidiEncoding::TwosComplement,
-                        MidiEncoding::SignBit => PatchMidiEncoding::SignBit,
-                    }),
-                },
-                range: (mapping.options.low, mapping.options.high),
-                invert: mapping.options.invert,
-            });
+            let target = (mapping.target.0, param_name(graph, mapping.target, mapping.param));
+            patch.midi.push(midi_entry(mapping, target));
         }
         patch.canonicalise();
         patch
@@ -643,15 +634,35 @@ pub(crate) fn canonicalise_lists(
     midi.sort_by(|a, b| (a.target.0, &a.target.1).cmp(&(b.target.0, &b.target.1)));
 }
 
-fn port_name(graph: &Graph, output: OutputRef) -> String {
+/// A MIDI mapping as a file writes it, on `target`.
+pub(crate) fn midi_entry(mapping: &loom_core::MidiMapping, target: (u32, String)) -> PatchMidiMapping {
+    PatchMidiMapping {
+        target,
+        channel: mapping.control.channel,
+        controller: mapping.control.controller,
+        mode: match mapping.options.mode {
+            MidiMode::Absolute => PatchMidiMode::Absolute,
+            MidiMode::Pickup => PatchMidiMode::Pickup,
+            MidiMode::Relative(encoding) => PatchMidiMode::Relative(match encoding {
+                MidiEncoding::Offset64 => PatchMidiEncoding::Offset64,
+                MidiEncoding::TwosComplement => PatchMidiEncoding::TwosComplement,
+                MidiEncoding::SignBit => PatchMidiEncoding::SignBit,
+            }),
+        },
+        range: (mapping.options.low, mapping.options.high),
+        invert: mapping.options.invert,
+    }
+}
+
+pub(crate) fn port_name(graph: &Graph, output: OutputRef) -> String {
     name_of(graph, output.module, |n| n.output_name(output.port))
 }
 
-fn input_name(graph: &Graph, input: InputRef) -> String {
+pub(crate) fn input_name(graph: &Graph, input: InputRef) -> String {
     name_of(graph, input.module, |n| n.input_name(input.port))
 }
 
-fn param_name(graph: &Graph, module: ModuleId, index: usize) -> String {
+pub(crate) fn param_name(graph: &Graph, module: ModuleId, index: usize) -> String {
     name_of(graph, module, |n| n.parameter_name(index))
 }
 
