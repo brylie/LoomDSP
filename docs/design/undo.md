@@ -45,7 +45,7 @@ The shortcuts work anywhere in the window, except while a text field or text box
 ### After an undo or redo
 
 - **Selection.** The modules the step touched and that still exist become the selection. A module that the step removed leaves the selection. A step that touches no module directly (a cable, a mapping) keeps the selection as it was. *Why:* the user sees at once what changed, and the inspector follows it.
-- **View.** Pan and zoom do not change. *Why:* moving the view on every undo is disorienting, and the selection already shows what changed.
+- **View.** Pan and zoom do not change. The one exception: a step made on another level of a nested patch shows that level first, with its own camera ([sub-patches](sub-patches.md#undo-across-levels)). *Why:* moving the view on every undo is disorienting, and the selection already shows what changed; but the player must see the level a step changed.
 - **Status bar.** It names the step, for example **Undo: delete 3 modules**.
 
 ### Step names
@@ -62,6 +62,8 @@ A step is named by a verb and what it acted on, in the same words the user sees 
 | Assignment add, remove, change | **add modulation**, **remove modulation**, **change modulation depth** |
 | MIDI mapping | **learn CC 74**, **remove MIDI mapping**, **move MIDI mapping**, **change MIDI mapping** |
 | Cut, paste, duplicate | **cut Filter**, **paste 3 modules**, **duplicate Filter** ([copy, paste, and duplicate](clipboard.md)) |
+| Make or dissolve a sub-patch | **make sub-patch**, **dissolve Voice** ([sub-patches](sub-patches.md)) |
+| Move a sub-patch or port tile | **move Voice**, **move 2 tiles** |
 
 The exact wording can change while building. Each step must have a name.
 
@@ -87,6 +89,7 @@ The exact wording can change while building. Each step must have a name.
 | Change a mapping's mode, range, invert, or encoding | The change. Switching to Relative resets range and invert in the same step. Undo and redo keep a mapping's options wherever a step brings the mapping back. |
 | "Add scope" on a cable | The new scope module and its cable together. |
 | Cut, paste, or duplicate | The whole group: its modules, cables, and assignments ([copy, paste, and duplicate](clipboard.md)). Copy is not a step. |
+| Make or dissolve a sub-patch | The whole collapse or dissolve: the tile, its ports, where they stand, and the records of the cables through them ([sub-patches](sub-patches.md)). The graph does not change, so the step holds the hierarchy before and after. |
 | A button press whose saved value is toggle | The toggle. |
 
 ### What is not undoable

@@ -66,7 +66,7 @@ fn unknown_module_is_reported_by_check_and_render() {
 fn nested_patches_check_and_render() {
     let dir = std::env::temp_dir().join(format!("loom-cli-nested-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/nested-subtractive.ron");
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/nested-subtractive.ron");
     let path = dir.join("nested.ron");
     std::fs::copy(&source, &path).unwrap();
     let wave = dir.join("render.wav");

@@ -735,7 +735,7 @@ fn ports_at_the_top_level_are_ordinary_modules() {
 /// order, depth first.
 #[test]
 fn the_nested_example_has_the_documented_id_table() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/nested-subtractive.ron");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/nested-subtractive.ron");
     let text = std::fs::read_to_string(path).unwrap();
     let (_, ids) = flatten(&text);
     let table: Vec<(String, u32)> = ids.paths().map(|(path, id)| (path.to_string(), id.0)).collect();

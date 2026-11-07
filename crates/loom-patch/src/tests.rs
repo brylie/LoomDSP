@@ -209,7 +209,8 @@ fn example_patches_keep_their_values() {
         let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
         let notes = patch.load_into(&mut parts.controller).unwrap();
         assert!(notes.is_empty(), "{}: {notes:?}", path.display());
-        for module in &patch.modules {
+        // An instance is no module of the graph; its values go inside.
+        for module in patch.modules.iter().filter(|m| !m.is_instance()) {
             let node = parts.controller.graph().node(ModuleId(module.id)).unwrap();
             for (name, &value) in &module.params {
                 let index = node.descriptor.param_index(name).unwrap();

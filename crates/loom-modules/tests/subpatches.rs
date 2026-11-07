@@ -6,10 +6,9 @@
 
 mod common;
 
-use common::{Note, SAMPLE_RATE, load_patch, patch_path, render};
+use common::{Note, SAMPLE_RATE, load_patch, patch_path, render, render_with};
 use loom_core::{EngineConfig, EngineParts, ModuleId, OutputSafety, create_engine};
 use loom_patch::Patch;
-use std::path::PathBuf;
 
 /// Length of each render: 0.2 s, as the golden patch tests use.
 const FRAMES: usize = 9_600;
@@ -20,13 +19,6 @@ const NOTE: Note = Note {
     on: 240,
     off: 7_200,
 };
-
-/// The dev example `name`, which the app does not list.
-fn dev_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/dev")
-        .join(name)
-}
 
 /// An engine with `patch` loaded and output safety off, so the render
 /// holds what the patch makes (ADR-0019).
@@ -46,7 +38,7 @@ fn load(patch: &Patch) -> EngineParts {
 /// so this also proves the exposed value reaches the inner parameter.
 #[test]
 fn three_levels_render_bit_identical_to_the_flat_patch() {
-    let nested = load_patch(&dev_path("nested-subtractive.ron"));
+    let nested = load_patch(&patch_path("nested-subtractive.ron"));
     let flat = load_patch(&patch_path("subtractive.ron"));
     assert_eq!(nested.subpatches.len(), 2);
     for block in [1, 77, 512] {
@@ -112,4 +104,66 @@ fn a_loop_across_a_boundary_gets_a_unit_delay() {
     let report = parts.controller.last_report();
     assert_eq!(report.loops.len(), 1);
     assert!(report.loops[0].inserted_delays.is_empty(), "{report:?}");
+}
+
+/// Collapsing three modules of the flat subtractive patch into a sub-patch
+/// renders bit-identical to the flat patch at host buffers of 1, 77, and
+/// 512 frames: the file the editor writes after a collapse plays the same
+/// (sub-patches.md, rule 2).
+#[test]
+fn a_collapse_renders_bit_identical_to_the_flat_patch() {
+    use loom_patch::{FlatIds, Hierarchy, Layout, ModulePath};
+    let flat = load_patch(&patch_path("subtractive.ron"));
+    // The editor's steps: load, collapse the phase generator, the saw, and
+    // the filter, sync, and write the file.
+    let mut parts = load(&flat);
+    let mut ids = FlatIds::new();
+    let mut edited = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    flat.load_with_ids(&mut edited.controller, &mut ids).unwrap();
+    let mut hierarchy = Hierarchy::from_patch(&flat, edited.controller.graph(), ids).unwrap();
+    let oscillator = flat
+        .modules
+        .iter()
+        .filter(|m| ["loom.phase.generator@1", "loom.osc.saw@1", "loom.filter.svf@1"].contains(&m.kind.as_str()))
+        .map(|m| m.id)
+        .collect::<Vec<_>>();
+    assert_eq!(oscillator.len(), 3, "the subtractive example has these three");
+    let made = hierarchy
+        .collapse(edited.controller.graph(), &ModulePath::root(), &oscillator)
+        .unwrap();
+    assert!(!made.inputs.is_empty() && !made.outputs.is_empty());
+    hierarchy.sync(&mut edited.controller).unwrap();
+    let mut collapsed = hierarchy.unflatten(edited.controller.graph(), |_| Layout::default());
+    collapsed.metadata = flat.metadata.clone();
+    assert_eq!(collapsed.subpatches.len(), 1);
+    for block in [1, 77, 512] {
+        let (left, right) = render(&mut parts, FRAMES, block, &[NOTE]);
+        let (c_left, c_right) = render(&mut load(&collapsed), FRAMES, block, &[NOTE]);
+        assert!(left.iter().any(|&s| s != 0.0));
+        assert!(left == c_left && right == c_right, "block {block} differs");
+        parts = load(&flat);
+    }
+}
+
+/// An edit inside a sub-patch keeps the state of the other inner modules:
+/// a module added inside while the patch plays leaves the oscillators'
+/// phases alone, so the render equals one with no edit.
+#[test]
+fn an_edit_inside_keeps_the_state_of_the_other_inner_modules() {
+    let nested = load_patch(&patch_path("nested-subtractive.ron"));
+    let (left, right) = render(&mut load(&nested), FRAMES, 64, &[NOTE]);
+    let mut parts = load(&nested);
+    let mut added = false;
+    let (e_left, e_right) = render_with(&mut parts, FRAMES, 64, &[NOTE], |position, parts| {
+        if position >= 2_048 && !added {
+            // As the app does for a module added inside the Voice: a new
+            // flat module, unconnected, and one commit.
+            parts.controller.add_module("loom.osc.sine").unwrap();
+            parts.controller.commit().unwrap();
+            added = true;
+        }
+    });
+    assert!(added);
+    assert!(left.iter().any(|&s| s != 0.0));
+    assert!(left == e_left && right == e_right, "the edit changed the sound");
 }

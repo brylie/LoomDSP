@@ -4,11 +4,11 @@ A sub-patch is a group of modules shown as one tile. The player sees a box with 
 
 - **Specification:** [sub-patches](../design/sub-patches.md), the section "Flattening".
 - **Decision:** [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md).
-- **Code:** `crates/loom-patch/src/flatten.rs`.
+- **Code:** `crates/loom-patch/src/flatten.rs`, and `hierarchy.rs` for the editor's side.
 
 ## Start from a real patch
 
-[`examples/dev/nested-subtractive.ron`](../../examples/dev/nested-subtractive.ron) is the subtractive example built as three levels. The top patch holds a MIDI note input, a **Voice** sub-patch, the audio output, the transport, and a scope. The Voice holds a phase generator, a saw, a **Filter** sub-patch, an amplitude envelope, and a VCA. The Filter holds the state variable filter, its envelope, and a scaler.
+[`examples/patches/nested-subtractive.ron`](../../examples/patches/nested-subtractive.ron) is the subtractive example built as three levels. The top patch holds a MIDI note input, a **Voice** sub-patch, the audio output, the transport, and a scope. The Voice holds a phase generator, a saw, a **Filter** sub-patch, an amplitude envelope, and a VCA. The Filter holds the state variable filter, its envelope, and a scaler.
 
 Each level is written once in the file, in a `subpatches` table, and used by an instance:
 
@@ -80,6 +80,16 @@ So flat ids come from a table keyed by path. "2 › 5 › 3" got id 14 the first
 ## Ports with nothing behind them
 
 A cable can run into a Patch input that feeds nothing, or out of a Patch output that nothing feeds. Flattening drops such a cable. The input on the other side reads its default, as any unconnected input does. A Patch input cabled straight to a Patch output is a pass-through: the outer cable continues from whatever feeds the instance, through as many levels as it takes, and a pass-through fed by its own output carries nothing and is dropped too.
+
+## The editor keeps the hierarchy beside the graph
+
+The app shows one level at a time, and a player can collapse a selection into a sub-patch or dissolve one. The obvious way to build that is to make the nested file the editor's model and re-flatten after every edit. LoomDSP does the opposite ([ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md)): the flat graph stays the editor's model too, and the hierarchy is a record kept beside it. The record says where each module sits (its path), what the definitions are, which tiles are instances and ports, and which cables run into or out of a port, in the ids of their level. Everything else, parameters included, is read from the graph.
+
+Two things follow. First, collapsing is free in the same sense as flattening: it moves paths in the record and turns the cables that crossed the new boundary into port records, and the graph does not change at all. The oscillator inside keeps its phase, because no module was rebuilt. Second, saving is the inverse of flattening. The file is written from the graph and the record together, and a test loads the nested example, writes it back, and checks the text is the same.
+
+The record and the graph must never disagree about a cable. So every change to the record is checked with the flattener itself: the candidate record is written out as a file, flattened on a scratch id table, and the cables that come out are compared with the controller's. The difference is applied to the controller, and only then is the candidate kept. After a collapse or a dissolve the difference is empty, which is the proof that the sound did not change.
+
+One id space makes this simple to use. An instance tile and a port tile have flat ids of their own, from the same table as the modules, so the canvas, the selection, and the undo history handle them as they handle any tile. At the top level a tile's id in the file is its flat id; inside a definition, the table maps the path to the flat id.
 
 ## How other tools do it
 

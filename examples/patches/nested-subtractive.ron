@@ -4,7 +4,7 @@
 // The Filter stores a cutoff of 1000 Hz; the Voice exposes it without a
 // value, and only the top-level instance sets it to 300 Hz, so the two
 // renders match only when exposed values reach the inner parameter.
-// Lives in examples/dev until the app can open sub-patches (#51, slice 2).
+// The app opens it and shows one level at a time (#51, slice 2).
 Patch(
     version: 1,
     metadata: Metadata(
