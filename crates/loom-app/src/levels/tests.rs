@@ -620,3 +620,47 @@ fn the_tile_menu_knows_sub_patches() {
     assert_eq!(labels(2), ["Open", "Dissolve sub-patch"]);
     assert_eq!(labels(1), ["Help", "Make sub-patch"]);
 }
+
+/// Duplicating a selection that holds the Transport pairs each copy with
+/// its own original, so a module fed from a sub-patch tile keeps that
+/// cable on its copy: the Transport sorts first here, and a group leaves
+/// it out.
+#[test]
+fn duplicate_with_the_transport_selected_pairs_copies_with_their_originals() {
+    let text = r#"Patch(
+        version: 1,
+        subpatches: {
+            "voice": SubPatch(
+                metadata: Metadata(name: "Voice"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.osc.sine@1"),
+                    PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+            ),
+        },
+        modules: [
+            PatchModule(id: 1, kind: "loom.clock.transport@1", position: Some((0.0, 240.0))),
+            PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), position: Some((0.0, 0.0))),
+            PatchModule(id: 4, kind: "loom.level.clamp@1", position: Some((240.0, 0.0))),
+        ],
+        cables: [PatchCable(from: (2, "out"), to: (4, "in"))],
+    )"#;
+    let mut app = app_with(text);
+    app.session.selection = [1, 4].into_iter().collect();
+    app.duplicate();
+    assert_eq!(app.ui_snapshot().status, "Duplicated Clamp");
+    let copy = *app.session.selection.iter().next().expect("the copy is selected");
+    assert_ne!(copy, 4);
+    let fed = app.session.controller.graph().source_of(loom_core::InputRef {
+        module: ModuleId(copy),
+        port: 0,
+    });
+    let sine = app.session.hierarchy.id_at(&voice(), 1).unwrap();
+    assert_eq!(fed, Some(loom_core::OutputRef { module: sine, port: 0 }));
+    let saved = app.current_patch();
+    assert_eq!(
+        saved.cables.iter().filter(|c| c.from == (2, "out".to_string())).count(),
+        2
+    );
+}

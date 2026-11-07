@@ -383,6 +383,13 @@ impl Group {
             .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1)))
     }
 
+    /// The ids of the group's modules in the patch they came from, in the
+    /// order [`Group::add`] gives out new ids: for pairing copies with
+    /// their originals.
+    pub fn ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.modules.iter().map(|m| m.id)
+    }
+
     /// Drops the cables from outside the group that `drop` says. A cable a
     /// port implies is not the graph's to copy: the caller adds it back as
     /// a boundary record from the same port.

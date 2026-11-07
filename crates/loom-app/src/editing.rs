@@ -589,7 +589,10 @@ impl App {
                 },
             )
         });
-        let originals: Vec<u32> = self.session.selection.iter().copied().collect();
+        // The group's members, in its order: the selection may also hold the
+        // Transport, which a group leaves out, and the new ids follow the
+        // group.
+        let originals: Vec<u32> = group.ids().collect();
         let through_ports: Vec<(loom_patch::End, u32, String)> = hierarchy
             .level_cables(graph, &level)
             .into_iter()
