@@ -696,7 +696,13 @@ pub fn headless(args: &Args) -> Result<App, String> {
         false,
     );
     for &id in &args.select {
-        if app.session.controller.graph().node(loom_core::ModuleId(id)).is_none() {
+        // Any tile: a module, a sub-patch tile, or a port tile.
+        let known = app
+            .session
+            .hierarchy
+            .tile(app.session.controller.graph(), loom_core::ModuleId(id))
+            .is_some();
+        if !known {
             return Err(format!("no module {id} in the patch"));
         }
         app.session.selection.insert(id);

@@ -1312,3 +1312,23 @@ fn the_inspector_offers_expose_and_shows_surface_rows() {
         other => panic!("{other:?}"),
     }
 }
+
+/// `--select` takes a sub-patch tile, so `--dump-ui --select 2` on the
+/// nested example shows the Voice tile's inspector; an id no tile has is
+/// still refused.
+#[test]
+fn select_takes_a_sub_patch_tile() {
+    let mut args = crate::tests::app_args();
+    args.patch = Some(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/nested-subtractive.ron"),
+    );
+    args.no_audio = true;
+    args.select = vec![2];
+    let app = crate::snapshot::headless(&args).unwrap();
+    assert!(matches!(app.inspector_model(), Inspector::SubPatch(_)));
+    args.select = vec![999];
+    assert_eq!(
+        crate::snapshot::headless(&args).err().as_deref(),
+        Some("no module 999 in the patch")
+    );
+}
