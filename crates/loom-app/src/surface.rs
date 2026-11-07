@@ -13,9 +13,11 @@
 //! are one parameter with two controls (FR-PANEL-03).
 
 use crate::App;
-use loom_canvas::ControlPart;
-use loom_core::{Graph, ModuleId, ModuleNames, ParamRange, ParamSpec, WidgetKind};
-use loom_patch::Hierarchy;
+use crate::modulation::Reach;
+use loom_canvas::{ControlPart, HoverText, PanelValues, PanelView, WidgetValue, WidgetView, WidgetViewKind};
+use loom_core::{Controller, Graph, ModuleId, ModuleNames, ParamRange, ParamSpec, WidgetKind};
+use loom_patch::{Exposed, Hierarchy, ModulePath};
+use std::collections::BTreeMap;
 
 /// What a control on a tile moves: a flat module's parameter, and the
 /// widget kind and spec the control works in.
@@ -215,6 +217,239 @@ impl App {
             part,
         )
     }
+}
+
+/// The surface of the sub-patch tile `instance`: one widget per exposed
+/// item, in the order the items were exposed, each the widget the item has
+/// inside ([`surface_kind`]), labelled with its surface name, and with
+/// hover text that names the inner module and parameter it controls
+/// (panels.md, Exposed controls in a sub-patch). Widgets flow left to
+/// right on the panel grid and wrap at 12 units; each row is as tall as
+/// its tallest widget (panels.md, Default panels, Layout). With nothing
+/// exposed the panel is empty.
+pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -> PanelView {
+    let Some(definition) = hierarchy.definition_of(instance) else {
+        return empty_surface();
+    };
+    let path = hierarchy.path_of(instance);
+    let widgets: Vec<WidgetView> = definition
+        .exposed
+        .iter()
+        .enumerate()
+        .map(|(index, exposed)| {
+            let target = control_target(graph, hierarchy, instance.0, index, ControlPart::Main);
+            let kind = surface_kind(graph, hierarchy, instance, index);
+            let (description, controls) = inner_text(graph, hierarchy, &path, exposed);
+            WidgetView {
+                kind: view_kind(kind, target.as_ref().map(|t| &t.spec)),
+                x: 0,
+                y: 0,
+                label: exposed.name.clone(),
+                hover: HoverText {
+                    description,
+                    name: None,
+                    note: Some(format!("Controls {controls}")),
+                },
+                hidden: false,
+                exposed: false,
+            }
+        })
+        .collect();
+    flow_layout(widgets)
+}
+
+/// A surface with nothing on it: the tile shows its name and ports.
+fn empty_surface() -> PanelView {
+    PanelView {
+        width: 10,
+        height: 2,
+        widgets: Vec::new(),
+    }
+}
+
+/// Places `widgets` on the panel grid in order, left to right, wrapping
+/// at [`SURFACE_WIDTH`] units; each row is as tall as its tallest widget,
+/// and the panel is as wide as its widest row, at least as wide as an
+/// empty surface (panels.md, Default panels, Layout).
+fn flow_layout(mut widgets: Vec<WidgetView>) -> PanelView {
+    let (mut x, mut y, mut row_height, mut width) = (0u8, 0u8, 0u8, 0u8);
+    for widget in &mut widgets {
+        let (w, h) = widget.size();
+        if x > 0 && x + w > SURFACE_WIDTH {
+            x = 0;
+            y += row_height;
+            row_height = 0;
+        }
+        widget.x = x;
+        widget.y = y;
+        x += w;
+        row_height = row_height.max(h);
+        width = width.max(x);
+    }
+    let empty = empty_surface();
+    PanelView {
+        width: width.max(empty.width),
+        height: if widgets.is_empty() {
+            empty.height
+        } else {
+            y + row_height
+        },
+        widgets,
+    }
+}
+
+/// Where a surface row wraps, in grid units: four knobs wide (panels.md,
+/// Default panels, Layout).
+const SURFACE_WIDTH: u8 = 12;
+
+/// The canvas widget for a surface control of kind `kind` whose parameter
+/// is `spec`: a knob, fader, or number steps through a whole number's
+/// values, and a choice widget shows the parameter's choice names
+/// (panels.md, Choice names). A kind the surface cannot show yet gets a
+/// knob.
+fn view_kind(kind: WidgetKind, spec: Option<&ParamSpec>) -> WidgetViewKind {
+    let steps = spec
+        .filter(|spec| spec.options.integer)
+        .map_or(0, |spec| (spec.max - spec.min) as u32);
+    let choices = || {
+        spec.map_or_else(Vec::new, |spec| {
+            spec.options.choices.iter().map(ToString::to_string).collect()
+        })
+    };
+    match kind {
+        WidgetKind::Knob => WidgetViewKind::Knob { steps },
+        WidgetKind::Fader { vertical } => WidgetViewKind::Fader { vertical, steps },
+        WidgetKind::Number => WidgetViewKind::Number {
+            steps,
+            key_step: spec
+                .and_then(|spec| Some(spec.options.key_step? / (spec.max - spec.min)))
+                .unwrap_or(0.0),
+        },
+        WidgetKind::Toggle => WidgetViewKind::Toggle,
+        WidgetKind::Radio => WidgetViewKind::Radio { options: choices() },
+        WidgetKind::Select => WidgetViewKind::Select {
+            options: spec.map_or_else(Vec::new, ParamSpec::value_names),
+        },
+        WidgetKind::Segmented { width } => WidgetViewKind::Segmented {
+            options: choices(),
+            width,
+        },
+        _ => WidgetViewKind::Knob { steps },
+    }
+}
+
+/// The description a surface control shows, and what it controls: the
+/// member's name and the parameter's label, such as "Filter › Cutoff",
+/// naming the nested sub-patch and its surface item when the member is
+/// one.
+fn inner_text(graph: &Graph, hierarchy: &Hierarchy, instance: &ModulePath, exposed: &Exposed) -> (String, String) {
+    let member = instance.child(exposed.module);
+    let member_id = hierarchy.ids().get(&member);
+    let description = hierarchy
+        .resolve_exposed(instance, exposed)
+        .and_then(|(id, param)| {
+            let node = graph.node(id)?;
+            let index = node.parameter_index(&param)?;
+            Some(node.descriptor.params[index].description.to_string())
+        })
+        .unwrap_or_default();
+    let (member_name, param_label) = match member_id {
+        Some(id) if hierarchy.definition_of(id).is_some() => {
+            (hierarchy.tile_name(id).unwrap_or_default(), exposed.param.clone())
+        }
+        Some(id) => match graph.node(id) {
+            Some(node) => (
+                node.descriptor.name.to_string(),
+                node.parameter_index(&exposed.param)
+                    .map_or(exposed.param.clone(), |i| node.descriptor.params[i].label.to_string()),
+            ),
+            None => (format!("module {}", exposed.module), exposed.param.clone()),
+        },
+        None => (format!("module {}", exposed.module), exposed.param.clone()),
+    };
+    (description, format!("{member_name} › {param_label}"))
+}
+
+/// Fills the values of every surface control from the inner parameter it
+/// moves: position and text in the exposed range, the modulation mark of
+/// the inner parameter's assignments (only `dragged` while its arc is
+/// dragged), and the live value while an assignment is on, as
+/// `scene::update_panel_values` does for module controls.
+pub fn surface_values(
+    values: &mut PanelValues,
+    controller: &Controller,
+    hierarchy: &Hierarchy,
+    reaches: &BTreeMap<(ModuleId, usize), Vec<Reach>>,
+    dragged: Option<&((ModuleId, usize), Reach)>,
+) {
+    let graph = controller.graph();
+    for (instance, count) in instances(hierarchy) {
+        for index in 0..count {
+            let Some(target) = control_target(graph, hierarchy, instance.0, index, ControlPart::Main) else {
+                values.set(instance.0, index, WidgetValue::default());
+                continue;
+            };
+            let Some(node) = graph.node(target.module) else {
+                continue;
+            };
+            let value = node.params[target.index];
+            let key = (target.module, target.index);
+            let all = reaches.get(&key).map_or(&[][..], Vec::as_slice);
+            let assigned = match dragged {
+                Some((dragged_key, reach)) if *dragged_key == key => std::slice::from_ref(reach),
+                _ => all,
+            };
+            let live = (target.kind.has_range() && all.iter().any(|r| r.enabled))
+                .then(|| controller.modulated(target.module, target.index))
+                .flatten();
+            values.set(
+                instance.0,
+                index,
+                WidgetValue {
+                    position: crate::scene::control_position(target.kind, &target.spec, value),
+                    text: crate::param::format(&target.spec, value),
+                    modulation: crate::modulation::mark(target.kind, &target.spec, value, assigned),
+                    live,
+                    ..WidgetValue::default()
+                },
+            );
+        }
+    }
+}
+
+/// Updates the live dots of the surface controls that stand for the
+/// parameter `target`, at every level above it, as `scene::update_live_values`
+/// does for module controls.
+pub fn surface_live_values(
+    values: &mut PanelValues,
+    hierarchy: &Hierarchy,
+    target: (ModuleId, &str),
+    live: Option<f32>,
+) {
+    let mut at = (target.0, target.1.to_string());
+    while let Some((instance, name)) = hierarchy.exposure_of(at.0, &at.1) {
+        let index = hierarchy
+            .definition_of(instance)
+            .and_then(|d| d.exposed.iter().position(|e| e.name == name));
+        if let Some(index) = index
+            && let Some(value) = values.get(instance.0, index)
+            && value.live != live
+        {
+            let next = WidgetValue { live, ..value.clone() };
+            values.set(instance.0, index, next);
+        }
+        at = (instance, name);
+    }
+}
+
+/// Every sub-patch tile in the patch and how many items its surface
+/// shows, in path order.
+fn instances(hierarchy: &Hierarchy) -> Vec<(ModuleId, usize)> {
+    hierarchy
+        .ids()
+        .paths()
+        .filter_map(|(path, id)| Some((id, hierarchy.definition_at(path)?.exposed.len())))
+        .collect()
 }
 
 #[cfg(test)]

@@ -96,6 +96,11 @@ pub struct HoverText {
     /// The stable name used in patch files, or `None` when it reads the
     /// same as the label.
     pub name: Option<String>,
+    /// One more line, between the description and the name: what a
+    /// control stands for on a sub-patch's surface ("Exposed as Cutoff"),
+    /// or what a surface control moves inside ("Controls Filter › Cutoff")
+    /// (sub-patches.md, Exposing).
+    pub note: Option<String>,
 }
 
 impl HoverText {
@@ -106,6 +111,7 @@ impl HoverText {
         Self {
             description: description.to_string(),
             name: (!name.eq_ignore_ascii_case(label)).then(|| name.to_string()),
+            note: None,
         }
     }
 }
@@ -291,6 +297,10 @@ pub struct WidgetView {
     /// True while the module's mode does not use this control (ADR-0030).
     /// A hidden widget has no bounds, so it is not drawn, hit, or focused.
     pub hidden: bool,
+    /// True for a control inside a sub-patch that is exposed on its
+    /// surface. It gets a small square at its corner, a shape and not only
+    /// a colour (sub-patches.md, Exposing; NFR-UX-03).
+    pub exposed: bool,
 }
 
 impl WidgetView {

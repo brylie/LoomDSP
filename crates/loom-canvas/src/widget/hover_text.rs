@@ -287,6 +287,11 @@ impl<Message> PatchCanvas<'_, Message> {
         if !hover.description.is_empty() {
             lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, font));
         }
+        // What a control stands for across a sub-patch boundary
+        // (sub-patches.md, Exposing).
+        if let Some(note) = &hover.note {
+            lines.push(line(note, HOVER_TEXT_PX, self.palette.text_dim, font));
+        }
         if let Some(signal) = follows {
             lines.push(line(signal.hover_line(), HOVER_TEXT_PX, self.palette.text, font));
         }

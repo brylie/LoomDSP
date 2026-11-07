@@ -189,7 +189,7 @@ impl PatchSession {
         let scene = scene::build(&controller, &hierarchy, &ModulePath::root(), &positions, &sizes);
         let mode_key = scene::mode_key(&controller);
         let mut values = PanelValues::new();
-        scene::update_panel_values(&mut values, &controller, &BTreeMap::new());
+        scene::update_panel_values(&mut values, &controller, &hierarchy, &BTreeMap::new());
         // The loaded patch may already have a cable on run, before any
         // commit of the app's own (#413 review).
         let run_driven = run_is_driven(&controller);

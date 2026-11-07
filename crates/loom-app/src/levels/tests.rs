@@ -814,3 +814,127 @@ fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
         app.session.controller.graph().cables().count()
     );
 }
+
+/// The nested example open in the harness, with the filter's flat id and
+/// its cutoff index: the one parameter the Voice tile's surface shows.
+fn nested_example_ui() -> (Ui, ModuleId, usize) {
+    use loom_core::ModuleNames;
+    let ui = Ui::open("nested-subtractive.ron");
+    let graph = ui.app.session.controller.graph();
+    let (svf, node) = graph
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
+        .expect("the filter two levels down");
+    let cutoff = node.parameter_index("cutoff").unwrap();
+    (ui, svf, cutoff)
+}
+
+/// The filter's live cutoff.
+fn cutoff_of(ui: &Ui, svf: ModuleId, cutoff: usize) -> f32 {
+    ui.app.session.controller.graph().node(svf).unwrap().params[cutoff]
+}
+
+/// Turning the Voice tile's surface control moves the filter's cutoff two
+/// levels down, as one undo step, and the surface and inner controls show
+/// one value. Inside, turning the filter's own knob moves the surface
+/// control, and one undo step reverts that too (panels.md, Exposed
+/// controls, acceptance criteria).
+#[test]
+fn surface_and_inner_controls_move_together_and_undo_as_one() {
+    let (mut ui, svf, cutoff) = nested_example_ui();
+    assert_eq!(cutoff_of(&ui, svf, cutoff), 300.0);
+    let steps_before = ui.app.session.edits.history.len();
+
+    // Outside: the Voice tile (id 2) shows "cutoff" as its one control.
+    let knob = ui.control(2, "cutoff");
+    ui.drag(knob, Point::new(knob.x, knob.y - 40.0), 8);
+    let turned = cutoff_of(&ui, svf, cutoff);
+    assert!(turned > 300.0, "the surface knob moved the inner cutoff: {turned}");
+    assert_eq!(
+        ui.app.session.edits.history.len(),
+        steps_before + 1,
+        "one step for the drag"
+    );
+    let surface = ui.app.session.values.get(2, 0).unwrap().clone();
+    ui.app.undo();
+    assert_eq!(
+        cutoff_of(&ui, svf, cutoff),
+        300.0,
+        "one undo step reverts the surface drag"
+    );
+    ui.app.redo();
+    assert_eq!(cutoff_of(&ui, svf, cutoff), turned);
+
+    // Inside the Filter: the knob itself shows the same value and moves it.
+    let filter = ModulePath::top(2).child(5);
+    ui.app.show_level(&filter);
+    ui.redraw();
+    let inner_widget = crate::surface::find_control(
+        ui.app.session.controller.graph(),
+        &ui.app.session.hierarchy,
+        svf.0,
+        "cutoff",
+    )
+    .unwrap();
+    assert_eq!(
+        ui.app.session.values.get(svf.0, inner_widget).unwrap().text,
+        surface.text,
+        "both controls say the same value"
+    );
+    let inner = ui.control(svf.0, "cutoff");
+    ui.drag(inner, Point::new(inner.x, inner.y - 40.0), 8);
+    let turned_inside = cutoff_of(&ui, svf, cutoff);
+    assert!(turned_inside > turned);
+    ui.app.show_level(&ModulePath::root());
+    ui.redraw();
+    assert_eq!(
+        ui.app.session.values.get(2, 0).unwrap().text,
+        crate::param::format(
+            &ui.app
+                .control_target(2, 0, loom_canvas::ControlPart::Main)
+                .unwrap()
+                .spec,
+            turned_inside
+        ),
+        "the surface follows the inner knob"
+    );
+    ui.app.undo();
+    assert_eq!(
+        cutoff_of(&ui, svf, cutoff),
+        turned,
+        "one undo step reverts the inner drag"
+    );
+}
+
+/// The surface control spans the exposed range and writes stay in it from
+/// both sides: a value typed on the surface past the range is clamped,
+/// and so is one typed on the inner knob (sub-patches.md, Exposing).
+#[test]
+fn an_exposed_range_clamps_writes_from_both_sides() {
+    let (mut ui, svf, cutoff) = nested_example_ui();
+    let target = ui.app.control_target(2, 0, loom_canvas::ControlPart::Main).unwrap();
+    assert_eq!(
+        (target.spec.min, target.spec.max),
+        (20.0, 20000.0),
+        "the Filter's exposed range"
+    );
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::TypedValue {
+        module: 2,
+        widget: 0,
+        text: "30000".to_string(),
+    }));
+    assert_eq!(cutoff_of(&ui, svf, cutoff), 20000.0, "clamped to the exposed range");
+    let inner_widget = crate::surface::find_control(
+        ui.app.session.controller.graph(),
+        &ui.app.session.hierarchy,
+        svf.0,
+        "cutoff",
+    )
+    .unwrap();
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::TypedValue {
+        module: svf.0,
+        widget: inner_widget,
+        text: "5".to_string(),
+    }));
+    assert_eq!(cutoff_of(&ui, svf, cutoff), 20.0, "the inner knob is clamped too");
+}

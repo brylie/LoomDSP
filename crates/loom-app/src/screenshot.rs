@@ -328,6 +328,7 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
     crate::scene::update_panel_values_dragging(
         &mut values,
         &loaded.controller,
+        &loaded.hierarchy,
         &BTreeMap::new(),
         &crate::clip::ClipHolds::default(),
         shown.dragging,
@@ -554,7 +555,7 @@ fn find_point(
 ) -> Result<Point, String> {
     let part = crate::targets::find(controller.graph(), hierarchy, target.module, &target.name)?;
     let mut values = PanelValues::new();
-    crate::scene::update_panel_values(&mut values, controller, &BTreeMap::new());
+    crate::scene::update_panel_values(&mut values, controller, hierarchy, &BTreeMap::new());
     crate::targets::world_bounds(scene, &values, part)
         .map(|bounds| bounds.center())
         .map_err(|e| format!("{}:{}: {e}", target.module, target.name))

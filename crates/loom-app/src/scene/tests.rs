@@ -69,7 +69,7 @@ fn modulated_knobs_carry_the_live_value() {
     parts.engine.process(&mut left, &mut right);
 
     let mut values = PanelValues::new();
-    update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+    update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
     let live = values.get(filter.0, knob).unwrap().live.expect("a live value");
     assert_eq!(Some(live), parts.controller.modulated(filter, 0));
     // The resonance knob is not modulated.
@@ -77,7 +77,7 @@ fn modulated_knobs_carry_the_live_value() {
     assert_eq!(values.get(filter.0, other).unwrap().live, None);
 
     parts.controller.set_assignment_enabled(id, false).unwrap();
-    update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+    update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
     assert_eq!(values.get(filter.0, knob).unwrap().live, None);
 }
 
@@ -97,17 +97,17 @@ fn the_frame_refresh_touches_only_live_dots() {
     controller.commit().unwrap();
 
     let mut values = PanelValues::new();
-    update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+    update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
     assert_eq!(values.get(filter.0, knob).unwrap().live, None, "not swapped in yet");
     let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
     parts.engine.process(&mut left, &mut right);
     let before = values.get(filter.0, knob).unwrap().clone();
-    update_live_values(&mut values, &parts.controller);
+    update_live_values(&mut values, &parts.controller, &Hierarchy::flat());
     let after = values.get(filter.0, knob).unwrap().clone();
     assert!(after.live.is_some());
     assert_eq!(WidgetValue { live: None, ..after }, before, "only the dot changed");
     let generation = values.generation();
-    update_live_values(&mut values, &parts.controller);
+    update_live_values(&mut values, &parts.controller, &Hierarchy::flat());
     assert_eq!(values.generation(), generation, "a still value changes nothing");
 }
 
@@ -136,6 +136,7 @@ fn dragging_an_off_assignment_keeps_the_live_dot() {
     update_panel_values_dragging(
         &mut values,
         &parts.controller,
+        &Hierarchy::flat(),
         &BTreeMap::new(),
         &ClipHolds::default(),
         Some(off),
@@ -440,21 +441,21 @@ fn envelope_preview_follows_parameter_edits() {
     let mut parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let envelope = parts.controller.add_module("loom.env.envelope").unwrap();
     let mut values = PanelValues::new();
-    update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+    update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
     let before = values.get(envelope.0, 0).unwrap().shape.clone();
     let panel = panel_view(&loom_modules::env::ENVELOPE);
     assert_eq!(panel.widgets[0].label, "Shape");
     assert!(!panel.widgets[0].is_control());
     assert!(matches!(panel.widgets[1].kind, WidgetViewKind::Segmented { .. }));
     let still_generation = values.generation();
-    update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+    update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
     assert_eq!(
         values.generation(),
         still_generation,
         "an unchanged preview needs no redraw"
     );
     parts.controller.set_param_named(envelope, "attack", 1.0).unwrap();
-    update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+    update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
     assert_ne!(values.get(envelope.0, 0).unwrap().shape, before);
     assert_eq!(panel, panel_view(&loom_modules::env::ENVELOPE));
 }
@@ -470,7 +471,7 @@ fn the_eq_curve_uses_the_engines_sample_rate() {
         parts.controller.set_param_named(eq, "mid_freq", 16_000.0).unwrap();
         parts.controller.set_param_named(eq, "mid_gain", 12.0).unwrap();
         let mut values = PanelValues::new();
-        update_panel_values(&mut values, &parts.controller, &BTreeMap::new());
+        update_panel_values(&mut values, &parts.controller, &Hierarchy::flat(), &BTreeMap::new());
         values.get(eq.0, 0).unwrap().shape.clone()
     };
     let (low, high) = (curve(44_100.0), curve(96_000.0));
@@ -518,6 +519,7 @@ fn hiding_a_whole_row_shortens_the_panel() {
         label: label.into(),
         hover: HoverText::default(),
         hidden: false,
+        exposed: false,
     };
     let mut panel = PanelView {
         width: 6,
@@ -729,7 +731,7 @@ fn an_xy_scope_reads_its_parameters_and_says_its_inputs() {
     let shown = xy_outputs(c, &[xy.0]);
     assert_eq!((shown[0].range, shown[0].rotate), (10.0, true));
     let mut values = PanelValues::new();
-    update_panel_values(&mut values, c, &BTreeMap::new());
+    update_panel_values(&mut values, c, &Hierarchy::flat(), &BTreeMap::new());
     assert_eq!(values.get(xy.0, 0).unwrap().text, "XY scope of X and Y");
 }
 

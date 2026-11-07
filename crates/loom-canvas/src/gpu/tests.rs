@@ -165,6 +165,7 @@ fn each_zoom_draws_the_bars_for_the_text_it_hides() {
                 label: "Gain".into(),
                 hover: crate::scene::HoverText::default(),
                 hidden: false,
+                exposed: false,
             }],
         },
     };
@@ -259,6 +260,7 @@ fn a_box_text_bar_has_its_own_range() {
         label: "n".into(),
         hover: crate::scene::HoverText::default(),
         hidden: false,
+        exposed: false,
     };
     view.panel = crate::scene::PanelView {
         width: 5,

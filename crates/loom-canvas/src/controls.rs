@@ -247,6 +247,9 @@ impl ControlGeometry {
                 if let Some(dot) = modulation_dot(&widget.kind, rect, modulation, palette) {
                     shapes.push(dot);
                 }
+                if widget.exposed {
+                    shapes.push(exposed_mark(rect, palette));
+                }
                 match &widget.kind {
                     WidgetViewKind::Knob { .. } => {
                         let centre = knob_centre(rect);
@@ -693,6 +696,28 @@ fn live_dot(centre: Point, position: f32, palette: &Palette) -> Shape {
         palette.modulation,
         palette.text,
         0.8,
+    )
+}
+
+/// Side of the square that marks a control exposed on a sub-patch's
+/// surface, in world units.
+const EXPOSED_SIDE: f32 = 4.0;
+
+/// The mark of a control inside a sub-patch that is exposed on its
+/// surface: a small filled square in the top left corner of its cell
+/// (sub-patches.md, Exposing). It differs from the round modulation dot
+/// and the hollow ghost ring by shape, so colour need not tell them apart
+/// (NFR-UX-03).
+pub(crate) fn exposed_mark(rect: Rectangle, palette: &Palette) -> Shape {
+    Shape::new(
+        Rectangle::new(
+            Point::new(rect.x + 1.5, rect.y + 1.5),
+            Size::new(EXPOSED_SIDE, EXPOSED_SIDE),
+        ),
+        0.8,
+        palette.text_dim,
+        Color::TRANSPARENT,
+        0.0,
     )
 }
 

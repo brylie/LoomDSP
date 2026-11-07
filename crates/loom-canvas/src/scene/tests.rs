@@ -34,6 +34,7 @@ fn knob(x: u8, y: u8) -> WidgetView {
         label: "k".into(),
         hover: HoverText::default(),
         hidden: false,
+        exposed: false,
     }
 }
 
@@ -49,6 +50,7 @@ fn a_meter_does_not_grow_over_a_widget() {
         label: String::new(),
         hover: HoverText::default(),
         hidden: false,
+        exposed: false,
     };
     let mut m = module(1, 0.0, 0.0);
     m.panel = PanelView {
@@ -131,6 +133,7 @@ fn a_growing_scope_moves_the_controls_below_it_down() {
                 label: String::new(),
                 hover: HoverText::default(),
                 hidden: false,
+                exposed: false,
             },
             knob(0, 8),
         ],
@@ -168,6 +171,7 @@ fn growable_tiles_use_saved_dimensions() {
                 label: String::new(),
                 hover: HoverText::default(),
                 hidden: false,
+                exposed: false,
             },
         ],
     };
@@ -241,6 +245,7 @@ fn controls_take_the_press_and_lights_do_not() {
                 label: "l".into(),
                 hover: HoverText::default(),
                 hidden: false,
+                exposed: false,
             },
         ],
     };
@@ -478,6 +483,7 @@ fn tile_with(kind: WidgetViewKind, width: u8, height: u8) -> ModuleView {
             label: String::new(),
             hover: HoverText::default(),
             hidden: false,
+            exposed: false,
         }],
     };
     tile
@@ -542,6 +548,7 @@ fn a_widget_below_any_trace_display_moves_down() {
             label: String::new(),
             hover: HoverText::default(),
             hidden: false,
+            exposed: false,
         });
         tile.size = Some((40, 40));
         let display = tile.widget_bounds(0).unwrap();
@@ -562,6 +569,7 @@ fn stacked_displays_never_cover_each_other() {
         label: String::new(),
         hover: HoverText::default(),
         hidden: false,
+        exposed: false,
     });
     tile.size = Some((40, 60));
     let upper = tile.widget_bounds(0).unwrap();
@@ -584,6 +592,7 @@ fn a_growing_xy_scope_moves_what_is_below_it() {
         label: String::new(),
         hover: HoverText::default(),
         hidden: false,
+        exposed: false,
     });
     let before = tile.widget_bounds(1).unwrap().y;
     tile.size = Some((40, 40));

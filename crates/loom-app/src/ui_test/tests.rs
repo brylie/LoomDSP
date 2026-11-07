@@ -1806,7 +1806,11 @@ fn two_value_widgets_do_not_redraw_when_nothing_changes() {
     select_new(&mut ui, "test.panel");
     let generation = ui.app.session.values.generation();
     ui.app.refresh_values();
-    crate::scene::update_live_values(&mut ui.app.session.values, &ui.app.session.controller);
+    crate::scene::update_live_values(
+        &mut ui.app.session.values,
+        &ui.app.session.controller,
+        &ui.app.session.hierarchy,
+    );
     assert_eq!(ui.app.session.values.generation(), generation);
 }
 

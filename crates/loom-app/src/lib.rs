@@ -839,6 +839,7 @@ impl App {
         scene::update_panel_values_dragging(
             &mut self.session.values,
             &self.session.controller,
+            &self.session.hierarchy,
             &shown,
             &self.session.clip_holds,
             dragging,
@@ -1612,12 +1613,20 @@ impl App {
             Message::BenchDone => self.quit = true,
             Message::Frame(now) => {
                 self.meter.record(now);
-                scene::update_live_values(&mut self.session.values, &self.session.controller);
+                scene::update_live_values(
+                    &mut self.session.values,
+                    &self.session.controller,
+                    &self.session.hierarchy,
+                );
                 self.session.controller.collect_garbage();
                 self.update_dropouts(now);
             }
             Message::LiveFrame => {
-                scene::update_live_values(&mut self.session.values, &self.session.controller);
+                scene::update_live_values(
+                    &mut self.session.values,
+                    &self.session.controller,
+                    &self.session.hierarchy,
+                );
                 if !self.rig.input.feedback_warned() && self.rig.input.port().is_some() {
                     self.sync_audio_input();
                 }

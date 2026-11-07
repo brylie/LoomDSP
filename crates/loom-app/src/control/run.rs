@@ -200,7 +200,11 @@ impl App {
                 Step::Sample(mut sampling) => {
                     // The live values this frame draws, even when nothing
                     // else asks for frames.
-                    crate::scene::update_live_values(&mut self.session.values, &self.session.controller);
+                    crate::scene::update_live_values(
+                        &mut self.session.values,
+                        &self.session.controller,
+                        &self.session.hierarchy,
+                    );
                     match sampling.record(
                         self.session.controller.graph(),
                         &self.session.hierarchy,

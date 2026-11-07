@@ -21,6 +21,7 @@ fn widget(kind: WidgetViewKind, x: u8, y: u8, label: &str) -> WidgetView {
         label: label.into(),
         hover: HoverText::default(),
         hidden: false,
+        exposed: false,
     }
 }
 

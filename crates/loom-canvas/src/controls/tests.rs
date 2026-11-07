@@ -10,6 +10,7 @@ fn scene() -> Scene {
         label: String::new(),
         hover: crate::scene::HoverText::default(),
         hidden: false,
+        exposed: false,
     };
     Scene::new(
         vec![ModuleView {
@@ -317,6 +318,7 @@ fn the_peak_line_is_never_below_the_bar() {
                     label: String::new(),
                     hover: crate::scene::HoverText::default(),
                     hidden: false,
+                    exposed: false,
                 }],
             },
         }],
@@ -371,6 +373,7 @@ fn stereo_meter_draws_two_tracks() {
                     label: String::new(),
                     hover: crate::scene::HoverText::default(),
                     hidden: false,
+                    exposed: false,
                 }],
             },
         }],
@@ -417,6 +420,7 @@ fn a_result_preview_is_one_joined_line() {
             label: "Shape".into(),
             hover: crate::scene::HoverText::default(),
             hidden: false,
+            exposed: false,
         }],
     };
     let scene = Scene::new(vec![module], Vec::new());

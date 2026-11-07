@@ -35,6 +35,7 @@ fn widget(kind: WidgetViewKind, x: u8) -> WidgetView {
         label: String::new(),
         hover: crate::scene::HoverText::default(),
         hidden: false,
+        exposed: false,
     }
 }
 
@@ -183,6 +184,7 @@ fn the_header_hovers_with_the_module_family() {
     m.hover = HoverText {
         description: "Sources. A test module.".into(),
         name: Some("test.module".into()),
+        note: None,
     };
     let tile = m.bounds();
     let scene = Scene::new(vec![m], Vec::new());

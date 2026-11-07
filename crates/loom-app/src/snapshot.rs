@@ -234,6 +234,10 @@ pub struct Widget {
     /// True while the module's mode does not use this control (ADR-0030).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// True for a control inside a sub-patch that is exposed on its surface
+    /// (sub-patches.md, Exposing). Left out otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub exposed: bool,
     /// Control position, light brightness, or meter RMS level.
     pub position: f32,
     /// A meter's peak level. 0 for other widgets.
@@ -602,6 +606,7 @@ impl App {
                                 kind: kind_name(&w.kind),
                                 bounds: m.widget_bounds(index).map(Rect::from),
                                 hidden: w.hidden,
+                                exposed: w.exposed,
                                 position: value.position,
                                 peak: value.peak,
                                 right: value.right,

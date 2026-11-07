@@ -22,6 +22,7 @@ fn scope_scene() -> Scene {
                 label: String::new(),
                 hover: crate::scene::HoverText::default(),
                 hidden: false,
+                exposed: false,
             }],
         },
     };
@@ -103,6 +104,7 @@ fn history_scene() -> Scene {
             label: String::new(),
             hover: Default::default(),
             hidden: false,
+            exposed: false,
         }],
     };
     let mut scene = scope_scene();
