@@ -380,15 +380,19 @@ impl Patch {
 impl Flat {
     /// Adds every module, cable, assignment, and mapping to `controller`
     /// and commits. Adds a Transport, with a note, when the patch has none
-    /// and the registry has the module; its id is told to `ids`.
+    /// and the registry has the module; its id comes from `ids`, above
+    /// every id the file uses, instances included.
     pub fn apply_to(&self, controller: &mut Controller, ids: &mut FlatIds) -> Result<Vec<LoadWarning>, PatchError> {
         let mut notes = self.warnings.clone();
         for module in &self.modules {
             module.module.add_to(controller, module.id)?;
         }
         if self.transport.is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
-            let id = controller.add_module(TRANSPORT_MODULE)?;
-            ids.reserve_id(id);
+            // From the table, not the controller: a top-level instance owns
+            // its id without a graph module, and the controller would not
+            // know to skip it.
+            let id = ids.next_top()?;
+            controller.add_module_with_id(id, TRANSPORT_MODULE)?;
             notes.push(LoadWarning::TransportAdded { module: id.0 });
         }
         for cable in &self.cables {
