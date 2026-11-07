@@ -125,19 +125,18 @@ impl App {
                     module: ModuleId(to.module),
                     port: to.index,
                 };
-                // The cable into the input goes, also when a port held it.
-                if self.fed_through_port(input) {
-                    let to_end = self.level_end(to);
-                    let level = self.session.level.clone();
-                    if let Some(to_end) = to_end {
-                        self.change_hierarchy("connect", |h| {
-                            h.disconnect(&level, &to_end);
-                            Ok(())
-                        });
-                    }
-                }
+                let through_port = self.fed_through_port(input);
                 match self.session.controller.connect(output, input) {
                     Ok(_) => {
+                        // The record that held the old cable goes with it,
+                        // after the connect, so a refusal changes nothing.
+                        if through_port && let Some(to_end) = self.level_end(to) {
+                            let level = self.session.level.clone();
+                            self.change_hierarchy("connect", |h| {
+                                h.disconnect(&level, &to_end);
+                                Ok(())
+                            });
+                        }
                         self.commit();
                     }
                     Err(e) => self.alerts.warn(e.to_string()),

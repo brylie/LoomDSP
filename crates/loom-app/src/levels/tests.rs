@@ -664,3 +664,63 @@ fn duplicate_with_the_transport_selected_pairs_copies_with_their_originals() {
         2
     );
 }
+
+/// Deleting everything keeps the Transport, its place, and its cable into
+/// a sub-patch port: the controller would refuse it, so it is never part
+/// of the delete.
+#[test]
+fn deleting_everything_keeps_the_transport_and_its_cable_into_a_port() {
+    let text = r#"Patch(
+        version: 1,
+        subpatches: {
+            "clocked": SubPatch(
+                metadata: Metadata(name: "Clocked"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("phase")),
+                    PatchModule(id: 2, kind: "loom.osc.sine@1"),
+                ],
+                cables: [PatchCable(from: (1, "out"), to: (2, "phase"))],
+            ),
+        },
+        modules: [
+            PatchModule(id: 1, kind: "loom.clock.transport@1", position: Some((0.0, 240.0))),
+            PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("clocked"), position: Some((240.0, 0.0))),
+            PatchModule(id: 3, kind: "loom.io.audio-out@1", position: Some((480.0, 0.0))),
+        ],
+        cables: [PatchCable(from: (1, "beat-phase"), to: (2, "phase"))],
+    )"#;
+    let mut app = app_with(text);
+    let sine = app.session.hierarchy.id_at(&ModulePath::top(2), 2).unwrap();
+    assert_eq!(graph_cables(&app).len(), 1);
+    app.session.selection = [1, 3].into_iter().collect();
+    app.edit(|app| {
+        app.delete_modules(&[1, 3]);
+    });
+    assert_eq!(
+        app.session.controller.graph().nodes().count(),
+        2,
+        "the Transport and the sine"
+    );
+    assert_eq!(
+        app.session.positions.get(&1),
+        Some(&(0.0, 240.0)),
+        "the Transport keeps its place"
+    );
+    assert_eq!(
+        app.session
+            .controller
+            .graph()
+            .source_of(loom_core::InputRef { module: sine, port: 0 }),
+        Some(loom_core::OutputRef {
+            module: ModuleId(1),
+            port: 1
+        }),
+        "the Transport still feeds the port"
+    );
+    assert!(
+        app.current_patch()
+            .cables
+            .iter()
+            .any(|c| c.to == (2, "phase".to_string()))
+    );
+}

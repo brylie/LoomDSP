@@ -523,3 +523,181 @@ fn the_breadcrumb_names_and_tiles_follow_the_path() {
     let behind = hierarchy.source_behind(controller.graph(), &ModulePath::root(), &(2, "out".to_string()));
     assert_eq!(behind, Some((hierarchy.id_at(&voice, 7).unwrap(), "out".to_string())));
 }
+
+/// The live cutoff of the state variable filter in the nested example,
+/// wherever it now sits, in a freshly loaded engine.
+fn reloaded_cutoff(saved: &Patch) -> f32 {
+    let (again, _) = load(saved);
+    let graph = again.graph();
+    let (id, node) = graph
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == "loom.filter.svf")
+        .expect("the filter is still there");
+    let index = node.parameter_index("cutoff").unwrap();
+    let _ = id;
+    node.params[index]
+}
+
+/// Dissolving the Filter inside the Voice, whose definition exposes the
+/// Filter's cutoff, keeps that exposure: it now names the filter module
+/// itself, the saved file loads, and the top instance's 300 Hz still
+/// reaches the filter.
+#[test]
+fn dissolving_inside_a_sub_patch_keeps_the_outer_exposure() {
+    let file = nested_example();
+    let (mut controller, mut hierarchy) = load(&file);
+    let before = cables_by_path(&controller, &hierarchy);
+    let voice = ModulePath::top(2);
+    let filter = hierarchy.id_at(&voice, 5).unwrap();
+    hierarchy.dissolve(controller.graph(), filter).unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(cables(&controller).len(), before.len());
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert_eq!(saved.subpatches.len(), 1);
+    let definition = &saved.subpatches["voice"];
+    let svf = definition
+        .modules
+        .iter()
+        .find(|m| m.kind == "loom.filter.svf@1")
+        .expect("the filter is in the Voice now");
+    assert_eq!(definition.exposed.len(), 1);
+    assert_eq!(definition.exposed[0].module, svf.id);
+    assert_eq!(definition.exposed[0].param, "cutoff");
+    assert_eq!(
+        definition.exposed[0].range,
+        Some((20.0, 20000.0)),
+        "the inner range carried up"
+    );
+    assert_eq!(
+        svf.params.get("cutoff"),
+        Some(&1000.0),
+        "the stored value stays the definition's"
+    );
+    assert_eq!(reloaded_cutoff(&saved), 300.0);
+}
+
+/// Collapsing the Filter and the saw inside the Voice carries the Voice's
+/// exposure of the cutoff through the new sub-patch, and the file loads
+/// with the same cutoff.
+#[test]
+fn collapsing_inside_a_sub_patch_keeps_the_outer_exposure() {
+    let file = nested_example();
+    let (mut controller, mut hierarchy) = load(&file);
+    let voice = ModulePath::top(2);
+    let filter = hierarchy.id_at(&voice, 5).unwrap();
+    let saw = hierarchy.id_at(&voice, 4).unwrap();
+    let made = hierarchy
+        .collapse(controller.graph(), &voice, &[filter.0, saw.0])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert_eq!(saved.subpatches.len(), 3);
+    let voice_def = &saved.subpatches["voice"];
+    assert_eq!(voice_def.exposed.len(), 1);
+    assert_eq!(voice_def.exposed[0].module, hierarchy.path_of(made.instance).last());
+    assert_eq!(voice_def.exposed[0].param, "cutoff");
+    let new_def = &saved.subpatches["sub-patch"];
+    assert_eq!(new_def.exposed.len(), 1);
+    assert_eq!(new_def.exposed[0].name, "cutoff");
+    assert_eq!(
+        (new_def.exposed[0].module, new_def.exposed[0].param.as_str()),
+        (5, "cutoff")
+    );
+    assert_eq!(reloaded_cutoff(&saved), 300.0);
+    // The instance between stores no value of its own.
+    let between = voice_def.modules.iter().find(|m| m.is_instance()).unwrap();
+    assert!(between.params.is_empty());
+}
+
+/// Removing a module whose parameter is exposed takes the exposure with
+/// it, and every re-exposure above: the saved file loads again.
+#[test]
+fn removing_an_exposed_module_drops_its_exposure_at_every_level() {
+    let file = nested_example();
+    let (mut controller, mut hierarchy) = load(&file);
+    let svf = hierarchy.id_at(&ModulePath(vec![2, 5]), 3).unwrap();
+    let removed = hierarchy.remove(controller.graph(), svf);
+    assert_eq!(removed.modules, vec![svf]);
+    hierarchy.sync_without(&mut controller, &removed.modules).unwrap();
+    controller.remove_module(svf).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert!(saved.subpatches["filter"].exposed.is_empty());
+    assert!(saved.subpatches["voice"].exposed.is_empty());
+    let top = saved.modules.iter().find(|m| m.id == 2).unwrap();
+    assert!(top.params.is_empty(), "no value for a parameter that is gone");
+    let (again, _) = load(&saved);
+    assert!(again.graph().nodes().all(|(_, n)| n.descriptor.id != "loom.filter.svf"));
+    // Later edits still work.
+    hierarchy
+        .collapse(controller.graph(), &ModulePath::root(), &[1])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+}
+
+/// Removing a connected port takes the cables through it on both sides,
+/// and the saved file loads again.
+#[test]
+fn removing_a_connected_port_drops_the_cables_through_it() {
+    let file = nested_example();
+    let (mut controller, mut hierarchy) = load(&file);
+    let voice = ModulePath::top(2);
+    let pitch = hierarchy.id_at(&voice, 1).unwrap();
+    let removed = hierarchy.remove(controller.graph(), pitch);
+    assert!(removed.modules.is_empty());
+    hierarchy.sync(&mut controller).unwrap();
+    let phase = hierarchy.id_at(&voice, 3).unwrap();
+    assert!(
+        !cables(&controller)
+            .iter()
+            .any(|(from, to)| from.0 == 1 && to.0 == phase.0),
+        "the note no longer reaches the phase generator"
+    );
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert!(!saved.cables.iter().any(|c| c.to == (2, "pitch".to_string())));
+    let (inputs, _) = hierarchy.instance_ports(ModuleId(2));
+    assert_eq!(inputs.len(), 1);
+    load(&saved);
+}
+
+/// Two assignments onto one inner parameter expose it once, and both
+/// saved assignments target that one name.
+#[test]
+fn two_assignments_to_one_parameter_expose_it_once() {
+    let (mut controller, mut hierarchy) = load_text(FLAT);
+    let cutoff = controller
+        .graph()
+        .node(ModuleId(4))
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    for source in [1, 5] {
+        controller
+            .add_assignment(
+                OutputRef {
+                    module: ModuleId(source),
+                    port: 0,
+                },
+                ModuleId(4),
+                cutoff,
+                0.5,
+            )
+            .unwrap();
+    }
+    controller.commit().unwrap();
+    let made = hierarchy
+        .collapse(controller.graph(), &ModulePath::root(), &[2, 3, 4])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let definition = hierarchy.definition_of(made.instance).unwrap();
+    assert_eq!(definition.exposed.len(), 1);
+    let saved = written(&hierarchy, &controller, &Metadata::default());
+    assert_eq!(saved.modulation.len(), 2);
+    assert!(
+        saved
+            .modulation
+            .iter()
+            .all(|a| a.target == (made.instance.0, "Cutoff".to_string()))
+    );
+    let (again, _) = load(&saved);
+    assert_eq!(again.graph().assignments().count(), 2);
+}

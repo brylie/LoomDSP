@@ -692,13 +692,19 @@ impl Hierarchy {
     /// with `layout` giving each tile's position and size by flat id.
     /// The patch's own metadata is left for the caller.
     pub fn unflatten(&self, graph: &Graph, layout: impl Fn(u32) -> Layout) -> Patch {
-        self.unflatten_with(graph, layout, true)
+        self.unflatten_with(graph, layout, true, &BTreeSet::new())
     }
 
     /// [`Hierarchy::unflatten`], with or without the graph's own cables. Without
     /// them, the file holds only what the links say, so flattening it gives
     /// exactly the cables the links imply.
-    fn unflatten_with(&self, graph: &Graph, layout: impl Fn(u32) -> Layout, direct: bool) -> Patch {
+    fn unflatten_with(
+        &self,
+        graph: &Graph,
+        layout: impl Fn(u32) -> Layout,
+        direct: bool,
+        skip: &BTreeSet<ModuleId>,
+    ) -> Patch {
         let mut levels: BTreeMap<ModulePath, Level> = BTreeMap::new();
         levels.entry(ModulePath::root()).or_default();
         for path in self.instances.keys() {
@@ -706,7 +712,7 @@ impl Hierarchy {
         }
 
         // Modules, with the definition-side values of exposed parameters.
-        for (id, node) in graph.nodes() {
+        for (id, node) in graph.nodes().filter(|(id, _)| !skip.contains(id)) {
             let path = self.path_of(id);
             let level = path.parent().unwrap_or_else(ModulePath::root);
             let mut module = ResolvedModule::from_node(id, node, layout(id.0)).write();
@@ -753,6 +759,9 @@ impl Hierarchy {
         // Cables: the graph's between two modules of one level, unless a
         // link implies them, then the links.
         for (from, to) in graph.cables().filter(|_| direct) {
+            if skip.contains(&from.module) || skip.contains(&to.module) {
+                continue;
+            }
             let (from_end, to_end) = cable_ends(graph, from, to);
             if self.implied.contains(&(from_end.clone(), to_end.clone())) {
                 continue;
@@ -764,6 +773,11 @@ impl Hierarchy {
                 continue;
             }
             let level = from_path.parent().unwrap_or_else(ModulePath::root);
+            // A link into the same input wins (invariant 2): the graph's
+            // cable is the one a sync replaces.
+            if self.link_into(&level, &(to_path.last(), to_end.1.clone())).is_some() {
+                continue;
+            }
             levels.entry(level).or_default().cables.push(PatchCable {
                 from: (from_path.last(), from_end.1),
                 to: (to_path.last(), to_end.1),
@@ -777,14 +791,17 @@ impl Hierarchy {
         }
         // Assignments: within a level as they are; across levels through
         // the exposed name or the output port they cross.
-        for (_, assignment) in graph.assignments() {
+        for (_, assignment) in graph
+            .assignments()
+            .filter(|(_, a)| !skip.contains(&a.source.module) && !skip.contains(&a.target))
+        {
             let Some(entry) = self.assignment_entry(graph, assignment) else {
                 continue;
             };
             levels.entry(entry.0).or_default().modulation.push(entry.1);
         }
         // Mappings live with their module.
-        for (_, mapping) in graph.midi_mappings() {
+        for (_, mapping) in graph.midi_mappings().filter(|(_, m)| !skip.contains(&m.target)) {
             let path = self.path_of(mapping.target);
             let level = path.parent().unwrap_or_else(ModulePath::root);
             let param = crate::param_name(graph, mapping.target, mapping.param);
@@ -925,10 +942,19 @@ impl Hierarchy {
     /// also refuses what a file could not hold), and the difference in
     /// cables is applied. A refusal changes nothing. The caller commits.
     pub fn sync(&mut self, controller: &mut Controller) -> Result<(), PatchError> {
+        self.sync_without(controller, &[])
+    }
+
+    /// [`Hierarchy::sync`] with `skip` left out of the file, as if those
+    /// modules were gone: a delete checks and settles the cables first,
+    /// while the modules are still in the graph, so a refusal changes
+    /// nothing. The cables into and out of them are disconnected.
+    pub fn sync_without(&mut self, controller: &mut Controller, skip: &[ModuleId]) -> Result<(), PatchError> {
+        let skip: BTreeSet<ModuleId> = skip.iter().copied().collect();
         self.adopt(controller.graph());
         // What the links imply, from the links alone: a cable the graph
         // holds for a link that is gone must be written as direct now.
-        let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), false);
+        let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), false, &skip);
         let mut scratch = self.ids.clone();
         let flat = links_only.flatten(controller.registry(), &mut scratch)?;
         self.implied = flat
@@ -936,7 +962,7 @@ impl Hierarchy {
             .iter()
             .map(|cable| (cable.from.clone(), cable.to.clone()))
             .collect();
-        let patch = self.unflatten(controller.graph(), |_| Layout::default());
+        let patch = self.unflatten_with(controller.graph(), |_| Layout::default(), true, &skip);
         let mut scratch = self.ids.clone();
         let flat = patch.flatten(controller.registry(), &mut scratch)?;
         let desired: BTreeSet<(End, End)> = flat
@@ -1044,7 +1070,8 @@ impl Hierarchy {
         };
         let level = path.parent().unwrap_or_else(ModulePath::root);
         let lid = path.last();
-        if self.instances.contains_key(&path) {
+        let was_instance = self.instances.contains_key(&path);
+        if was_instance {
             // Everything under the instance, deepest first.
             let under: Vec<ModulePath> = self
                 .ids
@@ -1068,13 +1095,58 @@ impl Hierarchy {
             if let Some(instance) = self.instances.remove(&path) {
                 self.definitions.remove(&instance.key);
             }
-        } else if self.ports.remove(&path).is_none() && graph.node(id).is_some() {
-            removed.modules.push(id);
+        }
+        let mut removed_port = None;
+        if !was_instance {
+            removed_port = self.ports.remove(&path);
+            if removed_port.is_none() && graph.node(id).is_some() {
+                removed.modules.push(id);
+            }
         }
         self.links
             .retain(|link| !(link.level == level && (link.from.0 == lid || link.to.0 == lid)));
+        // A port's cables outside, on the instance's tile.
+        if let Some(port) = removed_port
+            && let Some(parent) = level.parent()
+        {
+            let outside = (level.last(), port.name);
+            self.links
+                .retain(|link| !(link.level == parent && (link.from == outside || link.to == outside)));
+        }
+        // What the enclosing definition exposed on the tile goes with it,
+        // and so does every re-exposure of that above.
+        self.drop_exposed(&level, lid, None);
         removed.tiles.push(id);
         removed
+    }
+
+    /// Drops the enclosing definition's exposed entries that name `member`
+    /// (all of them, or only those on `names`), and the entries above that
+    /// re-exposed them, level by level.
+    fn drop_exposed(&mut self, level: &ModulePath, member: u32, names: Option<&[String]>) {
+        let Some(key) = self.instances.get(level).map(|i| i.key.clone()) else {
+            return;
+        };
+        let Some(definition) = self.definitions.get_mut(&key) else {
+            return;
+        };
+        let goes = |e: &Exposed| e.module == member && names.is_none_or(|names| names.contains(&e.param));
+        let gone: Vec<String> = definition
+            .exposed
+            .iter()
+            .filter(|e| goes(e))
+            .map(|e| e.name.clone())
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        definition.exposed.retain(|e| !goes(e));
+        definition
+            .defaults
+            .retain(|(m, param), _| !(*m == member && names.is_none_or(|names| names.contains(param))));
+        if let Some(parent) = level.parent() {
+            self.drop_exposed(&parent, level.last(), Some(&gone));
+        }
     }
 
     /// Moves every path under `old` to the same place under `new`: the
@@ -1250,8 +1322,8 @@ impl Hierarchy {
             }
         }
 
-        // Assignments across the new boundary (point 4).
-        let mut exposed_names: BTreeSet<String> = BTreeSet::new();
+        // Assignments across the new boundary (point 4): each target is
+        // exposed once, however many assignments reach it.
         for (_, assignment) in graph.assignments() {
             let source_inside = self.path_of(assignment.source.module).starts_with(&instance_path);
             let target_inside = self.path_of(assignment.target).starts_with(&instance_path);
@@ -1278,16 +1350,7 @@ impl Hierarchy {
                     .node(assignment.target)
                     .and_then(|n| n.descriptor.params.get(assignment.param))
                     .map_or(inner_param.clone(), |spec| spec.label.to_string());
-                let name = unique_name(&label, |name| exposed_names.contains(name));
-                exposed_names.insert(name.clone());
-                let definition = self.definitions.get_mut(&key).expect("just inserted");
-                definition.exposed.push(Exposed {
-                    name,
-                    module: member.last(),
-                    param: inner_param.clone(),
-                    range: None,
-                });
-                definition.defaults.insert((member.last(), inner_param), stored);
+                self.expose_on(&key, member.last(), &inner_param, &label, None, stored);
             } else if source_inside && !target_inside && self.level_of(assignment.target) == *level {
                 let source_path = self.path_of(assignment.source.module);
                 let member = instance_path.child(source_path.0[instance_path.0.len()]);
@@ -1302,6 +1365,28 @@ impl Hierarchy {
                 };
                 self.output_port_for(graph, &instance_path, &end, &mut outputs, &mut output_tiles)
                     .map_err(|e| e.to_string())?;
+            }
+        }
+
+        // What the enclosing definition exposed on a member now goes through
+        // the new sub-patch: exposed there under the same name, and the
+        // enclosing entry points at the new instance.
+        if let Some(outer_key) = self.instances.get(level).map(|i| i.key.clone()) {
+            let outer = self.definitions[&outer_key].clone();
+            for entry in outer.exposed.iter().filter(|e| members.contains(&e.module)) {
+                let stored = outer
+                    .defaults
+                    .get(&(entry.module, entry.param.clone()))
+                    .cloned()
+                    .unwrap_or_default();
+                let name = self.expose_on(&key, entry.module, &entry.param, &entry.name, entry.range, stored);
+                let outer = self.definitions.get_mut(&outer_key).expect("the enclosing definition");
+                if let Some(e) = outer.exposed.iter_mut().find(|e| e.name == entry.name) {
+                    e.module = ilid;
+                    e.param = name.clone();
+                }
+                outer.defaults.remove(&(entry.module, entry.param.clone()));
+                outer.defaults.insert((ilid, name), Stored::default());
             }
         }
 
@@ -1339,6 +1424,34 @@ impl Hierarchy {
             from: from.clone(),
         });
         Ok(port)
+    }
+
+    /// Exposes `param` of the member `lid` on the definition `key`, or
+    /// finds it already exposed, and returns the exposed name: `label` made
+    /// unique among the definition's names. `stored` is the member's own
+    /// value and range, kept for the file.
+    fn expose_on(
+        &mut self,
+        key: &str,
+        lid: u32,
+        param: &str,
+        label: &str,
+        range: Option<(f32, f32)>,
+        stored: Stored,
+    ) -> String {
+        let definition = self.definitions.get_mut(key).expect("the definition exists");
+        if let Some(entry) = definition.exposed.iter().find(|e| e.module == lid && e.param == param) {
+            return entry.name.clone();
+        }
+        let name = unique_name(label, |name| definition.exposed.iter().any(|e| e.name == name));
+        definition.exposed.push(Exposed {
+            name: name.clone(),
+            module: lid,
+            param: param.to_string(),
+            range,
+        });
+        definition.defaults.insert((lid, param.to_string()), stored);
+        name
     }
 
     /// The label a new port takes from the inner end it stands for
@@ -1476,7 +1589,7 @@ impl Hierarchy {
         self.links
             .retain(|link| !(link.level == level && (link.from.0 == ilid || link.to.0 == ilid)));
         self.instances.remove(&instance_path);
-        self.definitions.remove(&record.key);
+        let inner = self.definitions.remove(&record.key);
 
         // Move the members out.
         let mut member_ids = Vec::new();
@@ -1493,6 +1606,29 @@ impl Hierarchy {
                 to: rename(&link.to),
                 from: rename(&link.from),
             });
+        }
+        // What the enclosing definition exposed through the dissolved
+        // sub-patch now names the member itself.
+        if let (Some(inner), Some(outer_key)) = (inner, self.instances.get(&level).map(|i| i.key.clone())) {
+            let outer = self.definitions.get_mut(&outer_key).expect("the enclosing definition");
+            let mut moved = Vec::new();
+            for entry in outer.exposed.iter_mut().filter(|e| e.module == ilid) {
+                let Some(through) = inner.exposed.iter().find(|e| e.name == entry.param) else {
+                    continue;
+                };
+                let stored = inner
+                    .defaults
+                    .get(&(through.module, through.param.clone()))
+                    .cloned()
+                    .unwrap_or_default();
+                entry.module = renamed.get(&through.module).copied().unwrap_or(through.module);
+                entry.param = through.param.clone();
+                entry.range = entry.range.or(through.range);
+                moved.push(((entry.module, entry.param.clone()), stored));
+            }
+            outer.exposed.retain(|e| e.module != ilid);
+            outer.defaults.retain(|(member, _), _| *member != ilid);
+            outer.defaults.extend(moved);
         }
         for (from, to) in joins {
             let (from, to) = (rename(&from), rename(&to));

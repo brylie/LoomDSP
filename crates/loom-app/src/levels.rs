@@ -131,17 +131,8 @@ impl App {
             return;
         };
         let level = self.session.level.clone();
-        // A direct cable into a module's input must go first: inside a
-        // sub-patch, two cables into one input have no file form.
-        let input = InputRef {
-            module: ModuleId(to.module),
-            port: to.index,
-        };
-        if self.session.controller.graph().node(input.module).is_some()
-            && self.session.controller.graph().source_of(input).is_some()
-        {
-            let _ = self.session.controller.disconnect(input);
-        }
+        // A direct cable into the same input yields to the record: the
+        // sync replaces it, so nothing is removed before the check passes.
         if self.change_hierarchy("connect", |h| {
             h.connect(&level, from_end, to_end);
             Ok(())
@@ -175,17 +166,30 @@ impl App {
     }
 
     /// Takes tiles out of the patch: modules, with their cables; ports,
-    /// with their cables; sub-patches, with everything inside. Returns
-    /// whether the commit was sent.
+    /// with their cables; sub-patches, with everything inside. The cables
+    /// are checked and settled first, with the modules still in the graph,
+    /// so a refusal changes nothing (ADR-0039, invariant 3). The Transport
+    /// stays, as the controller would refuse it. Returns whether the
+    /// commit was sent.
     pub(crate) fn delete_tiles(&mut self, ids: &[u32]) -> bool {
-        let mut gone: Vec<ModuleId> = Vec::new();
+        let transport = self.session.controller.transport_module();
         let mut candidate = self.session.hierarchy.clone();
+        let mut modules: Vec<ModuleId> = Vec::new();
+        let mut gone: Vec<ModuleId> = Vec::new();
         for &id in ids {
-            let removed = candidate.remove(self.session.controller.graph(), ModuleId(id));
-            for module in &removed.modules {
-                let _ = self.session.controller.remove_module(*module);
+            if Some(ModuleId(id)) == transport {
+                continue;
             }
+            let removed = candidate.remove(self.session.controller.graph(), ModuleId(id));
+            modules.extend(removed.modules);
             gone.extend(removed.tiles);
+        }
+        if let Err(e) = candidate.sync_without(&mut self.session.controller, &modules) {
+            self.alerts.warn(format!("Cannot delete: {e}"));
+            return false;
+        }
+        for module in &modules {
+            let _ = self.session.controller.remove_module(*module);
         }
         for id in &gone {
             self.session.positions.remove(&id.0);
@@ -193,10 +197,7 @@ impl App {
             self.session.selection.remove(&id.0);
             self.session.cameras.remove(&self.session.hierarchy.path_of(*id));
         }
-        match candidate.sync(&mut self.session.controller) {
-            Ok(()) => self.session.hierarchy = candidate,
-            Err(e) => self.alerts.warn(format!("Cannot delete: {e}")),
-        }
+        self.session.hierarchy = candidate;
         self.commit()
     }
 
