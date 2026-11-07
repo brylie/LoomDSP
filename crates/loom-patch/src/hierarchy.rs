@@ -1978,12 +1978,14 @@ fn is_span((min, max): (f32, f32)) -> bool {
 /// lists them, which is the order the file loads them: each instance's
 /// inner ones first, then the level's own (flattening rule 11). The engine
 /// sums assignments on one parameter in id order, so an assignment whose
-/// id is below the one before it in that order is removed and added again
-/// with a fresh id; every other one keeps its id. Two assignments from one
-/// source onto one parameter, which only a hand-written file makes, are
-/// matched to the file's entries in id order, so a settled order stays
-/// settled. A live assignment the file does not hold is left alone.
-/// Returns the ids that changed, as (old, new).
+/// id is below the one before it in that order gets a fresh id; every
+/// other one keeps its id. Two assignments from one source onto one
+/// parameter, which only a hand-written file makes, are matched to the
+/// file's entries in id order, so a settled order stays settled. A live
+/// assignment the file does not hold is left alone. Only the graph
+/// changes, so a full command queue cannot stop this part-way; the
+/// caller's commit carries it to the engine. Returns the ids that changed,
+/// as (old, new).
 fn order_assignments(
     controller: &mut Controller,
     canonical: &[PatchModulation],
@@ -2008,14 +2010,7 @@ fn order_assignments(
         for id in ids {
             let placed = match last {
                 Some(last) if id <= last => {
-                    let moved = controller.remove_assignment(id)?;
-                    let fresh = controller.add_assignment(moved.source, moved.target, moved.param, moved.depth)?;
-                    if moved.polarity.is_some() {
-                        controller.set_assignment_polarity(fresh, moved.polarity)?;
-                    }
-                    if !moved.enabled {
-                        controller.set_assignment_enabled(fresh, false)?;
-                    }
+                    let fresh = controller.renumber_assignment(id)?;
                     renamed.push((id, fresh));
                     fresh
                 }

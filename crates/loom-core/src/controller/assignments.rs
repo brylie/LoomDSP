@@ -62,6 +62,25 @@ impl Controller {
         Ok(())
     }
 
+    /// Gives an assignment a fresh id, the next one, and keeps everything
+    /// else about it: its endpoints, depth, polarity, and enabled state.
+    /// Assignments on one parameter are summed in id order, so this moves
+    /// it behind every other one. Only the graph changes, so it cannot
+    /// fail on a full command queue; it takes effect on the next
+    /// [`Controller::commit`].
+    pub fn renumber_assignment(&mut self, id: AssignmentId) -> Result<AssignmentId, LoomError> {
+        let assignment = self
+            .graph
+            .assignments
+            .remove(&id)
+            .ok_or(LoomError::UnknownAssignment(id))?;
+        let fresh = AssignmentId(self.next_assignment);
+        self.next_assignment += 1;
+        self.graph.assignments.insert(fresh, assignment);
+        self.dirty = true;
+        Ok(fresh)
+    }
+
     /// Assigns an output to a parameter, both named.
     pub fn add_assignment_named(
         &mut self,

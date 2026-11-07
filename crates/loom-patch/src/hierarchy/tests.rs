@@ -1015,3 +1015,52 @@ fn duplicate_assignments_settle_in_one_sync() {
     let again: Vec<AssignmentId> = controller.graph().assignments().map(|(id, _)| id).collect();
     assert_eq!(again, ids);
 }
+
+/// The order sync changes only the graph, so it works with a full command
+/// queue, and a moved assignment keeps its depth, polarity, and state. The
+/// commit that follows can fail and be retried without a half-done reorder,
+/// which the matrix retarget relies on.
+#[test]
+fn the_order_sync_survives_a_full_command_queue() {
+    let config = EngineConfig {
+        command_capacity: 64,
+        ..EngineConfig::default()
+    };
+    let EngineParts { mut controller, .. } = create_engine(loom_modules::registry(), config);
+    let patch = Patch::from_ron(FLAT).unwrap();
+    let mut ids = FlatIds::new();
+    patch.load_with_ids(&mut controller, &mut ids).unwrap();
+    let mut hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).unwrap();
+    let made = hierarchy
+        .collapse(controller.graph(), &ModulePath::root(), &[2, 3, 4])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let inside = ModulePath::top(made.instance.0);
+    let svf = hierarchy.id_at(&inside, 4).unwrap();
+    let saw = hierarchy.id_at(&inside, 3).unwrap();
+    hierarchy.expose(controller.graph(), &inside, 4, "cutoff").unwrap();
+    let cutoff = controller.graph().node(svf).unwrap().parameter_index("cutoff").unwrap();
+    let out = |module: ModuleId| OutputRef { module, port: 0 };
+    let outer = controller.add_assignment(out(ModuleId(5)), svf, cutoff, 0.4).unwrap();
+    controller
+        .set_assignment_polarity(outer, Some(loom_core::Polarity::Unipolar))
+        .unwrap();
+    controller.set_assignment_enabled(outer, false).unwrap();
+    let inner = controller.add_assignment(out(saw), svf, cutoff, 0.7).unwrap();
+
+    // Fill the queue, as a burst of knob turns with no audio callback does.
+    let filled = (0..200).any(|i| controller.set_param(ModuleId(5), 0, i as f32 * 0.01).is_err());
+    assert!(filled, "the command queue is full");
+
+    let renamed = hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(renamed.len(), 1);
+    assert_eq!(renamed[0].0, outer);
+    let moved = controller.graph().assignment(renamed[0].1).unwrap();
+    assert_eq!(
+        (moved.depth, moved.polarity, moved.enabled),
+        (0.4, Some(loom_core::Polarity::Unipolar), false)
+    );
+    let ids: Vec<AssignmentId> = controller.graph().assignments().map(|(id, _)| id).collect();
+    assert_eq!(ids, [inner, renamed[0].1]);
+    assert!(matches!(controller.commit(), Err(loom_core::LoomError::QueueFull)));
+}
