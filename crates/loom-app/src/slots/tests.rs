@@ -611,3 +611,64 @@ fn a_refused_swap_during_a_fade_leaves_everything_in_step() {
     });
     assert_eq!(app.alerts.status(), "Cannot swap Filter: it holds that part already");
 }
+
+/// Swapping from the app to a sub-patch the slot holds brings it back
+/// whole, through the Part list's entry, and the status bar names it.
+#[test]
+fn swapping_back_to_a_held_sub_patch_from_the_app() {
+    let mut app = app_with(COMB_SLOT);
+    let slot = inside(&app, 9);
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.svf@1".to_string()),
+    });
+    app.process(600);
+    app.session.selection = std::collections::BTreeSet::from([slot]);
+    let Inspector::Slot(rows) = app.inspector_model() else {
+        panic!("a slot inspector");
+    };
+    let held = rows
+        .choices
+        .iter()
+        .find(|c| matches!(c.to, SwapTarget::Held(_)))
+        .expect("the held comb is offered");
+    assert_eq!(held.label, "Comb");
+    assert!(!held.current);
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: held.to.clone(),
+    });
+    assert_eq!(app.alerts.status(), "Swapped Filter to Comb.");
+    app.process(600);
+    let part = app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)).unwrap();
+    assert_eq!(app.session.hierarchy.tile_name(part).as_deref(), Some("Comb"));
+    let Inspector::Slot(rows) = app.inspector_model() else {
+        panic!("a slot inspector");
+    };
+    assert_eq!(rows.part.as_deref(), Some("Comb"));
+    assert!(rows.choices.iter().any(|c| c.current && c.label == "Comb"));
+    assert_eq!(
+        rows.role_params.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
+        ["cutoff"]
+    );
+    let saved = app.current_patch();
+    assert_eq!(saved.subpatches.len(), 2, "voice and the live comb");
+}
+
+/// The slot's inspector draws: its name, the role, the Part list, the
+/// role's rows, the part's own rows under its name, and Dissolve slot.
+#[test]
+fn the_slot_inspector_draws() {
+    let (mut app, slot, _) = with_slot();
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    app.session.selection = std::collections::BTreeSet::from([slot]);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.redraw();
+    assert!(ui.text("Slot for Filter").is_some());
+    assert!(ui.text("Ladder only").is_some());
+    assert!(ui.text("Dissolve slot").is_some());
+    assert!(ui.text("Slope").is_some(), "the ladder's own row");
+}

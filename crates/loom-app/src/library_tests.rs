@@ -1043,3 +1043,70 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
         Some("Voices/Voice.ron")
     );
 }
+
+/// A library file that declares the Filter role: a one-pole behind `in`
+/// and `out` ports, with its cutoff exposed under the role's name.
+const COMB_FILE: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Comb"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+        PatchModule(id: 2, kind: "loom.filter.onepole@1", params: {"cutoff": 500.0}),
+        PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out")),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "lowpass"), to: (3, "in")),
+    ],
+    exposed: [Exposed(name: "cutoff", module: 2, param: "cutoff")],
+    roles: ["loom.role.filter@1"],
+)"#;
+
+/// Noise into a top-level Filter slot holding an SVF.
+const SLOT_HOST: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Host"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1", position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 300.0}, position: Some((200.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1", position: Some((600.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.clock.transport@1", position: Some((0.0, 300.0))),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2))), position: Some((200.0, 0.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// A library item whose file declares the slot's role is offered in the
+/// slot's Swap list, and swapping to it inserts it as a copy with the
+/// cutoff carried across (sub-patches.md, Slots: Swap).
+#[test]
+fn a_library_item_that_declares_the_role_can_fill_a_slot() {
+    let dir = library();
+    write(&dir.0, "Filters/Comb.ron", COMB_FILE);
+    let mut app = app_with(SLOT_HOST, &dir.0);
+    let labels: Vec<String> = app.tile_menu_items(9).into_iter().map(|(l, _)| l).collect();
+    assert!(labels.contains(&"Swap to Comb".to_string()), "{labels:?}");
+    assert!(!labels.contains(&"Swap to Voice".to_string()), "Voice declares no role");
+    let _ = app.update(Message::SwapSlot {
+        slot: 9,
+        to: crate::slots::SwapTarget::Library("Filters/Comb.ron".to_string()),
+    });
+    assert_eq!(app.alerts.status(), "Swapped Filter to Comb.");
+    let part = app.session.hierarchy.part_of_slot(ModuleId(9)).expect("a part");
+    assert_eq!(app.session.hierarchy.tile_name(part).as_deref(), Some("Comb"));
+    assert_eq!(app.session.hierarchy.library_of(part), None, "inserted as a copy");
+    let target = app
+        .session
+        .hierarchy
+        .exposed_target(part, 0)
+        .expect("the comb's cutoff");
+    let node = app.session.controller.graph().node(target.module).unwrap();
+    let index = loom_core::ModuleNames::parameter_index(node, "cutoff").unwrap();
+    assert_eq!(node.params[index], 300.0, "the SVF's cutoff came across");
+    let saved = app.current_patch();
+    assert_eq!(saved.subpatches.len(), 1);
+    assert_eq!(saved.subpatches.values().next().unwrap().roles, ["loom.role.filter@1"]);
+}
