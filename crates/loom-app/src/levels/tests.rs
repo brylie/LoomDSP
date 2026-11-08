@@ -1395,6 +1395,42 @@ fn each_nested_surface_marks_the_ghost_on_its_own_span() {
     );
 }
 
+/// The inspector of tile `tile`, as the snapshot shows it, as text.
+fn inspector_text(app: &mut App, tile: u32) -> String {
+    app.session.selection = [tile].into_iter().collect();
+    serde_json::to_string(&app.ui_snapshot().inspector).unwrap()
+}
+
+/// A mapping row on a parameter a surface narrows says, in one friendly
+/// sentence, that Low and High are a share of the exposed range, and names
+/// the surface that gives it: on the inner row and on the sub-patch tile's
+/// row. With no surface left, the note goes (sub-patches.md, MIDI follows
+/// the range).
+#[test]
+fn a_mapping_row_says_its_range_is_a_share_of_the_exposed_range() {
+    let mut app = narrowed_nested();
+    let (svf, cutoff) = svf_cutoff(&app);
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    app.session.controller.map_midi(control, svf, cutoff).unwrap();
+    app.commit();
+    let note = "Low and High are a share of 200.0 Hz to 2000 Hz, the range exposed on Filter.";
+    let inner = inspector_text(&mut app, svf.0);
+    assert!(inner.contains(note), "the inner row: {inner}");
+    let surface = inspector_text(&mut app, 2);
+    assert!(surface.contains(note), "the Voice tile's row: {surface}");
+
+    // Off the Voice's surface, the Filter's own exposure still gives it.
+    app.unexpose(2, 0);
+    assert!(inspector_text(&mut app, svf.0).contains(note));
+    let filter = app.session.hierarchy.id_at(&ModulePath::top(2), 5).unwrap();
+    app.unexpose(filter.0, 0);
+    let inner = inspector_text(&mut app, svf.0);
+    assert!(!inner.contains("range_note"), "no surface, no note: {inner}");
+}
+
 /// The name typed in the sub-patch's inspector renames it as one undo
 /// step: the tile and the breadcrumb follow, and the key stays.
 #[test]
