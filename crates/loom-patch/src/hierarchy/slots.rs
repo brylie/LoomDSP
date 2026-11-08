@@ -603,6 +603,23 @@ impl Hierarchy {
                 });
             }
         }
+        // An exposure of a role parameter the part has follows it; one of an
+        // optional parameter the part lacks has nothing behind it and goes,
+        // with its re-exposures above.
+        let has = |role_param: &str| {
+            self.slot_param_target(&slot_path, role_param)
+                .is_some_and(|(id, own)| graph.node(id).is_some_and(|n| n.parameter_index(&own).is_some()))
+        };
+        let gone: Vec<String> = self
+            .exposures_on(&level, slot_lid)
+            .into_iter()
+            .filter(|role_param| !has(role_param))
+            .collect();
+        if !gone.is_empty() {
+            self.drop_exposed(&level, slot_lid, Some(&gone));
+            self.top_exposed
+                .retain(|e| !(level.is_root() && e.module == slot_lid && gone.contains(&e.param)));
+        }
         if let Some(key) = self.instances.get(&level).map(|i| i.key.clone()) {
             let definition = self.definitions.get_mut(&key).expect("the level's definition");
             let mut moved = Vec::new();
@@ -624,6 +641,26 @@ impl Hierarchy {
         }
         self.remove_slot_record(&slot_path, &state);
         Ok(transient)
+    }
+
+    /// The parameter names exposed on the member `lid` of `level`: by the
+    /// level's definition, or by the patch's own surface at the top.
+    fn exposures_on(&self, level: &ModulePath, lid: u32) -> Vec<String> {
+        match self.definition_at(level) {
+            Some(definition) => definition
+                .exposed
+                .iter()
+                .filter(|e| e.module == lid)
+                .map(|e| e.param.clone())
+                .collect(),
+            None if level.is_root() => self
+                .top_exposed
+                .iter()
+                .filter(|e| e.module == lid)
+                .map(|e| e.param.clone())
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     /// Forgets a slot and the definitions its held sub-patches kept.

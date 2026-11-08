@@ -712,3 +712,42 @@ fn a_save_during_a_fade_keeps_modulations_from_the_slot() {
     assert_eq!(again.graph().assignments().count(), 2);
     let _ = hierarchy_again;
 }
+
+/// Dissolving a slot whose part lacks an exposed optional role parameter
+/// drops that exposure, and keeps the ones the part has, so the dissolve
+/// is not refused.
+#[test]
+fn dissolve_drops_an_exposure_the_part_cannot_carry() {
+    let (mut controller, mut hierarchy) = load(&Patch::from_ron(SLOT_FILE).unwrap());
+    let level = ModulePath::top(2);
+    let slot = inside(&hierarchy, 9);
+    // Drive is a role parameter the ladder has: exposed on the slot.
+    hierarchy.expose(controller.graph(), &level, 3, "drive").unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    assert_eq!(hierarchy.definition_at(&level).unwrap().exposed.len(), 2);
+    let layout = |_: u32| Layout::default();
+    let svf = hierarchy
+        .swap_to_module(&mut controller, &layout, slot, "loom.filter.svf@1")
+        .unwrap()
+        .part;
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    hierarchy.finish_all_fades(&mut controller);
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    let removed = hierarchy.dissolve_slot(controller.graph(), slot).expect("dissolves");
+    assert!(removed.is_empty());
+    hierarchy
+        .sync(&mut controller)
+        .expect("the file has no missing parameter");
+    controller.commit().unwrap();
+    let exposed = &hierarchy.definition_at(&level).unwrap().exposed;
+    assert_eq!(exposed.len(), 1, "{exposed:?}");
+    assert_eq!(
+        (exposed[0].module, exposed[0].param.as_str()),
+        (hierarchy.path_of(svf).last(), "cutoff")
+    );
+    let saved = written(&hierarchy, &controller);
+    assert_eq!(saved.subpatches["voice"].exposed.len(), 1);
+}

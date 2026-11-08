@@ -1019,8 +1019,12 @@ impl Hierarchy {
                     .filter(|(p, s)| p.parent().as_ref() == Some(&level) && s.part == Some(lid))
                 {
                     for ((member, param), stored) in &definition.defaults {
-                        if *member == slot_path.last() {
-                            apply_stored(&mut module, &slot.own_param(param), stored);
+                        // An optional role parameter the part lacks has no
+                        // place on it: the exposure stays on the slot with
+                        // nothing behind it until a part that has it is in.
+                        let own = slot.own_param(param);
+                        if *member == slot_path.last() && node.parameter_index(&own).is_some() {
+                            apply_stored(&mut module, &own, stored);
                         }
                     }
                 }
