@@ -329,6 +329,17 @@ impl Loaded {
             let flat = match patch.flatten(controller.registry(), &mut ids) {
                 Ok(flat) => flat,
                 Err(error) if patch != stored => {
+                    // The refresh's notes describe changes that are not
+                    // applied now; what still holds for the stored copies
+                    // is a file that was missing, unreadable, or in a loop.
+                    notes.retain(|note| {
+                        matches!(
+                            note,
+                            loom_patch::LoadWarning::LibraryMissing { .. }
+                                | loom_patch::LoadWarning::LibraryUnreadable { .. }
+                                | loom_patch::LoadWarning::LibraryLoop { .. }
+                        )
+                    });
                     notes.push(loom_patch::LoadWarning::LibraryNotUsed {
                         reason: error.to_string(),
                     });

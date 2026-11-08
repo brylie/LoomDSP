@@ -907,12 +907,11 @@ fn a_changed_library_file_never_stops_the_patch_from_opening() {
         &VOICE_FILE.replace("module: 4, param: \"gain\"", "module: 99, param: \"gain\""),
     );
     assert!(app.open_path(&patch_file));
+    let status = app.ui_snapshot().status;
+    assert!(status.contains("The library's changes could not be used ("), "{status}");
     assert!(
-        app.ui_snapshot()
-            .status
-            .contains("The library's changes could not be used ("),
-        "{}",
-        app.ui_snapshot().status
+        !status.contains("Updated from the library") && !status.contains("was removed"),
+        "no refresh is claimed: {status}"
     );
     assert_eq!(inner_gain(app, voice), 0.5, "the stored copy plays");
     assert_eq!(
