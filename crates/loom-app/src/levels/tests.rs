@@ -1274,6 +1274,127 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     assert_eq!(saved.subpatches["filter"].midi[0].target, (3, "cutoff".to_string()));
 }
 
+/// The nested example's flat filter and its cutoff index.
+fn svf_cutoff(app: &App) -> (ModuleId, usize) {
+    use loom_core::ModuleNames;
+    let (svf, node) = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
+        .unwrap();
+    (svf, node.parameter_index("cutoff").unwrap())
+}
+
+/// Maps CC 74 on the filter's cutoff as a Pickup that waits, sends `value`,
+/// and lets the app follow, as a player moving the hardware far from the
+/// value would.
+fn waiting_pickup_at(app: &mut App, value: u8) {
+    let (svf, cutoff) = svf_cutoff(app);
+    let options = loom_core::MidiMappingOptions {
+        mode: loom_core::MidiMode::Pickup,
+        ..loom_core::MidiMappingOptions::DEFAULT
+    };
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    app.session
+        .controller
+        .map_midi_with(control, svf, cutoff, options)
+        .unwrap();
+    app.commit();
+    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    assert!(loom_host_desktop::send_midi(
+        &midi,
+        loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value])
+    ));
+    app.process(128);
+    let _ = app.update(Message::Midi);
+    assert_eq!(app.session.controller.midi_waiting().len(), 1, "the pickup waits");
+}
+
+/// Where the ghost mark shows on tile `tile`'s control `widget`.
+fn ghost_on(app: &App, tile: u32, widget: usize) -> f32 {
+    app.session
+        .values
+        .get(tile, widget)
+        .and_then(|value| value.ghost)
+        .unwrap_or_else(|| panic!("no ghost on tile {tile}, control {widget}"))
+}
+
+/// The cutoff knob's index on the filter tile.
+fn cutoff_knob(app: &App) -> usize {
+    let (svf, _) = svf_cutoff(app);
+    let node = app.session.controller.graph().node(svf).unwrap();
+    node.descriptor
+        .panel
+        .widgets
+        .iter()
+        .position(|w| w.binds("cutoff"))
+        .unwrap()
+}
+
+/// A waiting pickup's ghost mark sits at the hardware's value on every
+/// control that shows the parameter, each on its own scale: the surface
+/// knob and the sub-patch inspector row on the exposed 200 to 2000 Hz, the
+/// inner knob on 20 to 20 000 Hz (sub-patches.md, MIDI follows the range).
+/// The ends are checked, because the middle lands near the middle of both.
+#[test]
+fn a_ghost_mark_sits_on_each_controls_own_scale() {
+    for (value, surface, inner) in [(0, 0.0, 1.0 / 3.0), (127, 1.0, 2.0 / 3.0)] {
+        let mut app = narrowed_nested();
+        waiting_pickup_at(&mut app, value);
+        let (svf, _) = svf_cutoff(&app);
+        assert!(
+            (ghost_on(&app, 2, 0) - surface).abs() < 1e-3,
+            "CC {value} on the surface"
+        );
+        let knob = cutoff_knob(&app);
+        assert!((ghost_on(&app, svf.0, knob) - inner).abs() < 1e-3, "CC {value} inside");
+
+        app.session.selection = [2].into_iter().collect();
+        let Inspector::SubPatch(rows) = app.inspector_model() else {
+            panic!("the sub-patch tile's inspector");
+        };
+        let ghost = rows.params[0].row.mapping_options.as_ref().and_then(|m| m.ghost);
+        assert!(
+            ghost.is_some_and(|g| (g - surface).abs() < 1e-3),
+            "CC {value} on the inspector row: {ghost:?}"
+        );
+    }
+}
+
+/// With a range on each level, each surface puts the mark on its own span:
+/// the Voice's 500 to 1000 Hz, and the Filter's 200 to 2000 Hz inside it.
+#[test]
+fn each_nested_surface_marks_the_ghost_on_its_own_span() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+    let text = std::fs::read_to_string(root.join("nested-subtractive.ron")).unwrap();
+    let text = text
+        .replace("range: Some((20.0, 20000.0))", "range: Some((200.0, 2000.0))")
+        .replace(
+            r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff")]"#,
+            r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff", range: Some((500.0, 1000.0)))]"#,
+        );
+    let mut app = app_with(&text);
+    // The value sits at 500 Hz, the bottom of the Voice's range, so CC 127
+    // is far away and stands for 1000 Hz.
+    waiting_pickup_at(&mut app, 127);
+    let filter_tile = app
+        .session
+        .hierarchy
+        .id_at(&ModulePath::top(2), 5)
+        .expect("the Filter tile inside the Voice");
+    assert!((ghost_on(&app, 2, 0) - 1.0).abs() < 1e-3, "the Voice surface");
+    let on_filter = 5f32.log10();
+    assert!(
+        (ghost_on(&app, filter_tile.0, 0) - on_filter).abs() < 1e-3,
+        "the Filter surface: 1000 Hz of 200 to 2000"
+    );
+}
+
 /// The name typed in the sub-patch's inspector renames it as one undo
 /// step: the tile and the breadcrumb follow, and the key stays.
 #[test]

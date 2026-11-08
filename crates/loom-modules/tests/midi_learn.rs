@@ -569,7 +569,7 @@ fn a_waiting_pickup_never_overwrites_a_newer_edit() {
     assert_eq!(step(&mut parts).0, 0.9);
     let waiting = parts.controller.midi_waiting();
     assert_eq!(waiting.len(), 1, "the hardware moved, so a ghost shows");
-    assert!((waiting[0].position - 66.0 / 127.0).abs() < 1e-6);
+    assert!((waiting[0].value - 66.0 / 127.0).abs() < 1e-6);
     assert_eq!(parts.controller.sync_midi(), vec![], "nothing to copy");
     assert_eq!(parts.controller.graph().node(id).unwrap().params[0], 0.9);
 

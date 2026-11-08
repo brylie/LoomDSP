@@ -39,7 +39,8 @@ pub struct Armed {
 /// One waiting pickup whose hardware has moved.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Ghost {
-    position: f32,
+    /// The parameter value the hardware stands for.
+    value: f32,
     /// Changes when the hardware moves.
     sequence: u32,
     moved: Instant,
@@ -69,7 +70,7 @@ impl Ghosts {
             marks.insert(
                 param,
                 Ghost {
-                    position: w.position,
+                    value: w.value,
                     sequence: w.sequence,
                     moved,
                 },
@@ -78,7 +79,7 @@ impl Ghosts {
         let shown: BTreeMap<Param, f32> = marks
             .iter()
             .filter(|(_, mark)| now.saturating_duration_since(mark.moved) < GHOST_TIME)
-            .map(|(&param, mark)| (param, mark.position))
+            .map(|(&param, mark)| (param, mark.value))
             .collect();
         let changed = shown != self.shown;
         self.marks = marks;
@@ -86,7 +87,8 @@ impl Ghosts {
         changed
     }
 
-    /// The marks that show, by parameter, as positions from 0 to 1.
+    /// The marks that show, by parameter, as parameter values. Each control
+    /// places a mark on its own scale.
     pub fn shown(&self) -> &BTreeMap<Param, f32> {
         &self.shown
     }

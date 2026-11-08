@@ -847,6 +847,7 @@ impl App {
         scene::set_ghosts(
             &mut self.session.values,
             &self.session.controller,
+            &self.session.hierarchy,
             self.session.learn.ghosts().shown(),
         );
         // A scope's window or trigger may have changed.

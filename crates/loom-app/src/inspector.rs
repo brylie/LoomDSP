@@ -526,13 +526,15 @@ impl App {
                 open: self.session.learn.options_open((id, index)),
                 // Only a slider has a travel to mark, and a learn
                 // mode row has no slider (midi-learn.md, Mapping modes).
+                // The mark sits on this row's scale: the knob's, or the
+                // exposed range on a sub-patch row.
                 ghost: self
                     .session
                     .learn
                     .ghosts()
                     .shown()
                     .get(&(id, index))
-                    .copied()
+                    .map(|&value| spec.normalize(value).clamp(0.0, 1.0))
                     .filter(|_| spec.options.choices.is_empty() && !self.session.learn.is_on()),
                 options: m.options,
             }

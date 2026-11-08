@@ -111,12 +111,12 @@ fn a_removed_module_disarms_its_parameter() {
     assert!(learn.shown().unwrap().armed.is_none());
 }
 
-/// A waiting pickup's hardware at `position`, moved `sequence` times.
-fn waiting(position: f32, sequence: u32) -> MidiWaiting {
+/// A waiting pickup's hardware at `value`, moved `sequence` times.
+fn waiting(value: f32, sequence: u32) -> MidiWaiting {
     MidiWaiting {
         target: ModuleId(4),
         param: 0,
-        position,
+        value,
         sequence,
     }
 }

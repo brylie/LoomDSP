@@ -173,16 +173,14 @@ impl Controller {
                     return None;
                 }
                 // The hardware stands for a place in the span MIDI sweeps,
-                // which an exposed range narrows. The knob spans the
-                // selected range, so the mark is moved to the knob's scale.
+                // which an exposed range narrows. Reported as a value, so
+                // every control can place it on its own scale.
                 let node = self.graph.nodes.get(&mapping.target)?;
                 let swept = node.midi_spec(mapping.param)?;
-                let knob = node.spec(mapping.param)?;
-                let value = swept.denormalize(mapping.options.position(entry.value));
                 Some(MidiWaiting {
                     target: mapping.target,
                     param: mapping.param,
-                    position: knob.normalize(value).clamp(0.0, 1.0),
+                    value: swept.denormalize(mapping.options.position(entry.value)),
                     sequence: entry.sequence,
                 })
             })

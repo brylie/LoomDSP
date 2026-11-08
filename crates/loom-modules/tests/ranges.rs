@@ -240,11 +240,11 @@ fn set_limits_refuses_what_is_not_a_span() {
     assert_eq!(c.graph().node(mul).unwrap().limit(0), kept, "a refusal changes nothing");
 }
 
-/// A waiting pickup's ghost mark sits where the hardware's value is on the
-/// knob, which spans the selected range, not on the narrower span MIDI
-/// sweeps.
+/// A waiting pickup reports the value the hardware stands for in the
+/// narrower span MIDI sweeps, so each control can place the ghost mark on
+/// its own scale.
 #[test]
-fn a_ghost_mark_sits_on_the_knob_scale() {
+fn a_waiting_pickup_reports_the_value_in_the_swept_span() {
     const CC: MidiControl = MidiControl {
         channel: 0,
         controller: 21,
@@ -268,6 +268,6 @@ fn a_ghost_mark_sits_on_the_knob_scale() {
     render(&mut parts, 64);
     let waiting = parts.controller.midi_waiting();
     assert_eq!(waiting.len(), 1, "the pickup waits");
-    // CC 127 stands for 0.1, which is 0.55 of the way along -1 to 1.
-    assert!((waiting[0].position - 0.55).abs() < 1e-6, "{:?}", waiting[0]);
+    // CC 127 stands for the top of the limit, not of the knob's -1 to 1.
+    assert!((waiting[0].value - 0.1).abs() < 1e-6, "{:?}", waiting[0]);
 }

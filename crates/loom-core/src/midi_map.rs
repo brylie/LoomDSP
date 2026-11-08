@@ -212,11 +212,11 @@ pub struct MidiWaiting {
     pub target: ModuleId,
     /// Parameter index on [`Self::target`].
     pub param: usize,
-    /// The position the hardware stands for, from 0 to 1, on the scale of
-    /// the parameter's knob ([`Node::spec`](crate::Node::spec)), so the mark
-    /// sits where the knob would be even when an exposed range narrows what
-    /// MIDI sweeps.
-    pub position: f32,
+    /// The parameter value the hardware stands for, in the parameter's own
+    /// units. Each control that shows the parameter places the mark on its
+    /// own scale: the module's knob on the selected range, a sub-patch
+    /// surface on the exposed range (sub-patches.md, Exposing).
+    pub value: f32,
     /// Changes each time the hardware moves.
     pub sequence: u32,
 }
