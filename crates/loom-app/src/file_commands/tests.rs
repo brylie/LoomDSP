@@ -60,6 +60,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     });
     app.session.matrix.focused = true;
     app.session.step_name = Some("step".to_string());
+    app.session.linked_before = Some(std::collections::BTreeMap::new());
     // Overlays close, all but the Preferences window.
     app.overlays.help = Some(help::Help::shortcuts());
 
@@ -130,6 +131,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         patch_info,
         edits,
         step_name,
+        linked_before,
         gestures,
         value_draft,
         learn,
@@ -171,6 +173,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(sizes.is_empty());
     assert!(!mode_key.contains(&(99, 0, 1)));
     assert_eq!(gestures.adding(), None);
+    assert!(linked_before.is_none());
     assert!(value_draft.is_none());
     assert!(!text_focus.any);
     assert!(lights.is_empty());

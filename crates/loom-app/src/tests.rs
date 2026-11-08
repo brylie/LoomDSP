@@ -1401,7 +1401,13 @@ fn a_patch_with_sub_patches_opens() {
         cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
     )"#;
     let nested = Patch::from_ron(text).unwrap();
-    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(nested))).unwrap();
+    let loaded = Loaded::read(
+        EngineConfig::default(),
+        false,
+        Source::Recovered(Box::new(nested)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
     assert!(!loaded.hierarchy.is_flat());
     assert_eq!(
         loaded.controller.graph().nodes().count(),
@@ -1415,7 +1421,15 @@ fn a_patch_with_sub_patches_opens() {
     let port = loaded.hierarchy.id_at(&loom_patch::ModulePath::top(1), 1).unwrap();
     assert_eq!(loaded.positions.get(&port.0), Some(&(10.0, 20.0)), "the port tile");
     let flat = Patch::new("Flat");
-    assert!(Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(flat))).is_ok());
+    assert!(
+        Loaded::read(
+            EngineConfig::default(),
+            false,
+            Source::Recovered(Box::new(flat)),
+            &loom_patch::NoLibrary
+        )
+        .is_ok()
+    );
 }
 
 /// Saved tile dimensions survive session loading and patch creation.
@@ -1432,7 +1446,13 @@ fn session_keeps_saved_tile_dimensions() {
         size: Some((24, 16)),
         ranges: Default::default(),
     });
-    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+    let loaded = Loaded::read(
+        EngineConfig::default(),
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
     assert_eq!(loaded.sizes.get(&7), Some(&(24, 16)));
     let scene = scene::build(
         &loaded.controller,

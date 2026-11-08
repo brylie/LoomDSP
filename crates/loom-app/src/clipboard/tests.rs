@@ -1,6 +1,6 @@
 use super::*;
 use loom_core::ParamRange;
-use loom_core::{EngineConfig, EngineParts, MidiControl, create_engine};
+use loom_core::{EngineConfig, EngineParts, LoomError, MidiControl, create_engine};
 
 fn parts() -> EngineParts {
     create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(48_000.0))
@@ -53,7 +53,7 @@ fn copy_writes_a_versioned_patch_with_inside_cables_and_assignments_only() {
     let positions = spread(&c);
     // The selection leaves out the voice's phase and the second oscillator.
     let selection = ids(&[sine, lfo_phase, lfo_a, vca]);
-    let text = Group::from_selection(c.graph(), &positions, &selection, false).to_text();
+    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &selection, false).to_text();
     let patch = Patch::from_ron(&text).unwrap();
 
     assert_eq!(patch.version, loom_patch::CURRENT_VERSION);
@@ -78,7 +78,7 @@ fn paste_adds_new_ids_with_values_cables_and_assignments_in_order() {
     let voice = voice(&mut c);
     c.commit().unwrap();
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &positions, &ids(&voice), false).to_text();
+    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&voice), false).to_text();
 
     let before: BTreeSet<u32> = c.graph().nodes().map(|(id, _)| id.0).collect();
     let group = Group::from_text(&text, c.registry()).unwrap();
@@ -122,7 +122,14 @@ fn duplicate_keeps_incoming_links_and_drops_outgoing_ones() {
 
     // Duplicate the sine and the multiply. The phase and the oscillators
     // stay outside; the audio output is outgoing.
-    let group = Group::from_selection(c.graph(), &positions, &ids(&[sine, vca]), true);
+    let group = Group::from_selection(
+        c.graph(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&[sine, vca]),
+        true,
+    );
     let at = group.top_left().unwrap();
     let new = add_flat(
         &group,
@@ -214,7 +221,7 @@ fn a_duplicated_voice_sounds_like_one_built_by_hand() {
         let c = &mut duplicated.controller;
         let first = voice(c);
         let mut positions = spread(c);
-        let group = Group::from_selection(c.graph(), &positions, &ids(&first), true);
+        let group = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&first), true);
         let new = add_flat(&group, c, &mut positions, (0.0, 0.0)).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
         let join = c.add_module("loom.mix.join").unwrap();
@@ -260,13 +267,19 @@ fn paste_refuses_text_it_cannot_add_whole() {
     let refuse = |text: &str| Group::from_text(text, registry).unwrap_err();
     assert_eq!(refuse("hello"), NOTHING_TO_PASTE);
     assert_eq!(refuse("Patch(version: 1)"), NOTHING_TO_PASTE);
-    // Sub-patches wait for the editor (#51, slice 2); an instance must not
-    // paste as a silent placeholder.
+    // A sub-patch tile pastes with its definition; one without a
+    // definition cannot.
     let nested = r#"Patch(version: 1, subpatches: {"v": SubPatch(metadata: Metadata(name: "Voice"))}, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"))])"#;
-    assert_eq!(refuse(nested), "Cannot paste: sub-patches are not supported yet");
+    assert_eq!(Group::from_text(nested, registry).unwrap().describe(), "Voice");
     let orphan =
         r#"Patch(version: 1, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"))])"#;
-    assert_eq!(refuse(orphan), "Cannot paste: sub-patches are not supported yet");
+    assert_eq!(refuse(orphan), "Cannot paste: there is no sub-patch `v`");
+    // Only a patch-wide module was copied: nothing to paste.
+    let transport = r#"Patch(version: 1, modules: [PatchModule(id: 1, kind: "loom.clock.transport@1")])"#;
+    assert_eq!(
+        refuse(transport),
+        "Cannot paste: only the Transport was copied, and a patch has one, at the top level"
+    );
     assert!(refuse("Patch(version: 99, modules: [(id: 1, kind: \"loom.osc.sine\")])").contains("newer"));
     let unknown = refuse("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])");
     assert!(
@@ -297,7 +310,7 @@ fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
     c.add_unknown_with_id(id, unknown.clone()).unwrap();
     c.set_label(id, Some("Missing".into()));
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &positions, &ids(&[id]), false).to_text();
+    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&[id]), false).to_text();
     assert!(Patch::from_ron(&text).is_ok(), "clipboard remains patch text");
     let group = Group::from_text(&text, c.registry()).unwrap();
     let new = add_flat(&group, &mut c, &mut positions, (1200.0, 600.0)).unwrap();
@@ -333,7 +346,15 @@ fn copy_unknown_module_remaps_named_links() {
     c.add_assignment_named(unknown, "out", phase, "tune", 0.5).unwrap();
     c.add_assignment_named(phase, "phase", unknown, "amount", 0.25).unwrap();
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &positions, &ids(&[unknown, phase]), false).to_text();
+    let text = Group::from_selection(
+        c.graph(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&[unknown, phase]),
+        false,
+    )
+    .to_text();
     let group = Group::from_text(&text, c.registry()).unwrap();
     let added = add_flat(&group, &mut c, &mut positions, (1200.0, 600.0)).unwrap();
     let new_unknown = ModuleId(added[0]);
@@ -359,7 +380,14 @@ fn a_group_too_big_for_the_patch_is_refused_before_anything_is_added() {
     let a = c.add_module("loom.osc.sine").unwrap();
     let b = c.add_module("loom.osc.saw").unwrap();
     c.commit().unwrap();
-    let group = Group::from_selection(c.graph(), &BTreeMap::new(), &ids(&[a, b]), false);
+    let group = Group::from_selection(
+        c.graph(),
+        &flat(c.graph()),
+        &root(),
+        &BTreeMap::new(),
+        &ids(&[a, b]),
+        false,
+    );
     let why = group.check(&c).unwrap_err();
     assert_eq!(why, "the patch has room for 1 more module");
     assert_eq!(c.graph().nodes().count(), 2);
@@ -390,7 +418,14 @@ fn a_paste_larger_than_the_command_queue_goes_in_over_several_commits() {
     let free = c.free_module_slots();
 
     // Two copies of three modules do not fit in a queue of four.
-    let group = Group::from_selection(c.graph(), &positions, &ids(&voice_ids), false);
+    let group = Group::from_selection(
+        c.graph(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&voice_ids),
+        false,
+    );
     add_flat(&group, c, &mut positions, (0.0, 0.0)).unwrap();
     add_flat(&group, c, &mut positions, (0.0, 0.0)).unwrap();
     assert!(matches!(c.commit(), Err(LoomError::QueueFull)));
@@ -411,7 +446,7 @@ fn copy_and_paste_keep_control_ranges() {
     c.set_range(mul, 0, ParamRange::new(-5.0, 5.0)).unwrap();
     c.set_param(mul, 0, 4.0).unwrap();
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &positions, &ids(&[mul]), false).to_text();
+    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&[mul]), false).to_text();
     assert!(text.contains(r#"ranges: {"gain": (-5.0, 5.0)}"#), "{text}");
     let group = Group::from_text(&text, c.registry()).unwrap();
     let new = add_flat(&group, &mut c, &mut positions, (1200.0, 600.0)).unwrap();
@@ -431,16 +466,36 @@ fn copy_paste_and_duplicate_keep_a_known_module_label() {
     let mut positions = spread(&c);
     let label = |c: &Controller, id: u32| c.graph().node(ModuleId(id)).unwrap().label.clone();
 
-    let text = Group::from_selection(c.graph(), &positions, &ids(&[sine, plain]), false).to_text();
+    let text = Group::from_selection(
+        c.graph(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&[sine, plain]),
+        false,
+    )
+    .to_text();
     assert!(text.contains(r#"label: Some(" Lead ")"#), "{text}");
     let pasted = Group::from_text(&text, c.registry()).unwrap();
     let pasted = add_flat(&pasted, &mut c, &mut positions, (1200.0, 600.0)).unwrap();
     assert_eq!(label(&c, pasted[0]).as_deref(), Some(" Lead "));
     assert_eq!(label(&c, pasted[1]), None);
 
-    let duplicated = Group::from_selection(c.graph(), &positions, &ids(&[sine]), true);
+    let duplicated = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&[sine]), true);
     let duplicated = add_flat(&duplicated, &mut c, &mut positions, (1400.0, 600.0)).unwrap();
     assert_eq!(label(&c, duplicated[0]).as_deref(), Some(" Lead "));
+}
+
+/// The hierarchy of a flat patch over the modules of `graph`.
+fn flat(graph: &Graph) -> Hierarchy {
+    let mut hierarchy = Hierarchy::flat();
+    hierarchy.adopt(graph);
+    hierarchy
+}
+
+/// The top level.
+fn root() -> ModulePath {
+    ModulePath::root()
 }
 
 /// Adds a group to a flat patch at the top level, as the app does with a
@@ -450,8 +505,9 @@ fn add_flat(
     c: &mut Controller,
     positions: &mut BTreeMap<u32, (f32, f32)>,
     origin: (f32, f32),
-) -> Result<Vec<u32>, LoomError> {
-    let mut hierarchy = loom_patch::Hierarchy::flat();
-    hierarchy.adopt(c.graph());
-    group.add(c, &mut hierarchy, &loom_patch::ModulePath::root(), positions, origin)
+) -> Result<Vec<u32>, String> {
+    let mut hierarchy = flat(c.graph());
+    group
+        .add(c, &mut hierarchy, &root(), positions, &mut BTreeMap::new(), origin)
+        .map(|added| added.ids)
 }

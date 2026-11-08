@@ -40,7 +40,13 @@ const NESTED: &str = r#"Patch(
 /// The app with [`NESTED`] open, no audio.
 fn nested_app() -> App {
     let patch = Patch::from_ron(NESTED).unwrap();
-    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+    let loaded = Loaded::read(
+        EngineConfig::default(),
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
     App::assemble(
         Err("test".to_string()),
         48_000.0,
@@ -265,7 +271,13 @@ const FLAT: &str = r#"Patch(
 /// The app with `text` open, no audio.
 fn app_with(text: &str) -> App {
     let patch = Patch::from_ron(text).unwrap();
-    let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+    let loaded = Loaded::read(
+        EngineConfig::default(),
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
     App::assemble(
         Err("test".to_string()),
         48_000.0,
@@ -442,20 +454,6 @@ fn a_modulation_across_a_boundary_is_refused() {
     assert_eq!(app.session.controller.graph().assignments().count(), 0);
 }
 
-/// Copy, cut, and duplicate refuse a selection with a sub-patch tile.
-#[test]
-fn copy_of_a_sub_patch_tile_is_refused() {
-    let mut app = nested_app();
-    app.session.selection = [1, 2].into_iter().collect();
-    assert!(app.copy().is_none());
-    assert_eq!(app.ui_snapshot().status, super::NO_COPY_YET);
-    assert!(app.cut().is_none());
-    assert_eq!(app.ui_snapshot().status, "Cannot cut a sub-patch yet");
-    app.duplicate();
-    assert_eq!(app.ui_snapshot().status, "Cannot duplicate a sub-patch yet");
-    assert_eq!(app.session.controller.graph().nodes().count(), 4);
-}
-
 /// Inside a sub-patch, the cable from a port into a module can be taken
 /// away and put back, and outside, a new cable into the sub-patch's port
 /// replaces the one there. The graph follows each time.
@@ -617,7 +615,7 @@ fn duplicate_inside_a_sub_patch_keeps_the_cable_from_the_port() {
 fn the_tile_menu_knows_sub_patches() {
     let app = nested_app();
     let labels = |id: u32| app.tile_menu_items(id).into_iter().map(|(l, _)| l).collect::<Vec<_>>();
-    assert_eq!(labels(2), ["Open", "Dissolve sub-patch"]);
+    assert_eq!(labels(2), ["Open", "Dissolve sub-patch", "Save to library"]);
     assert_eq!(labels(1), ["Help", "Make sub-patch"]);
 }
 
@@ -806,7 +804,13 @@ fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
     // And the file loads with that cable.
     let (reloaded, _) = {
         let patch = saved.clone();
-        let loaded = Loaded::read(EngineConfig::default(), false, Source::Recovered(Box::new(patch))).unwrap();
+        let loaded = Loaded::read(
+            EngineConfig::default(),
+            false,
+            Source::Recovered(Box::new(patch)),
+            &loom_patch::NoLibrary,
+        )
+        .unwrap();
         (loaded.controller, loaded.hierarchy)
     };
     assert_eq!(

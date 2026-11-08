@@ -177,11 +177,18 @@ impl App {
             .into()
         };
         let label = |s: &'static str| text(s).size(style::CONTROL);
-        let file = row![
+        let mut file = row![
             button(label("New")).on_press(Message::File(FileAction::New)),
             button(label("Open")).on_press(Message::File(FileAction::Open)),
             button(label("Save")).on_press(Message::File(FileAction::Save)),
             button(label("Save As")).on_press(Message::File(FileAction::SaveAs)),
+        ];
+        // Inside a sub-patch, the file commands also save that sub-patch to
+        // the library (sub-patches.md, Library).
+        if !self.session.level.is_root() {
+            file = file.push(button(label("Save to library")).on_press(Message::File(FileAction::SaveToLibrary)));
+        }
+        file = file.extend([
             tip(
                 button(label("Browse")).on_press(Message::File(FileAction::Browse)),
                 if cfg!(target_os = "macos") {
@@ -195,7 +202,7 @@ impl App {
                     .on_press_maybe((!self.rig.recent.files().is_empty()).then_some(Message::OpenRecent)),
                 self.recent_hover(),
             ),
-        ];
+        ]);
         let add = tip(
             button(label("Add module")).on_press(Message::OpenBrowser),
             "Or press A over the canvas, or double-click empty canvas",

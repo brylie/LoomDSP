@@ -302,6 +302,10 @@ enum Message {
     MakeSubPatch(u32),
     /// Dissolve this sub-patch tile (the tile menu).
     DissolveSubPatch(u32),
+    /// Save this sub-patch tile to the library (the tile menu).
+    SaveToLibrary(u32),
+    /// Make this linked sub-patch tile a plain copy (the tile menu).
+    Unlink(u32),
     /// A message for the open module browser.
     Browser(browser::Message),
     /// A message for the open probe menu.
@@ -549,6 +553,8 @@ impl Message {
             | Self::OpenTile(_)
             | Self::MakeSubPatch(_)
             | Self::DissolveSubPatch(_)
+            | Self::SaveToLibrary(_)
+            | Self::Unlink(_)
             | Self::Browser(_)
             | Self::ProbeMenu(_)
             | Self::AddProbe { .. }
@@ -592,6 +598,9 @@ pub(crate) enum FileAction {
     SaveAs,
     /// Open your patches browser (`docs/design/patch-metadata.md`).
     Browse,
+    /// Save the sub-patch whose inside the canvas shows to the library
+    /// (`docs/design/sub-patches.md`, Library).
+    SaveToLibrary,
     /// The window asked to close: quit, unless the player keeps the patch.
     Close,
 }
@@ -690,10 +699,10 @@ struct Loaded {
 }
 
 impl App {
-    /// The patch as it would be saved now.
-    fn current_patch(&self) -> Patch {
+    /// Each tile's layout as the file writes it, by flat id.
+    pub(crate) fn layout_fn(&self) -> impl Fn(u32) -> loom_patch::Layout + '_ {
         let session = &self.session;
-        let layout = |id: u32| {
+        move |id: u32| {
             let shown = session.positions.get(&id);
             let position = match session.unknown_positions.get(&id) {
                 // A placeholder nobody moved keeps the position from its
@@ -705,10 +714,17 @@ impl App {
                 position,
                 size: session.sizes.get(&id).copied(),
             }
-        };
+        }
+    }
+
+    /// The patch as it would be saved now.
+    fn current_patch(&self) -> Patch {
+        let session = &self.session;
         // Through the hierarchy, so the sub-patches are written as the file
         // holds them (ADR-0039, invariant 5).
-        let mut patch = session.hierarchy.unflatten(session.controller.graph(), layout);
+        let mut patch = session
+            .hierarchy
+            .unflatten(session.controller.graph(), self.layout_fn());
         patch.metadata = session.document.info().clone();
         patch
     }
@@ -1259,6 +1275,11 @@ impl App {
                     generation,
                 })
             }
+            // The library folder is read for the browser's list as it opens.
+            Message::Canvas(CanvasEvent::OpenBrowser { world, at, area }) => {
+                self.canvas_event(CanvasEvent::OpenBrowser { world, at, area });
+                self.read_library_for_browser()
+            }
             Message::Control(call) => self.control(call),
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
@@ -1371,8 +1392,25 @@ impl App {
                 self.overlays.close_browser();
                 self.add_module(descriptor, world);
             }
+            browser::Outcome::Insert { item, linked, world } => {
+                self.overlays.close_browser();
+                self.insert_library_item(&item, linked, world);
+            }
         }
         task.map(Message::Browser)
+    }
+
+    /// Starts reading the library folder for the open browser's list of
+    /// sub-patches (sub-patches.md, Library). With no folder, the list
+    /// holds modules only.
+    fn read_library_for_browser(&mut self) -> Task<Message> {
+        if self.overlays.browser().is_none() {
+            return Task::none();
+        }
+        match self.rig.store.saved().library_folder() {
+            Some(folder) => browser::read_library(folder).map(Message::Browser),
+            None => Task::none(),
+        }
     }
 
     /// Adds a module with its top-left corner at a world point and selects
@@ -1514,6 +1552,14 @@ impl App {
                 self.overlays.close_tile_menu();
                 self.session.selection = BTreeSet::from([id]);
                 self.dissolve_subpatch();
+            }
+            Message::SaveToLibrary(id) => {
+                self.overlays.close_tile_menu();
+                self.save_to_library(ModuleId(id));
+            }
+            Message::Unlink(id) => {
+                self.overlays.close_tile_menu();
+                self.unlink(id);
             }
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();

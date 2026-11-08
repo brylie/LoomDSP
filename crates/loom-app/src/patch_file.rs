@@ -4,9 +4,9 @@
 //! WebAssembly, which has no files (AGENTS.md, hard rule 6). The app is the
 //! only part of LoomDSP that saves a patch, so the file code lives here.
 
-use loom_patch::{Patch, PatchError};
+use loom_patch::{Library, LibraryError, Patch, PatchError};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A patch file that could not be read or written.
 #[derive(Debug)]
@@ -105,6 +105,57 @@ pub fn save(patch: &Patch, path: impl AsRef<Path>) -> Result<(), PatchFileError>
         let _ = std::fs::remove_file(&temp);
         io(source)
     })
+}
+
+/// The library folder as the loader reads linked sub-patches from it
+/// (`docs/design/sub-patches.md`, Linked library items). A library path is
+/// relative to the folder, with `/` between its parts; one that leaves the
+/// folder is treated as missing.
+#[derive(Debug, Clone)]
+pub struct FolderLibrary {
+    /// The library folder.
+    pub root: PathBuf,
+}
+
+impl FolderLibrary {
+    /// The file a library path names, or `None` for a path that is not a
+    /// plain relative one.
+    pub fn file(&self, path: &str) -> Option<PathBuf> {
+        let mut file = self.root.clone();
+        for part in path.split('/') {
+            if part.is_empty() || part == "." || part == ".." || part.contains(['\\', ':']) {
+                return None;
+            }
+            file.push(part);
+        }
+        Some(file)
+    }
+
+    /// The library path of `file`, when it is inside the folder: its parts
+    /// below the folder joined by `/`, as a definition's `library` writes it.
+    pub fn path_of(&self, file: &Path) -> Option<String> {
+        let relative = file.strip_prefix(&self.root).ok()?;
+        let parts: Vec<String> = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        (!parts.is_empty()).then(|| parts.join("/"))
+    }
+}
+
+impl Library for FolderLibrary {
+    fn read(&self, path: &str) -> Result<Patch, LibraryError> {
+        let Some(file) = self.file(path) else {
+            return Err(LibraryError::Missing);
+        };
+        match load(&file) {
+            Ok(patch) => Ok(patch),
+            Err(PatchFileError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                Err(LibraryError::Missing)
+            }
+            Err(error) => Err(LibraryError::Unreadable(error.to_string())),
+        }
+    }
 }
 
 #[cfg(test)]

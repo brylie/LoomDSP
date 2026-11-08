@@ -5,7 +5,7 @@ use crate::{App, Message, RightTab, alerts, browser, clipboard, undo};
 use iced::advanced::widget::operation::{self, Focusable, Outcome};
 use iced::advanced::widget::{Id, Operation};
 use iced::{Point, Task};
-use loom_core::{InputRef, LoomError, ModuleId};
+use loom_core::{LoomError, ModuleId};
 use std::collections::BTreeSet;
 
 /// Why toolbar Undo or Redo is disabled.
@@ -181,6 +181,9 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     pub(crate) fn begin_edit(&mut self) {
+        if self.session.linked_before.is_none() {
+            self.session.linked_before = Some(self.linked_fingerprints());
+        }
         let (controller, hierarchy, level, positions, sizes) = (
             &self.session.controller,
             &self.session.hierarchy,
@@ -193,10 +196,44 @@ impl App {
         });
     }
 
+    /// What each linked sub-patch would save as now, by definition key.
+    fn linked_fingerprints(&self) -> std::collections::BTreeMap<String, String> {
+        self.session
+            .hierarchy
+            .linked_fingerprints(self.session.controller.graph(), self.layout_fn())
+    }
+
+    /// Makes every linked sub-patch the edit in progress changed inside a
+    /// plain copy, so the next load does not replace the edit, and says so
+    /// (sub-patches.md, Copies and editing). Called as the edit's step is
+    /// recorded, so the unlink is part of the same step. An exposed value
+    /// belongs to the instance, not the definition, so changing one keeps
+    /// the link.
+    fn unlink_edited(&mut self) {
+        let Some(before) = self.session.linked_before.take() else {
+            return;
+        };
+        if before.is_empty() {
+            return;
+        }
+        let after = self.linked_fingerprints();
+        let changed: Vec<String> = before
+            .iter()
+            .filter(|(key, text)| after.get(*key).is_some_and(|now| now != *text))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in changed {
+            if let Some(name) = self.session.hierarchy.unlink_key(&key) {
+                self.alerts.say(crate::levels::now_a_copy(&name));
+            }
+        }
+    }
+
     /// Ends the recording and adds a step if the patch changed.
     pub(crate) fn record(&mut self) {
         // A command's name is for this step only, also when no step is made.
         let step_name = self.session.step_name.take();
+        self.unlink_edited();
         let (controller, hierarchy, level, positions, sizes) = (
             &self.session.controller,
             &self.session.hierarchy,
@@ -212,6 +249,7 @@ impl App {
     /// Closes the open gesture, of either kind, and records it.
     pub(crate) fn end_gesture(&mut self) {
         let step_name = self.session.step_name.take();
+        self.unlink_edited();
         let (controller, hierarchy, level, positions, sizes) = (
             &self.session.controller,
             &self.session.hierarchy,
@@ -504,17 +542,14 @@ impl App {
         text.map_or_else(Task::none, iced::clipboard::write)
     }
 
-    /// The selected modules, or `None` and a status bar note when nothing
-    /// is selected.
+    /// The selected tiles, or `None` and a status bar note when nothing is
+    /// selected. A port tile and the Transport are left out, so a selection
+    /// of only those is nothing.
     pub(crate) fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
-        // The clipboard cannot carry a sub-patch or a port yet
-        // (sub-patches.md, Editor model).
-        if self.structural_in_selection() {
-            self.alerts.warn(crate::levels::NO_COPY_YET.replace("copy", verb));
-            return None;
-        }
         let group = clipboard::Group::from_selection(
             self.session.controller.graph(),
+            &self.session.hierarchy,
+            &self.session.level,
             &self.session.positions,
             &self.session.selection,
             incoming,
@@ -572,110 +607,61 @@ impl App {
     }
 
     /// Duplicates the selection next to it, keeping incoming cables and
-    /// assignments.
+    /// assignments, also those that come in through a port or from a
+    /// sub-patch tile (sub-patches.md, Editor model).
     pub(crate) fn duplicate(&mut self) {
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
         }
-        let Some(mut group) = self.selected_group("duplicate", true) else {
+        let Some(group) = self.selected_group("duplicate", true) else {
             return;
         };
-        // A cable that comes in through a port is a boundary record, not a
-        // graph cable the copy could take: it is added back as a record
-        // from the same port (sub-patches.md, Editor model).
-        let level = self.session.level.clone();
-        let (graph, hierarchy) = (self.session.controller.graph(), &self.session.hierarchy);
-        group.drop_outside_cables(|from, to| {
-            hierarchy.is_implied(
-                graph,
-                from,
-                InputRef {
-                    module: ModuleId(to.0),
-                    port: to.1,
-                },
-            )
-        });
-        // The group's members, in its order: the selection may also hold the
-        // Transport, which a group leaves out, and the new ids follow the
-        // group.
-        let originals: Vec<u32> = group.ids().collect();
-        let through_ports: Vec<(loom_patch::End, u32, String)> = hierarchy
-            .level_cables(graph, &level)
-            .into_iter()
-            .filter(|cable| cable.link)
-            .filter_map(|cable| {
-                let id = hierarchy.id_at(&level, cable.to.0)?;
-                originals.contains(&id.0).then_some((cable.from, id.0, cable.to.1))
-            })
-            .collect();
         let at = group.top_left().unwrap_or((0.0, 0.0));
         let offset = clipboard::DUPLICATE_OFFSET;
-        self.add_group_then(
-            &group,
-            (at.0 + offset, at.1 + offset),
-            "duplicate",
-            "Duplicated",
-            |app, ids| {
-                if through_ports.is_empty() {
-                    return;
-                }
-                let copies: std::collections::BTreeMap<u32, u32> =
-                    originals.iter().copied().zip(ids.iter().copied()).collect();
-                app.change_hierarchy("duplicate", |h, _| {
-                    for (from, original, input) in through_ports {
-                        if let Some(copy) = copies.get(&original) {
-                            h.connect(&level, from, (h.path_of(ModuleId(*copy)).last(), input));
-                        }
-                    }
-                    Ok(())
-                });
-            },
-        );
+        self.add_group(&group, (at.0 + offset, at.1 + offset), "duplicate", "Duplicated");
     }
 
     /// Adds a group as one step and selects it, or changes nothing and says
-    /// why.
+    /// why. A sub-patch tile in it gets a definition of its own. Patch-wide
+    /// modules the text held are left out, and the status bar says so
+    /// (sub-patches.md, rule 8).
     pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: (f32, f32), verb: &str, done: &str) {
-        self.add_group_then(group, origin, verb, done, |_, _| {});
-    }
-
-    /// [`App::add_group`], with `finish` run on the new ids inside the same
-    /// step, before the commit.
-    pub(crate) fn add_group_then(
-        &mut self,
-        group: &clipboard::Group,
-        origin: (f32, f32),
-        verb: &str,
-        done: &str,
-        finish: impl FnOnce(&mut Self, &[u32]),
-    ) {
         if let Err(why) = group.check(&self.session.controller) {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
             return;
         }
         self.session.step_name = Some(format!("{verb} {}", group.describe()));
         self.edit(|app| {
-            match group.add(
+            // On a candidate, so a refusal leaves the hierarchy as it was
+            // (ADR-0039, invariant 3).
+            let mut candidate = app.session.hierarchy.clone();
+            let added = group.add(
                 &mut app.session.controller,
-                &mut app.session.hierarchy,
+                &mut candidate,
                 &app.session.level,
                 &mut app.session.positions,
+                &mut app.session.sizes,
                 origin,
-            ) {
-                Ok(ids) => {
-                    group.apply_sizes(&ids, &mut app.session.sizes);
-                    finish(app, &ids);
-                    app.session.selection = ids.into_iter().collect();
+            );
+            match added {
+                Ok(added) => {
+                    app.session.hierarchy = candidate;
+                    app.assignments_renumbered(&added.renamed);
+                    app.session.selection = added.ids.into_iter().collect();
                     if app.commit() {
-                        app.alerts.say(format!("{done} {}", group.describe()));
+                        let status = format!("{done} {}", group.describe());
+                        match group.left_out_note() {
+                            Some(note) => app.alerts.warn(format!("{status}. {note}")),
+                            None => app.alerts.say(status),
+                        }
                     }
                 }
-                Err(e) => {
+                Err(why) => {
                     // The rollback freed the new modules' slots. Only a commit
                     // hands them back, so the next paste has room.
                     app.commit();
-                    app.alerts.warn(format!("Cannot {verb}: {e}"));
+                    app.alerts.warn(format!("Cannot {verb}: {why}"));
                 }
             }
         });

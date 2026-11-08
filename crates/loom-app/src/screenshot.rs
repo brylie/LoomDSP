@@ -312,7 +312,9 @@ fn shown(
 /// PNG.
 pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
     let config = loom_core::EngineConfig::with_sample_rate(48_000.0);
-    let mut loaded = crate::Loaded::read(config, args.test_modules, args.source())?;
+    // A headless run reads no preferences, so it has no library folder:
+    // linked sub-patches draw from their stored copies.
+    let mut loaded = crate::Loaded::read(config, args.test_modules, args.source(), &loom_patch::NoLibrary)?;
     let options = &args.view;
     let logical = options.size.map_or(CANVAS, ImageSize::logical);
     let (scene, shown) = shown(

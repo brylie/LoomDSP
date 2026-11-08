@@ -51,7 +51,7 @@ pub use hierarchy::{
     Stored, Tile,
 };
 pub mod library;
-pub use library::{LeftOut, Library, LibraryError, NoLibrary, SCALE_MODULE};
+pub use library::{LeftOut, Library, LibraryError, NoLibrary, SCALE_MODULE, reachable_keys};
 pub mod warning;
 pub use warning::{LoadLevel, LoadWarning, RangeReason};
 

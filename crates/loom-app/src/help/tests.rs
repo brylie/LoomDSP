@@ -20,6 +20,7 @@ fn bundled_help_examples_load() {
             loom_core::EngineConfig::default(),
             false,
             crate::Source::Recovered(Box::new(patch)),
+            &loom_patch::NoLibrary,
         );
         assert!(
             session.is_ok(),

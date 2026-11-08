@@ -522,7 +522,7 @@ fn refresh_table(
 
 /// The keys of the definitions `root` uses, through any depth, in the
 /// order they are first met: the instances in id order, depth first.
-pub(crate) fn reachable_keys(root: &SubPatch, table: &BTreeMap<String, SubPatch>) -> Vec<String> {
+pub fn reachable_keys(root: &SubPatch, table: &BTreeMap<String, SubPatch>) -> Vec<String> {
     let mut found = Vec::new();
     let mut pending: Vec<&SubPatch> = vec![root];
     while let Some(definition) = pending.pop() {
