@@ -92,7 +92,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Release downloads](releases.md) | [ADR-0027](../adr/0027-prebuilt-release-downloads.md) | Agreed, M1 |
 | [Unknown modules](unknown-modules.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Agreed, M1 |
 | [Frame meter](frame-meter.md) | None (extends the [M1 canvas benchmarks](../benchmarks/p1-canvas.md)) | Agreed, developer tooling |
-| [Sub-patches](sub-patches.md) | [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) | Agreed, M2 |
+| [Sub-patches](sub-patches.md) | [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md), [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) | Agreed, M2; the file, flattening, the editor, exposing, the library, and linking Implemented; roles, slots, and modes Agreed |
 | [Scale and tuning](scale-and-tuning.md) | [ADR-0033](../adr/0033-one-scale-and-tuning-per-patch.md) | Agreed, M2 |
 | [Module data](module-data.md) | [ADR-0032](../adr/0032-module-data-in-typed-slots.md), [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed; buffer data M1, rest M2 |
 | [Polyphony and voice allocation](polyphony.md) | [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md), refining [ADR-0020](../adr/0020-inferred-channel-count.md) | Agreed, M2; the M3 sources are followed as checks only |

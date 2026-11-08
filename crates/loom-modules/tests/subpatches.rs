@@ -513,3 +513,63 @@ fn a_control_change_at_the_top_renders_as_the_top_of_the_range() {
     assert!(left.iter().any(|&s| s != 0.0), "the patch makes sound");
     assert!(left == typed_left && right == typed_right);
 }
+
+/// A sub-patch written as a library file and inserted into a fresh patch
+/// renders bit-identical to the patch it came from, at block sizes 1, 77,
+/// and 512: Save to library and Insert keep what plays (sub-patches.md,
+/// Library).
+#[test]
+fn a_sub_patch_saved_to_the_library_plays_the_same_inserted_again() {
+    use loom_patch::{FlatIds, Hierarchy, Layout, ModulePath};
+    let nested = load_patch(&patch_path("nested-subtractive.ron"));
+    // The Voice tile as a library file, from the nested example.
+    let file = {
+        let mut ids = FlatIds::new();
+        let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+        nested.load_with_ids(&mut parts.controller, &mut ids).expect("loads");
+        let hierarchy = Hierarchy::from_patch(&nested, parts.controller.graph(), ids).expect("reads");
+        hierarchy
+            .definition_file(parts.controller.graph(), |_| Layout::default(), ModuleId(2))
+            .expect("the Voice tile has a file")
+    };
+    assert_eq!(file.metadata.name, "Voice");
+    assert_eq!(file.subpatches.len(), 1, "the Filter comes along");
+    // The example without its Voice, with the file inserted in its place.
+    let mut host = nested.clone();
+    host.subpatches.clear();
+    host.modules.retain(|m| m.id != 2);
+    host.cables.retain(|c| c.from.0 != 2 && c.to.0 != 2);
+    for block in [1, 77, 512] {
+        let (left, right) = render(&mut load(&nested), FRAMES, block, &[NOTE]);
+        let config = EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+        };
+        let mut parts = create_engine(loom_modules::registry(), config);
+        let mut ids = FlatIds::new();
+        host.load_with_ids(&mut parts.controller, &mut ids)
+            .expect("the host loads");
+        let mut hierarchy = Hierarchy::from_patch(&host, parts.controller.graph(), ids).expect("reads");
+        let inserted = hierarchy
+            .insert(&mut parts.controller, &ModulePath::root(), &file, None)
+            .expect("the file inserts");
+        let lid = hierarchy.path_of(inserted.instance).last();
+        let root = ModulePath::root();
+        hierarchy.connect(&root, (1, "pitch".to_string()), (lid, "pitch".to_string()));
+        hierarchy.connect(&root, (1, "gate".to_string()), (lid, "gate".to_string()));
+        hierarchy.connect(&root, (lid, "out".to_string()), (9, "in".to_string()));
+        hierarchy.connect(&root, (lid, "filter".to_string()), (11, "in".to_string()));
+        hierarchy.sync(&mut parts.controller).expect("syncs");
+        // The example's instance sets the cutoff; the file holds the
+        // definition's own value.
+        let cutoff = hierarchy.exposed_target(inserted.instance, 0).expect("the cutoff");
+        parts
+            .controller
+            .set_param_named(cutoff.module, &cutoff.param, 300.0)
+            .unwrap();
+        parts.controller.commit().unwrap();
+        let (again_left, again_right) = render(&mut parts, FRAMES, block, &[NOTE]);
+        assert!(left.iter().any(|&s| s != 0.0), "the patch makes sound");
+        assert!(left == again_left && right == again_right, "block {block} differs");
+    }
+}

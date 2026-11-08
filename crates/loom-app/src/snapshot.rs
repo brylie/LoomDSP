@@ -685,7 +685,9 @@ pub fn headless(args: &Args) -> Result<App, String> {
         output_safety: args.output_safety.unwrap_or_default(),
         ..loom_core::EngineConfig::with_sample_rate(48_000.0)
     };
-    let loaded = crate::Loaded::read(config, args.test_modules, args.source())?;
+    // A headless run reads no preferences, so it has no library folder:
+    // linked sub-patches show their stored copies.
+    let loaded = crate::Loaded::read(config, args.test_modules, args.source(), &loom_patch::NoLibrary)?;
     let mut app = App::assemble(
         Err("headless".to_string()),
         48_000.0,

@@ -86,6 +86,70 @@ pub enum LoadWarning {
         /// What loaded differently inside it.
         warning: Box<LoadWarning>,
     },
+    /// Linked sub-patches whose library file differed from their stored
+    /// copy, so the copy was replaced (`docs/design/sub-patches.md`, Linked
+    /// library items).
+    LibraryRefreshed {
+        /// The refreshed sub-patches' names, in table order.
+        names: Vec<String>,
+    },
+    /// A linked sub-patch's library file is missing, so its stored copy
+    /// is used (sub-patches.md, rule 5: a patch always opens).
+    LibraryMissing {
+        /// The sub-patch's name.
+        name: String,
+        /// The library path the definition names.
+        path: String,
+    },
+    /// A linked sub-patch's library file does not load, so its stored copy
+    /// is used.
+    LibraryUnreadable {
+        /// The sub-patch's name.
+        name: String,
+        /// The library path the definition names.
+        path: String,
+        /// Why the file does not load.
+        reason: String,
+    },
+    /// A refreshed library file no longer has a port or an exposed
+    /// parameter the patch used, so what named it was removed
+    /// (sub-patches.md, Linked library items).
+    LinkDropped {
+        /// The sub-patch's name.
+        name: String,
+        /// The port or exposed name the file no longer has.
+        item: String,
+        /// What was removed: `cable`, `assignment`, `MIDI mapping`, or
+        /// `exposed parameter`.
+        what: &'static str,
+    },
+    /// A chain of library links came back to a file already on it, so the
+    /// linked sub-patch kept its stored copy (sub-patches.md, Patch file;
+    /// rule 5).
+    LibraryLoop {
+        /// The sub-patch's name.
+        name: String,
+        /// The sub-patches along the loop, first to last.
+        path: Vec<String>,
+    },
+    /// The refreshed library files could not be used together, so every
+    /// linked sub-patch kept its stored copy (sub-patches.md, rule 5).
+    LibraryNotUsed {
+        /// Why the refreshed patch does not load.
+        reason: String,
+    },
+    /// A patch-wide module (the Transport, or the Scale and tuning module)
+    /// in a file inserted or refreshed as a sub-patch was left out, and its
+    /// cables became ports on the tile (sub-patches.md, rule 8).
+    PatchWideLeftOut {
+        /// The sub-patch's name.
+        name: String,
+        /// What was left out, as the player knows it: `Transport`.
+        module: String,
+        /// What its cables carried, for the advice: `clock` or `pitch`.
+        /// `None` when it had no cables, so no port was made.
+        ports: Option<&'static str>,
+    },
 }
 
 impl LoadWarning {
@@ -162,6 +226,42 @@ impl fmt::Display for LoadWarning {
                 "module {module}: parameters `{param}` and `{partner}` share a range, and the saved ranges do not hold both values; they load with {loaded}"
             ),
             Self::InSubPatch { name, warning } => write!(f, "in sub-patch \"{name}\": {warning}"),
+            Self::LibraryRefreshed { names } => write!(f, "Updated from the library: {}.", names.join(", ")),
+            Self::LibraryMissing { name, path } => {
+                write!(
+                    f,
+                    "{name}: the library file \"{path}\" is missing, so its stored copy is used."
+                )
+            }
+            Self::LibraryUnreadable { name, path, reason } => write!(
+                f,
+                "{name}: the library file \"{path}\" does not load ({reason}), so its stored copy is used."
+            ),
+            Self::LinkDropped { name, item, what } => {
+                write!(
+                    f,
+                    "{name}: the library file no longer has \"{item}\"; its {what} was removed."
+                )
+            }
+            Self::LibraryLoop { name, path } => write!(
+                f,
+                "{name}: the library links loop ({}), so its stored copy is used.",
+                path.join(" › ")
+            ),
+            Self::LibraryNotUsed { reason } => write!(
+                f,
+                "The library's changes could not be used ({reason}), so the stored copies are used."
+            ),
+            Self::PatchWideLeftOut {
+                name,
+                module,
+                ports: Some(ports),
+            } => write!(f, "{name}: its {module} was left out; connect its {ports} ports."),
+            Self::PatchWideLeftOut {
+                name,
+                module,
+                ports: None,
+            } => write!(f, "{name}: its {module} was left out."),
         }
     }
 }

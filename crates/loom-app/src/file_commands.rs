@@ -6,8 +6,13 @@ use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Qu
 use crate::session::{PatchSession, Started};
 use crate::{App, Args, FileAction, Loaded, Source, alerts, bench, control, files, settings};
 use loom_core::EngineConfig;
+use loom_patch::Patch;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+/// The status bar text when Save to library is asked with no sub-patch to
+/// save: at the top level, or on a tile that is not one.
+pub(crate) const SAVE_TO_LIBRARY_INSIDE: &str = "Save to library works on a sub-patch: open one, or use its tile menu";
 
 impl App {
     /// The name of the patch as the title shows it, without the mark.
@@ -284,6 +289,9 @@ impl App {
                 true
             }
             (Kind::Replace { path, next }, Answer::Replace) => self.write_then(path, next),
+            (Kind::ReplaceLibrary { path, file, name }, Answer::Replace) => {
+                self.write_library_file(&file, &path, &name)
+            }
             _ => true,
         }
     }
@@ -319,7 +327,7 @@ impl App {
             output_safety: self.session.engine.stream.output_safety(),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
-        let loaded = match Loaded::read(config, self.test_modules, source) {
+        let loaded = match Loaded::read(config, self.test_modules, source, &self.rig.library()) {
             Ok(loaded) => loaded,
             Err(e) => {
                 let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
@@ -400,6 +408,13 @@ impl App {
             }
             FileAction::SaveAs => {
                 self.save_as();
+            }
+            FileAction::SaveToLibrary => {
+                if let Some(instance) = self.shown_instance() {
+                    self.save_to_library(instance);
+                } else {
+                    self.alerts.warn(SAVE_TO_LIBRARY_INSIDE.to_string());
+                }
             }
             // Opening the browser starts a task, so `App::update` handles
             // it before it reaches here.
@@ -521,6 +536,123 @@ impl App {
 }
 
 impl App {
+    /// The sub-patch tile whose inside the canvas shows. `None` at the top.
+    pub(crate) fn shown_instance(&self) -> Option<loom_core::ModuleId> {
+        let level = &self.session.level;
+        (!level.is_root())
+            .then(|| self.session.hierarchy.ids().get(level))
+            .flatten()
+    }
+
+    /// Save to library: writes the sub-patch tile `instance` as a patch
+    /// file in the library folder (`docs/design/sub-patches.md`, Library).
+    /// A linked tile writes to the file it follows, with no dialog; a copy
+    /// asks where, starting in the library folder under the sub-patch's
+    /// name. Not an edit: the open patch, and every other tile in it, stays
+    /// as it is (rule 3). Refused when the file would contain itself
+    /// through a linked sub-patch inside. Returns true when the file was
+    /// written.
+    pub(crate) fn save_to_library(&mut self, instance: loom_core::ModuleId) -> bool {
+        self.finish_edits();
+        let Some(file) =
+            self.session
+                .hierarchy
+                .definition_file(self.session.controller.graph(), self.layout_fn(), instance)
+        else {
+            self.alerts.warn(SAVE_TO_LIBRARY_INSIDE.to_string());
+            return false;
+        };
+        let name = file.metadata.name.clone();
+        let folder = self
+            .library_folder()
+            .map(|root| crate::patch_file::FolderLibrary { root });
+        let target = match self.session.hierarchy.library_of(instance).map(str::to_string) {
+            Some(path) => {
+                let Some(target) = folder.as_ref().and_then(|folder| folder.file(&path)) else {
+                    self.alerts.warn(format!(
+                        "Cannot save {name} to the library: no library folder holds \"{path}\"."
+                    ));
+                    return false;
+                };
+                target
+            }
+            None => {
+                if !self.control.is_empty() {
+                    self.alerts
+                        .warn("Save to library opens a file dialog, which a script cannot answer.".to_string());
+                    return false;
+                }
+                let start = folder.as_ref().map(|folder| files::free_path(&folder.root, &name));
+                match files::pick_save(start.as_deref()) {
+                    files::Saving::Cancelled => return false,
+                    files::Saving::Chosen(path) => path,
+                    // A name typed without its extension that another file
+                    // has: ask, as Save As does.
+                    files::Saving::Confirm(path) => {
+                        if !self.library_file_is_sound(&file, &path, &name) {
+                            return false;
+                        }
+                        self.overlays.question = Some(Question::replace_library(path, file, name));
+                        return false;
+                    }
+                }
+            }
+        };
+        if !self.library_file_is_sound(&file, &target, &name) {
+            return false;
+        }
+        self.write_library_file(&file, &target, &name)
+    }
+
+    /// Refuses, with the reason in the status bar, a library file that
+    /// would contain itself: a linked sub-patch inside it follows the very
+    /// file being written (sub-patches.md, Patch file).
+    fn library_file_is_sound(&mut self, file: &Patch, target: &Path, name: &str) -> bool {
+        let folder = self
+            .rig
+            .store
+            .saved()
+            .library_folder()
+            .map(|root| crate::patch_file::FolderLibrary { root });
+        let relative = folder.as_ref().and_then(|folder| folder.path_of(target));
+        if let Some(relative) = &relative
+            && let Some(nested) = file
+                .subpatches
+                .values()
+                .find(|d| d.library.as_deref() == Some(relative.as_str()))
+        {
+            let error = loom_patch::PatchError::SubPatchLoop {
+                path: vec![name.to_string(), nested.metadata.name.clone()],
+            };
+            self.alerts.warn(format!("Cannot save {name} to the library: {error}"));
+            return false;
+        }
+        true
+    }
+
+    /// Writes the sub-patch `name` as the patch file `target`, making the
+    /// folders on the way, and says so. Returns true when it was written.
+    fn write_library_file(&mut self, file: &Patch, target: &Path, name: &str) -> bool {
+        let written = target
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .map_err(|e| e.to_string())
+            .and_then(|()| crate::patch_file::save(file, target).map_err(|e| e.to_string()));
+        match written {
+            Ok(()) => {
+                self.alerts.clear(alerts::Cause::File);
+                self.alerts.say(format!("saved {name} to {}", target.display()));
+                true
+            }
+            Err(e) => {
+                let message = format!("Could not save {name} to \"{}\": {e}.", target.display());
+                self.show_error(&message);
+                self.alerts.error(alerts::Cause::File, message);
+                false
+            }
+        }
+    }
+
     /// Says a patch opened: info, or a warning when it loaded differently
     /// from how it was saved. Shared with the control channel's `open`.
     pub(crate) fn say_opened(&mut self, path: &std::path::Path) {

@@ -75,6 +75,13 @@ pub enum Kind {
     /// Saving to `path` would replace another file. `next` runs once it is
     /// saved. Without one, the save was all that was asked for.
     Replace { path: PathBuf, next: Option<AfterDiscard> },
+    /// Save to library would replace the file at `path` with the sub-patch
+    /// `name`, written as `file` (sub-patches.md, Library).
+    ReplaceLibrary {
+        path: PathBuf,
+        file: Box<Patch>,
+        name: String,
+    },
     /// Something failed. One button, so it cannot be a question.
     Error { message: String },
 }
@@ -127,6 +134,18 @@ impl Question {
         Self::starting_on(Kind::Replace { path, next }, Answer::Cancel)
     }
 
+    /// Asks whether Save to library may replace the file at `path`.
+    pub fn replace_library(path: PathBuf, file: Patch, name: String) -> Self {
+        Self::starting_on(
+            Kind::ReplaceLibrary {
+                path,
+                file: Box::new(file),
+                name,
+            },
+            Answer::Cancel,
+        )
+    }
+
     /// Says that something failed.
     pub fn error(message: String) -> Self {
         Self::starting_on(Kind::Error { message }, Answer::Ok)
@@ -148,7 +167,7 @@ impl Question {
     pub fn answers(&self) -> &'static [Answer] {
         match self.kind {
             Kind::Discard { .. } => &[Answer::Save, Answer::DontSave, Answer::Cancel],
-            Kind::Replace { .. } => &[Answer::Replace, Answer::Cancel],
+            Kind::Replace { .. } | Kind::ReplaceLibrary { .. } => &[Answer::Replace, Answer::Cancel],
             Kind::Error { .. } => &[Answer::Ok],
         }
     }
@@ -184,7 +203,7 @@ impl Question {
                 format!("Save changes to \"{name}\"?"),
                 "Your changes will be lost if you do not save them.".to_string(),
             ),
-            Kind::Replace { path, .. } => (
+            Kind::Replace { path, .. } | Kind::ReplaceLibrary { path, .. } => (
                 format!("Replace \"{}\"?", files::display_name(Some(path))),
                 "A file with this name already exists. Saving replaces it.".to_string(),
             ),

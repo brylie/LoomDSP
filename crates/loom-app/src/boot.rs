@@ -10,7 +10,7 @@ use crate::{
 use iced::{Color, Theme};
 use loom_core::{Controller, EngineConfig, EngineParts, TRANSPORT_MODULE, create_engine};
 use loom_host_desktop::AudioOutput;
-use loom_patch::{FlatIds, Hierarchy, Metadata, ModulePath, Patch};
+use loom_patch::{FlatIds, Hierarchy, Library, Metadata, ModulePath, Patch};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -109,14 +109,15 @@ impl App {
             output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
             ..EngineConfig::with_sample_rate(sample_rate)
         };
-        let loaded = Loaded::read(config, args.test_modules, source).unwrap_or_else(|e| {
+        let library = rig.library();
+        let loaded = Loaded::read(config, args.test_modules, source, &library).unwrap_or_else(|e| {
             // A copy that reads but does not load is a failed restore too:
             // the orphan is kept, not adopted.
             match recovered.take() {
                 Some((_, orphan, _)) => restore_error(&e, orphan, &mut notes),
                 None => status = e,
             }
-            Loaded::read(config, args.test_modules, Source::Empty).expect("an empty patch always loads")
+            Loaded::read(config, args.test_modules, Source::Empty, &library).expect("an empty patch always loads")
         });
         let mut app = Self::assemble(output, sample_rate, loaded, 1, &args, rig, true);
         // Tests have no bundled folder unless they set one: the checkout's
@@ -294,8 +295,16 @@ impl Loaded {
     }
 
     /// Builds an engine and loads a patch into it. On failure nothing else
-    /// is touched, so a failed open leaves the running patch alone.
-    pub(crate) fn read(config: EngineConfig, test_modules: bool, source: Source) -> Result<Self, String> {
+    /// is touched, so a failed open leaves the running patch alone. Linked
+    /// sub-patches take a fresh copy from `library` first (sub-patches.md,
+    /// Linked library items); the notes say which, and which file was
+    /// missing.
+    pub(crate) fn read(
+        config: EngineConfig,
+        test_modules: bool,
+        source: Source,
+        library: &dyn Library,
+    ) -> Result<Self, String> {
         let EngineParts {
             mut controller,
             engine,
@@ -307,13 +316,44 @@ impl Loaded {
         let mut original_unknown_positions = BTreeMap::new();
         let mut notes = Vec::new();
         let mut hierarchy = Hierarchy::flat();
-        let mut load = |patch: &Patch, controller: &mut Controller| -> Result<Metadata, String> {
+        let mut load = |stored: Patch, controller: &mut Controller| -> Result<Metadata, String> {
+            // Linked sub-patches follow the library file, and the refreshed
+            // copies are what the editor holds and saves.
+            let mut patch = stored.clone();
+            notes = patch.refresh_linked(library, controller.registry());
             // The flat graph plays; the hierarchy keeps the sub-patches and
-            // gives every tile its id (ADR-0039).
+            // gives every tile its id (ADR-0039). If the refreshed files do
+            // not play together, the stored copies do: a patch always opens
+            // (sub-patches.md, rule 5).
             let mut ids = FlatIds::new();
-            notes = patch.load_with_ids(controller, &mut ids).map_err(|e| e.to_string())?;
-            hierarchy = Hierarchy::from_patch(patch, controller.graph(), ids).map_err(|e| e.to_string())?;
-            for (id, layout) in hierarchy.layouts(patch) {
+            let flat = match patch.flatten(controller.registry(), &mut ids) {
+                Ok(flat) => flat,
+                Err(error) if patch != stored => {
+                    // The refresh's notes describe changes that are not
+                    // applied now; what still holds for the stored copies
+                    // is a file that was missing, unreadable, or in a loop.
+                    notes.retain(|note| {
+                        matches!(
+                            note,
+                            loom_patch::LoadWarning::LibraryMissing { .. }
+                                | loom_patch::LoadWarning::LibraryUnreadable { .. }
+                                | loom_patch::LoadWarning::LibraryLoop { .. }
+                        )
+                    });
+                    notes.push(loom_patch::LoadWarning::LibraryNotUsed {
+                        reason: error.to_string(),
+                    });
+                    patch = stored;
+                    ids = FlatIds::new();
+                    patch
+                        .flatten(controller.registry(), &mut ids)
+                        .map_err(|e| e.to_string())?
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            notes.extend(flat.apply_to(controller, &mut ids).map_err(|e| e.to_string())?);
+            hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).map_err(|e| e.to_string())?;
+            for (id, layout) in hierarchy.layouts(&patch) {
                 if controller.graph().node(id).is_some_and(|node| node.unknown.is_some()) {
                     original_unknown_positions.insert(id.0, layout.position);
                 }
@@ -341,10 +381,10 @@ impl Loaded {
                 // Stamped before reading: a change after this shows as a change.
                 let stamp = recovery::Stamp::of(path);
                 let patch = crate::patch_file::load(path).map_err(|e| e.to_string())?;
-                let info = load(&patch, &mut controller)?;
+                let info = load(patch, &mut controller)?;
                 (info, Some(path.to_path_buf()), stamp)
             }
-            Source::Recovered(patch) => (load(&patch, &mut controller)?, None, None),
+            Source::Recovered(patch) => (load(*patch, &mut controller)?, None, None),
             Source::Empty => (named("Untitled".to_string()), None, None),
         };
         // Every patch has one Transport (clock.md). A loaded file gets one

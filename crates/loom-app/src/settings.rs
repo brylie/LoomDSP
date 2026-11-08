@@ -68,6 +68,23 @@ impl Change {
     }
 }
 
+/// The library the rig reads linked sub-patches from (`Rig::library`).
+pub enum RigLibrary {
+    /// The library folder.
+    Folder(crate::patch_file::FolderLibrary),
+    /// No folder is known.
+    None,
+}
+
+impl loom_patch::Library for RigLibrary {
+    fn read(&self, path: &str) -> Result<loom_patch::Patch, loom_patch::LibraryError> {
+        match self {
+            Self::Folder(folder) => folder.read(path),
+            Self::None => loom_patch::NoLibrary.read(path),
+        }
+    }
+}
+
 /// What belongs to the machine, not the patch.
 pub struct Rig {
     pub host: Rc<dyn Host>,
@@ -222,6 +239,16 @@ impl Rig {
             devices::Options::default(),
             false,
         )
+    }
+
+    /// Where linked sub-patches are read from: the library folder, or
+    /// nothing when none is known, so every linked tile keeps its stored
+    /// copy (sub-patches.md, rule 5).
+    pub fn library(&self) -> RigLibrary {
+        match self.store.saved().library_folder() {
+            Some(root) => RigLibrary::Folder(crate::patch_file::FolderLibrary { root }),
+            None => RigLibrary::None,
+        }
     }
 
     /// Points MIDI at a new engine. Returns true the first time, when the

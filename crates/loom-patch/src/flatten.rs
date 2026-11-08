@@ -398,9 +398,8 @@ impl Flat {
     /// every id the file uses, instances included.
     pub fn apply_to(&self, controller: &mut Controller, ids: &mut FlatIds) -> Result<Vec<LoadWarning>, PatchError> {
         let mut notes = self.warnings.clone();
-        for module in &self.modules {
-            module.module.add_to(controller, module.id)?;
-        }
+        let same = |id: ModuleId| id;
+        self.add_modules(controller, &same)?;
         if self.transport.is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
             // From the table, not the controller: a top-level instance owns
             // its id without a graph module, and the controller would not
@@ -409,14 +408,43 @@ impl Flat {
             controller.add_module_with_id(id, TRANSPORT_MODULE)?;
             notes.push(LoadWarning::TransportAdded { module: id.0 });
         }
+        self.add_links(controller, &same)?;
+        controller.set_limits(self.limits_in(controller.graph()))?;
+        controller.commit()?;
+        Ok(notes)
+    }
+
+    /// Adds every module, then every cable, assignment, and mapping, to a
+    /// controller that holds a patch already, with `map` giving each flat
+    /// id the id it takes there: a sub-patch inserted into the open patch
+    /// ([`crate::Hierarchy::insert`]). No Transport is added and nothing
+    /// is committed.
+    pub fn add_to(&self, controller: &mut Controller, map: &dyn Fn(ModuleId) -> ModuleId) -> Result<(), PatchError> {
+        self.add_modules(controller, map)?;
+        self.add_links(controller, map)
+    }
+
+    fn add_modules(&self, controller: &mut Controller, map: &dyn Fn(ModuleId) -> ModuleId) -> Result<(), PatchError> {
+        for module in &self.modules {
+            module.module.add_to(controller, map(module.id))?;
+        }
+        Ok(())
+    }
+
+    fn add_links(&self, controller: &mut Controller, map: &dyn Fn(ModuleId) -> ModuleId) -> Result<(), PatchError> {
         for cable in &self.cables {
-            controller.connect_named(ModuleId(cable.from.0), &cable.from.1, ModuleId(cable.to.0), &cable.to.1)?;
+            controller.connect_named(
+                map(ModuleId(cable.from.0)),
+                &cable.from.1,
+                map(ModuleId(cable.to.0)),
+                &cable.to.1,
+            )?;
         }
         for assignment in &self.modulation {
             let id = controller.add_assignment_named(
-                ModuleId(assignment.source.0),
+                map(ModuleId(assignment.source.0)),
                 &assignment.source.1,
-                ModuleId(assignment.target.0),
+                map(ModuleId(assignment.target.0)),
                 &assignment.target.1,
                 assignment.depth,
             )?;
@@ -435,7 +463,7 @@ impl Flat {
             controller
                 .map_midi_named_with(
                     control,
-                    ModuleId(mapping.target.0),
+                    map(ModuleId(mapping.target.0)),
                     &mapping.target.1,
                     mapping.options(),
                 )
@@ -452,9 +480,7 @@ impl Flat {
                     other => PatchError::Engine(other),
                 })?;
         }
-        controller.set_limits(self.limits_in(controller.graph()))?;
-        controller.commit()?;
-        Ok(notes)
+        Ok(())
     }
 
     /// [`Flat::limits`] as [`Controller::set_limits`] takes them: by

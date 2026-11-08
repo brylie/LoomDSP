@@ -17,9 +17,11 @@ pub(crate) const NO_TRANSPORT_INSIDE: &str = "A sub-patch cannot hold the Transp
 pub(crate) const NO_MODULATION_ACROSS: &str =
     "Modulation cannot cross a sub-patch boundary; expose the parameter instead";
 
-/// The status bar text when a selection with a sub-patch tile is copied,
-/// cut, or duplicated, until the clipboard carries definitions.
-pub(crate) const NO_COPY_YET: &str = "Cannot copy a sub-patch yet";
+/// The status bar text when a linked sub-patch becomes a copy, after an
+/// edit inside it or Unlink (sub-patches.md, Copies and editing).
+pub(crate) fn now_a_copy(name: &str) -> String {
+    format!("{name} is now a copy. It no longer follows the library.")
+}
 
 impl App {
     /// Shows `level` on the canvas. The selection belongs to the level it
@@ -597,30 +599,139 @@ impl App {
         });
     }
 
-    /// The tiles of the selection that are sub-patches or ports, which the
-    /// clipboard cannot carry yet.
-    pub(crate) fn structural_in_selection(&self) -> bool {
-        let session = &self.session;
-        session.selection.iter().any(|&id| {
-            session.controller.graph().node(ModuleId(id)).is_none()
-                && session
-                    .hierarchy
-                    .tile(session.controller.graph(), ModuleId(id))
-                    .is_some()
-        })
+    /// Unlink, from the tile menu: the linked sub-patch tile `tile` becomes
+    /// a plain copy, as one undo step (sub-patches.md, Linked library
+    /// items).
+    pub(crate) fn unlink(&mut self, tile: u32) {
+        self.close_slider_gesture();
+        let Some(name) = self.session.hierarchy.tile_name(ModuleId(tile)) else {
+            return;
+        };
+        self.session.step_name = Some(format!("unlink {name}"));
+        self.edit(|app| {
+            if app.change_hierarchy("unlink", |h, _| h.unlink(ModuleId(tile)).map(|_| ())) && app.commit() {
+                app.alerts.say(now_a_copy(&name));
+            }
+        });
     }
 
-    /// What the tile menu offers for a tile: Help for a module, Open and
-    /// Dissolve for a sub-patch, and Make sub-patch for any selection of
-    /// modules.
+    /// Inserts a library item as a new sub-patch tile at `world`, as a copy
+    /// or linked, and selects it, as one undo step (sub-patches.md,
+    /// Library). The file's own linked sub-patches are refreshed first. A
+    /// Transport or Scale and tuning module in the file is left out, its
+    /// cables become ports, and the status bar says so (rule 8).
+    pub(crate) fn insert_library_item(&mut self, item: &browser::LibraryItem, linked: bool, world: Point) {
+        self.close_slider_gesture();
+        if self.session.edits.gesture_open() {
+            return;
+        }
+        let mut file = match crate::patch_file::load(&item.path) {
+            Ok(file) => file,
+            Err(e) => {
+                self.alerts.warn(format!("Cannot insert {}: {e}", item.name));
+                return;
+            }
+        };
+        let mut notes = file.refresh_linked(&self.rig.library(), self.session.controller.registry());
+        let library = linked.then(|| item.library.clone());
+        let level = self.session.level.clone();
+        let name = file.metadata.name.clone();
+        // The open patch may be a library file itself: a link to it, or a
+        // file whose links reach it, would make it contain itself
+        // (sub-patches.md, Patch file).
+        if let Some(own) = self.own_library_path()
+            && (library.as_deref() == Some(own.as_str())
+                || file
+                    .subpatches
+                    .values()
+                    .any(|d| d.library.as_deref() == Some(own.as_str())))
+        {
+            let error = loom_patch::PatchError::SubPatchLoop {
+                path: vec![self.session.document.name().to_string(), name],
+            };
+            self.alerts.warn(format!("Cannot insert {}: {error}", item.name));
+            return;
+        }
+        self.session.step_name = Some(format!("insert {name}"));
+        self.edit(|app| {
+            let mut candidate = app.session.hierarchy.clone();
+            let inserted = match candidate.insert(&mut app.session.controller, &level, &file, library.as_deref()) {
+                Ok(inserted) => inserted,
+                Err(e) => {
+                    // The insert took its modules back; only a commit hands
+                    // their slots back.
+                    app.commit();
+                    app.alerts.warn(format!("Cannot insert {name}: {e}"));
+                    return;
+                }
+            };
+            let renamed = match candidate.sync(&mut app.session.controller) {
+                Ok(renamed) => renamed,
+                Err(e) => {
+                    for id in &inserted.modules {
+                        let _ = app.session.controller.remove_module(*id);
+                    }
+                    app.commit();
+                    app.alerts.warn(format!("Cannot insert {name}: {e}"));
+                    return;
+                }
+            };
+            app.session.hierarchy = candidate;
+            app.assignments_renumbered(&renamed);
+            let at = browser::snap(world);
+            app.session.positions.insert(inserted.instance.0, (at.x, at.y));
+            for (id, layout) in &inserted.layouts {
+                if let Some(position) = layout.position {
+                    app.session.positions.insert(id.0, position);
+                }
+                if let Some(size) = layout.size {
+                    app.session.sizes.insert(id.0, size);
+                }
+            }
+            app.session.selection = BTreeSet::from([inserted.instance.0]);
+            if app.commit() {
+                notes.extend(inserted.left_out.iter().map(|dropped| dropped.warning(&inserted.name)));
+                notes.extend(inserted.notes);
+                let done = format!("Inserted {}", inserted.name);
+                if notes.is_empty() {
+                    app.alerts.say(done);
+                } else {
+                    app.alerts
+                        .warn(format!("{done}. {}", crate::file_commands::join_notes(&notes)));
+                }
+            }
+        });
+        self.session.step_name = None;
+    }
+
+    /// The open patch's own path in the library, when its file is inside
+    /// the library folder: a library item being edited on its own.
+    pub(crate) fn own_library_path(&self) -> Option<String> {
+        let file = self.session.document.file()?;
+        match self.rig.library() {
+            crate::settings::RigLibrary::Folder(folder) => folder.path_of(file),
+            crate::settings::RigLibrary::None => None,
+        }
+    }
+
+    /// What the tile menu offers for a tile: Help for a module; Open,
+    /// Dissolve, Save to library, and Unlink (when linked) for a sub-patch;
+    /// and Make sub-patch for any selection of modules.
     pub(crate) fn tile_menu_items(&self, module: u32) -> Vec<(&'static str, Message)> {
         let session = &self.session;
         let tile = session.hierarchy.tile(session.controller.graph(), ModuleId(module));
         match tile {
-            Some(Tile::Instance(_)) => vec![
-                ("Open", Message::OpenTile(module)),
-                ("Dissolve sub-patch", Message::DissolveSubPatch(module)),
-            ],
+            Some(Tile::Instance(_)) => {
+                let mut items = vec![
+                    ("Open", Message::OpenTile(module)),
+                    ("Dissolve sub-patch", Message::DissolveSubPatch(module)),
+                    ("Save to library", Message::SaveToLibrary(module)),
+                ];
+                if session.hierarchy.library_of(ModuleId(module)).is_some() {
+                    items.push(("Unlink", Message::Unlink(module)));
+                }
+                items
+            }
             Some(Tile::Port(..)) => vec![("Help", Message::ShowModuleHelp(module))],
             _ => vec![
                 ("Help", Message::ShowModuleHelp(module)),

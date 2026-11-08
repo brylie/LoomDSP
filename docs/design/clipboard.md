@@ -3,13 +3,13 @@
 How a user copies modules with their cables and modulation, pastes them into the same patch or another one, and duplicates them in place.
 
 - **Kind:** living specification.
-- **Status:** Implemented. The transport rule (rule 6) waits for the Transport module.
+- **Status:** Implemented, with sub-patch tiles since slice 4 of [#51](https://github.com/brylie/LoomDSP/issues/51) (2026-11-08). Of the transport rule (rule 6), only leaving the Transport out is built.
 - **Decision behind it:** none of its own. Builds on [ADR-0008](../adr/0008-patch-format-ron.md) (the clipboard holds patch text) and [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (all edits go through `Controller`).
 - **Use case and requirements:** FR-CANVAS-05. Related: FR-FILE-05 (unknown modules, [#18](https://github.com/brylie/LoomDSP/issues/18)), NFR-UX-01 (keyboard, [#101](https://github.com/brylie/LoomDSP/issues/101)).
 - **Background:** none.
 - **Prior art:** every editor has copy, paste, and duplicate. The only conventions we use are the common shortcuts, and "paste lands at the pointer".
 - **Issues:** [#13](https://github.com/brylie/LoomDSP/issues/13).
-- **Code:** `crates/loom-app/src/clipboard.rs` (`Group`; tests in `clipboard/tests.rs`), which reads and writes modules with `loom-patch`'s `resolve.rs` (`ResolvedModule`, as a patch loads), the commands in `editing.rs`, and `CanvasEvent::Paste` in `loom-canvas`.
+- **Code:** `crates/loom-app/src/clipboard.rs` (`Group`; tests in `clipboard/tests.rs` and, with sub-patch tiles, `library_tests.rs`), which reads and writes modules with `loom-patch`'s `resolve.rs` (`ResolvedModule`, as a patch loads) and inserts sub-patch tiles through `Hierarchy::insert`, the commands in `editing.rs`, and `CanvasEvent::Paste` in `loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -22,8 +22,8 @@ How a user copies modules with their cables and modulation, pastes them into the
 
 | Term | Meaning |
 |---|---|
-| **Selection** | The selected modules on the canvas. |
-| **Group** | The modules being copied or duplicated, with what goes with them: the cables and assignments the rules below keep. |
+| **Selection** | The selected tiles on the canvas: modules and sub-patch tiles. |
+| **Group** | The tiles being copied or duplicated, with what goes with them: the cables and assignments the rules below keep, and the definitions of its sub-patch tiles. |
 | **Inside** | A cable or assignment whose two ends are both on selected modules. |
 | **Incoming** | A cable or assignment that starts outside the selection and ends on a selected module. |
 | **Outgoing** | A cable or assignment that starts on a selected module and ends outside the selection. |
@@ -49,6 +49,8 @@ How a user copies modules with their cables and modulation, pastes them into the
 | | Copy, cut, and paste | Duplicate |
 |---|---|---|
 | Modules, with their parameter values | Kept | Kept |
+| Sub-patch tiles, with their definitions, nested ones included, their exposed values, and their link to a library file ([sub-patches](sub-patches.md#copies-and-editing)) | Kept | Kept |
+| Port tiles inside a sub-patch | Dropped | Dropped |
 | Inside cables | Kept | Kept |
 | Incoming cables | Dropped | Kept: the copy is fed by the same output |
 | Outgoing cables | Dropped | Dropped |
@@ -63,7 +65,9 @@ How a user copies modules with their cables and modulation, pastes them into the
 
 *Why assignments follow the same rules as cables:* a source can drive any number of parameters, as an output can feed any number of inputs. An outgoing assignment is dropped because it would add a second, equal modulation to the outside parameter, and its sound would change.
 
-*Why MIDI mappings are dropped:* a hardware control maps to one parameter only ([MIDI learn](midi-learn.md)). A copied mapping would take the control away from the original.
+*Why MIDI mappings are dropped:* a hardware control maps to one parameter only ([MIDI learn](midi-learn.md)). A copied mapping would take the control away from the original. A mapping inside a sub-patch tile is part of its definition, and goes with the tile.
+
+*Why port tiles are dropped:* a port belongs to its definition. Pasting one elsewhere would give that sub-patch a port nobody asked for.
 
 ### Where a paste lands
 
@@ -86,7 +90,7 @@ A pasted module with no position (text written by hand) goes in a row starting a
 
 ### The clipboard text
 
-Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.rs), with `version` and an empty `name`. It holds the selected modules with their positions and non-default parameters, the inside cables, and the inside assignments in their order. It holds no MIDI mappings.
+Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.rs), with `version` and an empty `name`. It holds the selected modules with their positions and non-default parameters, the inside cables, and the inside assignments in their order. It holds no MIDI mappings. A selected sub-patch tile is written as its instance module, with its exposed values, and its definition goes in the `subpatches` table with every definition nested in it, so the text is a patch that loads on its own ([sub-patches](sub-patches.md#patch-file)). An assignment onto a parameter inside the tile is written onto its exposed name, and a cable into the tile onto its port. An assignment with both ends inside the tile is the definition's, and is not written again outside, so a paste adds it once. A placeholder for a patch-wide module this build does not have is left out as the module itself would be.
 
 ```ron
 Patch(
@@ -105,7 +109,7 @@ Patch(
 
 *Why a whole patch, not a fragment:* paste reads it with the same parser and version check as Open, so there is one format to keep correct. A saved patch file can be opened in a text editor, copied, and pasted into another patch.
 
-Paste reads any text that is a valid patch, including text edited by hand and a whole patch file. MIDI mappings in it are ignored. The ids in it only link modules, cables, and assignments inside the text; they are never kept (rule 2).
+Paste reads any text that is a valid patch, including text edited by hand and a whole patch file. MIDI mappings in it are ignored. The ids in it only link modules, cables, and assignments inside the text; they are never kept (rule 2). A sub-patch tile in it is inserted as the file would be, with a definition of its own: a copy of a linked tile follows the same library file.
 
 For a placeholder, copied text also has a trailing RON comment with its named ports and parameter names. This keeps ports whose cables were not copied, without adding those ports to a saved patch. The text is still a valid patch. Hand-written patch text without the comment infers ports from its links, as on Open.
 
@@ -119,7 +123,8 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 |---|---|
 | The clipboard holds no text, or text that is not a patch | **The clipboard holds no LoomDSP modules** |
 | The patch format version is newer than this build | The same message as Open gives |
-| A parameter, port, or module id that the text refers to does not exist | **Cannot paste:** and the reason |
+| A parameter, port, module id, or sub-patch definition that the text refers to does not exist | **Cannot paste:** and the reason |
+| Only a patch-wide module (the Transport) was copied | **Cannot paste: only the Transport was copied, and a patch has one, at the top level** |
 | Not enough free module slots | **Cannot paste: the patch has room for N more modules** |
 
 *Why the whole paste or nothing:* half a group, with some cables missing, is worse than none, and it would make a step that undo cannot describe. This is the same rule as undo ([undo](undo.md#rules), rule 10).
@@ -131,7 +136,7 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 3. **Assignment order is kept.** Assignments are added in the order the clipboard text lists them, or, for duplicate, the order of the originals. *Why:* assignments on one parameter are summed in id order, which decides the last bits of the output. A duplicate must sound the same as the original (determinism).
 4. **One commit.** All the new modules, cables, and assignments are added, then committed once. *Why:* the engine swaps one schedule, and the user hears the whole group start at once ([undo](undo.md#rules), rule 8).
 5. **Check before adding.** Before anything is added, the app checks that there are enough free module slots and that every name on a known module exists. An unregistered kind pastes as a placeholder. *Why:* see [When a paste cannot be done](#when-a-paste-cannot-be-done).
-6. **A patch keeps exactly one transport.** The Transport module ([clock](clock.md)) is never added by a paste or duplicate. Copy still writes it to the clipboard, so its cables and assignments have an end. On paste, cables and assignments from the copied transport connect to the patch's own transport, and the copied tempo and time signature are ignored. Duplicate skips a selected transport and treats it as outside the selection. If only the transport is selected, duplicate does nothing and the status bar says why. *Why:* a patch has exactly one transport, and a group copied with Select All should keep its clock cables in the other patch. This rule applies once the Transport module exists.
+6. **A patch keeps exactly one transport.** The Transport module ([clock](clock.md)), and the Scale and tuning module when it exists, is never added by a paste or duplicate. Copy and duplicate leave a selected one out and treat it as outside the selection; if only it is selected, nothing happens and the status bar says why. Paste of text that holds one, such as a whole patch file, leaves it out with its cables and says so: `The Transport was left out: a patch has one, at the top level.` Inside a sub-patch the same note applies ([sub-patches](sub-patches.md), rule 8). *Why:* a patch has exactly one transport. Connecting the copied clock cables to the patch's own transport, so a group copied with Select All keeps them in the other patch, is not built; revisit if players ask.
 7. **The keys do not reach the canvas while a text field is being edited.** In the module browser's search field and in other text fields, Ctrl/Cmd+C, X, V, and D act on the text. *Why:* the same rule as undo ([undo](undo.md#commands)). The text field has its own clipboard.
 8. **The keys do not clash with panel focus.** Panel focus uses Tab, the arrows, Space, Enter, and Escape without modifiers ([panels](panels.md#interaction-68)). Copy, cut, paste, and duplicate use Ctrl or Cmd, so they work the same with or without a focused control. *Why:* [#101](https://github.com/brylie/LoomDSP/issues/101) orders the keys; these keys need no place in that order.
 9. **A module's label goes where the module goes.** Copy, cut, paste, and duplicate keep each module's label exactly as written, and so do open, save, and undo. An empty label is no label. The app does not show labels on known modules yet ([#526](https://github.com/brylie/LoomDSP/issues/526)), but it never drops one. *Why:* a label is the user's work, and sub-patches name their ports by the label of a Patch input or output ([sub-patches](sub-patches.md#patch-file)).
@@ -155,6 +160,8 @@ Nothing is added, no undo step is made, and the status bar says why, in these ca
 - [ ] Copy, paste, and duplicate work while a panel control has focus. (manual)
 - [x] Paste and duplicate do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
 - [x] A known module's label, including one that is only spaces, survives copy and paste, duplicate, save and open, and undo of a delete (rule 9; clipboard, patch, and undo tests).
+- [x] Copy of a sub-patch tile writes its definition, its exposed values, and its link into the text; paste gives the tile a definition of its own, with its inside, and editing inside the copy leaves the original (tests: `crates/loom-app/src/clipboard/tests.rs`, `a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole`; `crates/loom-app/src/library_tests.rs`, `pasting_a_sub_patch_tile_and_editing_inside_the_copy_leaves_the_original`).
+- [x] Duplicate of a sub-patch tile keeps the cable into it, cut takes it out whole, and a pasted text with a Transport leaves it out with a note (test: `crates/loom-app/src/library_tests.rs`, `duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out`).
 
 ## Out of scope
 

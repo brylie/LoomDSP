@@ -59,6 +59,11 @@ pub(crate) struct PatchSession {
     /// The name for the step the edit in progress makes, when a command
     /// names it (cut, paste, duplicate) rather than what changed.
     pub(crate) step_name: Option<String>,
+    /// What each linked sub-patch would save as, taken when the edit in
+    /// progress began, by definition key: an edit that changes one unlinks
+    /// it when the step is recorded (sub-patches.md, Copies and editing).
+    /// `None` outside an edit, and empty while nothing is linked.
+    pub(crate) linked_before: Option<BTreeMap<String, String>>,
     /// Modulation gestures in progress: the Add modulation list, an output
     /// dragged onto the inspector, an arc drag, a placeholder label.
     pub(crate) gestures: gestures::Gestures,
@@ -208,6 +213,7 @@ impl PatchSession {
             patch_info: patch_info::State::new(&Metadata::default()),
             edits: edits::Edits::default(),
             step_name: None,
+            linked_before: None,
             gestures: gestures::Gestures::default(),
             value_draft: None,
             learn: learn::Learn::default(),

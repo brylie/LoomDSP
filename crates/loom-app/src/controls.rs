@@ -4,7 +4,7 @@
 //! `docs/design/modulation.md`).
 
 use crate::{App, Message, learn, modulation};
-use loom_core::{MidiMappingOptions, ModuleId, OutputRef};
+use loom_core::{MidiMappingOptions, ModuleId, ModuleNames, OutputRef};
 use std::time::Instant;
 
 impl App {
@@ -94,10 +94,54 @@ impl App {
         self.refresh_learn();
     }
 
+    /// True when a MIDI mapping targets a parameter inside a linked
+    /// sub-patch that no surface at or above that sub-patch exposes: a
+    /// control change on it changes the stored copy, which unlinks the
+    /// tile (Notes from building). A mapping at the top level, or on a
+    /// value an instance holds, never does, so the common case costs
+    /// nothing.
+    pub(crate) fn midi_may_edit_a_linked_tile(&self) -> bool {
+        let hierarchy = &self.session.hierarchy;
+        if !hierarchy.has_links() {
+            return false;
+        }
+        let graph = self.session.controller.graph();
+        graph.midi_mappings().any(|(_, mapping)| {
+            let path = hierarchy.path_of(mapping.target);
+            // The outermost linked sub-patch the parameter's module is in.
+            let Some(linked) = (1..path.0.len())
+                .map(|n| path.prefix(n))
+                .find(|prefix| hierarchy.definition_at(prefix).is_some_and(|d| d.library.is_some()))
+            else {
+                return false;
+            };
+            let Some(name) = graph
+                .node(mapping.target)
+                .and_then(|node| node.parameter_name(mapping.param))
+            else {
+                return false;
+            };
+            // Exposed on that sub-patch's surface or above: the value is
+            // an instance's, outside the definition.
+            match hierarchy.outermost_surface(mapping.target, name) {
+                Some((instance, _)) => !linked.starts_with(&hierarchy.path_of(instance)),
+                None => true,
+            }
+        })
+    }
+
     /// Follows control changes: mapped parameters on screen, and the armed
     /// parameter in learn mode.
     pub(crate) fn midi_arrived(&mut self) {
+        // A control moving a value inside a linked sub-patch that is not
+        // exposed changes its stored copy: an edit inside, which unlinks
+        // it like any other, so what plays is what saves. The check costs
+        // an unflatten, so it runs only while a mapping can do that.
+        let linked = self.midi_may_edit_a_linked_tile().then(|| self.linked_fingerprints());
         let moved = !self.session.controller.sync_midi().is_empty();
+        if moved && let Some(before) = linked {
+            self.unlink_changed(&before);
+        }
         if self.refresh_ghosts() || moved {
             self.refresh_values();
         }
