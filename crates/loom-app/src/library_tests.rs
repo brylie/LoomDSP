@@ -99,6 +99,7 @@ fn use_library(app: &mut App, dir: &Path) {
     // With no preferences file the save fails, but the value is kept for
     // the run.
     let _ = app.rig.store.save(preferences);
+    app.refresh_library_items();
 }
 
 /// Writes `text` at `relative` under `dir`, making the folders.

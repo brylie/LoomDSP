@@ -652,6 +652,11 @@ struct App {
     alerts: alerts::Alerts,
     /// Every registered module, for the browser.
     modules: Vec<&'static ModuleDescriptor>,
+    /// The library folder's items, read once when a session starts, when
+    /// the browser reads the folder, after Save to library, and when the
+    /// folder preference changes, so a slot's Swap list never reads the
+    /// disk while the screen draws (sub-patches.md, Slots).
+    library: Vec<browser::LibraryItem>,
     /// What is open over the canvas.
     overlays: overlays::Overlays,
     /// Files of a drop being collected, for a moment after the first.
@@ -1407,6 +1412,10 @@ impl App {
 
     /// Handles a browser message: keep it open, close it, or add a module.
     fn browser_message(&mut self, message: browser::Message) -> Task<Message> {
+        // The folder's items serve the slots' Swap lists too.
+        if let browser::Message::Library(items) = &message {
+            self.library = items.clone();
+        }
         let Some(open) = self.overlays.browser_mut() else {
             return Task::none();
         };

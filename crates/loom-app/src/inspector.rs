@@ -120,10 +120,13 @@ pub struct SlotRows {
     /// Every part the slot can take, the current one marked: the **Part**
     /// list.
     pub choices: Vec<crate::slots::SwapChoice>,
-    /// The part's parameters that are the role's, as `(label, row)`.
-    pub role_params: Vec<(String, ParamRow)>,
+    /// The part's parameters that are the role's, as `(label, module, row)`:
+    /// the module is the part for a module part, and the inner module an
+    /// exposed item stands for on a sub-patch part, as the row's messages
+    /// name it.
+    pub role_params: Vec<(String, u32, ParamRow)>,
     /// The part's other parameters, under a heading with the part's name.
-    pub other_params: Vec<(String, ParamRow)>,
+    pub other_params: Vec<(String, u32, ParamRow)>,
 }
 
 /// A surface item's row on a sub-patch tile's inspector.
@@ -749,9 +752,9 @@ impl App {
                         continue;
                     };
                     if state.role_param_of(spec.name).is_some() {
-                        role_params.push((spec.label.to_string(), row));
+                        role_params.push((spec.label.to_string(), part.0, row));
                     } else {
-                        other_params.push((spec.label.to_string(), row));
+                        other_params.push((spec.label.to_string(), part.0, row));
                     }
                 }
             } else if let Some(definition) = hierarchy.definition_of(part) {
@@ -767,9 +770,9 @@ impl App {
                         continue;
                     };
                     if state.role.param(&exposed.name).is_some() {
-                        role_params.push((exposed.name.clone(), row));
+                        role_params.push((exposed.name.clone(), target.module.0, row));
                     } else {
-                        other_params.push((exposed.name.clone(), row));
+                        other_params.push((exposed.name.clone(), target.module.0, row));
                     }
                 }
             }
@@ -1150,9 +1153,8 @@ pub fn view<'a>(
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             );
-            let part_id = s.part_id.unwrap_or(id);
-            for (label, p) in s.role_params {
-                rows = rows.push(param_row_view(part_id, label, p, None, drop_row, dragging));
+            for (label, module, p) in s.role_params {
+                rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
             }
             if !s.other_params.is_empty() {
                 rows = rows.push(
@@ -1160,8 +1162,8 @@ pub fn view<'a>(
                         .size(style::BODY)
                         .color(DIM),
                 );
-                for (label, p) in s.other_params {
-                    rows = rows.push(param_row_view(part_id, label, p, None, drop_row, dragging));
+                for (label, module, p) in s.other_params {
+                    rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
                 }
             }
             rows = rows.push(button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)));

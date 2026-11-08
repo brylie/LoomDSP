@@ -97,6 +97,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         rig: _,
         alerts,
         modules,
+        // The library folder's items, for the slots' Swap lists: machine
+        // state, read for the run, so it belongs beside `modules`.
+        library: _,
         overlays,
         drops,
         patches_open,

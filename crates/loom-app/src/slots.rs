@@ -100,18 +100,25 @@ impl App {
                 current: true,
             });
         }
-        if let crate::settings::RigLibrary::Folder(folder) = self.rig.library() {
-            for item in browser::library_items(&folder.root) {
-                if item.roles.iter().any(|r| loom_patch::role_id(r) == state.role.id) {
-                    choices.push(SwapChoice {
-                        label: item.name.clone(),
-                        to: SwapTarget::Library(item.library.clone()),
-                        current: false,
-                    });
-                }
+        for item in &self.library {
+            if item.roles.iter().any(|r| loom_patch::role_id(r) == state.role.id) {
+                choices.push(SwapChoice {
+                    label: item.name.clone(),
+                    to: SwapTarget::Library(item.library.clone()),
+                    current: false,
+                });
             }
         }
         choices
+    }
+
+    /// Reads the library folder's items into the app, once, for the Swap
+    /// lists. Nothing when no folder is set.
+    pub(crate) fn refresh_library_items(&mut self) {
+        self.library = match self.rig.library() {
+            crate::settings::RigLibrary::Folder(folder) => browser::library_items(&folder.root),
+            crate::settings::RigLibrary::None => Vec::new(),
+        };
     }
 
     /// The tile menu's Make slot items for the tile `module`: one per role

@@ -642,6 +642,8 @@ impl App {
             Ok(()) => {
                 self.alerts.clear(alerts::Cause::File);
                 self.alerts.say(format!("saved {name} to {}", target.display()));
+                // A new or changed item shows in the slots' Swap lists.
+                self.refresh_library_items();
                 true
             }
             Err(e) => {

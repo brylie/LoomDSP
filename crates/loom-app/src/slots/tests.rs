@@ -285,10 +285,11 @@ fn the_inspector_shows_the_slot_and_swaps_it() {
     assert_eq!(current, ["SVF"]);
     assert!(rows.choices.iter().any(|c| c.label == "Ladder"));
     assert_eq!(
-        rows.role_params.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
+        rows.role_params.iter().map(|(l, _, _)| l.as_str()).collect::<Vec<_>>(),
         ["Cutoff", "Resonance"]
     );
-    assert!(rows.other_params.iter().all(|(l, _)| l != "Cutoff"));
+    assert!(rows.role_params.iter().all(|(_, module, _)| *module == svf));
+    assert!(rows.other_params.iter().all(|(l, _, _)| l != "Cutoff"));
     let _ = app.update(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.onepole@1".to_string()),
@@ -298,7 +299,7 @@ fn the_inspector_shows_the_slot_and_swaps_it() {
     };
     assert_eq!(rows.part.as_deref(), Some("One-Pole"));
     assert_eq!(
-        rows.role_params.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
+        rows.role_params.iter().map(|(l, _, _)| l.as_str()).collect::<Vec<_>>(),
         ["Cutoff"],
         "the one-pole has no resonance"
     );
@@ -647,8 +648,17 @@ fn swapping_back_to_a_held_sub_patch_from_the_app() {
     };
     assert_eq!(rows.part.as_deref(), Some("Comb"));
     assert!(rows.choices.iter().any(|c| c.current && c.label == "Comb"));
+    // The comb's row names the inner one-pole, so its slider moves it.
+    let (_, module, _) = &rows.role_params[0];
+    let inner = app
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(*module))
+        .unwrap();
+    assert_eq!(inner.descriptor.id, "loom.filter.onepole");
     assert_eq!(
-        rows.role_params.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
+        rows.role_params.iter().map(|(l, _, _)| l.as_str()).collect::<Vec<_>>(),
         ["cutoff"]
     );
     let saved = app.current_patch();
@@ -671,4 +681,30 @@ fn the_slot_inspector_draws() {
     assert!(ui.text("Ladder only").is_some());
     assert!(ui.text("Dissolve slot").is_some());
     assert!(ui.text("Slope").is_some(), "the ladder's own row");
+}
+
+/// Redo of Make slot and undo of Dissolve slot are plain hierarchy
+/// changes, not swaps: both apply, and the history stays.
+#[test]
+fn make_slot_redoes_and_dissolve_slot_undoes() {
+    let (mut app, slot, svf) = with_slot();
+    app.undo();
+    assert!(titles(&app).contains(&"SVF".to_string()));
+    app.redo();
+    assert_eq!(app.alerts.status(), "Redo: make Filter slot");
+    assert!(titles(&app).contains(&"Filter".to_string()));
+    assert_eq!(
+        app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)),
+        Some(loom_core::ModuleId(svf))
+    );
+    let _ = app.update(Message::DissolveSlot(slot));
+    assert!(titles(&app).contains(&"SVF".to_string()));
+    app.undo();
+    assert_eq!(app.alerts.status(), "Undo: dissolve Filter slot");
+    assert!(titles(&app).contains(&"Filter".to_string()));
+    assert_eq!(
+        app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)),
+        Some(loom_core::ModuleId(svf))
+    );
+    assert!(app.ui_snapshot().redo.is_some(), "the history is intact");
 }

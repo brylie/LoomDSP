@@ -230,6 +230,7 @@ impl App {
             } else {
                 loom_modules::registry().browsable().collect()
             },
+            library: Vec::new(),
             overlays: Default::default(),
             drops: Vec::new(),
             patches_open: 0,
@@ -266,6 +267,7 @@ impl App {
         // A stream that failed to start took the engine with it.
         self.keep_engine_idle();
         self.sync_audio_input();
+        self.refresh_library_items();
         self.send_panic_trigger();
         if let Some(error) = self.connect_midi(first_midi, connect_midi) {
             self.alerts.warn(error);

@@ -569,8 +569,11 @@ fn apply_swaps(
     };
     for slot in to.slots_differing_from(from) {
         let Some(target) = to.slot(slot) else { continue };
+        // A slot that appears or goes (Make slot, Dissolve slot) is a plain
+        // hierarchy change, not a swap.
+        let Some(source) = from.slot(slot) else { continue };
         let level = to.level_of(slot);
-        if let Some(lid) = from.slot(slot).and_then(|s| s.part) {
+        if let Some(lid) = source.part {
             parts.extend(under(from, &level.child(lid)));
         }
         let Some(lid) = target.part else {

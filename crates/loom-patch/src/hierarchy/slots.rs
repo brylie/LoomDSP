@@ -264,9 +264,8 @@ impl Hierarchy {
     /// made on the live hierarchy must keep fading.
     pub fn carry_fading_from(&mut self, live: &Hierarchy) {
         for (path, state) in &mut self.slots {
-            let Some(from) = live.slots.get(path) else { continue };
-            state.fading = from.fading.clone();
-            let Some(fading) = &from.fading else { continue };
+            state.fading = live.slots.get(path).and_then(|s| s.fading.clone());
+            let Some(fading) = &state.fading else { continue };
             // The leaving part and the fades keep their paths and flat ids,
             // which a snapshot taken before them does not have.
             let level = path.parent().unwrap_or_else(ModulePath::root);
