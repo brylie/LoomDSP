@@ -609,6 +609,13 @@ fn struct_output() {
     Harness::new(&structure::OUTPUT).seconds(0.01).check_block_sizes();
 }
 
+/// The swap fade: its law is checked in `structure/tests.rs`; here it
+/// renders the same at every block size.
+#[test]
+fn struct_fade() {
+    Harness::new(&structure::FADE).seconds(0.02).check_block_sizes();
+}
+
 #[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
@@ -673,6 +680,7 @@ fn every_dsp_module_has_a_reference_test() {
         &display::XY,
         &structure::INPUT,
         &structure::OUTPUT,
+        &structure::FADE,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {

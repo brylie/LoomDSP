@@ -52,7 +52,7 @@ fn regenerating_keeps_notes() {
     let registry = loom_modules::registry();
     let dir = temp_dir("notes");
     let first = write_pages(&registry, &dir).unwrap();
-    assert_eq!(first.written.len(), registry.len() + 1);
+    assert_eq!(first.written.len(), registry.browsable().count() + 1);
     assert!(stale_pages(&registry, &dir).unwrap().is_empty());
 
     let d = registry.iter().next().unwrap();
@@ -172,7 +172,7 @@ fn extract_ron_snippet(notes: &str) -> Option<String> {
 fn example_patches_in_pages_are_valid() {
     let registry = loom_modules::registry();
     let dir = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/modules"));
-    for d in registry.iter() {
+    for d in registry.browsable() {
         let path = dir.join(file_name(d));
         let text = read_normalized(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
