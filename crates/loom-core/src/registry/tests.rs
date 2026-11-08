@@ -889,3 +889,42 @@ fn internal_modules_are_not_browsable() {
     assert_eq!(registry.browsable().count(), 0);
     assert_eq!(registry.iter().count(), 1);
 }
+
+/// A module refused for a duplicate id leaves no role behind.
+#[test]
+fn a_refused_duplicate_registers_no_role() {
+    static FIRST: ModuleDescriptor = ModuleDescriptor {
+        id: "test.dup",
+        version: 1,
+        name: "First",
+        category: "Test",
+        family: crate::Family::Interface,
+        description: "",
+        inputs: &[port("in", crate::SignalType::Audio)],
+        outputs: &[port("out", crate::SignalType::Audio)],
+        params: &[],
+        role: ModuleRole::UnitDelay,
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[],
+    };
+    static SECOND: ModuleDescriptor = ModuleDescriptor {
+        id: "test.dup",
+        version: 1,
+        name: "Second",
+        category: "Test",
+        family: crate::Family::Modulation,
+        description: "",
+        inputs: &[],
+        outputs: &[port("out", crate::SignalType::Modulation)],
+        params: &[],
+        role: ModuleRole::Dsp(|_| unreachable!("never created")),
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[crate::FillsRole::of(&crate::roles::MODULATOR)],
+    };
+    let mut registry = Registry::new();
+    registry.register(&FIRST).unwrap();
+    assert!(registry.register(&SECOND).is_err());
+    assert!(registry.role("loom.role.modulator").is_none());
+}

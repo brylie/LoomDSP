@@ -558,13 +558,20 @@ fn apply_swaps(
         return Ok(parts);
     };
     let (from, to) = if forward { (before, after) } else { (after, before) };
+    // Every flat id at or under a part's path: a sub-patch part brings its
+    // inner modules.
+    let under = |side: &Hierarchy, path: &loom_patch::ModulePath| -> Vec<u32> {
+        side.ids()
+            .paths()
+            .filter(|(p, _)| p.starts_with(path))
+            .map(|(_, id)| id.0)
+            .collect()
+    };
     for slot in to.slots_differing_from(from) {
         let Some(target) = to.slot(slot) else { continue };
         let level = to.level_of(slot);
-        if let Some(lid) = from.slot(slot).and_then(|s| s.part)
-            && let Some(id) = from.ids().get(&level.child(lid))
-        {
-            parts.insert(id.0);
+        if let Some(lid) = from.slot(slot).and_then(|s| s.part) {
+            parts.extend(under(from, &level.child(lid)));
         }
         let Some(lid) = target.part else {
             // The slot empties: the leaving part goes with the rest of the
@@ -574,7 +581,7 @@ fn apply_swaps(
         let Some(id) = to.ids().get(&level.child(lid)) else {
             continue;
         };
-        parts.insert(id.0);
+        parts.extend(under(to, &level.child(lid)));
         let state = step
             .modules
             .get(&id.0)
@@ -593,12 +600,14 @@ fn apply_swaps(
                 controller.set_params(id, &changes).map_err(|e| e.to_string())?;
             }
             None => {
-                // A sub-patch part: held whole in the live hierarchy.
+                // A sub-patch part: held whole in the live hierarchy, put
+                // back at the level id it had, so its inner modules take
+                // their old flat ids.
                 let key = to
                     .key_at(&level.child(lid))
                     .ok_or_else(|| "the step's part is neither a module nor a sub-patch".to_string())?
                     .to_string();
-                hierarchy.swap_to_held_subpatch(controller, layout, slot, &key)?;
+                hierarchy.swap_to_held_subpatch_at(controller, layout, slot, &key, Some(lid))?;
             }
         }
     }
@@ -761,10 +770,20 @@ fn apply_rest(
         }
     }
     for (&id, pair) in &step.assignments {
-        if pair.0.as_ref().is_some_and(touches_swapped) || pair.1.as_ref().is_some_and(touches_swapped) {
+        let (have, want) = sides(pair, forward);
+        let on_swapped = pair.0.as_ref().is_some_and(touches_swapped) || pair.1.as_ref().is_some_and(touches_swapped);
+        if on_swapped {
+            // The swap moved what it could by role name, keeping the id;
+            // what it removed, because only the leaving part had the
+            // parameter, comes back here with the part (sub-patches.md,
+            // Slots: undo brings it back).
+            if let Some(assignment) = want
+                && controller.graph().assignment(id).is_none()
+            {
+                controller.restore_assignment(id, *assignment)?;
+            }
             continue;
         }
-        let (have, want) = sides(pair, forward);
         if let Some(assignment) = want
             && have != want
         {
@@ -772,10 +791,15 @@ fn apply_rest(
         }
     }
     for (&(module, param), pair) in &step.midi {
+        let (have, want) = sides(pair, forward);
         if swapped.contains(&module) {
+            if let Some((control, options)) = want
+                && controller.graph().midi_mapping_of(ModuleId(module), param).is_none()
+            {
+                controller.map_midi_with(*control, ModuleId(module), param, *options)?;
+            }
             continue;
         }
-        let (have, want) = sides(pair, forward);
         if let Some((control, options)) = want
             && have != want
         {

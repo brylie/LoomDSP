@@ -190,12 +190,23 @@ impl Registry {
         }
         for fills in descriptor.roles {
             fills.check(descriptor).map_err(|reason| invalid(&reason))?;
-            self.register_role(fills.role)
-                .map_err(|_| invalid(&format!("role {} is registered twice under one id", fills.role.id)))?;
+            if let Some(known) = self.roles.get(fills.role.id)
+                && !std::ptr::eq(*known, fills.role)
+            {
+                return Err(invalid(&format!(
+                    "role {} is registered twice under one id",
+                    fills.role.id
+                )));
+            }
         }
-        if self.modules.insert(descriptor.id, descriptor).is_some() {
+        if self.modules.contains_key(descriptor.id) {
             return Err(invalid("duplicate module ID"));
         }
+        // Only an accepted module registers its roles.
+        for fills in descriptor.roles {
+            self.register_role(fills.role)?;
+        }
+        self.modules.insert(descriptor.id, descriptor);
         self.notes
             .extend(descriptor.undocumented().into_iter().map(|missing| RegistryNote {
                 module: descriptor.id,

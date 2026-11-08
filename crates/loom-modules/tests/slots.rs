@@ -204,3 +204,89 @@ fn the_fade_mixes_the_two_parts_equal_power() {
     let after = SWAP_AT + FADE + 1;
     assert_ne!(swapped[after], plain[after]);
 }
+
+/// A sine through an amplifier whose gain a 30 Hz LFO in a Modulator slot
+/// drives through an assignment, so the slot's output is a modulation
+/// source and not a cable. One LFO cycle fits the steady window before the
+/// swap, so that window's largest step is the signal's own.
+const LFO_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "LFO slot"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.phase.generator@1"),
+        PatchModule(id: 2, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.level.amp@1", params: {"gain": 0.5}),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.clock.transport@1"),
+        PatchModule(id: 6, kind: "loom.mod.lfo@1", params: {"rate": 30.0}),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.modulator@1", part: Some(6)))),
+    ],
+    cables: [
+        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+    ],
+    modulation: [PatchModulation(source: (9, "out"), target: (3, "gain"), depth: 0.4)],
+)
+"#;
+
+/// Swapping a Modulator slot that drives a parameter through an
+/// assignment fades too: the gain moves from the LFO's value to the
+/// random's through the fade, so no step in the swap window is larger
+/// than the steady audio on either side allows plus the fade's own gain
+/// change (sub-patches.md, How a swap crossfades, point 2).
+#[test]
+fn a_modulation_source_slot_swaps_through_the_fade() {
+    let (mut parts, hierarchy) = load(LFO_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let mut finished = None;
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.rand.random@1")
+                .expect("the random fills Modulator");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |position, parts| {
+            if finished.is_none() {
+                let mut hierarchy = hierarchy.borrow_mut();
+                let fading = hierarchy.fading_slots();
+                let done = !fading.is_empty()
+                    && fading
+                        .iter()
+                        .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+                if done {
+                    hierarchy.finish_all_fades(&mut parts.controller);
+                    hierarchy.sync(&mut parts.controller).expect("syncs");
+                    parts.controller.commit().expect("commits");
+                    finished = Some(position);
+                }
+            }
+        },
+    );
+    let finished = finished.expect("the fade finished");
+    let max_step = |s: &[f32]| s.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+    let peak = |s: &[f32]| s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let limit = |steady: &[f32]| max_step(steady) + peak(steady) * (std::f32::consts::FRAC_PI_2 / FADE as f32) + 1e-6;
+    let before = &left[SWAP_AT - 2_000..SWAP_AT];
+    let after = &left[finished + 200..finished + 2_200];
+    assert!(peak(after) > 1e-3, "the sine plays");
+    let bound = limit(before).max(limit(after));
+    let across = max_step(&left[SWAP_AT - 1..finished + 200]);
+    assert!(across <= bound, "swap step {across} > {bound}");
+    // The assignment started at the fade and ends at the random.
+    let graph = parts.controller.graph();
+    let random = graph
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.rand.random")
+        .map(|(id, _)| id)
+        .expect("the random");
+    assert!(graph.assignments().all(|(_, a)| a.source.module == random));
+}

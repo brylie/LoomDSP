@@ -2306,6 +2306,21 @@ impl Hierarchy {
         file: &Patch,
         library: Option<&str>,
     ) -> Result<Inserted, PatchError> {
+        self.insert_with(controller, level, file, library, None, None)
+    }
+
+    /// [`Hierarchy::insert`], with the new tile at the level id `at` and the
+    /// definition under `key` when given and free: undo puts a sub-patch
+    /// part back at the ids it had, so the step's records still apply.
+    pub fn insert_with(
+        &mut self,
+        controller: &mut Controller,
+        level: &ModulePath,
+        file: &Patch,
+        library: Option<&str>,
+        at: Option<u32>,
+        key: Option<&str>,
+    ) -> Result<Inserted, PatchError> {
         if let Some(path) = library {
             for n in 1..=level.0.len() {
                 let prefix = level.prefix(n);
@@ -2322,14 +2337,23 @@ impl Hierarchy {
         let (mut definition, left_out) = SubPatch::from_patch(file, controller.registry(), library);
         let name = definition.metadata.name.clone();
         let mut nested = file.subpatches.clone();
-        let key = unique_name(&name.to_lowercase(), |key| {
-            self.definitions.contains_key(key) || nested.contains_key(key)
-        });
+        let taken = |key: &str| self.definitions.contains_key(key) || nested.contains_key(key);
+        let key = match key {
+            Some(wanted) if !taken(wanted) => wanted.to_string(),
+            _ => unique_name(&name.to_lowercase(), taken),
+        };
         rekey(&mut definition, &mut nested, |candidate| {
             candidate == key || self.definitions.contains_key(candidate)
         });
         self.adopt(controller.graph());
-        let (instance_path, instance_id) = self.new_module(level)?;
+        let (instance_path, instance_id) = match at {
+            Some(lid) => {
+                let path = level.child(lid);
+                let id = self.ids.id_of(&path)?;
+                (path, id)
+            }
+            None => self.new_module(level)?,
+        };
 
         // The file as a patch of one instance, flattened on a scratch table
         // whose paths start at the instance's level id.

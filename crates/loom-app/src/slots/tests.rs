@@ -390,3 +390,224 @@ fn dissolve_slot_and_the_clipboard_refusal() {
     let saved = app.current_patch();
     assert!(saved.subpatches["voice"].modules.iter().all(|m| !m.is_slot()));
 }
+
+/// Noise into a Voice whose Ladder is already a Filter slot's part, with an
+/// LFO inside assigned to the ladder's slope (a parameter outside the
+/// role) and a MIDI mapping on it.
+const LADDER_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Slots"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in"), position: Some((0.0, 0.0))),
+                PatchModule(id: 3, kind: "loom.filter.ladder@1", params: {"cutoff": 800.0, "drive": 0.3}, position: Some((200.0, 0.0))),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out"), position: Some((400.0, 0.0))),
+                PatchModule(id: 6, kind: "loom.mod.lfo@1", position: Some((200.0, 200.0))),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3))), position: Some((200.0, 0.0))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+            modulation: [PatchModulation(source: (6, "out"), target: (3, "slope"), depth: 0.3)],
+            midi: [PatchMidiMapping(target: (3, "slope"), channel: 0, controller: 7)],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1", position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), position: Some((200.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1", position: Some((400.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.clock.transport@1", position: Some((0.0, 200.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// Noise into a Voice whose Filter slot holds the Comb sub-patch, with an
+/// SVF held.
+const COMB_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Slots"),
+    subpatches: {
+        "comb": SubPatch(
+            metadata: Metadata(name: "Comb"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 2, kind: "loom.time.delay@1", params: {"time": 0.002}),
+                PatchModule(id: 3, kind: "loom.filter.onepole@1", params: {"cutoff": 500.0}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "in")),
+                PatchCable(from: (2, "out"), to: (3, "in")),
+                PatchCable(from: (3, "lowpass"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff")],
+            roles: ["loom.role.filter@1"],
+        ),
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.struct.subpatch@1", subpatch: Some("comb"), params: {"cutoff": 700.0}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", label: Some("Filter"), slot: Some(Slot(
+                    role: "loom.role.filter@1",
+                    part: Some(3),
+                    held: {Module("loom.filter.svf@1"): Held(params: {"cutoff": 800.0, "resonance": 0.4})},
+                ))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// The app with `text` open, no audio.
+fn app_with(text: &str) -> App {
+    let patch = loom_patch::Patch::from_ron(text).unwrap();
+    let loaded = Loaded::read(
+        EngineConfig::default(),
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    App::assemble(
+        Err("test".to_string()),
+        48_000.0,
+        loaded,
+        1,
+        &crate::tests::app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    )
+}
+
+/// A swap removes the assignment and the mapping on a parameter only the
+/// leaving part has, and names them; undo brings both back with their
+/// ids; redo removes them again (sub-patches.md, Slots).
+#[test]
+fn undo_restores_the_links_a_swap_removed() {
+    let mut app = app_with(LADDER_SLOT);
+    let slot = inside(&app, 9);
+    let ladder = inside(&app, 3);
+    let (assignment, slope) = {
+        let graph = app.session.controller.graph();
+        let (id, a) = graph.assignments().next().expect("the slope assignment");
+        assert_eq!(a.target.0, ladder);
+        (id, a.param)
+    };
+    assert!(
+        app.session
+            .controller
+            .graph()
+            .midi_mapping_of(loom_core::ModuleId(ladder), slope)
+            .is_some()
+    );
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.svf@1".to_string()),
+    });
+    assert_eq!(
+        app.alerts.status(),
+        "Swapped Filter to SVF. 2 modulations on Slope were removed."
+    );
+    app.process(600);
+    assert!(app.session.controller.graph().assignment(assignment).is_none());
+    assert!(app.session.controller.graph().midi_mappings().next().is_none());
+    app.undo();
+    app.process(600);
+    let graph = app.session.controller.graph();
+    let back = graph
+        .assignment(assignment)
+        .expect("the assignment is back with its id");
+    assert_eq!((back.target.0, back.param), (ladder, slope));
+    assert!(graph.midi_mapping_of(loom_core::ModuleId(ladder), slope).is_some());
+    app.redo();
+    app.process(600);
+    assert!(app.session.controller.graph().assignment(assignment).is_none());
+    assert!(app.session.controller.graph().midi_mappings().next().is_none());
+}
+
+/// A sub-patch part leaves and comes back through undo at the ids it
+/// had: the graph's module set is what it was, nothing is left over, the
+/// saved file is the same, and redo leaves no extra module either.
+#[test]
+fn undo_of_a_swap_from_a_sub_patch_part_leaves_no_extra_modules() {
+    let mut app = app_with(COMB_SLOT);
+    let slot = inside(&app, 9);
+    let modules = |app: &App| -> std::collections::BTreeSet<u32> {
+        app.session.controller.graph().nodes().map(|(id, _)| id.0).collect()
+    };
+    let before = modules(&app);
+    let saved_before = app.current_patch().to_ron().unwrap();
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    assert_eq!(app.alerts.status(), "Swapped Filter to Ladder.");
+    app.process(600);
+    let after_swap = modules(&app);
+    assert!(after_swap.len() < before.len(), "the comb's modules went");
+    app.undo();
+    app.process(600);
+    assert_eq!(modules(&app), before, "the comb is back at its ids, nothing left over");
+    assert_eq!(app.current_patch().to_ron().unwrap(), saved_before);
+    app.redo();
+    app.process(600);
+    assert_eq!(modules(&app), after_swap);
+}
+
+/// A swap asked for during a fade finishes the fade first, so a refused
+/// swap leaves the graph and the hierarchy in step and adds no undo step
+/// (sub-patches.md, How a swap crossfades, point 5).
+#[test]
+fn a_refused_swap_during_a_fade_leaves_everything_in_step() {
+    let (mut app, slot, svf) = with_slot();
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    assert_eq!(app.session.hierarchy.fading_slots().len(), 1);
+    let steps = app.session.edits.history.len();
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.osc.sine@1".to_string()),
+    });
+    assert_eq!(app.alerts.status(), "Cannot swap Filter: Sine does not fill Filter");
+    assert!(
+        app.session.hierarchy.fading_slots().is_empty(),
+        "the fade was finished first"
+    );
+    assert!(app.session.controller.graph().node(loom_core::ModuleId(svf)).is_none());
+    assert!(
+        app.session
+            .controller
+            .graph()
+            .nodes()
+            .all(|(_, n)| n.descriptor.id != "loom.struct.fade" && n.descriptor.id != "loom.osc.sine")
+    );
+    assert_eq!(app.session.edits.history.len(), steps, "no step for a refused swap");
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    assert_eq!(app.alerts.status(), "Cannot swap Filter: it holds that part already");
+}

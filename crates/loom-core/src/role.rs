@@ -312,7 +312,7 @@ impl FillsRole {
             ),
         ];
         for (what, map, in_role, in_module) in maps {
-            for (i, (role_name, own)) in map.iter().enumerate() {
+            for (role_name, own) in map.iter() {
                 if !in_role(role_name) {
                     return Err(format!("role {role} has no {what} `{role_name}` to map"));
                 }
@@ -321,7 +321,27 @@ impl FillsRole {
                         "role {role} maps {what} `{role_name}` to `{own}`, which the module does not have"
                     ));
                 }
-                if map[..i].iter().any(|(_, other)| other == own) {
+            }
+        }
+        // Two role names onto one own name, through the map or through a
+        // role name that is also a module name.
+        let collisions: [(&str, Vec<String>); 3] = [
+            (
+                "input",
+                self.role.inputs.iter().map(|p| self.own_input(p.name)).collect(),
+            ),
+            (
+                "output",
+                self.role.outputs.iter().map(|p| self.own_output(p.name)).collect(),
+            ),
+            (
+                "parameter",
+                self.role.params.iter().map(|p| self.own_param(p.name)).collect(),
+            ),
+        ];
+        for (what, owns) in collisions {
+            for (i, own) in owns.iter().enumerate() {
+                if owns[..i].contains(own) {
                     return Err(format!("role {role} maps two {what}s onto `{own}`"));
                 }
             }

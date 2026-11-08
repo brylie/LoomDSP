@@ -200,6 +200,7 @@ impl App {
         if self.session.edits.gesture_open() {
             return;
         }
+        self.finish_all_fades();
         let Some(name) = self.session.hierarchy.tile_name(ModuleId(slot)) else {
             return;
         };
@@ -265,6 +266,10 @@ impl App {
             },
             _ => None,
         };
+        // A fade in progress is finished on the live session first, so a
+        // refused swap leaves nothing half done (sub-patches.md, How a swap
+        // crossfades, point 5).
+        self.finish_all_fades();
         self.session.step_name = Some(format!("swap {name}"));
         self.edit(|app| {
             let result = app.swap_now(slot, &to, file.as_ref());
@@ -285,6 +290,10 @@ impl App {
     fn swap_now(&mut self, slot: u32, to: &SwapTarget, file: Option<&Patch>) -> Result<hierarchy::Swapped, String> {
         let layout = self.layout_fn_owned();
         let mut candidate = self.session.hierarchy.clone();
+        // What the graph held, so a refusal part-way can take back what the
+        // swap added before it failed.
+        let before: std::collections::BTreeSet<ModuleId> =
+            self.session.controller.graph().nodes().map(|(id, _)| id).collect();
         let part = candidate.part_of_slot(ModuleId(slot));
         let holds_already = match to {
             SwapTarget::Module(kind) => part
@@ -314,8 +323,9 @@ impl App {
         let swapped = match swapped {
             Ok(swapped) => swapped,
             Err(why) => {
-                // The swap added nothing it did not take back, or failed
-                // before adding; the live hierarchy is untouched.
+                // The live hierarchy is untouched; whatever the swap added to
+                // the controller before it failed goes again.
+                self.remove_added_since(&before);
                 return Err(why);
             }
         };
@@ -326,11 +336,24 @@ impl App {
                 Ok(swapped)
             }
             Err(e) => {
-                for id in &swapped.added {
-                    let _ = self.session.controller.remove_module(*id);
-                }
+                self.remove_added_since(&before);
                 Err(e.to_string())
             }
+        }
+    }
+
+    /// Removes every module the graph holds that `before` did not.
+    fn remove_added_since(&mut self, before: &std::collections::BTreeSet<ModuleId>) {
+        let added: Vec<ModuleId> = self
+            .session
+            .controller
+            .graph()
+            .nodes()
+            .map(|(id, _)| id)
+            .filter(|id| !before.contains(id))
+            .collect();
+        for id in added {
+            let _ = self.session.controller.remove_module(id);
         }
     }
 

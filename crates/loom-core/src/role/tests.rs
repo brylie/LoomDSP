@@ -180,3 +180,32 @@ fn initial_roles_are_documented() {
     assert_eq!(FILTER.output("out").map(|p| p.required), Some(true));
     assert_eq!(FILTER.param("drive").map(|p| p.required), Some(false));
 }
+
+/// A map onto a name that another role name already has as its own, through
+/// the identity, is a collision too.
+#[test]
+fn a_map_onto_another_role_names_own_name_is_refused() {
+    static TWO: ModuleDescriptor = ModuleDescriptor {
+        id: "test.two",
+        version: 1,
+        name: "Two",
+        category: "Test",
+        family: crate::Family::FiltersAndEffects,
+        description: "",
+        inputs: &[port("in", SignalType::Audio)],
+        outputs: &[port("out", SignalType::Audio)],
+        params: &[param("cutoff", "Hz"), param("resonance", "")],
+        role: ModuleRole::UnitDelay,
+        panel: Panel::EMPTY,
+        displays: &[],
+        roles: &[],
+    };
+    let fills = FillsRole {
+        params: &[("drive", "resonance")],
+        ..FillsRole::of(&FILTER)
+    };
+    assert_eq!(
+        fills.check(&TWO),
+        Err("role loom.role.filter@1 maps two parameters onto `resonance`".to_string())
+    );
+}

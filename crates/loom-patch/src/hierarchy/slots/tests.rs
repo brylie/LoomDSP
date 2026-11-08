@@ -578,13 +578,27 @@ fn a_source_on_the_part_moves_with_a_swap() {
         .unwrap();
     hierarchy.sync(&mut controller).unwrap();
     controller.commit().unwrap();
-    // The two assignments from the LFO's out now start at the random's out.
-    let from_new = controller
-        .graph()
-        .assignments()
-        .filter(|(_, a)| a.source.module == swapped.part && a.target == svf)
-        .count();
-    assert_eq!(from_new, 2);
+    // The two assignments from the LFO's out go through the fade while it
+    // runs, then start at the random's out.
+    let fade = module_of(&controller, "loom.struct.fade");
+    let from = |controller: &Controller, module: ModuleId| {
+        controller
+            .graph()
+            .assignments()
+            .filter(|(_, a)| a.source.module == module && a.target == svf)
+            .count()
+    };
+    assert_eq!(from(&controller, fade), 2, "through the fade");
+    assert_eq!(from(&controller, swapped.part), 0);
+    hierarchy.finish_fade(&mut controller, slot);
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    assert_eq!(
+        from(&controller, swapped.part),
+        2,
+        "at the new part once the fade is done"
+    );
+    assert!(controller.graph().node(fade).is_none());
     // Rate is optional and the random has none: its mapping went, named.
     assert_eq!(swapped.removed, ["Rate"]);
     assert!(
@@ -593,5 +607,28 @@ fn a_source_on_the_part_moves_with_a_swap() {
             .midi_mappings()
             .all(|(_, m)| m.target != lfo && m.target != swapped.part),
         "the random has no rate to map"
+    );
+}
+
+/// A gate or phase output switches on the swap frame; audio, modulation,
+/// and pitch outputs fade (sub-patches.md, How a swap crossfades, point 6).
+#[test]
+fn gate_and_phase_outputs_are_not_faded() {
+    use loom_core::{RolePort, SignalType};
+    let port = |signal| RolePort {
+        name: "out",
+        label: "Out",
+        description: "",
+        signal,
+        required: true,
+    };
+    assert!(!fades(&port(SignalType::Gate)));
+    assert!(!fades(&port(SignalType::Phase)));
+    assert!(fades(&port(SignalType::Audio)));
+    assert!(fades(&port(SignalType::Modulation)));
+    assert!(fades(&port(SignalType::Pitch)));
+    assert_eq!(
+        swapped_text("Filter", "SVF", &["Slope".to_string(), "Slope".to_string()]),
+        "Swapped Filter to SVF. 2 modulations on Slope were removed."
     );
 }

@@ -46,10 +46,16 @@ pub fn made_slot_text(role: &RoleDescriptor, removed: &[String]) -> String {
 /// parameters only the leaving part had, which were removed.
 pub fn swapped_text(slot_name: &str, part_name: &str, removed: &[String]) -> String {
     let swapped = format!("Swapped {slot_name} to {part_name}.");
+    let mut names: Vec<&str> = Vec::new();
+    for label in removed {
+        if !names.contains(&label.as_str()) {
+            names.push(label);
+        }
+    }
     match removed.len() {
         0 => swapped,
         1 => format!("{swapped} 1 modulation on {} was removed.", removed[0]),
-        n => format!("{swapped} {n} modulations on {} were removed.", removed.join(", ")),
+        n => format!("{swapped} {n} modulations on {} were removed.", names.join(", ")),
     }
 }
 
@@ -676,11 +682,38 @@ impl Hierarchy {
         let Some(slot_path) = self.ids.path_of(slot).cloned() else {
             return Vec::new();
         };
+        self.retarget_fade_sources(controller, &slot_path);
         let removed = self.end_fade(&slot_path);
         for id in &removed {
             let _ = controller.remove_module(*id);
         }
         removed
+    }
+
+    /// Points every assignment whose source is one of the slot's fades at
+    /// the new part's output behind that fade, before the fade goes.
+    fn retarget_fade_sources(&self, controller: &mut Controller, slot_path: &ModulePath) {
+        let Some(state) = self.slots.get(slot_path) else { return };
+        let Some(fading) = &state.fading else { return };
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        let graph = controller.graph();
+        let mut moves = Vec::new();
+        for (role_out, fade) in &fading.fades {
+            let Some((id, own)) = self.part_output_of_state(graph, &level, state, role_out) else {
+                continue;
+            };
+            let Some(port) = graph.node(id).and_then(|n| n.output_index(&own)) else {
+                continue;
+            };
+            for (aid, a) in graph.assignments() {
+                if a.source.module == *fade {
+                    moves.push((aid, OutputRef { module: id, port }, a.target, a.param));
+                }
+            }
+        }
+        for (aid, source, target, param) in moves {
+            let _ = controller.retarget_assignment(aid, source, target, param);
+        }
     }
 
     /// Finishes every fade in progress, as before an undo or a swap during
@@ -888,6 +921,23 @@ impl Hierarchy {
         file: &Patch,
         library: Option<&str>,
     ) -> Result<Swapped, String> {
+        self.swap_to_subpatch_at(controller, layout, slot, file, library, None, None)
+    }
+
+    /// [`Hierarchy::swap_to_subpatch`], with the new instance at the level
+    /// id `at` and its definition under `key` when given, as
+    /// [`Hierarchy::swap_to_module_at`] does for undo.
+    #[allow(clippy::too_many_arguments)]
+    pub fn swap_to_subpatch_at(
+        &mut self,
+        controller: &mut Controller,
+        layout: &dyn Fn(u32) -> Layout,
+        slot: ModuleId,
+        file: &Patch,
+        library: Option<&str>,
+        at: Option<u32>,
+        key: Option<&str>,
+    ) -> Result<Swapped, String> {
         let slot_path = self
             .ids
             .path_of(slot)
@@ -923,7 +973,7 @@ impl Hierarchy {
         self.hold_part(controller.graph(), controller.registry(), layout, &slot_path);
 
         let inserted = self
-            .insert(controller, &level, file, library)
+            .insert_with(controller, &level, file, library, at, key)
             .map_err(|e| e.to_string())?;
         let new_id = inserted.instance;
         let new_path = self.ids.path_of(new_id).cloned().expect("just inserted");
@@ -972,6 +1022,19 @@ impl Hierarchy {
         slot: ModuleId,
         key: &str,
     ) -> Result<Swapped, String> {
+        self.swap_to_held_subpatch_at(controller, layout, slot, key, None)
+    }
+
+    /// [`Hierarchy::swap_to_held_subpatch`], with the instance back at the
+    /// level id `at` when given, under the key it had.
+    pub fn swap_to_held_subpatch_at(
+        &mut self,
+        controller: &mut Controller,
+        layout: &dyn Fn(u32) -> Layout,
+        slot: ModuleId,
+        key: &str,
+        at: Option<u32>,
+    ) -> Result<Swapped, String> {
         let stored = self
             .definitions
             .get(key)
@@ -990,7 +1053,7 @@ impl Hierarchy {
         {
             state.held.remove(&PartKey::SubPatch(key.to_string()));
         }
-        let swapped = self.swap_to_subpatch(controller, layout, slot, &file, library.as_deref())?;
+        let swapped = self.swap_to_subpatch_at(controller, layout, slot, &file, library.as_deref(), at, Some(key))?;
         // Its own values, by exposed name, under the role values.
         let new_path = self.ids.path_of(swapped.part).cloned().expect("just inserted");
         if let Some(definition) = self.definition_at(&new_path).cloned() {
@@ -1118,7 +1181,9 @@ impl Hierarchy {
                 }
             }
         }
-        // Fades: one per role output both parts have.
+        // Fades: one per role output both parts have, unless its signal
+        // switches rather than fades (sub-patches.md, How a swap crossfades,
+        // point 6).
         let mut fade_outputs = Vec::new();
         for output in new_state.role.outputs {
             let old_has = self
@@ -1127,13 +1192,50 @@ impl Hierarchy {
             let new_has = self
                 .part_output_of_state(graph, &level, &new_state, output.name)
                 .is_some();
-            if old_has && new_has {
+            if old_has && new_has && fades(output) {
                 fade_outputs.push(output.name.to_string());
             }
         }
         let _ = new_path;
+        // The new part's output behind each faded role output, so a
+        // modulation from the slot's output goes through its fade while the
+        // slot fades, and a Modulator or Envelope slot swaps click-free as
+        // a source too; `finish_fade` points it at the new part.
+        let new_outputs: Vec<(String, OutputRef)> = fade_outputs
+            .iter()
+            .filter_map(|role_out| {
+                let (id, own) = self.part_output_of_state(graph, &level, &new_state, role_out)?;
+                let port = graph.node(id)?.output_index(&own)?;
+                Some((role_out.clone(), OutputRef { module: id, port }))
+            })
+            .collect();
+        let mut fades_made = Vec::new();
+        let mut added = Vec::new();
+        for role_out in fade_outputs {
+            let k = self.next_level_id(slot_path);
+            let fade_path = slot_path.child(k);
+            let fade_id = self.ids.id_of(&fade_path).map_err(|e| e.to_string())?;
+            controller
+                .add_module_with_id(fade_id, FADE_KIND)
+                .map_err(|e| e.to_string())?;
+            added.push(fade_id);
+            fades_made.push((role_out, fade_id));
+        }
+        let through_fade: Vec<(OutputRef, ModuleId)> = fades_made
+            .iter()
+            .filter_map(|(role_out, fade)| {
+                let (_, output) = new_outputs.iter().find(|(name, _)| name == role_out)?;
+                Some((*output, *fade))
+            })
+            .collect();
 
-        for (aid, source, (target, param)) in retargets {
+        for (aid, mut source, (target, param)) in retargets {
+            if let Some((_, fade)) = through_fade.iter().find(|(output, _)| *output == source) {
+                source = OutputRef {
+                    module: *fade,
+                    port: FADE_OUT,
+                };
+            }
             controller
                 .retarget_assignment(aid, source, target, param)
                 .map_err(|e| e.to_string())?;
@@ -1150,19 +1252,7 @@ impl Hierarchy {
                 .map_midi_with(control, target, param, options)
                 .map_err(|e| e.to_string())?;
         }
-        let mut fades = Vec::new();
-        let mut added = Vec::new();
-        for role_out in fade_outputs {
-            let k = self.next_level_id(slot_path);
-            let fade_path = slot_path.child(k);
-            let fade_id = self.ids.id_of(&fade_path).map_err(|e| e.to_string())?;
-            controller
-                .add_module_with_id(fade_id, FADE_KIND)
-                .map_err(|e| e.to_string())?;
-            added.push(fade_id);
-            fades.push((role_out, fade_id));
-        }
-        Ok((added, removed, fades))
+        Ok((added, removed, fades_made))
     }
 
     /// The role name of a parameter of the leaving part: `param` of the
@@ -1240,6 +1330,21 @@ impl SlotState {
         }
         leaving_fills(hierarchy, graph, level, lid, self.role).map_or_else(|| name.to_string(), |f| f.own_input(name))
     }
+}
+
+/// The swap fade's `out` port index.
+const FADE_OUT: usize = 0;
+
+/// True for a role output a swap fades. A gate or phase output switches to
+/// the new part on the swap frame instead, for the reason live-patching
+/// rule 9 gives: a ramped gate fires late and a ramped phase looks like
+/// wraps (sub-patches.md, How a swap crossfades, point 6). A trigger is a
+/// one-sample gate.
+pub fn fades(output: &loom_core::RolePort) -> bool {
+    !matches!(
+        output.signal,
+        loom_core::SignalType::Gate | loom_core::SignalType::Phase
+    )
 }
 
 /// The leaving module part's declaration of the role, from its descriptor.
