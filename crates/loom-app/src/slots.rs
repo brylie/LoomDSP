@@ -31,7 +31,7 @@ impl Links {
     pub(crate) fn of(graph: &loom_core::Graph) -> Self {
         Self {
             assignments: graph.assignments().map(|(id, a)| (id, *a)).collect(),
-            midi: graph.midi_mappings().map(|(_, m)| m.clone()).collect(),
+            midi: graph.midi_mappings().map(|(_, m)| *m).collect(),
         }
     }
 }
