@@ -7,7 +7,8 @@ fn load(patch: &Patch) -> (Controller, Hierarchy) {
     let EngineParts { mut controller, .. } = create_engine(loom_modules::registry(), EngineConfig::default());
     let mut ids = FlatIds::new();
     patch.load_with_ids(&mut controller, &mut ids).expect("the patch loads");
-    let hierarchy = Hierarchy::from_patch(patch, controller.graph(), ids).expect("the hierarchy reads");
+    let hierarchy =
+        Hierarchy::from_patch(patch, controller.graph(), ids, controller.registry()).expect("the hierarchy reads");
     (controller, hierarchy)
 }
 
@@ -1030,7 +1031,7 @@ fn the_order_sync_survives_a_full_command_queue() {
     let patch = Patch::from_ron(FLAT).unwrap();
     let mut ids = FlatIds::new();
     patch.load_with_ids(&mut controller, &mut ids).unwrap();
-    let mut hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).unwrap();
+    let mut hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids, controller.registry()).unwrap();
     let made = hierarchy
         .collapse(controller.graph(), &ModulePath::root(), &[2, 3, 4])
         .unwrap();
@@ -1354,6 +1355,7 @@ fn inserting_a_file_with_a_transport_leaves_it_out() {
         id: 9,
         kind: "loom.clock.transport@1".to_string(),
         subpatch: None,
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,

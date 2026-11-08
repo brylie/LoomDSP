@@ -91,6 +91,7 @@ fn a_flat_patch_writes_nothing_new() {
         id: 1,
         kind: "loom.osc.sine@1".into(),
         subpatch: None,
+        slot: None,
         label: None,
         params: Default::default(),
         position: None,

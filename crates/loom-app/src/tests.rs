@@ -1440,6 +1440,7 @@ fn session_keeps_saved_tile_dimensions() {
         id: 7,
         kind: "loom.display.scope@1".into(),
         subpatch: None,
+        slot: None,
         label: None,
         params: Default::default(),
         position: None,

@@ -575,7 +575,7 @@ fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
     let mut c = parts().controller;
     let mut ids = loom_patch::FlatIds::new();
     patch.load_with_ids(&mut c, &mut ids).unwrap();
-    let hierarchy = Hierarchy::from_patch(&patch, c.graph(), ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&patch, c.graph(), ids, c.registry()).unwrap();
     let positions = spread(&c);
     let selection: BTreeSet<u32> = [1, 2, 5].into_iter().collect();
     let group = Group::from_selection(c.graph(), &hierarchy, &root(), &positions, &selection, false);

@@ -122,7 +122,8 @@ fn loads(patch: &Patch) -> (loom_core::Controller, Hierarchy) {
     let EngineParts { mut controller, .. } = create_engine(registry(), EngineConfig::default());
     let mut ids = FlatIds::new();
     patch.load_with_ids(&mut controller, &mut ids).expect("the patch loads");
-    let hierarchy = Hierarchy::from_patch(patch, controller.graph(), ids).expect("the hierarchy reads");
+    let hierarchy =
+        Hierarchy::from_patch(patch, controller.graph(), ids, controller.registry()).expect("the hierarchy reads");
     (controller, hierarchy)
 }
 
@@ -221,6 +222,7 @@ fn from_patch_leaves_patch_wide_modules_out_and_turns_their_cables_into_ports() 
         id: 1,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("arp".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -239,6 +241,7 @@ fn a_patch_wide_module_with_no_cables_leaves_no_port() {
         id: 9,
         kind: "loom.clock.transport@1".to_string(),
         subpatch: None,
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -282,6 +285,7 @@ fn from_definition_carries_the_nested_definitions() {
         id: 1,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("inner".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -360,6 +364,7 @@ fn fingerprints_ignore_nested_keys_and_see_nested_changes() {
         id: 1,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("a".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -415,6 +420,7 @@ fn refresh_drops_a_transport_the_file_gained_with_a_note() {
         id: 9,
         kind: "loom.clock.transport@1".to_string(),
         subpatch: None,
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -468,6 +474,7 @@ fn refresh_gives_the_file_s_nested_definitions_free_keys() {
         id: 1,
         kind: "loom.osc.sine@1".to_string(),
         subpatch: None,
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -479,6 +486,7 @@ fn refresh_gives_the_file_s_nested_definitions_free_keys() {
         id: 5,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("filter".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -491,6 +499,7 @@ fn refresh_gives_the_file_s_nested_definitions_free_keys() {
         id: 6,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("filter".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -520,6 +529,7 @@ fn a_link_loop_keeps_the_stored_copy_with_a_note_naming_the_loop() {
         id: 9,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("b".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -534,6 +544,7 @@ fn a_link_loop_keeps_the_stored_copy_with_a_note_naming_the_loop() {
         id: 1,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("a".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -565,6 +576,7 @@ fn a_link_loop_keeps_the_stored_copy_with_a_note_naming_the_loop() {
         id: 9,
         kind: SUBPATCH_KIND.to_string(),
         subpatch: Some("me".to_string()),
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,
@@ -608,6 +620,7 @@ fn refresh_drops_what_names_a_port_or_exposed_name_the_file_no_longer_has() {
         id: 5,
         kind: "loom.mod.lfo@1".to_string(),
         subpatch: None,
+        slot: None,
         label: None,
         params: BTreeMap::new(),
         position: None,

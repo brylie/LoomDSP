@@ -87,7 +87,12 @@ pub static FILTER: RoleDescriptor = RoleDescriptor {
     ],
     outputs: &[port("out", "Out", SignalType::Audio, "The filtered audio.")],
     params: &[
-        param("cutoff", "Cutoff", "Hz", "The frequency where the filter starts to cut."),
+        param(
+            "cutoff",
+            "Cutoff",
+            "Hz",
+            "The frequency where the filter starts to cut.",
+        ),
         optional("resonance", "Resonance", "", "Boosts the frequencies near the cutoff."),
         optional("drive", "Drive", "", "Raises the input level so the filter saturates."),
     ],
@@ -103,7 +108,12 @@ pub static SHAPER: RoleDescriptor = RoleDescriptor {
     outputs: &[port("out", "Out", SignalType::Audio, "The shaped audio.")],
     params: &[
         param("drive", "Drive", "", "How hard the signal is pushed into the shape."),
-        optional("mix", "Mix", "", "0 is the input alone, and 1 is the shaped signal alone."),
+        optional(
+            "mix",
+            "Mix",
+            "",
+            "0 is the input alone, and 1 is the shaped signal alone.",
+        ),
     ],
 };
 
@@ -119,11 +129,21 @@ pub static ENVELOPE: RoleDescriptor = RoleDescriptor {
         SignalType::Gate,
         "Going high starts the envelope; going low releases it.",
     )],
-    outputs: &[port("out", "Out", SignalType::Modulation, "The envelope level, from 0 to 1.")],
+    outputs: &[port(
+        "out",
+        "Out",
+        SignalType::Modulation,
+        "The envelope level, from 0 to 1.",
+    )],
     params: &[
         param("attack", "Attack", "s", "Time to rise after the gate goes high."),
         param("release", "Release", "s", "Time to fall after the gate goes low."),
-        optional("decay", "Decay", "s", "Time to fall to the sustain level after the attack."),
+        optional(
+            "decay",
+            "Decay",
+            "s",
+            "Time to fall to the sustain level after the attack.",
+        ),
         optional("sustain", "Sustain", "", "The level held while the gate stays high."),
     ],
 };

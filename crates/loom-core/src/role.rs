@@ -157,11 +157,10 @@ impl RoleDescriptor {
         param_word: &'static str,
     ) -> Vec<RoleMismatch> {
         let mut found = Vec::new();
-        let ports = [("input", self.inputs, &input as &dyn Fn(&str) -> Option<SignalType>), (
-            "output",
-            self.outputs,
-            &output,
-        )];
+        let ports = [
+            ("input", self.inputs, &input as &dyn Fn(&str) -> Option<SignalType>),
+            ("output", self.outputs, &output),
+        ];
         for (what, list, has) in ports {
             for port in list {
                 match has(port.name) {
@@ -189,11 +188,7 @@ impl RoleDescriptor {
                 Some(kind) if kind.unit != p.unit => found.push(RoleMismatch {
                     what: param_word,
                     name: p.name.to_string(),
-                    reason: Some(format!(
-                        "is in {}, not {}",
-                        unit_text(kind.unit),
-                        unit_text(p.unit)
-                    )),
+                    reason: Some(format!("is in {}, not {}", unit_text(kind.unit), unit_text(p.unit))),
                 }),
                 Some(kind) if kind.whole != p.whole => found.push(RoleMismatch {
                     what: param_word,
@@ -241,6 +236,15 @@ pub struct FillsRole {
     pub params: &'static [(&'static str, &'static str)],
 }
 
+impl PartialEq for FillsRole {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.role, other.role)
+            && self.inputs == other.inputs
+            && self.outputs == other.outputs
+            && self.params == other.params
+    }
+}
+
 impl FillsRole {
     /// A declaration with every role name the same as the module's own.
     pub const fn of(role: &'static RoleDescriptor) -> Self {
@@ -253,26 +257,17 @@ impl FillsRole {
     }
 
     /// The module's own name for the role input `name`.
-    pub fn own_input<'a>(&self, name: &'a str) -> &'a str
-    where
-        'static: 'a,
-    {
+    pub fn own_input(&self, name: &str) -> String {
         mapped(self.inputs, name)
     }
 
     /// The module's own name for the role output `name`.
-    pub fn own_output<'a>(&self, name: &'a str) -> &'a str
-    where
-        'static: 'a,
-    {
+    pub fn own_output(&self, name: &str) -> String {
         mapped(self.outputs, name)
     }
 
     /// The module's own name for the role parameter `name`.
-    pub fn own_param<'a>(&self, name: &'a str) -> &'a str
-    where
-        'static: 'a,
-    {
+    pub fn own_param(&self, name: &str) -> String {
         mapped(self.params, name)
     }
 
@@ -299,13 +294,10 @@ impl FillsRole {
     /// name. The registry refuses the descriptor with this text (FR-SDK-08).
     pub fn check(&self, module: &ModuleDescriptor) -> Result<(), String> {
         let role = self.role.kind();
-        let maps: [(&str, &[(&str, &str)], &dyn Fn(&str) -> bool, &dyn Fn(&str) -> bool); 3] = [
-            (
-                "input",
-                self.inputs,
-                &|name| self.role.input(name).is_some(),
-                &|name| module.input_index(name).is_some(),
-            ),
+        let maps: [NameMap<'_>; 3] = [
+            ("input", self.inputs, &|name| self.role.input(name).is_some(), &|name| {
+                module.input_index(name).is_some()
+            }),
             (
                 "output",
                 self.outputs,
@@ -334,16 +326,14 @@ impl FillsRole {
                 }
             }
         }
-        let port_signal = |ports: &'static [PortSpec], name: &str| ports.iter().find(|p| p.name == name).map(|p| p.signal);
+        let port_signal =
+            |ports: &'static [PortSpec], name: String| ports.iter().find(|p| p.name == name).map(|p| p.signal);
         let found = self.role.mismatches(
             |name| port_signal(module.inputs, self.own_input(name)),
             |name| port_signal(module.outputs, self.own_output(name)),
             |name| {
-                module
-                    .params
-                    .iter()
-                    .find(|p| p.name == self.own_param(name))
-                    .map(ParamKind::of)
+                let own = self.own_param(name);
+                module.params.iter().find(|p| p.name == own).map(ParamKind::of)
             },
             "parameter",
         );
@@ -359,14 +349,21 @@ impl FillsRole {
     }
 }
 
+/// One kind of name map a declaration checks: its word, its entries, and
+/// whether the role and the module have a name.
+type NameMap<'a> = (
+    &'a str,
+    &'a [(&'a str, &'a str)],
+    &'a dyn Fn(&str) -> bool,
+    &'a dyn Fn(&str) -> bool,
+);
+
 /// `name` mapped through `map`, or itself.
-fn mapped<'a>(map: &'static [(&'static str, &'static str)], name: &'a str) -> &'a str
-where
-    'static: 'a,
-{
+fn mapped(map: &'static [(&'static str, &'static str)], name: &str) -> String {
     map.iter()
         .find(|(role_name, _)| *role_name == name)
         .map_or(name, |(_, own)| *own)
+        .to_string()
 }
 
 #[cfg(test)]

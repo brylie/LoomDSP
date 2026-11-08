@@ -352,7 +352,8 @@ impl Loaded {
                 Err(error) => return Err(error.to_string()),
             };
             notes.extend(flat.apply_to(controller, &mut ids).map_err(|e| e.to_string())?);
-            hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).map_err(|e| e.to_string())?;
+            hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids, controller.registry())
+                .map_err(|e| e.to_string())?;
             for (id, layout) in hierarchy.layouts(&patch) {
                 if controller.graph().node(id).is_some_and(|node| node.unknown.is_some()) {
                     original_unknown_positions.insert(id.0, layout.position);

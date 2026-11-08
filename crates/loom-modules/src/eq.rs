@@ -4,11 +4,11 @@
 
 use crate::cached::Cached;
 use loom_core::signal::pitch;
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::filter::eq::{BUTTERWORTH_Q, Coefficients, Cut, CutCoefficients, CutSide, CutSlope, Section, Shape};
 use loom_rt::Smoothed;
 

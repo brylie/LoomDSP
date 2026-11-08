@@ -449,3 +449,56 @@ fn restarting_the_output_fade_never_allocates() {
     restart.request();
     assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
 }
+
+/// A slot swap and its finish are ordinary graph edits on the control
+/// side: the audio thread runs both parts and the swap fade with no
+/// allocation, and the finish only swaps a schedule (sub-patches.md,
+/// Acceptance criteria, Engine).
+#[test]
+fn a_slot_swap_never_allocates() {
+    use loom_patch::{FlatIds, Hierarchy, Layout, Patch};
+    let text = r#"Patch(
+        version: 1,
+        modules: [
+            PatchModule(id: 1, kind: "loom.osc.noise@1"),
+            PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 300.0}),
+            PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+            PatchModule(id: 4, kind: "loom.clock.transport@1"),
+            PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+        ],
+        cables: [
+            PatchCable(from: (1, "out"), to: (9, "in")),
+            PatchCable(from: (9, "out"), to: (3, "in")),
+        ],
+    )"#;
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let patch = Patch::from_ron(text).unwrap();
+    let mut ids = FlatIds::new();
+    patch.load_with_ids(&mut parts.controller, &mut ids).unwrap();
+    let mut hierarchy =
+        Hierarchy::from_patch(&patch, parts.controller.graph(), ids, parts.controller.registry()).unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    let layout = |_: u32| Layout::default();
+    hierarchy
+        .swap_to_module(
+            &mut parts.controller,
+            &layout,
+            loom_core::ModuleId(9),
+            "loom.filter.ladder@1",
+        )
+        .unwrap();
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    hierarchy.finish_all_fades(&mut parts.controller);
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    parts.controller.collect_garbage();
+}

@@ -16,9 +16,11 @@
 use crate::level::LevelRef;
 use crate::{
     INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping, PatchModulation,
-    PatchModule, ResolveOptions, ResolvedModule, SUBPATCH_KIND, SubPatch,
+    PatchModule, ResolveOptions, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, SubPatch,
 };
-use loom_core::{Controller, LoomError, MidiControl, ModuleId, ModuleNames, Registry, TRANSPORT_MODULE};
+use loom_core::{
+    Controller, FillsRole, LoomError, MidiControl, ModuleId, ModuleNames, Registry, RoleDescriptor, TRANSPORT_MODULE,
+};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -299,6 +301,15 @@ enum Member {
     Input(String),
     /// A Patch output of a definition, with its port name.
     Output(String),
+    /// A slot: its role, and the level id of its current part, which is
+    /// another member of the level (sub-patches.md, Slots).
+    Slot(SlotMember),
+}
+
+/// A slot of one level, as the flattener routes through it.
+struct SlotMember {
+    role: &'static RoleDescriptor,
+    part: Option<u32>,
 }
 
 impl Patch {
@@ -532,6 +543,8 @@ fn flatten_level(
     for module in &modules {
         let member = if module.is_instance() || module.subpatch.is_some() {
             Member::Instance(flatten_instance(ctx, module, path)?)
+        } else if module.is_slot() || module.slot.is_some() {
+            Member::Slot(slot_member(ctx, module)?)
         } else if !top && module.kind == INPUT_KIND {
             Member::Input(port_name(module, "in"))
         } else if !top && module.kind == OUTPUT_KIND {
@@ -581,6 +594,64 @@ fn flatten_level(
         inner.outputs.insert(name.clone(), None);
     }
 
+    // Slots: each part is another member of this level that declares the
+    // role, and no two slots share one (sub-patches.md, Patch file).
+    let mut owned: BTreeMap<u32, u32> = BTreeMap::new();
+    for module in &modules {
+        let Some(Member::Slot(slot)) = members.get(&module.id) else {
+            continue;
+        };
+        let bad = |reason: String| PatchError::BadSlot {
+            module: module.id,
+            reason,
+        };
+        if let Some(part) = slot.part {
+            let fits = match members.get(&part) {
+                Some(Member::Module(_, resolved)) => {
+                    resolved.unknown.is_some() || resolved.descriptor.fills(slot.role.id).is_some()
+                }
+                Some(Member::Instance(_)) => modules
+                    .iter()
+                    .find(|m| m.id == part)
+                    .and_then(|m| m.subpatch.as_ref())
+                    .and_then(|key| ctx.table.get(key))
+                    .is_some_and(|d| d.roles.iter().any(|r| crate::role_id(r) == slot.role.id)),
+                Some(Member::Slot(_) | Member::Input(_) | Member::Output(_)) => {
+                    return Err(bad(format!("its part, module {part}, is a slot or a port")));
+                }
+                None => return Err(bad(format!("its part, module {part}, is not in this level"))),
+            };
+            if !fits {
+                return Err(bad(format!(
+                    "its part, module {part}, does not fill the role {}",
+                    slot.role.kind()
+                )));
+            }
+            if let Some(other) = owned.insert(part, module.id) {
+                return Err(bad(format!("module {part} is already the part of slot {other}")));
+            }
+        }
+        if let Some(held) = module.slot.as_ref().map(|s| &s.held) {
+            for key in held.keys() {
+                if let crate::PartKey::SubPatch(key) = key
+                    && !ctx.table.contains_key(key)
+                {
+                    return Err(bad(format!(
+                        "it holds the sub-patch `{key}`, which the patch does not have"
+                    )));
+                }
+            }
+        }
+    }
+
+    // What feeds each instance or slot input, for pass-through ports, in
+    // last-cable-wins order as the controller connects.
+    let mut feeds: BTreeMap<(u32, String), (u32, String)> = BTreeMap::new();
+    for cable in level.cables {
+        if matches!(members.get(&cable.to.0), Some(Member::Instance(_) | Member::Slot(_))) {
+            feeds.insert(cable.to.clone(), cable.from.clone());
+        }
+    }
     // Exposed parameters, before the links, so an exposed name on a
     // placeholder is one of its parameters when an assignment reaches it.
     if let Some(definition) = definition {
@@ -614,6 +685,21 @@ fn flatten_level(
                         });
                     }
                 },
+                // A slot's role parameter, routed to its part. Nothing behind
+                // it (an empty slot, or a part without the optional
+                // parameter) makes no entry.
+                Some(Member::Slot(slot)) => {
+                    if slot.role.param(&exposed.param).is_none() {
+                        return Err(PatchError::BadExposed {
+                            name: exposed.name.clone(),
+                            reason: format!("slot {} has no role parameter `{}`", exposed.module, exposed.param),
+                        });
+                    }
+                    match slot_param(&members, slot, &exposed.param) {
+                        Some(target) => target,
+                        None => continue,
+                    }
+                }
                 Some(Member::Input(_) | Member::Output(_)) => {
                     return Err(PatchError::BadExposed {
                         name: exposed.name.clone(),
@@ -648,19 +734,12 @@ fn flatten_level(
         }
     }
 
-    // Pass 2: links. What feeds each instance input, for pass-through
-    // ports, in last-cable-wins order as the controller connects.
-    let mut feeds: BTreeMap<(u32, String), (u32, String)> = BTreeMap::new();
-    for cable in level.cables {
-        if matches!(members.get(&cable.to.0), Some(Member::Instance(_))) {
-            feeds.insert(cable.to.clone(), cable.from.clone());
-        }
-    }
     let lookup = Lookup {
         members: &members,
         feeds: &feeds,
+        owned: &owned,
     };
-    // Inside a definition, two cables into one input are refused: a flat
+    // Pass 2: links. Inside a definition, two cables into one input are refused: a flat
     // patch keeps the later one, and flattening would not keep that order
     // across the boundary.
     let mut fed = std::collections::BTreeSet::new();
@@ -713,7 +792,10 @@ fn flatten_level(
             // Nothing behind the port: the assignment moves nothing.
             None => continue,
         };
-        let (target, param) = lookup.param_of(&assignment.target)?;
+        // Nothing behind a slot's parameter: the assignment moves nothing.
+        let Some((target, param)) = lookup.param_of(&assignment.target)? else {
+            continue;
+        };
         own_modulation.push(PatchModulation {
             source,
             target: (target.0, param),
@@ -721,7 +803,9 @@ fn flatten_level(
         });
     }
     for mapping in level.midi {
-        let (target, param) = lookup.param_of(&mapping.target)?;
+        let Some((target, param)) = lookup.param_of(&mapping.target)? else {
+            continue;
+        };
         own_midi.push(PatchMidiMapping {
             target: (target.0, param),
             ..mapping.clone()
@@ -810,13 +894,36 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
             Some((min, max)) if min.is_finite() && max.is_finite() && min < max => value.clamp(min, max),
             _ => value,
         };
-        let Some(inner) = modules.iter_mut().find(|m| m.id == exposed.module) else {
+        let Some(inner) = modules.iter().find(|m| m.id == exposed.module) else {
             // Reported as a bad exposed entry when the definition is
             // flattened below.
             continue;
         };
-        inner.params.insert(exposed.param.clone(), value);
-        inner.ranges.remove(&exposed.param);
+        // Through a slot, the value lands on the part, by its own name
+        // (sub-patches.md, Slots). A part without the optional parameter
+        // takes nothing.
+        let (target, param) = match &inner.slot {
+            None => (exposed.module, exposed.param.clone()),
+            Some(slot) => {
+                let Some(part) = slot.part else { continue };
+                let Some(part_module) = modules.iter().find(|m| m.id == part) else {
+                    continue;
+                };
+                let role_id = crate::role_id(&slot.role);
+                let own = if part_module.subpatch.is_some() {
+                    Some(exposed.param.clone())
+                } else {
+                    part_own_param(ctx.registry, &part_module.kind, role_id, &exposed.param)
+                };
+                match own {
+                    Some(own) => (part, own),
+                    None => continue,
+                }
+            }
+        };
+        let inner = modules.iter_mut().find(|m| m.id == target).expect("found above");
+        inner.params.insert(param.clone(), value);
+        inner.ranges.remove(&param);
     }
     let inside = LevelRef {
         modules: &modules,
@@ -839,6 +946,42 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
         name,
         source: Box::new(source),
     })
+}
+
+/// The slot member for a slot module: its role, resolved, and its part.
+fn slot_member(ctx: &Context<'_>, module: &PatchModule) -> Result<SlotMember, PatchError> {
+    let bad = |reason: String| PatchError::BadSlot {
+        module: module.id,
+        reason,
+    };
+    if module.kind != SLOT_KIND {
+        return Err(bad(format!(
+            "`{}` has a `slot` field, which only {SLOT_KIND} has",
+            module.kind
+        )));
+    }
+    let Some(slot) = &module.slot else {
+        return Err(bad("it has no `slot` field".to_string()));
+    };
+    if !module.params.is_empty() || !module.ranges.is_empty() || module.subpatch.is_some() {
+        return Err(bad(
+            "a slot has no values of its own; they belong to its part".to_string()
+        ));
+    }
+    let role = ctx.registry.resolve_role(&slot.role).map_err(|e| bad(e.to_string()))?;
+    Ok(SlotMember { role, part: slot.part })
+}
+
+/// A module part's own name for the role parameter `param`: through its
+/// declaration of the role, the same name for a module this build does not
+/// know, or `None` when the module lacks the optional parameter.
+pub(crate) fn part_own_param(registry: &Registry, kind: &str, role_id: &str, param: &str) -> Option<String> {
+    let Ok(descriptor) = registry.resolve(kind) else {
+        return Some(param.to_string());
+    };
+    let fills = descriptor.fills(role_id)?;
+    let own = fills.own_param(param);
+    descriptor.param_index(&own).map(|_| own)
 }
 
 /// The port name a Patch input or output gives its sub-patch: its label,
@@ -864,8 +1007,11 @@ fn no_such_port(module: u32, direction: &'static str, port: &str) -> PatchError 
 /// Name lookups over one level's members, for pass 2.
 struct Lookup<'a> {
     members: &'a BTreeMap<u32, Member>,
-    /// What feeds each instance input in this level.
+    /// What feeds each instance or slot input in this level.
     feeds: &'a BTreeMap<(u32, String), (u32, String)>,
+    /// Each slot's part, by the part's id: a cable or an assignment on a
+    /// role name of one is refused, since it goes through the slot.
+    owned: &'a BTreeMap<u32, u32>,
 }
 
 impl Lookup<'_> {
@@ -874,7 +1020,41 @@ impl Lookup<'_> {
     /// carries nothing.
     fn source_of(&self, from: &(u32, String), seen: &mut Vec<(u32, String)>) -> Result<Option<Source>, PatchError> {
         let (id, port) = from;
+        if let Some(slot) = self.owned.get(id) {
+            return Err(PatchError::PartCabledDirectly {
+                module: *id,
+                slot: *slot,
+            });
+        }
         match self.members.get(id) {
+            Some(Member::Slot(slot)) => {
+                if slot.role.output(port).is_none() {
+                    return Err(no_such_port(*id, "output", port));
+                }
+                match slot.part.and_then(|part| self.members.get(&part)) {
+                    Some(Member::Module(flat, resolved)) => {
+                        let own = own_name(resolved, slot.role, port, |f, n| f.own_output(n));
+                        Ok(resolved.output_index(&own).map(|_| Source::Module(*flat, own)))
+                    }
+                    Some(Member::Instance(child)) => match child.outputs.get(port) {
+                        Some(Some(Source::Module(flat, output))) => Ok(Some(Source::Module(*flat, output.clone()))),
+                        Some(Some(Source::Input(input))) => {
+                            let key = (*id, input.clone());
+                            if seen.contains(&key) {
+                                return Ok(None);
+                            }
+                            seen.push(key.clone());
+                            match self.feeds.get(&key) {
+                                Some(feed) => self.source_of(feed, seen),
+                                None => Ok(None),
+                            }
+                        }
+                        _ => Ok(None),
+                    },
+                    // An empty slot: nothing behind the port.
+                    _ => Ok(None),
+                }
+            }
             Some(Member::Module(flat, resolved)) => {
                 if resolved.output_index(port).is_none() {
                     return Err(no_such_port(*id, "output", port));
@@ -913,7 +1093,29 @@ impl Lookup<'_> {
     /// module, several for an instance port that fans out inside.
     fn dests_of(&self, to: &(u32, String)) -> Result<Vec<(ModuleId, String)>, PatchError> {
         let (id, port) = to;
+        if let Some(slot) = self.owned.get(id) {
+            return Err(PatchError::PartCabledDirectly {
+                module: *id,
+                slot: *slot,
+            });
+        }
         match self.members.get(id) {
+            Some(Member::Slot(slot)) => {
+                if slot.role.input(port).is_none() {
+                    return Err(no_such_port(*id, "input", port));
+                }
+                Ok(match slot.part.and_then(|part| self.members.get(&part)) {
+                    Some(Member::Module(flat, resolved)) => {
+                        let own = own_name(resolved, slot.role, port, |f, n| f.own_input(n));
+                        resolved
+                            .input_index(&own)
+                            .map(|_| vec![(*flat, own)])
+                            .unwrap_or_default()
+                    }
+                    Some(Member::Instance(child)) => child.inputs.get(port).cloned().unwrap_or_default(),
+                    _ => Vec::new(),
+                })
+            }
             Some(Member::Module(flat, resolved)) => {
                 if resolved.input_index(port).is_none() {
                     return Err(no_such_port(*id, "input", port));
@@ -930,24 +1132,79 @@ impl Lookup<'_> {
         }
     }
 
-    /// The flat parameter the parameter `target` of this level stands for.
-    fn param_of(&self, target: &(u32, String)) -> Result<(ModuleId, String), PatchError> {
+    /// The flat parameter the parameter `target` of this level stands for,
+    /// or `None` for a slot's role parameter with nothing behind it: an
+    /// empty slot, or a part without the optional parameter. On a slot's
+    /// part itself, only a parameter outside the role is reached directly;
+    /// a role parameter goes through the slot.
+    fn param_of(&self, target: &(u32, String)) -> Result<Option<(ModuleId, String)>, PatchError> {
         let (id, param) = target;
         let no_such_param = || PatchError::UnknownParam {
             module: *id,
             param: param.clone(),
         };
+        let through_slot = |slot: u32| PatchError::PartCabledDirectly { module: *id, slot };
         match self.members.get(id) {
+            Some(Member::Slot(slot)) => {
+                if slot.role.param(param).is_none() {
+                    return Err(no_such_param());
+                }
+                Ok(slot_param(self.members, slot, param))
+            }
             Some(Member::Module(flat, resolved)) => {
                 if resolved.parameter_index(param).is_none() {
                     return Err(no_such_param());
                 }
-                Ok((*flat, param.clone()))
+                if let Some(slot) = self.owned.get(id)
+                    && let Some(Member::Slot(owner)) = self.members.get(slot)
+                    && resolved
+                        .descriptor
+                        .fills(owner.role.id)
+                        .is_some_and(|f| f.role_param_of(param).is_some())
+                {
+                    return Err(through_slot(*slot));
+                }
+                Ok(Some((*flat, param.clone())))
             }
-            Some(Member::Instance(child)) => child.exposed.get(param).cloned().ok_or_else(no_such_param),
+            Some(Member::Instance(child)) => {
+                if let Some(slot) = self.owned.get(id)
+                    && let Some(Member::Slot(owner)) = self.members.get(slot)
+                    && owner.role.param(param).is_some()
+                {
+                    return Err(through_slot(*slot));
+                }
+                child.exposed.get(param).cloned().map(Some).ok_or_else(no_such_param)
+            }
             Some(Member::Input(_) | Member::Output(_)) => Err(no_such_param()),
             None => Err(LoomError::UnknownModule(ModuleId(*id)).into()),
         }
+    }
+}
+
+/// A module part's own name for a role name: through its declaration of
+/// the role, or the same name for a module this build does not know.
+fn own_name(
+    resolved: &ResolvedModule,
+    role: &RoleDescriptor,
+    name: &str,
+    map: impl Fn(&FillsRole, &str) -> String,
+) -> String {
+    match resolved.descriptor.fills(role.id) {
+        Some(fills) => map(fills, name),
+        None => name.to_string(),
+    }
+}
+
+/// The flat parameter behind a slot's role parameter `param`, or `None`
+/// for an empty slot or a part without the optional parameter.
+fn slot_param(members: &BTreeMap<u32, Member>, slot: &SlotMember, param: &str) -> Option<(ModuleId, String)> {
+    match slot.part.and_then(|part| members.get(&part)) {
+        Some(Member::Module(flat, resolved)) => {
+            let own = own_name(resolved, slot.role, param, |f, n| f.own_param(n));
+            resolved.parameter_index(&own).map(|_| (*flat, own))
+        }
+        Some(Member::Instance(child)) => child.exposed.get(param).cloned(),
+        _ => None,
     }
 }
 

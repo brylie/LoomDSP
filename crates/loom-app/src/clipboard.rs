@@ -482,6 +482,7 @@ impl Group {
                     id: instance.id,
                     kind: SUBPATCH_KIND.to_string(),
                     subpatch: Some(instance.key.clone()),
+                    slot: None,
                     label: instance.label.clone(),
                     params: instance.params.clone(),
                     position: instance.layout.position,

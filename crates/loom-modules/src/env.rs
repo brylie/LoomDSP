@@ -3,11 +3,11 @@
 //! Spec: `docs/design/p1-modules.md`, Envelope AD mode.
 
 use loom_core::signal::gate_is_high;
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::envelope::{self, Settings, fall, power};
 
 /// `loom.env.envelope`: an envelope with an ADSR mode that follows a gate

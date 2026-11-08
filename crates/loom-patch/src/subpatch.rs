@@ -59,6 +59,13 @@ pub struct SubPatch {
     /// missing. Omitted for a plain copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub library: Option<String>,
+    /// The roles this sub-patch fills (FR-ENCAP-09), as role kinds such as
+    /// `"loom.role.filter@1"`, so it can be the part of a slot of that
+    /// role. Checked against its ports and exposed items when it is saved
+    /// to the library, inserted, or placed in a slot
+    /// ([`SubPatch::prune_roles`]). Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
 }
 
 /// An inner parameter exposed on the sub-patch (`docs/design/sub-patches.md`,
@@ -91,6 +98,7 @@ impl SubPatch {
             midi: Vec::new(),
             exposed: Vec::new(),
             library: None,
+            roles: Vec::new(),
         }
     }
 

@@ -6,11 +6,11 @@
 //! module is created (`NFR-RT-02`), never in `process`, and share a 4-point
 //! Catmull-Rom (cubic Hermite) fractional-delay reader.
 
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::delay;
 use loom_rt::Smoothed;
 

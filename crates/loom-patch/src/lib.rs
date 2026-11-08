@@ -43,6 +43,8 @@ pub mod resolve;
 pub use resolve::{Layout, ResolveError, ResolveOptions, ResolvedModule};
 pub mod subpatch;
 pub use subpatch::{Exposed, INPUT_KIND, OUTPUT_KIND, SUBPATCH_KIND, SubPatch};
+pub mod slot;
+pub use slot::{Held, PartKey, SLOT_KIND, Slot};
 pub mod flatten;
 pub use flatten::{Flat, FlatIds, FlatModule, ModulePath};
 pub mod hierarchy;
@@ -93,6 +95,11 @@ pub struct Patch {
     /// empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exposed: Vec<Exposed>,
+    /// The roles this patch fills when it is inserted as a sub-patch
+    /// (FR-ENCAP-09), as `SubPatch::roles`. A library item carries them
+    /// here. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
 }
 
 /// A module in a patch file.
@@ -107,6 +114,11 @@ pub struct PatchModule {
     /// of the definition's exposed parameters, by exposed name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subpatch: Option<String>,
+    /// For a slot ([`SLOT_KIND`]), its role, current part, and held parts
+    /// (`docs/design/sub-patches.md`, Slots). Then `params` and `ranges`
+    /// are empty: the part holds the values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<Slot>,
     /// Optional user label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -454,6 +466,25 @@ pub enum PatchError {
         /// The definitions' names along the loop, first to last.
         path: Vec<String>,
     },
+    /// A slot that cannot be used: an unknown role, a part that is not in
+    /// its level or does not fill the role, or a held sub-patch the table
+    /// lacks (`docs/design/sub-patches.md`, Patch file).
+    #[error("slot {module}: {reason}")]
+    BadSlot {
+        /// The slot's module ID.
+        module: u32,
+        /// What is wrong with it.
+        reason: String,
+    },
+    /// A cable, or an assignment or mapping on a role parameter, straight
+    /// onto a slot's part. Everything on the part goes through the slot.
+    #[error("module {module} is the part of slot {slot}; connect to the slot instead")]
+    PartCabledDirectly {
+        /// The part's module ID.
+        module: u32,
+        /// The slot's module ID.
+        slot: u32,
+    },
     /// An error inside a sub-patch definition, with the definition's name.
     #[error("in sub-patch \"{name}\": {source}")]
     InSubPatch {
@@ -479,6 +510,7 @@ impl Patch {
             modulation: Vec::new(),
             midi: Vec::new(),
             exposed: Vec::new(),
+            roles: Vec::new(),
         }
     }
 
@@ -642,6 +674,12 @@ pub(crate) fn canonicalise_lists(
     modules.sort_by_key(|m| m.id);
     cables.sort_by(|a, b| (a.to.0, &a.to.1).cmp(&(b.to.0, &b.to.1)));
     midi.sort_by(|a, b| (a.target.0, &a.target.1).cmp(&(b.target.0, &b.target.1)));
+}
+
+/// The id of a role or module kind string: `"loom.role.filter@1"` gives
+/// `"loom.role.filter"`.
+pub(crate) fn role_id(kind: &str) -> &str {
+    kind.rsplit_once('@').map_or(kind, |(id, _)| id)
 }
 
 /// A MIDI mapping as a file writes it, on `target`.

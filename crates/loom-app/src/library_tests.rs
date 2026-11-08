@@ -777,6 +777,7 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
         id: 99,
         kind: "loom.clock.transport@1".to_string(),
         subpatch: None,
+        slot: None,
         label: None,
         params: Default::default(),
         position: None,

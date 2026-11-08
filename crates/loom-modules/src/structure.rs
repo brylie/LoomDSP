@@ -102,7 +102,11 @@ pub static FADE: ModuleDescriptor = ModuleDescriptor {
         fade_port("a", "A", "The output of the part that is leaving."),
         fade_port("b", "B", "The same output of the part that takes its place."),
     ],
-    outputs: &[fade_port("out", "Out", "A, then a blend, then B alone once the fade is done.")],
+    outputs: &[fade_port(
+        "out",
+        "Out",
+        "A, then a blend, then B alone once the fade is done.",
+    )],
     params: &[],
     role: ModuleRole::Dsp(|config| {
         Box::new(SwapFade {
@@ -190,3 +194,6 @@ impl Module for PatchOutput {
         let ([_], []) = io.split::<1, 0>();
     }
 }
+
+#[cfg(test)]
+mod tests;

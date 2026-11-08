@@ -186,6 +186,7 @@ impl ResolvedModule {
                 id: self.id,
                 kind: unknown.kind.clone(),
                 subpatch: None,
+                slot: None,
                 label: self.label.clone(),
                 params: unknown.params.clone(),
                 position,
@@ -198,6 +199,7 @@ impl ResolvedModule {
             id: self.id,
             kind: self.descriptor.kind(),
             subpatch: None,
+            slot: None,
             label: self.label.clone(),
             params: specs
                 .iter()

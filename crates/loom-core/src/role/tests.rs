@@ -88,7 +88,12 @@ fn a_missing_required_parameter_is_named() {
     let mismatches = ENVELOPE.mismatches(
         |_| Some(SignalType::Gate),
         |_| Some(SignalType::Modulation),
-        |name| (name == "release").then_some(ParamKind { unit: "s", whole: false }),
+        |name| {
+            (name == "release").then_some(ParamKind {
+                unit: "s",
+                whole: false,
+            })
+        },
         "parameter",
     );
     assert_eq!(mismatches.len(), 1);
@@ -111,7 +116,12 @@ fn a_parameter_of_another_kind_is_refused() {
     let whole = MODULATOR.mismatches(
         |_| None,
         |_| Some(SignalType::Modulation),
-        |_| Some(ParamKind { unit: "Hz", whole: true }),
+        |_| {
+            Some(ParamKind {
+                unit: "Hz",
+                whole: true,
+            })
+        },
         "parameter",
     );
     assert_eq!(whole[0].to_string(), "parameter `rate` is a whole number");
@@ -159,7 +169,11 @@ fn initial_roles_are_documented() {
             assert!(!port.label.is_empty() && !port.description.is_empty(), "{}", port.name);
         }
         for param in role.params {
-            assert!(!param.label.is_empty() && !param.description.is_empty(), "{}", param.name);
+            assert!(
+                !param.label.is_empty() && !param.description.is_empty(),
+                "{}",
+                param.name
+            );
         }
     }
     assert_eq!(FILTER.input("cutoff").map(|p| p.required), Some(false));

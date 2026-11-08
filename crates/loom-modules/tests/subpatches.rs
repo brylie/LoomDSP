@@ -120,7 +120,8 @@ fn a_collapse_renders_bit_identical_to_the_flat_patch() {
     let mut ids = FlatIds::new();
     let mut edited = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
     flat.load_with_ids(&mut edited.controller, &mut ids).unwrap();
-    let mut hierarchy = Hierarchy::from_patch(&flat, edited.controller.graph(), ids).unwrap();
+    let mut hierarchy =
+        Hierarchy::from_patch(&flat, edited.controller.graph(), ids, edited.controller.registry()).unwrap();
     let oscillator = flat
         .modules
         .iter()
@@ -211,7 +212,7 @@ fn three_sources() -> (EngineParts, loom_patch::Hierarchy, Patch) {
     let mut parts = empty_engine();
     let mut ids = FlatIds::new();
     flat.load_with_ids(&mut parts.controller, &mut ids).unwrap();
-    let hierarchy = Hierarchy::from_patch(&flat, parts.controller.graph(), ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&flat, parts.controller.graph(), ids, parts.controller.registry()).unwrap();
     (parts, hierarchy, flat)
 }
 
@@ -351,7 +352,8 @@ fn a_sub_patch_saved_to_the_library_plays_the_same_inserted_again() {
         let mut ids = FlatIds::new();
         let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
         nested.load_with_ids(&mut parts.controller, &mut ids).expect("loads");
-        let hierarchy = Hierarchy::from_patch(&nested, parts.controller.graph(), ids).expect("reads");
+        let hierarchy =
+            Hierarchy::from_patch(&nested, parts.controller.graph(), ids, parts.controller.registry()).expect("reads");
         hierarchy
             .definition_file(parts.controller.graph(), |_| Layout::default(), ModuleId(2))
             .expect("the Voice tile has a file")
@@ -373,7 +375,8 @@ fn a_sub_patch_saved_to_the_library_plays_the_same_inserted_again() {
         let mut ids = FlatIds::new();
         host.load_with_ids(&mut parts.controller, &mut ids)
             .expect("the host loads");
-        let mut hierarchy = Hierarchy::from_patch(&host, parts.controller.graph(), ids).expect("reads");
+        let mut hierarchy =
+            Hierarchy::from_patch(&host, parts.controller.graph(), ids, parts.controller.registry()).expect("reads");
         let inserted = hierarchy
             .insert(&mut parts.controller, &ModulePath::root(), &file, None)
             .expect("the file inserts");

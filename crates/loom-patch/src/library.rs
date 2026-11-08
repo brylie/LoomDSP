@@ -159,6 +159,7 @@ impl SubPatch {
                 .collect(),
             exposed: file.exposed.clone(),
             library: library.map(str::to_string),
+            roles: file.roles.clone(),
         };
         if dropped.is_empty() {
             return (definition, Vec::new());
@@ -307,6 +308,7 @@ impl<'a> Ports<'a> {
             }
             .to_string(),
             subpatch: None,
+            slot: None,
             label: Some(name.clone()),
             params: BTreeMap::new(),
             position,
@@ -384,6 +386,7 @@ impl Patch {
         patch.modulation = definition.modulation.clone();
         patch.midi = definition.midi.clone();
         patch.exposed = definition.exposed.clone();
+        patch.roles = definition.roles.clone();
         for key in reachable_keys(definition, table) {
             if let Some(nested) = table.get(&key) {
                 patch.subpatches.insert(key, nested.clone());

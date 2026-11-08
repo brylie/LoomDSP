@@ -10,7 +10,7 @@ fn nested() -> (loom_core::Controller, Hierarchy) {
     let EngineParts { mut controller, .. } = create_engine(loom_modules::registry(), EngineConfig::default());
     let mut ids = loom_patch::FlatIds::new();
     patch.load_with_ids(&mut controller, &mut ids).unwrap();
-    let hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids, controller.registry()).unwrap();
     (controller, hierarchy)
 }
 
@@ -133,7 +133,7 @@ fn three() -> (loom_core::Controller, Hierarchy, BTreeMap<u32, (f32, f32)>) {
     let EngineParts { mut controller, .. } = create_engine(loom_modules::registry(), EngineConfig::default());
     let mut ids = loom_patch::FlatIds::new();
     patch.load_with_ids(&mut controller, &mut ids).unwrap();
-    let hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids, controller.registry()).unwrap();
     let positions = hierarchy
         .layouts(&patch)
         .into_iter()

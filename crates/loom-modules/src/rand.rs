@@ -2,11 +2,11 @@
 
 use crate::math::{DEFAULT_RANGE, WIDE_RANGES};
 use loom_core::signal::{EdgeDetector, gate_is_high};
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::random::Rng;
 use loom_rt::Smoothed;
 

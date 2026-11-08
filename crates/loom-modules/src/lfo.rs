@@ -3,11 +3,11 @@
 //! Spec: `docs/design/p1-modules.md`, LFO.
 
 use loom_core::signal::pitch;
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::oscillator::SlowWave;
 use loom_dsp::phase::Phasor;
 use loom_rt::Smoothed;

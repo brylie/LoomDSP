@@ -5,11 +5,11 @@
 
 use crate::cached::Cached;
 use crate::mix::stereo_port;
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::dynamics::{Coefficients, Curve, Detection, Dynamics as Algorithm, Mode, Settings};
 use loom_dsp::loudness::LevelMatch;
 use loom_rt::Smoothed;

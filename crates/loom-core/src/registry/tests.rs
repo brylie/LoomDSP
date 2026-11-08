@@ -841,10 +841,16 @@ fn refuses_a_role_declaration_missing_a_parameter() {
         error.contains("role loom.role.filter@1 needs parameter `cutoff`; the module has none"),
         "{error}"
     );
-    assert!(registry.role("loom.role.filter").is_none(), "a refused module registers no role");
+    assert!(
+        registry.role("loom.role.filter").is_none(),
+        "a refused module registers no role"
+    );
     registry.register(&FITS).unwrap();
     assert_eq!(registry.role("loom.role.filter").map(|r| r.name), Some("Filter"));
-    assert_eq!(registry.resolve_role("loom.role.filter@1").unwrap().id, "loom.role.filter");
+    assert_eq!(
+        registry.resolve_role("loom.role.filter@1").unwrap().id,
+        "loom.role.filter"
+    );
     assert!(matches!(
         registry.resolve_role("loom.role.filter@2"),
         Err(LoomError::UnsupportedRoleVersion { supported: 1, .. })

@@ -3,11 +3,11 @@
 //! Shapers take a phase input instead of a frequency. Connect a Phase module
 //! to drive them, or any other signal to bend the wave shape.
 
-use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
 };
+use loom_core::{FillsRole, roles};
 use loom_dsp::noise::Colour;
 use loom_dsp::{noise, oscillator};
 use loom_rt::Smoothed;

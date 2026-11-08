@@ -26,10 +26,22 @@ use crate::flatten::{FlatIds, ModulePath, port_name};
 use crate::library::{LeftOut, reachable_keys, rekey};
 use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
-    PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SUBPATCH_KIND, SubPatch, unique_name,
+    PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, Slot, SubPatch, unique_name,
 };
-use loom_core::{AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, TRANSPORT_MODULE};
+use loom_core::{
+    AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, Registry, TRANSPORT_MODULE,
+};
 use std::collections::{BTreeMap, BTreeSet};
+
+mod slots;
+pub use slots::{
+    Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, expose_role_only_text, made_slot_text,
+    make_slot_label, swapped_text,
+};
+
+/// The status bar text when Dissolve is asked for a sub-patch that holds
+/// a slot. Moving a slot out of a sub-patch is a follow-up.
+pub const NO_SLOT_IN_DISSOLVE: &str = "Cannot dissolve a sub-patch that holds a slot yet; dissolve the slot first";
 
 /// The name a new sub-patch gets when it is made, made unique with a
 /// number ("Sub-patch 2").
@@ -119,6 +131,12 @@ pub struct Definition {
     /// The library file this definition follows, as the file writes it
     /// (sub-patches.md, Linked library items), or `None` for a copy.
     pub library: Option<String>,
+    /// The roles it declares (FR-ENCAP-09), as role kinds.
+    pub roles: Vec<String>,
+    /// For a definition a slot holds but does not play: the definition
+    /// whole, since no instance carries its modules. `None` for a
+    /// definition with an instance.
+    pub stored: Option<Box<StoredPart>>,
 }
 
 /// What inserting a patch file as a sub-patch made (sub-patches.md,
@@ -162,6 +180,8 @@ pub enum Tile {
     Instance(String),
     /// A port tile of a definition.
     Port(Direction, String),
+    /// A slot tile, with its role's kind.
+    Slot(String),
 }
 
 /// One cable as a level shows it, in that level's ids.
@@ -235,6 +255,8 @@ pub struct Hierarchy {
     definitions: BTreeMap<String, Definition>,
     instances: BTreeMap<ModulePath, Instance>,
     ports: BTreeMap<ModulePath, Port>,
+    /// The slot tiles, by path (sub-patches.md, Slots).
+    slots: BTreeMap<ModulePath, SlotState>,
     links: BTreeSet<Link>,
     /// The flat cables the links imply, as (output, input) in flat ids and
     /// port names, from the last sync or load.
@@ -265,6 +287,7 @@ impl Hierarchy {
             definitions: BTreeMap::new(),
             instances: BTreeMap::new(),
             ports: BTreeMap::new(),
+            slots: BTreeMap::new(),
             links: BTreeSet::new(),
             implied: BTreeSet::new(),
             top_exposed: Vec::new(),
@@ -275,10 +298,16 @@ impl Hierarchy {
     /// into `graph`: every instance and port gets a flat id in path order,
     /// the definitions keep their exposed parameters and stored values,
     /// and the boundary cables become links.
-    pub fn from_patch(patch: &Patch, graph: &Graph, ids: FlatIds) -> Result<Self, PatchError> {
+    pub fn from_patch(patch: &Patch, graph: &Graph, ids: FlatIds, registry: &Registry) -> Result<Self, PatchError> {
         let mut hierarchy = Self::with_ids(ids);
         hierarchy.top_exposed = patch.exposed.clone();
-        hierarchy.read_level(&patch.modules, &patch.cables, &ModulePath::root(), &patch.subpatches)?;
+        hierarchy.read_level(
+            &patch.modules,
+            &patch.cables,
+            &ModulePath::root(),
+            &patch.subpatches,
+            registry,
+        )?;
         hierarchy.adopt(graph);
         hierarchy.implied = graph_cables(graph)
             .difference(&hierarchy.direct_cables(patch))
@@ -295,6 +324,7 @@ impl Hierarchy {
         cables: &[PatchCable],
         level: &ModulePath,
         table: &BTreeMap<String, SubPatch>,
+        registry: &Registry,
     ) -> Result<(), PatchError> {
         let mut structural = BTreeSet::new();
         let mut sorted: Vec<&PatchModule> = modules.iter().collect();
@@ -327,11 +357,67 @@ impl Hierarchy {
                     Definition {
                         metadata: definition.metadata.clone(),
                         exposed: definition.exposed.clone(),
-                        defaults: defaults_of(definition),
+                        defaults: defaults_of(definition, registry),
                         library: definition.library.clone(),
+                        roles: definition.roles.clone(),
+                        stored: None,
                     },
                 );
-                self.read_level(&definition.modules, &definition.cables, &path, table)?;
+                self.read_level(&definition.modules, &definition.cables, &path, table, registry)?;
+                structural.insert(module.id);
+            } else if module.is_slot() || module.slot.is_some() {
+                let Some(slot) = &module.slot else {
+                    return Err(PatchError::BadSlot {
+                        module: module.id,
+                        reason: "it has no `slot` field".to_string(),
+                    });
+                };
+                let role = registry.resolve_role(&slot.role).map_err(|e| PatchError::BadSlot {
+                    module: module.id,
+                    reason: e.to_string(),
+                })?;
+                self.ids.id_of(&path)?;
+                let part_fills = slot
+                    .part
+                    .and_then(|part| modules.iter().find(|m| m.id == part))
+                    .filter(|part| part.subpatch.is_none())
+                    .and_then(|part| registry.resolve(&part.kind).ok())
+                    .and_then(|d| d.fills(role.id));
+                self.slots.insert(
+                    path,
+                    SlotState {
+                        role,
+                        part: slot.part,
+                        part_fills,
+                        held: slot.held.clone(),
+                        label: module.label.clone(),
+                        fading: None,
+                    },
+                );
+                // A held sub-patch keeps its definition, whole, since no
+                // instance carries its modules.
+                for key in slot.held.keys() {
+                    let crate::PartKey::SubPatch(key) = key else { continue };
+                    let Some(definition) = table.get(key) else { continue };
+                    let nested: BTreeMap<String, SubPatch> = crate::reachable_keys(definition, table)
+                        .into_iter()
+                        .filter_map(|k| table.get(&k).map(|d| (k, d.clone())))
+                        .collect();
+                    self.definitions.insert(
+                        key.clone(),
+                        Definition {
+                            metadata: definition.metadata.clone(),
+                            exposed: definition.exposed.clone(),
+                            defaults: BTreeMap::new(),
+                            library: definition.library.clone(),
+                            roles: definition.roles.clone(),
+                            stored: Some(Box::new(StoredPart {
+                                definition: definition.clone(),
+                                nested,
+                            })),
+                        },
+                    );
+                }
                 structural.insert(module.id);
             } else if !level.is_root() && (module.kind == INPUT_KIND || module.kind == OUTPUT_KIND) {
                 let direction = if module.kind == INPUT_KIND {
@@ -381,7 +467,7 @@ impl Hierarchy {
 
     /// True when the patch has no sub-patch.
     pub fn is_flat(&self) -> bool {
-        self.instances.is_empty()
+        self.instances.is_empty() && self.slots.is_empty()
     }
 
     /// The name a tile shows: a definition's name for an instance, a port's
@@ -390,6 +476,9 @@ impl Hierarchy {
         let path = self.ids.path_of(id)?;
         if let Some(definition) = self.definition_at(path) {
             return Some(definition.metadata.name.clone());
+        }
+        if let Some(slot) = self.slots.get(path) {
+            return Some(slot.name());
         }
         self.ports.get(path).map(|port| port.name.clone())
     }
@@ -443,12 +532,18 @@ impl Hierarchy {
 
     /// What a flat id stands for, or `None` for an id no live tile has.
     pub fn tile(&self, graph: &Graph, id: ModuleId) -> Option<Tile> {
+        if self.is_hidden(id) {
+            return None;
+        }
         if graph.node(id).is_some() {
             return Some(Tile::Module);
         }
         let path = self.ids.path_of(id)?;
         if let Some(instance) = self.instances.get(path) {
             return Some(Tile::Instance(instance.key.clone()));
+        }
+        if let Some(slot) = self.slots.get(path) {
+            return Some(Tile::Slot(slot.role.kind()));
         }
         self.ports
             .get(path)
@@ -495,6 +590,13 @@ impl Hierarchy {
                 tiles.push((path.last(), id, Tile::Port(port.direction, port.name.clone())));
             }
         }
+        for (path, slot) in &self.slots {
+            if path.parent().as_ref() == Some(level)
+                && let Some(id) = self.ids.get(path)
+            {
+                tiles.push((path.last(), id, Tile::Slot(slot.role.kind())));
+            }
+        }
         tiles.sort_by_key(|(lid, _, _)| *lid);
         tiles.into_iter().map(|(_, id, tile)| (id, tile)).collect()
     }
@@ -537,6 +639,9 @@ impl Hierarchy {
     pub fn level_cables(&self, graph: &Graph, level: &ModulePath) -> Vec<LevelCable> {
         let mut cables = Vec::new();
         for (from, to) in graph.cables() {
+            if self.is_hidden(from.module) || self.is_hidden(to.module) {
+                continue;
+            }
             let (from_end, to_end) = cable_ends(graph, from, to);
             if self.implied.contains(&(from_end.clone(), to_end.clone())) {
                 continue;
@@ -600,8 +705,20 @@ impl Hierarchy {
             let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
             return self.source_behind_guarded(graph, &path, &link.from, seen);
         }
+        if let Some(slot) = self.slots.get(&path) {
+            // A slot's role output: the part's own output behind it.
+            slot.role.output(&end.1)?;
+            let part = slot.part?;
+            let own = if self.instances.contains_key(&level.child(part)) {
+                end.1.clone()
+            } else {
+                slot.own_output(&end.1)
+            };
+            return self.source_behind_guarded(graph, level, &(part, own), seen);
+        }
         let id = self.ids.get(&path)?;
-        graph.node(id)?;
+        let node = graph.node(id)?;
+        node.output_index(&end.1)?;
         Some((id, end.1.clone()))
     }
 
@@ -649,8 +766,21 @@ impl Hierarchy {
             }
             return;
         }
+        if let Some(slot) = self.slots.get(&path) {
+            if slot.role.input(&end.1).is_none() {
+                return;
+            }
+            let Some(part) = slot.part else { return };
+            let own = if self.instances.contains_key(&level.child(part)) {
+                end.1.clone()
+            } else {
+                slot.own_input(&end.1)
+            };
+            self.inputs_behind_guarded(graph, level, &(part, own), seen, found);
+            return;
+        }
         if let Some(id) = self.ids.get(&path)
-            && graph.node(id).is_some()
+            && graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some())
         {
             found.push((id, end.1.clone()));
         }
@@ -702,6 +832,9 @@ impl Hierarchy {
         if let Some(definition) = self.definition_at(&member) {
             let inner = definition.exposed.iter().find(|e| e.name == exposed.param)?;
             return self.resolve_exposed(&member, inner);
+        }
+        if self.slots.contains_key(&member) {
+            return self.slot_param_target(&member, &exposed.param);
         }
         Some((self.ids.get(&member)?, exposed.param.clone()))
     }
@@ -800,10 +933,12 @@ impl Hierarchy {
         let path = self.ids.path_of(member)?;
         let level = path.parent()?;
         let definition = self.definition_at(&level)?;
+        // A slot's part is exposed through the slot, by the role's name.
+        let (lid, param) = self.slot_end_for_param(&level, path.last(), param);
         let entry = definition
             .exposed
             .iter()
-            .find(|e| e.module == path.last() && e.param == param)?;
+            .find(|e| e.module == lid && e.param == param)?;
         Some((self.ids.get(&level)?, entry.name.clone()))
     }
 
@@ -867,6 +1002,10 @@ impl Hierarchy {
         for path in self.instances.keys() {
             levels.entry(path.clone()).or_default();
         }
+        // What exists only while a slot fades is never written.
+        let mut skip = skip.clone();
+        skip.extend(self.transient_ids());
+        let skip = &skip;
 
         // Modules, with the definition-side values of exposed parameters.
         for (id, node) in graph.nodes().filter(|(id, _)| !skip.contains(id)) {
@@ -880,17 +1019,55 @@ impl Hierarchy {
                         apply_stored(&mut module, param, stored);
                     }
                 }
+                // Exposed through a slot: the stored value is the part's,
+                // under the part's own name.
+                let lid = module.id;
+                for (slot_path, slot) in self
+                    .slots
+                    .iter()
+                    .filter(|(p, s)| p.parent().as_ref() == Some(&level) && s.part == Some(lid))
+                {
+                    for ((member, param), stored) in &definition.defaults {
+                        if *member == slot_path.last() {
+                            apply_stored(&mut module, &slot.own_param(param), stored);
+                        }
+                    }
+                }
             }
             levels.entry(level).or_default().modules.push(module);
+        }
+        // Slots, with their held parts.
+        for (path, slot) in &self.slots {
+            let Some(level) = path.parent() else { continue };
+            let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
+            levels.entry(level).or_default().modules.push(PatchModule {
+                id: path.last(),
+                kind: SLOT_KIND.to_string(),
+                subpatch: None,
+                slot: Some(Slot {
+                    role: slot.role.kind(),
+                    part: slot.part,
+                    held: slot.held.clone(),
+                }),
+                label: slot.label.clone(),
+                params: BTreeMap::new(),
+                position,
+                size,
+                ranges: BTreeMap::new(),
+            });
         }
         // Ports.
         for (path, port) in &self.ports {
             let Some(level) = path.parent() else { continue };
+            if self.is_leaving_path(path) {
+                continue;
+            }
             let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
             levels.entry(level).or_default().modules.push(PatchModule {
                 id: path.last(),
                 kind: port.direction.kind().to_string(),
                 subpatch: None,
+                slot: None,
                 label: Some(port.name.clone()),
                 params: BTreeMap::new(),
                 position,
@@ -898,14 +1075,19 @@ impl Hierarchy {
                 ranges: BTreeMap::new(),
             });
         }
-        // Instances, with their exposed values.
+        // Instances, with their exposed values. One that is leaving a slot
+        // is not written; its definition is stored whole instead.
         for (path, instance) in &self.instances {
             let Some(level) = path.parent() else { continue };
+            if self.is_leaving_path(path) {
+                continue;
+            }
             let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
             levels.entry(level.clone()).or_default().modules.push(PatchModule {
                 id: path.last(),
                 kind: SUBPATCH_KIND.to_string(),
                 subpatch: Some(instance.key.clone()),
+                slot: None,
                 label: instance.label.clone(),
                 params: self.instance_values(graph, path),
                 position,
@@ -941,6 +1123,9 @@ impl Hierarchy {
             });
         }
         for link in &self.links {
+            if self.is_leaving_path(&link.level.child(0)) && !link.level.is_root() {
+                continue;
+            }
             levels.entry(link.level.clone()).or_default().cables.push(PatchCable {
                 from: link.from.clone(),
                 to: link.to.clone(),
@@ -957,16 +1142,18 @@ impl Hierarchy {
             };
             levels.entry(entry.0).or_default().modulation.push(entry.1);
         }
-        // Mappings live with their module.
+        // Mappings live with their module; on a slot's part, through the
+        // slot by the role's name.
         for (_, mapping) in graph.midi_mappings().filter(|(_, m)| !skip.contains(&m.target)) {
             let path = self.path_of(mapping.target);
             let level = path.parent().unwrap_or_else(ModulePath::root);
             let param = crate::param_name(graph, mapping.target, mapping.param);
+            let target = self.slot_end_for_param(&level, path.last(), &param);
             levels
                 .entry(level)
                 .or_default()
                 .midi
-                .push(crate::midi_entry(mapping, (path.last(), param)));
+                .push(crate::midi_entry(mapping, target));
         }
 
         let mut patch = Patch::new("");
@@ -976,6 +1163,9 @@ impl Hierarchy {
         patch.modulation = top.modulation;
         patch.midi = top.midi;
         for (path, instance) in &self.instances {
+            if self.is_leaving_path(path) {
+                continue;
+            }
             let Some(definition) = self.definitions.get(&instance.key) else {
                 continue;
             };
@@ -990,8 +1180,26 @@ impl Hierarchy {
                     midi: level.midi,
                     exposed: definition.exposed.clone(),
                     library: definition.library.clone(),
+                    roles: definition.roles.clone(),
                 },
             );
+        }
+        // Definitions a slot holds but does not play, with what nests in
+        // them, rekeyed where a live definition took the key since.
+        for (key, definition) in &self.definitions {
+            let Some(stored) = &definition.stored else { continue };
+            if patch.subpatches.contains_key(key) {
+                continue;
+            }
+            let mut root = stored.definition.clone();
+            let mut nested = stored.nested.clone();
+            crate::library::rekey(&mut root, &mut nested, |candidate| {
+                candidate == key || patch.subpatches.contains_key(candidate)
+            });
+            patch.subpatches.insert(key.clone(), root);
+            for (nested_key, nested) in nested {
+                patch.subpatches.entry(nested_key).or_insert(nested);
+            }
         }
         // The top level's surface, less what no longer stands behind it: an
         // entry names a top-level id, which is a flat id only while the
@@ -1003,6 +1211,9 @@ impl Hierarchy {
                 let member = ModulePath::top(exposed.module);
                 if let Some(definition) = self.definition_at(&member) {
                     return definition.exposed.iter().any(|e| e.name == exposed.param);
+                }
+                if let Some(slot) = self.slots.get(&member) {
+                    return slot.role.param(&exposed.param).is_some();
                 }
                 let id = ModuleId(exposed.module);
                 !skip.contains(&id)
@@ -1054,17 +1265,22 @@ impl Hierarchy {
         let output = crate::port_name(graph, assignment.source);
         let param = crate::param_name(graph, assignment.target, assignment.param);
         let (level, source, target) = if source_level == target_level {
-            (source_level, (source_path.last(), output), (target_path.last(), param))
+            // On a slot's part, by the role's name through the slot.
+            let source = self.slot_end_for_output(&source_level, source_path.last(), &output);
+            let target = self.slot_end_for_param(&target_level, target_path.last(), &param);
+            (source_level, source, target)
         } else if target_level.starts_with(&source_level) {
             // The target is inside an instance of the source's level.
             let instance = target_level.prefix(source_level.0.len() + 1);
             let name = self.exposed_name_for(&instance, &(assignment.target, param))?;
-            (source_level, (source_path.last(), output), (instance.last(), name))
+            let source = self.slot_end_for_output(&source_level, source_path.last(), &output);
+            (source_level, source, (instance.last(), name))
         } else if source_level.starts_with(&target_level) {
             // The source is inside an instance of the target's level.
             let instance = source_level.prefix(target_level.0.len() + 1);
             let port = self.port_for_output(graph, &instance, &(assignment.source.module, output))?;
-            (target_level, (instance.last(), port), (target_path.last(), param))
+            let target = self.slot_end_for_param(&target_level, target_path.last(), &param);
+            (target_level, (instance.last(), port), target)
         } else {
             return None;
         };
@@ -1097,6 +1313,7 @@ impl Hierarchy {
                 .filter(|m| {
                     m.is_instance()
                         || m.subpatch.is_some()
+                        || m.is_slot()
                         || (!level.is_root() && (m.kind == INPUT_KIND || m.kind == OUTPUT_KIND))
                 })
                 .map(|m| m.id)
@@ -1138,7 +1355,8 @@ impl Hierarchy {
         controller: &mut Controller,
         skip: &[ModuleId],
     ) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
-        let skip: BTreeSet<ModuleId> = skip.iter().copied().collect();
+        let mut skip: BTreeSet<ModuleId> = skip.iter().copied().collect();
+        skip.extend(self.transient_ids());
         self.adopt(controller.graph());
         // What the links imply, from the links alone: a cable the graph
         // holds for a link that is gone must be written as direct now.
@@ -1153,11 +1371,32 @@ impl Hierarchy {
         let patch = self.unflatten_with(controller.graph(), |_| Layout::default(), true, &skip);
         let mut scratch = self.ids.clone();
         let flat = patch.flatten(controller.registry(), &mut scratch)?;
-        let desired: BTreeSet<(End, End)> = flat
+        let mut desired: BTreeSet<(End, End)> = flat
             .cables
             .iter()
             .map(|cable| (cable.from.clone(), cable.to.clone()))
             .collect();
+        debug_assert_eq!(
+            self.implied,
+            desired.difference(&self.direct_cables(&patch)).cloned().collect(),
+            "the links imply the same cables both ways"
+        );
+        // While a slot fades, both parts run and the fades sit between the
+        // new part and what the slot's output fed (sub-patches.md, How a
+        // swap crossfades).
+        let wiring = self.fade_wiring(controller.graph());
+        for (part_out, fade_out) in &wiring.reroute {
+            let moved: Vec<(End, End)> = desired
+                .iter()
+                .filter(|(from, to)| from == part_out && to.0 != fade_out.0)
+                .cloned()
+                .collect();
+            for (from, to) in moved {
+                desired.remove(&(from, to.clone()));
+                desired.insert((fade_out.clone(), to));
+            }
+        }
+        desired.extend(wiring.add);
         let current = graph_cables(controller.graph());
         for (_, to) in current.difference(&desired) {
             let input = input_ref(controller.graph(), to);
@@ -1169,11 +1408,6 @@ impl Hierarchy {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
         let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
-        debug_assert_eq!(
-            self.implied,
-            desired.difference(&self.direct_cables(&patch)).cloned().collect(),
-            "the links imply the same cables both ways"
-        );
         Ok(renamed)
     }
 
@@ -1239,6 +1473,31 @@ impl Hierarchy {
         let Some(key) = self.instances.get(level).map(|i| i.key.clone()) else {
             return Err(EXPOSE_INSIDE_ONLY.to_string());
         };
+        // A slot's part is exposed through the slot, by the role's name;
+        // a parameter only the part has is refused (sub-patches.md, Slots).
+        let (member, param) = if let Some((slot_path, slot)) = self.slot_owning(level, member) {
+            match slot.role_param_of(param) {
+                Some(role_name) => (slot_path.last(), role_name.to_string()),
+                None => {
+                    let part_id = self.ids.get(&path_of_member(level, member));
+                    let node = part_id.and_then(|id| graph.node(id));
+                    let label = node
+                        .and_then(|n| n.descriptor.params.iter().find(|p| p.name == param))
+                        .map_or(param.to_string(), |p| p.label.to_string());
+                    let part_name = node.map_or_else(
+                        || {
+                            self.definition_at(&level.child(member))
+                                .map_or_else(String::new, |d| d.metadata.name.clone())
+                        },
+                        |n| n.descriptor.name.to_string(),
+                    );
+                    return Err(expose_role_only_text(slot.role, &label, &part_name));
+                }
+            }
+        } else {
+            (member, param.to_string())
+        };
+        let param = param.as_str();
         let path = level.child(member);
         let (label, stored) = if let Some(definition) = self.definition_at(&path) {
             let Some(through) = definition.exposed.iter().find(|e| e.name == param).cloned() else {
@@ -1246,6 +1505,25 @@ impl Hierarchy {
             };
             let value = self.exposed_value(graph, &path, &through);
             (param.to_string(), Stored { value, range: None })
+        } else if let Some(slot) = self.slots.get(&path) {
+            let Some(role_param) = slot.role.param(param) else {
+                return Err(format!("{} has no role parameter `{param}`", slot.role.name));
+            };
+            let stored = match self.slot_param_target(&path, param) {
+                Some((id, own)) => {
+                    let node = graph.node(id);
+                    let index = node.and_then(|n| n.parameter_index(&own));
+                    match (node, index) {
+                        (Some(node), Some(index)) => Stored {
+                            value: Some(node.descriptor.saved_values(&node.params)[index]),
+                            range: stored_range(node, index),
+                        },
+                        _ => Stored::default(),
+                    }
+                }
+                None => Stored::default(),
+            };
+            (role_param.label.to_string(), stored)
         } else if self.ports.contains_key(&path) {
             return Err("a port has no parameters".to_string());
         } else {
@@ -1362,6 +1640,23 @@ impl Hierarchy {
         };
         let level = path.parent().unwrap_or_else(ModulePath::root);
         let lid = path.last();
+        // A slot goes with its part, its leaving part, and its fades.
+        if let Some(slot) = self.slots.get(&path).cloned() {
+            removed.modules.extend(self.end_fade(&path));
+            if let Some(part) = slot.part
+                && let Some(part_id) = self.ids.get(&level.child(part))
+            {
+                let inner = self.remove(graph, part_id);
+                removed.modules.extend(inner.modules);
+                removed.tiles.extend(inner.tiles);
+            }
+            self.remove_slot_record(&path, &slot);
+            self.links
+                .retain(|link| !(link.level == level && (link.from.0 == lid || link.to.0 == lid)));
+            self.drop_exposed(&level, lid, None);
+            removed.tiles.push(id);
+            return removed;
+        }
         let was_instance = self.instances.contains_key(&path);
         if was_instance {
             // Everything under the instance, deepest first.
@@ -1457,7 +1752,10 @@ impl Hierarchy {
                 self.instances.insert(target.clone(), instance);
             }
             if let Some(port) = self.ports.remove(&path) {
-                self.ports.insert(target, port);
+                self.ports.insert(target.clone(), port);
+            }
+            if let Some(slot) = self.slots.remove(&path) {
+                self.slots.insert(target, slot);
             }
         }
         self.links = self
@@ -1494,6 +1792,9 @@ impl Hierarchy {
                 continue;
             }
             let path = self.path_of(id);
+            if self.slots.contains_key(&path) || self.slot_of_part(id).is_some() {
+                return Err(NO_SLOT_IN_COLLAPSE.to_string());
+            }
             if graph.node(id).is_some() || self.instances.contains_key(&path) {
                 members.insert(path.last());
             }
@@ -1526,6 +1827,8 @@ impl Hierarchy {
                 exposed: Vec::new(),
                 defaults: BTreeMap::new(),
                 library: None,
+                roles: Vec::new(),
+                stored: None,
             },
         );
 
@@ -1810,6 +2113,9 @@ impl Hierarchy {
             .unwrap_or_default();
         let level = instance_path.parent().unwrap_or_else(ModulePath::root);
         let ilid = instance_path.last();
+        if self.slots.keys().any(|p| p.parent().as_ref() == Some(&instance_path)) {
+            return Err(NO_SLOT_IN_DISSOLVE.to_string());
+        }
 
         // The members and the ports of the inside.
         let mut members: Vec<ModulePath> = Vec::new();
@@ -2037,6 +2343,7 @@ impl Hierarchy {
             id: instance_path.last(),
             kind: SUBPATCH_KIND.to_string(),
             subpatch: Some(key),
+            slot: None,
             label: None,
             params: BTreeMap::new(),
             position: None,
@@ -2057,7 +2364,7 @@ impl Hierarchy {
             }
             return Err(error);
         }
-        if let Err(error) = self.read_level(&temp.modules, &[], level, &temp.subpatches) {
+        if let Err(error) = self.read_level(&temp.modules, &[], level, &temp.subpatches, controller.registry()) {
             for id in &added {
                 let _ = controller.remove_module(*id);
             }
@@ -2205,20 +2512,50 @@ struct Level {
     midi: Vec<PatchMidiMapping>,
 }
 
-/// The definition-side value and range of each exposed parameter.
-fn defaults_of(definition: &SubPatch) -> BTreeMap<(u32, String), Stored> {
+/// The definition-side value and range of each exposed parameter. Through
+/// a slot, they are the part's, under the part's own name.
+fn defaults_of(definition: &SubPatch, registry: &Registry) -> BTreeMap<(u32, String), Stored> {
     let mut defaults = BTreeMap::new();
     for exposed in &definition.exposed {
         let Some(member) = definition.modules.iter().find(|m| m.id == exposed.module) else {
             continue;
         };
+        let (member, param) = match &member.slot {
+            None => (member, exposed.param.clone()),
+            Some(slot) => {
+                let part = slot
+                    .part
+                    .and_then(|part| definition.modules.iter().find(|m| m.id == part));
+                let Some(part) = part else {
+                    defaults.insert((exposed.module, exposed.param.clone()), Stored::default());
+                    continue;
+                };
+                let own = if part.subpatch.is_some() {
+                    Some(exposed.param.clone())
+                } else {
+                    crate::flatten::part_own_param(registry, &part.kind, crate::role_id(&slot.role), &exposed.param)
+                };
+                match own {
+                    Some(own) => (part, own),
+                    None => {
+                        defaults.insert((exposed.module, exposed.param.clone()), Stored::default());
+                        continue;
+                    }
+                }
+            }
+        };
         let stored = Stored {
-            value: member.params.get(&exposed.param).copied(),
-            range: member.ranges.get(&exposed.param).copied(),
+            value: member.params.get(&param).copied(),
+            range: member.ranges.get(&param).copied(),
         };
         defaults.insert((exposed.module, exposed.param.clone()), stored);
     }
     defaults
+}
+
+/// The path of the member `lid` of `level`.
+fn path_of_member(level: &ModulePath, lid: u32) -> ModulePath {
+    level.child(lid)
 }
 
 /// Writes a stored value and range into a module entry.
