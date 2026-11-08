@@ -437,28 +437,61 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller, hie
     }
 }
 
-/// Puts each waiting pickup's ghost mark on its knob or fader. Other controls
-/// have no single travel to mark (midi-learn.md, Mapping modes). Call it after
-/// the values are updated, which clears the marks.
-pub fn set_ghosts(values: &mut PanelValues, controller: &Controller, ghosts: &BTreeMap<(u32, usize), f32>) {
-    for (&(module, param), &position) in ghosts {
-        let Some(node) = controller.graph().node(ModuleId(module)) else {
+/// Puts each waiting pickup's ghost mark on its knob or fader, and on the
+/// surface controls of every sub-patch level that exposes it, each at the
+/// hardware's value on its own scale (sub-patches.md, Exposing). Other
+/// controls have no single travel to mark (midi-learn.md, Mapping modes).
+/// Call it after the values are updated, which clears the marks.
+pub fn set_ghosts(
+    values: &mut PanelValues,
+    controller: &Controller,
+    hierarchy: &Hierarchy,
+    ghosts: &BTreeMap<(u32, usize), f32>,
+) {
+    let graph = controller.graph();
+    let mark = |values: &mut PanelValues, tile: u32, widget: usize, kind: WidgetKind, at: f32| {
+        if matches!(kind, WidgetKind::Knob | WidgetKind::Fader { .. })
+            && let Some(value) = values.get(tile, widget)
+        {
+            let next = WidgetValue {
+                ghost: Some(at.clamp(0.0, 1.0)),
+                ..value.clone()
+            };
+            values.set(tile, widget, next);
+        }
+    };
+    for (&(module, param), &value) in ghosts {
+        let Some(node) = graph.node(ModuleId(module)) else {
             continue;
         };
-        let Some(spec) = node.descriptor.params.get(param) else {
+        let (Some(spec), Some(knob)) = (node.descriptor.params.get(param), node.spec(param)) else {
             continue;
         };
         for (index, widget) in node.descriptor.panel.widgets.iter().enumerate() {
-            if widget.binds(spec.name)
-                && matches!(widget.kind, WidgetKind::Knob | WidgetKind::Fader { .. })
-                && let Some(value) = values.get(module, index)
-            {
-                let next = WidgetValue {
-                    ghost: Some(position),
-                    ..value.clone()
-                };
-                values.set(module, index, next);
+            if widget.binds(spec.name) {
+                mark(
+                    values,
+                    module,
+                    index,
+                    widget.kind,
+                    control_position(widget.kind, &knob, value),
+                );
             }
+        }
+        // The surfaces above it, as `surface::surface_live_values` walks them.
+        let mut at = (ModuleId(module), spec.name.to_string());
+        while let Some((instance, name)) = hierarchy.exposure_of(at.0, &at.1) {
+            let index = hierarchy
+                .definition_of(instance)
+                .and_then(|d| d.exposed.iter().position(|e| e.name == name));
+            if let Some(index) = index
+                && let Some(target) =
+                    crate::surface::control_target(graph, hierarchy, instance.0, index, loom_canvas::ControlPart::Main)
+            {
+                let position = control_position(target.kind, &target.spec, value);
+                mark(values, instance.0, index, target.kind, position);
+            }
+            at = (instance, name);
         }
     }
 }

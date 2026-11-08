@@ -145,9 +145,10 @@ impl Controller {
         if let Some(mapping) = self.graph.midi_mappings.get_mut(&result.0) {
             mapping.learned = true;
         }
-        // The control spans the selected range (control-ranges.md, rule 4).
+        // The control spans the selected range (control-ranges.md, rule 4),
+        // narrowed to an exposed range, as the engine will map it.
         let node = self.node(target)?;
-        let spec = node.spec(param).ok_or_else(|| LoomError::NoSuchParam {
+        let spec = node.midi_spec(param).ok_or_else(|| LoomError::NoSuchParam {
             module: target,
             param: param.to_string(),
         })?;
@@ -168,10 +169,18 @@ impl Controller {
             .midi_mappings()
             .filter_map(|(id, mapping)| {
                 let entry = self.midi.feedback().read(mapping.control);
-                (entry.id == id && entry.waiting).then(|| MidiWaiting {
+                if entry.id != id || !entry.waiting {
+                    return None;
+                }
+                // The hardware stands for a place in the span MIDI sweeps,
+                // which an exposed range narrows. Reported as a value, so
+                // every control can place it on its own scale.
+                let node = self.graph.nodes.get(&mapping.target)?;
+                let swept = node.midi_spec(mapping.param)?;
+                Some(MidiWaiting {
                     target: mapping.target,
                     param: mapping.param,
-                    position: mapping.options.position(entry.value),
+                    value: swept.denormalize(mapping.options.position(entry.value)),
                     sequence: entry.sequence,
                 })
             })

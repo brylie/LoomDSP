@@ -285,6 +285,11 @@ pub struct MappingRow {
     /// Where a waiting pickup's hardware stands, from 0 to 1, while its
     /// ghost mark shows on this row's slider. `None` on a row with no slider.
     pub ghost: Option<f32>,
+    /// A friendly note when a sub-patch surface narrows what MIDI sweeps:
+    /// the range and the surface that gives it (sub-patches.md, MIDI follows
+    /// the range). `None` for a parameter no surface narrows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range_note: Option<String>,
     /// The options as the controller holds them, for the messages that
     /// change one field.
     #[serde(skip)]
@@ -551,14 +556,17 @@ impl App {
                 open: self.session.learn.options_open((id, index)),
                 // Only a slider has a travel to mark, and a learn
                 // mode row has no slider (midi-learn.md, Mapping modes).
+                // The mark sits on this row's scale: the knob's, or the
+                // exposed range on a sub-patch row.
                 ghost: self
                     .session
                     .learn
                     .ghosts()
                     .shown()
                     .get(&(id, index))
-                    .copied()
+                    .map(|&value| spec.normalize(value).clamp(0.0, 1.0))
                     .filter(|_| spec.options.choices.is_empty() && !self.session.learn.is_on()),
+                range_note: self.range_note(id, index, m.options.mode),
                 options: m.options,
             }
         });
@@ -631,6 +639,57 @@ impl App {
                 bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
             },
             exposure,
+        })
+    }
+
+    /// The note on a mapping row when a sub-patch surface narrows what MIDI
+    /// sweeps on parameter `index` of `module`: the span the engine sweeps
+    /// ([`Node::midi_spec`](loom_core::Node::midi_spec), the function the
+    /// compiler uses, so the text cannot drift from what plays), and the
+    /// outermost surface with a range of its own, which is the one that sets
+    /// the span, as `fold_ranges` composes it. `None` when no surface
+    /// narrows it.
+    fn range_note(&self, module: u32, index: usize, mode: MidiMode) -> Option<String> {
+        let graph = self.session.controller.graph();
+        let hierarchy = &self.session.hierarchy;
+        let node = graph.node(ModuleId(module))?;
+        node.limit(index)?;
+        let spec = node.spec(index)?;
+        let swept = node.midi_spec(index)?;
+        // Every surface with a range, from the inside out.
+        let mut at = (ModuleId(module), node.descriptor.params.get(index)?.name.to_string());
+        let mut chain = Vec::new();
+        while let Some((instance, name)) = hierarchy.exposure_of(at.0, &at.1) {
+            let range = hierarchy
+                .definition_of(instance)
+                .and_then(|d| d.exposed.iter().find(|e| e.name == name))
+                .and_then(|e| e.range);
+            if let Some(range) = range {
+                chain.push((instance, range));
+            }
+            at = (instance, name);
+        }
+        // Folded outer first, as `fold_ranges` does: a range that does not
+        // overlap what came before replaces it, so the surface named is the
+        // outermost one whose range still takes part in the span.
+        let mut folded: Option<((f32, f32), ModuleId)> = None;
+        for &(instance, (min, max)) in chain.iter().rev() {
+            folded = Some(match folded {
+                Some(((outer_min, outer_max), surface)) if outer_min.max(min) < outer_max.min(max) => {
+                    ((outer_min.max(min), outer_max.min(max)), surface)
+                }
+                _ => ((min, max), instance),
+            });
+        }
+        let name = hierarchy.tile_name(folded?.1)?;
+        let span = format!(
+            "{} to {}",
+            crate::param::format(&spec, swept.min),
+            crate::param::format(&spec, swept.max)
+        );
+        Some(match mode {
+            MidiMode::Relative(_) => format!("Each step is a share of {span}, the range exposed on {name}."),
+            _ => format!("Low and High are a share of {span}, the range exposed on {name}."),
         })
     }
 
@@ -1457,6 +1516,9 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow) -> Element<
                     })
                 }),
         );
+    }
+    if let Some(note) = row_data.range_note {
+        rows = rows.push(label_owned(note));
     }
     rows.into()
 }

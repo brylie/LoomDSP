@@ -16,7 +16,12 @@
 //! still seen twice.
 //!
 //! The engine also keeps each control's [`ControlState`]: the position a
-//! pickup compares with and a relative step starts from.
+//! pickup compares with and a relative step starts from. A position is a
+//! place in the span the mapping sweeps: the selected range, narrowed by a
+//! sub-patch surface's exposed range ([`Node::midi_spec`](crate::Node::midi_spec)).
+//! When either range changes, the controller renews the mapping's id, so
+//! the state starts again in the new span and a position is never read in
+//! a span it was not measured in.
 //!
 //! Screen edits and control changes can race: the controller changes the
 //! graph at once, but the engine applies the edit at its next buffer. So a
@@ -207,8 +212,11 @@ pub struct MidiWaiting {
     pub target: ModuleId,
     /// Parameter index on [`Self::target`].
     pub param: usize,
-    /// The position the hardware stands for, from 0 to 1.
-    pub position: f32,
+    /// The parameter value the hardware stands for, in the parameter's own
+    /// units. Each control that shows the parameter places the mark on its
+    /// own scale: the module's knob on the selected range, a sub-patch
+    /// surface on the exposed range (sub-patches.md, Exposing).
+    pub value: f32,
     /// Changes each time the hardware moves.
     pub sequence: u32,
 }
@@ -341,8 +349,13 @@ pub(crate) struct MidiMapOp {
     pub synced: Option<u32>,
     pub slot: u32,
     pub param: u16,
-    /// The parameter limited to its selected range, so a control change
-    /// spans the range the knob does (control-ranges.md, rule 4).
+    /// The parameter limited to its selected range, and narrowed further to
+    /// a sub-patch surface's exposed range, so a control change sweeps what
+    /// the knob or the surface control spans (control-ranges.md, rule 4;
+    /// sub-patches.md, Exposing). Prepared on the control thread by
+    /// [`Node::midi_spec`](crate::Node::midi_spec) (rule 8). A new range
+    /// reaches it with the next compile: there is no other step that keeps
+    /// it in line.
     pub spec: ParamSpec,
     /// The mapping's mode and range.
     pub options: MidiMappingOptions,

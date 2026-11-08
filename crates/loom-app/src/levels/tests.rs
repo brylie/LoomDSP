@@ -1214,6 +1214,10 @@ fn unexposing_removes_the_assignment_from_outside_in_one_step() {
 /// leave it (sub-patches.md, Exposing).
 #[test]
 fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
+    /// Sends CC 74 on channel 1 with `value` to the idle engine.
+    fn send_cc(midi: &loom_host_desktop::SharedMidi, value: u8) -> bool {
+        loom_host_desktop::send_midi(midi, loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value]))
+    }
     use loom_core::ModuleNames;
     let mut app = narrowed_nested();
     let graph = app.session.controller.graph();
@@ -1222,7 +1226,6 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
         .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
         .unwrap();
     let cutoff = node.parameter_index("cutoff").unwrap();
-    let spec = node.spec(cutoff).unwrap();
 
     app.learn_message(crate::learn::Message::Toggle);
     app.canvas_event(loom_canvas::CanvasEvent::Learn { module: 2, widget: 0 });
@@ -1249,8 +1252,20 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
         .midi_mapping_of(svf, cutoff)
         .expect("mapped inside");
     assert_eq!(mapping.control.controller, 74);
-    assert_eq!(mapping.options.low, spec.normalize(200.0));
-    assert_eq!(mapping.options.high, spec.normalize(2000.0));
+    assert_eq!(
+        mapping.options,
+        loom_core::MidiMappingOptions::DEFAULT,
+        "a learned mapping keeps its whole travel"
+    );
+    // The engine maps the travel onto the exposed range (sub-patches.md,
+    // MIDI follows the range).
+    for (value, expected) in [(127, 2000.0), (0, 200.0)] {
+        assert!(send_cc(&midi, value));
+        app.process(128);
+        let _ = app.update(Message::Midi);
+        let cutoff_now = app.session.controller.graph().node(svf).unwrap().params[cutoff];
+        assert!((cutoff_now - expected).abs() < 1e-2, "CC {value}: {cutoff_now}");
+    }
     let view = crate::learn::view(
         &app.session.controller,
         &app.session.hierarchy,
@@ -1261,6 +1276,243 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     let saved = app.current_patch();
     assert!(saved.midi.is_empty() && saved.subpatches["voice"].midi.is_empty());
     assert_eq!(saved.subpatches["filter"].midi[0].target, (3, "cutoff".to_string()));
+}
+
+/// The nested example's flat filter and its cutoff index.
+fn svf_cutoff(app: &App) -> (ModuleId, usize) {
+    use loom_core::ModuleNames;
+    let (svf, node) = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
+        .unwrap();
+    (svf, node.parameter_index("cutoff").unwrap())
+}
+
+/// Maps CC 74 on the filter's cutoff as a Pickup that waits, sends `value`,
+/// and lets the app follow, as a player moving the hardware far from the
+/// value would.
+fn waiting_pickup_at(app: &mut App, value: u8) {
+    let (svf, cutoff) = svf_cutoff(app);
+    let options = loom_core::MidiMappingOptions {
+        mode: loom_core::MidiMode::Pickup,
+        ..loom_core::MidiMappingOptions::DEFAULT
+    };
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    app.session
+        .controller
+        .map_midi_with(control, svf, cutoff, options)
+        .unwrap();
+    app.commit();
+    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    assert!(loom_host_desktop::send_midi(
+        &midi,
+        loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value])
+    ));
+    app.process(128);
+    let _ = app.update(Message::Midi);
+    assert_eq!(app.session.controller.midi_waiting().len(), 1, "the pickup waits");
+}
+
+/// Where the ghost mark shows on tile `tile`'s control `widget`.
+fn ghost_on(app: &App, tile: u32, widget: usize) -> f32 {
+    app.session
+        .values
+        .get(tile, widget)
+        .and_then(|value| value.ghost)
+        .unwrap_or_else(|| panic!("no ghost on tile {tile}, control {widget}"))
+}
+
+/// The cutoff knob's index on the filter tile.
+fn cutoff_knob(app: &App) -> usize {
+    let (svf, _) = svf_cutoff(app);
+    let node = app.session.controller.graph().node(svf).unwrap();
+    node.descriptor
+        .panel
+        .widgets
+        .iter()
+        .position(|w| w.binds("cutoff"))
+        .unwrap()
+}
+
+/// A waiting pickup's ghost mark sits at the hardware's value on every
+/// control that shows the parameter, each on its own scale: the surface
+/// knob and the sub-patch inspector row on the exposed 200 to 2000 Hz, the
+/// inner knob on 20 to 20 000 Hz (sub-patches.md, MIDI follows the range).
+/// The ends are checked, because the middle lands near the middle of both.
+#[test]
+fn a_ghost_mark_sits_on_each_controls_own_scale() {
+    for (value, surface, inner) in [(0, 0.0, 1.0 / 3.0), (127, 1.0, 2.0 / 3.0)] {
+        let mut app = narrowed_nested();
+        waiting_pickup_at(&mut app, value);
+        let (svf, _) = svf_cutoff(&app);
+        assert!(
+            (ghost_on(&app, 2, 0) - surface).abs() < 1e-3,
+            "CC {value} on the surface"
+        );
+        let knob = cutoff_knob(&app);
+        assert!((ghost_on(&app, svf.0, knob) - inner).abs() < 1e-3, "CC {value} inside");
+
+        app.session.selection = [2].into_iter().collect();
+        let Inspector::SubPatch(rows) = app.inspector_model() else {
+            panic!("the sub-patch tile's inspector");
+        };
+        let ghost = rows.params[0].row.mapping_options.as_ref().and_then(|m| m.ghost);
+        assert!(
+            ghost.is_some_and(|g| (g - surface).abs() < 1e-3),
+            "CC {value} on the inspector row: {ghost:?}"
+        );
+    }
+}
+
+/// With a range on each level, each surface puts the mark on its own span:
+/// the Voice's 500 to 1000 Hz, and the Filter's 200 to 2000 Hz inside it.
+#[test]
+fn each_nested_surface_marks_the_ghost_on_its_own_span() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+    let text = std::fs::read_to_string(root.join("nested-subtractive.ron")).unwrap();
+    let text = text
+        .replace("range: Some((20.0, 20000.0))", "range: Some((200.0, 2000.0))")
+        .replace(
+            r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff")]"#,
+            r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff", range: Some((500.0, 1000.0)))]"#,
+        );
+    let mut app = app_with(&text);
+    // The value sits at 500 Hz, the bottom of the Voice's range, so CC 127
+    // is far away and stands for 1000 Hz.
+    waiting_pickup_at(&mut app, 127);
+    let filter_tile = app
+        .session
+        .hierarchy
+        .id_at(&ModulePath::top(2), 5)
+        .expect("the Filter tile inside the Voice");
+    assert!((ghost_on(&app, 2, 0) - 1.0).abs() < 1e-3, "the Voice surface");
+    let on_filter = 5f32.log10();
+    assert!(
+        (ghost_on(&app, filter_tile.0, 0) - on_filter).abs() < 1e-3,
+        "the Filter surface: 1000 Hz of 200 to 2000"
+    );
+}
+
+/// The inspector of tile `tile`, as the snapshot shows it, as text.
+fn inspector_text(app: &mut App, tile: u32) -> String {
+    app.session.selection = [tile].into_iter().collect();
+    serde_json::to_string(&app.ui_snapshot().inspector).unwrap()
+}
+
+/// A mapping row on a parameter a surface narrows says, in one friendly
+/// sentence, that Low and High are a share of the exposed range, and names
+/// the surface that gives it: on the inner row and on the sub-patch tile's
+/// row. With no surface left, the note goes (sub-patches.md, MIDI follows
+/// the range).
+#[test]
+fn a_mapping_row_says_its_range_is_a_share_of_the_exposed_range() {
+    let mut app = narrowed_nested();
+    let (svf, cutoff) = svf_cutoff(&app);
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    app.session.controller.map_midi(control, svf, cutoff).unwrap();
+    app.commit();
+    let note = "Low and High are a share of 200.0 Hz to 2000 Hz, the range exposed on Filter.";
+    let inner = inspector_text(&mut app, svf.0);
+    assert!(inner.contains(note), "the inner row: {inner}");
+    let surface = inspector_text(&mut app, 2);
+    assert!(surface.contains(note), "the Voice tile's row: {surface}");
+
+    // Off the Voice's surface, the Filter's own exposure still gives it.
+    app.unexpose(2, 0);
+    assert!(inspector_text(&mut app, svf.0).contains(note));
+    let filter = app.session.hierarchy.id_at(&ModulePath::top(2), 5).unwrap();
+    app.unexpose(filter.0, 0);
+    let inner = inspector_text(&mut app, svf.0);
+    assert!(!inner.contains("range_note"), "no surface, no note: {inner}");
+}
+
+/// The note names the span MIDI sweeps, which is the overlap of the exposed
+/// range and the selected range: a gain exposed at -1 to 1 with -0.1 to 0.1
+/// selected sweeps -0.1 to 0.1, so the note says that (sub-patches.md,
+/// MIDI follows the range).
+#[test]
+fn the_range_note_names_the_span_midi_sweeps() {
+    let mut app = app_with(
+        r#"Patch(
+            version: 1,
+            subpatches: {
+                "amp": SubPatch(
+                    metadata: Metadata(name: "Amp"),
+                    modules: [PatchModule(id: 1, kind: "loom.math.mul@1")],
+                    exposed: [Exposed(name: "gain", module: 1, param: "gain", range: Some((-1.0, 1.0)))],
+                ),
+            },
+            modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("amp"))],
+        )"#,
+    );
+    use loom_core::ModuleNames;
+    let (mul, node) = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.math.mul")
+        .unwrap();
+    let gain = node.parameter_index("gain").unwrap();
+    let spec = node.descriptor.params[gain];
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 20,
+    };
+    app.session
+        .controller
+        .set_range(mul, gain, loom_core::ParamRange::new(-0.1, 0.1))
+        .unwrap();
+    app.session.controller.map_midi(control, mul, gain).unwrap();
+    app.commit();
+    let fine = spec.in_range(loom_core::ParamRange::new(-0.1, 0.1));
+    let note = format!(
+        "Low and High are a share of {} to {}, the range exposed on Amp.",
+        crate::param::format(&fine, -0.1),
+        crate::param::format(&fine, 0.1)
+    );
+    let inner = inspector_text(&mut app, mul.0);
+    assert!(inner.contains(&note), "{note} in {inner}");
+}
+
+/// The note names the surface whose range takes part in the span, by the
+/// rule `fold_ranges` uses: the outer Voice when its range overlaps the
+/// Filter's, the Filter when the Voice's range lies outside it (only a
+/// hand-written file makes that).
+#[test]
+fn the_range_note_names_the_surface_that_sets_the_span() {
+    for (voice, named) in [("(500.0, 1000.0)", "Voice"), ("(1.0, 10.0)", "Filter")] {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+        let text = std::fs::read_to_string(root.join("nested-subtractive.ron")).unwrap();
+        let text = text
+            .replace("range: Some((20.0, 20000.0))", "range: Some((200.0, 2000.0))")
+            .replace(
+                r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff")]"#,
+                &format!(r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff", range: Some({voice}))]"#),
+            );
+        let mut app = app_with(&text);
+        let (svf, cutoff) = svf_cutoff(&app);
+        let control = loom_core::MidiControl {
+            channel: 0,
+            controller: 74,
+        };
+        app.session.controller.map_midi(control, svf, cutoff).unwrap();
+        app.commit();
+        let inner = inspector_text(&mut app, svf.0);
+        assert!(
+            inner.contains(&format!("the range exposed on {named}.")),
+            "Voice at {voice}: {inner}"
+        );
+    }
 }
 
 /// The name typed in the sub-patch's inspector renames it as one undo

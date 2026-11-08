@@ -1066,6 +1066,55 @@ fn the_order_sync_survives_a_full_command_queue() {
     assert!(matches!(controller.commit(), Err(loom_core::LoomError::QueueFull)));
 }
 
+/// The flat cutoff of the nested example, and its parameter index.
+fn nested_cutoff(controller: &Controller) -> (ModuleId, usize) {
+    let (svf, node) = controller
+        .graph()
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
+        .unwrap();
+    (svf, node.parameter_index("cutoff").unwrap())
+}
+
+/// The range MIDI sweeps on the flat parameter is the range the outermost
+/// surface control spans: loading and the hierarchy agree, for ranges that
+/// overlap and for ranges that do not (sub-patches.md, MIDI follows the
+/// range). Unexposing on the Voice leaves the Filter's own range, and
+/// unexposing inside the Filter leaves none, after a sync.
+#[test]
+fn the_midi_limit_follows_the_outermost_surface_range() {
+    let limit = |controller: &Controller| {
+        let (svf, cutoff) = nested_cutoff(controller);
+        controller
+            .graph()
+            .node(svf)
+            .unwrap()
+            .limit(cutoff)
+            .map(|r| (r.min, r.max))
+    };
+    let voice = ModulePath::top(2);
+    for (range, expected) in [((100.0, 500.0), (100.0, 500.0)), ((1.0, 10.0), (20.0, 20000.0))] {
+        let mut file = nested_example();
+        file.subpatches.get_mut("voice").unwrap().exposed[0].range = Some(range);
+        let (controller, hierarchy) = load(&file);
+        let exposed = hierarchy.definition_at(&voice).unwrap().exposed[0].clone();
+        assert_eq!(hierarchy.exposed_range(&voice, &exposed), Some(expected));
+        assert_eq!(limit(&controller), Some(expected), "{range:?}");
+    }
+
+    let mut file = nested_example();
+    file.subpatches.get_mut("filter").unwrap().exposed[0].range = Some((200.0, 2000.0));
+    file.subpatches.get_mut("voice").unwrap().exposed[0].range = Some((500.0, 1000.0));
+    let (mut controller, mut hierarchy) = load(&file);
+    assert_eq!(limit(&controller), Some((500.0, 1000.0)));
+    assert!(hierarchy.unexpose(&voice, 5, "cutoff"));
+    hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(limit(&controller), Some((200.0, 2000.0)), "the Filter's own range");
+    assert!(hierarchy.unexpose(&voice.child(5), 3, "cutoff"));
+    hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(limit(&controller), None, "no surface left");
+}
+
 /// A library item: a pitch port into a sine through a multiply whose gain
 /// is exposed, out through a port (sub-patches.md, Library).
 const VOICE_FILE: &str = r#"Patch(

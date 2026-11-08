@@ -185,3 +185,136 @@ fn a_failed_clamp_keeps_the_old_range() {
         Err(LoomError::NoSuchParam { .. })
     ));
 }
+
+/// A limit narrows only what MIDI sweeps: the overlap with the selected
+/// range, or the limit alone when they do not overlap, because the file
+/// saves the value clamped to it. The knob's spec is unchanged
+/// (sub-patches.md, MIDI follows the range).
+#[test]
+fn a_limit_narrows_only_the_midi_span() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_range(mul, 0, FINE).unwrap();
+    let spans = |c: &loom_core::Controller| {
+        let node = c.graph().node(mul).unwrap();
+        let (knob, midi) = (node.spec(0).unwrap(), node.midi_spec(0).unwrap());
+        ((knob.min, knob.max), (midi.min, midi.max))
+    };
+    assert_eq!(spans(c), ((-0.1, 0.1), (-0.1, 0.1)), "no limit");
+    c.set_limits([(mul, 0, ParamRange::new(0.0, 0.5))]).unwrap();
+    assert_eq!(spans(c), ((-0.1, 0.1), (0.0, 0.1)), "the overlap");
+    c.set_limits([(mul, 0, ParamRange::new(0.5, 1.0))]).unwrap();
+    assert_eq!(spans(c), ((-0.1, 0.1), (0.5, 1.0)), "no overlap: the limit");
+    c.set_limits([]).unwrap();
+    assert_eq!(c.graph().node(mul).unwrap().limit(0), None, "cleared");
+}
+
+/// `set_limits` cuts a limit to the parameter's bounds and refuses one
+/// with nothing left, a missing module or parameter, or NaN, changing
+/// nothing.
+#[test]
+fn set_limits_refuses_what_is_not_a_span() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_limits([(mul, 0, ParamRange::new(-50.0, 0.5))]).unwrap();
+    let kept = c.graph().node(mul).unwrap().limit(0);
+    assert_eq!(kept, Some(ParamRange::new(-10.0, 0.5)), "cut to the bounds");
+    for (module, index, limit) in [
+        (mul, 0, ParamRange::new(20.0, 30.0)),
+        (mul, 0, ParamRange::new(0.5, 0.5)),
+        (mul, 0, ParamRange::new(f32::NAN, 0.5)),
+    ] {
+        let refused = c.set_limits([(module, index, limit)]);
+        assert!(matches!(refused, Err(LoomError::InvalidLimit { .. })), "{refused:?}");
+    }
+    assert!(matches!(
+        c.set_limits([(ModuleId(99), 0, FINE)]),
+        Err(LoomError::UnknownModule(_))
+    ));
+    assert!(matches!(
+        c.set_limits([(mul, 9, FINE)]),
+        Err(LoomError::NoSuchParam { .. })
+    ));
+    assert_eq!(c.graph().node(mul).unwrap().limit(0), kept, "a refusal changes nothing");
+}
+
+/// A waiting pickup reports the value the hardware stands for in the
+/// narrower span MIDI sweeps, so each control can place the ghost mark on
+/// its own scale.
+#[test]
+fn a_waiting_pickup_reports_the_value_in_the_swept_span() {
+    const CC: MidiControl = MidiControl {
+        channel: 0,
+        controller: 21,
+    };
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_param(mul, 0, 0.05).unwrap();
+    c.set_limits([(mul, 0, ParamRange::new(0.0, 0.1))]).unwrap();
+    let options = loom_core::MidiMappingOptions {
+        mode: loom_core::MidiMode::Pickup,
+        ..loom_core::MidiMappingOptions::DEFAULT
+    };
+    c.map_midi_with(CC, mul, 0, options).unwrap();
+    c.commit().unwrap();
+    assert!(
+        parts
+            .midi
+            .send(MidiEvent::control_change(0, CC.channel, CC.controller, 127))
+    );
+    render(&mut parts, 64);
+    let waiting = parts.controller.midi_waiting();
+    assert_eq!(waiting.len(), 1, "the pickup waits");
+    // CC 127 stands for the top of the limit, not of the knob's -1 to 1.
+    assert!((waiting[0].value - 0.1).abs() < 1e-6, "{:?}", waiting[0]);
+}
+
+/// When a new limit renews a mapping, a control change the engine applied
+/// after the graph last synced is dropped on both sides: the graph keeps
+/// its value, and the engine plays that value after the swap, so what
+/// shows and what plays agree. Each step renders 0.1 s, past the
+/// constant's 5 ms glide. (sub-patches.md, MIDI follows the range).
+#[test]
+fn a_renewed_mapping_plays_what_the_graph_holds() {
+    const CC: MidiControl = MidiControl {
+        channel: 0,
+        controller: 22,
+    };
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let one = c.add_module("loom.math.constant").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(one, "out", out, "in").unwrap();
+    c.set_limits([(one, 0, ParamRange::new(0.0, 0.5))]).unwrap();
+    c.map_midi(CC, one, 0).unwrap();
+    c.commit().unwrap();
+    let send = |parts: &mut EngineParts, value: u8| {
+        assert!(
+            parts
+                .midi
+                .send(MidiEvent::control_change(0, CC.channel, CC.controller, value))
+        );
+        *render(parts, 4_800).last().unwrap()
+    };
+    assert!((send(&mut parts, 127) - 0.5).abs() < 1e-6);
+    assert!(send(&mut parts, 0).abs() < 1e-6);
+    parts.controller.sync_midi();
+    let held = parts.controller.graph().node(one).unwrap().params[0];
+    assert!(held.abs() < 1e-6, "the graph holds 0: {held}");
+
+    // Played, but not synced yet, when the range narrows.
+    assert!((send(&mut parts, 127) - 0.5).abs() < 1e-6);
+    parts
+        .controller
+        .set_limits([(one, 0, ParamRange::new(0.1, 0.2))])
+        .unwrap();
+    parts.controller.commit().unwrap();
+    let playing = *render(&mut parts, 4_800).last().unwrap();
+    parts.controller.sync_midi();
+    let shown = parts.controller.graph().node(one).unwrap().params[0];
+    assert_eq!(shown, held, "the stale control change is not copied into the graph");
+    assert_eq!(playing, shown, "the engine plays what the graph holds");
+}
