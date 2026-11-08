@@ -1064,3 +1064,294 @@ fn the_order_sync_survives_a_full_command_queue() {
     assert_eq!(ids, [inner, renamed[0].1]);
     assert!(matches!(controller.commit(), Err(loom_core::LoomError::QueueFull)));
 }
+
+/// A library item: a pitch port into a sine through a multiply whose gain
+/// is exposed, out through a port (sub-patches.md, Library).
+const VOICE_FILE: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Voice", authors: ["Ada"]),
+    modules: [
+        PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch"), position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.phase.generator@1", position: Some((200.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.osc.sine@1", position: Some((400.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.math.mul@1", params: {"gain": 0.5}, position: Some((600.0, 0.0))),
+        PatchModule(id: 5, kind: "loom.struct.output@1", label: Some("out"), position: Some((800.0, 0.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "pitch")),
+        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "a")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
+    ],
+    exposed: [Exposed(name: "gain", module: 4, param: "gain")],
+)"#;
+
+/// Inserts [`VOICE_FILE`] at the top of [`FLAT`], as a copy or linked to
+/// `Voices/Voice.ron`, and syncs.
+fn insert_voice(linked: bool) -> (Controller, Hierarchy, Inserted) {
+    let (mut controller, mut hierarchy) = load_text(FLAT);
+    let file = Patch::from_ron(VOICE_FILE).unwrap();
+    let inserted = hierarchy
+        .insert(
+            &mut controller,
+            &ModulePath::root(),
+            &file,
+            linked.then_some("Voices/Voice.ron"),
+        )
+        .expect("the file inserts");
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    (controller, hierarchy, inserted)
+}
+
+/// Inserting a patch file as a copy makes a tile with the file's ports and
+/// surface, adds its modules with ids from the table, places its tiles as
+/// the file did, and saves as a definition that follows no file. Cabled
+/// in, it plays as the file would.
+#[test]
+fn inserting_a_file_as_a_copy_makes_a_tile_with_its_ports() {
+    let (mut controller, mut hierarchy, inserted) = insert_voice(false);
+    assert_eq!(inserted.name, "Voice");
+    assert!(inserted.left_out.is_empty());
+    assert!(inserted.notes.is_empty());
+    assert_eq!(
+        inserted.modules.len(),
+        3,
+        "the phase generator, the sine, and the multiply"
+    );
+    assert_eq!(hierarchy.tile_name(inserted.instance).as_deref(), Some("Voice"));
+    assert_eq!(hierarchy.library_of(inserted.instance), None);
+    let (inputs, outputs) = hierarchy.instance_ports(inserted.instance);
+    assert_eq!(inputs.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>(), ["pitch"]);
+    assert_eq!(outputs.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>(), ["out"]);
+    let inside = hierarchy.path_of(inserted.instance);
+    for id in &inserted.modules {
+        assert_eq!(hierarchy.level_of(*id), inside);
+        assert!(controller.graph().node(*id).is_some());
+    }
+    // Every inner tile, ports included, has the file's position.
+    assert_eq!(inserted.layouts.len(), 5);
+    let mul = hierarchy.id_at(&inside, 4).unwrap();
+    let placed = inserted.layouts.iter().find(|(id, _)| *id == mul).unwrap();
+    assert_eq!(placed.1.position, Some((600.0, 0.0)));
+    // The surface item reaches the inner gain.
+    let target = hierarchy.exposed_target(inserted.instance, 0).unwrap();
+    assert_eq!((target.module, target.param.as_str()), (mul, "gain"));
+
+    // Cabled between the note and the output, the file loads back to it.
+    let lid = inside.last();
+    hierarchy.connect(
+        &ModulePath::root(),
+        (1, "pitch".to_string()),
+        (lid, "pitch".to_string()),
+    );
+    hierarchy.connect(&ModulePath::root(), (lid, "out".to_string()), (9, "in".to_string()));
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller, &Metadata::default());
+    let definition = &saved.subpatches["voice"];
+    assert_eq!(definition.library, None);
+    assert_eq!(definition.metadata.authors, ["Ada"], "the file's credit travels");
+    assert_eq!(definition.exposed.len(), 1);
+    let (again, again_hierarchy) = load(&saved);
+    assert_eq!(
+        cables_by_path(&again, &again_hierarchy),
+        cables_by_path(&controller, &hierarchy)
+    );
+}
+
+/// Two linked instances of one file have separate definitions, each
+/// following the file; Unlink on one leaves the other linked.
+#[test]
+fn two_linked_instances_have_separate_definitions_and_unlink_apart() {
+    let (mut controller, mut hierarchy, first) = insert_voice(true);
+    let file = Patch::from_ron(VOICE_FILE).unwrap();
+    let second = hierarchy
+        .insert(&mut controller, &ModulePath::root(), &file, Some("Voices/Voice.ron"))
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    assert_ne!(first.instance, second.instance);
+    assert_eq!(hierarchy.library_of(first.instance), Some("Voices/Voice.ron"));
+    assert_eq!(hierarchy.library_of(second.instance), Some("Voices/Voice.ron"));
+    assert!(hierarchy.has_links());
+    let saved = written(&hierarchy, &controller, &Metadata::default());
+    assert_eq!(saved.subpatches.len(), 2);
+    assert!(saved.subpatches.contains_key("voice"));
+    assert!(saved.subpatches.contains_key("voice 2"));
+    assert!(
+        saved
+            .subpatches
+            .values()
+            .all(|d| d.library.as_deref() == Some("Voices/Voice.ron"))
+    );
+    assert!(saved.has_links());
+    let instances: Vec<&PatchModule> = saved.modules.iter().filter(|m| m.is_instance()).collect();
+    assert_eq!(instances.len(), 2);
+    assert_ne!(instances[0].subpatch, instances[1].subpatch);
+
+    assert_eq!(hierarchy.unlink(first.instance).unwrap(), "Voice");
+    assert_eq!(hierarchy.library_of(first.instance), None);
+    assert_eq!(hierarchy.library_of(second.instance), Some("Voices/Voice.ron"));
+    assert_eq!(
+        hierarchy.unlink(first.instance).unwrap_err(),
+        "Voice does not follow the library"
+    );
+    assert_eq!(
+        hierarchy.unlink(ModuleId(1)).unwrap_err(),
+        "select a sub-patch to unlink"
+    );
+    let saved = written(&hierarchy, &controller, &Metadata::default());
+    assert_eq!(saved.subpatches["voice"].library, None);
+    assert_eq!(saved.subpatches["voice 2"].library.as_deref(), Some("Voices/Voice.ron"));
+    load(&saved);
+}
+
+/// Inserting a file linked inside a sub-patch that follows the same file
+/// is refused, naming the loop: the file would contain itself (Patch
+/// file). A copy of it inside is fine.
+#[test]
+fn inserting_a_link_inside_a_sub_patch_linked_to_the_same_file_is_refused() {
+    let (mut controller, mut hierarchy, outer) = insert_voice(true);
+    let inside = hierarchy.path_of(outer.instance);
+    let file = Patch::from_ron(VOICE_FILE).unwrap();
+    let before = controller.graph().nodes().count();
+    let error = hierarchy
+        .insert(&mut controller, &inside, &file, Some("Voices/Voice.ron"))
+        .unwrap_err();
+    assert_eq!(error.to_string(), "sub-patch Voice › Voice contains itself");
+    assert_eq!(controller.graph().nodes().count(), before, "nothing was added");
+    let copy = hierarchy.insert(&mut controller, &inside, &file, None).unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(hierarchy.level_of(copy.instance), inside);
+    load(&written(&hierarchy, &controller, &Metadata::default()));
+}
+
+/// A sub-patch written as a library file opens on its own: its ports are
+/// ordinary modules at the top, its surface is kept, and inserted again it
+/// gives the same definition.
+#[test]
+fn a_sub_patch_written_as_a_file_opens_on_its_own_and_inserts_back_the_same() {
+    let (controller, hierarchy, inserted) = insert_voice(false);
+    let file = hierarchy
+        .definition_file(controller.graph(), |_| Layout::default(), inserted.instance)
+        .expect("a sub-patch tile has a file");
+    assert_eq!(file.metadata.name, "Voice");
+    assert_eq!(file.metadata.authors, ["Ada"]);
+    assert!(file.subpatches.is_empty());
+    assert_eq!(file.exposed.len(), 1);
+    assert_eq!(file.modules.iter().filter(|m| m.kind == INPUT_KIND).count(), 1);
+    let written_text = text(&file);
+    // The file opens as a patch of its own, with a Transport added.
+    let (alone, alone_hierarchy) = load(&file);
+    assert!(alone_hierarchy.is_flat());
+    assert_eq!(alone.graph().nodes().count(), 6, "five modules and the Transport");
+    // Saved from that session, the surface comes back unchanged.
+    let mut saved = alone_hierarchy.unflatten(alone.graph(), |_| Layout::default());
+    saved.metadata = file.metadata.clone();
+    saved.modules.retain(|m| m.kind != "loom.clock.transport@1");
+    assert_eq!(text(&saved), written_text);
+    // Inserted again, it is the definition it came from.
+    let (fresh, _) = SubPatch::from_patch(&file, controller.registry(), None);
+    let stored = written(&hierarchy, &controller, &Metadata::default()).subpatches["voice"].clone();
+    assert_eq!(text(&Patch::from_definition(&fresh, &BTreeMap::new())), written_text);
+    assert_eq!(fresh.modules, stored.modules);
+    assert_eq!(fresh.exposed, stored.exposed);
+    assert_eq!(
+        hierarchy.definition_file(controller.graph(), |_| Layout::default(), ModuleId(1)),
+        None
+    );
+    assert_eq!(hierarchy.nested_keys(controller.graph(), "voice"), Vec::<String>::new());
+}
+
+/// What a linked definition would save changes with an edit inside (a
+/// value, a module, a move) and not with an exposed value, which belongs
+/// to the instance (sub-patches.md, Copies and editing).
+#[test]
+fn linked_fingerprints_change_with_an_edit_inside_but_not_with_an_exposed_value() {
+    let (mut controller, mut hierarchy, inserted) = insert_voice(true);
+    let layout = |_| Layout::default();
+    let before = hierarchy.linked_fingerprints(controller.graph(), layout);
+    assert_eq!(before.len(), 1);
+    assert!(before.contains_key("voice"));
+    // The exposed gain is the instance's value.
+    let target = hierarchy.exposed_target(inserted.instance, 0).unwrap();
+    controller.set_param_named(target.module, &target.param, 0.25).unwrap();
+    assert_eq!(hierarchy.linked_fingerprints(controller.graph(), layout), before);
+    // An inner value that is not exposed is an edit inside.
+    let inside = hierarchy.path_of(inserted.instance);
+    let generator = hierarchy.id_at(&inside, 2).unwrap();
+    controller.set_param_named(generator, "tune", 0.1).unwrap();
+    let after_value = hierarchy.linked_fingerprints(controller.graph(), layout);
+    assert_ne!(after_value, before);
+    // So is a move: the file keeps positions.
+    let moved = |id: u32| Layout {
+        position: (id == generator.0).then_some((10.0, 10.0)),
+        size: None,
+    };
+    assert_ne!(hierarchy.linked_fingerprints(controller.graph(), moved), after_value);
+    // And a module added inside.
+    let (_, added) = hierarchy.new_module(&inside).unwrap();
+    controller.add_module_with_id(added, "loom.osc.saw").unwrap();
+    assert_ne!(hierarchy.linked_fingerprints(controller.graph(), layout), after_value);
+    // Unlinked, there is nothing to compare.
+    assert_eq!(hierarchy.unlink_key("voice").as_deref(), Some("Voice"));
+    assert_eq!(hierarchy.unlink_key("voice"), None);
+    assert!(hierarchy.linked_fingerprints(controller.graph(), layout).is_empty());
+    assert!(!hierarchy.has_links());
+}
+
+/// A library file opened on its own keeps its surface: the top level's
+/// exposed list saves back as it was, less an entry whose module is gone.
+#[test]
+fn the_top_level_exposed_list_round_trips_and_drops_gone_modules() {
+    let file = Patch::from_ron(VOICE_FILE).unwrap();
+    let (mut controller, mut hierarchy) = load(&file);
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert_eq!(saved.exposed, file.exposed);
+    // A module the list names is removed: its entry goes.
+    let removed = hierarchy.remove(controller.graph(), ModuleId(4));
+    hierarchy.sync_without(&mut controller, &removed.modules).unwrap();
+    controller.remove_module(ModuleId(4)).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert!(saved.exposed.is_empty());
+}
+
+/// Inserting a file that has a Transport leaves it out, makes a port of
+/// its cable, and reports it; the patch keeps its one Transport.
+#[test]
+fn inserting_a_file_with_a_transport_leaves_it_out() {
+    let (mut controller, mut hierarchy) = load_text(FLAT);
+    let mut file = Patch::from_ron(VOICE_FILE).unwrap();
+    file.modules.push(PatchModule {
+        id: 9,
+        kind: "loom.clock.transport@1".to_string(),
+        subpatch: None,
+        label: None,
+        params: BTreeMap::new(),
+        position: None,
+        size: None,
+        ranges: BTreeMap::new(),
+    });
+    file.cables.push(PatchCable {
+        from: (9, "beat".to_string()),
+        to: (2, "reset".to_string()),
+    });
+    let inserted = hierarchy
+        .insert(&mut controller, &ModulePath::root(), &file, None)
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    assert_eq!(inserted.left_out.len(), 1);
+    assert_eq!(
+        inserted.left_out[0].warning(&inserted.name).to_string(),
+        "Voice: its Transport was left out; connect its clock ports."
+    );
+    let (inputs, _) = hierarchy.instance_ports(inserted.instance);
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(
+        controller
+            .graph()
+            .nodes()
+            .filter(|(_, n)| n.descriptor.id == TRANSPORT_MODULE)
+            .count(),
+        1
+    );
+}

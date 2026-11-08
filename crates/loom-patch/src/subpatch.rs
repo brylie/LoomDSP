@@ -52,6 +52,13 @@ pub struct SubPatch {
     /// when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exposed: Vec<Exposed>,
+    /// For a linked instance (`docs/design/sub-patches.md`, Linked library
+    /// items): the library file this definition follows, as a path
+    /// relative to the library folder with `/` between its parts. The
+    /// definition itself is the stored copy, used when the file is
+    /// missing. Omitted for a plain copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<String>,
 }
 
 /// An inner parameter exposed on the sub-patch (`docs/design/sub-patches.md`,
@@ -83,6 +90,7 @@ impl SubPatch {
             modulation: Vec::new(),
             midi: Vec::new(),
             exposed: Vec::new(),
+            library: None,
         }
     }
 

@@ -47,9 +47,11 @@ pub mod flatten;
 pub use flatten::{Flat, FlatIds, FlatModule, ModulePath};
 pub mod hierarchy;
 pub use hierarchy::{
-    Collapsed, Definition, Direction, Dissolved, End, Hierarchy, Instance, LevelCable, Link, Port, Removed, Stored,
-    Tile,
+    Collapsed, Definition, Direction, Dissolved, End, Hierarchy, Inserted, Instance, LevelCable, Link, Port, Removed,
+    Stored, Tile,
 };
+pub mod library;
+pub use library::{LeftOut, Library, LibraryError, NoLibrary, SCALE_MODULE};
 pub mod warning;
 pub use warning::{LoadLevel, LoadWarning, RangeReason};
 
@@ -84,6 +86,13 @@ pub struct Patch {
     /// MIDI mappings (MIDI learn). Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub midi: Vec<PatchMidiMapping>,
+    /// The parameters this patch exposes when it is inserted as a sub-patch
+    /// (`docs/design/sub-patches.md`, Library): a library item is an
+    /// ordinary patch file, and its surface travels here. Opened on its own,
+    /// the list is kept and saved back, and nothing shows it. Omitted when
+    /// empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exposed: Vec<Exposed>,
 }
 
 /// A module in a patch file.
@@ -469,6 +478,7 @@ impl Patch {
             cables: Vec::new(),
             modulation: Vec::new(),
             midi: Vec::new(),
+            exposed: Vec::new(),
         }
     }
 
@@ -652,6 +662,18 @@ pub(crate) fn midi_entry(mapping: &loom_core::MidiMapping, target: (u32, String)
         range: (mapping.options.low, mapping.options.high),
         invert: mapping.options.invert,
     }
+}
+
+/// `base`, or `base 2`, `base 3`, and so on, the first that `taken` does
+/// not report: how names are made unique everywhere in a patch.
+pub(crate) fn unique_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|n| format!("{base} {n}"))
+        .find(|name| !taken(name))
+        .expect("some number is free")
 }
 
 pub(crate) fn port_name(graph: &Graph, output: OutputRef) -> String {

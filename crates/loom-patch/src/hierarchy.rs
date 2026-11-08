@@ -21,10 +21,12 @@
 //!
 //! Control thread only. Nothing here opens a file.
 
+use crate::LoadWarning;
 use crate::flatten::{FlatIds, ModulePath, port_name};
+use crate::library::{LeftOut, reachable_keys, rekey};
 use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
-    PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SUBPATCH_KIND, SubPatch,
+    PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SUBPATCH_KIND, SubPatch, unique_name,
 };
 use loom_core::{AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, TRANSPORT_MODULE};
 use std::collections::{BTreeMap, BTreeSet};
@@ -114,6 +116,28 @@ pub struct Definition {
     /// The definition-side value and range of each exposed parameter, by
     /// the member's level id and the parameter (or exposed) name.
     pub defaults: BTreeMap<(u32, String), Stored>,
+    /// The library file this definition follows, as the file writes it
+    /// (sub-patches.md, Linked library items), or `None` for a copy.
+    pub library: Option<String>,
+}
+
+/// What inserting a patch file as a sub-patch made (sub-patches.md,
+/// Library).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Inserted {
+    /// The new instance tile.
+    pub instance: ModuleId,
+    /// The definition's name, from the file.
+    pub name: String,
+    /// The flat modules added to the controller, for a rollback.
+    pub modules: Vec<ModuleId>,
+    /// Where the file placed each tile inside, by flat id.
+    pub layouts: Vec<(ModuleId, Layout)>,
+    /// The patch-wide modules the file had, which were left out (rule 8).
+    pub left_out: Vec<LeftOut>,
+    /// What loaded differently from the file inside, such as an unknown
+    /// module.
+    pub notes: Vec<LoadWarning>,
 }
 
 /// A cable of one level that touches a port tile or an instance port, in
@@ -215,6 +239,10 @@ pub struct Hierarchy {
     /// The flat cables the links imply, as (output, input) in flat ids and
     /// port names, from the last sync or load.
     implied: BTreeSet<(End, End)>,
+    /// The `exposed` list of the top level, as the file had it: a library
+    /// file opened on its own keeps its surface for the next insert. Nothing
+    /// shows it; entries whose module is gone are dropped when it is written.
+    top_exposed: Vec<Exposed>,
 }
 
 impl Default for Hierarchy {
@@ -239,6 +267,7 @@ impl Hierarchy {
             ports: BTreeMap::new(),
             links: BTreeSet::new(),
             implied: BTreeSet::new(),
+            top_exposed: Vec::new(),
         }
     }
 
@@ -248,6 +277,7 @@ impl Hierarchy {
     /// and the boundary cables become links.
     pub fn from_patch(patch: &Patch, graph: &Graph, ids: FlatIds) -> Result<Self, PatchError> {
         let mut hierarchy = Self::with_ids(ids);
+        hierarchy.top_exposed = patch.exposed.clone();
         hierarchy.read_level(&patch.modules, &patch.cables, &ModulePath::root(), &patch.subpatches)?;
         hierarchy.adopt(graph);
         hierarchy.implied = graph_cables(graph)
@@ -298,6 +328,7 @@ impl Hierarchy {
                         metadata: definition.metadata.clone(),
                         exposed: definition.exposed.clone(),
                         defaults: defaults_of(definition),
+                        library: definition.library.clone(),
                     },
                 );
                 self.read_level(&definition.modules, &definition.cables, &path, table)?;
@@ -958,9 +989,28 @@ impl Hierarchy {
                     modulation: level.modulation,
                     midi: level.midi,
                     exposed: definition.exposed.clone(),
+                    library: definition.library.clone(),
                 },
             );
         }
+        // The top level's surface, less what no longer stands behind it.
+        patch.exposed = self
+            .top_exposed
+            .iter()
+            .filter(|exposed| {
+                let member = ModulePath::top(exposed.module);
+                if let Some(definition) = self.definition_at(&member) {
+                    return definition.exposed.iter().any(|e| e.name == exposed.param);
+                }
+                let id = ModuleId(exposed.module);
+                !skip.contains(&id)
+                    && graph.node(id).is_some_and(|node| match &node.unknown {
+                        Some(unknown) => unknown.params.contains_key(&exposed.param),
+                        None => node.parameter_index(&exposed.param).is_some(),
+                    })
+            })
+            .cloned()
+            .collect();
         patch.canonicalise();
         patch
     }
@@ -968,7 +1018,7 @@ impl Hierarchy {
     /// The `params` of the instance at `path`: the live value of each
     /// exposed parameter the outer level does not expose again, else the
     /// stored definition-side value.
-    fn instance_values(&self, graph: &Graph, path: &ModulePath) -> BTreeMap<String, f32> {
+    pub fn instance_values(&self, graph: &Graph, path: &ModulePath) -> BTreeMap<String, f32> {
         let mut values = BTreeMap::new();
         let Some(definition) = self.definition_at(path) else {
             return values;
@@ -1472,6 +1522,7 @@ impl Hierarchy {
                 },
                 exposed: Vec::new(),
                 defaults: BTreeMap::new(),
+                library: None,
             },
         );
 
@@ -1893,6 +1944,202 @@ impl Hierarchy {
         self.id_at(level, end.0).is_some_and(|id| graph.node(id).is_some())
     }
 
+    /// Inserts a patch file as a new sub-patch tile at `level`, as a copy
+    /// or, with `library`, linked to that path (sub-patches.md, Library).
+    /// The file becomes a definition ([`SubPatch::from_patch`]): its
+    /// patch-wide modules are left out and their cables become ports. Its
+    /// modules are added to the controller with ids from the table, and
+    /// the tile, its ports, and the definitions it brings are recorded.
+    /// Refused, with nothing added, when the file does not flatten, or
+    /// when `library` is the file an enclosing linked sub-patch follows,
+    /// which would make that file contain itself (Patch file). The caller
+    /// syncs and commits; on a later refusal it removes `modules`.
+    pub fn insert(
+        &mut self,
+        controller: &mut Controller,
+        level: &ModulePath,
+        file: &Patch,
+        library: Option<&str>,
+    ) -> Result<Inserted, PatchError> {
+        if let Some(path) = library {
+            for n in 1..=level.0.len() {
+                let prefix = level.prefix(n);
+                if self
+                    .definition_at(&prefix)
+                    .is_some_and(|d| d.library.as_deref() == Some(path))
+                {
+                    let mut loop_path = self.path_names(level).split_off(n - 1);
+                    loop_path.push(file.metadata.name.clone());
+                    return Err(PatchError::SubPatchLoop { path: loop_path });
+                }
+            }
+        }
+        let (mut definition, left_out) = SubPatch::from_patch(file, controller.registry(), library);
+        let name = definition.metadata.name.clone();
+        let mut nested = file.subpatches.clone();
+        let key = unique_name(&name.to_lowercase(), |key| {
+            self.definitions.contains_key(key) || nested.contains_key(key)
+        });
+        rekey(&mut definition, &mut nested, |candidate| {
+            candidate == key || self.definitions.contains_key(candidate)
+        });
+        self.adopt(controller.graph());
+        let (instance_path, instance_id) = self.new_module(level)?;
+
+        // The file as a patch of one instance, flattened on a scratch table
+        // whose paths start at the instance's level id.
+        let mut temp = Patch::new("");
+        temp.subpatches = nested;
+        temp.subpatches.insert(key.clone(), definition);
+        temp.modules.push(PatchModule {
+            id: instance_path.last(),
+            kind: SUBPATCH_KIND.to_string(),
+            subpatch: Some(key),
+            label: None,
+            params: BTreeMap::new(),
+            position: None,
+            size: None,
+            ranges: BTreeMap::new(),
+        });
+        let flat = temp.flatten(controller.registry(), &mut FlatIds::new())?;
+        let mut real: BTreeMap<ModuleId, ModuleId> = BTreeMap::new();
+        for module in &flat.modules {
+            let mut path = level.clone();
+            path.0.extend_from_slice(&module.path.0);
+            real.insert(module.id, self.ids.id_of(&path)?);
+        }
+        let added: Vec<ModuleId> = real.values().copied().collect();
+        if let Err(error) = flat.add_to(controller, &|id| real.get(&id).copied().unwrap_or(id)) {
+            for id in &added {
+                let _ = controller.remove_module(*id);
+            }
+            return Err(error);
+        }
+        self.read_level(&temp.modules, &[], level, &temp.subpatches)?;
+        let mut layouts = Vec::new();
+        for (path, instance) in &self.instances {
+            if !path.starts_with(&instance_path) {
+                continue;
+            }
+            let Some(definition) = temp.subpatches.get(&instance.key) else {
+                continue;
+            };
+            for module in &definition.modules {
+                if let Some(id) = self.ids.get(&path.child(module.id)) {
+                    layouts.push((
+                        id,
+                        Layout {
+                            position: module.position,
+                            size: module.size,
+                        },
+                    ));
+                }
+            }
+        }
+        Ok(Inserted {
+            instance: instance_id,
+            name,
+            modules: added,
+            layouts,
+            left_out,
+            notes: flat.warnings,
+        })
+    }
+
+    /// The library path the sub-patch tile `instance` follows, if it is
+    /// linked.
+    pub fn library_of(&self, instance: ModuleId) -> Option<&str> {
+        self.definition_of(instance)?.library.as_deref()
+    }
+
+    /// True when any sub-patch in the patch follows a library file.
+    pub fn has_links(&self) -> bool {
+        self.definitions.values().any(|d| d.library.is_some())
+    }
+
+    /// Unlink: makes the linked sub-patch tile `instance` a plain copy
+    /// (sub-patches.md, Linked library items). Returns its name. Refused
+    /// for a tile that is not a linked sub-patch.
+    pub fn unlink(&mut self, instance: ModuleId) -> Result<String, String> {
+        let key = self
+            .ids
+            .path_of(instance)
+            .and_then(|path| self.instances.get(path))
+            .map(|i| i.key.clone())
+            .ok_or_else(|| "select a sub-patch to unlink".to_string())?;
+        let definition = self
+            .definitions
+            .get_mut(&key)
+            .expect("every instance has its definition");
+        if definition.library.take().is_none() {
+            return Err(format!("{} does not follow the library", definition.metadata.name));
+        }
+        Ok(definition.metadata.name.clone())
+    }
+
+    /// Takes the link off the definition `key`, for the first edit inside
+    /// a linked sub-patch. Returns its name, or `None` when it was not
+    /// linked.
+    pub fn unlink_key(&mut self, key: &str) -> Option<String> {
+        let definition = self.definitions.get_mut(key)?;
+        definition.library.take()?;
+        Some(definition.metadata.name.clone())
+    }
+
+    /// What each linked definition and everything nested in it would be
+    /// saved as, by key: the text an edit inside changes, and the refresh
+    /// on load compares against the library file. Empty with no link, at
+    /// no cost.
+    pub fn linked_fingerprints(&self, graph: &Graph, layout: impl Fn(u32) -> Layout) -> BTreeMap<String, String> {
+        if !self.has_links() {
+            return BTreeMap::new();
+        }
+        let patch = self.unflatten(graph, layout);
+        patch
+            .subpatches
+            .iter()
+            .filter(|(_, definition)| definition.library.is_some())
+            .map(|(key, definition)| (key.clone(), crate::library::fingerprint(definition, &patch.subpatches)))
+            .collect()
+    }
+
+    /// The sub-patch tile `instance` as a library file: its definition at
+    /// the top level, with the definitions nested in it (sub-patches.md,
+    /// Library). `None` for a tile that is not a sub-patch.
+    pub fn definition_file(&self, graph: &Graph, layout: impl Fn(u32) -> Layout, instance: ModuleId) -> Option<Patch> {
+        let key = &self.instances.get(self.ids.path_of(instance)?)?.key;
+        let patch = self.unflatten(graph, layout);
+        let definition = patch.subpatches.get(key)?;
+        Some(Patch::from_definition(definition, &patch.subpatches))
+    }
+
+    /// The definition key of the instance shown at `level`. `None` at the
+    /// top.
+    pub fn key_at(&self, level: &ModulePath) -> Option<&str> {
+        self.instances.get(level).map(|i| i.key.as_str())
+    }
+
+    /// The keys of the definitions the one at `key` uses, through any
+    /// depth, as a file written from it would carry them.
+    pub fn nested_keys(&self, graph: &Graph, key: &str) -> Vec<String> {
+        let patch = self.unflatten(graph, |_| Layout::default());
+        patch
+            .subpatches
+            .get(key)
+            .map(|definition| reachable_keys(definition, &patch.subpatches))
+            .unwrap_or_default()
+    }
+
+    /// Sets the instance tile's own label, as a file or the clipboard gives
+    /// it. Nothing for a tile that is not an instance.
+    pub fn set_label(&mut self, instance: ModuleId, label: Option<String>) {
+        if let Some(path) = self.ids.path_of(instance).cloned()
+            && let Some(record) = self.instances.get_mut(&path)
+        {
+            record.label = label;
+        }
+    }
+
     /// Restores a snapshot of the hierarchy, keeping the ids the table has
     /// handed out since: no id is ever given out twice (undo.md, rule 5).
     pub fn restore(&mut self, snapshot: &Hierarchy) {
@@ -2020,18 +2267,6 @@ fn order_assignments(
         }
     }
     Ok(renamed)
-}
-
-/// `base`, or `base 2`, `base 3`, and so on, the first that `taken` does
-/// not report.
-fn unique_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
-    if !taken(base) {
-        return base.to_string();
-    }
-    (2..)
-        .map(|n| format!("{base} {n}"))
-        .find(|name| !taken(name))
-        .expect("some number is free")
 }
 
 /// A cable's ends in flat ids and port names.
