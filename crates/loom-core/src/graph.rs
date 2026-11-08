@@ -62,6 +62,7 @@ pub(crate) static UNKNOWN_DESCRIPTOR: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(unknown_factory),
     panel: crate::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// Stable identifier of a module in a patch. Saved in patch files.

@@ -36,6 +36,7 @@ static GATE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Silent)),
     panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode")]),
     displays: &[],
+    roles: &[],
 };
 
 fn controller(capacity: usize) -> Controller {
@@ -168,6 +169,7 @@ fn a_full_queue_changes_neither_value_of_a_range_pair() {
         role: ModuleRole::Dsp(|_| Box::new(Silent)),
         panel: Panel::new(6, 2, &[Widget::range(0, 0, "low", "high", "Span")]),
         displays: &[],
+        roles: &[],
     };
     let run = |capacity| {
         let mut registry = Registry::new();

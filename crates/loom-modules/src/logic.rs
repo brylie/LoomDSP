@@ -93,6 +93,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Trigger,
         range: DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -253,6 +254,7 @@ pub static COMPARE: ModuleDescriptor = ModuleDescriptor {
         &[Widget::segmented(0, 0, 7, "mode"), Widget::knob(2, 2, "hysteresis")],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.logic.compare`: the mode, the dead band, and whether the
@@ -372,6 +374,7 @@ pub static LOGIC: ModuleDescriptor = ModuleDescriptor {
         &[Widget::segmented(0, 0, 6, "op"), Widget::toggle(6, 0, "invert")],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.logic.logic`: the operation and the invert flag. The
@@ -482,6 +485,7 @@ pub static MEMORY: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Level,
         range: DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 /// State for `loom.logic.memory`: the mode, the remembered gate, and one edge

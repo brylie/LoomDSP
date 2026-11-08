@@ -138,6 +138,10 @@ pub struct ModuleDescriptor {
     /// [`MAX_DISPLAYS`]. It writes them in
     /// [`Module::displays`](crate::Module::displays).
     pub displays: &'static [DisplaySpec],
+    /// The roles this module fills (ADR-0017, sub-patches.md Roles), each
+    /// with the role names it maps to its own. Empty on most modules. The
+    /// registry checks each one when the module is registered.
+    pub roles: &'static [crate::role::FillsRole],
 }
 
 impl ModuleDescriptor {
@@ -151,7 +155,7 @@ impl ModuleDescriptor {
     /// # static SVF: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
     /// #     id: "doc.svf", version: 1, name: "SVF", category: "Doc", family: loom_core::Family::FiltersAndEffects, description: "",
     /// #     inputs: &[], outputs: &[], params: &[], role: loom_core::ModuleRole::UnitDelay,
-    /// #     panel: loom_core::Panel::EMPTY, displays: &[],
+    /// #     panel: loom_core::Panel::EMPTY, displays: &[], roles: &[],
     /// # };
     /// # const _: Option<usize> = SVF.input_index("in");
     /// // In a module: const IN: usize = SVF.input_index("in").unwrap();
@@ -251,6 +255,11 @@ impl ModuleDescriptor {
     /// The `"id@version"` string used in patch files.
     pub fn kind(&self) -> String {
         format!("{}@{}", self.id, self.version)
+    }
+
+    /// This module's declaration for the role `role_id`, if it fills it.
+    pub fn fills(&self, role_id: &str) -> Option<&'static crate::role::FillsRole> {
+        self.roles.iter().find(|f| f.role.id == role_id)
     }
 
     /// Default parameter values.

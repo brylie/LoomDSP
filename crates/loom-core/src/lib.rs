@@ -31,6 +31,7 @@ mod module;
 mod names;
 mod panic;
 mod registry;
+pub mod role;
 pub mod safety;
 pub mod signal;
 mod telemetry;
@@ -58,6 +59,7 @@ pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testi
 pub use names::ModuleNames;
 pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
+pub use role::{FillsRole, ParamKind, RoleDescriptor, RoleMismatch, RoleParam, RolePort, roles};
 pub use safety::OutputSafety;
 pub use signal::SignalType;
 pub use telemetry::{MeterReading, PAIR_CHUNK, PairChunk, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};

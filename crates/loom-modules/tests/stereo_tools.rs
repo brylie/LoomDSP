@@ -205,6 +205,7 @@ static SEEDED_NOISE: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
     }),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A running seeded module gets different, repeatable streams after stereo arrives.

@@ -72,6 +72,7 @@ static ECHO: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Echo { gain: 0.0 })),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 struct Echo {
@@ -113,6 +114,7 @@ static CALL_LENGTH: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(CallLength)),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 struct CallLength;
@@ -138,6 +140,7 @@ static NAN_AT_TEN: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(NanAtTen { frame: 0 })),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 struct NanAtTen {
@@ -376,6 +379,7 @@ fn unit_delays_are_refused() {
         role: ModuleRole::UnitDelay,
         panel: loom_core::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     let _ = Harness::new(&DELAY);
 }
@@ -411,6 +415,7 @@ static UNDOCUMENTED: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(CallLength)),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 #[test]
@@ -463,6 +468,7 @@ static SUM: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Sum(0.0))),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// The running sum of [`SUM`].
@@ -626,6 +632,7 @@ macro_rules! count {
             role: ModuleRole::Dsp(|_| Box::new(Count::new($copies, $snaps, $clears))),
             panel: loom_core::Panel::EMPTY,
             displays: &[],
+            roles: &[],
         };
     };
 }
@@ -733,6 +740,7 @@ macro_rules! phase_offset {
             }),
             panel: loom_core::Panel::EMPTY,
             displays: &[],
+            roles: &[],
         };
     };
 }
@@ -810,6 +818,7 @@ static NO_INPUTS: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Silent)),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// Writes silence, which is what a new output buffer holds.
@@ -867,6 +876,7 @@ macro_rules! capture {
             }),
             panel: loom_core::Panel::EMPTY,
             displays: &[],
+            roles: &[],
         };
     };
 }
@@ -940,6 +950,7 @@ static PRODUCT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Product)),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A harness for [`Product`] on the extreme check's slow signal.
@@ -1040,6 +1051,7 @@ static WRONG_ROUTE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(WrongRouteOnCopy { second: false })),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// With one signal on every input, a wrong route gives the same output, so the

@@ -66,6 +66,7 @@ pub static FOLLOWER: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Follower)),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 struct Follower;
@@ -115,6 +116,7 @@ pub static BAR_COPY: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Bar)),
     panel: loom_core::Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 struct Bar;

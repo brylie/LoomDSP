@@ -20,6 +20,17 @@ pub enum LoomError {
         /// Highest supported version.
         supported: u32,
     },
+    /// No role with this ID is registered.
+    #[error("unknown role `{0}`")]
+    UnknownRole(String),
+    /// The patch names a newer role version than this build has.
+    #[error("role `{kind}` is newer than this version of LoomDSP supports (up to version {supported})")]
+    UnsupportedRoleVersion {
+        /// The requested kind.
+        kind: String,
+        /// Highest supported version.
+        supported: u32,
+    },
     /// A module descriptor is invalid.
     #[error("invalid module descriptor `{id}`: {reason}")]
     InvalidDescriptor {

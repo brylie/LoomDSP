@@ -185,6 +185,7 @@ fn notes_print_only_when_present() {
         role: ModuleRole::UnitDelay,
         panel: Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     let mut out = Vec::new();
     write_notes(&mut out, &Registry::new()).unwrap();

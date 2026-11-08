@@ -125,6 +125,7 @@ pub static CLOCK: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Trigger,
         range: DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 /// Index of `rate`.

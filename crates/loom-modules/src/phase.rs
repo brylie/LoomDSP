@@ -74,6 +74,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config| Box::new(Phase::new(config))),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "tune"), Widget::knob(3, 0, "octave")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -184,6 +185,7 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Trigger,
         range: DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -259,6 +261,7 @@ pub static WRAP: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Wrap { fold: false })),
     panel: Panel::new(5, 2, &[Widget::segmented(0, 0, 5, "mode")]),
     displays: &[],
+    roles: &[],
 };
 
 struct Wrap {
@@ -373,6 +376,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
         &[Widget::number(0, 0, "multiply"), Widget::number(5, 0, "divide")],
     ),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -508,6 +512,7 @@ pub static RESET: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(2, 2, &[]),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.phase.reset`: `offset` is the input's wrapped value at the
@@ -612,6 +617,7 @@ pub static SHIFT: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "offset")]),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.phase.shift`: only the knob's glide.
@@ -701,6 +707,7 @@ pub static REVERSE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(PhaseReverse)),
     panel: Panel::new(2, 2, &[]),
     displays: &[],
+    roles: &[],
 };
 
 /// `loom.phase.reverse` has no state.

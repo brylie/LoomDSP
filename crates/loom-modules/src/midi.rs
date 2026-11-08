@@ -77,6 +77,7 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Level,
         range: DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 const MAX_HELD: usize = 16;
@@ -273,6 +274,7 @@ pub static CONTROLLER_IN: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.midi.controller`.

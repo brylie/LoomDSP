@@ -4,6 +4,7 @@
 
 use crate::cached::Cached;
 use loom_core::signal::pitch;
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -174,6 +175,7 @@ pub static EQ: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[FillsRole::of(&roles::EFFECT)],
 };
 
 /// The slope for a parameter value, or `None` for Off.

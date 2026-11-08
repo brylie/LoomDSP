@@ -195,6 +195,7 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
             range: DisplayRange::UNIT,
         },
     ],
+    roles: &[],
 };
 
 /// Parameter indices.

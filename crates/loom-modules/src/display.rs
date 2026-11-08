@@ -72,6 +72,7 @@ pub static METER: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// Copies the input to the output. The meter and the scope share it: both
@@ -184,6 +185,7 @@ pub static XY: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// Copies each input to its output, for a probe to read.
@@ -256,6 +258,7 @@ pub static SPECTRUM: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Meter)),
     panel: Panel::new(9, 5, &[Widget::spectrum(0, 0, "out").captioned("")]),
     displays: &[],
+    roles: &[],
 };
 
 /// `loom.display.scope`: a mono oscilloscope (MT-VIEW-01, scope mode).
@@ -351,4 +354,5 @@ pub static SCOPE: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };

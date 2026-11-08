@@ -125,6 +125,7 @@ pub static EUCLID: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// A whole-number parameter's value as a count.

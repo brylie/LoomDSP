@@ -30,6 +30,7 @@ static LEVEL: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A graph with module 1 and `id` mapping KNOB to its level.

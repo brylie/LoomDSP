@@ -2,7 +2,8 @@
 
 use crate::descriptor::{Channels, ModuleDescriptor, ModuleRole, ParamMapping, PortDefault};
 use crate::error::LoomError;
-use std::collections::BTreeMap;
+use crate::role::RoleDescriptor;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A parsed `"id@version"` module kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +57,14 @@ impl std::fmt::Display for RegistryNote {
 #[derive(Debug, Default)]
 pub struct Registry {
     modules: BTreeMap<&'static str, &'static ModuleDescriptor>,
+    /// Roles by id: the ones registered on their own and the ones a module
+    /// declares (sub-patches.md, Roles).
+    roles: BTreeMap<&'static str, &'static RoleDescriptor>,
+    /// Modules the editor adds itself and never offers to the player, such
+    /// as the swap fade. They are registered like any module, so the file
+    /// and the engine know them, but the browser and the help pages leave
+    /// them out.
+    internal: BTreeSet<&'static str>,
     notes: Vec<RegistryNote>,
 }
 
@@ -179,6 +188,11 @@ impl Registry {
         if !matches!(descriptor.role, ModuleRole::Dsp(_)) && has_params_or_displays {
             return Err(invalid("only DSP modules can have parameters or display values"));
         }
+        for fills in descriptor.roles {
+            fills.check(descriptor).map_err(|reason| invalid(&reason))?;
+            self.register_role(fills.role)
+                .map_err(|_| invalid(&format!("role {} is registered twice under one id", fills.role.id)))?;
+        }
         if self.modules.insert(descriptor.id, descriptor).is_some() {
             return Err(invalid("duplicate module ID"));
         }
@@ -188,6 +202,75 @@ impl Registry {
                 message: missing.to_string(),
             }));
         Ok(())
+    }
+
+    /// Adds a module the editor uses itself and never offers to the player
+    /// ([`Registry::is_internal`]). Checked and looked up like any module.
+    pub fn register_internal(&mut self, descriptor: &'static ModuleDescriptor) -> Result<(), LoomError> {
+        self.register(descriptor)?;
+        self.internal.insert(descriptor.id);
+        Ok(())
+    }
+
+    /// True for a module added with [`Registry::register_internal`].
+    pub fn is_internal(&self, id: &str) -> bool {
+        self.internal.contains(id)
+    }
+
+    /// The registered modules a player may add: every module that is not
+    /// internal, sorted by id.
+    pub fn browsable(&self) -> impl Iterator<Item = &'static ModuleDescriptor> + '_ {
+        self.iter().filter(|d| !self.is_internal(d.id))
+    }
+
+    /// Adds a role (sub-patches.md, Roles). A role a module declares is
+    /// added when the module is. The same descriptor twice is fine; two
+    /// descriptors under one id are refused.
+    pub fn register_role(&mut self, role: &'static RoleDescriptor) -> Result<(), LoomError> {
+        match self.roles.get(role.id) {
+            Some(known) if std::ptr::eq(*known, role) => Ok(()),
+            Some(_) => Err(LoomError::InvalidDescriptor {
+                id: role.id.to_string(),
+                reason: "duplicate role ID".to_string(),
+            }),
+            None => {
+                self.roles.insert(role.id, role);
+                Ok(())
+            }
+        }
+    }
+
+    /// The role with this id.
+    pub fn role(&self, id: &str) -> Option<&'static RoleDescriptor> {
+        self.roles.get(id).copied()
+    }
+
+    /// Resolves a role's `"id@version"` kind string, as
+    /// [`Registry::resolve`] does a module's: an older version resolves, a
+    /// newer one than the registry knows is an error.
+    pub fn resolve_role(&self, kind: &str) -> Result<&'static RoleDescriptor, LoomError> {
+        let parsed = ModuleKind::parse(kind)?;
+        let role = self
+            .role(&parsed.id)
+            .ok_or_else(|| LoomError::UnknownRole(kind.to_string()))?;
+        if parsed.version > role.version {
+            return Err(LoomError::UnsupportedRoleVersion {
+                kind: kind.to_string(),
+                supported: role.version,
+            });
+        }
+        Ok(role)
+    }
+
+    /// Every registered role, sorted by id.
+    pub fn roles(&self) -> impl Iterator<Item = &'static RoleDescriptor> + '_ {
+        self.roles.values().copied()
+    }
+
+    /// The modules that declare the role `role_id`, sorted by id, internal
+    /// ones left out: what a slot's Swap menu lists.
+    pub fn parts_of(&self, role_id: &str) -> Vec<&'static ModuleDescriptor> {
+        self.browsable().filter(|d| d.fills(role_id).is_some()).collect()
     }
 
     /// Notes about registered modules, in the order they were registered.

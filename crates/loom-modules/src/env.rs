@@ -3,6 +3,7 @@
 //! Spec: `docs/design/p1-modules.md`, Envelope AD mode.
 
 use loom_core::signal::gate_is_high;
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
@@ -127,6 +128,7 @@ pub static ENVELOPE: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Level,
         range: DisplayRange::UNIT,
     }],
+    roles: &[FillsRole::of(&roles::ENVELOPE)],
 };
 
 /// The envelope's schematic result for the tile preview. Each timed stage

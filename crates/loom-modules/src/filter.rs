@@ -3,6 +3,7 @@
 use crate::cached::Cached;
 use crate::mix::stereo_port;
 use loom_core::signal::pitch;
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -107,6 +108,10 @@ pub static SVF: ModuleDescriptor = ModuleDescriptor {
     // Resonance caption and the Bandpass and Highpass labels room (#455).
     panel: Panel::new(8, 3, &[Widget::knob(1, 0, "cutoff"), Widget::knob(4, 0, "resonance")]),
     displays: &[],
+    roles: &[FillsRole {
+        outputs: &[("out", "lowpass")],
+        ..FillsRole::of(&roles::FILTER)
+    }],
 };
 
 #[derive(Clone)]
@@ -268,6 +273,10 @@ pub static ONEPOLE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config| Box::new(OnePole::new(config))),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "cutoff")]),
     displays: &[],
+    roles: &[FillsRole {
+        outputs: &[("out", "lowpass")],
+        ..FillsRole::of(&roles::FILTER)
+    }],
 };
 
 /// State for `loom.filter.onepole`: the smoothed cutoff and the filter.
@@ -452,6 +461,7 @@ pub static LADDER: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[FillsRole::of(&roles::FILTER)],
 };
 
 /// The ladder's small-signal response for the tile. The horizontal axis is
@@ -687,6 +697,7 @@ pub static CROSSOVER: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.filter.crossover`.

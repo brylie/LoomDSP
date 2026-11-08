@@ -85,6 +85,7 @@ pub static ADD: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "offset")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -192,6 +193,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "gain")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -285,6 +287,7 @@ pub static SUB: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Sub)),
     panel: Panel::new(2, 2, &[]),
     displays: &[],
+    roles: &[],
 };
 
 /// Stateless: each output sample depends only on the inputs at that sample.
@@ -349,6 +352,7 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Div)),
     panel: Panel::new(2, 2, &[]),
     displays: &[],
+    roles: &[],
 };
 
 /// Stateless, so a NaN or infinity on an input cannot stay in the module.
@@ -418,6 +422,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "value")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -516,6 +521,7 @@ pub static CONVERT: ModuleDescriptor = ModuleDescriptor {
     // Four radio buttons are 3 wide and 5 tall.
     panel: Panel::new(6, 2, &[Widget::select(0, 0, "mode")]),
     displays: &[],
+    roles: &[],
 };
 
 struct Convert {
@@ -593,6 +599,7 @@ pub static PITCH_CONSTANT: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "semitones")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]

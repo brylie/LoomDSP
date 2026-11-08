@@ -39,6 +39,7 @@ static COUNTER: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Counter(0))),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// One counted frame on [`COUNTER`]'s output.
@@ -71,6 +72,7 @@ static PASS: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Pass)),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// The module behind [`PASS`].
@@ -100,6 +102,7 @@ static OUT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::AudioOutput,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A one-sample delay whose held value survives an unreachable schedule.
@@ -116,6 +119,7 @@ static DELAY: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// An engine with the test modules and no output safety, so the output

@@ -59,6 +59,7 @@ fn a_button_writes_the_parameter_its_mode_chooses() {
             &[Widget::button(0, 0, "on", "hold", "mode"), Widget::toggle(6, 0, "mode")],
         ),
         displays: &[],
+        roles: &[],
     };
     let button = &BUTTONS.panel.widgets[0];
     assert_eq!(BUTTONS.control_param(button, &[0.0, 0.0, 0.0]), Some(1));
@@ -109,6 +110,7 @@ fn select_and_shape_panel_bindings_are_checked() {
         role: ModuleRole::Dsp(|_| unreachable!("never created")),
         panel: Panel::new(6, 7, widgets),
         displays: &[],
+        roles: &[],
     };
     let valid = descriptor(&VALID, &PARAMS);
     assert!(valid.check_panel().is_ok());

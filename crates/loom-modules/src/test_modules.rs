@@ -172,6 +172,7 @@ pub static PANEL: ModuleDescriptor = ModuleDescriptor {
         kind: DisplayKind::Level,
         range: DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 struct TestPanel {
@@ -300,6 +301,7 @@ pub static READOUT: ModuleDescriptor = ModuleDescriptor {
             },
         },
     ],
+    roles: &[],
 };
 
 struct TestReadout {
@@ -389,6 +391,7 @@ macro_rules! mirror_module {
             role: ModuleRole::Dsp(|config| mirror(&$name, config)),
             panel: Panel::EMPTY,
             displays: &[],
+            roles: &[],
         };
     };
 }

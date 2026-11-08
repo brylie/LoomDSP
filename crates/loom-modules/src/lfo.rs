@@ -3,6 +3,7 @@
 //! Spec: `docs/design/p1-modules.md`, LFO.
 
 use loom_core::signal::pitch;
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -123,6 +124,7 @@ pub static LFO: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[FillsRole::of(&roles::MODULATOR)],
 };
 
 /// One cycle of the selected wave for the read-only tile preview.

@@ -48,4 +48,5 @@ pub(crate) static NAMED: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };

@@ -67,6 +67,7 @@ fn refuses_input_defaults_that_are_not_finite() {
         role: ModuleRole::UnitDelay,
         panel: crate::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     let error = Registry::new().register(&NAN_DEFAULT).unwrap_err();
     assert!(error.to_string().contains("finite"), "{error}");
@@ -88,6 +89,7 @@ macro_rules! with_ports {
             role: ModuleRole::Dsp(|_| unreachable!("never created")),
             panel: crate::Panel::EMPTY,
             displays: &[],
+            roles: &[],
         };
         Registry::new().register(&DESCRIPTOR)
     }};
@@ -209,6 +211,7 @@ fn registers_undocumented_modules_with_notes() {
         role: ModuleRole::UnitDelay,
         panel: crate::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     let mut registry = Registry::new();
     registry.register(&QUIET).unwrap();
@@ -240,6 +243,7 @@ fn notes_undocumented_display_values() {
             kind: crate::DisplayKind::Trigger,
             range: crate::descriptor::DisplayRange::UNIT,
         }],
+        roles: &[],
     };
     let mut registry = Registry::new();
     registry.register(&DARK).unwrap();
@@ -275,6 +279,7 @@ fn refuses_bad_ranges() {
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::EMPTY,
                 displays: &[],
+                roles: &[],
             };
             Registry::new().register(&DESCRIPTOR).map_err(|error| error.to_string())
         }};
@@ -343,6 +348,7 @@ fn refuses_bad_choice_names() {
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::EMPTY,
                 displays: &[],
+                roles: &[],
             };
             Registry::new().register(&DESCRIPTOR).map_err(|error| error.to_string())
         }};
@@ -395,6 +401,7 @@ macro_rules! with_params {
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::EMPTY,
                 displays: &[],
+                roles: &[],
             };
             &DESCRIPTOR
         }};
@@ -482,6 +489,7 @@ macro_rules! with_panel {
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::new($width, $height, &[$($widget),*]),
                 displays: &[display("busy")],
+                roles: &[],
             };
             Registry::new().register(&DESCRIPTOR).map_err(|error| error.to_string())
         }};
@@ -594,6 +602,7 @@ fn refuses_too_many_display_values() {
         role: ModuleRole::Dsp(|_| unreachable!("never created")),
         panel: crate::Panel::EMPTY,
         displays: &[display("a"), display("b"), display("c"), display("d"), display("e")],
+        roles: &[],
     };
     let error = Registry::new().register(&DESCRIPTOR).unwrap_err();
     assert!(error.to_string().contains("more than 4 display values"), "{error}");
@@ -616,6 +625,7 @@ fn refuses_ignored_input_defaults_on_delay_and_output_roles() {
         role: ModuleRole::UnitDelay,
         panel: crate::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     static OUTPUT_TRANSPORT: ModuleDescriptor = ModuleDescriptor {
         id: "test.output_default",
@@ -633,6 +643,7 @@ fn refuses_ignored_input_defaults_on_delay_and_output_roles() {
         role: ModuleRole::AudioOutput,
         panel: crate::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     for (descriptor, port_name) in [(&DELAY_VALUE, "in"), (&OUTPUT_TRANSPORT, "in")] {
         let text = Registry::new().register(descriptor).unwrap_err().to_string();
@@ -657,6 +668,7 @@ fn refuses_parameters_and_displays_on_non_dsp_modules() {
         role: ModuleRole::UnitDelay,
         panel: crate::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     let error = Registry::new().register(&DELAY_WITH_PARAMS).unwrap_err();
     assert!(
@@ -682,6 +694,7 @@ fn refuses_parameters_and_displays_on_non_dsp_modules() {
         role: ModuleRole::AudioOutput,
         panel: crate::Panel::EMPTY,
         displays: &[],
+        roles: &[],
     };
     let error = Registry::new().register(&OUTPUT_WITH_PARAMS).unwrap_err();
     assert!(
@@ -704,6 +717,7 @@ fn refuses_parameters_and_displays_on_non_dsp_modules() {
         role: ModuleRole::UnitDelay,
         panel: crate::Panel::EMPTY,
         displays: &[display("level")],
+        roles: &[],
     };
     let error = Registry::new().register(&DELAY_WITH_DISPLAYS).unwrap_err();
     assert!(
@@ -734,6 +748,7 @@ fn refuses_bad_mode_conditions_and_segmented_controls() {
                 role: ModuleRole::Dsp(|_| unreachable!("never created")),
                 panel: crate::Panel::new(9, 5, $widgets),
                 displays: &[],
+                roles: &[],
             };
             Registry::new().register(&DESCRIPTOR).map_err(|error| error.to_string())
         }};
@@ -780,4 +795,91 @@ fn refuses_bad_mode_conditions_and_segmented_controls() {
         let error = result.unwrap_err();
         assert!(error.contains(expected), "{error}");
     }
+}
+
+/// A module that declares a role it does not fit is refused, naming the
+/// parameter (FR-SDK-08, sub-patches.md Roles). One that fits registers
+/// its role too.
+#[test]
+fn refuses_a_role_declaration_missing_a_parameter() {
+    static NO_CUTOFF: ModuleDescriptor = ModuleDescriptor {
+        id: "test.nocutoff",
+        version: 1,
+        name: "No cutoff",
+        category: "Test",
+        family: crate::Family::FiltersAndEffects,
+        description: "",
+        inputs: &[port("in", crate::SignalType::Audio)],
+        outputs: &[port("out", crate::SignalType::Audio)],
+        params: &[param("resonance", 0.0, 1.0, 0.2, "")],
+        role: ModuleRole::Dsp(|_| unreachable!("never created")),
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[crate::FillsRole::of(&crate::roles::FILTER)],
+    };
+    static FITS: ModuleDescriptor = ModuleDescriptor {
+        id: "test.fits",
+        version: 1,
+        name: "Fits",
+        category: "Test",
+        family: crate::Family::FiltersAndEffects,
+        description: "",
+        inputs: &[port("in", crate::SignalType::Audio)],
+        outputs: &[port("low", crate::SignalType::Audio)],
+        params: &[param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz")],
+        role: ModuleRole::Dsp(|_| unreachable!("never created")),
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[crate::FillsRole {
+            outputs: &[("out", "low")],
+            ..crate::FillsRole::of(&crate::roles::FILTER)
+        }],
+    };
+    let mut registry = Registry::new();
+    let error = registry.register(&NO_CUTOFF).unwrap_err().to_string();
+    assert!(
+        error.contains("role loom.role.filter@1 needs parameter `cutoff`; the module has none"),
+        "{error}"
+    );
+    assert!(registry.role("loom.role.filter").is_none(), "a refused module registers no role");
+    registry.register(&FITS).unwrap();
+    assert_eq!(registry.role("loom.role.filter").map(|r| r.name), Some("Filter"));
+    assert_eq!(registry.resolve_role("loom.role.filter@1").unwrap().id, "loom.role.filter");
+    assert!(matches!(
+        registry.resolve_role("loom.role.filter@2"),
+        Err(LoomError::UnsupportedRoleVersion { supported: 1, .. })
+    ));
+    assert!(matches!(
+        registry.resolve_role("loom.role.other@1"),
+        Err(LoomError::UnknownRole(_))
+    ));
+    assert_eq!(registry.parts_of("loom.role.filter").len(), 1);
+    assert_eq!(registry.roles().count(), 1);
+}
+
+/// An internal module is registered and resolved like any other, but the
+/// browser's list leaves it out.
+#[test]
+fn internal_modules_are_not_browsable() {
+    static HIDDEN: ModuleDescriptor = ModuleDescriptor {
+        id: "test.hidden",
+        version: 1,
+        name: "Hidden",
+        category: "Test",
+        family: crate::Family::Interface,
+        description: "",
+        inputs: &[port("in", crate::SignalType::Audio)],
+        outputs: &[port("out", crate::SignalType::Audio)],
+        params: &[],
+        role: ModuleRole::UnitDelay,
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[],
+    };
+    let mut registry = Registry::new();
+    registry.register_internal(&HIDDEN).unwrap();
+    assert!(registry.is_internal("test.hidden"));
+    assert!(registry.resolve("test.hidden@1").is_ok());
+    assert_eq!(registry.browsable().count(), 0);
+    assert_eq!(registry.iter().count(), 1);
 }

@@ -87,6 +87,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
         &[Widget::segmented(0, 0, 9, "response"), Widget::knob(3, 2, "gain")],
     ),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -195,6 +196,7 @@ pub static CONSTANT: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "level")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -306,6 +308,7 @@ pub static CLAMP: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(6, 2, &[Widget::range(0, 0, "low", "high", "Limits")]),
     displays: &[],
+    roles: &[],
 };
 
 /// Holds `x` between two limits, and never panics.
@@ -445,6 +448,7 @@ pub static SCALE: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "factor"), Widget::knob(3, 0, "offset")]),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -557,6 +561,7 @@ pub static SLEW: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "rise"), Widget::knob(3, 0, "fall")]),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.level.slew`: the rise and fall times, and the limiter.

@@ -8,10 +8,18 @@
 //! engine from inside a sub-patch. At the top level of a patch, such as a
 //! library file opened on its own, they are ordinary modules: the input
 //! outputs silence, and the output reads its input and does nothing.
+//!
+//! The swap fade ([`FADE`]) is the one module here that plays inside a
+//! sub-patch: the editor adds one per role output when a slot swaps its
+//! part, so the leaving and the new part both run for a 10 ms equal-power
+//! crossfade (`docs/design/sub-patches.md`, How a swap crossfades). It is
+//! registered as internal: never in the browser, never in a file.
 
 use loom_core::{
-    Channels, Module, ModuleDescriptor, ModuleRole, Panel, PortDefault, PortIo, PortSpec, ProcessContext, SignalType,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, PortDefault, PortIo,
+    PortSpec, ProcessContext, SignalType,
 };
+use std::f32::consts::FRAC_PI_2;
 
 /// `loom.struct.input` (MT-STRUCT-02): an input port of a sub-patch.
 pub static INPUT: ModuleDescriptor = ModuleDescriptor {
@@ -35,6 +43,7 @@ pub static INPUT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(PatchInput)),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// `loom.struct.output` (MT-STRUCT-02): an output port of a sub-patch.
@@ -59,7 +68,109 @@ pub static OUTPUT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(PatchOutput)),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
+
+/// How long a slot swap crossfades, in seconds (sub-patches.md, Slots).
+pub const SWAP_FADE_SECONDS: f32 = 0.010;
+
+/// The kind of the swap fade, as the editor adds it.
+pub const FADE_KIND: &str = "loom.struct.fade@1";
+
+/// A port of the swap fade.
+const fn fade_port(name: &'static str, label: &'static str, description: &'static str) -> PortSpec {
+    PortSpec {
+        name,
+        label,
+        signal: SignalType::Audio,
+        description,
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::PerChannel,
+    }
+}
+
+/// `loom.struct.fade`: the crossfade of a slot swap. Internal.
+pub static FADE: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.struct.fade",
+    version: 1,
+    name: "Swap Fade",
+    category: "Structure",
+    family: loom_core::Family::Interface,
+    description: "Fades from the part leaving a slot to the part taking its place over 10 ms, equal power. The editor adds and removes it.",
+    inputs: &[
+        fade_port("a", "A", "The output of the part that is leaving."),
+        fade_port("b", "B", "The same output of the part that takes its place."),
+    ],
+    outputs: &[fade_port("out", "Out", "A, then a blend, then B alone once the fade is done.")],
+    params: &[],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(SwapFade {
+            length: (SWAP_FADE_SECONDS * config.sample_rate).round().max(1.0) as u32,
+            count: 0,
+        })
+    }),
+    panel: Panel::EMPTY,
+    displays: &[DisplaySpec {
+        name: "done",
+        label: "Done",
+        description: "1 once the fade has finished and the output is B alone.",
+        kind: DisplayKind::Level,
+        range: DisplayRange::UNIT,
+    }],
+    roles: &[],
+};
+
+/// The swap fade: counts samples from its first processed frame to the
+/// fade length, with gains on a quarter circle, so the sum of their
+/// squares stays 1 and loudness holds through the fade. Per sample, so it
+/// is the same at every block size.
+#[derive(Clone)]
+struct SwapFade {
+    /// Frames the fade takes.
+    length: u32,
+    /// Frames processed so far, up to `length`.
+    count: u32,
+}
+
+impl SwapFade {
+    /// The index of the `done` display value.
+    pub const DONE: usize = 0;
+
+    /// True once the fade has finished.
+    fn is_done(&self) -> bool {
+        self.count >= self.length
+    }
+}
+
+impl Module for SwapFade {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([a, b], [out]) = io.split::<2, 1>();
+        for i in 0..out.len() {
+            if self.is_done() {
+                out[i] = b[i];
+                continue;
+            }
+            let theta = FRAC_PI_2 * self.count as f32 / self.length as f32;
+            let (gain_b, gain_a) = theta.sin_cos();
+            out[i] = a[i] * gain_a + b[i] * gain_b;
+            self.count += 1;
+        }
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values[Self::DONE] = if self.is_done() { 1.0 } else { 0.0 };
+    }
+
+    fn reset(&mut self) {
+        self.count = 0;
+    }
+
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+}
 
 /// A Patch input at the top level: silence.
 struct PatchInput;

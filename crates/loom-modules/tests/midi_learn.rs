@@ -88,6 +88,7 @@ static PROBE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(probe),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 const CC74: MidiControl = MidiControl {

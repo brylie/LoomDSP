@@ -39,6 +39,7 @@ static BAD: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Bad { frame: 0 })),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// The state of [`BAD`]: frames written so far.
@@ -108,6 +109,7 @@ static WATCH: ModuleDescriptor = ModuleDescriptor {
             range: loom_core::DisplayRange::UNIT,
         },
     ],
+    roles: &[],
 };
 
 /// The counts of [`WATCH`].

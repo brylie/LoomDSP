@@ -5,6 +5,7 @@
 
 use crate::cached::Cached;
 use crate::mix::stereo_port;
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
@@ -225,6 +226,7 @@ pub static DYNAMICS: ModuleDescriptor = ModuleDescriptor {
             unit: "dB",
         },
     }],
+    roles: &[FillsRole::of(&roles::EFFECT)],
 };
 
 /// The mode for a parameter value.

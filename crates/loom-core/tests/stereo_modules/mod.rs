@@ -53,6 +53,7 @@ macro_rules! descriptor {
             role: $role,
             panel: Panel::EMPTY,
             displays: &[],
+            roles: &[],
         }
     };
 }

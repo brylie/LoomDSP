@@ -140,6 +140,7 @@ pub static SELECTOR: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// How Selector picks.

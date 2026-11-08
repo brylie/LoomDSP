@@ -3,6 +3,7 @@
 //! Shapers take a phase input instead of a frequency. Connect a Phase module
 //! to drive them, or any other signal to bend the wave shape.
 
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -41,6 +42,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Sine)),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[FillsRole::of(&roles::SOURCE)],
 };
 
 /// State for `loom.osc.sine`.
@@ -89,6 +91,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[FillsRole::of(&roles::SOURCE)],
 };
 
 /// State for `loom.osc.saw`.
@@ -164,6 +167,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "width")]),
     displays: &[],
+    roles: &[FillsRole::of(&roles::SOURCE)],
 };
 
 /// State for `loom.osc.pulse`.
@@ -247,6 +251,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[FillsRole::of(&roles::SOURCE)],
 };
 
 /// State for `loom.osc.triangle`.
@@ -317,6 +322,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|config: &ModuleConfig| Box::new(Noise::new(config.sample_rate))),
     panel: Panel::new(9, 2, &[Widget::segmented(0, 0, 9, "colour")]),
     displays: &[],
+    roles: &[FillsRole::of(&roles::SOURCE)],
 };
 
 /// State for `loom.osc.noise`. The generator and its sources are in

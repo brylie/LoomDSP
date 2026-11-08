@@ -121,6 +121,7 @@ pub static MIXER: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -334,6 +335,7 @@ pub static CROSSFADE: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 #[derive(Clone)]
@@ -436,6 +438,7 @@ pub static JOIN: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Join)),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A stateless stereo joiner.
@@ -479,6 +482,7 @@ pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Split)),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A stateless stereo splitter.

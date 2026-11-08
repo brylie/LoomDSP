@@ -16,6 +16,7 @@ static DOCUMENTED: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 static UNDOCUMENTED: ModuleDescriptor = ModuleDescriptor {
@@ -51,6 +52,7 @@ static UNDOCUMENTED: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 #[test]

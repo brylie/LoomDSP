@@ -74,6 +74,7 @@ pub static BUTTON: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Button::default())),
     panel: Panel::new(6, 3, &[Widget::button(0, 0, "on", "hold", "mode").captioned("Gate")]),
     displays: &[],
+    roles: &[],
 };
 
 /// Index of `mode`.
@@ -156,6 +157,7 @@ pub static MACRO: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(3, 3, &[Widget::knob(0, 0, "value")]),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.ui.macro`: only the knob's glide.

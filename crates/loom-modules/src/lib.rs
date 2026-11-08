@@ -102,16 +102,31 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &time::ALLPASS,
     &structure::INPUT,
     &structure::OUTPUT,
+    &structure::FADE,
 ];
 
 // Every built-in port and parameter has a label and a description, or this
 // crate does not compile.
 const _: () = loom_core::assert_documented(ALL);
 
-/// Adds every built-in module to a registry.
+/// The modules in [`ALL`] that the editor adds itself and never offers to
+/// the player: the swap fade. Registered as internal, so the browser and
+/// the help pages leave them out, while every check that runs over `ALL`
+/// still covers them.
+pub static INTERNAL: &[&ModuleDescriptor] = &[&structure::FADE];
+
+/// Adds every built-in module, the internal modules, and every initial
+/// role to a registry.
 pub fn register_all(registry: &mut Registry) -> Result<(), LoomError> {
+    for role in loom_core::roles::ALL {
+        registry.register_role(role)?;
+    }
     for descriptor in ALL {
-        registry.register(descriptor)?;
+        if INTERNAL.iter().any(|d| std::ptr::eq(*d, *descriptor)) {
+            registry.register_internal(descriptor)?;
+        } else {
+            registry.register(descriptor)?;
+        }
     }
     Ok(())
 }

@@ -2,6 +2,7 @@
 
 use crate::math::{DEFAULT_RANGE, WIDE_RANGES};
 use loom_core::signal::{EdgeDetector, gate_is_high};
+use loom_core::{FillsRole, roles};
 use loom_core::{
     Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
     PortSpec, ProcessContext, SignalType, Widget,
@@ -170,6 +171,7 @@ pub static RANDOM: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[FillsRole::of(&roles::MODULATOR)],
 };
 
 /// One output of Random. `position` is where the output is going, from 0 to
@@ -523,6 +525,7 @@ pub static CHANCE: ModuleDescriptor = ModuleDescriptor {
         ],
     ),
     displays: &[],
+    roles: &[],
 };
 
 /// Where a lane's input is going.
@@ -731,6 +734,7 @@ pub static SAMPLE_HOLD: ModuleDescriptor = ModuleDescriptor {
     }),
     panel: Panel::new(7, 2, &[Widget::segmented(0, 0, 7, "mode")]),
     displays: &[],
+    roles: &[],
 };
 
 /// State for `loom.rand.sample-hold`: `track` is the mode, `edge` finds the

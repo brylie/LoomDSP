@@ -36,6 +36,7 @@ pub static UNIT_DELAY: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::UnitDelay,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// `loom.io.audio-out`: sends audio to the speakers or host.
@@ -60,6 +61,7 @@ pub static AUDIO_OUT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::AudioOutput,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// `loom.io.audio-in`: brings the selected input pair into a patch.
@@ -143,6 +145,7 @@ pub static AUDIO_IN: ModuleDescriptor = ModuleDescriptor {
         kind: loom_core::DisplayKind::Level,
         range: loom_core::DisplayRange::UNIT,
     }],
+    roles: &[],
 };
 
 /// Input source state; the engine supplies the same frames to every instance.

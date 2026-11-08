@@ -72,6 +72,7 @@ static LAMP: ModuleDescriptor = ModuleDescriptor {
             range: DisplayRange::UNIT,
         },
     ],
+    roles: &[],
 };
 
 struct Lamp {

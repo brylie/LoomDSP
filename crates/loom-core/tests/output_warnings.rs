@@ -36,6 +36,7 @@ static SOURCE: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::Dsp(|_| Box::new(Source(0))),
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// The state of [`SOURCE`]: frames written so far.
@@ -67,6 +68,7 @@ static OUT: ModuleDescriptor = ModuleDescriptor {
     role: ModuleRole::AudioOutput,
     panel: Panel::EMPTY,
     displays: &[],
+    roles: &[],
 };
 
 /// A running patch from the source to the output, with this safety mode.
