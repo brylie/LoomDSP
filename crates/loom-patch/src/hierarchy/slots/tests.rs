@@ -632,3 +632,38 @@ fn gate_and_phase_outputs_are_not_faded() {
         "Swapped Filter to SVF. 2 modulations on Slope were removed."
     );
 }
+
+/// Removing a sub-patch that holds a slot takes the slot's record, its
+/// fade, and the definitions it held with it: the hierarchy is flat
+/// again, nothing fades, and the file has no orphan definition.
+#[test]
+fn removing_a_sub_patch_that_holds_a_slot_takes_the_slot_with_it() {
+    let (mut controller, mut hierarchy) = load(&Patch::from_ron(SLOT_FILE).unwrap());
+    let slot = inside(&hierarchy, 9);
+    let layout = |_: u32| Layout::default();
+    hierarchy
+        .swap_to_module(&mut controller, &layout, slot, "loom.filter.svf@1")
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    assert_eq!(hierarchy.fading_slots().len(), 1);
+    let removed = hierarchy.remove(controller.graph(), ModuleId(2));
+    for id in &removed.modules {
+        controller.remove_module(*id).unwrap();
+    }
+    assert!(removed.tiles.contains(&slot));
+    assert!(hierarchy.is_flat(), "no instance and no slot is left");
+    assert!(hierarchy.fading_slots().is_empty());
+    assert!(hierarchy.slot(slot).is_none());
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller);
+    assert!(
+        saved.subpatches.is_empty(),
+        "no orphan definition: {:?}",
+        saved.subpatches.keys()
+    );
+    assert!(controller.graph().nodes().all(|(_, n)| !matches!(
+        n.descriptor.id,
+        "loom.struct.fade" | "loom.filter.ladder" | "loom.filter.svf"
+    )));
+}

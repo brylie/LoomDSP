@@ -1668,6 +1668,12 @@ impl Hierarchy {
                 if let Some(instance) = self.instances.remove(inner) {
                     self.definitions.remove(&instance.key);
                     removed.tiles.push(inner_id);
+                } else if let Some(slot) = self.slots.get(inner).cloned() {
+                    // A nested slot goes with its record and the definitions
+                    // it held; its part and fades are graph nodes under the
+                    // instance, removed like any other.
+                    self.remove_slot_record(inner, &slot);
+                    removed.tiles.push(inner_id);
                 } else if self.ports.remove(inner).is_some() {
                     removed.tiles.push(inner_id);
                 } else if graph.node(inner_id).is_some() {
