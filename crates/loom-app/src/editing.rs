@@ -197,7 +197,7 @@ impl App {
     }
 
     /// What each linked sub-patch would save as now, by definition key.
-    fn linked_fingerprints(&self) -> std::collections::BTreeMap<String, String> {
+    pub(crate) fn linked_fingerprints(&self) -> std::collections::BTreeMap<String, String> {
         self.session
             .hierarchy
             .linked_fingerprints(self.session.controller.graph(), self.layout_fn())
@@ -210,9 +210,16 @@ impl App {
     /// belongs to the instance, not the definition, so changing one keeps
     /// the link.
     fn unlink_edited(&mut self) {
-        let Some(before) = self.session.linked_before.take() else {
-            return;
-        };
+        if let Some(before) = self.session.linked_before.take() {
+            self.unlink_changed(&before);
+        }
+    }
+
+    /// Unlinks every linked sub-patch whose saved text differs from
+    /// `before`, and says so. Also for a MIDI control that moved a value
+    /// inside a linked tile, which is an edit inside that goes through no
+    /// undo step (Notes from building).
+    pub(crate) fn unlink_changed(&mut self, before: &std::collections::BTreeMap<String, String>) {
         if before.is_empty() {
             return;
         }

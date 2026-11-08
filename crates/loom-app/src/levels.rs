@@ -632,13 +632,7 @@ impl App {
                 return;
             }
         };
-        let mut notes = match file.refresh_linked(&self.rig.library(), self.session.controller.registry()) {
-            Ok(notes) => notes,
-            Err(e) => {
-                self.alerts.warn(format!("Cannot insert {}: {e}", item.name));
-                return;
-            }
-        };
+        let mut notes = file.refresh_linked(&self.rig.library(), self.session.controller.registry());
         let library = linked.then(|| item.library.clone());
         let level = self.session.level.clone();
         let name = file.metadata.name.clone();

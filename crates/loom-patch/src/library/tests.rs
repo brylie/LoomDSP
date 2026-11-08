@@ -309,7 +309,7 @@ fn from_definition_carries_the_nested_definitions() {
 fn refresh_replaces_a_differing_copy_and_keeps_exposed_values_by_name() {
     let mut linked = patch(LINKED);
     let library = library(&[("Voices/Voice.ron", VOICE)]);
-    let notes = linked.refresh_linked(&library, &registry()).unwrap();
+    let notes = linked.refresh_linked(&library, &registry());
     assert_eq!(
         notes.iter().map(ToString::to_string).collect::<Vec<_>>(),
         ["Updated from the library: Voice."]
@@ -345,7 +345,7 @@ fn refresh_leaves_an_equal_copy_alone() {
     let (same, _) = SubPatch::from_patch(&patch(VOICE), &registry(), Some("Voices/Voice.ron"));
     linked.subpatches.insert("voice".to_string(), same.clone());
     let library = library(&[("Voices/Voice.ron", VOICE)]);
-    let notes = linked.refresh_linked(&library, &registry()).unwrap();
+    let notes = linked.refresh_linked(&library, &registry());
     assert!(notes.is_empty());
     assert_eq!(linked.subpatches["voice"], same);
 }
@@ -382,7 +382,7 @@ fn fingerprints_ignore_nested_keys_and_see_nested_changes() {
 fn a_missing_or_unreadable_library_file_keeps_the_stored_copy_with_a_note() {
     let mut linked = patch(LINKED);
     let before = linked.clone();
-    let notes = linked.refresh_linked(&NoLibrary, &registry()).unwrap();
+    let notes = linked.refresh_linked(&NoLibrary, &registry());
     assert_eq!(linked, before);
     assert_eq!(
         notes.iter().map(ToString::to_string).collect::<Vec<_>>(),
@@ -396,7 +396,7 @@ fn a_missing_or_unreadable_library_file_keeps_the_stored_copy_with_a_note() {
             Err(LibraryError::Unreadable("invalid patch".to_string()))
         }
     }
-    let notes = linked.refresh_linked(&Broken, &registry()).unwrap();
+    let notes = linked.refresh_linked(&Broken, &registry());
     assert_eq!(linked, before);
     assert_eq!(
         notes[0].to_string(),
@@ -426,7 +426,7 @@ fn refresh_drops_a_transport_the_file_gained_with_a_note() {
         to: (3, "phase".to_string()),
     });
     let library: BTreeMap<String, Patch> = [("Voices/Voice.ron".to_string(), voice)].into_iter().collect();
-    let notes = linked.refresh_linked(&library, &registry()).unwrap();
+    let notes = linked.refresh_linked(&library, &registry());
     assert_eq!(
         notes.iter().map(ToString::to_string).collect::<Vec<_>>(),
         [
@@ -498,7 +498,7 @@ fn refresh_gives_the_file_s_nested_definitions_free_keys() {
         ranges: BTreeMap::new(),
     });
     let library: BTreeMap<String, Patch> = [("Voices/Voice.ron".to_string(), voice)].into_iter().collect();
-    linked.refresh_linked(&library, &registry()).unwrap();
+    linked.refresh_linked(&library, &registry());
     assert_eq!(linked.subpatches["filter"], other, "the patch's own stays");
     assert_eq!(linked.subpatches["filter 2"].metadata.name, "Filter");
     let nested = linked.subpatches["voice"].modules.iter().find(|m| m.id == 6).unwrap();
@@ -506,10 +506,11 @@ fn refresh_gives_the_file_s_nested_definitions_free_keys() {
     loads(&linked);
 }
 
-/// A chain of links that comes back to a file on the way in is refused,
-/// naming the sub-patches along the loop (sub-patches.md, Patch file).
+/// A chain of links that comes back to a file on the way in leaves that
+/// sub-patch its stored copy, with a note naming the loop, and the patch
+/// still loads (sub-patches.md, Patch file; rule 5).
 #[test]
-fn a_link_loop_is_refused_naming_the_loop() {
+fn a_link_loop_keeps_the_stored_copy_with_a_note_naming_the_loop() {
     let mut a = patch(VOICE);
     a.metadata.name = "A".to_string();
     let mut b_def = SubPatch::new("B");
@@ -544,8 +545,17 @@ fn a_link_loop_is_refused_naming_the_loop() {
         .collect();
     let mut linked = patch(LINKED);
     linked.subpatches.get_mut("voice").unwrap().library = Some("A.ron".to_string());
-    let error = linked.refresh_linked(&library, &registry()).unwrap_err();
-    assert_eq!(error.to_string(), "sub-patch Voice › B › A contains itself");
+    let notes = linked.refresh_linked(&library, &registry());
+    let texts: Vec<String> = notes.iter().map(ToString::to_string).collect();
+    assert!(
+        texts.contains(&"A: the library links loop (Voice › B › A), so its stored copy is used.".to_string()),
+        "{texts:?}"
+    );
+    // The outer two levels were taken: Voice is A's copy now, holding B,
+    // which holds A's stored copy.
+    assert_eq!(linked.subpatches["voice"].metadata.name, "A");
+    assert_eq!(linked.subpatches.len(), 3);
+    loads(&linked);
     // A file that links to itself is the shortest loop.
     let mut selfish = patch(VOICE);
     let mut me = SubPatch::new("Me");
@@ -562,8 +572,15 @@ fn a_link_loop_is_refused_naming_the_loop() {
         ranges: BTreeMap::new(),
     });
     let library: BTreeMap<String, Patch> = [("Voices/Voice.ron".to_string(), selfish)].into_iter().collect();
-    let error = patch(LINKED).refresh_linked(&library, &registry()).unwrap_err();
-    assert_eq!(error.to_string(), "sub-patch Voice › Me contains itself");
+    let mut linked = patch(LINKED);
+    let notes = linked.refresh_linked(&library, &registry());
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.to_string() == "Me: the library links loop (Voice › Me), so its stored copy is used."),
+        "{notes:?}"
+    );
+    loads(&linked);
 }
 
 /// The Transport and the Scale and tuning module are patch-wide at any
@@ -617,7 +634,7 @@ fn refresh_drops_what_names_a_port_or_exposed_name_the_file_no_longer_has() {
         .replace("label: Some(\"out\")", "label: Some(\"audio\")")
         .replace("Exposed(name: \"gain\"", "Exposed(name: \"level\"");
     let library = library(&[("Voices/Voice.ron", &renamed)]);
-    let notes = linked.refresh_linked(&library, &registry()).unwrap();
+    let notes = linked.refresh_linked(&library, &registry());
     assert_eq!(
         notes.iter().map(ToString::to_string).collect::<Vec<_>>(),
         [
@@ -697,7 +714,7 @@ fn refresh_drops_an_enclosing_exposure_of_a_name_the_file_no_longer_has() {
     loads(&nested);
     let renamed = VOICE.replace("Exposed(name: \"gain\"", "Exposed(name: \"level\"");
     let library = library(&[("Voices/Voice.ron", &renamed)]);
-    let notes = nested.refresh_linked(&library, &registry()).unwrap();
+    let notes = nested.refresh_linked(&library, &registry());
     assert!(
         notes
             .iter()

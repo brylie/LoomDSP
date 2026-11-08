@@ -543,9 +543,10 @@ fn a_missing_library_file_loads_the_stored_copy_with_a_status() {
     assert_eq!(app.session.controller.graph().nodes().count(), 6);
 }
 
-/// A definition that contains itself through a chain of library links is
-/// refused when the patch loads and when it is inserted, naming the loop
-/// (sub-patches.md, Patch file).
+/// A chain of library links that comes back on itself leaves the stored
+/// copy when the patch loads, with a note naming the loop, and a link that
+/// would make a file contain itself is refused when inserted
+/// (sub-patches.md, Patch file; rule 5).
 #[test]
 fn a_self_containing_link_is_refused_naming_the_loop() {
     let dir = library();
@@ -571,12 +572,15 @@ fn a_self_containing_link_is_refused_naming_the_loop() {
     let patch_file = write(&dir.0, "set.ron", &host.to_ron().unwrap());
 
     let mut app = app_with(HOST, &dir.0);
-    assert!(!app.open_path(&patch_file));
-    assert_eq!(
-        app.ui_snapshot().status,
-        "Could not open the patch: sub-patch A › B › A contains itself. The current patch is unchanged."
+    assert!(app.open_path(&patch_file), "a patch always opens");
+    assert!(
+        app.ui_snapshot()
+            .status
+            .contains("A: the library links loop (A › B › A), so its stored copy is used."),
+        "{}",
+        app.ui_snapshot().status
     );
-    assert!(app.session.hierarchy.is_flat(), "the running patch is unchanged");
+    assert!(!app.session.hierarchy.is_flat());
 
     // Inserting a file linked inside a sub-patch that follows that file.
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
@@ -969,4 +973,65 @@ fn save_to_library_asks_before_replacing_a_file_named_without_its_extension() {
     assert_eq!(app.ui_snapshot().status, format!("saved Voice to {}", target.display()));
     assert_ne!(std::fs::read_to_string(&target).unwrap(), before, "positions differ");
     assert!(app.ui_snapshot().question.is_none());
+}
+
+/// A MIDI control that moves a value inside a linked tile which is not
+/// exposed changes the stored copy, so it unlinks the tile as an edit
+/// would; one on an exposed value keeps the link (Notes from building).
+#[test]
+fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
+    let dir = library();
+    let mut ui = Ui::with_app(app_with(HOST, &dir.0));
+    let first = insert(&mut ui, "Voice", true);
+    let second = insert(&mut ui, "Voice", true);
+    let app = &mut ui.app;
+    let inside = app.session.hierarchy.path_of(ModuleId(first));
+    let generator = app.session.hierarchy.id_at(&inside, 2).unwrap();
+    let exposed = app.session.hierarchy.exposed_target(ModuleId(second), 0).unwrap();
+    let gain = app
+        .session
+        .controller
+        .graph()
+        .node(exposed.module)
+        .unwrap()
+        .parameter_index(&exposed.param)
+        .unwrap();
+    // Mapped straight on the controller, so the mapping itself is not an
+    // edit here: controller 7 moves the first tile's tune, controller 8
+    // the second tile's exposed gain.
+    let cc = |controller: u8| loom_core::MidiControl { channel: 0, controller };
+    app.session.controller.map_midi(cc(7), generator, 0).unwrap();
+    app.session.controller.map_midi(cc(8), exposed.module, gain).unwrap();
+    app.commit();
+    assert_eq!(
+        app.session.hierarchy.library_of(ModuleId(first)),
+        Some("Voices/Voice.ron")
+    );
+    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    assert!(loom_host_desktop::send_midi(
+        &midi,
+        loom_core::MidiEvent::from_bytes(0, &[0xB0, 8, 100])
+    ));
+    app.process(128);
+    let _ = app.update(Message::Midi);
+    assert_eq!(
+        app.session.hierarchy.library_of(ModuleId(second)),
+        Some("Voices/Voice.ron"),
+        "an exposed value moved by MIDI keeps the link"
+    );
+    assert!(loom_host_desktop::send_midi(
+        &midi,
+        loom_core::MidiEvent::from_bytes(0, &[0xB0, 7, 100])
+    ));
+    app.process(128);
+    let _ = app.update(Message::Midi);
+    assert_eq!(
+        app.ui_snapshot().status,
+        "Voice is now a copy. It no longer follows the library."
+    );
+    assert_eq!(app.session.hierarchy.library_of(ModuleId(first)), None);
+    assert_eq!(
+        app.session.hierarchy.library_of(ModuleId(second)),
+        Some("Voices/Voice.ron")
+    );
 }

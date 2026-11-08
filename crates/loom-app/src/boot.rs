@@ -320,9 +320,7 @@ impl Loaded {
             // Linked sub-patches follow the library file, and the refreshed
             // copies are what the editor holds and saves.
             let mut patch = stored.clone();
-            notes = patch
-                .refresh_linked(library, controller.registry())
-                .map_err(|e| e.to_string())?;
+            notes = patch.refresh_linked(library, controller.registry());
             // The flat graph plays; the hierarchy keeps the sub-patches and
             // gives every tile its id (ADR-0039). If the refreshed files do
             // not play together, the stored copies do: a patch always opens

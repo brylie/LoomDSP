@@ -123,6 +123,15 @@ pub enum LoadWarning {
         /// `exposed parameter`.
         what: &'static str,
     },
+    /// A chain of library links came back to a file already on it, so the
+    /// linked sub-patch kept its stored copy (sub-patches.md, Patch file;
+    /// rule 5).
+    LibraryLoop {
+        /// The sub-patch's name.
+        name: String,
+        /// The sub-patches along the loop, first to last.
+        path: Vec<String>,
+    },
     /// The refreshed library files could not be used together, so every
     /// linked sub-patch kept its stored copy (sub-patches.md, rule 5).
     LibraryNotUsed {
@@ -234,6 +243,11 @@ impl fmt::Display for LoadWarning {
                     "{name}: the library file no longer has \"{item}\"; its {what} was removed."
                 )
             }
+            Self::LibraryLoop { name, path } => write!(
+                f,
+                "{name}: the library links loop ({}), so its stored copy is used.",
+                path.join(" › ")
+            ),
             Self::LibraryNotUsed { reason } => write!(
                 f,
                 "The library's changes could not be used ({reason}), so the stored copies are used."

@@ -97,7 +97,14 @@ impl App {
     /// Follows control changes: mapped parameters on screen, and the armed
     /// parameter in learn mode.
     pub(crate) fn midi_arrived(&mut self) {
+        // A control moving a value inside a linked sub-patch that is not
+        // exposed changes its stored copy: an edit inside, which unlinks
+        // it like any other, so what plays is what saves.
+        let linked = self.session.hierarchy.has_links().then(|| self.linked_fingerprints());
         let moved = !self.session.controller.sync_midi().is_empty();
+        if moved && let Some(before) = linked {
+            self.unlink_changed(&before);
+        }
         if self.refresh_ghosts() || moved {
             self.refresh_values();
         }

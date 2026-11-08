@@ -19,9 +19,7 @@
 //! a test passes a map, and the command line passes [`NoLibrary`].
 
 use crate::flatten::port_name;
-use crate::{
-    Exposed, INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchModule, SubPatch, unique_name,
-};
+use crate::{Exposed, INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchModule, SubPatch, unique_name};
 use loom_core::{Registry, TRANSPORT_MODULE};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -398,25 +396,22 @@ impl Patch {
     /// (sub-patches.md, Linked library items). A definition whose file
     /// differs from its stored copy is replaced, with its nested
     /// definitions; its instances keep their exposed values by exposed
-    /// name, and a value whose name is gone is dropped. A file's own
-    /// linked definitions are refreshed first, so a chain of links is
-    /// followed to its end, and a chain that comes back to a file already
-    /// on it is refused as a loop naming the sub-patches along it. A file
-    /// that is missing or does not load leaves the stored copy, with a
-    /// note (rule 5). Returns the notes: what was refreshed, what was left
-    /// as it was, and what a refreshed file left out (rule 8).
-    pub fn refresh_linked(
-        &mut self,
-        library: &dyn Library,
-        registry: &Registry,
-    ) -> Result<Vec<LoadWarning>, PatchError> {
+    /// name, and everything that named a port or exposed name the file no
+    /// longer has is dropped with a note. A file's own linked definitions
+    /// are refreshed first, so a chain of links is followed to its end; a
+    /// chain that comes back to a file already on it leaves that sub-patch
+    /// its stored copy, with a note naming the loop. A file that is missing
+    /// or does not load leaves the stored copy too (rule 5). Returns the
+    /// notes: what was refreshed, what was left as it was, and what a
+    /// refreshed file left out (rule 8).
+    pub fn refresh_linked(&mut self, library: &dyn Library, registry: &Registry) -> Vec<LoadWarning> {
         let mut notes = Vec::new();
         let mut refreshed = Vec::new();
-        refresh_table(self, library, registry, &mut Vec::new(), &mut notes, &mut refreshed)?;
+        refresh_table(self, library, registry, &mut Vec::new(), &mut notes, &mut refreshed);
         if !refreshed.is_empty() {
             notes.push(LoadWarning::LibraryRefreshed { names: refreshed });
         }
-        Ok(notes)
+        notes
     }
 
     /// True when a definition in this patch follows a library file.
@@ -436,7 +431,7 @@ fn refresh_table(
     stack: &mut Vec<(String, String)>,
     notes: &mut Vec<LoadWarning>,
     refreshed: &mut Vec<String>,
-) -> Result<(), PatchError> {
+) {
     let mut done: BTreeSet<String> = BTreeSet::new();
     loop {
         // The next linked definition not yet handled, in key order. The
@@ -454,13 +449,16 @@ fn refresh_table(
             })
             .next();
         let Some((key, path, name)) = next else {
-            return Ok(());
+            return;
         };
         done.insert(key.clone());
         if let Some(start) = stack.iter().position(|(p, _)| *p == path) {
             let mut loop_path: Vec<String> = stack[start..].iter().map(|(_, n)| n.clone()).collect();
-            loop_path.push(name);
-            return Err(PatchError::SubPatchLoop { path: loop_path });
+            loop_path.push(name.clone());
+            // The file would contain itself through its links: this
+            // sub-patch keeps its stored copy (rule 5).
+            notes.push(LoadWarning::LibraryLoop { name, path: loop_path });
+            continue;
         }
         let mut file = match library.read(&path) {
             Ok(file) => file,
@@ -476,9 +474,8 @@ fn refresh_table(
         // The file's own links first, so what comes in is current, and a
         // link back to a file on the way in is a loop.
         stack.push((path.clone(), name.clone()));
-        let inner = refresh_table(&mut file, library, registry, stack, notes, &mut Vec::new());
+        refresh_table(&mut file, library, registry, stack, notes, &mut Vec::new());
         stack.pop();
-        inner?;
         let (mut fresh, left_out) = SubPatch::from_patch(&file, registry, Some(&path));
         let old = &patch.subpatches[&key];
         if fingerprint(old, &patch.subpatches) == fingerprint(&fresh, &file.subpatches) {
