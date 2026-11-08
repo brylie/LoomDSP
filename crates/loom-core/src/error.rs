@@ -78,6 +78,17 @@ pub enum LoomError {
         /// The range asked for, as its name.
         range: String,
     },
+    /// A limit that is not a finite span inside the parameter's bounds
+    /// (see [`Controller::set_limits`](crate::Controller::set_limits)).
+    #[error("parameter `{param}` of module {module} cannot be limited to {range}")]
+    InvalidLimit {
+        /// The module.
+        module: ModuleId,
+        /// The parameter name.
+        param: String,
+        /// The limit asked for.
+        range: String,
+    },
     /// A transient parameter cannot be modulated or mapped to MIDI, because
     /// it carries a live gesture, not a setting (transient-params.md).
     #[error("parameter `{param}` of module {module} is a live control and cannot be modulated or mapped")]

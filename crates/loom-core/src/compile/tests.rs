@@ -93,6 +93,7 @@ fn followers(count: u32) -> Graph {
                 params: Vec::new(),
                 slot: Some(i as usize),
                 ranges: Vec::new(),
+                limits: Vec::new(),
                 copy_slot: None,
             },
         );
@@ -327,6 +328,7 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static crate::ModuleDescriptor)
         slot: Some(id as usize),
         copy_slot: None,
         ranges: vec![None; descriptor.params.len()],
+        limits: vec![None; descriptor.params.len()],
     };
     graph.nodes.insert(ModuleId(id), node);
 }

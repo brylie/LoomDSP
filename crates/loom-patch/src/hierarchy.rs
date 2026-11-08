@@ -734,16 +734,7 @@ impl Hierarchy {
     /// only a hand-written file can make, give the innermost one, because
     /// its clamp is applied last.
     pub fn exposed_range(&self, instance: &ModulePath, exposed: &Exposed) -> Option<(f32, f32)> {
-        self.range_chain(instance, exposed)
-            .into_iter()
-            .reduce(|(min, max), (inner_min, inner_max)| {
-                let overlap = (min.max(inner_min), max.min(inner_max));
-                if is_span(overlap) {
-                    overlap
-                } else {
-                    (inner_min, inner_max)
-                }
-            })
+        fold_ranges(self.range_chain(instance, exposed))
     }
 
     /// What the `index`th exposed entry of the instance tile `instance`
@@ -1069,7 +1060,8 @@ impl Hierarchy {
     /// cables is applied. It also puts the live assignments on each
     /// parameter in the order the file loads them (flattening rule 11),
     /// giving a new id only to one that must move, so the sum plays the
-    /// same after save and reload (sub-patches.md, Editor model). A
+    /// same after save and reload (sub-patches.md, Editor model), and gives
+    /// each exposed parameter the range MIDI sweeps on it (Exposing). A
     /// refusal changes nothing. The caller commits. Returns the assignments
     /// that got a new id, as (old, new), so what keeps an id can follow.
     pub fn sync(&mut self, controller: &mut Controller) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
@@ -1116,6 +1108,11 @@ impl Hierarchy {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
         let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
+        // The range MIDI sweeps follows the surfaces: a range that changed
+        // or went away reaches the engine with the caller's commit.
+        controller
+            .set_limits(flat.limits_in(controller.graph()))
+            .map_err(PatchError::Engine)?;
         debug_assert_eq!(
             self.implied,
             desired.difference(&self.direct_cables(&patch)).cloned().collect(),
@@ -1972,6 +1969,22 @@ fn stored_range(node: &loom_core::Node, index: usize) -> Option<(f32, f32)> {
 /// kind the flattener accepts and a control can span.
 fn is_span((min, max): (f32, f32)) -> bool {
     min.is_finite() && max.is_finite() && min < max
+}
+
+/// The range a chain of exposed ranges gives, outer first: each overlap in
+/// turn, and when one does not overlap, the inner range alone, because its
+/// clamp is applied last. `None` for an empty chain. The one rule for the
+/// surface control ([`Hierarchy::exposed_range`]) and for the span MIDI
+/// sweeps (`Flat::limits`), so the two cannot drift apart.
+pub(crate) fn fold_ranges(chain: impl IntoIterator<Item = (f32, f32)>) -> Option<(f32, f32)> {
+    chain.into_iter().reduce(|(min, max), (inner_min, inner_max)| {
+        let overlap = (min.max(inner_min), max.min(inner_max));
+        if is_span(overlap) {
+            overlap
+        } else {
+            (inner_min, inner_max)
+        }
+    })
 }
 
 /// Puts the live assignments on each parameter in the order `canonical`

@@ -243,6 +243,14 @@ fn audio_thread_never_allocates() {
                         },
                     )
                     .unwrap();
+                // An exposed range narrows what MIDI sweeps, and changes
+                // under running mappings, so schedules swap with new spans.
+                let limit = if i / 9 % 2 == 0 {
+                    loom_core::ParamRange::new(200.0, 2000.0)
+                } else {
+                    loom_core::ParamRange::new(500.0, 1000.0)
+                };
+                parts.controller.set_limits([(id, index, limit)]).unwrap();
             }
             if i % 3 == 0 {
                 parts

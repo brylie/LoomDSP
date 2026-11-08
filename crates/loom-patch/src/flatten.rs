@@ -13,12 +13,15 @@
 //! Control thread only. Nothing here runs on the audio thread, and nothing
 //! here opens a file.
 
+use crate::hierarchy::fold_ranges;
 use crate::level::LevelRef;
 use crate::{
     INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping, PatchModulation,
     PatchModule, ResolveOptions, ResolvedModule, SUBPATCH_KIND, SubPatch,
 };
-use loom_core::{Controller, LoomError, MidiControl, ModuleId, ModuleNames, Registry, TRANSPORT_MODULE};
+use loom_core::{
+    Controller, Graph, LoomError, MidiControl, ModuleId, ModuleNames, ParamRange, Registry, TRANSPORT_MODULE,
+};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -243,6 +246,12 @@ pub struct Flat {
     pub modulation: Vec<PatchModulation>,
     /// MIDI mappings on flat modules.
     pub midi: Vec<PatchMidiMapping>,
+    /// The range MIDI sweeps on each flat parameter a sub-patch surface
+    /// exposes with a range: every level's range on the way in, outer first,
+    /// as the surface control spans it (sub-patches.md, Exposing). Not in
+    /// the file as such; the loader hands it to
+    /// [`Controller::set_limits`].
+    pub limits: BTreeMap<(ModuleId, String), (f32, f32)>,
     /// What flattened differently from the file.
     pub warnings: Vec<LoadWarning>,
     /// The top-level Transport, if the file has one.
@@ -272,6 +281,10 @@ struct Inner {
     outputs: BTreeMap<String, Option<Source>>,
     /// Exposed name to the flat module and parameter it stands for.
     exposed: BTreeMap<String, (ModuleId, String)>,
+    /// Exposed name to every finite range on the way in, outer first.
+    chains: BTreeMap<String, Vec<(f32, f32)>>,
+    /// Flat parameter to the range MIDI sweeps on it. See [`Flat::limits`].
+    limits: BTreeMap<(ModuleId, String), (f32, f32)>,
 }
 
 /// What flattening carries down the levels.
@@ -341,6 +354,7 @@ impl Patch {
             cables: inner.cables,
             modulation: inner.modulation,
             midi: inner.midi,
+            limits: inner.limits,
             warnings,
             transport: transports.first().map(|&id| ModuleId(id)),
         };
@@ -438,8 +452,29 @@ impl Flat {
                     other => PatchError::Engine(other),
                 })?;
         }
+        controller.set_limits(self.limits_in(controller.graph()))?;
         controller.commit()?;
         Ok(notes)
+    }
+
+    /// [`Flat::limits`] as [`Controller::set_limits`] takes them: by
+    /// parameter index, for the modules `graph` holds. A placeholder for an
+    /// unknown module is left out: it plays nothing, so there is nothing for
+    /// MIDI to sweep. A limit is cut to the parameter's own bounds, and one
+    /// with nothing left, which only a hand-written file can make, is left
+    /// out: the value is clamped by the parameter anyway, and the file still
+    /// loads.
+    pub fn limits_in(&self, graph: &Graph) -> Vec<(ModuleId, usize, ParamRange)> {
+        self.limits
+            .iter()
+            .filter_map(|((module, param), &(min, max))| {
+                let node = graph.node(*module).filter(|node| node.unknown.is_none())?;
+                let index = node.descriptor.param_index(param)?;
+                let spec = node.descriptor.params.get(index)?;
+                let cut = ParamRange::new(min.max(spec.min), max.min(spec.max));
+                (cut.min < cut.max).then_some((*module, index, cut))
+            })
+            .collect()
     }
 
     /// Refuses two mappings on one flat parameter or one control. Each
@@ -557,6 +592,9 @@ fn flatten_level(
 
     // Exposed parameters, before the links, so an exposed name on a
     // placeholder is one of its parameters when an assignment reaches it.
+    // Their limits are kept until the instances' own are merged, because
+    // this level's chain holds the inner ranges too and so replaces them.
+    let mut surface_limits: Vec<((ModuleId, String), (f32, f32))> = Vec::new();
     if let Some(definition) = definition {
         for exposed in &definition.exposed {
             if let Some((min, max)) = exposed.range
@@ -601,6 +639,17 @@ fn flatten_level(
                     });
                 }
             };
+            // This level's range, then the ranges further in.
+            let mut chain: Vec<(f32, f32)> = exposed.range.into_iter().collect();
+            if let Some(Member::Instance(child)) = members.get(&exposed.module)
+                && let Some(further) = child.chains.get(&exposed.param)
+            {
+                chain.extend(further);
+            }
+            if let Some(limit) = fold_ranges(chain.iter().copied()) {
+                surface_limits.push((target.clone(), limit));
+            }
+            inner.chains.insert(exposed.name.clone(), chain);
             if inner.exposed.insert(exposed.name.clone(), target).is_some() {
                 return Err(PatchError::BadExposed {
                     name: exposed.name.clone(),
@@ -716,10 +765,12 @@ fn flatten_level(
                 inner.cables.append(&mut child.cables);
                 inner.modulation.append(&mut child.modulation);
                 inner.midi.append(&mut child.midi);
+                inner.limits.append(&mut child.limits);
             }
             _ => {}
         }
     }
+    inner.limits.extend(surface_limits);
     inner.modulation.append(&mut own_modulation);
     inner.midi.append(&mut own_midi);
     Ok(inner)

@@ -106,6 +106,7 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static ModuleDescriptor) -> Mod
             params: Vec::new(),
             slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize),
             ranges: Vec::new(),
+            limits: Vec::new(),
             // Distinct from every left slot, for graphs that compile.
             copy_slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize + 100_000),
         },

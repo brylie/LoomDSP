@@ -185,3 +185,89 @@ fn a_failed_clamp_keeps_the_old_range() {
         Err(LoomError::NoSuchParam { .. })
     ));
 }
+
+/// A limit narrows only what MIDI sweeps: the overlap with the selected
+/// range, or the limit alone when they do not overlap, because the file
+/// saves the value clamped to it. The knob's spec is unchanged
+/// (sub-patches.md, MIDI follows the range).
+#[test]
+fn a_limit_narrows_only_the_midi_span() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_range(mul, 0, FINE).unwrap();
+    let spans = |c: &loom_core::Controller| {
+        let node = c.graph().node(mul).unwrap();
+        let (knob, midi) = (node.spec(0).unwrap(), node.midi_spec(0).unwrap());
+        ((knob.min, knob.max), (midi.min, midi.max))
+    };
+    assert_eq!(spans(c), ((-0.1, 0.1), (-0.1, 0.1)), "no limit");
+    c.set_limits([(mul, 0, ParamRange::new(0.0, 0.5))]).unwrap();
+    assert_eq!(spans(c), ((-0.1, 0.1), (0.0, 0.1)), "the overlap");
+    c.set_limits([(mul, 0, ParamRange::new(0.5, 1.0))]).unwrap();
+    assert_eq!(spans(c), ((-0.1, 0.1), (0.5, 1.0)), "no overlap: the limit");
+    c.set_limits([]).unwrap();
+    assert_eq!(c.graph().node(mul).unwrap().limit(0), None, "cleared");
+}
+
+/// `set_limits` cuts a limit to the parameter's bounds and refuses one
+/// with nothing left, a missing module or parameter, or NaN, changing
+/// nothing.
+#[test]
+fn set_limits_refuses_what_is_not_a_span() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_limits([(mul, 0, ParamRange::new(-50.0, 0.5))]).unwrap();
+    let kept = c.graph().node(mul).unwrap().limit(0);
+    assert_eq!(kept, Some(ParamRange::new(-10.0, 0.5)), "cut to the bounds");
+    for (module, index, limit) in [
+        (mul, 0, ParamRange::new(20.0, 30.0)),
+        (mul, 0, ParamRange::new(0.5, 0.5)),
+        (mul, 0, ParamRange::new(f32::NAN, 0.5)),
+    ] {
+        let refused = c.set_limits([(module, index, limit)]);
+        assert!(matches!(refused, Err(LoomError::InvalidLimit { .. })), "{refused:?}");
+    }
+    assert!(matches!(
+        c.set_limits([(ModuleId(99), 0, FINE)]),
+        Err(LoomError::UnknownModule(_))
+    ));
+    assert!(matches!(
+        c.set_limits([(mul, 9, FINE)]),
+        Err(LoomError::NoSuchParam { .. })
+    ));
+    assert_eq!(c.graph().node(mul).unwrap().limit(0), kept, "a refusal changes nothing");
+}
+
+/// A waiting pickup's ghost mark sits where the hardware's value is on the
+/// knob, which spans the selected range, not on the narrower span MIDI
+/// sweeps.
+#[test]
+fn a_ghost_mark_sits_on_the_knob_scale() {
+    const CC: MidiControl = MidiControl {
+        channel: 0,
+        controller: 21,
+    };
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let mul = c.add_module("loom.math.mul").unwrap();
+    c.set_param(mul, 0, 0.05).unwrap();
+    c.set_limits([(mul, 0, ParamRange::new(0.0, 0.1))]).unwrap();
+    let options = loom_core::MidiMappingOptions {
+        mode: loom_core::MidiMode::Pickup,
+        ..loom_core::MidiMappingOptions::DEFAULT
+    };
+    c.map_midi_with(CC, mul, 0, options).unwrap();
+    c.commit().unwrap();
+    assert!(
+        parts
+            .midi
+            .send(MidiEvent::control_change(0, CC.channel, CC.controller, 127))
+    );
+    render(&mut parts, 64);
+    let waiting = parts.controller.midi_waiting();
+    assert_eq!(waiting.len(), 1, "the pickup waits");
+    // CC 127 stands for 0.1, which is 0.55 of the way along -1 to 1.
+    assert!((waiting[0].position - 0.55).abs() < 1e-6, "{:?}", waiting[0]);
+}

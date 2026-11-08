@@ -1210,6 +1210,10 @@ fn unexposing_removes_the_assignment_from_outside_in_one_step() {
 /// leave it (sub-patches.md, Exposing).
 #[test]
 fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
+    /// Sends CC 74 on channel 1 with `value` to the idle engine.
+    fn send_cc(midi: &loom_host_desktop::SharedMidi, value: u8) -> bool {
+        loom_host_desktop::send_midi(midi, loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value]))
+    }
     use loom_core::ModuleNames;
     let mut app = narrowed_nested();
     let graph = app.session.controller.graph();
@@ -1218,7 +1222,6 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
         .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
         .unwrap();
     let cutoff = node.parameter_index("cutoff").unwrap();
-    let spec = node.spec(cutoff).unwrap();
 
     app.learn_message(crate::learn::Message::Toggle);
     app.canvas_event(loom_canvas::CanvasEvent::Learn { module: 2, widget: 0 });
@@ -1245,8 +1248,20 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
         .midi_mapping_of(svf, cutoff)
         .expect("mapped inside");
     assert_eq!(mapping.control.controller, 74);
-    assert_eq!(mapping.options.low, spec.normalize(200.0));
-    assert_eq!(mapping.options.high, spec.normalize(2000.0));
+    assert_eq!(
+        mapping.options,
+        loom_core::MidiMappingOptions::DEFAULT,
+        "a learned mapping keeps its whole travel"
+    );
+    // The engine maps the travel onto the exposed range (sub-patches.md,
+    // MIDI follows the range).
+    for (value, expected) in [(127, 2000.0), (0, 200.0)] {
+        assert!(send_cc(&midi, value));
+        app.process(128);
+        let _ = app.update(Message::Midi);
+        let cutoff_now = app.session.controller.graph().node(svf).unwrap().params[cutoff];
+        assert!((cutoff_now - expected).abs() < 1e-2, "CC {value}: {cutoff_now}");
+    }
     let view = crate::learn::view(
         &app.session.controller,
         &app.session.hierarchy,

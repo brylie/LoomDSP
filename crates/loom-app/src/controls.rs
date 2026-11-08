@@ -126,7 +126,6 @@ impl App {
                     .midi_mappings()
                     .find(|(i, _)| *i == id)
                     .map(|(_, m)| *m);
-                self.cover_exposed_range(ModuleId(module), index);
                 self.session.learn.disarm();
                 self.commit();
                 if let Some(mapping) = mapping {
@@ -163,48 +162,6 @@ impl App {
         match hierarchy.exposed_target(tile, item).and_then(|t| t.range) {
             Some((min, max)) => value.clamp(min, max),
             None => value,
-        }
-    }
-
-    /// A mapping learned on a parameter that a sub-patch surface exposes
-    /// with a narrower range covers that range, so hardware stays in it
-    /// (sub-patches.md, Exposing). A Relative mapping has no span to set,
-    /// and a parameter with no exposed range keeps the defaults. A stopgap:
-    /// the engine will clamp what every mapping sets to the exposed range
-    /// (the spec's "MIDI stays in the range too"), and this goes then.
-    fn cover_exposed_range(&mut self, module: ModuleId, index: usize) {
-        let graph = self.session.controller.graph();
-        let Some(node) = graph.node(module) else { return };
-        let Some(spec) = node.descriptor.params.get(index) else {
-            return;
-        };
-        let Some((tile, item)) = self.session.hierarchy.outermost_surface(module, spec.name) else {
-            return;
-        };
-        let Some((min, max)) = self.session.hierarchy.exposed_target(tile, item).and_then(|t| t.range) else {
-            return;
-        };
-        let Some((_, mapping)) = graph.midi_mapping_of(module, index) else {
-            return;
-        };
-        if matches!(mapping.options.mode, loom_core::MidiMode::Relative(_)) {
-            return;
-        }
-        let Some(control) = node.spec(index) else { return };
-        let (low, high) = (
-            control.normalize(min).clamp(0.0, 1.0),
-            control.normalize(max).clamp(0.0, 1.0),
-        );
-        if low >= high {
-            return;
-        }
-        let options = loom_core::MidiMappingOptions {
-            low,
-            high,
-            ..mapping.options
-        };
-        if let Err(e) = self.session.controller.set_midi_options(module, index, options) {
-            self.alerts.warn(e.to_string());
         }
     }
 

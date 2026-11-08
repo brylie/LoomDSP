@@ -224,6 +224,70 @@ impl Controller {
         Ok(())
     }
 
+    /// Sets the range MIDI sweeps on each listed parameter, and clears it on
+    /// every other one: a sub-patch surface's exposed range (sub-patches.md,
+    /// Exposing). A mapped control then covers the limit from one end of its
+    /// travel to the other, inside the selected range (see
+    /// [`Node::midi_spec`]). Knobs, values, and modulation are unchanged:
+    /// the caller clamps values itself, as the surface does.
+    ///
+    /// A limit is cut to the parameter's own bounds and must stay a finite
+    /// span. Each parameter whose limit changes has its MIDI mapping renewed,
+    /// like a new selected range: the same value now sits at another place
+    /// under the hardware, so the engine starts the mapping again and a
+    /// Pickup waits. The engine follows at the next [`Controller::commit`],
+    /// which compiles the new span into the schedule (control-ranges.md,
+    /// rule 8). An error changes nothing.
+    pub fn set_limits(
+        &mut self,
+        limits: impl IntoIterator<Item = (ModuleId, usize, ParamRange)>,
+    ) -> Result<(), LoomError> {
+        let mut wanted: BTreeMap<(ModuleId, usize), ParamRange> = BTreeMap::new();
+        for (module, index, limit) in limits {
+            let node = self.node(module)?;
+            let spec = node
+                .descriptor
+                .params
+                .get(index)
+                .ok_or_else(|| LoomError::NoSuchParam {
+                    module,
+                    param: index.to_string(),
+                })?;
+            let cut = ParamRange::new(limit.min.max(spec.min), limit.max.min(spec.max));
+            // The limit itself is checked too, because `f32::max` drops NaN.
+            // Written so that NaN fails here.
+            if !(limit.min.is_finite() && limit.max.is_finite() && limit.min < limit.max && cut.min < cut.max) {
+                return Err(LoomError::InvalidLimit {
+                    module,
+                    param: spec.name.to_string(),
+                    range: limit.to_string(),
+                });
+            }
+            wanted.insert((module, index), cut);
+        }
+        let mut changed = Vec::new();
+        for (&module, node) in &mut self.graph.nodes {
+            for (index, slot) in node.limits.iter_mut().enumerate() {
+                let limit = wanted.get(&(module, index)).copied();
+                if *slot != limit {
+                    *slot = limit;
+                    changed.push((module, index));
+                }
+            }
+        }
+        for (module, index) in changed {
+            self.dirty = true;
+            if let Some((id, mapping)) = self.graph.midi_mapping_of(module, index) {
+                let mapping = MidiMapping {
+                    learned: false,
+                    ..*mapping
+                };
+                self.renew_midi_mapping(id, mapping);
+            }
+        }
+        Ok(())
+    }
+
     /// Clears a module's internal state.
     pub fn reset_module(&mut self, module: ModuleId) -> Result<(), LoomError> {
         if let Some(slot) = self.node(module)?.slot {

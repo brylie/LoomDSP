@@ -337,3 +337,173 @@ fn a_collapse_with_three_sources_reloads_as_it_plays() {
         "the reloaded file plays what plays after the collapse"
     );
 }
+
+/// The controller of the mapping inside the Filter in [`ranged`].
+const CUTOFF_CC: u8 = 74;
+
+/// The nested example with the Filter's cutoff exposed at 200 to 2000 Hz,
+/// a MIDI mapping on it inside the Filter in `mode` (a file mode, such as
+/// `Pickup`), default range, and the top instance's cutoff at `value`.
+fn ranged(mode: &str, value: f32) -> Patch {
+    let text = std::fs::read_to_string(patch_path("nested-subtractive.ron")).unwrap();
+    let exposed = r#"exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff", range: Some((20.0, 20000.0)))],"#;
+    assert!(text.contains(exposed));
+    let text = text
+        .replace(
+            exposed,
+            &format!(
+                r#"exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff", range: Some((200.0, 2000.0)))],
+                midi: [PatchMidiMapping(target: (3, "cutoff"), channel: 0, controller: {CUTOFF_CC}, mode: {mode})],"#
+            ),
+        )
+        .replace(
+            r#"params: {"cutoff": 300.0}"#,
+            &format!(r#"params: {{"cutoff": {value:?}}}"#),
+        );
+    Patch::from_ron(&text).unwrap()
+}
+
+/// The flat filter's id and its cutoff index.
+fn cutoff_of(parts: &EngineParts) -> (ModuleId, usize) {
+    let (svf, node) = parts
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
+        .unwrap();
+    (svf, node.parameter_index("cutoff").unwrap())
+}
+
+/// Sends CC [`CUTOFF_CC`] with `value`, plays one short buffer, and
+/// returns the cutoff the engine set, as the screen reads it.
+fn cc(parts: &mut EngineParts, value: u8) -> f32 {
+    assert!(
+        parts
+            .midi
+            .send(loom_core::MidiEvent::control_change(0, 0, CUTOFF_CC, value))
+    );
+    render(parts, 64, 64, &[]);
+    parts.controller.sync_midi();
+    let (svf, cutoff) = cutoff_of(parts);
+    parts.controller.graph().node(svf).unwrap().params[cutoff]
+}
+
+/// True when `value` lies in the exposed 200 to 2000 Hz, allowing for f32
+/// rounding at the ends.
+fn in_range(value: f32) -> bool {
+    (200.0 - 1e-2..=2000.0 + 1e-2).contains(&value)
+}
+
+/// Absolute: the whole travel sweeps the exposed range on the cutoff's own
+/// curve, so CC 0, 64, and 127 give 200, about 638, and 2000 Hz, and no
+/// value of the sweep leaves it (sub-patches.md, MIDI follows the range).
+#[test]
+fn an_absolute_mapping_sweeps_the_exposed_range() {
+    let mut parts = load(&ranged("Absolute", 300.0));
+    for value in 0..=127 {
+        let set = cc(&mut parts, value);
+        assert!(in_range(set), "CC {value}: {set}");
+    }
+    for (value, expected) in [(0, 200.0), (64, 200.0 * 10f32.powf(64.0 / 127.0)), (127, 2000.0)] {
+        let set = cc(&mut parts, value);
+        assert!((set - expected).abs() < 0.05, "CC {value}: {set}, expected {expected}");
+    }
+}
+
+/// Pickup: waits until the hardware reaches the value inside the exposed
+/// range, then follows, and never leaves the range.
+#[test]
+fn a_pickup_mapping_catches_and_stays_in_the_exposed_range() {
+    let mut parts = load(&ranged("Pickup", 1000.0));
+    assert_eq!(cc(&mut parts, 127), 1000.0, "waiting: the hardware is far above");
+    // 1000 Hz sits at CC 89 in 200 to 2000 on a log curve.
+    let mut caught = None;
+    for value in (0..=127).rev() {
+        let set = cc(&mut parts, value);
+        assert!(in_range(set), "CC {value}: {set}");
+        if caught.is_none() && set != 1000.0 {
+            caught = Some(value);
+        }
+    }
+    assert!(caught.is_some_and(|value| (85..=89).contains(&value)), "{caught:?}");
+    assert!((cc(&mut parts, 0) - 200.0).abs() < 1e-2);
+}
+
+/// Relative: steps are a share of the exposed range, and turning on past
+/// either end stops there, with no travel lost on the way back.
+#[test]
+fn a_relative_mapping_steps_inside_the_exposed_range() {
+    let mut parts = load(&ranged("Relative(Offset64)", 300.0));
+    for _ in 0..300 {
+        let set = cc(&mut parts, 65);
+        assert!(in_range(set), "{set}");
+    }
+    assert!((cc(&mut parts, 64) - 2000.0).abs() < 1e-2, "at the top");
+    let one_down = cc(&mut parts, 63);
+    assert!(one_down < 2000.0 - 1.0, "one step down moves at once: {one_down}");
+    for _ in 0..300 {
+        let set = cc(&mut parts, 63);
+        assert!(in_range(set), "{set}");
+    }
+    assert!((cc(&mut parts, 64) - 200.0).abs() < 1e-2, "at the bottom");
+}
+
+/// The span follows the range: a new limit reaches the engine with the
+/// next commit, with no new learn, and a control change that came before
+/// it never comes back outside it.
+#[test]
+fn the_span_follows_a_new_range() {
+    let mut parts = load(&ranged("Absolute", 300.0));
+    let (svf, cutoff) = cutoff_of(&parts);
+    assert!((cc(&mut parts, 127) - 2000.0).abs() < 1e-2);
+
+    let narrower = loom_core::ParamRange::new(500.0, 1000.0);
+    parts.controller.set_limits([(svf, cutoff, narrower)]).unwrap();
+    parts.controller.commit().unwrap();
+    assert!((cc(&mut parts, 127) - 1000.0).abs() < 1e-2);
+    assert!((cc(&mut parts, 0) - 500.0).abs() < 1e-2);
+
+    // A control change the engine applied after the last sync, then a
+    // range that excludes it, before the engine swaps schedules.
+    assert!(
+        parts
+            .midi
+            .send(loom_core::MidiEvent::control_change(0, 0, CUTOFF_CC, 127))
+    );
+    render(&mut parts, 64, 64, &[]);
+    parts
+        .controller
+        .set_limits([(svf, cutoff, loom_core::ParamRange::new(200.0, 400.0))])
+        .unwrap();
+    parts.controller.commit().unwrap();
+    render(&mut parts, 64, 64, &[]);
+    parts.controller.sync_midi();
+    let after = parts.controller.graph().node(svf).unwrap().params[cutoff];
+    assert!(after <= 1000.0, "the old result is not set again: {after}");
+    assert!((cc(&mut parts, 127) - 400.0).abs() < 1e-2);
+
+    // No range: the whole travel again.
+    parts.controller.set_limits([]).unwrap();
+    parts.controller.commit().unwrap();
+    assert!((cc(&mut parts, 127) - 20000.0).abs() < 1.0);
+}
+
+/// A control change at 127 plays exactly what the value typed at the top
+/// of the range plays: both renders hold 2000 Hz from the first frame.
+/// Without the engine's span the control change would set 20 000 Hz, and
+/// the renders would differ.
+#[test]
+fn a_control_change_at_the_top_renders_as_the_top_of_the_range() {
+    let patch = ranged("Absolute", 2000.0);
+    let mut typed = load(&patch);
+    let mut moved = load(&patch);
+    assert!(
+        moved
+            .midi
+            .send(loom_core::MidiEvent::control_change(0, 0, CUTOFF_CC, 127))
+    );
+    let (left, right) = render(&mut moved, FRAMES, 512, &[NOTE]);
+    let (typed_left, typed_right) = render(&mut typed, FRAMES, 512, &[NOTE]);
+    assert!(left.iter().any(|&s| s != 0.0), "the patch makes sound");
+    assert!(left == typed_left && right == typed_right);
+}

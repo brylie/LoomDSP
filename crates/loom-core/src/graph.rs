@@ -147,6 +147,15 @@ pub struct Node {
     /// The selected control range of each parameter, or `None` for one that
     /// offers no ranges (`docs/design/control-ranges.md`).
     pub(crate) ranges: Vec<Option<ParamRange>>,
+    /// The range MIDI sweeps for each parameter, inside its selected range:
+    /// a sub-patch surface's exposed range, or `None` (sub-patches.md,
+    /// Exposing). Set by the owner of the graph with
+    /// [`Controller::set_limits`](crate::Controller::set_limits) and never
+    /// saved, because the patch file holds the range on the surface. Any
+    /// path that creates an instance must end in a call that sets the
+    /// limits again (in `loom-patch`, `Hierarchy::sync` or `Flat::apply_to`),
+    /// or its parameters get none.
+    pub(crate) limits: Vec<Option<ParamRange>>,
     /// Engine slot holding the right copy, while the module runs per
     /// channel (ADR-0020). Set by the controller before each compile.
     pub(crate) copy_slot: Option<usize>,
@@ -173,6 +182,7 @@ impl Node {
             slot,
             copy_slot: None,
             ranges: descriptor.params.iter().map(ParamSpec::default_range).collect(),
+            limits: vec![None; descriptor.params.len()],
         }
     }
 
@@ -189,6 +199,29 @@ impl Node {
         Some(match self.range(index) {
             Some(range) => spec.in_range(range),
             None => *spec,
+        })
+    }
+
+    /// The range MIDI sweeps on parameter `index`, if a sub-patch surface
+    /// narrows it. See [`Node::midi_spec`].
+    pub fn limit(&self, index: usize) -> Option<ParamRange> {
+        self.limits.get(index).copied().flatten()
+    }
+
+    /// Parameter `index` as a MIDI mapping sweeps it: [`Node::spec`],
+    /// narrowed to the [`Node::limit`] when there is one, so hardware sweeps
+    /// what the surface control spans (sub-patches.md, Exposing). The
+    /// overlap of the two ranges is used; when they do not overlap the
+    /// limit wins, because the file saves the value clamped to it. Knobs and
+    /// modulation read [`Node::spec`], never this.
+    pub fn midi_spec(&self, index: usize) -> Option<ParamSpec> {
+        let spec = self.spec(index)?;
+        Some(match self.limit(index) {
+            Some(limit) => {
+                let overlap = ParamRange::new(spec.min.max(limit.min), spec.max.min(limit.max));
+                spec.in_range(if overlap.min < overlap.max { overlap } else { limit })
+            }
+            None => spec,
         })
     }
 
