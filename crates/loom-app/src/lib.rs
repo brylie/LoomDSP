@@ -40,6 +40,8 @@ mod inspector;
 mod layout;
 mod learn;
 mod levels;
+#[cfg(test)]
+mod library_tests;
 mod licence_chooser;
 mod lights;
 mod live;

@@ -220,13 +220,14 @@ impl Browser {
             .collect()
     }
 
-    /// The library items the list shows, in list order.
+    /// The library items the list shows, each with its row.
     #[cfg(test)]
-    pub fn library_results(&self) -> Vec<&LibraryItem> {
+    pub fn library_rows(&self) -> Vec<(usize, &LibraryItem)> {
         self.results
             .iter()
-            .filter_map(|entry| match entry {
-                Entry::Library(i) => self.library.get(*i),
+            .enumerate()
+            .filter_map(|(row, entry)| match entry {
+                Entry::Library(i) => self.library.get(*i).map(|item| (row, item)),
                 Entry::Module(_) => None,
             })
             .collect()

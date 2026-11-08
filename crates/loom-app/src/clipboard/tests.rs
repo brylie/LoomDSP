@@ -511,3 +511,123 @@ fn add_flat(
         .add(c, &mut hierarchy, &root(), positions, &mut BTreeMap::new(), origin)
         .map(|added| added.ids)
 }
+
+/// A patch with one sub-patch, Voice, between a note and the audio output.
+const NESTED: &str = r#"Patch(
+    version: 1,
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch")),
+                PatchModule(id: 2, kind: "loom.phase.generator@1"),
+                PatchModule(id: 3, kind: "loom.osc.sine@1"),
+                PatchModule(id: 4, kind: "loom.math.mul@1", params: {"gain": 0.5}),
+                PatchModule(id: 5, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "pitch")),
+                PatchCable(from: (2, "phase"), to: (3, "phase")),
+                PatchCable(from: (3, "out"), to: (4, "a")),
+                PatchCable(from: (4, "out"), to: (5, "in")),
+            ],
+            exposed: [Exposed(name: "gain", module: 4, param: "gain")],
+            library: Some("Voices/Voice.ron"),
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.midi.note@1", position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), params: {"gain": 0.25}, position: Some((200.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1", position: Some((400.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 5, kind: "loom.mod.lfo@1", position: Some((0.0, 200.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+    modulation: [
+        PatchModulation(source: (5, "out"), target: (2, "gain"), depth: 0.5),
+    ],
+)"#;
+
+/// Copy of a sub-patch tile writes its definition into the text, with the
+/// tile's exposed value, its link, the cable into it from a selected
+/// module, and the assignment onto its exposed name; pasted into another
+/// patch, the tile comes back with its inside, its value, and its link
+/// (clipboard.md, The clipboard text; sub-patches.md, Copies and editing).
+#[test]
+fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
+    let patch = Patch::from_ron(NESTED).unwrap();
+    let mut c = parts().controller;
+    let mut ids = loom_patch::FlatIds::new();
+    patch.load_with_ids(&mut c, &mut ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&patch, c.graph(), ids).unwrap();
+    let positions = spread(&c);
+    let selection: BTreeSet<u32> = [1, 2, 5].into_iter().collect();
+    let group = Group::from_selection(c.graph(), &hierarchy, &root(), &positions, &selection, false);
+    assert_eq!(group.describe(), "3 modules");
+    let text = group.to_text();
+    let copied = Patch::from_ron(&text).unwrap();
+    assert_eq!(copied.subpatches.len(), 1);
+    assert_eq!(
+        copied.subpatches["voice"].library.as_deref(),
+        Some("Voices/Voice.ron"),
+        "a copy of a linked tile is linked to the same file"
+    );
+    let tile = copied.modules.iter().find(|m| m.is_instance()).unwrap();
+    assert_eq!(tile.params["gain"], 0.25);
+    assert_eq!(
+        copied.cables.len(),
+        1,
+        "the cable into the tile; the one out of it is outgoing"
+    );
+    assert_eq!(copied.modulation.len(), 1);
+    assert_eq!(copied.modulation[0].target, (2, "gain".to_string()));
+
+    // Into a fresh patch.
+    let mut other = parts().controller;
+    let mut positions = BTreeMap::new();
+    let mut other_hierarchy = flat(other.graph());
+    let group = Group::from_text(&text, other.registry()).unwrap();
+    let added = group
+        .add(
+            &mut other,
+            &mut other_hierarchy,
+            &root(),
+            &mut positions,
+            &mut BTreeMap::new(),
+            (0.0, 0.0),
+        )
+        .unwrap();
+    other.commit().unwrap();
+    assert_eq!(added.ids.len(), 3);
+    let instance = added
+        .ids
+        .iter()
+        .copied()
+        .find(|&id| {
+            matches!(
+                other_hierarchy.tile(other.graph(), ModuleId(id)),
+                Some(loom_patch::Tile::Instance(_))
+            )
+        })
+        .expect("the tile came back");
+    assert_eq!(other_hierarchy.library_of(ModuleId(instance)), Some("Voices/Voice.ron"));
+    assert_eq!(other.graph().nodes().count(), 5, "the note, the LFO, and three inside");
+    let target = other_hierarchy.exposed_target(ModuleId(instance), 0).unwrap();
+    let node = other.graph().node(target.module).unwrap();
+    let gain = node.parameter_index(&target.param).unwrap();
+    assert_eq!(
+        node.descriptor.saved_values(&node.params)[gain],
+        0.25,
+        "the exposed value"
+    );
+    // The note feeds the inner phase generator through the port, and the
+    // LFO moves the exposed gain.
+    let saved = other_hierarchy.unflatten(other.graph(), |_| Layout::default());
+    assert_eq!(saved.cables.len(), 1);
+    assert_eq!(saved.modulation.len(), 1);
+    assert_eq!(saved.modulation[0].target.1, "gain");
+    assert_eq!(other.graph().assignments().count(), 1, "onto the inner multiply");
+}
