@@ -30,8 +30,9 @@ How a player collapses part of a patch into one module with its own ports and pa
 | **Exposed item** | An inner parameter, display, probe, or data slot that the sub-patch shows on its own surface (FR-ENCAP-03, [panels](panels.md#exposed-controls-in-a-sub-patch)). |
 | **Linked** | An instance that follows a library file (FR-ENCAP-06). |
 | **Role** | A contract of port and parameter names that a module or sub-patch promises to have (ADR-0017). |
-| **Slot** | A module inside an abstraction (`loom.struct.slot@1`, MT-STRUCT-03) that holds one part filling a role. |
-| **Part** | What fills a slot: a module type or a sub-patch that declares the slot's role. |
+| **Slot** | A module (`loom.struct.slot@1`, MT-STRUCT-03) that holds one part filling a role, at any level. An abstraction is where slots are most useful, not the only place they may be. |
+| **Part** | What fills a slot: a module or a sub-patch that declares the slot's role. The current part is an ordinary module of the slot's level, hidden behind the slot's tile. |
+| **Held part** | A part the slot has held before: its values, kept so swapping back restores them. |
 | **Mode** | How a sub-patch runs its inside: single, layer, select, or stack (FR-ENCAP-10). |
 
 ## Behaviour
@@ -137,24 +138,31 @@ The engine's flat graph is the only thing that plays and the only home of parame
 **Settled** (OQ-20, from its leaning).
 
 - A role has a namespaced ID and a version, like a module: `loom.role.filter@1`.
-- A role declares input names, output names, and core parameter names, with their kinds. It is data in the SDK, like a module descriptor.
-- A new version may only add optional parameters. Every part that filled the old version still fits.
+- A role declares input names, output names, and core parameter names, with their kinds. It is data in the SDK, like a module descriptor (`loom_core::RoleDescriptor`; the initial roles are `static`s in `loom_core::roles`). A port's kind is its signal type. A parameter's kind is its unit and whether it is a whole number. *Why:* a value carries across by name, so Hz must meet Hz, and a choice must not land on a knob. Minimum and maximum may differ: the value is clamped to the new part's range.
+- **Each port and parameter is required or optional** (settled 2026-11-08). The registry refuses a declaration that lacks a required one. An optional one is checked only when the part has it. A slot shows every role port; one the current part lacks connects to nothing while that part is in, as a port with nothing behind it does (flattening rule 8). A value for an optional parameter carries across when both parts have it. *Why:* the modules that should fill a role do not all have every core parameter (no oscillator has `level`, the one-pole has no `resonance`), and a new version of a role only adds optional parameters.
+- A new version may only add optional parameters. Every part that filled the old version still fits. A file naming a role version newer than the build knows is refused, as a module kind is; an older one resolves. A part fits a slot by role **id**, whatever version either declares. *Why:* an older part has everything an older slot asked for, and a newer slot asks for nothing more that is required.
 - A module or a sub-patch can fill several roles.
-- A module declares its roles in its descriptor. Each role port and parameter is matched to one of the module's own by name. A declaration can map a role name to a different own name, such as the role's `out` to a filter's `lowpass`. *Why:* the roles fit existing modules without renaming their ports.
-- The registry refuses a declaration whose module lacks a role's port or parameter, and names what is missing (FR-SDK-08).
-- A sub-patch declares roles in its definition (FR-ENCAP-09). Its exposed parameters and ports are checked against each role when it is saved or inserted. A failed check removes that role from the definition and says why; it does not block the save.
-- The initial roles are the ones in the [catalogue](../product/module-catalogue.md#roles).
+- A module declares its roles in its descriptor (`ModuleDescriptor::roles`, a list of `FillsRole`). Each role port and parameter is matched to one of the module's own by name. A declaration can map a role name to a different own name, such as the role's `out` to a filter's `lowpass`, separately for inputs, outputs, and parameters. *Why:* the roles fit existing modules without renaming their ports.
+- The registry refuses a declaration whose module lacks a role's required port or parameter, has it in another kind, maps a role name to a name the module lacks, or maps two role names onto one own name, and names what is missing (FR-SDK-08).
+- A sub-patch declares roles in its definition (FR-ENCAP-09), as a plain list of role ids with no name map: a definition fits a role when it has a Patch input or output of each required port's name and an exposed item of each required parameter's name, whose inner parameter is of the role's kind. The player renames a port or an exposed item to fit. Its exposed parameters and ports are checked against each role when it is saved to the library, inserted, or placed in a slot. A failed check at save or insert removes that role from the definition with `Voice no longer fills Filter: no exposed "cutoff"`; it does not block the save. The gesture that declares a role is a **Fills role** row in the sub-patch tile's inspector, one check box per role; turning on one that does not fit is refused with the same wording.
+- The initial roles are the ones in the [catalogue](../product/module-catalogue.md#roles). Sound source takes a `phase`, not a pitch, because every LoomDSP oscillator is phase driven (ADR-0012). Voice takes `pitch`, `gate`, and `velocity`, the per-voice signals of ADR-0038.
 
 ### Slots
 
-- A slot is a module inside an abstraction. It has the ports and core parameters of its role, and shows the part's panel on its tile.
-- **Swap** is a menu on the slot's tile, in the inspector, and on any panel widget bound to it. It lists every module type and library sub-patch that declares the role.
+The points marked "settled 2026-11-08" were put to the maintainer as a proposal while building slice 5 and agreed.
+
+- A slot is a module at any level. It has the ports and core parameters of its role, and shows the part's panel on its tile.
+- **Make slot** (settled 2026-11-08) is on the tile menu of a module or sub-patch tile that declares a role: one item per role, `Make Filter slot`. The module becomes the slot's current part in place, keeping its values, running state, position, MIDI mappings, and assignments. Each cable on a role port moves to the slot's port of the role's name, and an exposure of a role parameter follows it onto the slot. A cable on a port the role does not have (the SVF's `highpass`) is removed, and the status bar says `Filter slot made. The cable from Highpass was removed: a slot has only the Filter role's ports.` One undo step. *Why remove and not refuse:* the player chose the role knowing its ports, and undo brings the cable back. An empty slot is not made by any gesture yet: a slot in the browser, made from a role, comes with the abstractions, which are the first thing that needs one.
+- **Dissolve slot** (settled 2026-11-08) is on a slot tile's menu: the part becomes a plain module in place with its cables on its own ports, and the held parts are forgotten. One undo step.
+- **Swap** is a menu on the slot's tile, in the inspector, and on any panel widget bound to it. It lists every module type and library sub-patch that declares the role, the current part marked. On the tile menu the items read `Swap to Ladder`; the inspector has a **Part** list. A surface control bound to a slot's role parameter offers it through its tile's menu (`Swap Filter to Ladder`), since the canvas has no menu on a control (settled 2026-11-08). A library sub-patch is inserted as a copy and placed as the part.
 - **Cables stay.** The slot's ports are the role's ports.
-- **Values carry across** by role parameter name. A value the new part does not have stays stored, so swapping back restores it (FR-ENCAP-08).
+- **Values carry across** by role parameter name, clamped to the new part's range. A value the new part does not have stays stored, so swapping back restores it (FR-ENCAP-08). Assignments and MIDI mappings on role parameters move to the new part and keep their ids. One on a parameter only the leaving part has is removed with the swap, and the status bar says `Swapped Filter to Ladder. 1 modulation on Slope was removed.`; undo brings it back.
 - **Data** (OQ-21, settled from its leaning): each part's data is kept in the patch, keyed by the part, and comes back when the player swaps back. Data is never converted between parts.
-- **The swap is click-free.** Old and new parts both run for a 10 ms equal-power crossfade, then the old part is removed. *Why:* a swap is a graph edit, and FR-GRAPH-05 asks for faded connection changes.
-- **The swap is one undo step.**
-- Parameters only the current part has show in a sub-panel that follows the slot (FR-PANEL-11). A panel widget bound to a role parameter keeps working after a swap.
+- **The swap is click-free.** Old and new parts both run for a 10 ms equal-power crossfade, then the old part is removed. *Why:* a swap is a graph edit, and FR-GRAPH-05 asks for faded connection changes. How, without the engine learning anything new, is under [Flattening](#flattening), after the rules.
+- **The swap is one undo step.** Undo and redo of a swap go through the swap again, so they fade too (settled 2026-11-08). *Why:* rule 6, and an undo on stage is a swap. The part that comes back is a new module at its stored values, as undo of a delete is (live-patching, out of scope).
+- Parameters only the current part has show in a sub-panel that follows the slot (FR-PANEL-11), on the abstraction's front panel, which waits for the panel editor. On the slot's own tile the whole part panel shows. A panel widget bound to a role parameter keeps working after a swap: **Expose** on a role parameter of the part writes the exposure against the slot and the role name, so the surface control follows the slot across swaps. Expose on a parameter only the current part has is refused with `Expose a Filter parameter: Slope is only on Ladder` (settled 2026-11-08). *Why:* the surface item would have nothing behind it after a swap.
+- **The slot tile** shows the slot's label (default: the role's name) in the header, the role's ports with the role's labels, and the current part's panel with live values. Hover text on the header and the ports adds the part's name. The inspector shows the name, the Part list, the role's parameter rows, a heading with the part's name over its other parameters, and Dissolve slot.
+- A selection that includes a slot tile is refused by the clipboard with `Cannot copy a slot yet`; a sub-patch tile that contains a slot copies whole, since its definition's text carries it (settled 2026-11-08; a follow-up carries the slot itself).
 
 ### Modes
 
@@ -207,6 +215,31 @@ Patch(
 - A patch file has an `exposed` list of its own, omitted when empty: the surface it shows when it is inserted as a sub-patch ([Library](#library)). Save to library writes the definition's list there, and inserting the file reads it back. Opened on its own, the list is kept and saved back, less an entry whose module is gone, and nothing shows it; an entry follows its module through a collapse (onto the new tile's surface) and a dissolve. *Why:* a library item is an ordinary patch file, and its surface has to live somewhere in it.
 - A linked definition's `library` is its path relative to the library folder, with `/` between the parts. The definition itself is the stored copy.
 
+A slot (settled 2026-11-08) is a module of kind `loom.struct.slot@1` with a `slot` field, as an instance has a `subpatch` field. Its current part is an ordinary module of the same level, named by id:
+
+```ron
+modules: [
+    PatchModule(id: 3, kind: "loom.filter.ladder@1", params: {"cutoff": 800.0, "drive": 0.3}),
+    PatchModule(id: 9, kind: "loom.struct.slot@1", label: Some("Filter"), slot: Some(Slot(
+        role: "loom.role.filter@1",
+        part: Some(3),
+        held: {
+            Module("loom.filter.svf@1"): Held(params: {"cutoff": 800.0, "resonance": 0.4}),
+            SubPatch("comb"): Held(params: {"cutoff": 800.0}),
+        },
+    ))),
+],
+cables: [
+    PatchCable(from: (2, "out"), to: (9, "in")),
+    PatchCable(from: (9, "out"), to: (4, "in")),
+],
+```
+
+- `role` is the role's `id@version`. `part` is the level id of the module or instance that fills the slot now, or `None` for an empty slot, which shows the role's ports and `No part. Swap to choose one.` and plays as a module with nothing behind its ports. The part is never cabled directly: every cable, assignment, mapping, and exposure on it goes through the slot, by the role's names.
+- `held` keeps what every other part the slot has held would need to come back: its parameter values and control ranges by its own names, and later its data. The key says what the part is: a module kind, or a definition key. A definition a slot holds but does not play stays in `subpatches`, used by no instance, so a sub-patch part comes back whole, inner edits included. Swapping back takes the entry out of `held` and makes a module from it. The size is bounded by the number of distinct parts.
+- The slot's own `params`, `ranges`, and `subpatch` are empty; `label` is the tile's name. A file that cables the part directly, names a `part` the level does not have, names a part that does not declare the role, or holds a `held` key whose definition is missing, is refused with a message naming the slot.
+- *Why the part is a plain module:* module ids, flat ids, undo, module data, MIDI, and modulation all work on it unchanged. The slot adds only the overlay: the role, which module is behind the tile, and the held values. A new part is a new module with a new id, so flat ids stay stable (flattening rule 4).
+
 - Module IDs are unique within one definition, not across the patch. *Why:* a definition copied into another patch keeps its own IDs.
 - Definition keys are made from the name and made unique ("voice", "voice 2"). They are not shown to the player. Each instance refers to its own key; no two instances share one.
 - An instance's `params` holds the values of its exposed parameters, by exposed name.
@@ -220,7 +253,7 @@ These rules are for implementers. The player never sees the flat graph.
 2. A Patch input or output is removed. A cable into it continues from its other side.
 3. An exposed parameter's instance value is written to the inner parameter. A modulation assignment or MIDI mapping on the exposed parameter is attached to the inner parameter.
 4. Each flat module gets a `ModuleId` from a table keyed by its path (instance IDs, then the inner ID). A path keeps its ID across edits, so its state survives. A removed path's ID is not reused in the session.
-5. Stack copies, layer and select members, and slot parts expand into ordinary modules, with mixing or crossfade modules the flattener adds. Added modules are not shown and not saved.
+5. Stack copies, layer and select members, and slot parts expand into ordinary modules, with the mixing modules the flattener adds for modes. Added modules are not shown and not saved. A slot's part is already an ordinary module of its level: the flattener routes each cable, assignment, mapping, and exposure on the slot to the part's mapped port or parameter and adds nothing. The crossfade modules of a swap are added by the swap, not the flattener, and are never in the file (corrected 2026-11-08: a fade is a moment in a session, not a fact about the patch).
 6. Flattening is deterministic: the same patch gives the same flat graph and the same IDs.
 7. The flattener never opens a file. Linked library items are read through a `Library` trait that the caller implements, before a patch is flattened: when it loads, every linked definition takes a fresh copy from the library (`Patch::refresh_linked`), and the flattener then sees only definitions. The desktop app reads the library folder, a test passes a map, and the command line and the web runtime pass `NoLibrary`, so a missing item falls back to the stored copy (rule 5). A file's own linked items are refreshed first, so a chain of links is followed to its end, and a chain that comes back to a file on the way is the loop the [patch file](#patch-file) refuses. *Why:* `loom-patch` must work on WebAssembly, which has no files (hard rule 6), and the loop check needs to read links while it follows them.
 8. **Ports with nothing behind them.** A cable or assignment from an instance output whose Patch output has no cable behind it is dropped; the outer input reads its default. A cable into an input port that feeds nothing inside is dropped too.
@@ -234,6 +267,19 @@ These rules are for implementers. The player never sees the flat graph.
 16. **No two instances share a key.** A file whose instances name one definition twice, at one level or at two, is refused, naming the key and both instances (`modules 1 and 2 › 5`). *Why:* rule 3. The editor never writes one; a merge or a hand edit can.
 17. **Two cables into one input inside a definition are refused.** A flat patch keeps the later cable; flattening cannot keep that order across a boundary, so the file says which it means. The editor never makes two.
 18. **Errors and notes from inside a definition carry its name** and the inner module's own id, such as ``in sub-patch "Voice": module #3 has no input port `inn` ``. Unknown modules at every level are reported in one note.
+
+#### How a swap crossfades (settled 2026-11-08)
+
+The crossfade is made of ordinary modules and ordinary graph edits, so the engine learns nothing new and the audio thread allocates nothing.
+
+1. **A hidden module, `loom.struct.fade@1`** ("Swap fade"): inputs `a` (the leaving part) and `b` (the new part), output `out`, no parameters, one display value `done`. From its first processed frame it counts samples to `N = round(0.010 × sample rate)` and outputs `a·cos(θ) + b·sin(θ)` with `θ = (π/2)·n/N`. After `N` samples it outputs exactly `b` and publishes `done = 1`. It counts per sample, so it is block-size invariant and deterministic, and it holds no buffer. It is registered as internal: not in the browser or the help pages, but checked by every test that runs over all modules.
+2. **The swap**, on the control thread, as one undo step: the new part module is added with its values (role parameters from the leaving part by role name, clamped; its other parameters from its held entry, else defaults); one fade module per role output is added; assignments and mappings on role parameters move to the new part; the leaving part and its fades are recorded on the slot as **fading**. `sync` then wires each slot input to both parts' mapped inputs, each part's mapped output to its fade's `a` or `b`, and each fade's `out` to what the slot's output fed. One commit, one schedule swap at a buffer boundary. The new part starts from reset at its values (live-patching rule 7) and the fade starts at 0, so the first frame after the swap is the leaving part alone.
+3. **Finishing.** On each UI tick the app reads every fading slot's `done`. When all of a slot's fades read 1, the leaving part and its fades are removed and the graph is committed again. This is bookkeeping, not an edit: no undo step and no change to the saved file. The removal is click-free, because a finished fade outputs exactly `b`, which is what the new part's output then feeds directly. *Why a display value and not a clock:* the control thread cannot read how many frames the engine has processed, and wall-clock time is wrong when the engine is idle or a test steps it by hand; a display value is read on every tick and tells the truth in both.
+4. **The file never holds a fade.** A save during the fade writes the new part only.
+5. **A swap during a fade** finishes the first fade at once, with whatever step the fade had left, and starts the new one. *Why:* two fades at once would need fades of fades, and a second swap within 10 ms is a mis-click.
+6. **Gate, trigger, and phase outputs** of a role are not faded: they switch to the new part on the swap frame, for the reason live-patching rule 9 gives (a ramped gate fires late). No initial role has one.
+
+*Why equal power:* the two parts are different sounds, so they add in power, not in amplitude. Gains on a quarter circle keep the sum of their squares at 1, so loudness holds through the fade, where a linear fade dips by 3 dB in the middle (C. Roads, *The Computer Music Tutorial*, MIT Press, 1996, on crossfading; U. Zölzer (ed.), *DAFX: Digital Audio Effects*, 2nd ed., Wiley, 2011, on constant-power laws). *Why 10 ms:* above the few milliseconds where a gain change is heard as a click, below the tens of milliseconds where a change is heard as a fade. The explainer [Abstraction: roles, slots, and swapping](../learn/abstraction.md) has the sample values.
 
 ## Rules
 
@@ -291,7 +337,7 @@ Roles, slots, and modes:
 
 - [ ] The registry refuses a role declaration that misses a role parameter, naming it (test).
 - [ ] Swapping a slot keeps cables and role parameter values; swapping back restores the first part's own values and data (test).
-- [ ] A slot swap during playback has no step larger than the crossfade allows (`loom analyze`, audio QA).
+- [ ] A slot swap during playback has no step larger than the crossfade allows: the largest step in the swap window is at most the steady audio's largest step plus the fade's largest gain change per sample times the peak, the same form as the output-safety click check (`loom_analysis`, audio QA).
 - [ ] Layer mode sums members; select mode crossfades over 10 ms; stack mode with 4 copies and spread on a parameter gives each copy its offset value (tests).
 - [ ] Stack mode with stereo spread gives a stereo output (test).
 
@@ -316,6 +362,7 @@ Points the [Library](#library) and [Linked library items](#linked-library-items)
 - Embedding a sub-patch's panel inside its parent's panel (FR-PANEL-08). After the panel editor.
 - Watching library files while a patch is open.
 - Converting data between parts on a swap (OQ-21).
+- An empty slot made from the browser, a slot tile on the clipboard, and a menu on a control (so Swap can sit on the bound widget itself): follow-ups of slice 5.
 - Sharing the library online (M4, FR-SHARE).
 
 ## Open points

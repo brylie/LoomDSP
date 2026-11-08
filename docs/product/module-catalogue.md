@@ -279,9 +279,9 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-STRUCT-01 | Sub-patch | A group of modules collapsed into one, with its own ports and panel. Modes: single, layer (all members run and mix), select (one member runs, chosen by a control), and stack (N copies, each with its own spread values). | Spread | M2 | FR-ENCAP-01, FR-ENCAP-10 | Built in part: the file format, flattening, the editor (collapse, dissolve, open, breadcrumb, undo across levels), exposed parameters on the surface, the library with linked items, and copies on the clipboard ([sub-patches](../design/sub-patches.md)); slots and modes follow |
+| MT-STRUCT-01 | Sub-patch | A group of modules collapsed into one, with its own ports and panel. Modes: single, layer (all members run and mix), select (one member runs, chosen by a control), and stack (N copies, each with its own spread values). | Spread | M2 | FR-ENCAP-01, FR-ENCAP-10 | Built in part: the file format, flattening, the editor (collapse, dissolve, open, breadcrumb, undo across levels), exposed parameters on the surface, the library with linked items, copies on the clipboard, and roles and slots ([sub-patches](../design/sub-patches.md)); modes follow |
 | MT-STRUCT-02 | Patch input and output | Ports inside a sub-patch that become its outer ports. | | M2 | FR-ENCAP-01 | Built (`loom.struct.input`, `loom.struct.output`) |
-| MT-STRUCT-03 | Slot | A place inside an abstraction that holds any module or sub-patch that fills a given role. Swapped from a menu, with cables kept. | | M2 | FR-ENCAP-08 | Specified ([sub-patches](../design/sub-patches.md)) |
+| MT-STRUCT-03 | Slot | A place that holds any module or sub-patch that fills a given role. Swapped from a menu, with cables kept and a 10 ms crossfade. | | M2 | FR-ENCAP-08 | Built (`loom.struct.slot`, with the hidden `loom.struct.fade`; [sub-patches](../design/sub-patches.md#slots)) |
 | MT-STRUCT-04 | Effect chain (abstraction) | Several effect slots in series, each with its own mix. | | M2 | FR-ENCAP-08 | Planned |
 | MT-ARR-01 | Note cycle | Plays a stored note pattern that is N bars long, read from the bar phase, and fires an end trigger. | | M3 | FR-LIB-20 | Specified ([arrangement](../design/arrangement.md)) |
 | MT-ARR-02 | Audio cycle | Plays a stored audio loop that is N bars long, read from the bar phase, and fires an end trigger. | | M3 | FR-LIB-20 | Specified ([arrangement](../design/arrangement.md)) |
@@ -334,17 +334,19 @@ Why traits: many module types differ only in an option that many other types als
 
 ## Roles
 
-A role is a contract: a set of port names and core parameter names that a module or sub-patch promises to have (ADR-0017). A slot in an abstraction accepts anything that fills its role, so the user can swap it and keep the cables and the main settings. Role names and versions are an open question (OQ-20).
+A role is a contract: a set of port names and core parameter names that a module or sub-patch promises to have (ADR-0017). A slot in an abstraction accepts anything that fills its role, so the user can swap it and keep the cables and the main settings. Role names and versions are settled (OQ-20, [sub-patches](../design/sub-patches.md#roles)): a role is `loom.role.<name>@<version>`, and each port and parameter is required or optional. A part fits a role when it has every required port and parameter, of the role's kind. Optional ones carry across when both parts have them.
 
-| Role | Ports | Core parameters | Filled by, for example |
-|---|---|---|---|
-| Sound source | pitch in, audio out | level | Oscillator, Noise, Buffer reader, Grain engine, String model |
-| Filter | audio in, audio out | cutoff, resonance, drive | State variable filter, Ladder low-pass, Comb filter, Formant filter |
-| Shaper | audio in, audio out | drive, mix | Shaper, Bit and rate reducer |
-| Envelope | gate in, level out | attack, release | Envelope, Segment envelope, Function generator |
-| Modulator | level out | rate, amount | LFO, Random, Curve reader |
-| Effect | audio in, audio out | mix | Delay, Reverb, Modulated delay, Dynamics, EQ |
-| Voice | note in, audio out | level | Synth voice, Drum voice, Sampler, user sub-patches |
+| Role | Inputs | Outputs | Core parameters | Declared on |
+|---|---|---|---|---|
+| Sound source `loom.role.source` | `phase` (phase, optional) | `out` (audio) | `level` (optional) | Sine, Saw, Pulse, Triangle, Noise. Later: Buffer reader, Grain engine, String model |
+| Filter `loom.role.filter` | `in` (audio), `cutoff` (pitch, optional) | `out` (audio) | `cutoff` (Hz), `resonance` (optional), `drive` (optional) | SVF, One-pole, Ladder. Later: Comb filter, Formant filter |
+| Shaper `loom.role.shaper` | `in` (audio) | `out` (audio) | `drive`, `mix` (optional) | Later: Shaper, Bit and rate reducer |
+| Envelope `loom.role.envelope` | `gate` (gate) | `out` (modulation) | `attack` (s), `release` (s), `decay` (s, optional), `sustain` (optional) | Envelope. Later: Segment envelope, Function generator |
+| Modulator `loom.role.modulator` | none | `out` (modulation) | `rate` (Hz, optional), `amount` (optional) | LFO, Random. Later: Curve reader |
+| Effect `loom.role.effect` | `in` (audio) | `out` (audio) | `mix` (optional) | Delay line, All-pass, Dynamics, EQ. Later: Reverb, Modulated delay |
+| Voice `loom.role.voice` | `pitch` (pitch), `gate` (gate), `velocity` (modulation, optional) | `out` (audio) | `level` (optional) | User sub-patches. Later: Synth voice, Drum voice, Sampler |
+
+Sound source takes a phase, not a pitch, because every LoomDSP oscillator is phase driven (ADR-0012). Voice takes the per-voice signals of ADR-0038 in place of a "note in". Most core parameters are optional because the built-in modules do not all have them; `level` and `amount` have no built-in part yet.
 
 A user's own sub-patch can declare a role and then fill any matching slot (FR-ENCAP-09).
 
