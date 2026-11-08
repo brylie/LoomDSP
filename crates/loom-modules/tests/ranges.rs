@@ -271,3 +271,50 @@ fn a_waiting_pickup_reports_the_value_in_the_swept_span() {
     // CC 127 stands for the top of the limit, not of the knob's -1 to 1.
     assert!((waiting[0].value - 0.1).abs() < 1e-6, "{:?}", waiting[0]);
 }
+
+/// When a new limit renews a mapping, a control change the engine applied
+/// after the graph last synced is dropped on both sides: the graph keeps
+/// its value, and the engine plays that value after the swap, so what
+/// shows and what plays agree. Each step renders 0.1 s, past the
+/// constant's 5 ms glide. (sub-patches.md, MIDI follows the range).
+#[test]
+fn a_renewed_mapping_plays_what_the_graph_holds() {
+    const CC: MidiControl = MidiControl {
+        channel: 0,
+        controller: 22,
+    };
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let one = c.add_module("loom.math.constant").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(one, "out", out, "in").unwrap();
+    c.set_limits([(one, 0, ParamRange::new(0.0, 0.5))]).unwrap();
+    c.map_midi(CC, one, 0).unwrap();
+    c.commit().unwrap();
+    let send = |parts: &mut EngineParts, value: u8| {
+        assert!(
+            parts
+                .midi
+                .send(MidiEvent::control_change(0, CC.channel, CC.controller, value))
+        );
+        *render(parts, 4_800).last().unwrap()
+    };
+    assert!((send(&mut parts, 127) - 0.5).abs() < 1e-6);
+    assert!(send(&mut parts, 0).abs() < 1e-6);
+    parts.controller.sync_midi();
+    let held = parts.controller.graph().node(one).unwrap().params[0];
+    assert!(held.abs() < 1e-6, "the graph holds 0: {held}");
+
+    // Played, but not synced yet, when the range narrows.
+    assert!((send(&mut parts, 127) - 0.5).abs() < 1e-6);
+    parts
+        .controller
+        .set_limits([(one, 0, ParamRange::new(0.1, 0.2))])
+        .unwrap();
+    parts.controller.commit().unwrap();
+    let playing = *render(&mut parts, 4_800).last().unwrap();
+    parts.controller.sync_midi();
+    let shown = parts.controller.graph().node(one).unwrap().params[0];
+    assert_eq!(shown, held, "the stale control change is not copied into the graph");
+    assert_eq!(playing, shown, "the engine plays what the graph holds");
+}

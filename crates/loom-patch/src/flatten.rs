@@ -471,6 +471,9 @@ impl Flat {
                 let node = graph.node(*module).filter(|node| node.unknown.is_none())?;
                 let index = node.descriptor.param_index(param)?;
                 let spec = node.descriptor.params.get(index)?;
+                // `Controller::set_limits` cuts and checks the same way. Both
+                // stay: the loader drops an empty limit so the file loads,
+                // and the controller refuses one from any other caller.
                 let cut = ParamRange::new(min.max(spec.min), max.min(spec.max));
                 (cut.min < cut.max).then_some((*module, index, cut))
             })

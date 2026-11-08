@@ -479,7 +479,13 @@ fn the_span_follows_a_new_range() {
     render(&mut parts, 64, 64, &[]);
     parts.controller.sync_midi();
     let after = parts.controller.graph().node(svf).unwrap().params[cutoff];
-    assert!(after <= 1000.0, "the old result is not set again: {after}");
+    // The graph still holds the 500 Hz CC 0 set before the stale change,
+    // which played 1000 Hz on the old span.
+    assert!(after != 1000.0, "the old result is not set again: {after}");
+    assert!(
+        (after - 500.0).abs() < 1e-2,
+        "the value before the stale change: {after}"
+    );
     assert!((cc(&mut parts, 127) - 400.0).abs() < 1e-2);
 
     // No range: the whole travel again.

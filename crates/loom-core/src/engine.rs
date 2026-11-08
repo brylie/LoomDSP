@@ -929,7 +929,9 @@ impl Engine {
     /// After a swap, brings each control's state and the new schedule into
     /// step (MIDI learn, rule 2, and Mapping modes):
     ///
-    /// - A new mapping id starts its state from the compiled value.
+    /// - A new mapping id starts its state from the compiled value, and the
+    ///   module takes that value, so a control change a renewed mapping
+    ///   dropped stops playing as well as showing.
     /// - A control change applied to the old schedule after the new one was
     ///   compiled is missing from the new one's base values. Sets its result
     ///   again, unless a screen edit came after it. The state already has it,
@@ -944,6 +946,19 @@ impl Engine {
             if state.id != map.id {
                 let waiting = map.options.mode == MidiMode::Pickup && !map.caught;
                 *state = ControlState::seeded(map.id, &map.spec, map.base, waiting);
+                // A renewed mapping (a new range) drops a control change the
+                // old one applied after the graph last synced: the controller
+                // never copies it, so the module goes back to the compiled
+                // value too, and what plays is what shows. For a mapping that
+                // is new, the module holds this value already.
+                set_base(
+                    &mut self.slots,
+                    &mut self.schedule.fills,
+                    &self.schedule.copies,
+                    map.slot as usize,
+                    usize::from(map.param),
+                    map.base,
+                );
                 continue;
             }
             let entry = self.midi_feedback.read(map.control);

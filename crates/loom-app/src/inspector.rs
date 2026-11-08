@@ -631,19 +631,32 @@ impl App {
         node.limit(index)?;
         let spec = node.spec(index)?;
         let swept = node.midi_spec(index)?;
+        // Every surface with a range, from the inside out.
         let mut at = (ModuleId(module), node.descriptor.params.get(index)?.name.to_string());
-        let mut surface = None;
+        let mut chain = Vec::new();
         while let Some((instance, name)) = hierarchy.exposure_of(at.0, &at.1) {
-            let ranged = hierarchy
+            let range = hierarchy
                 .definition_of(instance)
                 .and_then(|d| d.exposed.iter().find(|e| e.name == name))
-                .is_some_and(|e| e.range.is_some());
-            if ranged {
-                surface = Some(instance);
+                .and_then(|e| e.range);
+            if let Some(range) = range {
+                chain.push((instance, range));
             }
             at = (instance, name);
         }
-        let name = hierarchy.tile_name(surface?)?;
+        // Folded outer first, as `fold_ranges` does: a range that does not
+        // overlap what came before replaces it, so the surface named is the
+        // outermost one whose range still takes part in the span.
+        let mut folded: Option<((f32, f32), ModuleId)> = None;
+        for &(instance, (min, max)) in chain.iter().rev() {
+            folded = Some(match folded {
+                Some(((outer_min, outer_max), surface)) if outer_min.max(min) < outer_max.min(max) => {
+                    ((outer_min.max(min), outer_max.min(max)), surface)
+                }
+                _ => ((min, max), instance),
+            });
+        }
+        let name = hierarchy.tile_name(folded?.1)?;
         let span = format!(
             "{} to {}",
             crate::param::format(&spec, swept.min),

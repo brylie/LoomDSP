@@ -1480,6 +1480,37 @@ fn the_range_note_names_the_span_midi_sweeps() {
     assert!(inner.contains(&note), "{note} in {inner}");
 }
 
+/// The note names the surface whose range takes part in the span, by the
+/// rule `fold_ranges` uses: the outer Voice when its range overlaps the
+/// Filter's, the Filter when the Voice's range lies outside it (only a
+/// hand-written file makes that).
+#[test]
+fn the_range_note_names_the_surface_that_sets_the_span() {
+    for (voice, named) in [("(500.0, 1000.0)", "Voice"), ("(1.0, 10.0)", "Filter")] {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches");
+        let text = std::fs::read_to_string(root.join("nested-subtractive.ron")).unwrap();
+        let text = text
+            .replace("range: Some((20.0, 20000.0))", "range: Some((200.0, 2000.0))")
+            .replace(
+                r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff")]"#,
+                &format!(r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff", range: Some({voice}))]"#),
+            );
+        let mut app = app_with(&text);
+        let (svf, cutoff) = svf_cutoff(&app);
+        let control = loom_core::MidiControl {
+            channel: 0,
+            controller: 74,
+        };
+        app.session.controller.map_midi(control, svf, cutoff).unwrap();
+        app.commit();
+        let inner = inspector_text(&mut app, svf.0);
+        assert!(
+            inner.contains(&format!("the range exposed on {named}.")),
+            "Voice at {voice}: {inner}"
+        );
+    }
+}
+
 /// The name typed in the sub-patch's inspector renames it as one undo
 /// step: the tile and the breadcrumb follow, and the key stays.
 #[test]
