@@ -1431,6 +1431,55 @@ fn a_mapping_row_says_its_range_is_a_share_of_the_exposed_range() {
     assert!(!inner.contains("range_note"), "no surface, no note: {inner}");
 }
 
+/// The note names the span MIDI sweeps, which is the overlap of the exposed
+/// range and the selected range: a gain exposed at -1 to 1 with -0.1 to 0.1
+/// selected sweeps -0.1 to 0.1, so the note says that (sub-patches.md,
+/// MIDI follows the range).
+#[test]
+fn the_range_note_names_the_span_midi_sweeps() {
+    let mut app = app_with(
+        r#"Patch(
+            version: 1,
+            subpatches: {
+                "amp": SubPatch(
+                    metadata: Metadata(name: "Amp"),
+                    modules: [PatchModule(id: 1, kind: "loom.math.mul@1")],
+                    exposed: [Exposed(name: "gain", module: 1, param: "gain", range: Some((-1.0, 1.0)))],
+                ),
+            },
+            modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("amp"))],
+        )"#,
+    );
+    use loom_core::ModuleNames;
+    let (mul, node) = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, n)| n.descriptor.id == "loom.math.mul")
+        .unwrap();
+    let gain = node.parameter_index("gain").unwrap();
+    let spec = node.descriptor.params[gain];
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 20,
+    };
+    app.session
+        .controller
+        .set_range(mul, gain, loom_core::ParamRange::new(-0.1, 0.1))
+        .unwrap();
+    app.session.controller.map_midi(control, mul, gain).unwrap();
+    app.commit();
+    let fine = spec.in_range(loom_core::ParamRange::new(-0.1, 0.1));
+    let note = format!(
+        "Low and High are a share of {} to {}, the range exposed on Amp.",
+        crate::param::format(&fine, -0.1),
+        crate::param::format(&fine, 0.1)
+    );
+    let inner = inspector_text(&mut app, mul.0);
+    assert!(inner.contains(&note), "{note} in {inner}");
+}
+
 /// The name typed in the sub-patch's inspector renames it as one undo
 /// step: the tile and the breadcrumb follow, and the key stays.
 #[test]

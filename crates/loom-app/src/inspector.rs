@@ -617,21 +617,20 @@ impl App {
         })
     }
 
-    /// The Expose or Unexpose button of a row inside a sub-patch: for
-    /// `param` of the tile `tile` (a module's parameter, or a sub-patch
-    /// tile's surface item named `param`), where `index` is what the
-    /// button's message names. `None` at the top level, which has no
-    /// surface to expose onto.
     /// The note on a mapping row when a sub-patch surface narrows what MIDI
-    /// sweeps on parameter `index` of `module`: the span, and the outermost
-    /// surface with a range of its own, which is the one that sets the span,
-    /// as `fold_ranges` composes it. `None` when no surface narrows it.
+    /// sweeps on parameter `index` of `module`: the span the engine sweeps
+    /// ([`Node::midi_spec`](loom_core::Node::midi_spec), the function the
+    /// compiler uses, so the text cannot drift from what plays), and the
+    /// outermost surface with a range of its own, which is the one that sets
+    /// the span, as `fold_ranges` composes it. `None` when no surface
+    /// narrows it.
     fn range_note(&self, module: u32, index: usize, mode: MidiMode) -> Option<String> {
         let graph = self.session.controller.graph();
         let hierarchy = &self.session.hierarchy;
         let node = graph.node(ModuleId(module))?;
-        let limit = node.limit(index)?;
+        node.limit(index)?;
         let spec = node.spec(index)?;
+        let swept = node.midi_spec(index)?;
         let mut at = (ModuleId(module), node.descriptor.params.get(index)?.name.to_string());
         let mut surface = None;
         while let Some((instance, name)) = hierarchy.exposure_of(at.0, &at.1) {
@@ -647,8 +646,8 @@ impl App {
         let name = hierarchy.tile_name(surface?)?;
         let span = format!(
             "{} to {}",
-            crate::param::format(&spec, limit.min),
-            crate::param::format(&spec, limit.max)
+            crate::param::format(&spec, swept.min),
+            crate::param::format(&spec, swept.max)
         );
         Some(match mode {
             MidiMode::Relative(_) => format!("Each step is a share of {span}, the range exposed on {name}."),
@@ -656,6 +655,11 @@ impl App {
         })
     }
 
+    /// The Expose or Unexpose button of a row inside a sub-patch: for
+    /// `param` of the tile `tile` (a module's parameter, or a sub-patch
+    /// tile's surface item named `param`), where `index` is what the
+    /// button's message names. `None` at the top level, which has no
+    /// surface to expose onto.
     fn exposure_row(&self, tile: u32, index: usize, param: &str) -> Option<ExposureRow> {
         let hierarchy = &self.session.hierarchy;
         let level = hierarchy.level_of(ModuleId(tile));
