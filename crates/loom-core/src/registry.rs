@@ -188,10 +188,16 @@ impl Registry {
         if !matches!(descriptor.role, ModuleRole::Dsp(_)) && has_params_or_displays {
             return Err(invalid("only DSP modules can have parameters or display values"));
         }
-        for fills in descriptor.roles {
+        for (i, fills) in descriptor.roles.iter().enumerate() {
             fills.check(descriptor).map_err(|reason| invalid(&reason))?;
-            if let Some(known) = self.roles.get(fills.role.id)
-                && !std::ptr::eq(*known, fills.role)
+            let same_id_elsewhere = descriptor.roles[..i]
+                .iter()
+                .any(|other| other.role.id == fills.role.id && !std::ptr::eq(other.role, fills.role));
+            if same_id_elsewhere
+                || self
+                    .roles
+                    .get(fills.role.id)
+                    .is_some_and(|known| !std::ptr::eq(*known, fills.role))
             {
                 return Err(invalid(&format!(
                     "role {} is registered twice under one id",

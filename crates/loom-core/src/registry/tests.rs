@@ -928,3 +928,40 @@ fn a_refused_duplicate_registers_no_role() {
     assert!(registry.register(&SECOND).is_err());
     assert!(registry.role("loom.role.modulator").is_none());
 }
+
+/// Two different role descriptors with one id in one module's list are
+/// refused before either is registered.
+#[test]
+fn two_roles_with_one_id_in_one_descriptor_are_refused() {
+    static OTHER_FILTER: crate::RoleDescriptor = crate::RoleDescriptor {
+        id: "loom.role.filter",
+        version: 1,
+        name: "Other filter",
+        description: "",
+        inputs: &[],
+        outputs: &[],
+        params: &[],
+    };
+    static TWICE: ModuleDescriptor = ModuleDescriptor {
+        id: "test.twice",
+        version: 1,
+        name: "Twice",
+        category: "Test",
+        family: crate::Family::FiltersAndEffects,
+        description: "",
+        inputs: &[port("in", crate::SignalType::Audio)],
+        outputs: &[port("out", crate::SignalType::Audio)],
+        params: &[param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz")],
+        role: ModuleRole::Dsp(|_| unreachable!("never created")),
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[
+            crate::FillsRole::of(&crate::roles::FILTER),
+            crate::FillsRole::of(&OTHER_FILTER),
+        ],
+    };
+    let mut registry = Registry::new();
+    let error = registry.register(&TWICE).unwrap_err().to_string();
+    assert!(error.contains("registered twice under one id"), "{error}");
+    assert!(registry.role("loom.role.filter").is_none());
+}

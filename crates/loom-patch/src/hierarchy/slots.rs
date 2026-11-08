@@ -689,27 +689,32 @@ impl Hierarchy {
         removed
     }
 
+    /// The new part's output behind a swap fade's `out`, when `source` is
+    /// one: what an assignment from the fade stands for once the fade is
+    /// done, and what the file and an undo snapshot write for it
+    /// (sub-patches.md, How a swap crossfades, point 4). `None` when
+    /// `source` is not a fade.
+    pub fn output_behind_fade(&self, graph: &Graph, source: OutputRef) -> Option<OutputRef> {
+        let fade_path = self.ids.path_of(source.module)?;
+        let slot_path = fade_path.parent()?;
+        let state = self.slots.get(&slot_path)?;
+        let fading = state.fading.as_ref()?;
+        let (role_out, _) = fading.fades.iter().find(|(_, fade)| *fade == source.module)?;
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        let (id, own) = self.part_output_of_state(graph, &level, state, role_out)?;
+        let port = graph.node(id)?.output_index(&own)?;
+        Some(OutputRef { module: id, port })
+    }
+
     /// Points every assignment whose source is one of the slot's fades at
     /// the new part's output behind that fade, before the fade goes.
     fn retarget_fade_sources(&self, controller: &mut Controller, slot_path: &ModulePath) {
-        let Some(state) = self.slots.get(slot_path) else { return };
-        let Some(fading) = &state.fading else { return };
-        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
         let graph = controller.graph();
-        let mut moves = Vec::new();
-        for (role_out, fade) in &fading.fades {
-            let Some((id, own)) = self.part_output_of_state(graph, &level, state, role_out) else {
-                continue;
-            };
-            let Some(port) = graph.node(id).and_then(|n| n.output_index(&own)) else {
-                continue;
-            };
-            for (aid, a) in graph.assignments() {
-                if a.source.module == *fade {
-                    moves.push((aid, OutputRef { module: id, port }, a.target, a.param));
-                }
-            }
-        }
+        let moves: Vec<_> = graph
+            .assignments()
+            .filter(|(_, a)| self.ids.path_of(a.source.module).and_then(|p| p.parent()).as_ref() == Some(slot_path))
+            .filter_map(|(aid, a)| Some((aid, self.output_behind_fade(graph, a.source)?, a.target, a.param)))
+            .collect();
         for (aid, source, target, param) in moves {
             let _ = controller.retarget_assignment(aid, source, target, param);
         }

@@ -16,6 +16,26 @@ pub const CANNOT_COPY_SLOT: &str = "Cannot copy a slot yet";
 /// The text an empty slot's tile shows in place of a panel.
 pub const NO_PART: &str = "No part. Swap to choose one.";
 
+/// The graph's assignments and MIDI mappings at one moment, so a failed
+/// swap can put back what it moved.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Links {
+    /// Every assignment, by id.
+    pub assignments: Vec<(loom_core::AssignmentId, loom_core::Assignment)>,
+    /// Every mapping.
+    pub midi: Vec<loom_core::MidiMapping>,
+}
+
+impl Links {
+    /// The links `graph` holds now.
+    pub(crate) fn of(graph: &loom_core::Graph) -> Self {
+        Self {
+            assignments: graph.assignments().map(|(id, a)| (id, *a)).collect(),
+            midi: graph.midi_mappings().map(|(_, m)| m.clone()).collect(),
+        }
+    }
+}
+
 /// What a slot can swap to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SwapTarget {
@@ -298,9 +318,10 @@ impl App {
         let layout = self.layout_fn_owned();
         let mut candidate = self.session.hierarchy.clone();
         // What the graph held, so a refusal part-way can take back what the
-        // swap added before it failed.
+        // swap added before it failed, and put back the links it moved.
         let before: std::collections::BTreeSet<ModuleId> =
             self.session.controller.graph().nodes().map(|(id, _)| id).collect();
+        let links = Links::of(self.session.controller.graph());
         let part = candidate.part_of_slot(ModuleId(slot));
         let holds_already = match to {
             SwapTarget::Module(kind) => part
@@ -331,8 +352,10 @@ impl App {
             Ok(swapped) => swapped,
             Err(why) => {
                 // The live hierarchy is untouched; whatever the swap added to
-                // the controller before it failed goes again.
+                // the controller before it failed goes again, and the links
+                // it moved come back.
                 self.remove_added_since(&before);
+                self.restore_links(&links);
                 return Err(why);
             }
         };
@@ -344,7 +367,46 @@ impl App {
             }
             Err(e) => {
                 self.remove_added_since(&before);
+                self.restore_links(&links);
                 Err(e.to_string())
+            }
+        }
+    }
+
+    /// Puts back every assignment and mapping in `links` that the graph
+    /// lacks or holds changed, with its id: what a failed swap moved onto
+    /// a part that was then taken back.
+    pub(crate) fn restore_links(&mut self, links: &Links) {
+        for (id, assignment) in &links.assignments {
+            match self.session.controller.graph().assignment(*id) {
+                Some(live) if live == assignment => {}
+                Some(_) => {
+                    let _ = self.session.controller.retarget_assignment(
+                        *id,
+                        assignment.source,
+                        assignment.target,
+                        assignment.param,
+                    );
+                }
+                None => {
+                    let _ = self.session.controller.restore_assignment(*id, *assignment);
+                }
+            }
+        }
+        for mapping in &links.midi {
+            if self
+                .session
+                .controller
+                .graph()
+                .midi_mapping_of(mapping.target, mapping.param)
+                .is_none()
+            {
+                let _ = self.session.controller.map_midi_with(
+                    mapping.control,
+                    mapping.target,
+                    mapping.param,
+                    mapping.options,
+                );
             }
         }
     }

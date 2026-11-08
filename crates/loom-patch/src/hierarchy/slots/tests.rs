@@ -667,3 +667,48 @@ fn removing_a_sub_patch_that_holds_a_slot_takes_the_slot_with_it() {
         "loom.struct.fade" | "loom.filter.ladder" | "loom.filter.svf"
     )));
 }
+
+/// A file written during a fade holds a modulation from the slot's output
+/// as coming from the slot, as finishing the fade makes it, so a save with
+/// the engine idle loses nothing (sub-patches.md, How a swap crossfades,
+/// point 4).
+#[test]
+fn a_save_during_a_fade_keeps_modulations_from_the_slot() {
+    let (mut controller, mut hierarchy) = load(&Patch::from_ron(SVF_VOICE).unwrap());
+    let lfo = inside(&hierarchy, 6);
+    let slot = hierarchy
+        .make_slot(controller.graph(), lfo, &roles::MODULATOR)
+        .unwrap()
+        .slot;
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    let slot_lid = hierarchy.path_of(slot).last();
+    let before = written(&hierarchy, &controller);
+    assert_eq!(before.subpatches["voice"].modulation.len(), 2);
+    let layout = |_: u32| Layout::default();
+    hierarchy
+        .swap_to_module(&mut controller, &layout, slot, "loom.rand.random@1")
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    controller.commit().unwrap();
+    // The engine ran nothing: the fade is in progress and the assignments
+    // start at the fade.
+    let fade = module_of(&controller, "loom.struct.fade");
+    assert!(controller.graph().assignments().all(|(_, a)| a.source.module == fade));
+    let during = written(&hierarchy, &controller);
+    let voice = &during.subpatches["voice"];
+    assert_eq!(voice.modulation.len(), 2, "{:?}", voice.modulation);
+    assert!(
+        voice
+            .modulation
+            .iter()
+            .all(|a| a.source == (slot_lid, "out".to_string()))
+    );
+    assert!(voice.modules.iter().all(|m| m.kind != "loom.struct.fade@1"));
+    // The file reloads with the modulations on the random's output.
+    let (again, hierarchy_again) = load(&during);
+    let random = module_of(&again, "loom.rand.random");
+    assert!(again.graph().assignments().all(|(_, a)| a.source.module == random));
+    assert_eq!(again.graph().assignments().count(), 2);
+    let _ = hierarchy_again;
+}

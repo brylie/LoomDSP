@@ -708,3 +708,43 @@ fn make_slot_redoes_and_dissolve_slot_undoes() {
     );
     assert!(app.ui_snapshot().redo.is_some(), "the history is intact");
 }
+
+/// `restore_links` puts back the assignments and mappings a failed swap
+/// moved: one retargeted comes back to its source and target with its id,
+/// one removed is restored, and a mapping that went is mapped again.
+#[test]
+fn restore_links_puts_moved_links_back() {
+    let mut app = app_with(LADDER_SLOT);
+    let ladder = inside(&app, 3);
+    let lfo = inside(&app, 6);
+    let links = crate::slots::Links::of(app.session.controller.graph());
+    let (id, assignment) = links.assignments[0];
+    assert_eq!(assignment.target.0, ladder);
+    // Move the assignment onto the LFO's own rate, drop the mapping.
+    let rate = loom_core::ModuleNames::parameter_index(
+        app.session.controller.graph().node(loom_core::ModuleId(lfo)).unwrap(),
+        "rate",
+    )
+    .unwrap();
+    app.session
+        .controller
+        .retarget_assignment(id, assignment.source, loom_core::ModuleId(lfo), rate)
+        .unwrap();
+    app.session
+        .controller
+        .unmap_midi(links.midi[0].target, links.midi[0].param)
+        .unwrap();
+    app.restore_links(&links);
+    assert_eq!(app.session.controller.graph().assignment(id), Some(&assignment));
+    assert!(
+        app.session
+            .controller
+            .graph()
+            .midi_mapping_of(links.midi[0].target, links.midi[0].param)
+            .is_some()
+    );
+    // Removed outright, it comes back with its id too.
+    app.session.controller.remove_assignment(id).unwrap();
+    app.restore_links(&links);
+    assert_eq!(app.session.controller.graph().assignment(id), Some(&assignment));
+}

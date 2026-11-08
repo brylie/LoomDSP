@@ -1124,11 +1124,17 @@ impl Hierarchy {
         }
         // Assignments: within a level as they are; across levels through
         // the exposed name or the output port they cross.
-        for (_, assignment) in graph
-            .assignments()
-            .filter(|(_, a)| !skip.contains(&a.source.module) && !skip.contains(&a.target))
-        {
-            let Some(entry) = self.assignment_entry(graph, assignment) else {
+        // One from a swap fade is written from the new part's output behind
+        // it, which is what finishing the fade makes it.
+        for (_, assignment) in graph.assignments() {
+            let mut assignment = *assignment;
+            if let Some(source) = self.output_behind_fade(graph, assignment.source) {
+                assignment.source = source;
+            }
+            if skip.contains(&assignment.source.module) || skip.contains(&assignment.target) {
+                continue;
+            }
+            let Some(entry) = self.assignment_entry(graph, &assignment) else {
                 continue;
             };
             levels.entry(entry.0).or_default().modulation.push(entry.1);

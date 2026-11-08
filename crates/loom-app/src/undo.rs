@@ -114,10 +114,10 @@ impl Snapshot {
         // (sub-patches.md, How a swap crossfades), so a step never adds or
         // removes it; the hierarchy is kept without the fade.
         let transient = hierarchy.transient_ids();
-        let mut hierarchy = hierarchy.clone();
-        hierarchy.carry_fading_from(&Hierarchy::flat());
+        let mut without_fades = hierarchy.clone();
+        without_fades.carry_fading_from(&Hierarchy::flat());
         Self {
-            hierarchy,
+            hierarchy: without_fades,
             layouts,
             level: level.clone(),
             modules: graph
@@ -146,10 +146,18 @@ impl Snapshot {
                 .filter(|(from, to)| !transient.contains(&from.module) && !transient.contains(&to.module))
                 .map(|(from, to)| (to, from))
                 .collect(),
+            // One from a swap fade is recorded from the new part's output
+            // behind it, as the file writes it.
             assignments: graph
                 .assignments()
+                .map(|(id, a)| {
+                    let mut a = *a;
+                    if let Some(source) = hierarchy.output_behind_fade(graph, a.source) {
+                        a.source = source;
+                    }
+                    (id, a)
+                })
                 .filter(|(_, a)| !transient.contains(&a.source.module) && !transient.contains(&a.target))
-                .map(|(id, a)| (id, *a))
                 .collect(),
             midi: graph
                 .midi_mappings()
