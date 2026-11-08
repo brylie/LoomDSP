@@ -725,7 +725,7 @@ impl App {
 
     /// What the tile menu offers for a tile: Help for a module; Open,
     /// Dissolve, Save to library, and Unlink (when linked) for a sub-patch;
-    /// Make sub-patch for any selection of modules; Make <Role> slot for
+    /// Make sub-patch for any selection of modules; `Make Filter slot` for
     /// each role a module or sub-patch declares; and, on a slot, Swap to
     /// each part that fills its role and Dissolve slot (sub-patches.md,
     /// Slots). A sub-patch tile whose surface has a control bound to a
