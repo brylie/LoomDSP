@@ -355,7 +355,7 @@ fn two_linked_instances_have_separate_definitions() {
         .collect();
     assert_eq!(keys, [Some("voice"), Some("voice 2")]);
     // The tile menu offers Unlink on a linked tile.
-    let labels: Vec<&str> = app.tile_menu_items(first).into_iter().map(|(l, _)| l).collect();
+    let labels: Vec<String> = app.tile_menu_items(first).into_iter().map(|(l, _)| l).collect();
     assert_eq!(labels, ["Open", "Dissolve sub-patch", "Save to library", "Unlink"]);
 }
 
@@ -617,6 +617,7 @@ fn instance(id: u32, key: &str) -> loom_patch::PatchModule {
         id,
         kind: loom_patch::SUBPATCH_KIND.to_string(),
         subpatch: Some(key.to_string()),
+        slot: None,
         label: None,
         params: Default::default(),
         position: None,

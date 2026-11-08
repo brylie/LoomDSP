@@ -384,6 +384,9 @@ impl App {
         };
         let Some(step) = step.cloned() else { return };
         let verb = if forward { "Redo" } else { "Undo" };
+        // A fade in progress is finished first; the step's own swap, if
+        // any, fades again (sub-patches.md, Slots).
+        self.finish_all_fades();
         if let Err(why) = undo::check(&step, forward, &self.session.controller) {
             self.alerts
                 .warn(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
@@ -391,6 +394,7 @@ impl App {
         }
         // An armed parameter is a mode, not an edit: undo disarms it first.
         self.session.learn.disarm();
+        let layout = self.layout_fn_owned();
         let applied = undo::apply_full(
             &step,
             forward,
@@ -398,6 +402,7 @@ impl App {
             &mut self.session.hierarchy,
             &mut self.session.positions,
             &mut self.session.sizes,
+            &layout,
         );
         match applied {
             Ok(()) => {
@@ -553,6 +558,16 @@ impl App {
     /// selected. A port tile and the Transport are left out, so a selection
     /// of only those is nothing.
     pub(crate) fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
+        // A slot tile is not carried yet (sub-patches.md, Slots).
+        if self
+            .session
+            .selection
+            .iter()
+            .any(|&id| self.session.hierarchy.slot(ModuleId(id)).is_some())
+        {
+            self.alerts.warn(crate::slots::CANNOT_COPY_SLOT.to_string());
+            return None;
+        }
         let group = clipboard::Group::from_selection(
             self.session.controller.graph(),
             &self.session.hierarchy,

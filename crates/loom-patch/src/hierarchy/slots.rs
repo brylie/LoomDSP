@@ -195,6 +195,13 @@ impl Hierarchy {
             .find(|(path, state)| path.parent().as_ref() == Some(level) && state.part == Some(lid))
     }
 
+    /// The name of a definition a slot holds but does not play.
+    pub fn held_definition_name(&self, key: &str) -> Option<String> {
+        let definition = self.definitions.get(key)?;
+        definition.stored.as_ref()?;
+        Some(definition.metadata.name.clone())
+    }
+
     /// The slot tile whose current part is the flat module `part`.
     pub fn slot_of_part(&self, part: ModuleId) -> Option<ModuleId> {
         let path = self.ids.path_of(part)?;
@@ -244,6 +251,37 @@ impl Hierarchy {
             ids.extend(fading.fades.iter().map(|(_, id)| *id));
         }
         ids
+    }
+
+    /// Takes the fades in progress from `live` onto this hierarchy, slot by
+    /// slot: a restored snapshot carries no fade, and the swap that undo
+    /// made on the live hierarchy must keep fading.
+    pub fn carry_fading_from(&mut self, live: &Hierarchy) {
+        for (path, state) in &mut self.slots {
+            let Some(from) = live.slots.get(path) else { continue };
+            state.fading = from.fading.clone();
+            let Some(fading) = &from.fading else { continue };
+            // The leaving part and the fades keep their paths and flat ids,
+            // which a snapshot taken before them does not have.
+            let level = path.parent().unwrap_or_else(ModulePath::root);
+            let leaving = level.child(fading.leaving);
+            for (p, id) in live.ids.paths() {
+                if p.starts_with(&leaving) || p.parent().as_ref() == Some(path) {
+                    let _ = self.ids.reserve(p.clone(), id);
+                }
+            }
+        }
+    }
+
+    /// The slot tiles whose current part differs between `self` and
+    /// `other`, by flat id: what an undo step must swap rather than add
+    /// and remove.
+    pub fn slots_differing_from(&self, other: &Hierarchy) -> Vec<ModuleId> {
+        self.slots
+            .iter()
+            .filter(|(path, state)| other.slots.get(*path).is_none_or(|o| o.part != state.part))
+            .filter_map(|(path, _)| self.ids.get(path))
+            .collect()
     }
 
     /// The slot tiles with a fade in progress, each with its fades' flat
@@ -746,6 +784,21 @@ impl Hierarchy {
         slot: ModuleId,
         kind: &str,
     ) -> Result<Swapped, String> {
+        self.swap_to_module_at(controller, layout, slot, kind, None)
+    }
+
+    /// [`Hierarchy::swap_to_module`], with the new part at the level id
+    /// `at` when given: undo and redo put a part back at the id it had, so
+    /// the step's assignments and mappings find it (sub-patches.md, Slots:
+    /// undo of a swap fades too).
+    pub fn swap_to_module_at(
+        &mut self,
+        controller: &mut Controller,
+        layout: &dyn Fn(u32) -> Layout,
+        slot: ModuleId,
+        kind: &str,
+        at: Option<u32>,
+    ) -> Result<Swapped, String> {
         let slot_path = self
             .ids
             .path_of(slot)
@@ -770,7 +823,14 @@ impl Hierarchy {
         self.hold_part(controller.graph(), controller.registry(), layout, &slot_path);
 
         // The new part, at its held values, then the role values.
-        let (new_path, new_id) = self.new_module(&level).map_err(|e| e.to_string())?;
+        let (new_path, new_id) = match at {
+            Some(lid) => {
+                let path = level.child(lid);
+                let id = self.ids.id_of(&path).map_err(|e| e.to_string())?;
+                (path, id)
+            }
+            None => self.new_module(&level).map_err(|e| e.to_string())?,
+        };
         controller.add_module_with_id(new_id, kind).map_err(|e| e.to_string())?;
         let mut added = vec![new_id];
         if let Some(held) = &restore {

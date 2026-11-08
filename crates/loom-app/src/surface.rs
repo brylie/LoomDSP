@@ -46,6 +46,7 @@ pub fn control_target(
     widget: usize,
     part: ControlPart,
 ) -> Option<ControlTarget> {
+    let tile = part_tile(hierarchy, tile);
     if let Some(node) = graph.node(ModuleId(tile)) {
         let d = node.descriptor;
         let w = d.panel.widgets.get(widget)?;
@@ -85,6 +86,7 @@ pub fn control_target(
 /// The widget index of the control bound to `name` on tile `tile`: a
 /// parameter name on a module tile, an exposed name on a sub-patch tile.
 pub fn find_control(graph: &Graph, hierarchy: &Hierarchy, tile: u32, name: &str) -> Option<usize> {
+    let tile = part_tile(hierarchy, tile);
     if let Some(node) = graph.node(ModuleId(tile)) {
         return node
             .descriptor
@@ -104,6 +106,7 @@ pub fn find_control(graph: &Graph, hierarchy: &Hierarchy, tile: u32, name: &str)
 /// display. Every surface widget is a control until displays can be
 /// exposed.
 pub fn is_control(graph: &Graph, hierarchy: &Hierarchy, tile: u32, widget: usize) -> bool {
+    let tile = part_tile(hierarchy, tile);
     match graph.node(ModuleId(tile)) {
         Some(node) => node
             .descriptor
@@ -118,6 +121,7 @@ pub fn is_control(graph: &Graph, hierarchy: &Hierarchy, tile: u32, widget: usize
 /// True when widget `widget` of tile `tile` is bound to `name`: a parameter
 /// or display value on a module tile, an exposed name on a sub-patch tile.
 pub fn widget_binds(graph: &Graph, hierarchy: &Hierarchy, tile: u32, widget: usize, name: &str) -> bool {
+    let tile = part_tile(hierarchy, tile);
     match graph.node(ModuleId(tile)) {
         Some(node) => node.descriptor.panel.widgets.get(widget).is_some_and(|w| w.binds(name)),
         None => hierarchy
@@ -131,6 +135,7 @@ pub fn widget_binds(graph: &Graph, hierarchy: &Hierarchy, tile: u32, widget: usi
 /// parameter or display value on a module tile, the exposed name on a
 /// sub-patch tile.
 pub fn widget_name(graph: &Graph, hierarchy: &Hierarchy, tile: u32, widget: usize) -> Option<String> {
+    let tile = part_tile(hierarchy, tile);
     match graph.node(ModuleId(tile)) {
         Some(node) => Some(node.descriptor.panel.widgets.get(widget)?.bind().to_string()),
         None => Some(
@@ -142,6 +147,13 @@ pub fn widget_name(graph: &Graph, hierarchy: &Hierarchy, tile: u32, widget: usiz
                 .clone(),
         ),
     }
+}
+
+/// A slot tile shows its part's panel, so a control on it is the part's:
+/// the part's id for a slot tile, else the tile itself (sub-patches.md,
+/// Slots).
+pub fn part_tile(hierarchy: &Hierarchy, tile: u32) -> u32 {
+    hierarchy.part_of_slot(ModuleId(tile)).map_or(tile, |part| part.0)
 }
 
 /// The widget a surface control takes: the one the inner tile shows for
@@ -392,8 +404,12 @@ pub fn surface_values(
     let graph = controller.graph();
     for (instance, count) in instances(hierarchy) {
         for index in 0..count {
+            let slot = hierarchy.slot_of_part(instance);
             let Some(target) = control_target(graph, hierarchy, instance.0, index, ControlPart::Main) else {
                 values.set(instance.0, index, WidgetValue::default());
+                if let Some(slot) = slot {
+                    values.set(slot.0, index, WidgetValue::default());
+                }
                 continue;
             };
             let Some(node) = graph.node(target.module) else {
@@ -409,17 +425,18 @@ pub fn surface_values(
             let live = (target.kind.has_range() && all.iter().any(|r| r.enabled))
                 .then(|| controller.modulated(target.module, target.index))
                 .flatten();
-            values.set(
-                instance.0,
-                index,
-                WidgetValue {
-                    position: crate::scene::control_position(target.kind, &target.spec, value),
-                    text: crate::param::format(&target.spec, value),
-                    modulation: crate::modulation::mark(target.kind, &target.spec, value, assigned),
-                    live,
-                    ..WidgetValue::default()
-                },
-            );
+            let widget_value = WidgetValue {
+                position: crate::scene::control_position(target.kind, &target.spec, value),
+                text: crate::param::format(&target.spec, value),
+                modulation: crate::modulation::mark(target.kind, &target.spec, value, assigned),
+                live,
+                ..WidgetValue::default()
+            };
+            // A sub-patch part's surface is drawn on its slot's tile too.
+            if let Some(slot) = slot {
+                values.set(slot.0, index, widget_value.clone());
+            }
+            values.set(instance.0, index, widget_value);
         }
     }
 }
@@ -443,6 +460,9 @@ pub fn surface_live_values(
             && value.live != live
         {
             let next = WidgetValue { live, ..value.clone() };
+            if let Some(slot) = hierarchy.slot_of_part(instance) {
+                values.set(slot.0, index, next.clone());
+            }
             values.set(instance.0, index, next);
         }
         at = (instance, name);

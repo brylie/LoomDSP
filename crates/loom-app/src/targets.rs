@@ -142,7 +142,7 @@ fn find_on_tile(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str) -
         ));
     }
     let control = match tile {
-        Tile::Instance(_) => {
+        Tile::Instance(_) | Tile::Slot(_) => {
             crate::surface::find_control(graph, hierarchy, module, name).map(|i| Part::Control(module, i))
         }
         _ => None,
@@ -166,6 +166,11 @@ fn tile_port(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str, outp
         Tile::Port(direction, _) => {
             let faces_out = direction == loom_patch::Direction::Input;
             (faces_out == output && direction.own_port() == name).then_some(0)?
+        }
+        Tile::Slot(_) => {
+            let state = hierarchy.slot(id)?;
+            let list = if output { state.role.outputs } else { state.role.inputs };
+            list.iter().position(|port| port.name == name)?
         }
         Tile::Module => return None,
     };
@@ -192,6 +197,15 @@ fn port_name(graph: &Graph, hierarchy: &Hierarchy, port: PortRef) -> Option<Stri
         Tile::Port(direction, _) => {
             let faces_out = direction == loom_patch::Direction::Input;
             (faces_out == port.output && port.index == 0).then(|| direction.own_port().to_string())
+        }
+        Tile::Slot(_) => {
+            let state = hierarchy.slot(id)?;
+            let list = if port.output {
+                state.role.outputs
+            } else {
+                state.role.inputs
+            };
+            Some(list.get(port.index)?.name.to_string())
         }
         Tile::Module => None,
     }

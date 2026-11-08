@@ -78,6 +78,9 @@ pub enum Inspector {
     Unknown(UnknownRows),
     /// A sub-patch tile: its name and ports (sub-patches.md, Editor model).
     SubPatch(SubPatchRows),
+    /// A slot tile: its part, the parts it can swap to, and the part's
+    /// parameters, the role's first (sub-patches.md, Slots).
+    Slot(SlotRows),
     /// A Patch input or output tile inside a sub-patch.
     Port(PortRows),
     /// The selected module is gone. Nothing is shown.
@@ -99,6 +102,28 @@ pub struct SubPatchRows {
     /// parameter's row, named by its surface name (sub-patches.md,
     /// Exposing).
     pub params: Vec<ExposedRow>,
+}
+
+/// The inspector's view of a slot tile.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SlotRows {
+    /// The tile's id.
+    pub id: u32,
+    /// The slot's name.
+    pub name: String,
+    /// The role's display name.
+    pub role: String,
+    /// The current part's name, or `None` for an empty slot.
+    pub part: Option<String>,
+    /// The flat id of the part, whose rows the parameters are.
+    pub part_id: Option<u32>,
+    /// Every part the slot can take, the current one marked: the **Part**
+    /// list.
+    pub choices: Vec<crate::slots::SwapChoice>,
+    /// The part's parameters that are the role's, as `(label, row)`.
+    pub role_params: Vec<(String, ParamRow)>,
+    /// The part's other parameters, under a heading with the part's name.
+    pub other_params: Vec<(String, ParamRow)>,
 }
 
 /// A surface item's row on a sub-patch tile's inspector.
@@ -638,6 +663,70 @@ impl App {
         })
     }
 
+    /// The inspector's rows for the slot tile `id`: its part, the Part
+    /// list, and the part's parameter rows, the role's first (sub-patches.md,
+    /// Slots). A sub-patch part shows its surface items as the role's rows.
+    fn slot_rows(&self, id: u32) -> Inspector {
+        let graph = self.session.controller.graph();
+        let hierarchy = &self.session.hierarchy;
+        let Some(state) = hierarchy.slot(ModuleId(id)) else {
+            return Inspector::Empty;
+        };
+        let part = hierarchy.part_of_slot(ModuleId(id));
+        let mut role_params = Vec::new();
+        let mut other_params = Vec::new();
+        let mut part_name = None;
+        if let Some(part) = part {
+            if let Some(node) = graph.node(part) {
+                part_name = Some(node.descriptor.name.to_string());
+                for (index, spec) in node.descriptor.params.iter().enumerate() {
+                    if spec.is_transient() {
+                        continue;
+                    }
+                    let Some(spec) = node.spec(index) else { continue };
+                    let exposure = self.exposure_row(part.0, index, spec.name);
+                    let exposed = exposure.as_ref().is_some_and(|e| e.name.is_some());
+                    let Some(row) = self.param_row(part.0, index, &spec, exposure, !exposed) else {
+                        continue;
+                    };
+                    if state.role_param_of(spec.name).is_some() {
+                        role_params.push((spec.label.to_string(), row));
+                    } else {
+                        other_params.push((spec.label.to_string(), row));
+                    }
+                }
+            } else if let Some(definition) = hierarchy.definition_of(part) {
+                part_name = Some(definition.metadata.name.clone());
+                for (index, exposed) in definition.exposed.iter().enumerate() {
+                    let Some(target) =
+                        crate::surface::control_target(graph, hierarchy, part.0, index, loom_canvas::ControlPart::Main)
+                    else {
+                        continue;
+                    };
+                    let exposure = self.exposure_row(part.0, index, &exposed.name);
+                    let Some(row) = self.param_row(target.module.0, target.index, &target.spec, exposure, false) else {
+                        continue;
+                    };
+                    if state.role.param(&exposed.name).is_some() {
+                        role_params.push((exposed.name.clone(), row));
+                    } else {
+                        other_params.push((exposed.name.clone(), row));
+                    }
+                }
+            }
+        }
+        Inspector::Slot(SlotRows {
+            id,
+            name: state.name(),
+            role: state.role.name.to_string(),
+            part: part_name,
+            part_id: part.map(|p| p.0),
+            choices: self.swap_choices(id),
+            role_params,
+            other_params,
+        })
+    }
+
     /// The inspector's content for the current selection.
     pub(crate) fn inspector_model(&self) -> Inspector {
         let graph = self.session.controller.graph();
@@ -698,6 +787,9 @@ impl App {
                     outputs: outputs.into_iter().map(|(_, name)| name).collect(),
                     params,
                 });
+            }
+            Some(loom_patch::Tile::Slot(_)) => {
+                return self.slot_rows(id);
             }
             Some(loom_patch::Tile::Port(direction, name)) => {
                 return Inspector::Port(PortRows {
@@ -973,6 +1065,47 @@ pub fn view<'a>(
                     dragging,
                 ));
             }
+            rows.into()
+        }
+        Inspector::Slot(s) => {
+            let id = s.id;
+            let mut rows = column![
+                text(s.name.clone()).size(style::HEADING),
+                text(format!("Slot for {}", s.role)).size(style::BODY).color(DIM),
+            ]
+            .spacing(6);
+            let current = s.choices.iter().find(|c| c.current).cloned();
+            let choices: Vec<crate::slots::SwapChoice> = s.choices.clone();
+            rows = rows.push(
+                row![
+                    text("Part").size(style::BODY),
+                    pick_list(choices, current, move |choice: crate::slots::SwapChoice| {
+                        AppMessage::SwapSlot {
+                            slot: id,
+                            to: choice.to,
+                        }
+                    })
+                    .placeholder(crate::slots::NO_PART)
+                    .text_size(style::CONTROL),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            );
+            let part_id = s.part_id.unwrap_or(id);
+            for (label, p) in s.role_params {
+                rows = rows.push(param_row_view(part_id, label, p, None, drop_row, dragging));
+            }
+            if !s.other_params.is_empty() {
+                rows = rows.push(
+                    text(format!("{} only", s.part.clone().unwrap_or_default()))
+                        .size(style::BODY)
+                        .color(DIM),
+                );
+                for (label, p) in s.other_params {
+                    rows = rows.push(param_row_view(part_id, label, p, None, drop_row, dragging));
+                }
+            }
+            rows = rows.push(button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)));
             rows.into()
         }
         Inspector::Port(p) => column![

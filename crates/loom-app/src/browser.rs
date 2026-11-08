@@ -83,6 +83,9 @@ pub struct LibraryItem {
     /// The name shown: the patch's name, or its file name when it has none
     /// or does not read.
     pub name: String,
+    /// The roles the file declares, as role kinds, so a slot's Swap list
+    /// can offer it (sub-patches.md, Slots).
+    pub roles: Vec<String>,
 }
 
 /// What the app should do after a browser message.
@@ -485,10 +488,16 @@ pub fn library_items(folder: &Path) -> Vec<LibraryItem> {
         .into_iter()
         .filter_map(|path| {
             let row = crate::patches::Row::read(&path);
+            let roles = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| loom_patch::Patch::from_ron(&text).ok())
+                .map(|patch| patch.roles)
+                .unwrap_or_default();
             Some(LibraryItem {
                 library: library.path_of(&path)?,
                 name: row.name(),
                 path,
+                roles,
             })
         })
         .collect();

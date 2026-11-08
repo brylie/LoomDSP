@@ -562,7 +562,7 @@ fn the_all_modules_patch_has_every_module_without_overlap() {
     let graph = app.session.controller.graph();
     let mut kinds: Vec<&str> = graph.nodes().map(|(_, node)| node.descriptor.id).collect();
     kinds.sort_unstable();
-    let mut registry: Vec<&str> = loom_modules::registry().iter().map(|d| d.id).collect();
+    let mut registry: Vec<&str> = loom_modules::registry().browsable().map(|d| d.id).collect();
     registry.sort_unstable();
     assert_eq!(kinds, registry, "every built-in module, once");
     let tiles: Vec<_> = app

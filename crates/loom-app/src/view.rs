@@ -91,7 +91,7 @@ impl App {
                 .on_right_press(Message::CloseTileMenu);
             let mut items = column![].spacing(2);
             for (label, message) in self.tile_menu_items(module) {
-                items = items.push(button(label).on_press(message).width(160));
+                items = items.push(button(iced::widget::text(label)).on_press(message).width(200));
             }
             let menu = container(items).padding(4).style(container::rounded_box);
             layers = layers

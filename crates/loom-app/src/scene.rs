@@ -428,6 +428,9 @@ pub fn update_live_values(values: &mut PanelValues, controller: &Controller, hie
                 None => next.live = live,
             }
             if &next != value {
+                if let Some(slot) = hierarchy.slot_of_part(a.target) {
+                    values.set(slot.0, index, next.clone());
+                }
                 values.set(a.target.0, index, next);
             }
         }
@@ -573,6 +576,10 @@ pub fn update_panel_values_dragging(
                     }
                 }
             };
+            // A slot tile draws its part's panel under its own id.
+            if let Some(slot) = hierarchy.slot_of_part(id) {
+                values.set(slot.0, index, value.clone());
+            }
             values.set(id.0, index, value);
         }
     }
@@ -917,7 +924,9 @@ pub fn build(
 ) -> Scene {
     let graph = controller.graph();
     let delayed: BTreeSet<InputRef> = controller.last_report().inserted_delays().map(|(_, to)| *to).collect();
-    let on_level = |id: ModuleId| hierarchy.level_of(id) == *level;
+    // A slot's part, a part that is leaving, and a swap fade are hidden
+    // behind the slot's tile (sub-patches.md, Slots).
+    let on_level = |id: ModuleId| hierarchy.level_of(id) == *level && !hierarchy.is_hidden(id);
 
     // Assignments each output drives, counting those that are off.
     let mut badges: BTreeMap<OutputRef, u32> = BTreeMap::new();
@@ -1132,6 +1141,81 @@ pub fn build(
                     ),
                 }
             }
+            Tile::Slot(_) => {
+                let Some(state) = hierarchy.slot(id) else { continue };
+                let name = hierarchy.tile_name(id).unwrap_or_default();
+                let part = hierarchy.part_of_slot(id);
+                let part_node = part.and_then(|part| graph.node(part));
+                let part_name = part.and_then(|part| match part_node {
+                    Some(node) => Some(node.descriptor.name.to_string()),
+                    None => hierarchy.tile_name(part),
+                });
+                let holds = part_name
+                    .as_ref()
+                    .map_or_else(|| "Holds nothing yet.".to_string(), |p| format!("Holds {p}."));
+                let role_port = |port: &loom_core::RolePort, into: bool| PortView {
+                    label: port.label.to_string(),
+                    hover: HoverText::new(port.label, port.description, port.name),
+                    colour: signal_colour(port.signal),
+                    shape: signal_shape(port.signal),
+                    badge: if into {
+                        0
+                    } else {
+                        hierarchy
+                            .source_behind(graph, level, &(lid, port.name.to_string()))
+                            .and_then(|(module, output)| {
+                                let index = graph.node(module)?.output_index(&output)?;
+                                badges.get(&OutputRef { module, port: index }).copied()
+                            })
+                            .unwrap_or(0)
+                    },
+                    follows_transport: None,
+                };
+                let panel = match (part, part_node) {
+                    (Some(part), Some(node)) => {
+                        let mut panel = panel_for(node.descriptor, &node.params);
+                        for (w, view) in node.descriptor.panel.widgets.iter().zip(panel.widgets.iter_mut()) {
+                            if w.is_control()
+                                && let Some((_, surface_name)) = hierarchy.exposure_of(part, w.bind())
+                            {
+                                view.exposed = true;
+                                view.hover.note = Some(format!("Exposed as {surface_name}"));
+                            }
+                        }
+                        panel
+                    }
+                    (Some(part), None) => crate::surface::surface_panel(graph, hierarchy, part),
+                    (None, _) => PanelView {
+                        width: 10,
+                        height: 3,
+                        widgets: Vec::new(),
+                    },
+                };
+                ModuleView {
+                    id: id.0,
+                    title: name.clone(),
+                    hover: HoverText {
+                        description: format!(
+                            "Slot for {}. {holds} {}",
+                            state.role.name,
+                            if part.is_some() {
+                                "Right-click to swap."
+                            } else {
+                                crate::slots::NO_PART
+                            }
+                        ),
+                        name: Some(state.role.kind()),
+                        note: None,
+                    },
+                    accent: part_node.map_or(structure, |node| family_colour(node.descriptor.family)),
+                    position: place(id),
+                    size: sizes.get(&id.0).copied(),
+                    unknown: false,
+                    inputs: state.role.inputs.iter().map(|port| role_port(port, true)).collect(),
+                    outputs: state.role.outputs.iter().map(|port| role_port(port, false)).collect(),
+                    panel,
+                }
+            }
             Tile::Module => continue,
         };
         modules.push(view);
@@ -1177,6 +1261,12 @@ pub fn build(
                     Direction::Output => input && end.1 == "in",
                 };
                 fits.then(|| (id.0, 0, if input { signal_from(end) } else { signal_into(end) }))
+            }
+            Tile::Slot(_) => {
+                let state = hierarchy.slot(id)?;
+                let list = if input { state.role.inputs } else { state.role.outputs };
+                let index = list.iter().position(|port| port.name == end.1)?;
+                Some((id.0, index, list[index].signal))
             }
             Tile::Module => None,
         }

@@ -98,6 +98,15 @@ impl App {
                 Some((lid, list.get(port.index)?.1.clone()))
             }
             Tile::Port(direction, _) => Some((lid, direction.own_port().to_string())),
+            Tile::Slot(_) => {
+                let state = session.hierarchy.slot(id)?;
+                let list = if port.output {
+                    state.role.outputs
+                } else {
+                    state.role.inputs
+                };
+                Some((lid, list.get(port.index)?.name.to_string()))
+            }
             Tile::Module => None,
         }
     }
@@ -716,28 +725,95 @@ impl App {
 
     /// What the tile menu offers for a tile: Help for a module; Open,
     /// Dissolve, Save to library, and Unlink (when linked) for a sub-patch;
-    /// and Make sub-patch for any selection of modules.
-    pub(crate) fn tile_menu_items(&self, module: u32) -> Vec<(&'static str, Message)> {
+    /// Make sub-patch for any selection of modules; Make <Role> slot for
+    /// each role a module or sub-patch declares; and, on a slot, Swap to
+    /// each part that fills its role and Dissolve slot (sub-patches.md,
+    /// Slots). A sub-patch tile whose surface has a control bound to a
+    /// slot's role parameter offers that slot's swaps too.
+    pub(crate) fn tile_menu_items(&self, module: u32) -> Vec<(String, Message)> {
         let session = &self.session;
         let tile = session.hierarchy.tile(session.controller.graph(), ModuleId(module));
+        let own = |label: &str, message: Message| (label.to_string(), message);
         match tile {
             Some(Tile::Instance(_)) => {
                 let mut items = vec![
-                    ("Open", Message::OpenTile(module)),
-                    ("Dissolve sub-patch", Message::DissolveSubPatch(module)),
-                    ("Save to library", Message::SaveToLibrary(module)),
+                    own("Open", Message::OpenTile(module)),
+                    own("Dissolve sub-patch", Message::DissolveSubPatch(module)),
+                    own("Save to library", Message::SaveToLibrary(module)),
                 ];
                 if session.hierarchy.library_of(ModuleId(module)).is_some() {
-                    items.push(("Unlink", Message::Unlink(module)));
+                    items.push(own("Unlink", Message::Unlink(module)));
                 }
+                items.extend(self.make_slot_items(module));
+                items.extend(self.bound_slot_swaps(module));
                 items
             }
-            Some(Tile::Port(..)) => vec![("Help", Message::ShowModuleHelp(module))],
-            _ => vec![
-                ("Help", Message::ShowModuleHelp(module)),
-                ("Make sub-patch", Message::MakeSubPatch(module)),
-            ],
+            Some(Tile::Port(..)) => vec![own("Help", Message::ShowModuleHelp(module))],
+            Some(Tile::Slot(_)) => {
+                let mut items: Vec<(String, Message)> = self
+                    .swap_choices(module)
+                    .into_iter()
+                    .filter(|choice| !choice.current)
+                    .map(|choice| {
+                        (
+                            format!("Swap to {}", choice.label),
+                            Message::SwapSlot {
+                                slot: module,
+                                to: choice.to,
+                            },
+                        )
+                    })
+                    .collect();
+                items.push(own("Dissolve slot", Message::DissolveSlot(module)));
+                items
+            }
+            _ => {
+                let mut items = vec![
+                    own("Help", Message::ShowModuleHelp(module)),
+                    own("Make sub-patch", Message::MakeSubPatch(module)),
+                ];
+                items.extend(self.make_slot_items(module));
+                items
+            }
         }
+    }
+
+    /// The swaps of every slot a surface control of the sub-patch tile
+    /// `instance` is bound to, as `Swap Filter to Ladder`: the canvas has
+    /// no menu on a control, so the tile's menu carries them.
+    fn bound_slot_swaps(&self, instance: u32) -> Vec<(String, Message)> {
+        let session = &self.session;
+        let Some(definition) = session.hierarchy.definition_of(ModuleId(instance)) else {
+            return Vec::new();
+        };
+        let mut slots: Vec<ModuleId> = Vec::new();
+        for index in 0..definition.exposed.len() {
+            let Some(target) = session.hierarchy.exposed_target(ModuleId(instance), index) else {
+                continue;
+            };
+            if let Some(slot) = session.hierarchy.slot_of_part(target.module)
+                && !slots.contains(&slot)
+            {
+                slots.push(slot);
+            }
+        }
+        let mut items = Vec::new();
+        for slot in slots {
+            let name = session.hierarchy.tile_name(slot).unwrap_or_default();
+            for choice in self.swap_choices(slot.0) {
+                if choice.current {
+                    continue;
+                }
+                items.push((
+                    format!("Swap {name} to {}", choice.label),
+                    Message::SwapSlot {
+                        slot: slot.0,
+                        to: choice.to,
+                    },
+                ));
+            }
+        }
+        items
     }
 }
 

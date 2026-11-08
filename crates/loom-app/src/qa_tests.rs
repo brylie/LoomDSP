@@ -1030,3 +1030,65 @@ fn a_new_patch_ends_the_loss_of_a_system_default() {
     run.app.check_audio(Instant::now() + Duration::from_secs(2));
     assert_eq!(run.tape.stream_starts().len(), starts, "no second restart");
 }
+
+/// Noise into a Filter slot holding an SVF, out to the audio output, as
+/// the player would swap it on stage.
+const NOISE_SLOT: &str = r#"Patch(version: 1, metadata: Metadata(name: "Noise slot"), modules: [
+    PatchModule(id: 1, kind: "loom.osc.noise@1"),
+    PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 300.0, "resonance": 0.5}),
+    PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+], cables: [
+    PatchCable(from: (1, "out"), to: (9, "in")),
+    PatchCable(from: (9, "out"), to: (3, "in")),
+])"#;
+
+/// The 10 ms swap fade in frames at the test rate.
+fn swap_fade_frames() -> usize {
+    (loom_modules::structure::SWAP_FADE_SECONDS * RATE as f32).round() as usize
+}
+
+/// The largest step a swap may have, given steady audio on one side of
+/// it: that audio's largest step, plus the fade's largest gain change per
+/// sample times its peak, since the fade's gains move too (sub-patches.md,
+/// Acceptance criteria).
+fn swap_step_limit(steady: &[f32]) -> f32 {
+    assert!(steady.iter().all(|x| x.is_finite()), "the steady audio is finite");
+    max_step(steady) + peak(steady) * (std::f32::consts::FRAC_PI_2 / swap_fade_frames() as f32) + 1e-6
+}
+
+/// A slot swap during playback has no step larger than the crossfade
+/// allows: across the swap and its fade, the largest step is within what
+/// the steady audio before it, or the steady audio after it, allows, and
+/// finishing the fade adds no step (sub-patches.md, Slots: click-free;
+/// FR-ENCAP-08, FR-GRAPH-05).
+#[test]
+fn a_slot_swap_during_playback_has_no_click() {
+    let mut run = Setup::new("slot_swap", PatchFrom::Text(NOISE_SLOT)).start();
+    run.play(0.5);
+    let switch = run.left().len();
+    let _ = run.app.update(Message::SwapSlot {
+        slot: 9,
+        to: crate::slots::SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    assert_eq!(run.app.alerts.status(), "Swapped Filter to Ladder.");
+    run.play(0.1);
+    // A tick finishes the fade once every fade reports done.
+    let _ = run.app.update(Message::Tick);
+    assert!(
+        run.app.session.hierarchy.fading_slots().is_empty(),
+        "the fade finished after 100 ms of audio"
+    );
+    let finish = run.left().len();
+    run.play(0.3);
+    let left = run.left();
+    assert!(left.iter().all(|x| x.is_finite()));
+
+    let before = &left[switch - WINDOW..switch];
+    let after = &left[finish + 1024..finish + 1024 + WINDOW];
+    assert!(peak(after) > 1e-3, "the ladder plays");
+    let limit = swap_step_limit(before).max(swap_step_limit(after));
+    let across = max_step(&left[switch - 1..finish + 1024]);
+    assert!(across <= limit, "swap step {across} > {limit}");
+}

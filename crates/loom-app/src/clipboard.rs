@@ -185,7 +185,7 @@ impl Group {
                     !loom_patch::library::is_patch_wide(&kind)
                 }),
                 Some(Tile::Instance(_)) => true,
-                Some(Tile::Port(..)) | None => false,
+                Some(Tile::Port(..) | Tile::Slot(_)) | None => false,
             })
             .collect();
         let selected = &selected;

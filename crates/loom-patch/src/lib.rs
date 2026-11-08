@@ -678,7 +678,7 @@ pub(crate) fn canonicalise_lists(
 
 /// The id of a role or module kind string: `"loom.role.filter@1"` gives
 /// `"loom.role.filter"`.
-pub(crate) fn role_id(kind: &str) -> &str {
+pub fn role_id(kind: &str) -> &str {
     kind.rsplit_once('@').map_or(kind, |(id, _)| id)
 }
 

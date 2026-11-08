@@ -98,7 +98,7 @@ enum Expected {
 /// Every file the generator owns in `dir`, with what it should hold.
 fn expected(registry: &Registry, dir: &Path) -> io::Result<Vec<(PathBuf, Expected)>> {
     let mut files = vec![(dir.join(INDEX), Expected::Content(index(registry)))];
-    for d in registry.iter() {
+    for d in registry.browsable() {
         let path = dir.join(file_name(d));
         let notes = match read_normalized(&path)? {
             None => Some(String::new()),
@@ -140,7 +140,7 @@ fn read_normalized(path: &Path) -> io::Result<Option<String>> {
 
 /// Markdown pages in `dir` that belong to no registered module.
 fn unknown_pages(registry: &Registry, dir: &Path) -> io::Result<Vec<PathBuf>> {
-    let known: Vec<String> = registry.iter().map(file_name).collect();
+    let known: Vec<String> = registry.browsable().map(file_name).collect();
     let mut unknown = Vec::new();
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -171,7 +171,7 @@ fn display_name(path: &Path) -> String {
 /// to its page (ADR-0029).
 pub fn index(registry: &Registry) -> String {
     let mut families: BTreeMap<loom_core::Family, Vec<&ModuleDescriptor>> = BTreeMap::new();
-    for d in registry.iter() {
+    for d in registry.browsable() {
         families.entry(d.family).or_default().push(d);
     }
     let mut out = String::new();

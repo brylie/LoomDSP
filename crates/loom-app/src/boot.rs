@@ -226,9 +226,9 @@ impl App {
             alerts: alerts::Alerts::with_notes(status),
             // The app's tests load the test modules but never list them.
             modules: if args.test_modules {
-                registry(true).iter().collect()
+                registry(true).browsable().collect()
             } else {
-                loom_modules::registry().iter().collect()
+                loom_modules::registry().browsable().collect()
             },
             overlays: Default::default(),
             drops: Vec::new(),

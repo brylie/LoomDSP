@@ -67,6 +67,7 @@ mod screenshot;
 mod script_vars;
 mod session;
 mod settings;
+mod slots;
 mod snapshot;
 mod spectrum;
 mod stream;
@@ -308,6 +309,23 @@ enum Message {
     SaveToLibrary(u32),
     /// Make this linked sub-patch tile a plain copy (the tile menu).
     Unlink(u32),
+    /// Make this module or sub-patch tile the part of a new slot for the
+    /// role with this id (the tile menu; sub-patches.md, Slots).
+    MakeSlot {
+        /// The tile.
+        module: u32,
+        /// The role's id, such as `loom.role.filter`.
+        role: String,
+    },
+    /// Swap what this slot tile holds (the tile menu, the inspector).
+    SwapSlot {
+        /// The slot tile.
+        slot: u32,
+        /// The part to take.
+        to: slots::SwapTarget,
+    },
+    /// Make this slot tile's part a plain module again (the tile menu).
+    DissolveSlot(u32),
     /// A message for the open module browser.
     Browser(browser::Message),
     /// A message for the open probe menu.
@@ -557,6 +575,9 @@ impl Message {
             | Self::DissolveSubPatch(_)
             | Self::SaveToLibrary(_)
             | Self::Unlink(_)
+            | Self::MakeSlot { .. }
+            | Self::SwapSlot { .. }
+            | Self::DissolveSlot(_)
             | Self::Browser(_)
             | Self::ProbeMenu(_)
             | Self::AddProbe { .. }
@@ -798,6 +819,8 @@ impl App {
             engine.process(&mut left[..n], &mut right[..n]);
             remaining -= n;
         }
+        // What a tick would do after the engine ran.
+        self.finish_due_fades();
     }
 
     /// Rebuilds the scene after the graph changed.
@@ -1563,6 +1586,18 @@ impl App {
                 self.overlays.close_tile_menu();
                 self.unlink(id);
             }
+            Message::MakeSlot { module, role } => {
+                self.overlays.close_tile_menu();
+                self.make_slot(module, &role);
+            }
+            Message::SwapSlot { slot, to } => {
+                self.overlays.close_tile_menu();
+                self.swap_slot(slot, to);
+            }
+            Message::DissolveSlot(id) => {
+                self.overlays.close_tile_menu();
+                self.dissolve_slot(id);
+            }
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
                 self.overlays.help = self
@@ -1683,6 +1718,9 @@ impl App {
             Message::Tick => {
                 self.session.controller.collect_garbage();
                 self.update_dropouts(Instant::now());
+                // A swap's crossfade is finished once every fade reports
+                // done (sub-patches.md, How a swap crossfades).
+                self.finish_due_fades();
             }
             Message::AudioPoll => self.poll_audio(),
             Message::InputAudio(event) => {

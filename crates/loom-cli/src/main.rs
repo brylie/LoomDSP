@@ -284,7 +284,7 @@ const TEXT_INDENT: usize = 8;
 /// Writes the module list. With `verbose`, each port and parameter gets a
 /// header line, then its label and description wrapped on lines below it.
 fn write_modules(out: &mut impl Write, registry: &Registry, verbose: bool) -> std::io::Result<()> {
-    for d in registry.iter() {
+    for d in registry.browsable() {
         writeln!(out, "{:<28} {:<16} {}", d.kind(), d.name, d.description)?;
         if !verbose {
             continue;
