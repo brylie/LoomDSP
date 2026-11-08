@@ -2057,7 +2057,12 @@ impl Hierarchy {
             }
             return Err(error);
         }
-        self.read_level(&temp.modules, &[], level, &temp.subpatches)?;
+        if let Err(error) = self.read_level(&temp.modules, &[], level, &temp.subpatches) {
+            for id in &added {
+                let _ = controller.remove_module(*id);
+            }
+            return Err(error);
+        }
         let mut layouts = Vec::new();
         for (path, instance) in &self.instances {
             if !path.starts_with(&instance_path) {

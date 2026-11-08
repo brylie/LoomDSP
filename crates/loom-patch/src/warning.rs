@@ -111,6 +111,24 @@ pub enum LoadWarning {
         /// Why the file does not load.
         reason: String,
     },
+    /// A refreshed library file no longer has a port or an exposed
+    /// parameter the patch used, so what named it was removed
+    /// (sub-patches.md, Linked library items).
+    LinkDropped {
+        /// The sub-patch's name.
+        name: String,
+        /// The port or exposed name the file no longer has.
+        item: String,
+        /// What was removed: `cable`, `assignment`, `MIDI mapping`, or
+        /// `exposed parameter`.
+        what: &'static str,
+    },
+    /// The refreshed library files could not be used together, so every
+    /// linked sub-patch kept its stored copy (sub-patches.md, rule 5).
+    LibraryNotUsed {
+        /// Why the refreshed patch does not load.
+        reason: String,
+    },
     /// A patch-wide module (the Transport, or the Scale and tuning module)
     /// in a file inserted or refreshed as a sub-patch was left out, and its
     /// cables became ports on the tile (sub-patches.md, rule 8).
@@ -209,6 +227,16 @@ impl fmt::Display for LoadWarning {
             Self::LibraryUnreadable { name, path, reason } => write!(
                 f,
                 "{name}: the library file \"{path}\" does not load ({reason}), so its stored copy is used."
+            ),
+            Self::LinkDropped { name, item, what } => {
+                write!(
+                    f,
+                    "{name}: the library file no longer has \"{item}\"; its {what} was removed."
+                )
+            }
+            Self::LibraryNotUsed { reason } => write!(
+                f,
+                "The library's changes could not be used ({reason}), so the stored copies are used."
             ),
             Self::PatchWideLeftOut {
                 name,

@@ -187,12 +187,17 @@ impl SubPatch {
                 });
             }
             // Cables into it come from inner outputs: one Patch output per
-            // inner output, shared with an assignment from that output.
+            // inner output, fed by that output once, and shared with an
+            // assignment from the same output.
             let mut outputs: BTreeMap<(u32, String), u32> = BTreeMap::new();
             let mut output_for = |source: &(u32, String), definition: &mut SubPatch, made: &mut Vec<String>| {
                 *outputs.entry(source.clone()).or_insert_with(|| {
                     let (id, name) = ports.add(definition, Direction::Output, source);
                     made.push(name);
+                    definition.cables.push(PatchCable {
+                        from: source.clone(),
+                        to: (id, "in".to_string()),
+                    });
                     id
                 })
             };
@@ -200,11 +205,7 @@ impl SubPatch {
                 if dropped_ids.contains(&cable.from.0) {
                     continue;
                 }
-                let port = output_for(&cable.from, &mut definition, &mut made);
-                definition.cables.push(PatchCable {
-                    from: cable.from.clone(),
-                    to: (port, "in".to_string()),
-                });
+                output_for(&cable.from, &mut definition, &mut made);
             }
             for assignment in &file.modulation {
                 if assignment.source.0 == module.id && !dropped_ids.contains(&assignment.target.0) {
@@ -422,14 +423,6 @@ impl Patch {
     pub fn has_links(&self) -> bool {
         self.subpatches.values().any(|d| d.library.is_some())
     }
-
-    /// The modules of every level, top first then each definition in key
-    /// order, for an edit that touches every instance.
-    fn modules_at_every_level(&mut self) -> impl Iterator<Item = &mut PatchModule> {
-        self.modules
-            .iter_mut()
-            .chain(self.subpatches.values_mut().flat_map(|d| d.modules.iter_mut()))
-    }
 }
 
 /// Refreshes the linked definitions of `patch`'s table. `stack` holds the
@@ -505,18 +498,186 @@ fn refresh_table(
             done.insert(nested_key.clone());
             patch.subpatches.insert(nested_key, definition);
         }
-        let names: BTreeSet<String> = fresh.exposed.iter().map(|e| e.name.clone()).collect();
         let fresh_name = fresh.metadata.name.clone();
+        let surface = Surface::of(&fresh);
         patch.subpatches.insert(key.clone(), fresh);
-        for module in patch.modules_at_every_level() {
-            if module.subpatch.as_deref() == Some(key.as_str()) {
-                module.params.retain(|name, _| names.contains(name));
-            }
-        }
+        drop_stale_references(patch, &key, &surface, &fresh_name, notes);
         for dropped in &left_out {
             notes.push(dropped.warning(&fresh_name));
         }
         refreshed.push(fresh_name);
+    }
+}
+
+/// What a definition shows outside: its port names and its exposed names.
+struct Surface {
+    inputs: BTreeSet<String>,
+    outputs: BTreeSet<String>,
+    exposed: BTreeSet<String>,
+}
+
+impl Surface {
+    fn of(definition: &SubPatch) -> Self {
+        let ports = |kind: &str, fallback: &str| -> BTreeSet<String> {
+            definition
+                .modules
+                .iter()
+                .filter(|m| m.kind == kind)
+                .map(|m| port_name(m, fallback))
+                .collect()
+        };
+        Self {
+            inputs: ports(INPUT_KIND, "in"),
+            outputs: ports(OUTPUT_KIND, "out"),
+            exposed: definition.exposed.iter().map(|e| e.name.clone()).collect(),
+        }
+    }
+}
+
+/// One level of a patch, for an edit that touches every level: the top,
+/// or a definition by key.
+struct LevelMut<'a> {
+    key: Option<String>,
+    modules: &'a mut Vec<PatchModule>,
+    cables: &'a mut Vec<PatchCable>,
+    modulation: &'a mut Vec<crate::PatchModulation>,
+    midi: &'a mut Vec<crate::PatchMidiMapping>,
+    exposed: &'a mut Vec<Exposed>,
+}
+
+/// Every level of `patch`, the top first.
+fn levels_mut(patch: &mut Patch) -> Vec<LevelMut<'_>> {
+    let mut levels = vec![LevelMut {
+        key: None,
+        modules: &mut patch.modules,
+        cables: &mut patch.cables,
+        modulation: &mut patch.modulation,
+        midi: &mut patch.midi,
+        exposed: &mut patch.exposed,
+    }];
+    for (key, definition) in &mut patch.subpatches {
+        levels.push(LevelMut {
+            key: Some(key.clone()),
+            modules: &mut definition.modules,
+            cables: &mut definition.cables,
+            modulation: &mut definition.modulation,
+            midi: &mut definition.midi,
+            exposed: &mut definition.exposed,
+        });
+    }
+    levels
+}
+
+/// After the definition `key` was replaced from its library file: drops
+/// everything, at every level, that names a port or an exposed parameter
+/// the fresh definition no longer has (a cable, an assignment, a MIDI
+/// mapping, an instance's value or range, an enclosing definition's
+/// exposed entry, and the entries above that re-exposed it), with a note
+/// for each. *Why:* the file says what the surface is now, and a patch
+/// must still open (rule 5).
+fn drop_stale_references(patch: &mut Patch, key: &str, surface: &Surface, name: &str, notes: &mut Vec<LoadWarning>) {
+    let note = |item: &str, what: &'static str| LoadWarning::LinkDropped {
+        name: name.to_string(),
+        item: item.to_string(),
+        what,
+    };
+    // Exposed names gone from an enclosing definition, by its key (or the
+    // top), still to follow up the levels.
+    let mut pending: Vec<(Option<String>, BTreeSet<String>)> = Vec::new();
+    for level in levels_mut(patch) {
+        let instances: BTreeSet<u32> = level
+            .modules
+            .iter()
+            .filter(|m| m.subpatch.as_deref() == Some(key))
+            .map(|m| m.id)
+            .collect();
+        if instances.is_empty() {
+            continue;
+        }
+        for module in level.modules.iter_mut().filter(|m| instances.contains(&m.id)) {
+            module.params.retain(|n, _| surface.exposed.contains(n));
+            module.ranges.retain(|n, _| surface.exposed.contains(n));
+        }
+        let stale_input = |end: &(u32, String)| instances.contains(&end.0) && !surface.inputs.contains(&end.1);
+        let stale_output = |end: &(u32, String)| instances.contains(&end.0) && !surface.outputs.contains(&end.1);
+        let stale_exposed = |end: &(u32, String)| instances.contains(&end.0) && !surface.exposed.contains(&end.1);
+        level.cables.retain(|cable| {
+            let stale = stale_input(&cable.to) || stale_output(&cable.from);
+            if stale {
+                let item = if stale_input(&cable.to) {
+                    &cable.to.1
+                } else {
+                    &cable.from.1
+                };
+                notes.push(note(item, "cable"));
+            }
+            !stale
+        });
+        level.modulation.retain(|assignment| {
+            let stale = stale_exposed(&assignment.target) || stale_output(&assignment.source);
+            if stale {
+                let item = if stale_exposed(&assignment.target) {
+                    &assignment.target.1
+                } else {
+                    &assignment.source.1
+                };
+                notes.push(note(item, "assignment"));
+            }
+            !stale
+        });
+        level.midi.retain(|mapping| {
+            let stale = stale_exposed(&mapping.target);
+            if stale {
+                notes.push(note(&mapping.target.1, "MIDI mapping"));
+            }
+            !stale
+        });
+        let mut gone = BTreeSet::new();
+        level.exposed.retain(|entry| {
+            let stale = stale_exposed(&(entry.module, entry.param.clone()));
+            if stale {
+                notes.push(note(&entry.param, "exposed parameter"));
+                gone.insert(entry.name.clone());
+            }
+            !stale
+        });
+        if !gone.is_empty() && level.key.is_some() {
+            pending.push((level.key.clone(), gone));
+        }
+    }
+    // An exposed name gone from a definition takes with it, on every
+    // instance of that definition, the value, the assignments and
+    // mappings onto it, and the enclosing entries that re-exposed it.
+    while let Some((Some(outer_key), names)) = pending.pop() {
+        for level in levels_mut(patch) {
+            let instances: BTreeSet<u32> = level
+                .modules
+                .iter()
+                .filter(|m| m.subpatch.as_deref() == Some(outer_key.as_str()))
+                .map(|m| m.id)
+                .collect();
+            if instances.is_empty() {
+                continue;
+            }
+            let stale = |end: &(u32, String)| instances.contains(&end.0) && names.contains(&end.1);
+            for module in level.modules.iter_mut().filter(|m| instances.contains(&m.id)) {
+                module.params.retain(|n, _| !names.contains(n));
+                module.ranges.retain(|n, _| !names.contains(n));
+            }
+            level.modulation.retain(|a| !stale(&a.target));
+            level.midi.retain(|m| !stale(&m.target));
+            let mut gone = BTreeSet::new();
+            level.exposed.retain(|entry| {
+                let goes = stale(&(entry.module, entry.param.clone()));
+                if goes {
+                    gone.insert(entry.name.clone());
+                }
+                !goes
+            });
+            if !gone.is_empty() && level.key.is_some() {
+                pending.push((level.key.clone(), gone));
+            }
+        }
     }
 }
 

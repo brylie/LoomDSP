@@ -316,16 +316,33 @@ impl Loaded {
         let mut original_unknown_positions = BTreeMap::new();
         let mut notes = Vec::new();
         let mut hierarchy = Hierarchy::flat();
-        let mut load = |mut patch: Patch, controller: &mut Controller| -> Result<Metadata, String> {
+        let mut load = |stored: Patch, controller: &mut Controller| -> Result<Metadata, String> {
             // Linked sub-patches follow the library file, and the refreshed
             // copies are what the editor holds and saves.
+            let mut patch = stored.clone();
             notes = patch
                 .refresh_linked(library, controller.registry())
                 .map_err(|e| e.to_string())?;
             // The flat graph plays; the hierarchy keeps the sub-patches and
-            // gives every tile its id (ADR-0039).
+            // gives every tile its id (ADR-0039). If the refreshed files do
+            // not play together, the stored copies do: a patch always opens
+            // (sub-patches.md, rule 5).
             let mut ids = FlatIds::new();
-            notes.extend(patch.load_with_ids(controller, &mut ids).map_err(|e| e.to_string())?);
+            let flat = match patch.flatten(controller.registry(), &mut ids) {
+                Ok(flat) => flat,
+                Err(error) if patch != stored => {
+                    notes.push(loom_patch::LoadWarning::LibraryNotUsed {
+                        reason: error.to_string(),
+                    });
+                    patch = stored;
+                    ids = FlatIds::new();
+                    patch
+                        .flatten(controller.registry(), &mut ids)
+                        .map_err(|e| e.to_string())?
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            notes.extend(flat.apply_to(controller, &mut ids).map_err(|e| e.to_string())?);
             hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids).map_err(|e| e.to_string())?;
             for (id, layout) in hierarchy.layouts(&patch) {
                 if controller.graph().node(id).is_some_and(|node| node.unknown.is_some()) {

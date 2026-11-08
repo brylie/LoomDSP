@@ -855,3 +855,118 @@ fn a_scale_placeholder_stays_out_of_copies_and_stays_put_on_cut() {
         "the Transport stays"
     );
 }
+
+/// A library file that renamed a port still lets the patch open: the
+/// cable out of the old port goes, the status bar says what went, and the
+/// tile plays from the new file. A file whose fresh copy cannot play at
+/// all leaves the stored copy, with a note (sub-patches.md, rule 5).
+#[test]
+fn a_changed_library_file_never_stops_the_patch_from_opening() {
+    let dir = library();
+    let mut ui = Ui::with_app(app_with(HOST, &dir.0));
+    let voice = insert(&mut ui, "Voice", true);
+    let app = &mut ui.app;
+    let lid = app.session.hierarchy.path_of(ModuleId(voice)).last();
+    let root = ModulePath::root();
+    assert!(app.change_hierarchy("connect", |h, _| {
+        h.connect(&root, (1, "pitch".to_string()), (lid, "pitch".to_string()));
+        h.connect(&root, (lid, "out".to_string()), (2, "in".to_string()));
+        Ok(())
+    }));
+    app.commit();
+    let patch_file = dir.0.join("set.ron");
+    crate::patch_file::save(&app.current_patch(), &patch_file).unwrap();
+
+    // The file renames its output port.
+    write(
+        &dir.0,
+        "Voices/Voice.ron",
+        &VOICE_FILE.replace("label: Some(\"out\")", "label: Some(\"audio\")"),
+    );
+    assert!(app.open_path(&patch_file));
+    assert_eq!(
+        app.ui_snapshot().status,
+        format!(
+            "opened {}: Voice: the library file no longer has \"out\"; its cable was removed.; Updated from the library: Voice.",
+            patch_file.display()
+        )
+    );
+    let tile = app.ui_snapshot().tiles.into_iter().find(|t| t.id == voice).unwrap();
+    assert_eq!(tile.outputs[0].label, "audio");
+    assert_eq!(app.current_patch().cables.len(), 1, "the note into the tile stays");
+
+    // The file's fresh copy cannot play: it exposes a module it does not
+    // have. The stored copy plays instead.
+    write(
+        &dir.0,
+        "Voices/Voice.ron",
+        &VOICE_FILE.replace("module: 4, param: \"gain\"", "module: 99, param: \"gain\""),
+    );
+    assert!(app.open_path(&patch_file));
+    assert!(
+        app.ui_snapshot()
+            .status
+            .contains("The library's changes could not be used ("),
+        "{}",
+        app.ui_snapshot().status
+    );
+    assert_eq!(inner_gain(app, voice), 0.5, "the stored copy plays");
+    assert_eq!(
+        app.session.controller.graph().cables().count(),
+        4,
+        "the note in, the two inside, and the stored copy's out to the output"
+    );
+}
+
+/// A library file opened on its own cannot take a link to itself, or to a
+/// file whose links reach it: the file would contain itself
+/// (sub-patches.md, Patch file). A copy of itself is fine.
+#[test]
+fn inserting_the_open_library_file_into_itself_is_refused() {
+    let dir = library();
+    let mut ui = Ui::with_app(app_with(HOST, &dir.0));
+    assert!(ui.app.open_path(&dir.0.join("Voices").join("Voice.ron")));
+    ui.redraw();
+    open_browser(&mut ui);
+    let row = ui
+        .app
+        .overlays
+        .browser()
+        .unwrap()
+        .library_rows()
+        .into_iter()
+        .find(|(_, item)| item.name == "Voice")
+        .unwrap()
+        .0;
+    ui.send(Message::Browser(browser::Message::InsertLinked(row)));
+    assert_eq!(
+        ui.app.ui_snapshot().status,
+        "Cannot insert Voice: sub-patch Voice › Voice contains itself"
+    );
+    assert!(ui.app.session.hierarchy.is_flat(), "nothing was added");
+    let copy = insert(&mut ui, "Voice", false);
+    assert_eq!(ui.app.session.hierarchy.library_of(ModuleId(copy)), None);
+}
+
+/// Save to library with a name typed without its extension, when a file
+/// of that name exists, asks before replacing it, as Save As does.
+#[test]
+fn save_to_library_asks_before_replacing_a_file_named_without_its_extension() {
+    let dir = library();
+    let mut ui = Ui::with_app(app_with(HOST, &dir.0));
+    let voice = insert(&mut ui, "Voice", false);
+    let app = &mut ui.app;
+    let _ = fake::asked();
+    let target = dir.0.join("Voices").join("Voice.ron");
+    let before = std::fs::read_to_string(&target).unwrap();
+    // A fresh name the dialog did not check, with Voice.ron already there.
+    fake::answer_save(Some(dir.0.join("Voices").join("Voice")));
+    let _ = app.update(Message::SaveToLibrary(voice));
+    let question = app.ui_snapshot().question.expect("the replace question");
+    assert_eq!(question.title, "Replace \"Voice.ron\"?");
+    assert_eq!(question.primary, "cancel");
+    assert!(app.question_message(crate::question::Message::Answer(crate::question::Answer::Replace)));
+    assert_eq!(app.ui_snapshot().status, format!("saved Voice to {}", target.display()));
+    assert_ne!(std::fs::read_to_string(&target).unwrap(), before, "positions differ");
+    assert!(app.ui_snapshot().question.is_none());
+}

@@ -6,6 +6,7 @@ use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Qu
 use crate::session::{PatchSession, Started};
 use crate::{App, Args, FileAction, Loaded, Source, alerts, bench, control, files, settings};
 use loom_core::EngineConfig;
+use loom_patch::Patch;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -288,6 +289,9 @@ impl App {
                 true
             }
             (Kind::Replace { path, next }, Answer::Replace) => self.write_then(path, next),
+            (Kind::ReplaceLibrary { path, file, name }, Answer::Replace) => {
+                self.write_library_file(&file, &path, &name)
+            }
             _ => true,
         }
     }
@@ -582,19 +586,35 @@ impl App {
                 match files::pick_save(start.as_deref()) {
                     files::Saving::Cancelled => return false,
                     files::Saving::Chosen(path) => path,
+                    // A name typed without its extension that another file
+                    // has: ask, as Save As does.
                     files::Saving::Confirm(path) => {
-                        self.alerts.warn(format!(
-                            "Cannot save {name} to the library: \"{}\" is there already. Pick another name.",
-                            files::display_name(Some(&path))
-                        ));
+                        if !self.library_file_is_sound(&file, &path, &name) {
+                            return false;
+                        }
+                        self.overlays.question = Some(Question::replace_library(path, file, name));
                         return false;
                     }
                 }
             }
         };
-        // A linked sub-patch inside that follows this very file would make
-        // the file contain itself (sub-patches.md, Patch file).
-        let relative = folder.as_ref().and_then(|folder| folder.path_of(&target));
+        if !self.library_file_is_sound(&file, &target, &name) {
+            return false;
+        }
+        self.write_library_file(&file, &target, &name)
+    }
+
+    /// Refuses, with the reason in the status bar, a library file that
+    /// would contain itself: a linked sub-patch inside it follows the very
+    /// file being written (sub-patches.md, Patch file).
+    fn library_file_is_sound(&mut self, file: &Patch, target: &Path, name: &str) -> bool {
+        let folder = self
+            .rig
+            .store
+            .saved()
+            .library_folder()
+            .map(|root| crate::patch_file::FolderLibrary { root });
+        let relative = folder.as_ref().and_then(|folder| folder.path_of(target));
         if let Some(relative) = &relative
             && let Some(nested) = file
                 .subpatches
@@ -602,16 +622,22 @@ impl App {
                 .find(|d| d.library.as_deref() == Some(relative.as_str()))
         {
             let error = loom_patch::PatchError::SubPatchLoop {
-                path: vec![name.clone(), nested.metadata.name.clone()],
+                path: vec![name.to_string(), nested.metadata.name.clone()],
             };
             self.alerts.warn(format!("Cannot save {name} to the library: {error}"));
             return false;
         }
+        true
+    }
+
+    /// Writes the sub-patch `name` as the patch file `target`, making the
+    /// folders on the way, and says so. Returns true when it was written.
+    fn write_library_file(&mut self, file: &Patch, target: &Path, name: &str) -> bool {
         let written = target
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
             .map_err(|e| e.to_string())
-            .and_then(|()| crate::patch_file::save(&file, &target).map_err(|e| e.to_string()));
+            .and_then(|()| crate::patch_file::save(file, target).map_err(|e| e.to_string()));
         match written {
             Ok(()) => {
                 self.alerts.clear(alerts::Cause::File);

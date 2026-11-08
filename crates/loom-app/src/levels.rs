@@ -642,12 +642,31 @@ impl App {
         let library = linked.then(|| item.library.clone());
         let level = self.session.level.clone();
         let name = file.metadata.name.clone();
+        // The open patch may be a library file itself: a link to it, or a
+        // file whose links reach it, would make it contain itself
+        // (sub-patches.md, Patch file).
+        if let Some(own) = self.own_library_path()
+            && (library.as_deref() == Some(own.as_str())
+                || file
+                    .subpatches
+                    .values()
+                    .any(|d| d.library.as_deref() == Some(own.as_str())))
+        {
+            let error = loom_patch::PatchError::SubPatchLoop {
+                path: vec![self.session.document.name().to_string(), name],
+            };
+            self.alerts.warn(format!("Cannot insert {}: {error}", item.name));
+            return;
+        }
         self.session.step_name = Some(format!("insert {name}"));
         self.edit(|app| {
             let mut candidate = app.session.hierarchy.clone();
             let inserted = match candidate.insert(&mut app.session.controller, &level, &file, library.as_deref()) {
                 Ok(inserted) => inserted,
                 Err(e) => {
+                    // The insert took its modules back; only a commit hands
+                    // their slots back.
+                    app.commit();
                     app.alerts.warn(format!("Cannot insert {name}: {e}"));
                     return;
                 }
@@ -689,6 +708,16 @@ impl App {
             }
         });
         self.session.step_name = None;
+    }
+
+    /// The open patch's own path in the library, when its file is inside
+    /// the library folder: a library item being edited on its own.
+    pub(crate) fn own_library_path(&self) -> Option<String> {
+        let file = self.session.document.file()?;
+        match self.rig.library() {
+            crate::settings::RigLibrary::Folder(folder) => folder.path_of(file),
+            crate::settings::RigLibrary::None => None,
+        }
     }
 
     /// What the tile menu offers for a tile: Help for a module; Open,

@@ -182,6 +182,15 @@ fn from_patch_leaves_patch_wide_modules_out_and_turns_their_cables_into_ports() 
             .count(),
         1
     );
+    // The port made for the assignment's source is fed by that source,
+    // once, as collapsing would feed it.
+    let into_out_2: Vec<&PatchCable> = definition
+        .cables
+        .iter()
+        .filter(|c| c.to == (outputs[2].id, "in".to_string()))
+        .collect();
+    assert_eq!(into_out_2.len(), 1);
+    assert_eq!(into_out_2[0].from, (3, "out".to_string()));
     assert!(
         !definition
             .cables
@@ -568,4 +577,137 @@ fn patch_wide_kinds() {
     assert!(!is_patch_wide(INPUT_KIND));
     assert!(!patch(VOICE).has_links());
     assert!(patch(LINKED).has_links());
+}
+
+/// A library file that renamed its output port and its exposed parameter
+/// is taken, and everything in the patch that named the old port or name
+/// goes with a note: the cable out of the tile, the assignment and the
+/// MIDI mapping onto the exposed name, and the instance's value. The
+/// patch still loads (sub-patches.md, Linked library items; rule 5).
+#[test]
+fn refresh_drops_what_names_a_port_or_exposed_name_the_file_no_longer_has() {
+    let mut linked = patch(LINKED);
+    linked.modules.push(PatchModule {
+        id: 5,
+        kind: "loom.mod.lfo@1".to_string(),
+        subpatch: None,
+        label: None,
+        params: BTreeMap::new(),
+        position: None,
+        size: None,
+        ranges: BTreeMap::new(),
+    });
+    linked.modulation.push(crate::PatchModulation {
+        source: (5, "out".to_string()),
+        target: (2, "gain".to_string()),
+        depth: 0.5,
+        polarity: None,
+        enabled: true,
+    });
+    linked.midi.push(crate::PatchMidiMapping {
+        target: (2, "gain".to_string()),
+        channel: 0,
+        controller: 7,
+        mode: crate::PatchMidiMode::Absolute,
+        range: (0.0, 1.0),
+        invert: false,
+    });
+    loads(&linked);
+    let renamed = VOICE
+        .replace("label: Some(\"out\")", "label: Some(\"audio\")")
+        .replace("Exposed(name: \"gain\"", "Exposed(name: \"level\"");
+    let library = library(&[("Voices/Voice.ron", &renamed)]);
+    let notes = linked.refresh_linked(&library, &registry()).unwrap();
+    assert_eq!(
+        notes.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        [
+            "Voice: the library file no longer has \"out\"; its cable was removed.",
+            "Voice: the library file no longer has \"gain\"; its assignment was removed.",
+            "Voice: the library file no longer has \"gain\"; its MIDI mapping was removed.",
+            "Updated from the library: Voice.",
+        ]
+    );
+    assert!(
+        !linked.cables.iter().any(|c| c.from.0 == 2),
+        "the cable out of the tile"
+    );
+    assert!(
+        linked.cables.iter().any(|c| c.to == (2, "pitch".to_string())),
+        "the cable into a port the file still has stays"
+    );
+    assert!(linked.modulation.is_empty());
+    assert!(linked.midi.is_empty());
+    let instance = linked.modules.iter().find(|m| m.id == 2).unwrap();
+    assert!(instance.params.is_empty(), "no value for a name that is gone");
+    let (controller, hierarchy) = loads(&linked);
+    let (_, outputs) = hierarchy.instance_ports(loom_core::ModuleId(2));
+    assert_eq!(outputs[0].1, "audio");
+    assert_eq!(
+        controller.graph().cables().count(),
+        3,
+        "the note into the generator through the port, and the two inside; nothing out"
+    );
+}
+
+/// An exposed name gone from a refreshed file goes up the levels: an
+/// enclosing definition's entry that re-exposed it, and the value on that
+/// definition's instance, go too, and the patch loads.
+#[test]
+fn refresh_drops_an_enclosing_exposure_of_a_name_the_file_no_longer_has() {
+    let text = r#"Patch(
+        version: 1,
+        subpatches: {
+            "rack": SubPatch(
+                metadata: Metadata(name: "Rack"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), params: {"gain": 0.3}),
+                    PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+                exposed: [Exposed(name: "gain", module: 1, param: "gain")],
+            ),
+            "voice": SubPatch(
+                metadata: Metadata(name: "Voice"),
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch")),
+                    PatchModule(id: 2, kind: "loom.phase.generator@1"),
+                    PatchModule(id: 3, kind: "loom.osc.sine@1"),
+                    PatchModule(id: 4, kind: "loom.math.mul@1", params: {"gain": 0.9}),
+                    PatchModule(id: 5, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [
+                    PatchCable(from: (1, "out"), to: (2, "pitch")),
+                    PatchCable(from: (2, "phase"), to: (3, "phase")),
+                    PatchCable(from: (3, "out"), to: (4, "a")),
+                    PatchCable(from: (4, "out"), to: (5, "in")),
+                ],
+                exposed: [Exposed(name: "gain", module: 4, param: "gain")],
+                library: Some("Voices/Voice.ron"),
+            ),
+        },
+        modules: [
+            PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("rack"), params: {"gain": 0.1}),
+            PatchModule(id: 2, kind: "loom.io.audio-out@1"),
+            PatchModule(id: 3, kind: "loom.clock.transport@1"),
+        ],
+        cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+        midi: [PatchMidiMapping(target: (1, "gain"), channel: 0, controller: 7)],
+    )"#;
+    let mut nested = patch(text);
+    loads(&nested);
+    let renamed = VOICE.replace("Exposed(name: \"gain\"", "Exposed(name: \"level\"");
+    let library = library(&[("Voices/Voice.ron", &renamed)]);
+    let notes = nested.refresh_linked(&library, &registry()).unwrap();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.to_string()
+                == "Voice: the library file no longer has \"gain\"; its exposed parameter was removed."),
+        "{notes:?}"
+    );
+    assert!(nested.subpatches["rack"].exposed.is_empty());
+    assert!(nested.subpatches["rack"].modules[0].params.is_empty());
+    assert!(nested.modules[0].params.is_empty(), "the value on the Rack's instance");
+    assert!(nested.midi.is_empty(), "the mapping on the Rack's exposed name");
+    loads(&nested);
 }
