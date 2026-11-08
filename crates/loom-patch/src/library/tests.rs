@@ -722,6 +722,12 @@ fn refresh_drops_an_enclosing_exposure_of_a_name_the_file_no_longer_has() {
                 == "Voice: the library file no longer has \"gain\"; its exposed parameter was removed."),
         "{notes:?}"
     );
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.to_string() == "Voice: the library file no longer has \"gain\"; its MIDI mapping was removed."),
+        "the mapping dropped a level up is said too: {notes:?}"
+    );
     assert!(nested.subpatches["rack"].exposed.is_empty());
     assert!(nested.subpatches["rack"].modules[0].params.is_empty());
     assert!(nested.modules[0].params.is_empty(), "the value on the Rack's instance");

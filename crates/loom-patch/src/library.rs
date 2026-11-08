@@ -661,12 +661,25 @@ fn drop_stale_references(patch: &mut Patch, key: &str, surface: &Surface, name: 
                 module.params.retain(|n, _| !names.contains(n));
                 module.ranges.retain(|n, _| !names.contains(n));
             }
-            level.modulation.retain(|a| !stale(&a.target));
-            level.midi.retain(|m| !stale(&m.target));
+            level.modulation.retain(|a| {
+                let goes = stale(&a.target);
+                if goes {
+                    notes.push(note(&a.target.1, "assignment"));
+                }
+                !goes
+            });
+            level.midi.retain(|m| {
+                let goes = stale(&m.target);
+                if goes {
+                    notes.push(note(&m.target.1, "MIDI mapping"));
+                }
+                !goes
+            });
             let mut gone = BTreeSet::new();
             level.exposed.retain(|entry| {
                 let goes = stale(&(entry.module, entry.param.clone()));
                 if goes {
+                    notes.push(note(&entry.param, "exposed parameter"));
                     gone.insert(entry.name.clone());
                 }
                 !goes

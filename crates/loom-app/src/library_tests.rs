@@ -548,7 +548,7 @@ fn a_missing_library_file_loads_the_stored_copy_with_a_status() {
 /// would make a file contain itself is refused when inserted
 /// (sub-patches.md, Patch file; rule 5).
 #[test]
-fn a_self_containing_link_is_refused_naming_the_loop() {
+fn a_link_loop_keeps_the_stored_copy_and_a_self_link_is_refused_on_insert() {
     let dir = library();
     // A links to B, and B links to A.
     let mut a = Patch::from_ron(VOICE_FILE).unwrap();
@@ -1006,6 +1006,13 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
         app.session.hierarchy.library_of(ModuleId(first)),
         Some("Voices/Voice.ron")
     );
+    // The check that costs an unflatten runs only while a mapping can
+    // change a stored copy: not for the exposed gain alone.
+    assert!(app.midi_may_edit_a_linked_tile());
+    app.session.controller.unmap_midi(generator, 0).unwrap();
+    assert!(!app.midi_may_edit_a_linked_tile(), "an exposed value is the instance's");
+    app.session.controller.map_midi(cc(7), generator, 0).unwrap();
+    app.commit();
     let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
