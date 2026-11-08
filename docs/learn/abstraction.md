@@ -47,7 +47,7 @@ A slot is a tile with the role's ports. Behind it sits an ordinary module, the *
 
 This matters for what a slot costs: nothing. Encapsulation has no run-time cost (FR-ENCAP-07), and a slot is only a way of saying which module is wired in and how.
 
-It also matters for what a slot remembers. When you swap the ladder out for an SVF, the slot keeps the ladder's own values under the ladder's name: its drive and its slope, which the Filter role does not have. Swap back a week later and both are where you left them. Cutoff and resonance are different: they are the role's, so they carry across on every swap, and the ladder comes back with the cutoff and resonance the SVF had when it left. A sub-patch that leaves a slot is kept whole, inner edits and all. Nothing is ever converted from one part to another: a ladder's drive has no meaning on an SVF, so it waits for the ladder to come back.
+It also matters for what a slot remembers. When you swap the ladder out for an SVF, the slot keeps the ladder's own values under the ladder's name. Its slope is a parameter the Filter role does not have, so it is kept and comes back as it was. Its drive is a role parameter, but an optional one that the SVF lacks, so there is nothing to carry it to or from, and it comes back as it was too. Cutoff and resonance are different: both parts have them, so they carry across on every swap, and the ladder comes back with the cutoff and resonance the SVF had when it left. A sub-patch that leaves a slot is kept whole, inner edits and all. Nothing is ever converted from one part to another: a ladder's drive has no meaning on an SVF, so it waits for the ladder to come back.
 
 ## Why a swap must crossfade
 
