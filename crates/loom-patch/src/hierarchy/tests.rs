@@ -1300,11 +1300,40 @@ fn linked_fingerprints_change_with_an_edit_inside_but_not_with_an_exposed_value(
 }
 
 /// A library file opened on its own keeps its surface: the top level's
-/// exposed list saves back as it was, less an entry whose module is gone.
+/// exposed list saves back as it was, follows a module collapsed into a
+/// sub-patch and dissolved out again, and loses an entry whose module is
+/// gone.
 #[test]
 fn the_top_level_exposed_list_round_trips_and_drops_gone_modules() {
     let file = Patch::from_ron(VOICE_FILE).unwrap();
     let (mut controller, mut hierarchy) = load(&file);
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    assert_eq!(saved.exposed, file.exposed);
+    // The multiply collapses into a sub-patch with the sine: the entry
+    // goes through the new tile's surface, and the module's flat id, which
+    // it keeps inside, no longer names it at the top.
+    let made = hierarchy
+        .collapse(controller.graph(), &ModulePath::root(), &[3, 4])
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let saved = written(&hierarchy, &controller, &file.metadata);
+    let lid = hierarchy.path_of(made.instance).last();
+    assert_eq!(saved.exposed.len(), 1);
+    // The new surface names the item by the parameter's label, as Expose
+    // does; the top entry keeps its own name and points at that item.
+    assert_eq!(
+        (saved.exposed[0].module, saved.exposed[0].param.as_str()),
+        (lid, "Gain")
+    );
+    assert_eq!(saved.exposed[0].name, "gain");
+    let inner = &saved.subpatches["sub-patch"];
+    assert_eq!(inner.exposed.len(), 1);
+    assert_eq!(inner.exposed[0].name, "Gain");
+    assert_eq!((inner.exposed[0].module, inner.exposed[0].param.as_str()), (4, "gain"));
+    load(&saved);
+    // Dissolved, the entry names the multiply again.
+    hierarchy.dissolve(controller.graph(), made.instance).unwrap();
+    hierarchy.sync(&mut controller).unwrap();
     let saved = written(&hierarchy, &controller, &file.metadata);
     assert_eq!(saved.exposed, file.exposed);
     // A module the list names is removed: its entry goes.

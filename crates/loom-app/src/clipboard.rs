@@ -175,9 +175,15 @@ impl Group {
             .copied()
             .filter(|&id| hierarchy.level_of(ModuleId(id)) == *level)
             .filter(|&id| match tile_of(id) {
-                Some(Tile::Module) => graph
-                    .node(ModuleId(id))
-                    .is_some_and(|node| node.descriptor.id != loom_core::TRANSPORT_MODULE),
+                // A patch-wide module is left out, also as a placeholder for
+                // one this build does not have (sub-patches.md, rule 8).
+                Some(Tile::Module) => graph.node(ModuleId(id)).is_some_and(|node| {
+                    let kind = node
+                        .unknown
+                        .as_ref()
+                        .map_or_else(|| node.descriptor.kind(), |unknown| unknown.kind.clone());
+                    !loom_patch::library::is_patch_wide(&kind)
+                }),
                 Some(Tile::Instance(_)) => true,
                 Some(Tile::Port(..)) | None => false,
             })
@@ -247,9 +253,19 @@ impl Group {
             .collect();
 
         // Assignments come in id order, the order the engine sums them in.
-        // One onto a parameter inside a selected sub-patch tile is written
-        // onto the tile's exposed name; one from inside a tile, through
-        // its output port.
+        // Only the level's own come: one onto a parameter inside a selected
+        // sub-patch tile is written onto the tile's exposed name, and one
+        // from inside a tile through its output port, but one with both
+        // ends inside the same tile is the definition's, and the copied
+        // definition carries it already.
+        let written_at = |source: ModuleId, target: ModuleId| -> ModulePath {
+            let (source_level, target_level) = (hierarchy.level_of(source), hierarchy.level_of(target));
+            if target_level.starts_with(&source_level) {
+                source_level
+            } else {
+                target_level
+            }
+        };
         let target_of = |target: ModuleId, index: usize| -> Option<(u32, String)> {
             let name = graph.node(target)?.parameter_name(index)?.to_string();
             if selected.contains(&target.0) {
@@ -279,6 +295,7 @@ impl Group {
         };
         let modulation = graph
             .assignments()
+            .filter(|(_, a)| written_at(a.source.module, a.target) == *level)
             .filter_map(|(_, a)| {
                 Some(Modulation {
                     target: target_of(a.target, a.param)?,
@@ -337,8 +354,9 @@ impl Group {
             })
             .collect();
         if kept.is_empty() {
+            let verb = if left_out.len() == 1 { "was" } else { "were" };
             return Err(format!(
-                "only the {} was copied, and a patch has one, at the top level",
+                "only the {} {verb} copied, and a patch has one, at the top level",
                 left_out.join(" and ")
             ));
         }
@@ -591,6 +609,12 @@ impl Group {
     /// True when the group has no tiles.
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
+    }
+
+    /// The ids of the group's tiles in the patch they came from: what cut
+    /// deletes, so a tile the clipboard left out stays.
+    pub fn ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.members.iter().map(Member::id)
     }
 
     /// "Filter" for one module, "Voice" for one sub-patch, "3 modules" for

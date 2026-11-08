@@ -274,11 +274,16 @@ fn paste_refuses_text_it_cannot_add_whole() {
     let orphan =
         r#"Patch(version: 1, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"))])"#;
     assert_eq!(refuse(orphan), "Cannot paste: there is no sub-patch `v`");
-    // Only a patch-wide module was copied: nothing to paste.
+    // Only patch-wide modules were copied: nothing to paste.
     let transport = r#"Patch(version: 1, modules: [PatchModule(id: 1, kind: "loom.clock.transport@1")])"#;
     assert_eq!(
         refuse(transport),
         "Cannot paste: only the Transport was copied, and a patch has one, at the top level"
+    );
+    let both = r#"Patch(version: 1, modules: [PatchModule(id: 1, kind: "loom.clock.transport@1"), PatchModule(id: 2, kind: "loom.pitch.scale@1")])"#;
+    assert_eq!(
+        refuse(both),
+        "Cannot paste: only the Transport and loom.pitch.scale@1 were copied, and a patch has one, at the top level"
     );
     assert!(refuse("Patch(version: 99, modules: [(id: 1, kind: \"loom.osc.sine\")])").contains("newer"));
     let unknown = refuse("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])");
@@ -531,7 +536,13 @@ const NESTED: &str = r#"Patch(
                 PatchCable(from: (3, "out"), to: (4, "a")),
                 PatchCable(from: (4, "out"), to: (5, "in")),
             ],
-            exposed: [Exposed(name: "gain", module: 4, param: "gain")],
+            modulation: [
+                PatchModulation(source: (4, "out"), target: (2, "tune"), depth: 0.2),
+            ],
+            exposed: [
+                Exposed(name: "gain", module: 4, param: "gain"),
+                Exposed(name: "tune", module: 2, param: "tune"),
+            ],
             library: Some("Voices/Voice.ron"),
         ),
     },
@@ -553,9 +564,11 @@ const NESTED: &str = r#"Patch(
 
 /// Copy of a sub-patch tile writes its definition into the text, with the
 /// tile's exposed value, its link, the cable into it from a selected
-/// module, and the assignment onto its exposed name; pasted into another
-/// patch, the tile comes back with its inside, its value, and its link
-/// (clipboard.md, The clipboard text; sub-patches.md, Copies and editing).
+/// module, and the assignment onto its exposed name; an assignment with
+/// both ends inside the tile stays the definition's and is not written
+/// again outside. Pasted into another patch, the tile comes back with its
+/// inside, its value, its link, and each assignment once (clipboard.md,
+/// The clipboard text; sub-patches.md, Copies and editing).
 #[test]
 fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
     let patch = Patch::from_ron(NESTED).unwrap();
@@ -582,8 +595,13 @@ fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
         1,
         "the cable into the tile; the one out of it is outgoing"
     );
-    assert_eq!(copied.modulation.len(), 1);
+    assert_eq!(
+        copied.modulation.len(),
+        1,
+        "the LFO's; the inner one is the definition's"
+    );
     assert_eq!(copied.modulation[0].target, (2, "gain".to_string()));
+    assert_eq!(copied.subpatches["voice"].modulation.len(), 1);
 
     // Into a fresh patch.
     let mut other = parts().controller;
@@ -629,5 +647,9 @@ fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
     assert_eq!(saved.cables.len(), 1);
     assert_eq!(saved.modulation.len(), 1);
     assert_eq!(saved.modulation[0].target.1, "gain");
-    assert_eq!(other.graph().assignments().count(), 1, "onto the inner multiply");
+    assert_eq!(
+        other.graph().assignments().count(),
+        2,
+        "the LFO onto the inner multiply, and the inner one, once"
+    );
 }

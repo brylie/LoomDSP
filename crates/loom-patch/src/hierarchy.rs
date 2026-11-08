@@ -993,7 +993,9 @@ impl Hierarchy {
                 },
             );
         }
-        // The top level's surface, less what no longer stands behind it.
+        // The top level's surface, less what no longer stands behind it: an
+        // entry names a top-level id, which is a flat id only while the
+        // module is still at the top (collapsing keeps its id inside).
         patch.exposed = self
             .top_exposed
             .iter()
@@ -1004,6 +1006,7 @@ impl Hierarchy {
                 }
                 let id = ModuleId(exposed.module);
                 !skip.contains(&id)
+                    && self.path_of(id) == member
                     && graph.node(id).is_some_and(|node| match &node.unknown {
                         Some(unknown) => unknown.params.contains_key(&exposed.param),
                         None => node.parameter_index(&exposed.param).is_some(),
@@ -1678,6 +1681,33 @@ impl Hierarchy {
                 outer.defaults.remove(&(entry.module, entry.param.clone()));
                 outer.defaults.insert((ilid, name), Stored::default());
             }
+        } else if level.is_root() {
+            // The top level's own surface (a library file opened on its
+            // own) goes through the new sub-patch the same way. An entry
+            // the member cannot carry is dropped.
+            let entries: Vec<Exposed> = self
+                .top_exposed
+                .iter()
+                .filter(|e| members.contains(&e.module))
+                .cloned()
+                .collect();
+            for entry in entries {
+                let carried = self.expose(graph, &instance_path, entry.module, &entry.param).ok();
+                let index = self
+                    .top_exposed
+                    .iter()
+                    .position(|e| e.module == entry.module && e.param == entry.param)
+                    .expect("the entry is still there");
+                match carried {
+                    Some(name) => {
+                        self.top_exposed[index].module = ilid;
+                        self.top_exposed[index].param = name;
+                    }
+                    None => {
+                        self.top_exposed.remove(index);
+                    }
+                }
+            }
         }
 
         Ok(Collapsed {
@@ -1898,7 +1928,19 @@ impl Hierarchy {
             });
         }
         // What the enclosing definition exposed through the dissolved
-        // sub-patch now names the member itself.
+        // sub-patch now names the member itself; at the top level, the
+        // patch's own surface does the same.
+        if let (Some(inner), true) = (&inner, level.is_root()) {
+            for entry in self.top_exposed.iter_mut().filter(|e| e.module == ilid) {
+                let Some(through) = inner.exposed.iter().find(|e| e.name == entry.param) else {
+                    continue;
+                };
+                entry.module = renamed.get(&through.module).copied().unwrap_or(through.module);
+                entry.param = through.param.clone();
+                entry.range = entry.range.or(through.range);
+            }
+            self.top_exposed.retain(|e| e.module != ilid);
+        }
         if let (Some(inner), Some(outer_key)) = (inner, self.instances.get(&level).map(|i| i.key.clone())) {
             let outer = self.definitions.get_mut(&outer_key).expect("the enclosing definition");
             let mut moved = Vec::new();

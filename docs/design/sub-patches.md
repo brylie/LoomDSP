@@ -202,7 +202,7 @@ Patch(
 ```
 
 - A definition's `metadata` is the same type as the patch's (name, description, authors, tags, licence), so a library item's credit travels with it ([#652](https://github.com/brylie/LoomDSP/issues/652)). Its name is what the player sees.
-- A patch file has an `exposed` list of its own, omitted when empty: the surface it shows when it is inserted as a sub-patch ([Library](#library)). Save to library writes the definition's list there, and inserting the file reads it back. Opened on its own, the list is kept and saved back, less an entry whose module is gone, and nothing shows it. *Why:* a library item is an ordinary patch file, and its surface has to live somewhere in it.
+- A patch file has an `exposed` list of its own, omitted when empty: the surface it shows when it is inserted as a sub-patch ([Library](#library)). Save to library writes the definition's list there, and inserting the file reads it back. Opened on its own, the list is kept and saved back, less an entry whose module is gone, and nothing shows it; an entry follows its module through a collapse (onto the new tile's surface) and a dissolve. *Why:* a library item is an ordinary patch file, and its surface has to live somewhere in it.
 - A linked definition's `library` is its path relative to the library folder, with `/` between the parts. The definition itself is the stored copy.
 
 - Module IDs are unique within one definition, not across the patch. *Why:* a definition copied into another patch keeps its own IDs.

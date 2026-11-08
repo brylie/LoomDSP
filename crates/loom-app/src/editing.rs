@@ -577,7 +577,9 @@ impl App {
             return None;
         }
         let group = self.selected_group("cut", false)?;
-        let ids: Vec<u32> = self.session.selection.iter().copied().collect();
+        // Only what the clipboard holds goes: a patch-wide module or a port
+        // tile in the selection stays, since it was not copied.
+        let ids: Vec<u32> = group.ids().collect();
         self.session.step_name = Some(format!("cut {}", group.describe()));
         self.edit(|app| {
             if app.delete_modules(&ids) {

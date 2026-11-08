@@ -801,3 +801,57 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
         "a sub-patch inside a sub-patch"
     );
 }
+
+/// A placeholder for the Scale and tuning module, which this build does
+/// not have yet, is patch-wide too: copy leaves it out, duplicate makes no
+/// second one, and cut leaves it where it is, since the clipboard did not
+/// take it (sub-patches.md, rule 8; clipboard.md, rule 6).
+#[test]
+fn a_scale_placeholder_stays_out_of_copies_and_stays_put_on_cut() {
+    let dir = library();
+    let text = r#"Patch(
+        version: 1,
+        metadata: Metadata(name: "Host"),
+        modules: [
+            PatchModule(id: 1, kind: "loom.osc.sine@1", position: Some((0.0, 0.0))),
+            PatchModule(id: 2, kind: "loom.pitch.scale@1", position: Some((200.0, 0.0))),
+            PatchModule(id: 3, kind: "loom.clock.transport@1", position: Some((0.0, 300.0))),
+        ],
+    )"#;
+    let mut app = app_with(text, &dir.0);
+    assert!(
+        app.session
+            .controller
+            .graph()
+            .node(ModuleId(2))
+            .unwrap()
+            .unknown
+            .is_some(),
+        "the scale module loads as a placeholder"
+    );
+    app.session.selection = [1, 2, 3].into_iter().collect();
+    let text = app.copy().expect("the sine copies");
+    assert_eq!(app.ui_snapshot().status, "Copied Sine");
+    let copied = Patch::from_ron(&text).unwrap();
+    assert_eq!(copied.modules.len(), 1);
+    assert_eq!(copied.modules[0].kind, "loom.osc.sine@1");
+    app.duplicate();
+    assert_eq!(app.ui_snapshot().status, "Duplicated Sine");
+    assert_eq!(
+        app.session.controller.graph().nodes().count(),
+        4,
+        "one sine more, nothing else"
+    );
+    app.session.selection = [1, 2, 3].into_iter().collect();
+    app.cut();
+    assert_eq!(app.ui_snapshot().status, "Cut Sine");
+    assert!(app.session.controller.graph().node(ModuleId(1)).is_none());
+    assert!(
+        app.session.controller.graph().node(ModuleId(2)).is_some(),
+        "the placeholder stays"
+    );
+    assert!(
+        app.session.controller.graph().node(ModuleId(3)).is_some(),
+        "the Transport stays"
+    );
+}

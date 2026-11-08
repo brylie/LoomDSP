@@ -90,7 +90,7 @@ A pasted module with no position (text written by hand) goes in a row starting a
 
 ### The clipboard text
 
-Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.rs), with `version` and an empty `name`. It holds the selected modules with their positions and non-default parameters, the inside cables, and the inside assignments in their order. It holds no MIDI mappings. A selected sub-patch tile is written as its instance module, with its exposed values, and its definition goes in the `subpatches` table with every definition nested in it, so the text is a patch that loads on its own ([sub-patches](sub-patches.md#patch-file)). An assignment onto a parameter inside the tile is written onto its exposed name, and a cable into the tile onto its port.
+Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.rs), with `version` and an empty `name`. It holds the selected modules with their positions and non-default parameters, the inside cables, and the inside assignments in their order. It holds no MIDI mappings. A selected sub-patch tile is written as its instance module, with its exposed values, and its definition goes in the `subpatches` table with every definition nested in it, so the text is a patch that loads on its own ([sub-patches](sub-patches.md#patch-file)). An assignment onto a parameter inside the tile is written onto its exposed name, and a cable into the tile onto its port. An assignment with both ends inside the tile is the definition's, and is not written again outside, so a paste adds it once. A placeholder for a patch-wide module this build does not have is left out as the module itself would be.
 
 ```ron
 Patch(
