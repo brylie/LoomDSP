@@ -74,7 +74,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [MIDI learn](midi-learn.md) | None (builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md)) | Implemented, with mapping modes; device mappings Agreed, M2 |
 | [Module browser](module-browser.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, M1 |
 | [Automatic placement](auto-placement.md) | None (builds on [ADR-0010](../adr/0010-own-patch-canvas.md)) | Implemented, M1 |
-| [Canvas accessibility](canvas-accessibility.md) | None (builds on [ADR-0040](../adr/0040-own-ui-layer.md) and [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Agreed, M2 |
+| [Canvas accessibility](canvas-accessibility.md) | None (builds on [ADR-0041](../adr/0041-own-ui-layer.md) and [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Agreed, M2 |
 | [Copy, paste, and duplicate](clipboard.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, M1 |
 | [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, M1; rule 15 (fade in on restart) Agreed |
 | [Autosave and crash recovery](autosave.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md) and [files](files.md)) | Implemented, M1 |

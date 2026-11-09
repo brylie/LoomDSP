@@ -4,7 +4,7 @@ How a screen reader user gets an overview of a patch, follows a signal from modu
 
 - **Kind:** living specification.
 - **Status:** Agreed (2026-11-09), M2. The answers to its open questions are in [Decisions made for this spec](#decisions-made-for-this-spec).
-- **Decision behind it:** none of its own. Builds on [ADR-0040](../adr/0040-own-ui-layer.md) (our own UI layer, with its accessibility tree), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (feedback loops), and [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md) (the editor's sub-patch levels).
+- **Decision behind it:** none of its own. Builds on [ADR-0041](../adr/0041-own-ui-layer.md) (our own UI layer, with its accessibility tree), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (feedback loops), and [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md) (the editor's sub-patch levels).
 - **Use case and requirements:** UC11, NFR-UX-06, NFR-UX-07, FR-CANVAS-06, FR-CANVAS-13.
 - **Background:** [Reading a patch by ear](../learn/reading-a-patch-by-ear.md) (explainer), [overviews of node-link diagrams for screen reader users](../research/2026-11-screen-reader-graph-overviews.md) (research), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [the large patch review](../research/2026-11-large-patch-ux-review.md) (finding 3, the overview has no words), [Feedback loops](../learn/feedback-loops.md).
 - **Prior art:** the WAI-ARIA tree view pattern for the outline's keys, and "overview first, then details on demand" from information visualisation research. Named only to explain ideas; the research snapshot cites them.
@@ -139,7 +139,7 @@ A row has a short **name**, read at once, and a **description**, read after it o
 
 **Status:** Agreed, M2.
 
-The outline is an **Outline** tab in the right column, beside Inspector and Matrix. O on the canvas, with no text field focused, opens the tab and moves focus to the outline's focused row, or to its first row the first time. F6 moves focus from region to region (canvas, right column, toolbar), and lands on the outline when its tab is open. A click on the tab opens it too, so sighted users can read the outline as well.
+The outline is an **Outline** tab in the right column, beside Inspector and Matrix. O on the canvas, with no text field focused, opens the tab and moves focus to the outline's focused row, or to its first row the first time. Ctrl+Tab moves focus to the next region (canvas, right column, toolbar) and Ctrl+Shift+Tab to the previous one, on every platform, and lands on the outline when its tab is open (ui-layer.md, section 6, rule 7). A click on the tab opens it too, so sighted users can read the outline as well.
 
 The outline is one focus stop. While it has focus, it takes these keys before the app's shortcuts (ui-layer.md, section 6, rule 6). The navigation keys follow the WAI-ARIA tree view pattern, so screen reader users meet what they expect from a file tree.
 
@@ -158,7 +158,7 @@ The outline is one focus stop. While it has focus, it takes these keys before th
 
 ### Rules
 
-15. **The app handles every key in the outline itself,** and keeps the expanded rows. It does not rely on the screen reader or the platform to expand rows or move between them. *Why:* `accesskit_macos` 0.27.2 has no expand or collapse action and does not report a row's level, and the Linux adapter was not found to either (research, section 4). Keys we handle work the same on every platform, and for keyboard users with no screen reader.
+15. **The app handles every key in the outline itself,** and keeps the expanded rows. It does not rely on the screen reader or the platform to expand rows or move between them. *Why:* `accesskit_macos` 0.27.2 has no expand or collapse action and does not report a row's level, and the Linux adapter was not found to either (research, section 4). Keys we handle work the same on every platform, and for keyboard users with no screen reader. The outline's nodes are built flat, as ui-layer.md, section 7, rule 12 says: the visible rows are direct children of the Tree node, in display order, each with its level, position in set, size of set, and expanded state. A collapsed row's children are not in the tree.
 16. **Expanded rows and the focused row survive a rebuild,** keyed by UI ID. If the focused module is deleted, focus goes to the next row, or the previous one at the end. *Why:* ui-layer.md, section 4, rule 2, and a user must not be thrown to the top of the outline because a cable changed elsewhere.
 17. **Delete and Backspace do nothing in the outline.** *Why:* the outline is for reading. A user who is listening must not remove a module by a key that, on the canvas, deletes the selection.
 18. **Space selects but Enter moves focus.** *Why:* the user can look at a module on the canvas without losing their place in the outline. Neither changes the patch.
@@ -262,7 +262,7 @@ M on the canvas, with no text field focused, moves through the three settings, a
 - [ ] A test checks that an output port's node has a `controls` relation to every input its cables feed.
 - [ ] `Ui` harness: a click on the map centres the canvas there, and dragging the view rectangle pans it.
 - [ ] `Ui` harness: with the Auto setting, the map shows while the level overflows the view and hides when it fits; M moves through Auto, Always, and Hidden, and the setting is saved in preferences.
-- [ ] `Ui` harness: O on the canvas opens the Outline tab and focuses its first row; F6 reaches it; Escape returns to the canvas with the tab still open.
+- [ ] `Ui` harness: O on the canvas opens the Outline tab and focuses its first row; Ctrl+Tab reaches it; Escape returns to the canvas with the tab still open.
 - [ ] `Ui` harness: on the canvas, `]` on a selected SVF selects Multiply 8 and centres it, and Cmd+`[` (Ctrl+`[`) returns to SVF.
 - [ ] Inside a sub-patch, the outline shows the inside, with the port tiles as source and output rows.
 - [ ] A VoiceOver check, recorded in the pull request: the summary, a scan of `subtractive.ron`, a jump and Back, Enter to a tile, and what VoiceOver says about a row's level and position (rule 15). Narrator and Orca checks are recorded, or listed as not checked.
@@ -277,7 +277,7 @@ M on the canvas, with no text field focused, moves through the three settings, a
 
 ## For the UI layer specification
 
-These are hooks this spec needs from [ui-layer.md](ui-layer.md) (PR [#697](https://github.com/brylie/LoomDSP/pull/697)). They are notes for that spec, not changes to it:
+These hooks were added to [ui-layer.md](ui-layer.md) on PR [#697](https://github.com/brylie/LoomDSP/pull/697) (commit 9ab9cdea): region keys in section 6, rule 7; the app-driven tree in section 7, rule 12; relations by UI ID in section 7, rule 13 and section 9, rule 7; focus into a custom element's part in section 9, rule 6; and the image row in section 7's role table. They were:
 
 1. **Custom element relations.** Section 9 says the canvas gives its own nodes. It should also say a custom element may set relations between its nodes and nodes outside it (rule 21 here, and later the outline's rows pointing at tiles).
 2. **Focus into a custom element by UI ID.** Enter on a module row (rule 5) moves focus from a panel to a tile control inside the canvas. Section 6 should allow an effect that focuses an inner part of a custom element by its UI ID.
@@ -293,7 +293,8 @@ Asked and answered on 2026-11-09. Each is written into the rules named.
 | Where the map and the outline live | The map in the bottom-right corner of the canvas. The outline in an Outline tab of the right column, opened by a key | Sections 5 and 8 |
 | When the map shows | Auto by default: only while the level does not fit in the view. A toolbar toggle, a key, and Preferences give Always and Hidden | Section 8, rule 30 |
 | The outline's order | Forward, from sources to the output, in signal-flow order | Rule 6 |
-| The keys to follow a cable | `[` upstream, `]` downstream, Cmd+`[` (Ctrl+`[`) back, in the outline and on the canvas; F6 moves between regions | Sections 5 and 7 |
+| The keys to follow a cable | `[` upstream, `]` downstream, Cmd+`[` (Ctrl+`[`) back, in the outline and on the canvas; Ctrl+Tab and Ctrl+Shift+Tab move between regions | Sections 5 and 7 |
+| The keys to move between regions | Ctrl+Tab forward and Ctrl+Shift+Tab back, with Ctrl on every platform, including macOS. Not F6: on most laptop keyboards the F keys need Fn | Section 5, and ui-layer.md, section 6, rule 7 |
 | Milestone | M2 for both the map and the outline. The outline needs the UI layer's phase 1 tree; the map needs only the canvas | FR-CANVAS-13, NFR-UX-07 |
 
 The letters O (open the outline) and M (cycle the map setting) were chosen while writing the answers in, as the canvas's single-letter keys A and F already are. Neither was in use. They are listed for the keymap in [#494](https://github.com/brylie/LoomDSP/issues/494).
