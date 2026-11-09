@@ -121,7 +121,7 @@ impl Controller {
         };
         self.graph.nodes.insert(id, Node::new(descriptor, slot));
         self.next_id = self.next_id.max(id.0 + 1);
-        self.dirty = true;
+        self.mark_dirty();
         Ok(())
     }
 
@@ -148,7 +148,7 @@ impl Controller {
         if let Some(copy) = node.copy_slot {
             self.slots.retire(copy);
         }
-        self.dirty = true;
+        self.mark_dirty();
         Ok(())
     }
 

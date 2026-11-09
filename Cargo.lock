@@ -2195,6 +2195,7 @@ name = "loom-patch"
 version = "0.1.0"
 dependencies = [
  "loom-core",
+ "loom-dsp",
  "loom-modules",
  "ron",
  "serde",

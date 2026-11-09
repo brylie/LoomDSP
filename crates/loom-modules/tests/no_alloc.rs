@@ -510,3 +510,81 @@ fn a_slot_swap_never_allocates() {
     }
     parts.controller.collect_garbage();
 }
+
+/// A select change crossfades on the audio thread with no allocation, from
+/// a set Member value and from Member modulated at audio rate, and so does
+/// a stack whose copies follow one MIDI mapping (sub-patches.md, Acceptance
+/// criteria, Engine).
+#[test]
+fn a_select_change_never_allocates() {
+    use loom_patch::flatten::{ADDED_STEP, MEMBER_STEP};
+    use loom_patch::{FlatIds, ModulePath, Patch};
+    let member = |key: &str, kind: &str| {
+        format!(
+            r#""{key}": SubPatch(
+                metadata: Metadata(name: "{key}"),
+                modules: [
+                    PatchModule(id: 1, kind: "{kind}"),
+                    PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+                ],
+                cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+            ),"#
+        )
+    };
+    let text = format!(
+        r#"Patch(
+        version: 1,
+        subpatches: {{
+            "select": SubPatch(
+                metadata: Metadata(name: "Select"),
+                mode: Select,
+                members: [1, 2, 3],
+                modules: [
+                    PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("a")),
+                    PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("b")),
+                    PatchModule(id: 3, kind: "loom.struct.subpatch@1", subpatch: Some("c")),
+                ],
+            ),
+            {}{}{}
+        }},
+        modules: [
+            PatchModule(id: 7, kind: "loom.struct.subpatch@1", subpatch: Some("select")),
+            PatchModule(id: 8, kind: "loom.mod.lfo@1"),
+            PatchModule(id: 9, kind: "loom.io.audio-out@1"),
+            PatchModule(id: 10, kind: "loom.clock.transport@1"),
+        ],
+        cables: [PatchCable(from: (7, "out"), to: (9, "in"))],
+        midi: [PatchMidiMapping(target: (7, "member"), channel: 0, controller: 21)],
+    )"#,
+        member("a", "loom.osc.noise@1"),
+        member("b", "loom.math.constant@1"),
+        member("c", "loom.osc.noise@1"),
+    );
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let mut ids = FlatIds::new();
+    Patch::from_ron(&text)
+        .unwrap()
+        .load_with_ids(&mut parts.controller, &mut ids)
+        .unwrap();
+    let member = ids.get(&ModulePath(vec![7, ADDED_STEP + MEMBER_STEP])).unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    for value in [2.0, 3.0, 1.0, 2.0] {
+        parts.controller.set_param(member, 0, value).unwrap();
+        assert_no_alloc(|| parts.engine.process(&mut left[..7], &mut right[..7]));
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    assert!(parts.midi.send(loom_core::MidiEvent::control_change(0, 0, 21, 127)));
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    // Member modulated at audio rate: the fade reverses and waits per sample.
+    parts
+        .controller
+        .add_assignment_named(loom_core::ModuleId(8), "out", member, "member", 1.0)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..8 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    parts.controller.collect_garbage();
+}

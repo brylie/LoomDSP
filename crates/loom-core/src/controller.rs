@@ -99,6 +99,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         next_id: 1,
         next_assignment: 1,
         dirty: false,
+        revision: 0,
         last_report: CompileReport::default(),
         transport: TransportSettings::default(),
         config,
@@ -159,6 +160,9 @@ pub struct Controller {
     next_id: u32,
     next_assignment: u32,
     dirty: bool,
+    /// Goes up by one with every structural edit; see
+    /// [`Controller::revision`].
+    revision: u64,
     last_report: CompileReport,
     /// What the engine's transport is set to, as of the last command sent.
     transport: TransportSettings,
@@ -199,6 +203,21 @@ impl Controller {
     /// True if there are structural or probe edits not yet committed.
     pub fn has_uncommitted_changes(&self) -> bool {
         self.dirty
+    }
+
+    /// A count that goes up with every structural or probe edit, committed
+    /// or not, and never with a parameter value. Two equal readings mean
+    /// the graph's structure did not change between them, so a caller that
+    /// derives something from it (the editor's sync of stack copies,
+    /// ADR-0040) can skip the work.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Marks the graph changed: it needs a commit, and its revision moves on.
+    fn mark_dirty(&mut self) {
+        self.dirty = true;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     fn send(&mut self, command: Command) -> Result<(), LoomError> {

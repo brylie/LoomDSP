@@ -15,14 +15,19 @@
 
 use crate::hierarchy::fold_ranges;
 use crate::level::LevelRef;
+use crate::modes::{
+    MEMBER_KIND, MEMBER_PARAM, MOST_MEMBERS, Mode, SELECT_KIND, SPREAD_SOURCE_KIND, SPREAD_SUM_KIND, SUM_KIND,
+};
 use crate::{
     INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping, PatchModulation,
     PatchModule, ResolveOptions, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, SubPatch,
 };
+use loom_core::SignalType;
 use loom_core::{
     Controller, FillsRole, Graph, LoomError, MidiControl, ModuleId, ModuleNames, ParamRange, Registry, RoleDescriptor,
     TRANSPORT_MODULE,
 };
+use loom_dsp::blend;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -95,7 +100,66 @@ impl ModulePath {
         ids.extend_from_slice(&self.0[old.0.len().min(self.0.len())..]);
         Self(ids)
     }
+
+    /// The path of copy `k` (from 1) of the stacked instance at this path:
+    /// a step no module id can take ([`FIRST_RESERVED_STEP`]). Copy 0 is the
+    /// instance's own path (sub-patches.md, Copies in the editor).
+    pub fn copy(&self, k: u32) -> Self {
+        self.child(COPY_STEP + k)
+    }
+
+    /// The path of the `n`th module the flattener adds for the mode of the
+    /// instance at this path (sub-patches.md, The modules the flattener
+    /// adds): a step no module id can take.
+    pub fn added(&self, n: u32) -> Self {
+        self.child(ADDED_STEP + n)
+    }
+
+    /// True for a path the flattener makes for a mode: a stack copy past
+    /// the first, or a module it adds. Such a path is implied (ADR-0040):
+    /// never a tile, never saved.
+    pub fn is_implied(&self) -> bool {
+        // The first step is a top-level module's own flat id, which may be
+        // any id; reserved steps come only after an instance.
+        self.0.iter().skip(1).any(|&step| step >= FIRST_RESERVED_STEP)
+    }
+
+    /// The path with every copy step left out and the copy index of each
+    /// stack it passes through, outer first; `None` for a path with an added
+    /// step. Copy 0 of every stack has no copy step, so its path is the
+    /// path the editor shows.
+    pub fn without_copies(&self) -> Option<(Self, Vec<u32>)> {
+        let mut ids = Vec::new();
+        let mut copies = Vec::new();
+        for (n, &step) in self.0.iter().enumerate() {
+            if n == 0 {
+                ids.push(step);
+                continue;
+            }
+            if (ADDED_STEP..COPY_STEP).contains(&step) {
+                return None;
+            }
+            if step >= COPY_STEP {
+                copies.push(step - COPY_STEP);
+            } else {
+                ids.push(step);
+            }
+        }
+        Some((Self(ids), copies))
+    }
 }
+
+/// The first path step a module id cannot take. A file whose level ids reach
+/// it is refused, so copies and added modules never meet a real id.
+pub const FIRST_RESERVED_STEP: u32 = ADDED_STEP;
+/// The base of the steps of added modules ([`ModulePath::added`]).
+pub const ADDED_STEP: u32 = 0xE000_0000;
+/// The base of the steps of stack copies ([`ModulePath::copy`]).
+pub const COPY_STEP: u32 = 0xF000_0000;
+/// The added step of a select's Member module.
+pub const MEMBER_STEP: u32 = 0x0FFF_FFFF;
+/// The added step of a stack's spread source.
+pub const SPREAD_STEP: u32 = 0x0FFF_FFFE;
 
 impl fmt::Display for ModulePath {
     /// The ids joined by " › ", such as `7 › 3`.
@@ -206,6 +270,14 @@ impl FlatIds {
         Ok(id)
     }
 
+    /// Forgets `path` and its id. The id is never handed out again, since
+    /// `next` is not lowered (rule 4).
+    pub fn forget(&mut self, path: &ModulePath) {
+        if let Some(id) = self.by_path.remove(path) {
+            self.by_id.remove(&id);
+        }
+    }
+
     /// Moves the id of `old` to `new`, which must be free: the module
     /// keeps its id and its state while it changes level (collapsing and
     /// dissolving).
@@ -232,6 +304,9 @@ pub struct FlatModule {
     pub id: ModuleId,
     /// The module, resolved.
     pub module: ResolvedModule,
+    /// What the stack copies it is in added to a `seed` parameter: 0 in
+    /// copy 0 of every stack (sub-patches.md, Copies in the editor).
+    pub seed_offset: u32,
 }
 
 /// A patch with every instance expanded: what [`Flat::apply_to`] adds to
@@ -257,6 +332,44 @@ pub struct Flat {
     pub warnings: Vec<LoadWarning>,
     /// The top-level Transport, if the file has one.
     pub transport: Option<ModuleId>,
+    /// For a mapped parameter of copy 0 of a stack, the same parameter of
+    /// every other copy, which takes every value the mapping sets: a control
+    /// has one mapping ([`Controller::set_midi_followers`]; ADR-0040).
+    pub followers: BTreeMap<(ModuleId, String), Vec<(ModuleId, String)>>,
+    /// For each module of copy 0 of a stack, the same module in every other
+    /// copy, with the seed offset that copy adds to a `seed` parameter
+    /// (sub-patches.md, Copies in the editor). A parameter write reaches
+    /// them all.
+    pub copies: BTreeMap<ModuleId, Vec<(ModuleId, u32)>>,
+    /// Every module the flattener added for a mode, with what it stands for.
+    pub added: BTreeMap<ModuleId, Added>,
+}
+
+/// A mapped parameter and the parameters that follow its mapping, by
+/// parameter index, as [`Controller::set_midi_followers`] takes them.
+pub type Followers = ((ModuleId, usize), Vec<(ModuleId, usize)>);
+
+/// What a module the flattener adds for a mode stands for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Added {
+    /// The sum or select behind an output port of the instance at
+    /// `instance`.
+    Output {
+        /// The instance's path.
+        instance: ModulePath,
+        /// The output port's name.
+        port: String,
+    },
+    /// The Member module of the select instance at `instance`.
+    Member {
+        /// The instance's path.
+        instance: ModulePath,
+    },
+    /// The constant source of the spreads of the stack at `instance`.
+    Spread {
+        /// The instance's path.
+        instance: ModulePath,
+    },
 }
 
 /// What stands behind an output port of a definition.
@@ -286,6 +399,23 @@ struct Inner {
     chains: BTreeMap<String, Vec<(f32, f32)>>,
     /// Flat parameter to the range MIDI sweeps on it. See [`Flat::limits`].
     limits: BTreeMap<(ModuleId, String), (f32, f32)>,
+    /// See [`Flat::followers`].
+    followers: BTreeMap<(ModuleId, String), Vec<(ModuleId, String)>>,
+    /// See [`Flat::copies`].
+    copies: BTreeMap<ModuleId, Vec<(ModuleId, u32)>>,
+    /// See [`Flat::added`].
+    added: BTreeMap<ModuleId, Added>,
+    /// Each instance member of this level, by level id: its ports as they
+    /// were before its modules joined this level's, for a layer or select,
+    /// whose ports come from its members.
+    children: BTreeMap<u32, ChildPorts>,
+}
+
+/// The ports of one flattened instance.
+#[derive(Debug, Default, Clone)]
+struct ChildPorts {
+    inputs: BTreeMap<String, Vec<(ModuleId, String)>>,
+    outputs: BTreeMap<String, Option<Source>>,
 }
 
 /// What flattening carries down the levels.
@@ -301,6 +431,15 @@ struct Context<'a> {
     /// Each definition key and the first instance that used it. No two
     /// instances share a definition (sub-patches.md, Patch file).
     used: BTreeMap<String, ModulePath>,
+    /// What one step of copy index adds to [`Context::seed_offset`] at this
+    /// depth of stacks: 1 outside any stack, times 16 inside each.
+    seed_stride: u32,
+    /// More than 0 while flattening a stack copy past the first, whose
+    /// nested instances use the keys copy 0 used.
+    in_copy: usize,
+    /// What a `seed` parameter gains in the copy being flattened: 0 in
+    /// copy 0 of every stack (sub-patches.md, Copies in the editor).
+    seed_offset: u32,
 }
 
 /// A module of one level, sorted into what flattening does with it.
@@ -351,6 +490,9 @@ impl Patch {
             unknown_kinds: Vec::new(),
             stack: Vec::new(),
             used: BTreeMap::new(),
+            in_copy: 0,
+            seed_offset: 0,
+            seed_stride: 1,
         };
         let inner = flatten_level(&mut ctx, self.level(), &ModulePath(Vec::new()), None)?;
         let mut warnings = ctx.warnings;
@@ -367,6 +509,9 @@ impl Patch {
             limits: inner.limits,
             warnings,
             transport: transports.first().map(|&id| ModuleId(id)),
+            followers: inner.followers,
+            copies: inner.copies,
+            added: inner.added,
         };
         flat.check_midi(ctx.ids)?;
         Ok(flat)
@@ -420,8 +565,22 @@ impl Flat {
         }
         self.add_links(controller, &same)?;
         controller.set_limits(self.limits_in(controller.graph()))?;
+        controller.set_midi_followers(self.followers_in(controller.graph()))?;
         controller.commit()?;
         Ok(notes)
+    }
+
+    /// [`Flat::followers`] as [`Controller::set_midi_followers`] takes them:
+    /// by parameter index, for the modules `graph` holds.
+    pub fn followers_in(&self, graph: &Graph) -> Vec<Followers> {
+        let index = |(module, param): &(ModuleId, String)| {
+            let node = graph.node(*module)?;
+            Some((*module, node.parameter_index(param)?))
+        };
+        self.followers
+            .iter()
+            .filter_map(|(target, list)| Some((index(target)?, list.iter().filter_map(index).collect())))
+            .collect()
     }
 
     /// Adds every module, then every cable, assignment, and mapping, to a
@@ -570,6 +729,10 @@ fn flatten_level(
         if !seen.insert(module.id) {
             return Err(LoomError::DuplicateModuleId(ModuleId(module.id)).into());
         }
+        // A copy or an added module's path step is never a module id.
+        if !top && module.id >= FIRST_RESERVED_STEP {
+            return Err(LoomError::ModuleIdOutOfRange(ModuleId(module.id)).into());
+        }
     }
     level.check_midi()?;
     let mut members: BTreeMap<u32, Member> = BTreeMap::new();
@@ -591,9 +754,10 @@ fn flatten_level(
                 return Err(PatchError::TransportInSubPatch { module: module.id });
             }
             let mut warnings = Vec::new();
-            let resolved = level
+            let mut resolved = level
                 .resolve_module(module, ctx.registry, ResolveOptions::FILE, &mut warnings)
                 .map_err(PatchError::from)?;
+            offset_seed(&mut resolved, ctx.seed_offset);
             ctx.warnings.extend(warnings);
             if let Some(unknown) = &resolved.unknown {
                 ctx.unknown_kinds.push(unknown.kind.clone());
@@ -865,27 +1029,91 @@ fn flatten_level(
 
     // The modules, depth first, in id order; each instance's inner
     // assignments first, instances in id order, then this level's own.
-    for (_, member) in members {
+    for (lid, member) in members {
         match member {
             Member::Module(id, module) => inner.modules.push(FlatModule {
                 path: path.child(module.id),
                 id,
                 module,
+                seed_offset: ctx.seed_offset,
             }),
             Member::Instance(mut child) => {
+                inner.children.insert(
+                    lid,
+                    ChildPorts {
+                        inputs: child.inputs.clone(),
+                        outputs: child.outputs.clone(),
+                    },
+                );
                 inner.modules.append(&mut child.modules);
                 inner.cables.append(&mut child.cables);
                 inner.modulation.append(&mut child.modulation);
                 inner.midi.append(&mut child.midi);
                 inner.limits.append(&mut child.limits);
+                inner.followers.append(&mut child.followers);
+                inner.copies.append(&mut child.copies);
+                inner.added.append(&mut child.added);
             }
             _ => {}
         }
     }
     inner.limits.extend(surface_limits);
-    inner.modulation.append(&mut own_modulation);
+    // An assignment or mapping into a stack reaches every copy: an
+    // assignment as one per copy, a mapping as followers, since a control
+    // has one mapping (ADR-0040).
+    for assignment in own_modulation {
+        let copies = inner
+            .copies
+            .get(&ModuleId(assignment.target.0))
+            .cloned()
+            .unwrap_or_default();
+        let param = assignment.target.1.clone();
+        inner.modulation.push(assignment.clone());
+        for (copy, _) in copies {
+            inner.modulation.push(PatchModulation {
+                target: (copy.0, param.clone()),
+                ..assignment.clone()
+            });
+        }
+    }
+    for mapping in &own_midi {
+        let target = (ModuleId(mapping.target.0), mapping.target.1.clone());
+        if let Some(copies) = inner.copies.get(&target.0) {
+            let list: Vec<(ModuleId, String)> = copies.iter().map(|(copy, _)| (*copy, target.1.clone())).collect();
+            inner.followers.entry(target).or_default().extend(list);
+        }
+    }
     inner.midi.append(&mut own_midi);
     Ok(inner)
+}
+
+/// Adds `offset` to a `seed` parameter, wrapped in its range, so copy `k`
+/// of a stack plays its own random numbers (sub-patches.md, Copies in the
+/// editor). Nothing changes for an offset of 0 or a module with no seed.
+pub(crate) fn offset_seed(module: &mut ResolvedModule, offset: u32) {
+    if offset == 0 {
+        return;
+    }
+    let Some(index) = module.descriptor.params.iter().position(|p| p.name == SEED_PARAM) else {
+        return;
+    };
+    let spec = &module.descriptor.params[index];
+    if let Some(value) = module.params.get_mut(index) {
+        *value = seeded(spec.min, spec.max, *value, offset);
+    }
+}
+
+/// The name of a seed parameter (TR-07).
+pub const SEED_PARAM: &str = "seed";
+
+/// `value + offset`, wrapped into the whole numbers from `min` to `max`.
+pub fn seeded(min: f32, max: f32, value: f32, offset: u32) -> f32 {
+    let span = (f64::from(max) - f64::from(min)).floor() + 1.0;
+    if !(span.is_finite() && span >= 1.0) {
+        return value;
+    }
+    let shifted = (f64::from(value) - f64::from(min) + f64::from(offset)).rem_euclid(span);
+    (f64::from(min) + shifted) as f32
 }
 
 /// Flattens the instance `module` of this level: its definition with the
@@ -917,7 +1145,9 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
         return Err(PatchError::SubPatchLoop { path: loop_path });
     }
     let child_path = path.child(module.id);
-    if let Some(first) = ctx.used.insert(key.clone(), child_path.clone()) {
+    if ctx.in_copy == 0
+        && let Some(first) = ctx.used.insert(key.clone(), child_path.clone())
+    {
         return Err(PatchError::SharedSubPatch {
             key: key.clone(),
             first: first.to_string(),
@@ -936,7 +1166,12 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
     // range on that parameter is dropped, so the loader picks one that
     // holds the value (control-ranges.md, rule 7).
     let mut modules = definition.modules.clone();
+    let mut member = None;
     for (name, &value) in &module.params {
+        if definition.mode == Mode::Select && name == MEMBER_PARAM {
+            member = Some(value);
+            continue;
+        }
         let Some(exposed) = definition.exposed.iter().find(|e| &e.name == name) else {
             return Err(PatchError::UnknownParam {
                 module: module.id,
@@ -986,7 +1221,7 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
     };
     ctx.stack.push((key.clone(), name.clone()));
     let first_new_warning = ctx.warnings.len();
-    let result = flatten_level(ctx, inside, &child_path, Some(definition));
+    let result = flatten_mode(ctx, inside, &child_path, definition, member);
     ctx.stack.pop();
     // What the inside reports says which sub-patch it is in.
     for warning in ctx.warnings.drain(first_new_warning..).collect::<Vec<_>>() {
@@ -999,6 +1234,362 @@ fn flatten_instance(ctx: &mut Context<'_>, module: &PatchModule, path: &ModulePa
         name,
         source: Box::new(source),
     })
+}
+
+/// Flattens the inside of the instance at `path` by its definition's mode
+/// (sub-patches.md, Modes): as it is, as members mixed or selected, or as
+/// copies summed. `member` is a select instance's Member value.
+fn flatten_mode(
+    ctx: &mut Context<'_>,
+    inside: LevelRef<'_>,
+    path: &ModulePath,
+    definition: &SubPatch,
+    member: Option<f32>,
+) -> Result<Inner, PatchError> {
+    if let Some(reason) = definition.mode_problem() {
+        return Err(PatchError::BadMode { reason });
+    }
+    match definition.mode {
+        Mode::Single => flatten_level(ctx, inside, path, Some(definition)),
+        Mode::Layer | Mode::Select => {
+            let inner = flatten_level(ctx, inside, path, Some(definition))?;
+            mix_members(ctx, inner, path, definition, member)
+        }
+        Mode::Stack => flatten_stack(ctx, inside, path, definition),
+    }
+}
+
+/// A module the flattener adds for a mode, at `path`, of `kind`, with
+/// `params` set. Refused when this build lacks the kind, since a
+/// placeholder would play silence where the mode needs a sum.
+fn added_module(
+    ctx: &mut Context<'_>,
+    path: &ModulePath,
+    kind: &str,
+    params: &[(&str, f32)],
+) -> Result<FlatModule, PatchError> {
+    let mut module = PatchModule::new(path.last(), kind);
+    for (name, value) in params {
+        module.params.insert((*name).to_string(), *value);
+    }
+    let empty = LevelRef {
+        modules: &[],
+        cables: &[],
+        modulation: &[],
+        midi: &[],
+    };
+    let mut warnings = Vec::new();
+    let resolved = empty
+        .resolve_module(&module, ctx.registry, ResolveOptions::FILE, &mut warnings)
+        .map_err(PatchError::from)?;
+    if resolved.unknown.is_some() {
+        return Err(PatchError::BadMode {
+            reason: format!("this build has no `{kind}` module, which the mode needs"),
+        });
+    }
+    Ok(FlatModule {
+        path: path.clone(),
+        id: ctx.ids.id_of(path)?,
+        module: resolved,
+        seed_offset: 0,
+    })
+}
+
+/// Feeds input `input` of the added module `mix` from `source`: a cable
+/// from an inner module, or a place in the instance input a pass-through
+/// stands for. Nothing behind a port feeds nothing.
+fn feed(inner: &mut Inner, source: Option<&Source>, mix: ModuleId, input: String) {
+    match source {
+        Some(Source::Module(from, output)) => inner.cables.push(PatchCable {
+            from: (from.0, output.clone()),
+            to: (mix.0, input),
+        }),
+        Some(Source::Input(port)) => inner.inputs.entry(port.clone()).or_default().push((mix, input)),
+        None => {}
+    }
+}
+
+/// The input of an added module for member or copy `k`, from 0: `in1` to
+/// `in16`.
+fn member_input(k: usize) -> String {
+    format!("in{}", k + 1)
+}
+
+/// The signal type of the output behind `source`, or `None` for a
+/// pass-through or nothing, which the modes treat as audio.
+fn signal_of(inner: &Inner, source: Option<&Source>) -> Option<SignalType> {
+    let Some(Source::Module(id, port)) = source else {
+        return None;
+    };
+    inner
+        .modules
+        .iter()
+        .find(|m| m.id == *id)
+        .and_then(|m| m.module.descriptor.outputs.iter().find(|p| p.name == port))
+        .map(|p| p.signal)
+}
+
+/// The Select's `fade` for an output whose members give `signals`: off when
+/// any is a gate, trigger, or phase, which switch on the frame (live-patching
+/// rule 9); linear when any is pitch or modulation, whose values must not
+/// swell mid-fade; equal power for audio (sub-patches.md, The modules the
+/// flattener adds, Select).
+fn select_fade(signals: &[Option<SignalType>]) -> f32 {
+    if signals
+        .iter()
+        .any(|s| matches!(s, Some(SignalType::Gate | SignalType::Phase)))
+    {
+        0.0
+    } else if signals
+        .iter()
+        .any(|s| matches!(s, Some(SignalType::Pitch | SignalType::Modulation)))
+    {
+        1.0
+    } else {
+        2.0
+    }
+}
+
+/// The gain a stack's Sum takes for an output of `signal` over `copies`:
+/// 1/√N for audio, whose different copies add in power; 1/N for pitch and
+/// modulation, so the output is the copies' mean; 1 for a gate, which stays
+/// high while any copy is high (sub-patches.md, The modules the flattener
+/// adds, Sum). A phase output takes no Sum at all: see [`flatten_stack`].
+fn stack_gain(signal: Option<SignalType>, copies: u32) -> f32 {
+    match signal {
+        Some(SignalType::Pitch | SignalType::Modulation) => 1.0 / copies.max(1) as f32,
+        Some(SignalType::Gate) => 1.0,
+        _ => blend::unison_gain(copies),
+    }
+}
+
+/// A layer's or a select's ports and mixing (sub-patches.md, Members are
+/// nested instances): each outer input feeds the same-named input of every
+/// member; each outer output is a Sum of the members' (layer) or a Select
+/// between them (select), all Selects reading one Member module.
+fn mix_members(
+    ctx: &mut Context<'_>,
+    mut inner: Inner,
+    path: &ModulePath,
+    definition: &SubPatch,
+    member: Option<f32>,
+) -> Result<Inner, PatchError> {
+    let children: Vec<ChildPorts> = definition
+        .members
+        .iter()
+        .map(|id| inner.children.get(id).cloned().unwrap_or_default())
+        .collect();
+    let mut outputs: Vec<String> = Vec::new();
+    for child in &children {
+        for (name, dests) in &child.inputs {
+            inner
+                .inputs
+                .entry(name.clone())
+                .or_default()
+                .extend(dests.iter().cloned());
+        }
+        for name in child.outputs.keys() {
+            if !outputs.contains(name) {
+                outputs.push(name.clone());
+            }
+        }
+    }
+    let count = children.len();
+    if definition.mode == Mode::Layer && count == 1 {
+        inner.outputs = children[0].outputs.clone();
+        return Ok(inner);
+    }
+    let member_id = if definition.mode == Mode::Select {
+        let value = member.unwrap_or(1.0);
+        let value = if value.is_finite() {
+            value.round().clamp(1.0, count as f32)
+        } else {
+            1.0
+        };
+        let module = added_module(ctx, &path.added(MEMBER_STEP), MEMBER_KIND, &[(MEMBER_PARAM, value)])?;
+        let id = module.id;
+        inner.modules.push(module);
+        inner
+            .exposed
+            .insert(MEMBER_PARAM.to_string(), (id, MEMBER_PARAM.to_string()));
+        if count > 1 {
+            inner.limits.insert((id, MEMBER_PARAM.to_string()), (1.0, count as f32));
+        }
+        inner.added.insert(id, Added::Member { instance: path.clone() });
+        Some(id)
+    } else {
+        None
+    };
+    for (i, name) in outputs.iter().enumerate() {
+        let sources: Vec<Option<&Source>> = children
+            .iter()
+            .map(|child| child.outputs.get(name).and_then(Option::as_ref))
+            .collect();
+        let step = path.added(i as u32);
+        let mix = match member_id {
+            None => added_module(ctx, &step, SUM_KIND, &[("gain", 1.0)])?,
+            Some(_) => {
+                let signals: Vec<Option<SignalType>> = sources.iter().map(|s| signal_of(&inner, *s)).collect();
+                let fade = select_fade(&signals);
+                added_module(ctx, &step, SELECT_KIND, &[("members", count as f32), ("fade", fade)])?
+            }
+        };
+        let id = mix.id;
+        inner.modules.push(mix);
+        for (k, source) in sources.iter().enumerate() {
+            feed(&mut inner, *source, id, member_input(k));
+        }
+        if let Some(member_id) = member_id {
+            inner.cables.push(PatchCable {
+                from: (member_id.0, "out".to_string()),
+                to: (id.0, MEMBER_PARAM.to_string()),
+            });
+        }
+        inner
+            .outputs
+            .insert(name.clone(), Some(Source::Module(id, "out".to_string())));
+        inner.added.insert(
+            id,
+            Added::Output {
+                instance: path.clone(),
+                port: name.clone(),
+            },
+        );
+    }
+    Ok(inner)
+}
+
+/// A stack's copies (sub-patches.md, Copies in the editor): the inside
+/// flattened once per copy, copy 0 at the instance's own paths and copy `k`
+/// under [`ModulePath::copy`], with every output summed at 1/√N (or spread
+/// across stereo), each spread as hidden modulation from one constant, and
+/// the copies' mappings turned into followers of copy 0's.
+fn flatten_stack(
+    ctx: &mut Context<'_>,
+    inside: LevelRef<'_>,
+    path: &ModulePath,
+    definition: &SubPatch,
+) -> Result<Inner, PatchError> {
+    let n = definition.copy_count();
+    let mut copies = Vec::with_capacity(n as usize);
+    for k in 0..n {
+        let copy_path = if k == 0 { path.clone() } else { path.copy(k) };
+        let saved = (ctx.in_copy, ctx.seed_offset, ctx.seed_stride);
+        if k > 0 {
+            ctx.in_copy += 1;
+        }
+        ctx.seed_offset = saved.1.wrapping_add(k.wrapping_mul(saved.2));
+        ctx.seed_stride = saved.2.wrapping_mul(MOST_MEMBERS as u32);
+        let result = flatten_level(ctx, inside, &copy_path, Some(definition));
+        (ctx.in_copy, ctx.seed_offset, ctx.seed_stride) = saved;
+        copies.push(result?);
+    }
+    let mut rest = copies.split_off(1);
+    let mut inner = copies.pop().expect("a stack has at least one copy");
+    let base_modules: Vec<ModuleId> = inner.modules.iter().map(|m| m.id).collect();
+    let base_midi: Vec<(ModuleId, String)> = inner
+        .midi
+        .iter()
+        .map(|m| (ModuleId(m.target.0), m.target.1.clone()))
+        .collect();
+    let mut outputs: Vec<BTreeMap<String, Option<Source>>> = vec![inner.outputs.clone()];
+    let mut exposed: Vec<BTreeMap<String, (ModuleId, String)>> = vec![inner.exposed.clone()];
+    for copy in &mut rest {
+        // The same definition flattens to the same modules in the same
+        // order, so module `i` of copy `k` is module `i` of copy 0.
+        for (i, module) in copy.modules.iter().enumerate() {
+            let Some(&base) = base_modules.get(i) else { continue };
+            let mut list = vec![(module.id, module.seed_offset)];
+            list.extend(copy.copies.remove(&module.id).unwrap_or_default());
+            inner.copies.entry(base).or_default().extend(list);
+        }
+        for (i, mapping) in copy.midi.iter().enumerate() {
+            let Some(base) = base_midi.get(i) else { continue };
+            let target = (ModuleId(mapping.target.0), mapping.target.1.clone());
+            let mut list = vec![target.clone()];
+            list.extend(copy.followers.remove(&target).unwrap_or_default());
+            inner.followers.entry(base.clone()).or_default().extend(list);
+        }
+        inner.modules.append(&mut copy.modules);
+        inner.cables.append(&mut copy.cables);
+        inner.modulation.append(&mut copy.modulation);
+        inner.limits.append(&mut copy.limits);
+        inner.added.append(&mut copy.added);
+        for (name, dests) in std::mem::take(&mut copy.inputs) {
+            inner.inputs.entry(name).or_default().extend(dests);
+        }
+        outputs.push(std::mem::take(&mut copy.outputs));
+        exposed.push(std::mem::take(&mut copy.exposed));
+    }
+    if n > 1 || definition.stereo_spread {
+        let names: Vec<String> = outputs[0].keys().cloned().collect();
+        for (i, name) in names.iter().enumerate() {
+            let step = path.added(i as u32);
+            let signal = signal_of(&inner, outputs[0].get(name).and_then(Option::as_ref));
+            // A sum of ramps that wrap is no phase: copy 0's phase alone goes
+            // out, as it would from a single sub-patch.
+            if signal == Some(SignalType::Phase) {
+                inner
+                    .outputs
+                    .insert(name.clone(), outputs[0].get(name).cloned().flatten());
+                continue;
+            }
+            // Only audio is spread across stereo; a pitch or a gate has no side.
+            let audio = !matches!(
+                signal,
+                Some(SignalType::Pitch | SignalType::Modulation | SignalType::Gate | SignalType::Phase)
+            );
+            let mix = if definition.stereo_spread && audio {
+                added_module(ctx, &step, SPREAD_SUM_KIND, &[("copies", n as f32)])?
+            } else {
+                added_module(ctx, &step, SUM_KIND, &[("gain", stack_gain(signal, n))])?
+            };
+            let id = mix.id;
+            inner.modules.push(mix);
+            for (k, copy) in outputs.iter().enumerate() {
+                feed(&mut inner, copy.get(name).and_then(Option::as_ref), id, member_input(k));
+            }
+            inner
+                .outputs
+                .insert(name.clone(), Some(Source::Module(id, "out".to_string())));
+            inner.added.insert(
+                id,
+                Added::Output {
+                    instance: path.clone(),
+                    port: name.clone(),
+                },
+            );
+        }
+    }
+    let spreads: Vec<(&String, f32)> = definition
+        .spread
+        .iter()
+        .filter(|(_, amount)| **amount > 0.0)
+        .map(|(name, amount)| (name, *amount))
+        .collect();
+    if n > 1 && !spreads.is_empty() {
+        let source = added_module(ctx, &path.added(SPREAD_STEP), SPREAD_SOURCE_KIND, &[("value", 1.0)])?;
+        let source_id = source.id;
+        inner.modules.push(source);
+        inner.added.insert(source_id, Added::Spread { instance: path.clone() });
+        for (name, amount) in spreads {
+            for (k, targets) in exposed.iter().enumerate() {
+                let depth = amount * blend::spread_offset(k as u32, n);
+                let Some(target) = targets.get(name) else { continue };
+                if depth == 0.0 {
+                    continue;
+                }
+                inner.modulation.push(PatchModulation {
+                    source: (source_id.0, "out".to_string()),
+                    target: (target.0.0, target.1.clone()),
+                    depth,
+                    polarity: None,
+                    enabled: true,
+                });
+            }
+        }
+    }
+    Ok(inner)
 }
 
 /// The slot member for a slot module: its role, resolved, and its part.

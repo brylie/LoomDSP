@@ -33,6 +33,13 @@ fn panels_follow_the_spec() {
         ("loom.display.spectrum", "hold"),
     ];
     for descriptor in super::ALL {
+        // The modules the editor and the flattener add have no panel: they
+        // are never on the canvas (sub-patches.md, The modules the
+        // flattener adds).
+        if super::INTERNAL.iter().any(|d| std::ptr::eq(*d, *descriptor)) {
+            assert!(descriptor.panel.widgets.is_empty(), "{}", descriptor.id);
+            continue;
+        }
         let panel = &descriptor.panel;
         for param in descriptor.params {
             let widget = panel.widgets.iter().find(|w| w.binds(param.name));

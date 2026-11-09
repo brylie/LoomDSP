@@ -14,6 +14,7 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod blend;
 pub mod delay;
 pub mod dynamics;
 pub mod envelope;

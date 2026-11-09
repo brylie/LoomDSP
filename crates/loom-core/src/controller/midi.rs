@@ -61,8 +61,35 @@ impl Controller {
                 learned: false,
             },
         );
-        self.dirty = true;
+        self.mark_dirty();
         Ok((id, removed))
+    }
+
+    /// Sets, for each mapped parameter, the parameters that take every value
+    /// its mapping sets: the same parameter of each copy of a stacked
+    /// sub-patch, which cannot have mappings of their own, since a control
+    /// has one mapping (sub-patches.md, Copies in the editor; ADR-0040).
+    /// Replaces what was set before. A follower of a parameter with no
+    /// mapping does nothing. Takes effect on the next [`Controller::commit`].
+    pub fn set_midi_followers(
+        &mut self,
+        followers: impl IntoIterator<Item = ((ModuleId, usize), Vec<(ModuleId, usize)>)>,
+    ) -> Result<(), LoomError> {
+        let mut wanted = BTreeMap::new();
+        for ((module, param), list) in followers {
+            self.check_param(module, param)?;
+            for &(follower, index) in &list {
+                self.check_param(follower, index)?;
+            }
+            if !list.is_empty() {
+                wanted.insert((module, param), list);
+            }
+        }
+        if wanted != self.graph.midi_followers {
+            self.graph.midi_followers = wanted;
+            self.mark_dirty();
+        }
+        Ok(())
     }
 
     /// Maps a hardware control to a parameter by name, with the default
@@ -122,7 +149,7 @@ impl Controller {
         self.graph.midi_mappings.remove(&id);
         let id = self.midi.new_mapping();
         self.graph.midi_mappings.insert(id, mapping);
-        self.dirty = true;
+        self.mark_dirty();
         id
     }
 
@@ -195,7 +222,7 @@ impl Controller {
             return Ok(None);
         };
         self.midi.forget(id);
-        self.dirty = true;
+        self.mark_dirty();
         Ok(self.graph.midi_mappings.remove(&id))
     }
 
@@ -352,6 +379,7 @@ impl MidiSync {
     /// parameters that changed.
     pub(super) fn sync(&mut self, graph: &mut Graph) -> Vec<(ModuleId, usize)> {
         let mut changed = Vec::new();
+        let mut updates = Vec::new();
         for (&id, mapping) in &graph.midi_mappings {
             let entry = self.feedback.read(mapping.control);
             let unseen = entry.id == id && self.seen.get(&id) != Some(&entry.sequence);
@@ -377,15 +405,27 @@ impl MidiSync {
             // A waiting pickup set nothing in the engine, so a newer screen
             // edit in the graph must stay. Otherwise the graph takes exactly
             // what the engine set, and maps nothing itself.
-            if apply
-                && !entry.waiting
-                && let Some(value) = graph
+            if apply && !entry.waiting {
+                updates.push((mapping.target, mapping.param, self.feedback.result(mapping.control)));
+            }
+        }
+        for (target, param, result) in updates {
+            // The followers took the same value in the engine, so the graph
+            // holds it for them too, and a commit before the next sync of
+            // the copies compiles what plays (ADR-0040).
+            let followers = graph.midi_followers(target, param).to_vec();
+            if let Some(value) = graph.nodes.get_mut(&target).and_then(|node| node.params.get_mut(param)) {
+                *value = result;
+                changed.push((target, param));
+            }
+            for (follower, index) in followers {
+                if let Some(value) = graph
                     .nodes
-                    .get_mut(&mapping.target)
-                    .and_then(|node| node.params.get_mut(mapping.param))
-            {
-                *value = self.feedback.result(mapping.control);
-                changed.push((mapping.target, mapping.param));
+                    .get_mut(&follower)
+                    .and_then(|node| node.params.get_mut(index))
+                {
+                    *value = result;
+                }
             }
         }
         changed

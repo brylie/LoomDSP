@@ -8,6 +8,7 @@
 #![cfg(debug_assertions)]
 
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
+use loom_dsp::blend::{self, MemberFade};
 use loom_dsp::delay::{Allpass, DelayLine};
 use loom_dsp::dynamics::{self, Dynamics};
 use loom_dsp::envelope::{Envelope, Settings, power};
@@ -152,6 +153,25 @@ fn envelope_and_slew_never_allocate() {
         }
         envelope.reset();
         slew.reset();
+    });
+}
+
+/// The blends: a member fade through starts, reversals, waits, and cuts,
+/// and the gain laws.
+#[test]
+fn blends_never_allocate() {
+    let mut fade = MemberFade::new(48, 0);
+    assert_no_alloc(|| {
+        let mut sum = 0.0;
+        for i in 0..FRAMES {
+            let blend = fade.tick((i / 30) % 3);
+            sum += blend.gain_from + blend.gain_to;
+            let (left, right) = blend::pan(blend::spread_offset(i as u32 % 16, 16));
+            sum += left * right * blend::unison_gain(i as u32 % 17) + blend::equal_power(0.3).0;
+        }
+        fade.cut(1);
+        fade.reset(2);
+        assert!(sum.is_finite());
     });
 }
 

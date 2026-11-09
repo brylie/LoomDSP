@@ -51,6 +51,7 @@ impl App {
                 if let Err(e) = self.session.controller.set_assignment_depth(id, depth) {
                     self.alerts.warn(e.to_string());
                 }
+                self.fan_out_assignment(id, |c, copy| c.set_assignment_depth(copy, depth).map(|_| ()));
                 self.refresh_values();
             }
             Message::Polarity { id, choice } => {
@@ -59,6 +60,7 @@ impl App {
                     if let Err(e) = app.session.controller.set_assignment_polarity(id, choice.polarity()) {
                         app.alerts.warn(e.to_string());
                     }
+                    app.fan_out_assignment(id, |c, copy| c.set_assignment_polarity(copy, choice.polarity()));
                     app.refresh_values();
                 });
             }
@@ -68,6 +70,7 @@ impl App {
                     if let Err(e) = app.session.controller.set_assignment_enabled(id, enabled) {
                         app.alerts.warn(e.to_string());
                     } else {
+                        app.fan_out_assignment(id, |c, copy| c.set_assignment_enabled(copy, enabled));
                         app.session.scene.set_modulation_enabled(id.0, enabled);
                     }
                     app.refresh_values();

@@ -160,6 +160,7 @@ impl SubPatch {
             exposed: file.exposed.clone(),
             library: library.map(str::to_string),
             roles: file.roles.clone(),
+            ..SubPatch::new("")
         };
         if dropped.is_empty() {
             return (definition, Vec::new());

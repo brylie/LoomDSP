@@ -78,7 +78,8 @@ The user touches the control on screen, then moves the hardware control. Learn m
 5. **A mapping matches one channel and one controller number,** the ones the user moved while learning. *Why:* what the user moved is what works. Most controllers send each knob on one channel, so this needs no setting. Two controllers that send the same controller number on different channels stay apart.
 6. **Mapped control changes still reach modules.** A MIDI input module (#30) still sees every control change. *Why:* hiding messages that a mapping uses is a surprise that is hard to debug. If this causes trouble in use, a later change can add a "consume" option.
 7. **Mappings are saved with the patch.** A new list in the patch file, empty when missing. The patch format stays at version 1. *Why:* the issue asks for it, and a patch should play the same way when opened again. Per-device mappings that live outside patches are [device mappings](#device-mappings-fr-midi-06).
-8. **Real-time rules hold.** The mapping table is built on the control thread and sent with the schedule. The latest-value table is a fixed table of atomics, allocated once when the engine is created. The engine reads the mapping table and stores into the latest-value table with no allocation, lock, or wait (hard rule 1).
+8. **A mapping can carry followers** (2026-11-09, slice 6 of [#51](https://github.com/brylie/LoomDSP/issues/51)). The copies of a stacked sub-patch cannot have mappings of their own, since a control has one. A mapping on copy 0's parameter lists the same parameter of every other copy, and the engine sets each to the value the mapping sets, in the same step and with no allocation (`Controller::set_midi_followers`). Only the flattener sets them; nothing about learning changes ([sub-patches](sub-patches.md#notes-from-building-modes)).
+9. **Real-time rules hold.** The mapping table is built on the control thread and sent with the schedule. The latest-value table is a fixed table of atomics, allocated once when the engine is created. The engine reads the mapping table and stores into the latest-value table with no allocation, lock, or wait (hard rule 1).
 
 ### Patch format
 
@@ -179,7 +180,7 @@ Controller(
 
 ### Engine
 
-- The controller resolves device mappings to parameters through the slots, and compiles them with the patch mappings into the one table the engine already reads (rule 1). An entry from a device mapping also carries its input index. *Why:* the engine path, the feedback table, and the real-time rules (rules 2 and 8) stay as they are.
+- The controller resolves device mappings to parameters through the slots, and compiles them with the patch mappings into the one table the engine already reads (rule 1). An entry from a device mapping also carries its input index. *Why:* the engine path, the feedback table, and the real-time rules (rules 2 and 9) stay as they are.
 - `loom play` and plugin export do not read device files. *Why:* `loom play` runs one patch on any rig, and a plugin gets its controls from the host's automation. Patch mappings still work in both.
 
 ### Acceptance criteria: device mappings

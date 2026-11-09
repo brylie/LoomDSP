@@ -103,4 +103,6 @@ An algorithm documents the input it accepts and does not check it in a release b
 | `Dynamics` (two thresholds, hold) | First principles | Not applicable |
 | `eq::Section` | R. Bristow-Johnson, "Audio EQ Cookbook", W3C Working Group Note, 2021 | Confirmed. The bell and shelf formulas were compared with the note, and a test writes them out |
 | `Crossover` | S. H. Linkwitz, JAES 24, 1976 | Confirmed |
+| `blend::equal_power`, `blend::pan`, `MemberFade` | C. Roads, *The Computer Music Tutorial*, MIT Press, 1996; U. Zölzer (ed.), *DAFX*, 2nd ed., Wiley, 2011 (constant-power laws) | Citing source. Tests check the laws: the power stays 1, the centre is -3 dB, and a reversed fade does not step |
+| `blend::unison_gain` | A. Papoulis and S. U. Pillai, *Probability, Random Variables and Stochastic Processes*, 4th ed., 2002 (variance of a sum of independent variables) | Citing source. A test checks N seeded noise sources at 1/√N keep the power of one |
 | `KWeighting`, `LevelMatch` | ITU-R BS.1770 | Partly confirmed. The high-pass and part of the shelf were seen in BS.1770-1. The rest of the table a test uses was not |

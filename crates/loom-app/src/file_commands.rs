@@ -554,6 +554,18 @@ impl App {
     /// written.
     pub(crate) fn save_to_library(&mut self, instance: loom_core::ModuleId) -> bool {
         self.finish_edits();
+        // A patch file has no place for a mode yet (sub-patches.md, How modes
+        // meet the rest).
+        if let Some(mode) = self
+            .session
+            .hierarchy
+            .modes_of(instance)
+            .map(|m| m.mode)
+            .filter(|m| !m.is_single())
+        {
+            self.alerts.warn(loom_patch::modes::no_library(mode));
+            return false;
+        }
         let Some(file) =
             self.session
                 .hierarchy

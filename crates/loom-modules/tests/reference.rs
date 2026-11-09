@@ -640,6 +640,67 @@ fn struct_fade() {
     Harness::new(&structure::FADE).seconds(0.02).check_block_sizes();
 }
 
+/// Reference render for `loom.struct.sum`: three members at gain 0.5.
+#[test]
+fn struct_sum() {
+    Harness::new(&structure::modes::SUM)
+        .seconds(0.02)
+        .input("in1", Signal::phase(100.0))
+        .input("in2", Signal::constant(0.5))
+        .input("in3", Signal::phase(130.0))
+        .param("gain", 0.5)
+        .param_at(0.01, "gain", 0.25)
+        .check(reference!("struct_sum"));
+}
+
+/// Reference render for `loom.struct.spread_sum`: three copies spread from
+/// left to right, then four.
+#[test]
+fn struct_spread_sum() {
+    Harness::new(&structure::modes::SPREAD_SUM)
+        .seconds(0.02)
+        .input("in1", Signal::phase(100.0))
+        .input("in2", Signal::constant(0.5))
+        .input("in3", Signal::phase(130.0))
+        .input("in4", Signal::constant(-0.25))
+        .param("copies", 3.0)
+        .param_at(0.01, "copies", 4.0)
+        .check(reference!("struct_spread_sum"));
+}
+
+/// Reference render for `loom.struct.member`: member 3, then 1.
+#[test]
+fn struct_member() {
+    Harness::new(&structure::modes::MEMBER)
+        .seconds(0.02)
+        .param("member", 3.0)
+        .param_at(0.01, "member", 1.0)
+        .check(reference!("struct_member"));
+}
+
+/// Reference render for `loom.struct.select`: member 1, a fade to 2 that
+/// turns back to 1 half way, a change to 3 during a fade that waits, and a
+/// modulated Member between whole values.
+#[test]
+fn struct_select() {
+    let member = Signal::from_fn(|frame| match frame {
+        0..200 => 1.0,
+        200..440 => 2.0,
+        440..500 => 1.0,
+        500..520 => 2.0,
+        520..1_400 => 3.4,
+        _ => 2.6,
+    });
+    Harness::new(&structure::modes::SELECT)
+        .seconds(0.04)
+        .input("in1", Signal::phase(100.0))
+        .input("in2", Signal::constant(0.5))
+        .input("in3", Signal::constant(-0.75))
+        .input("member", member)
+        .param("members", 3.0)
+        .check(reference!("struct_select"));
+}
+
 #[test]
 fn every_dsp_module_has_a_reference_test() {
     // Add a test above when you add a module to `ALL`.
@@ -705,6 +766,10 @@ fn every_dsp_module_has_a_reference_test() {
         &structure::INPUT,
         &structure::OUTPUT,
         &structure::FADE,
+        &structure::modes::SUM,
+        &structure::modes::SPREAD_SUM,
+        &structure::modes::MEMBER,
+        &structure::modes::SELECT,
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {
