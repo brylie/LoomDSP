@@ -4,12 +4,13 @@
 //! ramp drive any shaper, and lets users bend time (sync, phase distortion,
 //! step indexing) before it becomes sound.
 
-use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
+use crate::own_phase::{OCTAVE_PARAM, PitchedPhase, TUNE_PARAM};
+use loom_core::signal::{EdgeDetector, WrapDetector, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
-use loom_dsp::phase::{Phasor, wrap};
+use loom_dsp::phase::wrap;
 use loom_rt::Smoothed;
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -55,85 +56,6 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
     displays: &[],
     roles: &[],
 };
-
-/// The `tune` parameter of Phase and of every oscillator.
-pub(crate) const TUNE_PARAM: ParamSpec = ParamSpec {
-    name: "tune",
-    label: "Tune",
-    description: "Shifts the pitch in semitones.",
-    min: -48.0,
-    max: 48.0,
-    default: 0.0,
-    unit: "st",
-    options: ParamOptions::DEFAULT,
-};
-
-/// The `octave` parameter of Phase and of every oscillator.
-pub(crate) const OCTAVE_PARAM: ParamSpec = ParamSpec {
-    name: "octave",
-    label: "Octave",
-    description: "Shifts the pitch in octaves.",
-    min: -10.0,
-    max: 10.0,
-    default: 0.0,
-    unit: "oct",
-    options: ParamOptions::DEFAULT,
-};
-
-/// A phase that runs at a pitch, shifted by a tune in semitones and an
-/// octave. Phase runs one, and so does every oscillator while its phase
-/// input has no cable (oscillators.md, rule 1). Sharing it means an
-/// oscillator's own phase is the same, bit for bit, as a Phase module in
-/// front of it.
-#[derive(Clone)]
-pub(crate) struct PitchedPhase {
-    phasor: Phasor,
-    sample_rate: f32,
-    /// The `tune` knob, in semitones.
-    tune: f32,
-    /// The `octave` knob, a whole number.
-    octave: f32,
-}
-
-impl PitchedPhase {
-    /// A phase at 0, with both knobs at 0.
-    pub(crate) fn new(sample_rate: f32) -> Self {
-        Self {
-            phasor: Phasor::new(),
-            sample_rate,
-            tune: 0.0,
-            octave: 0.0,
-        }
-    }
-
-    /// The phase for frame `i`, then one step on at `pitch` plus the knobs.
-    /// A modulated knob counts for this frame only, and a modulated octave
-    /// rounds to a whole octave as the knob does.
-    #[inline]
-    pub(crate) fn tick(&mut self, i: usize, pitch_in: f32, tune: Param<'_>, octave: Param<'_>) -> f32 {
-        let octave = octave.map_or(i, self.octave, f32::round);
-        let offset = tune.at_or(i, self.tune) * pitch::PER_SEMITONE + octave * pitch::PER_OCTAVE;
-        // A high pitch overflows `to_hz` to infinity, and `step_for` limits
-        // that, so a patch recovers when the pitch comes back (#121).
-        self.phasor
-            .tick(Phasor::step_for(pitch::to_hz(pitch_in + offset), self.sample_rate))
-    }
-
-    /// Sets the tune knob, in semitones.
-    pub(crate) fn set_tune(&mut self, semitones: f32) {
-        self.tune = semitones;
-    }
-
-    /// Sets the octave knob. It rounds to a whole octave.
-    pub(crate) fn set_octave(&mut self, octaves: f32) {
-        self.octave = octaves.round();
-    }
-
-    /// Sets the phase back to 0.
-    pub(crate) fn reset(&mut self) {
-        self.phasor.reset();
-    }
-}
 
 #[derive(Clone)]
 struct Phase {

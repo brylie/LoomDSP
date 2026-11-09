@@ -28,6 +28,7 @@ pub mod math;
 pub mod midi;
 pub mod mix;
 pub mod osc;
+mod own_phase;
 pub mod phase;
 pub mod rand;
 pub mod route;

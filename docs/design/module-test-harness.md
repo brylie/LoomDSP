@@ -130,7 +130,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] With `LOOM_UPDATE_REFERENCES=1`, a missing or different reference is written, and the test passes.
 - [x] A missing reference fails with a message that says how to create it. A reference with a different sample rate, channel count, or length fails.
 - [x] `check_block_sizes` passes for a block-size invariant module, and fails for a module whose output depends on block size.
-- [x] Unconnected inputs read their port default, including transport signals; connected inputs read their signal and report `is_connected`.
+- [x] Unconnected inputs read their port default, including transport signals, and zeros for an own phase (the module runs its own, ADR-0042); connected inputs read their signal and report `is_connected`.
 - [x] MIDI events reach the module in the block and frame they belong to, at every block size.
 - [x] A non-finite output fails with the output and frame.
 - [x] Every built-in DSP module has a reference test and a block-size check.

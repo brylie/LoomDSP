@@ -25,6 +25,8 @@ Many things in a modular patch are phases:
 
 *Why you rarely patch a phase by hand:* a module whose phase input has no cable still gets one. An oscillator runs its own phase from its pitch, and an LFO or sequencer follows the transport's bar phase ([clock](../design/clock.md#default-inputs)). So a note into an oscillator plays at once, and a phase cable is only needed to share a phase or to bend it ([oscillators](../design/oscillators.md)).
 
+This is a **normalled** input, in Eurorack terms: the jack is wired inside the module to a default source, and a cable breaks that link. A cable into an oscillator's phase input therefore *replaces* its own phase. It does not add to it. Adding a signal to a running phase is phase modulation, which many Eurorack VCOs offer on a separate PM input; LoomDSP keeps that as a separate input too, so a shared or bent phase stays exactly what you patched ([ADR-0042](../adr/0042-unpatched-phase-inputs-are-wired-for-the-player.md)).
+
 **In Eurorack** a phase is just a ramp or sawtooth voltage. **In Bitwig Grid**, phase is a signal type of its own, with a whole family of modules that change it (the Ø modules: shift, reverse, mirror, bend, and others). LoomDSP follows Grid here: everything is a number on a cable, and phase is one way to read that number.
 
 ## A phase on a cable is a list of samples
