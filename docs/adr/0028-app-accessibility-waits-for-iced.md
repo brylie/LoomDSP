@@ -1,7 +1,7 @@
 # ADR-0028: App accessibility waits for AccessKit support in Iced
 
-- **Status:** Deferred
-- **Date:** 2026-10-28
+- **Status:** Superseded by ADR-0041
+- **Date:** 2026-11-09
 - **Related requirements:** NFR-UX-06 (new), NFR-UX-01, NFR-UX-02, NFR-UX-03
 - **Specification:** none yet. A spec is written when this ADR is taken up again.
 

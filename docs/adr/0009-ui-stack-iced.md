@@ -1,7 +1,7 @@
 # ADR-0009: UI stack: Iced (canvas decided in ADR-0010)
 
-- **Status:** Accepted
-- **Date:** 2026-10-13
+- **Status:** Superseded by ADR-0041
+- **Date:** 2026-11-09
 - **Related requirements:** FR-CANVAS-*, FR-PANEL-*, FR-VIS-*, NFR-PERF-04, OQ-02, OQ-12, OQ-13, OQ-14
 
 ## Context

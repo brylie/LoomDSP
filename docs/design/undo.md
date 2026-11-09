@@ -40,7 +40,7 @@ How a user takes back and replays edits on the canvas, the inspector, and the pa
 | Press undo or redo while a gesture is in progress | Nothing happens. The gesture finishes first. |
 | Open a patch, or start a new one | The history is cleared. |
 
-The shortcuts work anywhere in the window, except while a text field or text box has keyboard focus: then they do nothing. The text widgets have no undo of their own, and undoing a canvas edit behind the field would surprise the user. *Why not only when the canvas has focus:* the app has no focus for the canvas or the inspector as a whole, and the user expects undo to work wherever they last clicked.
+The shortcuts work anywhere in the window, except while a text field or text box has keyboard focus: then they do nothing. The text widgets have no undo of their own, and undoing a canvas edit behind the field would surprise the user. When phase 3 of leaving Iced moves a field to the new UI layer, the shortcuts undo and redo the typing inside that field instead, and still never reach the patch ([UI layer](ui-layer.md), section 8, rule 3). *Why not only when the canvas has focus:* the app has no focus for the canvas or the inspector as a whole, and the user expects undo to work wherever they last clicked.
 
 ### After an undo or redo
 
@@ -186,7 +186,7 @@ The edit log itself lives in `loom-app` and knows nothing about the audio thread
 - [x] The history keeps 200 steps; the 201st edit drops the oldest.
 - [ ] Opening a patch clears the history, and the buttons are disabled.
 - [ ] Undo and redo work from the keyboard and from the toolbar; the toolbar hover text and the status bar name the step.
-- [ ] Undo and redo shortcuts do nothing while a text field is being edited.
+- [ ] Undo and redo shortcuts do nothing to the patch while a text field is being edited. Until a field moves to the UI layer, they do nothing at all; after, they act on the typing in the field.
 - [ ] Undo and redo do not allocate or lock on the audio thread (`tests/no_alloc.rs` still passes).
 
 ## Out of scope

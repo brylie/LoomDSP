@@ -50,7 +50,7 @@ Measured at commit `6091e52`.
 1. **The view models are the seam.** `App::ui_snapshot`, `inspector.rs`, and the other plain-data models (ADR-0021) describe what the user sees. The accessibility tree, the control channel, `--dump-ui`, and the tests all read them. New code reads them too. Nothing reads a toolkit widget tree to find out what is on screen.
 2. **One runtime, two drivers.** The window and the headless harness must run the same code for events, layout, and messages. Only the event source and the drawing target differ. This is what keeps the tests honest.
 3. **No hidden skips.** A harness that cannot run an effect (a file dialog, a window command, a timer) panics with a message, as the `Ui` harness does today.
-4. **Do not invent text.** Shaping, font fallback, and line breaking come from `cosmic-text`. Glyph drawing comes from a glyph atlas crate (step 2.4). Text editing builds on `cosmic-text`'s editor.
+4. **Do not invent text.** Shaping, font fallback, line breaking, glyph drawing, and the editing model come from the text crate and its glyph renderer. Which crate is chosen at step 2.4 ([spec](../design/ui-layer.md), section 8, rule 8). The steps below name `cosmic-text` and `glyphon`, today's stack under Iced; if Parley is chosen, steps 2.4, 3.3, and phase 4 change to name it and its glyph drawing.
 5. **Licences.** Every new crate goes through `cargo deny check` before it is used. Only permissive licences (ADR-0006).
 6. **Clean room.** The agent may read the source of dependencies accepted under ADR-0006, which includes Iced, `winit`, `wgpu`, `cosmic-text`, and AccessKit. It must not read the source of other audio applications or other UI frameworks that are not dependencies.
 7. **Same versions during the move.** Use the `winit` and `wgpu` versions Iced 0.14 already pulls in, so the lock file never holds two of either.
@@ -158,14 +158,14 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
 ### 2.1 Our own runtime
 
-1. Create `crates/loom-app/src/runtime.rs` (or a small crate). It owns:
+1. Create the runtime in `crates/loom-ui`, generic over the app and the driver ([UI layer spec](../design/ui-layer.md), section 2, rule 9). The code that links it to Iced during phases 2 and 3 goes in `crates/loom-app/src/iced_bridge/` (spec section 1, rule 6). The runtime owns:
    - the message queue;
    - `fn handle(&mut self, event: Event) -> ...`: our own event enum covering window, pointer, keyboard, IME, redraw, and wake-ups;
    - effects, which replace `Task`: widget operations (focus a field, scroll to), clipboard read and write, exit, file dialogs, timers, window commands. Each is an enum variant, not a future, so the headless harness can see and run each one or panic on it.
 2. Port `App::update` to return `Effects` instead of `Task<Message>`. Do it file by file, behind an adapter that turns effects into Iced tasks, so the app keeps running on `iced::application` until 2.2 lands.
 3. Port subscriptions to event sources that wake the loop:
-   - the control channel listener, the MIDI learn watcher, the input watcher, and audio watch send messages through an `EventLoopProxy`;
-   - timers (frame meter, alerts, autosave) become deadlines the loop waits on with `ControlFlow::WaitUntil`.
+   - the control channel listener, the MIDI learn watcher, the input watcher, and audio watch send messages through a waker the driver gives (an `EventLoopProxy` in the `winit` shell);
+   - timers (frame meter, alerts, autosave) become deadlines the runtime returns, which the `winit` shell waits on with `ControlFlow::WaitUntil`.
 
    While nothing is due, the loop sleeps (NFR-PERF-04, control channel rule 7).
 
