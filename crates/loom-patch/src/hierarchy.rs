@@ -22,9 +22,10 @@
 //! Control thread only. Nothing here opens a file.
 
 use crate::LoadWarning;
+use crate::flatten::Added;
 use crate::flatten::{FlatIds, ModulePath, port_name};
 use crate::library::{LeftOut, reachable_keys, rekey};
-use crate::modes::ModeSettings;
+use crate::modes::{MEMBER_PARAM, Mode, ModeSettings};
 use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
     PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, Slot, SubPatch, unique_name,
@@ -34,6 +35,7 @@ use loom_core::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod modes;
 mod slots;
 pub use slots::{
     Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, expose_role_only_text, made_slot_text,
@@ -264,6 +266,11 @@ pub struct Hierarchy {
     /// The flat cables the links imply, as (output, input) in flat ids and
     /// port names, from the last sync or load.
     implied: BTreeSet<(End, End)>,
+    /// For each module of copy 0 of a stack, its copies, from the last sync
+    /// ([`Flat::copies`](crate::Flat::copies)).
+    copies: BTreeMap<ModuleId, Vec<(ModuleId, u32)>>,
+    /// The modules the flattener added for modes, from the last sync.
+    added: BTreeMap<ModuleId, crate::flatten::Added>,
     /// The `exposed` list of the top level, as the file had it: a library
     /// file opened on its own keeps its surface for the next insert. Nothing
     /// shows it; entries whose module is gone are dropped when it is written.
@@ -293,6 +300,8 @@ impl Hierarchy {
             slots: BTreeMap::new(),
             links: BTreeSet::new(),
             implied: BTreeSet::new(),
+            copies: BTreeMap::new(),
+            added: BTreeMap::new(),
             top_exposed: Vec::new(),
         }
     }
@@ -316,6 +325,13 @@ impl Hierarchy {
             .difference(&hierarchy.direct_cables(patch))
             .cloned()
             .collect();
+        // What the flattener added for modes, from the same ids, so a
+        // parameter write reaches every copy from the first edit on.
+        if !hierarchy.instances.is_empty() {
+            let mut scratch = hierarchy.ids.clone();
+            let flat = patch.flatten(registry, &mut scratch)?;
+            hierarchy.note_flat(&flat);
+        }
         Ok(hierarchy)
     }
 
@@ -572,7 +588,7 @@ impl Hierarchy {
         (1..=level.0.len())
             .filter_map(|n| {
                 let prefix = ModulePath(level.0[..n].to_vec());
-                self.definition_at(&prefix).map(|d| d.metadata.name.clone())
+                self.level_name(&prefix)
             })
             .collect()
     }
@@ -612,6 +628,25 @@ impl Hierarchy {
         let Some(path) = self.ids.path_of(instance) else {
             return (Vec::new(), Vec::new());
         };
+        // A layer or select: its members' ports, by name, in the order they
+        // first appear (sub-patches.md, Members are nested instances).
+        if let Some(modes) = self.modes_at(path).filter(|m| m.mode.has_members()) {
+            let (mut inputs, mut outputs): (PortList, PortList) = (Vec::new(), Vec::new());
+            for lid in &modes.members {
+                let Some(member) = self.ids.get(&path.child(*lid)) else {
+                    continue;
+                };
+                let (member_inputs, member_outputs) = self.instance_ports(member);
+                for (list, more) in [(&mut inputs, member_inputs), (&mut outputs, member_outputs)] {
+                    for (id, name) in more {
+                        if !list.iter().any(|(_, n)| *n == name) {
+                            list.push((id, name));
+                        }
+                    }
+                }
+            }
+            return (inputs, outputs);
+        }
         let mut inputs = Vec::new();
         let mut outputs = Vec::new();
         for (port_path, port) in &self.ports {
@@ -706,6 +741,15 @@ impl Hierarchy {
             return self.source_behind_guarded(graph, &parent, &link.from, seen);
         }
         if self.instances.contains_key(&path) {
+            // A mode's sum or select stands behind the port.
+            if let Some(added) = self.added_output(&path, &end.1) {
+                return Some((added, "out".to_string()));
+            }
+            // A layer of one member: the member's port.
+            if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
+                let member = *modes.members.first()?;
+                return self.source_behind_guarded(graph, &path, &(member, end.1.clone()), seen);
+            }
             let port_path = self.port_path(&path, Direction::Output, &end.1)?;
             let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
             return self.source_behind_guarded(graph, &path, &link.from, seen);
@@ -762,6 +806,13 @@ impl Hierarchy {
             return;
         }
         if self.instances.contains_key(&path) {
+            // A layer or select: every member's port of that name.
+            if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
+                for member in modes.members.clone() {
+                    self.inputs_behind_guarded(graph, &path, &(member, end.1.clone()), seen, found);
+                }
+                return;
+            }
             let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
                 return;
             };
@@ -822,6 +873,9 @@ impl Hierarchy {
     /// The exposed name of `instance` that stands for the flat parameter
     /// `target`, through any depth of nesting.
     pub fn exposed_name_for(&self, instance: &ModulePath, target: &(ModuleId, String)) -> Option<String> {
+        if self.member_target(instance).as_ref() == Some(target) {
+            return Some(MEMBER_PARAM.to_string());
+        }
         let definition = self.definition_at(instance)?;
         definition
             .exposed
@@ -834,6 +888,11 @@ impl Hierarchy {
     /// `instance` stands for.
     pub fn resolve_exposed(&self, instance: &ModulePath, exposed: &Exposed) -> Option<(ModuleId, String)> {
         let member = instance.child(exposed.module);
+        if exposed.param == MEMBER_PARAM
+            && let Some(target) = self.member_target(&member)
+        {
+            return Some(target);
+        }
         if let Some(definition) = self.definition_at(&member) {
             let inner = definition.exposed.iter().find(|e| e.name == exposed.param)?;
             return self.resolve_exposed(&member, inner);
@@ -1140,17 +1199,41 @@ impl Hierarchy {
             if let Some(source) = self.output_behind_fade(graph, assignment.source) {
                 assignment.source = source;
             }
-            if skip.contains(&assignment.source.module) || skip.contains(&assignment.target) {
+            // Onto a select's Member: written on the instance, by name.
+            let member_target = matches!(self.added.get(&assignment.target), Some(Added::Member { .. }));
+            if skip.contains(&assignment.target) && !member_target {
                 continue;
             }
-            let Some(entry) = self.assignment_entry(graph, &assignment) else {
+            // From a mode's sum or select: written from the instance's port.
+            let entry = match self.added.get(&assignment.source.module) {
+                Some(Added::Output { instance, port }) => {
+                    self.assignment_entry_at(graph, instance.clone(), port.clone(), &assignment)
+                }
+                _ if skip.contains(&assignment.source.module) => continue,
+                _ => self.assignment_entry(graph, &assignment),
+            };
+            let Some(entry) = entry else {
                 continue;
             };
             levels.entry(entry.0).or_default().modulation.push(entry.1);
         }
         // Mappings live with their module; on a slot's part, through the
         // slot by the role's name.
-        for (_, mapping) in graph.midi_mappings().filter(|(_, m)| !skip.contains(&m.target)) {
+        for (_, mapping) in graph.midi_mappings() {
+            // A mapping on a select's Member is written on the instance.
+            if let Some(Added::Member { instance }) = self.added.get(&mapping.target) {
+                let Some(level) = instance.parent() else { continue };
+                let target = (instance.last(), MEMBER_PARAM.to_string());
+                levels
+                    .entry(level)
+                    .or_default()
+                    .midi
+                    .push(crate::midi_entry(mapping, target));
+                continue;
+            }
+            if skip.contains(&mapping.target) {
+                continue;
+            }
             let path = self.path_of(mapping.target);
             let level = path.parent().unwrap_or_else(ModulePath::root);
             let param = crate::param_name(graph, mapping.target, mapping.param);
@@ -1254,6 +1337,12 @@ impl Hierarchy {
                 values.insert(exposed.name.clone(), value);
             }
         }
+        // A select's Member value, from its Member module.
+        if definition.modes.mode == Mode::Select
+            && let Some(value) = self.member_value(graph, path)
+        {
+            values.insert(MEMBER_PARAM.to_string(), value);
+        }
         values
     }
 
@@ -1265,10 +1354,23 @@ impl Hierarchy {
         assignment: &loom_core::Assignment,
     ) -> Option<(ModulePath, PatchModulation)> {
         let source_path = self.path_of(assignment.source.module);
+        let output = crate::port_name(graph, assignment.source);
+        self.assignment_entry_at(graph, source_path, output, assignment)
+    }
+
+    /// [`Hierarchy::assignment_entry`] with the source given as a tile's
+    /// path and its output's name: a mode's added output stands for the
+    /// instance's port (sub-patches.md, The modules the flattener adds).
+    fn assignment_entry_at(
+        &self,
+        graph: &Graph,
+        source_path: ModulePath,
+        output: String,
+        assignment: &loom_core::Assignment,
+    ) -> Option<(ModulePath, PatchModulation)> {
         let target_path = self.path_of(assignment.target);
         let source_level = source_path.parent().unwrap_or_else(ModulePath::root);
         let target_level = target_path.parent().unwrap_or_else(ModulePath::root);
-        let output = crate::port_name(graph, assignment.source);
         let param = crate::param_name(graph, assignment.target, assignment.param);
         let (level, source, target) = if source_level == target_level {
             // On a slot's part, by the role's name through the slot.
@@ -1368,16 +1470,32 @@ impl Hierarchy {
         // What the links imply, from the links alone: a cable the graph
         // holds for a link that is gone must be written as direct now.
         let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), false, &skip);
-        let mut scratch = self.ids.clone();
-        let flat = links_only.flatten(controller.registry(), &mut scratch)?;
-        self.implied = flat
+        let mut links_scratch = self.ids.clone();
+        let links_flat = links_only.flatten(controller.registry(), &mut links_scratch)?;
+        self.implied = links_flat
             .cables
             .iter()
             .map(|cable| (cable.from.clone(), cable.to.clone()))
             .collect();
         let patch = self.unflatten_with(controller.graph(), |_| Layout::default(), true, &skip);
-        let mut scratch = self.ids.clone();
+        // On the links' table, so implied modules have the same ids.
+        let mut scratch = links_scratch.clone();
         let flat = patch.flatten(controller.registry(), &mut scratch)?;
+        // Stack copies and the modules a mode adds are the flattener's, with
+        // every cable on them (ADR-0040).
+        let implied_ids: BTreeSet<u32> = flat
+            .modules
+            .iter()
+            .filter(|m| m.path.is_implied())
+            .map(|m| m.id.0)
+            .collect();
+        self.implied.extend(
+            flat.cables
+                .iter()
+                .filter(|c| implied_ids.contains(&c.from.0) || implied_ids.contains(&c.to.0))
+                .map(|cable| (cable.from.clone(), cable.to.clone())),
+        );
+        self.sync_implied_modules(controller, &flat, &scratch)?;
         let mut desired: BTreeSet<(End, End)> = flat
             .cables
             .iter()
@@ -1414,12 +1532,14 @@ impl Hierarchy {
         for (from, to) in desired.difference(&current) {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
+        self.sync_implied_links(controller, &flat)?;
         let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
         // The range MIDI sweeps follows the surfaces: a range that changed
         // or went away reaches the engine with the caller's commit.
         controller
             .set_limits(flat.limits_in(controller.graph()))
             .map_err(PatchError::Engine)?;
+        self.note_flat(&flat);
         Ok(renamed)
     }
 
@@ -1427,7 +1547,7 @@ impl Hierarchy {
     pub fn next_level_id(&self, level: &ModulePath) -> u32 {
         self.ids
             .paths()
-            .filter(|(path, _)| path.parent().as_ref() == Some(level))
+            .filter(|(path, _)| path.parent().as_ref() == Some(level) && !path.is_implied())
             .map(|(path, _)| path.last())
             .max()
             .map_or(1, |max| max + 1)
@@ -1721,6 +1841,12 @@ impl Hierarchy {
         // What the enclosing definition exposed on the tile goes with it,
         // and so does every re-exposure of that above.
         self.drop_exposed(&level, lid, None);
+        // A member leaves its layer's or select's list.
+        if let Some(key) = self.instances.get(&level).map(|i| i.key.clone())
+            && let Some(definition) = self.definitions.get_mut(&key)
+        {
+            definition.modes.members.retain(|member| *member != lid);
+        }
         removed.tiles.push(id);
         removed
     }
@@ -2356,9 +2482,49 @@ impl Hierarchy {
                 }
             }
         }
-        let (mut definition, left_out) = SubPatch::from_patch(file, controller.registry(), library);
+        let (definition, left_out) = SubPatch::from_patch(file, controller.registry(), library);
+        self.insert_definition(
+            controller,
+            level,
+            definition,
+            file.subpatches.clone(),
+            at,
+            key,
+            left_out,
+        )
+    }
+
+    /// Inserts `definition`, with the definitions `nested` in it, as a new
+    /// sub-patch tile at `level`: at level id `at` and under definition key
+    /// `key` when they are free. The keys are made unique. At a layer or
+    /// select level the new tile is a member, added last; a seventeenth is
+    /// refused (sub-patches.md, The editor for modes). The caller syncs and
+    /// commits, and removes the added modules on a later refusal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_definition(
+        &mut self,
+        controller: &mut Controller,
+        level: &ModulePath,
+        mut definition: SubPatch,
+        mut nested: BTreeMap<String, SubPatch>,
+        at: Option<u32>,
+        key: Option<&str>,
+        left_out: Vec<LeftOut>,
+    ) -> Result<Inserted, PatchError> {
+        let member_mode = self
+            .definition_at(level)
+            .map(|d| d.modes.mode)
+            .filter(|m| m.has_members());
+        if let Some(mode) = member_mode
+            && self
+                .definition_at(level)
+                .is_some_and(|d| d.modes.members.len() >= crate::MOST_MEMBERS)
+        {
+            return Err(PatchError::BadMode {
+                reason: crate::modes::too_many_members(mode),
+            });
+        }
         let name = definition.metadata.name.clone();
-        let mut nested = file.subpatches.clone();
         let taken = |key: &str| self.definitions.contains_key(key) || nested.contains_key(key);
         let key = match key {
             Some(wanted) if !taken(wanted) => wanted.to_string(),
@@ -2432,6 +2598,12 @@ impl Hierarchy {
                     ));
                 }
             }
+        }
+        if member_mode.is_some()
+            && let Some(key) = self.instances.get(level).map(|i| i.key.clone())
+            && let Some(definition) = self.definitions.get_mut(&key)
+        {
+            definition.modes.members.push(instance_path.last());
         }
         Ok(Inserted {
             instance: instance_id,
@@ -2541,7 +2713,23 @@ impl Hierarchy {
     /// handed out since: no id is ever given out twice (undo.md, rule 5).
     pub fn restore(&mut self, snapshot: &Hierarchy) {
         let next = self.ids.next_free();
+        // Implied modules outlive the snapshot: the next sync keeps, adds,
+        // or removes them, so their state survives an unrelated undo.
+        let implied: Vec<(ModulePath, ModuleId)> = self
+            .ids
+            .paths()
+            .filter(|(path, _)| path.is_implied())
+            .map(|(path, id)| (path.clone(), id))
+            .collect();
+        let (copies, added) = (std::mem::take(&mut self.copies), std::mem::take(&mut self.added));
         *self = snapshot.clone();
+        for (path, id) in implied {
+            if self.ids.get(&path).is_none() && self.ids.path_of(id).is_none() {
+                let _ = self.ids.reserve(path, id);
+            }
+        }
+        self.copies = copies;
+        self.added = added;
         self.ids.reserve_id(ModuleId(next.saturating_sub(1)));
     }
 }

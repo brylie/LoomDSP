@@ -263,6 +263,14 @@ impl FlatIds {
         Ok(id)
     }
 
+    /// Forgets `path` and its id. The id is never handed out again, since
+    /// `next` is not lowered (rule 4).
+    pub fn forget(&mut self, path: &ModulePath) {
+        if let Some(id) = self.by_path.remove(path) {
+            self.by_id.remove(&id);
+        }
+    }
+
     /// Moves the id of `old` to `new`, which must be free: the module
     /// keeps its id and its state while it changes level (collapsing and
     /// dissolving).
