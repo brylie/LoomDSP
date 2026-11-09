@@ -387,6 +387,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Question | Decision (2026-11-09) | Rule |
 |---|---|---|
 | How a held arrow key steps a knob for a screen reader | SetValue is applied as sent; Increment and Decrement move one step; confirmed by a listening test in phase 1 | Section 7, rule 5 |
+| How screen reader edits group into undo steps | Their own group beside `ArrowGroup`: each action is a step and its release; joins within 500 ms on the same control; closes 500 ms after the last action or early on another control, a pointer press, a key press, a focus move, window focus loss, an inspector edit, or Undo or Redo; Undo stays enabled | Section 7, rule 6 |
 | Whether focus on a tile selects it | No. Only Click or Enter selects | Section 7, rule 9 |
 | Number or text for a slider's value on macOS | A number, with the unit in the description, until AccessKit's adapter gives value text | Section 7, rule 4 |
 | How often live value nodes update | At most every 250 ms. While a screen reader is active, every live value node on screen updates, focused or not, because AccessKit does not report where the screen reader's cursor is. Widened from "only while focused" on the same day, so a meter under the cursor is never stale | Section 7, rule 7 |
