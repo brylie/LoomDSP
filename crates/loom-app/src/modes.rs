@@ -312,7 +312,9 @@ impl App {
     /// inside a stack, so the commit sends them together (ADR-0040,
     /// invariant 7). A patch with no mode pays nothing.
     pub(crate) fn sync_modes(&mut self) {
-        if !self.session.hierarchy.has_modes() {
+        // Nothing to do with no mode, or when the last sync saw this very
+        // graph: a gesture that synced already pays only once.
+        if !self.session.hierarchy.has_modes() || self.session.hierarchy.synced_with(&self.session.controller) {
             return;
         }
         let mut candidate = self.session.hierarchy.clone();

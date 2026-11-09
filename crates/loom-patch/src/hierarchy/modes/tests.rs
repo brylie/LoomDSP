@@ -313,6 +313,31 @@ fn leaving_a_layer_whose_member_has_a_mode_is_refused() {
     assert_eq!(written(&hierarchy, &controller), before);
 }
 
+/// A surface item already called `member` takes the next free name when
+/// the sub-patch becomes a select, so the Member control can have it, and
+/// the file loads back the same.
+#[test]
+fn an_item_called_member_is_renamed_for_a_select() {
+    let text = VOICE
+        .replace(
+            r#"exposed: [Exposed(name: "cutoff", module: 5, param: "cutoff")],"#,
+            r#"exposed: [Exposed(name: "member", module: 5, param: "cutoff")],"#,
+        )
+        .replace(r#"params: {"cutoff": 1200.0}"#, r#"params: {"member": 1200.0}"#)
+        .replace(r#"target: (7, "cutoff")"#, r#"target: (7, "member")"#);
+    let (mut controller, mut hierarchy) = load(&text);
+    hierarchy
+        .set_mode(controller.graph(), ModuleId(7), Mode::Select, &role_name)
+        .unwrap();
+    commit(&mut hierarchy, &mut controller);
+    let text = written(&hierarchy, &controller);
+    assert!(text.contains(r#"name: "member 2""#), "{text}");
+    assert!(text.contains(r#""member 2": 1200.0"#), "{text}");
+    assert!(text.contains(r#"target: (7, "member 2")"#), "{text}");
+    let (again_controller, again) = load(&text);
+    assert_eq!(written(&again, &again_controller), text);
+}
+
 /// An undo snapshot leaves implied modules out, and restoring one keeps
 /// the implied ids, so copies keep their state.
 #[test]

@@ -1148,9 +1148,6 @@ impl Engine {
     }
 }
 
-/// Sets a parameter's base value: on the module, and on its fill if it is
-/// modulated, where a smoothed base glides to it. A module that runs per
-/// channel gets the value on both copies (stereo spec, rule 14).
 /// Sets the base value of a mapped parameter and of every parameter that
 /// follows its mapping (the copies of a stacked sub-patch).
 fn set_mapped(
@@ -1166,6 +1163,9 @@ fn set_mapped(
     }
 }
 
+/// Sets a parameter's base value: on the module, and on its fill if it is
+/// modulated, where a smoothed base glides to it. A module that runs per
+/// channel gets the value on both copies (stereo spec, rule 14).
 fn set_base(
     slots: &mut [Option<Box<dyn Module>>],
     fills: &mut [ParamFill],

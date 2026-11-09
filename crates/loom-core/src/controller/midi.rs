@@ -61,7 +61,7 @@ impl Controller {
                 learned: false,
             },
         );
-        self.dirty = true;
+        self.mark_dirty();
         Ok((id, removed))
     }
 
@@ -87,7 +87,7 @@ impl Controller {
         }
         if wanted != self.graph.midi_followers {
             self.graph.midi_followers = wanted;
-            self.dirty = true;
+            self.mark_dirty();
         }
         Ok(())
     }
@@ -149,7 +149,7 @@ impl Controller {
         self.graph.midi_mappings.remove(&id);
         let id = self.midi.new_mapping();
         self.graph.midi_mappings.insert(id, mapping);
-        self.dirty = true;
+        self.mark_dirty();
         id
     }
 
@@ -222,7 +222,7 @@ impl Controller {
             return Ok(None);
         };
         self.midi.forget(id);
-        self.dirty = true;
+        self.mark_dirty();
         Ok(self.graph.midi_mappings.remove(&id))
     }
 

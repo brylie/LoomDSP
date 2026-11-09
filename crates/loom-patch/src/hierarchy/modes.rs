@@ -190,6 +190,13 @@ impl Hierarchy {
         })
     }
 
+    /// True when the last sync ran against the controller's current
+    /// revision: nothing structural changed since, so a commit can skip
+    /// another sync (ADR-0040).
+    pub fn synced_with(&self, controller: &Controller) -> bool {
+        self.synced_revision.0 == Some(controller.revision())
+    }
+
     /// Keeps what the flattener said about copies and added modules.
     pub(super) fn note_flat(&mut self, flat: &Flat) {
         self.copies = flat.copies.clone();
@@ -231,6 +238,22 @@ impl Hierarchy {
                 }
                 module.module.add_to(controller, *id)?;
                 continue;
+            }
+            // Ranges first, as a load sets them, so a range never clamps a
+            // value; spread works in the control's range, so copies must share
+            // copy 0's.
+            let ranges: Vec<(usize, loom_core::ParamRange)> = {
+                let node = controller.graph().node(*id).expect("checked above");
+                module
+                    .module
+                    .ranges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, range)| range.filter(|r| node.range(index) != Some(*r)).map(|r| (index, r)))
+                    .collect()
+            };
+            for (index, range) in ranges {
+                controller.set_range(*id, index, range)?;
             }
             let changes: Vec<(usize, f32)> = {
                 let node = controller.graph().node(*id).expect("checked above");
@@ -409,6 +432,11 @@ impl Hierarchy {
         if !from.has_members() && mode.has_members() {
             self.sink_into_member(graph, &path).map_err(|e| e.to_string())?;
         }
+        // `member` is the Member control's name on a select's surface: an
+        // item already called that takes the next free name, "member 2".
+        if mode == Mode::Select {
+            self.free_member_name(&path);
+        }
         let settings = &mut self
             .definitions
             .get_mut(&key)
@@ -421,6 +449,46 @@ impl Hierarchy {
             settings.stereo_spread = false;
         }
         Ok(())
+    }
+
+    /// Renames an exposed item called `member` on the surface of the instance
+    /// at `path` to the next free name, with the outer surface's exposures
+    /// of it and the instance's stored value, so the Member control can take
+    /// the name. Assignments and mappings follow by themselves, since the
+    /// file writes them by the name the surface has.
+    fn free_member_name(&mut self, path: &ModulePath) {
+        let key = self.instances[path].key.clone();
+        let definition = &self.definitions[&key];
+        if !definition
+            .exposed
+            .iter()
+            .any(|e| e.name == MEMBER_PARAM && !Self::is_member_entry(e))
+        {
+            return;
+        }
+        let taken: BTreeSet<String> = definition.exposed.iter().map(|e| e.name.clone()).collect();
+        let name = unique_name(MEMBER_PARAM, |n| taken.contains(n));
+        for exposed in &mut self.definitions.get_mut(&key).expect("checked above").exposed {
+            if exposed.name == MEMBER_PARAM && !Self::is_member_entry(exposed) {
+                exposed.name = name.clone();
+            }
+        }
+        let Some(parent) = path.parent() else { return };
+        let Some(parent_key) = self.instances.get(&parent).map(|i| i.key.clone()) else {
+            return;
+        };
+        let outer = self
+            .definitions
+            .get_mut(&parent_key)
+            .expect("an instance has a definition");
+        for exposed in &mut outer.exposed {
+            if exposed.module == path.last() && exposed.param == MEMBER_PARAM {
+                exposed.param = name.clone();
+            }
+        }
+        if let Some(stored) = outer.defaults.remove(&(path.last(), MEMBER_PARAM.to_string())) {
+            outer.defaults.insert((path.last(), name), stored);
+        }
     }
 
     /// Moves the inside of the instance at `path` into a new member

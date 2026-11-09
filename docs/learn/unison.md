@@ -37,6 +37,8 @@ A stack's copies are meant to differ: each is detuned a little, or plays its own
 
 A layer is different: its members are different sounds that the player chose to hear together, so a layer adds them at full level, as a mixer with every fader at 1 does.
 
+All of this is about audio. A stack's pitch and modulation outputs are values, so the stack gives their **mean** (1/N): four copies of pitch 0.2 give 0.2. A gate output is a plain sum, so it stays high while any copy is high. Stereo spread pans only audio outputs; a pitch has no left or right.
+
 ## Why the copies must differ
 
 Four copies with nothing to tell them apart start from reset together and play the same samples. They add in amplitude: 4 × 1/√4 = 2, so the stack is **6 dB louder** than one copy and sounds the same. That is not unison, only a louder sound.
@@ -78,6 +80,8 @@ A swap is one gesture, but Member is a parameter that can be modulated at audio 
 
 1. **Turning back reverses the fade from where it is.** If Member goes back to the member that is fading out, the two swap roles and the count goes from n to N - n. The gains on that frame do not change, because cos((π/2)(N - n)/N) = sin((π/2)n/N). The fade simply runs the other way.
 2. **A third member waits.** If Member goes somewhere else during a fade, the fade finishes first, then a new one starts toward wherever Member is then. Only the latest choice counts, so a fast sweep ends where the control stopped, never more than 10 ms late.
+
+Pitch and modulation outputs fade **linearly**: the gains are `1 - p` and `p`, which sum to 1. Equal power is right for two different sounds, but wrong for two values. Two members that both send pitch 0.2 would, half way through an equal-power fade, send 0.707·0.2 + 0.707·0.2 = 0.283, about 10 semitones sharp for 5 ms. With linear gains the pitch stays at 0.2. Turning back stays continuous under either law, because the gains at N - n are the gains at n swapped.
 
 Gate, trigger, and phase outputs are not faded: a half-faded gate fires late, and a half-faded phase looks like a wrap ([hot patching](hot-patching.md)). They switch on the frame.
 

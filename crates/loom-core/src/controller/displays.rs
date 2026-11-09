@@ -48,7 +48,7 @@ impl Controller {
     pub fn add_probe(&mut self, output: OutputRef, kind: ProbeKind) -> Result<ProbeId, LoomError> {
         self.check_output(output)?;
         let id = self.probes.add(output, kind);
-        self.dirty = true;
+        self.mark_dirty();
         Ok(id)
     }
 
@@ -85,7 +85,7 @@ impl Controller {
             y: y_output,
             y_input,
         });
-        self.dirty = true;
+        self.mark_dirty();
         Ok(id)
     }
 
@@ -98,7 +98,7 @@ impl Controller {
     /// on. Telemetry already in the queues may still arrive.
     pub fn remove_probe(&mut self, id: ProbeId) -> Result<(), LoomError> {
         self.probes.remove(id).ok_or(LoomError::UnknownProbe(id))?;
-        self.dirty = true;
+        self.mark_dirty();
         Ok(())
     }
 

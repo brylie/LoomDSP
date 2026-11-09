@@ -220,7 +220,7 @@ impl Controller {
             };
             self.renew_midi_mapping(id, mapping);
         }
-        self.dirty = true;
+        self.mark_dirty();
         Ok(())
     }
 
@@ -276,7 +276,7 @@ impl Controller {
             }
         }
         for (module, index) in changed {
-            self.dirty = true;
+            self.mark_dirty();
             if let Some((id, mapping)) = self.graph.midi_mapping_of(module, index) {
                 let mapping = MidiMapping {
                     learned: false,

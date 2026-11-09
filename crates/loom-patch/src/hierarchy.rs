@@ -250,6 +250,18 @@ pub struct ExposedTarget {
     pub range: Option<(f32, f32)>,
 }
 
+/// The controller revision a hierarchy was last synced against. Bookkeeping,
+/// not state: two hierarchies are equal whatever their marks, so an undo
+/// snapshot never sees a sync as a change.
+#[derive(Debug, Clone, Copy, Default)]
+struct SyncMark(Option<u64>);
+
+impl PartialEq for SyncMark {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// The status bar text when Expose is asked at the top level, which has no
 /// surface to expose onto.
 pub const EXPOSE_INSIDE_ONLY: &str = "Expose works inside a sub-patch";
@@ -272,6 +284,9 @@ pub struct Hierarchy {
     copies: BTreeMap<ModuleId, Vec<(ModuleId, u32)>>,
     /// The modules the flattener added for modes, from the last sync.
     added: BTreeMap<ModuleId, crate::flatten::Added>,
+    /// The controller's revision at the end of the last sync, so a commit
+    /// that follows with nothing structural changed skips another.
+    synced_revision: SyncMark,
     /// The `exposed` list of the top level, as the file had it: a library
     /// file opened on its own keeps its surface for the next insert. Nothing
     /// shows it; entries whose module is gone are dropped when it is written.
@@ -303,6 +318,7 @@ impl Hierarchy {
             implied: BTreeSet::new(),
             copies: BTreeMap::new(),
             added: BTreeMap::new(),
+            synced_revision: SyncMark(None),
             top_exposed: Vec::new(),
         }
     }
@@ -1548,6 +1564,7 @@ impl Hierarchy {
             .set_limits(flat.limits_in(controller.graph()))
             .map_err(PatchError::Engine)?;
         self.note_flat(&flat);
+        self.synced_revision = SyncMark(Some(controller.revision()));
         Ok(renamed)
     }
 
@@ -2738,6 +2755,8 @@ impl Hierarchy {
         }
         self.copies = copies;
         self.added = added;
+        // The restored overlay was never synced against this graph.
+        self.synced_revision = SyncMark(None);
         self.ids.reserve_id(ModuleId(next.saturating_sub(1)));
     }
 }
