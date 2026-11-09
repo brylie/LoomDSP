@@ -213,7 +213,7 @@ The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar
 3. **Focus that came from the keyboard shows a visible ring.** Focus from a click does not, because the pointer is already there. *Why:* the canvas works this way today (`via_tab`).
 4. **When an overlay opens, focus moves into it and stays there until it closes, then returns to where it was.** If that element is gone (a module deleted while the overlay was open), focus goes to the first focus stop of the panel that held it, or to the canvas if the panel is gone too. *Why:* a keyboard user must not be left behind the overlay, nor lose their place when it closes.
 5. **The accessibility tree reports the element with focus,** and changes it when focus moves. *Why:* otherwise a screen reader does not follow the keyboard. In the spike, focus was always on the window.
-6. **A key goes to the focused element first,** then to its panel, then to the app's shortcuts. An element or a panel that takes a key stops it there. A focused text field takes every printable key, Space, Backspace, Delete, the arrows, and its editing shortcuts (select all, copy, cut, paste, undo, redo). The order kept from today (`input_owner.rs`, `Listening::rows`):
+6. **A key goes to the focused element first,** then to its panel, then to the app's shortcuts. An element or a panel that takes a key stops it there. A focused text field takes every printable key, Space, Backspace, Delete, the arrows, and its editing shortcuts (select all, copy, cut, paste, undo, redo). It does not take Ctrl+Tab or Ctrl+Shift+Tab, which go on to the app's shortcuts (rule 7). The order kept from today (`input_owner.rs`, `Listening::rows`):
    1. **Panic** is always heard, whoever has the input (`always_event`).
    2. **An open question has every other key.** No key both answers it and reaches what is behind it.
    3. **The focused element.** A key it uses goes no further, with the exceptions in step 4.
@@ -222,7 +222,11 @@ The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar
    6. **The app's shortcuts** (`Message::Key`): undo, redo, save, delete, and the rest.
 
    A change to this order is a behaviour change. It is listed in its pull request and in this rule. *Why:* today the order is spread across Iced's widget status and a list of listeners, so a rebuilt layer could change it without anyone noticing. Cmd+Z in a name field must undo the typing, and the canvas must have its arrows before panel navigation does.
-7. **F6 moves focus from region to region:** the canvas, the right column, then the toolbar, and round again. Each region remembers the element it last had focused, and F6 returns to it; the first time, focus goes to the region's first focus stop. In the right column, that is the open tab's content, so F6 lands on the outline when the Outline tab is open ([canvas accessibility](canvas-accessibility.md)). F6 is an app shortcut (rule 6, step 6), and does nothing while an overlay or a question holds focus (rule 4). *Why:* Tab moves one element at a time, which is slow across a toolbar, an inspector, and a canvas of tiles. A key that jumps between the window's large parts is what keyboard and screen reader users expect from desktop apps.
+7. **Ctrl+Tab moves focus to the next region, and Ctrl+Shift+Tab to the previous one:** the canvas, the right column, then the toolbar, wrapping at both ends. Ctrl is used on every platform, macOS included. Each region remembers the element it last had focused, and the key returns to it; the first time, focus goes to the region's first focus stop. In the right column, that is the open tab's content, so the key lands on the outline when the Outline tab is open ([canvas accessibility](canvas-accessibility.md)). It is an app shortcut (rule 6, step 6) that a focused text field does not take (rule 6), and it does nothing while an overlay or a question holds focus (rule 4). Every handler of Tab ignores Tab while Ctrl is held: today the canvas's range parts (`panel_input.rs`), the matrix (`matrix.rs`), and field stepping (`lib.rs`, which on macOS checks Cmd, not Ctrl) would all act on it. *Why:*
+   - Tab moves one element at a time, which is slow across a toolbar, an inspector, and a canvas of tiles. A key that jumps between the window's large parts is what keyboard and screen reader users expect from desktop apps.
+   - F6, the usual key for this, needs Fn on most laptop keyboards. Ctrl+Tab is reachable with one hand on any keyboard.
+   - Cmd+Tab is the macOS app switcher, so Ctrl is the only modifier that works the same on every platform.
+   - It must work from a text field, or a user typing in the browser search could not leave the right column without Tab-stepping out.
 
 ## 7. The accessibility tree
 
@@ -376,7 +380,7 @@ Phase 3:
 - [ ] Tab and Shift+Tab reach every interactive element in every view, with a visible ring, and the screen reader follows.
 - [ ] Opening an overlay moves focus into it and hides the layers below from the tree; closing it restores focus, or moves it by section 6, rule 4 when its element is gone.
 - [ ] A test checks the key order of section 6, rule 6, step by step.
-- [ ] F6 cycles the canvas, the right column, and the toolbar, returns to each region's last focused element, and does nothing while an overlay holds focus.
+- [ ] Ctrl+Tab and Ctrl+Shift+Tab cycle the canvas, the right column, and the toolbar in both directions, wrapping at the ends; return to each region's last focused element; work while a text field has focus; and do nothing while an overlay holds focus. On macOS, Ctrl+Tab neither steps between fields nor leaves the matrix or a range part, as plain Tab does.
 - [ ] A focus effect with the UI ID of a tile control, sent from a panel, focuses that control on the canvas, and the tree reports it.
 - [ ] A tree's visible rows are direct children of its Tree node, each with its level, position in set, size of set, and expanded state.
 - [ ] A `controls` relation to a removed element is dropped from the tree.
@@ -405,7 +409,8 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Number or text for a slider's value on macOS | A number, with the unit in the description, until AccessKit's adapter gives value text | Section 7, rule 4 |
 | How often live value nodes update | At most every 250 ms. While a screen reader is active, every live value node on screen updates, focused or not, because AccessKit does not report where the screen reader's cursor is. Widened from "only while focused" on the same day, so a meter under the cursor is never stale | Section 7, rule 7 |
 | Which text crate | Chosen at plan step 2.4 by the criteria in the rule, including how its glyphs are drawn | Section 8, rule 8 |
-| Hooks for the canvas accessibility spec | Added at the maintainer's request: `controls` relations, focus into a custom element's parts, an app-driven tree, an image with its text alternative elsewhere, and F6 between regions | Section 6, rule 7; section 7, rules 12 and 13; section 9, rules 6 and 7 |
+| Hooks for the canvas accessibility spec | Added at the maintainer's request: `controls` relations, focus into a custom element's parts, an app-driven tree, an image with its text alternative elsewhere, and a key between regions | Section 6, rule 7; section 7, rules 12 and 13; section 9, rules 6 and 7 |
+| Which key moves between regions | Ctrl+Tab forward and Ctrl+Shift+Tab back, wrapping, with Ctrl on every platform, and working from a text field. Chosen over F6, which needs Fn on most keyboards | Section 6, rule 7 |
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.
