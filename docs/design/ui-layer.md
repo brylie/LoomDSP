@@ -3,7 +3,7 @@
 How LoomDSP's own UI layer turns events into messages, decides what to rebuild, lays out and draws panels, moves keyboard focus, and exposes an accessibility tree, for the desktop app and for other tools that use the layer.
 
 - **Kind:** living specification.
-- **Status:** Agreed (2026-11-09). Each section gives the phase of [the plan](../dev/leaving-iced-plan.md) that first builds it. One choice, the text crate, is agreed as a decision rule and made at plan step 2.4 (section 8).
+- **Status:** Agreed (2026-11-09). Each section gives the phase of [the plan](../dev/leaving-iced-plan.md) that first builds it. One choice, the text crate, is agreed as a decision rule and made at plan step 2.4 (section 8, rule 8).
 - **Decision behind it:** [ADR-0040](../adr/0040-own-ui-layer.md), superseding [ADR-0009](../adr/0009-ui-stack-iced.md) for the window and widgets, and [ADR-0028](../adr/0028-app-accessibility-waits-for-iced.md). Builds on [ADR-0010](../adr/0010-own-patch-canvas.md) (our own canvas), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), and [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value).
 - **Use case and requirements:** NFR-UX-01 (keyboard), NFR-UX-06 (screen readers), NFR-PERF-04 (no redraw when idle), FR-SDK-06 (publishable crates), OQ-13 (plugin windows), OQ-14 (Iced churn).
 - **Background:** [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md). An explainer in `docs/learn/` follows in phase 4.
@@ -49,6 +49,7 @@ All three work because one runtime, one set of view models, and one identity sch
 | `loom-ui` | Runtime, effects, elements, layout, focus, the accessibility tree, the `winit` shell, the widgets, and the drawing of panels | `loom-ui-core`, `winit`, `wgpu`, the text crate, `taffy`, `accesskit`, `accesskit_winit` |
 | `loom-canvas` | The patch canvas, as a custom element | `loom-ui-core`, later `loom-ui`, and `iced` and `iced_wgpu` until phase 2 moves it off them |
 | `loom-app` | The app: messages, `update`, view models, panels | All of the above |
+| `loom-app/src/iced_bridge/` (temporary) | During phases 2 and 3 only: drives Iced's `UserInterface` for the views not yet moved, turns the effects that address an Iced widget (focus, scroll, select all, the focus query) into Iced widget operations, and draws those views with `iced_wgpu`. Removed in phase 4 | `loom-ui`, `iced`, `iced_wgpu`, `iced_runtime` |
 
 Rules:
 
@@ -57,6 +58,7 @@ Rules:
 3. **Each crate has a crate-level doc comment and an example program that does not use LoomDSP.** *Why:* the example proves rule 1, and it is the first documentation a new user reads.
 4. **The engine crates never depend on UI crates.** `loom-core`, `loom-dsp`, `loom-modules`, `loom-patch`, and `loom-rt` stay portable (AGENTS.md, hard rule 6).
 5. **Every new crate passes `cargo deny check` before it is used** (ADR-0006).
+6. **All Iced code during the move lives in the bridge.** `loom-ui` never depends on Iced. The runtime lives in `loom-ui` from phase 2, and the bridge plugs Iced's views into it as one more drawing and routing target per layer. An element still drawn by Iced gets an `iced::widget::Id` made from the text form of its UI ID (section 4, rule 5), so focus and scroll effects reach the same element in both toolkits. *Why:* one place to delete in phase 4, and no Iced type can leak into the crates meant for reuse.
 
 ## 2. The runtime: events, messages, and effects
 
@@ -128,8 +130,9 @@ The table covers every use of Iced's `Task`, its widget operations, and `rfd` in
 4. **The harness runs background work inline and in order.** *Why:* tests stay deterministic, and a test never waits on a thread. The patches browser already reads its folder this way under test.
 5. **One message gives one `update`.** Effects run after it returns. An effect never calls `update` again in the same turn, and a message produced by an effect waits for the next turn. *Why:* chains of updates in one turn are hard to predict and hard to test.
 6. **Derived values are computed in view model builders,** not through chains of messages or effects. *Why:* the same reason. A value that follows from state is a function of state.
-7. **Threads wake the loop through the event loop proxy.** The control channel listener, the MIDI learn watcher (`learn.rs`), the audio input watcher (`input_watch`), the audio stream watcher (`audio_watch`), the telemetry monitor, and background work send messages through the proxy. *Why:* the loop then sleeps until something happens, rather than polling for it.
+7. **Threads wake the loop through a waker the driver gives.** The control channel listener, the MIDI learn watcher (`learn.rs`), the audio input watcher (`input_watch`), the audio stream watcher (`audio_watch`), the telemetry monitor, and background work send messages through it. In the `winit` shell the waker wraps an `EventLoopProxy`; in the harness it queues the message. *Why:* the loop then sleeps until something happens, rather than polling for it.
 8. **Periodic checks become deadlines, and a deadline that changes nothing costs nothing.** These stay periodic: the device poll (`AudioPoll`, every 250 ms), the MIDI port poll (`MidiPoll`), the MIDI ghost check (`MidiGhosts`), the 500 ms `Tick`, the autosave check (`Autosave`), and the drop-out check (`DropsDone`). Each wakes the loop and runs `update`. When its message changes no view model, it causes no panel rebuild, no accessibility update, and no redraw. *Why:* these checks poll the operating system, which has no event for them. NFR-PERF-04 asks for no redraw while nothing visible changes, which holds even while the loop wakes.
+9. **The driver is a trait, and the runtime and the `App` trait use no `winit` type.** No `EventLoop`, `EventLoopProxy`, `ControlFlow`, `Window`, or `winit` event reaches them. The runtime takes events as `loom-ui-core` types, returns the next deadline, and asks the driver to redraw or to apply window commands. Two drivers exist after phase 2: the `winit` shell and the headless harness. *Why:* a plugin's window belongs to the host, and the host runs the event loop. `winit` owns the process's one event loop (on the main thread on macOS), so it is not expected to serve inside a plugin; plugin GUIs use host-window backends instead. The OQ-13 spike confirms which. A third driver for a host window must then be possible without changing the runtime. Otherwise the contract carries the kind of cost section 3, rule 5 warns about.
 
 ## 3. Change and cost model
 
@@ -164,19 +167,25 @@ Keys come from what the element shows, not from where it sits:
 
 | Element | Key from |
 |---|---|
-| An inspector parameter row | The module ID and the parameter name |
+| An inspector parameter row | The module ID, the kind `param`, and the parameter name |
 | A modulation assignment row | The `AssignmentId` |
 | A module browser entry | The module type ID |
 | A tile control on the canvas | The module ID and the widget's name in the panel |
+| A sub-patch tile, a Patch input or output tile | Its flat module ID: instance and port tiles take IDs from the same table as modules ([sub-patches](sub-patches.md)) |
+| An exposed item on a sub-patch's surface, on its tile or its inspector rows | The instance's flat ID, the kind `exposed`, and the item's name on that surface |
+| A slot and its parts | The slot's flat ID, then the part's module type or library item |
+| A breadcrumb entry | The path of instance flat IDs from the top patch to that level |
+| A library item in the module browser | `library` and the item's path in the library folder |
 | A toolbar button | A fixed name (`undo`, `open`, `panic`) |
 | A row in a list that never changes length | Its position, allowed only here |
 
 ### Rules
 
 1. **One identity scheme serves five uses:** widget state, keyboard focus, accessibility node IDs, event routing, and the control channel's `locate`. *Why:* if each use had its own scheme, they could disagree about which element is which. A screen reader would follow one element while the keyboard moved another.
-2. **Elements in a list that can change are keyed by a stable domain ID, never by position.** *Why:* by position, removing one row moves every later row's state, focus, and accessibility node onto its neighbour. ADR-0021 recorded this limit in Iced's `keyed_column`.
-3. **An accessibility node ID stays the same while its element exists,** and is not reused for another element in the same run. The runtime keeps a table from UI ID to the 64-bit AccessKit node ID. *Why:* a screen reader keeps its place by node ID. The spike packed a module ID and a widget index into 64 bits, which works for tiles but not for rows and overlays.
-4. **A UI ID can be written as text,** and that text is what the control channel's `locate` accepts beside its existing names. *Why:* agents, tests, and people then use the same names.
+2. **A key names its kind where a module shows more than one kind of item.** The kind is one of `param`, `exposed`, `display`, `input`, `output`, and `badge`, as the control channel's prefixes already name them. An instance's exposed "Cutoff" and the inner module's "cutoff" row then never share a key. A flat ID needs no level beside it: the flat ID table is keyed by path and never gives an ID to something else while the patch is open ([flattening](../learn/flattening.md)). *Why:* that table already lets the canvas, the selection, and undo work across levels, so identity can rest on it too.
+3. **Elements in a list that can change are keyed by a stable domain ID, never by position.** *Why:* by position, removing one row moves every later row's state, focus, and accessibility node onto its neighbour. ADR-0021 recorded this limit in Iced's `keyed_column`.
+4. **An accessibility node ID stays the same while its element exists,** and is not reused for another element in the same run. The runtime keeps a table from UI ID to the 64-bit AccessKit node ID. It gives out IDs from a counter that only increases, and removes an entry when its element is gone; if the same UI ID comes back later, it gets a new node ID. *Why:* a screen reader keeps its place by node ID, and a reused ID would make it read the wrong element. Removing entries keeps the table the size of the window, not of the session. The spike packed a module ID and a widget index into 64 bits, which works for tiles but not for rows and overlays.
+5. **A UI ID can be written as text,** and that text is what the control channel's `locate` accepts beside its existing names. *Why:* agents, tests, and people then use the same names.
 
 ## 5. Layers, hit-testing, and who has the input
 
@@ -248,7 +257,15 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 3. **Names, values, and descriptions use our own words, the same ones the screen shows,** with units ("800 Hz", not "800"). *Why:* NFR-UX-06.
 4. **A slider's value is a number, and its text with the unit goes in the description,** until AccessKit's macOS adapter can give a spoken value beside a number. Then the text moves to the value text, and this rule changes. *Why:* the spike found that with text in the value, VoiceOver can say the unit but cannot step the knob. Being able to change a control matters more than hearing its unit in the same phrase.
 5. **A screen reader's SetValue is applied as sent,** clamped to the range. Increment and Decrement move one step, the same step as an arrow key on that control; for a stepped parameter, one option. *Why:* VoiceOver speeds up while a key is held, and some screen reader users rely on that to cross a range quickly. Phase 1 records a listening test with VoiceOver in its pull request. If a held key cannot be used to set a value, this rule is changed before phase 1 merges.
-6. **Every screen reader action becomes an ordinary message,** through the same path as the pointer or the keyboard. Screen reader edits group into undo steps the way arrow keys do: steps within 500 ms of each other form one step ([undo spec](undo.md)). *Why:* undo, autosave, MIDI feedback, and the unsaved mark then work with no extra code, as the spike showed. One VoiceOver session in the spike made about 300 undo steps before grouping.
+6. **Every screen reader action becomes an ordinary message,** through the same path as the pointer or the keyboard. *Why:* undo, autosave, MIDI feedback, and the unsaved mark then work with no extra code, as the spike showed.
+
+   **Screen reader edits group into undo steps** like a released arrow-key group ([undo spec](undo.md)). A screen reader sends no key-down or key-up, so each SetValue, Increment, or Decrement counts as one arrow step followed at once by its release. The app owns this group, beside `ArrowGroup` in `edits.rs`.
+   - **Opens** on the first such action on a control.
+   - **Joins** when the next one reaches the same control within 500 ms of the last.
+   - **Closes** 500 ms after the last action. It closes sooner on an action on another control, a pointer press on the canvas, a key press other than a modifier alone, focus moving to another node, the window losing focus, an inspector edit, or Undo or Redo.
+   - **Undo stays enabled** throughout, because no key is held. Undo or Redo closes the group first, then acts on it as one step.
+
+   *Why:* one VoiceOver session in the spike made about 300 undo steps. `ArrowGroup` itself would never close, since its group waits for a key release that never comes. A group of its own, with the triggers of a released arrow group, gives a screen reader user what an arrow-key user gets once they let go of the key.
 7. **The tree updates after a message that changes a view model, and sends only the nodes that changed.** A node that shows a live value (section 3, rule 7) is sent at most every 250 ms. While a screen reader is active, every live value node on screen is kept current at that rate, whether or not it has keyboard focus. A node off screen, or below a panel that owns the input (section 5, rule 3), keeps the value last sent. When the screen reader leaves (`deactivate_accessibility`), the runtime stops building the tree. *Why:*
    - **A screen reader can read any node without moving keyboard focus there,** so a node updated only on focus would show a stale value under the screen reader's cursor, against rule 1.
    - **AccessKit does not tell the app where that cursor is,** so the layer cannot update only the node under it. In `accesskit` 0.25.2 the app's only callbacks are activation, actions, and deactivation. `accesskit_macos` 0.27.2 answers VoiceOver's value reads from its own copy of the tree (`node.rs`, `accessibilityValue`), with no call to the app. A Focus action arrives only when the user has set keyboard focus to follow the VoiceOver cursor. The Windows and Linux adapters were not checked, so this rule holds on every platform. If a later AccessKit release reports the cursor on a platform, the rule narrows there to the node under it.
@@ -261,7 +278,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 
 ## 8. Text input and IME
 
-**Status:** Agreed, phase 3. The choice of text crate (rule 7) is made at plan step 2.4.
+**Status:** Agreed, phase 3. The choice of text crate (rule 8) is made at plan step 2.4.
 
 ### Rules
 
@@ -270,14 +287,17 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 3. **Undo inside a field is separate from patch undo,** and ends when the field loses focus or commits. *Why:* Cmd+Z while typing a name should undo the typing, not the last patch edit.
 4. **IME composition goes to the focused field.** The shell sends preedit and commit events, shows the preedit text in the field, and reports the caret area so the candidate window appears beside it. *Why:* people who type Chinese, Japanese, or Korean need composition to type at all.
 5. **A text field reports its text, caret, and selection to the accessibility tree** (section 7, rule 10). *Why:* a screen reader reads and moves through text by these.
-6. **The multi-line editor (patch info) comes last,** and may stay on Iced's editor until it is done. *Why:* it is the largest piece, and the rest of the move should not wait for it.
-7. **The text crate is chosen at plan step 2.4,** the first text drawn without Iced, between `cosmic-text` and Parley. The maintainer decides, from a short comparison recorded as a research snapshot, by these criteria in this order:
+6. **Fonts resolve as they do today, through the move.** Iced is built without its `fira-sans` feature, so `Font::DEFAULT` is the system sans-serif, found by `cosmic-text`'s font system, plus Iced's icon font (`iced_graphics` 0.14, `text.rs`). The new text stack picks the same family on each platform, and the `--screenshot-window` pixel diff checks it at every phase. System fonts fill in missing glyphs, as now. *Why:* a different font measures differently, which moves `locate` answers, hit tests, and layout, and breaks the parity gate. Embedding a UI font of our own would make text the same on every platform, but it changes how the app looks, so it is out of scope here.
+7. **The multi-line editor (patch info) comes last,** and may stay on Iced's editor until it is done. *Why:* it is the largest piece, and the rest of the move should not wait for it.
+8. **The text crate is chosen at plan step 2.4,** the first text drawn without Iced, between `cosmic-text` and Parley. The maintainer decides, from a short comparison recorded as a research snapshot, by these criteria in this order:
    1. IME composition in a single-line field (rule 4).
    2. Reporting text runs, caret, and selection to AccessKit (rule 5).
    3. One font system shared by the canvas and the panels.
-   4. A licence that passes `cargo deny check`, and versions that match the `winit` and `wgpu` in the lock file.
+   4. How its glyphs are drawn. `cosmic-text` has `glyphon` †, a `wgpu` glyph atlas that Iced's own `cryoglyph` forks. No such atlas for Parley is known to us †: its glyphs would be rasterised with `swash` into an atlas of our own, or drawn through Vello. An atlas of our own counts against rule 1 and must be costed in lines; Vello brings the compositing cost ADR-0040 names for Masonry.
+   5. It picks the same system font as today (rule 6).
+   6. A licence that passes `cargo deny check`, and versions that match the `winit` and `wgpu` in the lock file.
 
-   This rule is then replaced by the choice. *Why:* the two parts of phase 3 most likely to overrun are text fields and IME. Parley's release notes list AccessKit text properties and its editor tracks IME composition †, while `cosmic-text` is what Iced uses today. The comparison is cheapest once phase 2 has its own text drawing to test against.
+   This rule is then replaced by the choice, and the plan's steps 2.4 and 3.3 and phase 4 name the chosen crate. *Why:* the two parts of phase 3 most likely to overrun are text fields and IME. Parley's release notes list AccessKit text properties and its editor tracks IME composition †, while `cosmic-text` is what Iced uses today. The comparison is cheapest once phase 2 has its own text drawing to test against.
 
 ## 9. Custom elements
 
@@ -316,13 +336,14 @@ Phase 1:
 - [ ] `loom-ui-core` exists, depends on no toolkit and no LoomDSP crate, and has an example program.
 - [ ] `loom-canvas` uses no Iced types outside its widget adapter and primitive wrapper.
 - [ ] A test checks that every interactive element kind on a tile and in the inspector has an operable role from the table, a non-empty name, and a value, with the unit in the description.
-- [ ] A test checks that a screen reader SetValue, repeated within 500 ms, makes one undo step.
+- [ ] A test checks that screen reader SetValues on one control, each within 500 ms of the last, make one undo step; that an action on another control, a key press, or Undo closes the group; and that Undo is enabled while the group is open.
 - [ ] A test checks that Increment on a knob moves it by the same step as an arrow key.
 - [ ] A test checks that the tree changes when a view model changes, and only then.
 - [ ] A test checks that, while a screen reader is active, a moving meter's node is sent at most every 250 ms whether or not it has focus; that it is not sent while the meter is off screen or below a panel that owns the input; and that nothing is sent after `deactivate_accessibility`.
 - [ ] A test checks that the Focus action on a tile does not change the selection.
 - [ ] A tree built at scale factor 2 has bounds twice the logical layout.
-- [ ] Accessibility node IDs for inspector rows survive adding and removing a module.
+- [ ] Accessibility node IDs for inspector rows survive adding and removing a module, and the table drops the entries of removed elements.
+- [ ] An exposed parameter on a sub-patch tile and the inner module's own row for it have different UI IDs, and both are found by `locate`.
 - [ ] A VoiceOver check is recorded in the pull request: which controls were read, which could be changed by keyboard, how a held arrow key felt (section 7, rule 5), whether a meter under the VoiceOver cursor reads its current value, and whether VoiceOver announces meters it is not on (section 7, rule 7).
 
 Phase 2:
@@ -334,7 +355,7 @@ Phase 2:
 - [ ] Moving the window to a display with another scale factor resends every node's bounds.
 - [ ] The tree is exposed on macOS, Windows, and Linux. Narrator and Orca checks are recorded, or listed as not checked.
 - [ ] `Ui::a11y_tree()` and `Ui::a11y_action()` exist and a test uses each.
-- [ ] The text crate is chosen by section 8, rule 7, and the comparison is recorded.
+- [ ] The text crate is chosen by section 8, rule 8, and the comparison is recorded.
 
 Phase 3:
 
@@ -351,12 +372,13 @@ Phase 3:
 
 ## Out of scope
 
-- **Plugin window embedding** (OQ-13). The shell must not block it: it takes a window it is given as well as one it creates. Building it is later work.
+- **Plugin window embedding** (OQ-13). Section 2, rule 9 keeps it possible: a host-window driver can be added beside the `winit` shell. Building it, and choosing what that driver uses, is later work, after a spike.
 - **The web target** (ADR-0026).
 - **Visual redesign.** Every view looks the same after each phase.
 - **Read-tracking state, such as signals.** Comparing panel models is enough at LoomDSP's size ([research](../research/2026-11-ui-change-propagation.md#not-proposed)). Revisit if a measured panel cannot meet its cost with section 3, rule 1.
 - **Components with their own message types** inside `loom-ui`. LoomDSP's panels use the app's message. A mapping like Elm's `Html.map` can be added when a second app needs it.
 - **Publishing the crates.** Waits until the API settles (FR-SDK-06).
+- **Embedding a UI font.** Text uses the system sans-serif today, so it differs between macOS, Windows, and Linux. An embedded font would fix that and make screenshots match across machines, but it is a visual change with its own licence check. It is its own issue and decision, not part of this move (section 8, rule 6).
 
 ## Decisions made for this spec
 
@@ -368,7 +390,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Whether focus on a tile selects it | No. Only Click or Enter selects | Section 7, rule 9 |
 | Number or text for a slider's value on macOS | A number, with the unit in the description, until AccessKit's adapter gives value text | Section 7, rule 4 |
 | How often live value nodes update | At most every 250 ms. While a screen reader is active, every live value node on screen updates, focused or not, because AccessKit does not report where the screen reader's cursor is. Widened from "only while focused" on the same day, so a meter under the cursor is never stale | Section 7, rule 7 |
-| Which text crate | Chosen at plan step 2.4 by the criteria in the rule | Section 8, rule 7 |
+| Which text crate | Chosen at plan step 2.4 by the criteria in the rule, including how its glyphs are drawn | Section 8, rule 8 |
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.

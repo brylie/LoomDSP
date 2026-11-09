@@ -19,7 +19,7 @@ ADR-0009 chose Iced for the app's window, widgets, and text. ADR-0028 then defer
 Forces:
 
 - Screen reader users are blocked today (NFR-UX-06).
-- Plugin embedding (OQ-13) needs a shell that can run inside a window the host owns.
+- Plugin embedding (OQ-13) needs a UI that can run inside a window the host owns, on the host's event loop.
 - The headless tests, the control channel, and screenshots must keep working at every step.
 - The UI layer should be reusable by other audio tools, and publishable later (FR-SDK-06).
 - A small team in early alpha. Time spent on a toolkit is time not spent on modules.
@@ -34,7 +34,7 @@ Forces:
    - It owns the widget tree, focus, and the accessibility tree. Our view models would again be a second description beside a toolkit's own, which is the gap ADR-0028 and the spike worked around.
    - It draws through Vello †, while the canvas has its own `wgpu` pipeline. The two would need compositing, and Vello's GPU needs inside plugin hosts are unmeasured.
    - Embedding in a host window is not documented †.
-5. **Our own thin layer** on `winit`, `wgpu`, an existing text crate, and AccessKit, built in phases that each leave the app working ([plan](../dev/leaving-iced-plan.md)). We own the loop, layout, focus, the accessibility tree, and a small set of widgets, and we take text shaping, font loading, glyph drawing, and text editing from existing crates. Most work of the five. In return, the accessibility tree, focus, and the test harness are built from the same view models the window draws, and no toolkit sits between us and a host window.
+5. **Our own thin layer** on `winit`, `wgpu`, an existing text crate, and AccessKit, built in phases that each leave the app working ([plan](../dev/leaving-iced-plan.md)). We own the loop, layout, focus, the accessibility tree, and a small set of widgets, and we take text shaping, font loading, glyph drawing, and text editing from existing crates. Most work of the five. In return, the accessibility tree, focus, and the test harness are built from the same view models the window draws, and the runtime is ours to keep free of any one event loop. `winit` serves the desktop app. A plugin's host window will likely need another driver, because `winit` owns the process's event loop; that is for the OQ-13 spike to confirm.
 
 Entries marked † come from web search summaries and the projects' own prose, not from their source (ADR-0018). Check them before relying on them.
 
@@ -57,7 +57,7 @@ Stop the work, keep what the finished phases gave, and revisit this decision if 
 
 ## Consequences
 
-- Easier: accessibility on all three platforms on our own schedule, and a shell that can be adapted for plugin embedding. No toolkit upgrades that break the harness. One rendering model for panels and the canvas.
+- Easier: accessibility on all three platforms on our own schedule, and a runtime with no `winit` types in it, so a driver for a plugin's host window can be added beside the `winit` shell. That embedding works is not yet shown; the OQ-13 spike checks it. No toolkit upgrades that break the harness. One rendering model for panels and the canvas.
 - Easier: the UI layer can be published for other Rust audio tools (FR-SDK-06).
 - Harder: we own layout, focus, overlays, text fields, IME, and every accessibility bug. A tree that disagrees with the screen is worse than none, so the specification ties both to one source and the tests check it.
 - Harder: new contributors learn a UI layer documented only in this repository. Phase 4 adds an explainer in `docs/learn/`.
