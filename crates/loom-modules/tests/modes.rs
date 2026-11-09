@@ -338,7 +338,14 @@ fn a_mapping_on_a_stack_moves_every_copy() {
         let copy = parts.controller.graph().node(copy_constant(&ids, k)).unwrap();
         assert!((copy.params[index] - value).abs() < 1e-6, "copy {k}");
     }
-    parts.controller.commit().unwrap();
+    // An unrelated module makes the commit compile the schedule again from
+    // the graph's values; a stale copy would play its old value again.
+    let unrelated = parts.controller.add_module("loom.math.constant").unwrap();
+    let report = parts.controller.commit().unwrap();
+    assert!(
+        report.skipped.contains(&unrelated),
+        "the commit compiled the graph again"
+    );
     let (left, _) = render(&mut parts, 512, 512, &[]);
     assert!(
         (left[511] - want).abs() < 1e-4,
