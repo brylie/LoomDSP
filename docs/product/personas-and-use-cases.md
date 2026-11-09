@@ -170,9 +170,9 @@ Requirements: FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-LIB-13, FR-LIB-19, FR-LI
 A sighted user glances at the canvas and sees what connects to what before looking at any knob. This use case gives the same overview to someone who listens to the patch's structure instead of looking at it, and to anyone who wants a quick text outline of a large patch.
 
 1. Open a shared patch with the screen reader on. Open the outline with one key. Hear its first line: the patch name, how many modules it has, how many feedback loops, and how many modules are not heard.
-2. Move down the outline. Hear the modules in the order the signal flows, from the sources to the output, one short line each: "Saw, oscillator. From Phase. To SVF."
+2. Move down the outline. Hear the modules in the order the signal flows, from the sources to the output, one short line each: "Saw. From Phase. To SVF."
 3. Hear where a feedback loop starts and ends, and which modules modulate which parameters, although modulation has no cables (ADR-0014).
-4. Stop at the filter. Jump to what feeds it, then back. Jump to what it feeds, and on to the output, without passing through any control.
+4. Stop at the filter. Jump to what feeds it, then back. Jump to what it feeds, picking from a short list because it feeds two modules, and on to the output, without passing through any control.
 5. Press Enter on the filter, and land on its tile on the canvas, on its first control. Change the cutoff. Return to the outline where you left it.
 6. A sighted user beside them sees the same map drawn small, with the part of the patch in the window marked, and drags that mark to pan the canvas to another part of a large patch.
 

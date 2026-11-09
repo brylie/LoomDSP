@@ -37,7 +37,7 @@ In LoomDSP, modulation is an assignment, not a cable ([Modulation without cables
 
 Screen reader users often listen at two or three times normal speech, and they decide in the first few words whether to stay on a line. A line that starts with what matters, and leaves the rest for later, lets them scan fast.
 
-Platforms give every node two texts for this: a **name**, read at once, and a **description** (macOS calls it help), read after a pause or on request. The outline puts the neighbours in the name ("SVF. From Saw. To Multiply 8.") because that is what tracing needs, and the kind of module and its modulation in the description. It names at most three neighbours on each side, then "and 4 more", because a twelve-input mixer read in full is a sentence nobody waits for.
+Platforms give every node two texts for this: a **name**, read at once, and a **description** (macOS calls it help), read after a pause or on request. The outline puts the neighbours in the name ("SVF. From Saw and Multiply 6. To Multiply 8 and Scope.") because that is what tracing needs, and the kind of module and its modulation in the description. It names at most three neighbours on each side, then "and 4 more", because a twelve-input mixer read in full is a sentence nobody waits for.
 
 ## Why the app handles its own keys
 
