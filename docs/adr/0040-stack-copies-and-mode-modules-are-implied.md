@@ -27,12 +27,13 @@ These must keep the overlay's invariants: one id space, one writer of the file, 
 
 ## Decision
 
-**Option 3.** It adds four invariants to ADR-0039's six.
+**Option 3.** It adds five invariants to ADR-0039's six, found while designing and building slice 6.
 
-7. **Implied modules come from the flattener.** Stack copies 1 to N-1 and every module a mode adds are implied: `sync` writes the hierarchy out, flattens it on a scratch table, and makes the controller's implied modules, their values, cables, assignments, and MIDI mappings the ones the flattener gave. No edit path adds, edits, or removes one by hand. *Why:* invariant 3 again. The flattener is the one definition of what a stack or a layer is.
+7. **Implied modules come from the flattener.** Stack copies 1 to N-1 and every module a mode adds are implied: `sync` writes the hierarchy out, flattens it on a scratch table, and makes the controller's implied modules, their values, cables, assignments, and MIDI followers the ones the flattener gave. No edit path adds, edits, or removes one by hand. *Why:* invariant 3 again. The flattener is the one definition of what a stack or a layer is.
 8. **The editor sees copy 0 only.** Copy 0 keeps the paths a single sub-patch has. Copy k is `[instance, Copy(k), inner…]`, and an added module is `[instance, Added(n)]`, where `Copy` and `Added` are path steps no module id can take. Tiles, selection, the inspector, probes, lights, meters, the clipboard, the file, and undo snapshots never hold an implied id. *Why:* one tile stays one flat module, so no edit path learns a second handle. Copy 0 never moves, so turning a sub-patch into a stack, or raising Copies, keeps every copy's state.
 9. **A parameter write reaches every copy at once.** `App::set_param`, the one place every control writes through, writes the same value to the same parameter of each copy, with no commit, so a knob drag moves every copy during the drag. Everything else reaches the copies through `sync`, before the commit, so one edit is one schedule swap and one undo step. A seeded module is the one exception to "the same value": copy k's seed is copy 0's plus k.
 10. **What differs between copies is modulation the flattener adds.** A spread is a hidden constant source and one assignment per copy, with depth `amount × offset(k)`. The base value stays the same in every copy, so it stays the one home of the exposed value (invariant 6), and MIDI and modulation, which act on the base, keep the offsets. *Why not write each copy's value:* a MIDI control change is applied on the audio thread to each copy's parameter and would wipe a written offset.
+11. **A control has one mapping; copies follow it.** The engine keeps one mapping per control, so a mapping on a parameter of copy 0 carries the same parameter of every other copy as followers, which the engine sets to the mapping's value on the audio thread (`Controller::set_midi_followers`). *Why not lift the one-mapping rule:* MIDI learn, its feedback table, and pickup state are built on it, and a follower list keeps all of that unchanged.
 
 ## Consequences
 

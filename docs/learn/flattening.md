@@ -83,6 +83,8 @@ A cable can run into a Patch input that feeds nothing, or out of a Patch output 
 
 ## The editor keeps the hierarchy beside the graph
 
+A sub-patch's mode is flattened too: a stack's inside is flattened once per copy, under paths with a copy step, and a layer, select, or stack gets hidden mixing modules on paths with an added step. The editor never shows either, and rebuilds them from the flattener after every edit ([ADR-0040](../adr/0040-stack-copies-and-mode-modules-are-implied.md)). Why a stack sums at 1/√N and how a select fades is in [Unison](unison.md).
+
 The app shows one level at a time, and a player can collapse a selection into a sub-patch or dissolve one. The obvious way to build that is to make the nested file the editor's model and re-flatten after every edit. LoomDSP does the opposite ([ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md)): the flat graph stays the editor's model too, and the hierarchy is a record kept beside it. The record says where each module sits (its path), what the definitions are, which tiles are instances and ports, and which cables run into or out of a port, in the ids of their level. Everything else, parameters included, is read from the graph.
 
 Two things follow. First, collapsing is free in the same sense as flattening: it moves paths in the record and turns the cables that crossed the new boundary into port records, and the graph does not change at all. The oscillator inside keeps its phase, because no module was rebuilt. Second, saving is the inverse of flattening. The file is written from the graph and the record together, and a test loads the nested example, writes it back, and checks the text is the same.
