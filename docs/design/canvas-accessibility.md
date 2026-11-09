@@ -3,7 +3,7 @@
 How a screen reader user gets an overview of a patch, follows a signal from module to module, and reaches a module's controls only when they want them; and how the same model draws a small patch map that a sighted user pans with.
 
 - **Kind:** living specification.
-- **Status:** Draft. The open points at the end wait for the maintainer. Do not build from it yet.
+- **Status:** Agreed (2026-11-09), M2. The answers to its open questions are in [Decisions made for this spec](#decisions-made-for-this-spec).
 - **Decision behind it:** none of its own. Builds on [ADR-0040](../adr/0040-own-ui-layer.md) (our own UI layer, with its accessibility tree), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (feedback loops), and [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md) (the editor's sub-patch levels).
 - **Use case and requirements:** UC11, NFR-UX-06, NFR-UX-07, FR-CANVAS-06, FR-CANVAS-13.
 - **Background:** [Reading a patch by ear](../learn/reading-a-patch-by-ear.md) (explainer), [overviews of node-link diagrams for screen reader users](../research/2026-11-screen-reader-graph-overviews.md) (research), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [the large patch review](../research/2026-11-large-patch-ux-review.md) (finding 3, the overview has no words), [Feedback loops](../learn/feedback-loops.md).
@@ -20,11 +20,11 @@ The maintainer's words: "I can visually scan the whole graph to see what connect
 
 The [UI layer specification](ui-layer.md) gives every tile, control, and port an accessibility node. That makes every control reachable, but only one at a time. In the spike, learning what fed the filter meant visiting the filter's tile, then guessing which tile was upstream and visiting that one. A sighted user answers the same question in a glance.
 
-Example, with `subtractive.ron` open and VoiceOver on. The user presses the map key and hears:
+Example, with `subtractive.ron` open and VoiceOver on. The user opens the outline and hears:
 
 > Subtractive. 11 modules, 11 cables, no feedback loops. 2 modules not heard.
 
-They press Down and hear the modules in the order the signal flows:
+They press O on the canvas, which opens the outline and reads its first row. They press Down and hear the modules in the order the signal flows:
 
 > MIDI Note. Source. To Phase, Envelope 5, and Envelope 7.
 > Phase. From MIDI Note. To Saw.
@@ -35,7 +35,7 @@ They press Down and hear the modules in the order the signal flows:
 
 On SVF they press the downstream key, hear "Multiply 8", press Back, and are on SVF again. They press Enter and land on SVF's tile on the canvas, on its Cutoff knob. No control was visited on the way.
 
-A sighted user beside them sees the same patch drawn small in the map, with a box around the part the canvas shows. They drag the box to pan to another part of a large patch.
+A sighted user beside them sees the same patch drawn small in the map in the canvas corner, with a box around the part the canvas shows. They drag the box to pan to another part of a large patch.
 
 ## Words
 
@@ -52,7 +52,7 @@ A sighted user beside them sees the same patch drawn small in the map, with a bo
 
 ## 1. The patch map model
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 ### Behaviour
 
@@ -77,7 +77,7 @@ The app builds one `PatchMap` from the level being edited, beside its other view
 
 ## 2. Levels of detail
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 The outline gives four levels, from the coarsest. The user moves down a level only when they want to.
 
@@ -94,7 +94,7 @@ The outline gives four levels, from the coarsest. The user moves down a level on
 
 ## 3. Signal-flow order and sections
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 ### Rules
 
@@ -110,7 +110,7 @@ The outline gives four levels, from the coarsest. The user moves down a level on
 
 ## 4. What a row says
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 A row has a short **name**, read at once, and a **description**, read after it or after a pause, as the screen reader is set. Values with units follow the [port and parameter text](port-and-parameter-text.md) rules.
 
@@ -137,7 +137,9 @@ A row has a short **name**, read at once, and a **description**, read after it o
 
 ## 5. Keys in the outline
 
-**Status:** Draft. Which keys follow a cable waits for open point 3.
+**Status:** Agreed, M2.
+
+The outline is an **Outline** tab in the right column, beside Inspector and Matrix. O on the canvas, with no text field focused, opens the tab and moves focus to the outline's focused row, or to its first row the first time. F6 moves focus from region to region (canvas, right column, toolbar), and lands on the outline when its tab is open. A click on the tab opens it too, so sighted users can read the outline as well.
 
 The outline is one focus stop. While it has focus, it takes these keys before the app's shortcuts (ui-layer.md, section 6, rule 6). The navigation keys follow the WAI-ARIA tree view pattern, so screen reader users meet what they expect from a file tree.
 
@@ -150,9 +152,9 @@ The outline is one focus stop. While it has focus, it takes these keys before th
 | Letters | Go to the next row whose name starts with the typed letters, as the module browser's results do |
 | Enter | On a module row, focus its tile on the canvas, on its first control. On a connection row, jump to the module at the other end. On a sub-patch row, open it |
 | Space | Select the module on the canvas and centre the canvas on it, and stay in the outline |
-| Follow upstream, follow downstream | Jump to the module that feeds this one, or that this one feeds (section 7) |
-| Back | Return to where the last jump started (section 7) |
-| Escape | Leave the outline, and focus the canvas where it was |
+| `[`, `]` | Follow upstream, follow downstream: jump to the module that feeds this one, or that this one feeds (section 7) |
+| Cmd+`[` (Ctrl+`[` on Windows and Linux) | Back: return to where the last jump started (section 7) |
+| Escape | Leave the outline, and focus the canvas where it was. The tab stays open |
 
 ### Rules
 
@@ -163,7 +165,7 @@ The outline is one focus stop. While it has focus, it takes these keys before th
 
 ## 6. The canvas: tiles and ports
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 The canvas gives a node per tile, control, and port (ui-layer.md, section 9, rule 3). This section adds what those nodes say about the graph.
 
@@ -176,9 +178,9 @@ The canvas gives a node per tile, control, and port (ui-layer.md, section 9, rul
 
 ## 7. Following a cable
 
-**Status:** Draft. The keys wait for open point 3.
+**Status:** Agreed, M2.
 
-Following a cable works in the outline and on the canvas, with the same keys.
+Following a cable works in the outline and on the canvas, with the same keys: `[` follows upstream, `]` follows downstream, and Cmd+`[` (Ctrl+`[` on Windows and Linux) goes back. On the canvas they act on the focused port, else the focused control's module, else the selected module, and do nothing with no module selected or with more than one. *Why:* the arrow keys already move tiles and Alt-arrow resizes them ([panels.md](panels.md#keyboard-without-a-mouse)). The brackets are free, sit together, and point left and right like the signal on the canvas, and Cmd+`[` is back in browsers.
 
 ### Rules
 
@@ -195,11 +197,11 @@ Following a cable works in the outline and on the canvas, with the same keys.
 
 ## 8. The map
 
-**Status:** Draft. Where it sits waits for open point 1.
+**Status:** Agreed, M2.
 
 ### Behaviour
 
-The map draws the whole level small: every tile as a box in its place on the canvas, with its name, coloured by family; one line for each pair of connected modules, coloured by signal type and thicker for stereo; modulation as a dashed line from source to target; and a mark on modules in a feedback loop. It draws no controls, ports, or live values. A rectangle shows the part of the level the canvas shows.
+The map sits in the bottom-right corner of the canvas, over it, at most 200 by 150 logical pixels and never more than a quarter of the canvas's width or height, on a panel background so the tiles under it do not show through. It draws the whole level small: every tile as a box in its place on the canvas, with its name, coloured by family; one line for each pair of connected modules, coloured by signal type and thicker for stereo; modulation as a dashed line from source to target; and a mark on modules in a feedback loop. It draws no controls, ports, or live values. A rectangle shows the part of the level the canvas shows.
 
 | Gesture | Result |
 |---|---|
@@ -208,31 +210,41 @@ The map draws the whole level small: every tile as a box in its place on the can
 | Click on a module's box | Select it and centre the canvas on it |
 | Scroll over the map | Zoom the canvas, about the point under the pointer |
 
+| Setting (Preferences, and the toolbar's Map toggle) | When the map shows |
+|---|---|
+| Auto (default) | While the level does not fit in the canvas view at the current zoom |
+| Always | Always |
+| Hidden | Never |
+
+M on the canvas, with no text field focused, moves through the three settings, and the status line says which one is now set. The setting is per machine ([preferences](preferences.md)), not per patch.
+
 ### Rules
 
 27. **Boxes are placed as tiles are on the canvas,** not in signal-flow order. *Why:* the map's job is finding your way on the canvas. A sighted user looks for "the filter at the top right", and the map must agree.
 28. **Names on the map are drawn at a readable size or not at all,** from the visual system's text tokens. When a name does not fit its box, it is cut with "…", and when no name fits, boxes are drawn without names. *Why:* the large patch review found an overview with no words useless as a map; a box with a name too small to read is not better.
 29. **The map is one image node in the accessibility tree,** named "Patch map", whose description points to the outline. It has no nodes of its own. *Why:* WCAG 1.1.1 asks for a text alternative for a complex image. The outline is that alternative, and a second set of nodes for the same modules would be read twice.
-30. **The map is redrawn only when the patch map changes or the camera moves.** The camera moves only its view rectangle. *Why:* NFR-PERF-04, and ADR-0010's rule that pan and zoom never rebuild drawing data.
+30. **Auto shows the map only while it helps.** When the whole level fits in the view, the canvas already is the map. *Why:* a map of what is already on screen takes room and adds nothing; a large patch is where finding your way is hard.
+31. **The map takes the pointer over its own area,** and the canvas gets no pointer events there (ui-layer.md, section 5, rule 1). A tile under the map is reached by panning, or the map is hidden with M. *Why:* the user sees the map on top, so it must take the click.
+32. **The map is redrawn only when the patch map changes or the camera moves.** The camera moves only its view rectangle. *Why:* NFR-PERF-04, and ADR-0010's rule that pan and zoom never rebuild drawing data.
 
 ## 9. Updates while the user listens
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 ### Rules
 
-31. **The outline's nodes are sent when the patch map is rebuilt, and only those that changed.** *Why:* ui-layer.md, section 7, rule 7.
-32. **A change to the patch is not announced from the outline.** The edit's own feedback (the status line, the tile) says what happened. *Why:* the outline is a view of the patch, not a second voice for it. An announcement each time a cable moved would interrupt the user.
-33. **A module row's name does not include live values.** *Why:* a name that changed with the signal would be re-read whenever it changed, and the outline is about structure.
+33. **The outline's nodes are sent when the patch map is rebuilt, and only those that changed.** *Why:* ui-layer.md, section 7, rule 7.
+34. **A change to the patch is not announced from the outline.** The edit's own feedback (the status line, the tile) says what happened. *Why:* the outline is a view of the patch, not a second voice for it. An announcement each time a cable moved would interrupt the user.
+35. **A module row's name does not include live values.** *Why:* a name that changed with the signal would be re-read whenever it changed, and the outline is about structure.
 
 ## 10. Tests and the control channel
 
-**Status:** Draft.
+**Status:** Agreed, M2.
 
 ### Rules
 
-34. **`App::ui_snapshot` and `--dump-ui` include the patch map,** as rows with their names and descriptions. *Why:* agents and tests then check what a screen reader user hears with no screen reader, as they do for the rest of the window.
-35. **The outline's rows have UI IDs** from section 4 of the UI layer spec: a module row keyed by its module, a connection row by the module and port, a section and a loop by a fixed name and the loop's lowest module ID. The control channel's `locate` accepts them. *Why:* one identity scheme (ui-layer.md, section 4, rule 1).
+36. **`App::ui_snapshot` and `--dump-ui` include the patch map,** as rows with their names and descriptions. *Why:* agents and tests then check what a screen reader user hears with no screen reader, as they do for the rest of the window.
+37. **The outline's rows have UI IDs** from section 4 of the UI layer spec: a module row keyed by its module, a connection row by the module and port, a section and a loop by a fixed name and the loop's lowest module ID. The control channel's `locate` accepts them. *Why:* one identity scheme (ui-layer.md, section 4, rule 1).
 
 ## Acceptance criteria
 
@@ -249,6 +261,9 @@ The map draws the whole level small: every tile as a box in its place on the can
 - [ ] A test checks that a tile's description and its module row name the same neighbours.
 - [ ] A test checks that an output port's node has a `controls` relation to every input its cables feed.
 - [ ] `Ui` harness: a click on the map centres the canvas there, and dragging the view rectangle pans it.
+- [ ] `Ui` harness: with the Auto setting, the map shows while the level overflows the view and hides when it fits; M moves through Auto, Always, and Hidden, and the setting is saved in preferences.
+- [ ] `Ui` harness: O on the canvas opens the Outline tab and focuses its first row; F6 reaches it; Escape returns to the canvas with the tab still open.
+- [ ] `Ui` harness: on the canvas, `]` on a selected SVF selects Multiply 8 and centres it, and Cmd+`[` (Ctrl+`[`) returns to SVF.
 - [ ] Inside a sub-patch, the outline shows the inside, with the port tiles as source and output rows.
 - [ ] A VoiceOver check, recorded in the pull request: the summary, a scan of `subtractive.ron`, a jump and Back, Enter to a tile, and what VoiceOver says about a row's level and position (rule 15). Narrator and Orca checks are recorded, or listed as not checked.
 
@@ -269,11 +284,16 @@ These are hooks this spec needs from [ui-layer.md](ui-layer.md) (PR [#697](https
 3. **An app-driven tree.** The outline is a panel whose rows the app expands and moves through itself (rule 15). Section 7's role table could add Tree and Tree item, with level, position, size of set, and expanded state sent even where an adapter does not yet map them.
 4. **The image role for a drawing with a text alternative** (rule 29), if section 7's table should list it.
 
-## Open points
+## Decisions made for this spec
 
-Questions for the maintainer. Each has the current leaning. They are answered and written in as rules before this spec becomes Agreed.
+Asked and answered on 2026-11-09. Each is written into the rules named.
 
-1. **Where the map and the outline live.** Leaning: a **Map** tab in the right column, beside Inspector and Matrix, with the map drawn at the top and the outline below it, and a key that moves focus there. Alternatives: the map in a corner of the canvas and the outline only reachable by key; or the outline as a mode of the canvas.
-2. **The order of the outline.** Leaning: forward, from sources to the output (rule 6). Alternative: backward from the output, as a tree of what feeds what, which answers "why is this sound like this" first but repeats a module that feeds two places.
-3. **The keys.** Leaning: a key to move to the map, such as F6 cycling through regions as many desktop apps do (the accessibility review suggested it); `[` to follow upstream and `]` downstream, in the outline and on the canvas; Cmd+[ (Ctrl+[ on Windows and Linux) for Back, as browsers use for back. Arrow keys cannot be used on the canvas: they move tiles, and Alt-arrow resizes.
-4. **The milestone.** FR-CANVAS-13 and NFR-UX-07 say M2 and Should. The outline needs the UI layer's phase 1 tree; the map needs only the canvas.
+| Question | Decision | Where |
+|---|---|---|
+| Where the map and the outline live | The map in the bottom-right corner of the canvas. The outline in an Outline tab of the right column, opened by a key | Sections 5 and 8 |
+| When the map shows | Auto by default: only while the level does not fit in the view. A toolbar toggle, a key, and Preferences give Always and Hidden | Section 8, rule 30 |
+| The outline's order | Forward, from sources to the output, in signal-flow order | Rule 6 |
+| The keys to follow a cable | `[` upstream, `]` downstream, Cmd+`[` (Ctrl+`[`) back, in the outline and on the canvas; F6 moves between regions | Sections 5 and 7 |
+| Milestone | M2 for both the map and the outline. The outline needs the UI layer's phase 1 tree; the map needs only the canvas | FR-CANVAS-13, NFR-UX-07 |
+
+The letters O (open the outline) and M (cycle the map setting) were chosen while writing the answers in, as the canvas's single-letter keys A and F already are. Neither was in use. They are listed for the keymap in [#494](https://github.com/brylie/LoomDSP/issues/494).
