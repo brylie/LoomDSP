@@ -6,7 +6,7 @@
 
 use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
 use loom_core::{
-    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
 use loom_dsp::phase::{Phasor, wrap};
@@ -49,40 +49,93 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[
-        ParamSpec {
-            name: "tune",
-            label: "Tune",
-            description: "Shifts the pitch in semitones.",
-            min: -48.0,
-            max: 48.0,
-            default: 0.0,
-            unit: "st",
-            options: ParamOptions::DEFAULT,
-        },
-        ParamSpec {
-            name: "octave",
-            label: "Octave",
-            description: "Shifts the pitch in octaves.",
-            min: -10.0,
-            max: 10.0,
-            default: 0.0,
-            unit: "oct",
-            options: ParamOptions::DEFAULT,
-        },
-    ],
+    params: &[TUNE_PARAM, OCTAVE_PARAM],
     role: ModuleRole::Dsp(|config| Box::new(Phase::new(config))),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "tune"), Widget::knob(3, 0, "octave")]),
     displays: &[],
     roles: &[],
 };
 
+/// The `tune` parameter of Phase and of every oscillator.
+pub(crate) const TUNE_PARAM: ParamSpec = ParamSpec {
+    name: "tune",
+    label: "Tune",
+    description: "Shifts the pitch in semitones.",
+    min: -48.0,
+    max: 48.0,
+    default: 0.0,
+    unit: "st",
+    options: ParamOptions::DEFAULT,
+};
+
+/// The `octave` parameter of Phase and of every oscillator.
+pub(crate) const OCTAVE_PARAM: ParamSpec = ParamSpec {
+    name: "octave",
+    label: "Octave",
+    description: "Shifts the pitch in octaves.",
+    min: -10.0,
+    max: 10.0,
+    default: 0.0,
+    unit: "oct",
+    options: ParamOptions::DEFAULT,
+};
+
+/// A phase that runs at a pitch, shifted by a tune in semitones and an
+/// octave. Phase runs one, and so does every oscillator while its phase
+/// input has no cable (oscillators.md, rule 1). Sharing it means an
+/// oscillator's own phase is the same, bit for bit, as a Phase module in
+/// front of it.
 #[derive(Clone)]
-struct Phase {
+pub(crate) struct PitchedPhase {
     phasor: Phasor,
     sample_rate: f32,
+    /// The `tune` knob, in semitones.
     tune: f32,
+    /// The `octave` knob, a whole number.
     octave: f32,
+}
+
+impl PitchedPhase {
+    /// A phase at 0, with both knobs at 0.
+    pub(crate) fn new(sample_rate: f32) -> Self {
+        Self {
+            phasor: Phasor::new(),
+            sample_rate,
+            tune: 0.0,
+            octave: 0.0,
+        }
+    }
+
+    /// The phase for frame `i`, then one step on at `pitch` plus the knobs.
+    /// A modulated knob counts for this frame only.
+    #[inline]
+    pub(crate) fn tick(&mut self, i: usize, pitch_in: f32, tune: Param<'_>, octave: Param<'_>) -> f32 {
+        let offset = tune.at_or(i, self.tune) * pitch::PER_SEMITONE + octave.at_or(i, self.octave) * pitch::PER_OCTAVE;
+        // A high pitch overflows `to_hz` to infinity, and `step_for` limits
+        // that, so a patch recovers when the pitch comes back (#121).
+        self.phasor
+            .tick(Phasor::step_for(pitch::to_hz(pitch_in + offset), self.sample_rate))
+    }
+
+    /// Sets the tune knob, in semitones.
+    pub(crate) fn set_tune(&mut self, semitones: f32) {
+        self.tune = semitones;
+    }
+
+    /// Sets the octave knob. It rounds to a whole octave.
+    pub(crate) fn set_octave(&mut self, octaves: f32) {
+        self.octave = octaves.round();
+    }
+
+    /// Sets the phase back to 0.
+    pub(crate) fn reset(&mut self) {
+        self.phasor.reset();
+    }
+}
+
+#[derive(Clone)]
+struct Phase {
+    phase: PitchedPhase,
     reset_in: EdgeDetector,
 }
 
@@ -92,10 +145,7 @@ impl Phase {
 
     fn new(config: &ModuleConfig) -> Self {
         Self {
-            phasor: Phasor::new(),
-            sample_rate: config.sample_rate,
-            tune: 0.0,
-            octave: 0.0,
+            phase: PitchedPhase::new(config.sample_rate),
             reset_in: EdgeDetector::new(),
         }
     }
@@ -112,30 +162,23 @@ impl Module for Phase {
         let octave = io.param(Self::OCTAVE);
         let ([pitch_in, reset], [out]) = io.split::<2, 1>();
         for (i, ((out, &p), &r)) in out.iter_mut().zip(pitch_in).zip(reset).enumerate() {
-            let offset =
-                tune.at_or(i, self.tune) * pitch::PER_SEMITONE + octave.at_or(i, self.octave) * pitch::PER_OCTAVE;
             if self.reset_in.rising(r) {
-                self.phasor.reset();
+                self.phase.reset();
             }
-
-            // A high pitch overflows `to_hz` to infinity, and `step_for` limits
-            // that, so a patch recovers when the pitch comes back (#121).
-            *out = self
-                .phasor
-                .tick(Phasor::step_for(pitch::to_hz(p + offset), self.sample_rate));
+            *out = self.phase.tick(i, p, tune, octave);
         }
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            Self::TUNE => self.tune = value,
-            Self::OCTAVE => self.octave = value.round(),
+            Self::TUNE => self.phase.set_tune(value),
+            Self::OCTAVE => self.phase.set_octave(value),
             _ => {}
         }
     }
 
     fn reset(&mut self) {
-        self.phasor.reset();
+        self.phase.reset();
         self.reset_in.reset();
     }
 }

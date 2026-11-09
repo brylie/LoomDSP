@@ -33,6 +33,26 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "A huge gate is a real rising edge, so the envelope really plays.",
     ),
     (
+        "loom.osc.pulse",
+        "pitch",
+        "A huge pitch runs the own phase at its fastest for a while, so the wave comes back at another point in its cycle, as a Phase module's output does.",
+    ),
+    (
+        "loom.osc.saw",
+        "pitch",
+        "A huge pitch runs the own phase at its fastest for a while, so the wave comes back at another point in its cycle, as a Phase module's output does.",
+    ),
+    (
+        "loom.osc.sine",
+        "pitch",
+        "A huge pitch runs the own phase at its fastest for a while, so the wave comes back at another point in its cycle, as a Phase module's output does.",
+    ),
+    (
+        "loom.osc.triangle",
+        "pitch",
+        "A huge pitch runs the own phase at its fastest for a while, so the wave comes back at another point in its cycle, as a Phase module's output does.",
+    ),
+    (
         "loom.logic.memory",
         "a",
         "A huge input is a real gate, and the module's job is to remember it.",

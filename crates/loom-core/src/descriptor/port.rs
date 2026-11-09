@@ -165,6 +165,10 @@ pub enum PortDefault {
     BeatPhase,
     /// The transport's play gate: 1.0 while playing, 0.0 while stopped.
     Playing,
+    /// The module's own phase. The input reads 0, and the module runs its
+    /// own phase in place of it while no cable is connected, as an
+    /// oscillator does from its pitch (`docs/design/oscillators.md`).
+    OwnPhase,
 }
 
 impl PortDefault {
@@ -175,6 +179,7 @@ impl PortDefault {
             Self::BarPhase => "bar phase".to_string(),
             Self::BeatPhase => "beat phase".to_string(),
             Self::Playing => "play gate".to_string(),
+            Self::OwnPhase => "own phase".to_string(),
         }
     }
 }

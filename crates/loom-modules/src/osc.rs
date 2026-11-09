@@ -1,16 +1,92 @@
-//! Wave shapers and noise (FR-LIB-02).
+//! Oscillators and noise (FR-LIB-02).
 //!
-//! Shapers take a phase input instead of a frequency. Connect a Phase module
-//! to drive them, or any other signal to bend the wave shape.
+//! An oscillator plays at its pitch, like a VCO: it runs its own phase from
+//! the pitch input and its tune and octave knobs. A cable into its phase
+//! input replaces that phase, so any phase can drive any shape: one Phase
+//! module for several shapes in lock, or a bent phase for a new wave
+//! (`docs/design/oscillators.md`).
 
+use crate::phase::{OCTAVE_PARAM, PitchedPhase, TUNE_PARAM};
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType, Widget,
+    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, Param, ParamOptions, ParamSpec, PortDefault,
+    PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_core::{FillsRole, roles};
 use loom_dsp::noise::Colour;
 use loom_dsp::{noise, oscillator};
 use loom_rt::Smoothed;
+
+/// The `pitch` input of every oscillator.
+const PITCH_PORT: PortSpec = PortSpec {
+    name: "pitch",
+    label: "Pitch",
+    signal: SignalType::Pitch,
+    description: "Sets the frequency. 0 is middle C, and +0.1 is one octave up. Ignored while a phase cable is connected.",
+    default: PortDefault::Value(0.0),
+    range: loom_core::PortRange::Signal,
+    channels: Channels::Downmix,
+};
+
+/// The `phase` input of every oscillator. With no cable it reads the
+/// oscillator's own phase (oscillators.md, rule 1).
+const PHASE_PORT: PortSpec = PortSpec {
+    name: "phase",
+    label: "Phase",
+    signal: SignalType::Phase,
+    description: "Position in the wave, from 0 to 1. With no cable, the oscillator runs its own phase at the pitch. A cable replaces it.",
+    default: PortDefault::OwnPhase,
+    range: loom_core::PortRange::Signal,
+    channels: Channels::Downmix,
+};
+
+/// The oscillator's `tune` knob: Phase's, with what a phase cable does to it.
+const OSC_TUNE: ParamSpec = ParamSpec {
+    description: "Shifts the pitch in semitones. Ignored while a phase cable is connected.",
+    ..TUNE_PARAM
+};
+
+/// The oscillator's `octave` knob: Phase's, with what a phase cable does to it.
+const OSC_OCTAVE: ParamSpec = ParamSpec {
+    description: "Shifts the pitch in octaves. Ignored while a phase cable is connected.",
+    ..OCTAVE_PARAM
+};
+
+/// The panel knobs every oscillator starts with, left to right.
+const TUNING_KNOBS: [Widget; 2] = [Widget::knob(0, 0, "tune"), Widget::knob(3, 0, "octave")];
+
+/// Where an oscillator reads its phase for one call: its own, run from the
+/// pitch and the knobs, or the cable's (oscillators.md, rules 1 and 2).
+struct PhaseIn<'a> {
+    /// True while the phase input has no cable.
+    own: bool,
+    pitch: &'a [f32],
+    cable: &'a [f32],
+    tune: Param<'a>,
+    octave: Param<'a>,
+}
+
+impl PhaseIn<'_> {
+    /// The phase for frame `i`. The own phase only moves while it is used,
+    /// so it holds while a cable is connected (rule 3).
+    #[inline]
+    fn at(&self, i: usize, own: &mut PitchedPhase) -> f32 {
+        if self.own {
+            own.tick(i, self.pitch[i], self.tune, self.octave)
+        } else {
+            self.cable[i]
+        }
+    }
+}
+
+/// Sets a tuning knob on an oscillator's own phase, given the oscillator's
+/// `tune` and `octave` indices. Any other parameter is left alone.
+fn set_tuning(phase: &mut PitchedPhase, [tune, octave]: [usize; 2], index: usize, value: f32) {
+    if index == tune {
+        phase.set_tune(value);
+    } else if index == octave {
+        phase.set_octave(value);
+    }
+}
 
 /// `loom.osc.sine`: sine of the phase input.
 pub static SINE: ModuleDescriptor = ModuleDescriptor {
@@ -19,16 +95,8 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     name: "Sine",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "Sine wave shaped from a phase input.",
-    inputs: &[PortSpec {
-        name: "phase",
-        label: "Phase",
-        signal: SignalType::Phase,
-        description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
-        default: PortDefault::Value(0.0),
-        range: loom_core::PortRange::Signal,
-        channels: Channels::Downmix,
-    }],
+    description: "A sine wave at the pitch, or shaped from a phase cable.",
+    inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
         label: "Out",
@@ -38,22 +106,60 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[],
-    role: ModuleRole::Dsp(|_| Box::new(Sine)),
-    panel: Panel::EMPTY,
+    params: &[OSC_TUNE, OSC_OCTAVE],
+    role: ModuleRole::Dsp(|config| {
+        Box::new(Sine {
+            phase: PitchedPhase::new(config.sample_rate),
+        })
+    }),
+    panel: Panel::new(6, 3, &TUNING_KNOBS),
     displays: &[],
     roles: &[FillsRole::of(&roles::SOURCE)],
 };
 
 /// State for `loom.osc.sine`.
-struct Sine;
+#[derive(Clone)]
+struct Sine {
+    phase: PitchedPhase,
+}
+
+impl Sine {
+    const PHASE_IN: usize = SINE.input_index("phase").unwrap();
+    const TUNE: usize = SINE.param_index("tune").unwrap();
+    const OCTAVE: usize = SINE.param_index("octave").unwrap();
+}
 
 impl Module for Sine {
+    /// Takes the running state of another instance (ADR-0022).
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let ([phase], [out]) = io.split::<1, 1>();
-        for (out, &p) in out.iter_mut().zip(phase) {
-            *out = oscillator::sine(p);
+        let (own, tune, octave) = (
+            !io.is_connected(Self::PHASE_IN),
+            io.param(Self::TUNE),
+            io.param(Self::OCTAVE),
+        );
+        let ([pitch, cable], [out]) = io.split::<2, 1>();
+        let phase_in = PhaseIn {
+            own,
+            pitch,
+            cable,
+            tune,
+            octave,
+        };
+        for (i, out) in out.iter_mut().enumerate() {
+            *out = oscillator::sine(phase_in.at(i, &mut self.phase));
         }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        set_tuning(&mut self.phase, [Self::TUNE, Self::OCTAVE], index, value);
+    }
+
+    fn reset(&mut self) {
+        self.phase.reset();
     }
 }
 
@@ -64,16 +170,8 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     name: "Saw",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A sawtooth wave, with every harmonic, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.",
-    inputs: &[PortSpec {
-        name: "phase",
-        label: "Phase",
-        signal: SignalType::Phase,
-        description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
-        default: PortDefault::Value(0.0),
-        range: loom_core::PortRange::Signal,
-        channels: Channels::Downmix,
-    }],
+    description: "A sawtooth wave, with every harmonic, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.",
+    inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
         label: "Out",
@@ -83,13 +181,14 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[],
-    role: ModuleRole::Dsp(|_| {
+    params: &[OSC_TUNE, OSC_OCTAVE],
+    role: ModuleRole::Dsp(|config| {
         Box::new(Saw {
             osc: oscillator::Saw::new(),
+            phase: PitchedPhase::new(config.sample_rate),
         })
     }),
-    panel: Panel::EMPTY,
+    panel: Panel::new(6, 3, &TUNING_KNOBS),
     displays: &[],
     roles: &[FillsRole::of(&roles::SOURCE)],
 };
@@ -98,6 +197,13 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Saw {
     osc: oscillator::Saw,
+    phase: PitchedPhase,
+}
+
+impl Saw {
+    const PHASE_IN: usize = SAW.input_index("phase").unwrap();
+    const TUNE: usize = SAW.param_index("tune").unwrap();
+    const OCTAVE: usize = SAW.param_index("octave").unwrap();
 }
 
 impl Module for Saw {
@@ -107,14 +213,31 @@ impl Module for Saw {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let ([phase], [out]) = io.split::<1, 1>();
-        for (out, &p) in out.iter_mut().zip(phase) {
-            *out = self.osc.tick(p);
+        let (own, tune, octave) = (
+            !io.is_connected(Self::PHASE_IN),
+            io.param(Self::TUNE),
+            io.param(Self::OCTAVE),
+        );
+        let ([pitch, cable], [out]) = io.split::<2, 1>();
+        let phase_in = PhaseIn {
+            own,
+            pitch,
+            cable,
+            tune,
+            octave,
+        };
+        for (i, out) in out.iter_mut().enumerate() {
+            *out = self.osc.tick(phase_in.at(i, &mut self.phase));
         }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        set_tuning(&mut self.phase, [Self::TUNE, Self::OCTAVE], index, value);
     }
 
     fn reset(&mut self) {
         self.osc.reset();
+        self.phase.reset();
     }
 }
 
@@ -125,16 +248,8 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     name: "Pulse",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A pulse wave with a set width, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.",
-    inputs: &[PortSpec {
-        name: "phase",
-        label: "Phase",
-        signal: SignalType::Phase,
-        description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
-        default: PortDefault::Value(0.0),
-        range: loom_core::PortRange::Signal,
-        channels: Channels::Downmix,
-    }],
+    description: "A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.",
+    inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
         label: "Out",
@@ -144,20 +259,25 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[ParamSpec {
-        name: "width",
-        label: "Width",
-        description: "Share of the cycle spent high, from 0.01 to 0.99. 0.5 is a square wave.",
-        min: 0.01,
-        max: 0.99,
-        default: 0.5,
-        unit: "",
-        options: ParamOptions::DEFAULT,
-    }
-    .smooth(0.005)],
+    params: &[
+        OSC_TUNE,
+        OSC_OCTAVE,
+        ParamSpec {
+            name: "width",
+            label: "Width",
+            description: "Share of the cycle spent high, from 0.01 to 0.99. 0.5 is a square wave.",
+            min: 0.01,
+            max: 0.99,
+            default: 0.5,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .smooth(0.005),
+    ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Pulse {
             osc: oscillator::Pulse::new(),
+            phase: PitchedPhase::new(config.sample_rate),
             width: Smoothed::new(
                 0.5,
                 config.sample_rate,
@@ -165,7 +285,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
             ),
         })
     }),
-    panel: Panel::new(3, 3, &[Widget::knob(0, 0, "width")]),
+    panel: Panel::new(9, 3, &[TUNING_KNOBS[0], TUNING_KNOBS[1], Widget::knob(6, 0, "width")]),
     displays: &[],
     roles: &[FillsRole::of(&roles::SOURCE)],
 };
@@ -174,10 +294,14 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Pulse {
     osc: oscillator::Pulse,
+    phase: PitchedPhase,
     width: Smoothed,
 }
 
 impl Pulse {
+    const PHASE_IN: usize = PULSE.input_index("phase").unwrap();
+    const TUNE: usize = PULSE.param_index("tune").unwrap();
+    const OCTAVE: usize = PULSE.param_index("octave").unwrap();
     const WIDTH: usize = PULSE.param_index("width").unwrap();
 }
 
@@ -188,17 +312,31 @@ impl Module for Pulse {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let modulated = io.param(Self::WIDTH);
-        let ([phase], [out]) = io.split::<1, 1>();
-        for (i, (out, &p)) in out.iter_mut().zip(phase).enumerate() {
+        let (own, tune, octave, modulated) = (
+            !io.is_connected(Self::PHASE_IN),
+            io.param(Self::TUNE),
+            io.param(Self::OCTAVE),
+            io.param(Self::WIDTH),
+        );
+        let ([pitch, cable], [out]) = io.split::<2, 1>();
+        let phase_in = PhaseIn {
+            own,
+            pitch,
+            cable,
+            tune,
+            octave,
+        };
+        for (i, out) in out.iter_mut().enumerate() {
             let width = modulated.at_or(i, self.width.tick()).clamp(0.01, 0.99);
-            *out = self.osc.tick(p, width);
+            *out = self.osc.tick(phase_in.at(i, &mut self.phase), width);
         }
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
         if index == Self::WIDTH {
             self.width.set_target(value);
+        } else {
+            set_tuning(&mut self.phase, [Self::TUNE, Self::OCTAVE], index, value);
         }
     }
 
@@ -214,6 +352,7 @@ impl Module for Pulse {
         let target = self.width.target();
         self.width.reset(target);
         self.osc.reset(target.clamp(0.01, 0.99));
+        self.phase.reset();
     }
 }
 
@@ -224,16 +363,8 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     name: "Triangle",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A triangle wave with few harmonics, shaped from a phase input. Its corners are smoothed so high notes stay clean.",
-    inputs: &[PortSpec {
-        name: "phase",
-        label: "Phase",
-        signal: SignalType::Phase,
-        description: "Position in the wave, from 0 to 1. One ramp is one cycle.",
-        default: PortDefault::Value(0.0),
-        range: loom_core::PortRange::Signal,
-        channels: Channels::Downmix,
-    }],
+    description: "A triangle wave with few harmonics, at the pitch or shaped from a phase cable. Its corners are smoothed so high notes stay clean.",
+    inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
         label: "Out",
@@ -243,13 +374,14 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[],
-    role: ModuleRole::Dsp(|_| {
+    params: &[OSC_TUNE, OSC_OCTAVE],
+    role: ModuleRole::Dsp(|config| {
         Box::new(Triangle {
             osc: oscillator::Triangle::new(),
+            phase: PitchedPhase::new(config.sample_rate),
         })
     }),
-    panel: Panel::EMPTY,
+    panel: Panel::new(6, 3, &TUNING_KNOBS),
     displays: &[],
     roles: &[FillsRole::of(&roles::SOURCE)],
 };
@@ -258,6 +390,13 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
 #[derive(Clone)]
 struct Triangle {
     osc: oscillator::Triangle,
+    phase: PitchedPhase,
+}
+
+impl Triangle {
+    const PHASE_IN: usize = TRIANGLE.input_index("phase").unwrap();
+    const TUNE: usize = TRIANGLE.param_index("tune").unwrap();
+    const OCTAVE: usize = TRIANGLE.param_index("octave").unwrap();
 }
 
 impl Module for Triangle {
@@ -267,14 +406,31 @@ impl Module for Triangle {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let ([phase], [out]) = io.split::<1, 1>();
-        for (out, &p) in out.iter_mut().zip(phase) {
-            *out = self.osc.tick(p);
+        let (own, tune, octave) = (
+            !io.is_connected(Self::PHASE_IN),
+            io.param(Self::TUNE),
+            io.param(Self::OCTAVE),
+        );
+        let ([pitch, cable], [out]) = io.split::<2, 1>();
+        let phase_in = PhaseIn {
+            own,
+            pitch,
+            cable,
+            tune,
+            octave,
+        };
+        for (i, out) in out.iter_mut().enumerate() {
+            *out = self.osc.tick(phase_in.at(i, &mut self.phase));
         }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        set_tuning(&mut self.phase, [Self::TUNE, Self::OCTAVE], index, value);
     }
 
     fn reset(&mut self) {
         self.osc.reset();
+        self.phase.reset();
     }
 }
 
@@ -438,6 +594,9 @@ impl Module for Noise {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod own_phase_tests;
 
 #[cfg(test)]
 mod noise_colour_tests;

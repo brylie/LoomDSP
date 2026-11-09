@@ -70,7 +70,8 @@ impl DefaultKey {
     /// compares with `==`, so -0.0 reads it too.
     pub(super) fn of(default: PortDefault) -> Option<Self> {
         match default {
-            PortDefault::Value(0.0) => None,
+            // The module ignores the input while it has no cable.
+            PortDefault::Value(0.0) | PortDefault::OwnPhase => None,
             PortDefault::Value(value) => Some(Self::Value(value.to_bits())),
             PortDefault::BarPhase => Some(Self::BarPhase),
             PortDefault::BeatPhase => Some(Self::BeatPhase),

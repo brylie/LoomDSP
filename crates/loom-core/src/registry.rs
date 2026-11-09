@@ -99,6 +99,15 @@ impl Registry {
         {
             return Err(invalid("an input default must be a finite number"));
         }
+        // Own phase (oscillators.md, rule 8): only a phase input can stand
+        // in for the module's own phase.
+        if descriptor
+            .inputs
+            .iter()
+            .any(|port| port.default == PortDefault::OwnPhase && port.signal != crate::SignalType::Phase)
+        {
+            return Err(invalid("only a phase input can default to the module's own phase"));
+        }
         for param in descriptor.params {
             // Transient parameters (transient-params.md, rules 1 and 2): a
             // hold or a press, which starts in the safe "nothing" state.

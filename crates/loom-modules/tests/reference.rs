@@ -58,6 +58,30 @@ fn triangle() {
         .check(reference!("triangle"));
 }
 
+/// Reference renders for the four oscillators with no phase cable: each
+/// runs its own phase from a gliding pitch and its tune and octave knobs
+/// (`docs/design/oscillators.md`, rule 1).
+#[test]
+fn oscillators_at_pitch() {
+    for (descriptor, name) in [
+        (&osc::SINE, reference!("sine_at_pitch")),
+        (&osc::SAW, reference!("saw_at_pitch")),
+        (&osc::PULSE, reference!("pulse_at_pitch")),
+        (&osc::TRIANGLE, reference!("triangle_at_pitch")),
+    ] {
+        Harness::new(descriptor)
+            .seconds(0.05)
+            // A fifth below middle C, gliding up two octaves.
+            .input(
+                "pitch",
+                Signal::from_fn(|frame| -7.0 / 120.0 + frame as f32 / 2_400.0 * 0.2),
+            )
+            .param("tune", 5.0)
+            .param("octave", -1.0)
+            .check(name);
+    }
+}
+
 #[test]
 fn noise() {
     Harness::new(&osc::NOISE)
