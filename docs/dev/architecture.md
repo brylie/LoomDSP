@@ -14,6 +14,7 @@ flowchart BT
     test[loom-test<br/>module test harness]
     analysis[loom-analysis<br/>measures recorded audio]
     host[loom-host-desktop<br/>audio and MIDI devices]
+    uicore[loom-ui-core<br/>geometry and colour]
     canvas[loom-canvas<br/>patch canvas widget]
     cli[loom-cli<br/>the loom tool]
     app[loom-app<br/>desktop app]
@@ -25,7 +26,8 @@ flowchart BT
     analysis --> core
     host --> core
     cli --> modules & patch & host & analysis
-    app --> modules & patch & host & canvas
+    canvas --> uicore
+    app --> modules & patch & host & canvas & uicore
 ```
 
 | Crate | Job | Rules |
@@ -38,7 +40,8 @@ flowchart BT
 | `loom-test` | The module test harness: renders one module, checks block-size invariance, and compares with reference WAV files. | Desktop only, for tests. Only `dev-dependencies` use it, so it never ships. |
 | `loom-analysis` | Measures recorded audio: peak, clipping, the largest step, and DC. `loom analyze` and the app's audio QA tests use the same functions ([audio QA](../design/audio-qa.md)). | Desktop only: it reads WAV files. |
 | `loom-host-desktop` | Connects the engine to audio devices (cpal) and MIDI inputs (midir). For development, can also play it from a timer with no device, play it only when a test steps a tape (`AudioOutput::stepped`), and record it to a WAV file across many streams (`Recorder`). | Desktop only. The only crate that knows about audio APIs. |
-| `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
+| `loom-ui-core` | Plain geometry and colour types for the UI layer: `Point`, `Vector`, `Size`, `Rect`, and `Color` ([UI layer](../design/ui-layer.md), ADR-0041). Input events and UI IDs join it in later steps of [the plan](leaving-iced-plan.md). | No dependencies at all: no UI toolkit and no LoomDSP crate, so other tools can use it. |
+| `loom-canvas` | The patch canvas: an Iced widget drawn by one custom GPU primitive. Its geometry and colours are `loom-ui-core` values. They become Iced values only where they cross into an Iced call, through `iced_convert.rs`. | Knows nothing about the engine. It draws a `Scene` and reports gestures. |
 | `loom-cli` | The `loom` command: list modules, check, render, play, stress-test, measure WAV files, and act as a virtual MIDI controller for tests. `loom modules --markdown` writes the module help pages in `docs/modules/` ([help pages](../design/help-pages.md)). | |
 | `loom-app` | The desktop app: canvas, inspector, audio, MIDI. | Owns the application state. |
 

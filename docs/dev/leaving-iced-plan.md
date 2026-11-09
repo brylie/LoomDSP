@@ -97,20 +97,19 @@ Done when the ADR is Accepted and the spec's sections for phase 1 are Agreed.
 
 The app still runs on `iced::application`. This phase moves our code off Iced's types so later phases only swap the bottom layer.
 
-### 1.1 A toolkit-free geometry and input crate
+### 1.1 A toolkit-free geometry crate
 
-1. Create `crates/loom-ui-core` (desktop only, no Iced). It holds:
-   - `Point`, `Size`, `Rect`, `Vector`, `Color`, with the operations the canvas uses;
-   - `PointerEvent`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`, our own input events.
-2. Add `From` conversions to and from the Iced types in one adapter module in `loom-app`, not spread through the code.
-3. Move `loom-canvas` to these types: `scene.rs`, `tile_text.rs`, `camera.rs`, `controls.rs`, `hover.rs`, `trace.rs`, `gpu.rs`. `widget.rs` stays an Iced widget but converts at its edge.
-4. Tests: the existing canvas tests pass unchanged except for imports. Add unit tests for the conversions.
+1. Create `crates/loom-ui-core` (desktop only, no Iced). It holds `Point`, `Size`, `Rect`, `Vector`, and `Color`, with the operations the canvas uses. The types are our own design, written from plain geometry and not ported from Iced (ADR-0018). Each rule, such as which edges a rectangle holds, is stated in the crate and tested against itself. The input events arrive with step 1.2 and UI IDs with step 1.4, where each has a caller that shapes it.
+2. Add conversions to and from the Iced types in one adapter module, `loom-canvas/src/iced_convert.rs`, not spread through the code. They are extension traits (`to_iced()`, `to_core()`), not `From` impls: Rust allows a `From` impl only in a crate that owns one of the two types, and `loom-ui-core` must not know Iced. The module is in `loom-canvas`, not `loom-app`, because the canvas widget needs it and cannot depend on the app. `loom-app` uses the same module.
+3. Move `loom-canvas` to these types: `scene.rs`, `tile_text.rs`, `camera.rs`, `controls.rs`, `hover.rs`, `trace.rs`, `gpu.rs`. `widget.rs` stays an Iced widget. It uses the new types inside and converts only where Iced hands it a value or takes one.
+4. Tests: the existing canvas tests pass unchanged except for imports and the name `Rect`. Add unit tests for the conversions.
 
 ### 1.2 Canvas input as a plain state machine
 
-1. Move the event handling in `loom-canvas/src/widget.rs` (drags, hover, double-click, key handling) into a plain struct, for example `CanvasInput`, with `fn handle(&mut self, event: &PointerEvent | &KeyEvent, view: &CanvasView, now: Instant) -> Vec<CanvasEvent>`.
-2. The Iced widget becomes a thin adapter that converts events and calls it.
-3. Move the existing widget tests to test `CanvasInput` directly where they can. Keep the `Ui` harness tests as they are.
+1. Add our own input events to `loom-ui-core`: `PointerEvent`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`. Define them from what the canvas handlers match on.
+2. Move the event handling in `loom-canvas/src/widget.rs` (drags, hover, double-click, key handling) into a plain struct, for example `CanvasInput`, with `fn handle(&mut self, event: &PointerEvent | &KeyEvent, view: &CanvasView, now: Instant) -> Vec<CanvasEvent>`.
+3. The Iced widget becomes a thin adapter that converts events and calls it.
+4. Move the existing widget tests to test `CanvasInput` directly where they can. Keep the `Ui` harness tests as they are.
 
 ### 1.3 Canvas drawing without Iced's primitive
 
@@ -120,7 +119,7 @@ The app still runs on `iced::application`. This phase moves our code off Iced's 
 
 ### 1.4 The accessibility tree as a real module
 
-This turns the spike into supported code. It needs the phase 0 spec.
+This turns the spike into supported code. It needs the phase 0 spec. UI IDs ([spec](../design/ui-layer.md), section 4) join `loom-ui-core` in this step, with the table of accessibility node IDs as their first user.
 
 1. Split `a11y.rs` into:
    - `a11y/tree.rs`: builds an AccessKit `TreeUpdate` from `UiSnapshot` and the other view models. No platform code, so it builds and is tested on every OS.
