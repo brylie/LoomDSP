@@ -41,8 +41,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 
 - Plugins draw inside a window owned by the DAW. Iced normally creates its own window through `winit`.
 - `nice-plug-iced` shows this is possible, but it sits inside RustAudio and its AI policy.
-- **Action:** research when plugin export is scheduled (deferred). A small "embed Iced in a parent window" crate could be another published primitive (FR-SDK-06).
-- Since ADR-0040, embedding depends on our own `winit` shell rather than on Iced. The shell must accept a window it is given as well as one it creates ([UI layer spec](../design/ui-layer.md#out-of-scope)).
+- **Action:** research when plugin export is scheduled (deferred). Since ADR-0040, embedding depends on our own `winit` shell rather than on Iced: the shell takes a parent window it is given as well as one it creates ([UI layer spec](../design/ui-layer.md#out-of-scope)). That shell could be another published primitive (FR-SDK-06).
 - Trade-offs of leaving Iced for our own UI stack, and when to revisit: [research snapshot, 2026-11](../research/2026-11-own-ui-stack-tradeoffs.md).
 
 ### OQ-15. Looper recording
