@@ -5,6 +5,7 @@
 - **Related requirements:** NFR-UX-01, NFR-UX-06, NFR-PERF-04, FR-SDK-06, OQ-13, OQ-14
 - **Specification:** [UI layer](../design/ui-layer.md)
 - **Supersedes:** [ADR-0009](0009-ui-stack-iced.md) for the window, runtime, and widgets (the canvas stays with [ADR-0010](0010-own-patch-canvas.md)), and [ADR-0028](0028-app-accessibility-waits-for-iced.md)
+- **Refines:** [ADR-0010](0010-own-patch-canvas.md). Its decision that the canvas is our own stands. Its choice to build the canvas as an Iced widget is replaced from phase 2 of the plan, when the canvas becomes a custom element of the UI layer ([spec](../design/ui-layer.md), section 9). ADR-0010 stays Accepted, because a status line holds one value and most of that decision still holds.
 - **Background:** [Our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md)
 - **Plan and issue:** [Leaving Iced, step by step](../dev/leaving-iced-plan.md), [#683](https://github.com/brylie/LoomDSP/issues/683)
 
