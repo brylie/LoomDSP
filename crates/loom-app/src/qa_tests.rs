@@ -1092,3 +1092,86 @@ fn a_slot_swap_during_playback_has_no_click() {
     let across = max_step(&left[switch - 1..finish + 1024]);
     assert!(across <= limit, "swap step {across} > {limit}");
 }
+
+/// A select of two filtered noise members, member 1 playing, into the
+/// audio output.
+const NOISE_SELECT: &str = r#"Patch(version: 1, metadata: Metadata(name: "Noise select"),
+    subpatches: {
+        "select": SubPatch(
+            metadata: Metadata(name: "Select"),
+            mode: Select,
+            members: [1, 2],
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("low")),
+                PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("high")),
+            ],
+        ),
+        "low": SubPatch(
+            metadata: Metadata(name: "Low"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.osc.noise@1", params: {"seed": 1.0}),
+                PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 300.0, "resonance": 0.5}),
+                PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "in")),
+                PatchCable(from: (2, "lowpass"), to: (3, "in")),
+            ],
+        ),
+        "high": SubPatch(
+            metadata: Metadata(name: "High"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.osc.noise@1", params: {"seed": 2.0}),
+                PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 900.0, "resonance": 0.5}),
+                PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "in")),
+                PatchCable(from: (2, "lowpass"), to: (3, "in")),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 7, kind: "loom.struct.subpatch@1", subpatch: Some("select"), params: {"member": 1.0}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [PatchCable(from: (7, "out"), to: (3, "in"))],
+)"#;
+
+/// The largest step an equal-power fade from steady audio `a` to steady
+/// audio `b` may have: per sample, `out = a·cos θ + b·sin θ` moves by each
+/// signal's own step times its gain, at most √2 times the larger step, plus
+/// each signal's peak times the gains' largest change per sample, π/(2N)
+/// (sub-patches.md, The modules the flattener adds, Select).
+fn select_step_limit(a: &[f32], b: &[f32]) -> f32 {
+    let gain_step = std::f32::consts::FRAC_PI_2 / swap_fade_frames() as f32;
+    std::f32::consts::SQRT_2 * max_step(a).max(max_step(b)) + gain_step * (peak(a) + peak(b)) + 1e-6
+}
+
+/// A select change during playback has no step larger than the crossfade
+/// allows: Member 2 from the surface control fades over 10 ms, and across
+/// the change the largest step stays within the bound the two members'
+/// steady audio sets (sub-patches.md, rule 6 and Acceptance criteria).
+#[test]
+fn a_select_change_during_playback_has_no_click() {
+    let mut run = Setup::new("select_change", PatchFrom::Text(NOISE_SELECT)).start();
+    run.play(0.5);
+    let switch = run.left().len();
+    let member = run
+        .app
+        .session
+        .hierarchy
+        .member_module(&loom_patch::ModulePath::top(7))
+        .expect("a select has a Member module");
+    run.app.set_param(member.0, 0, 2.0);
+    run.play(0.3);
+    let left = run.left();
+    assert!(left.iter().all(|x| x.is_finite()));
+    let before = &left[switch - WINDOW..switch];
+    let after = &left[switch + 2 * swap_fade_frames()..switch + 2 * swap_fade_frames() + WINDOW];
+    assert!(peak(before) > 1e-3 && peak(after) > 1e-3, "both members play");
+    let limit = select_step_limit(before, after);
+    let across = max_step(&left[switch - 1..switch + 2 * swap_fade_frames()]);
+    assert!(across <= limit, "select step {across} > {limit}");
+}

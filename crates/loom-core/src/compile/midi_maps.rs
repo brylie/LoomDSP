@@ -20,6 +20,14 @@ pub(super) fn compile_midi_maps(graph: &Graph, synced: &BTreeMap<MidiMappingId, 
                 options: mapping.options,
                 base: *node.params.get(mapping.param)?,
                 caught: mapping.learned,
+                followers: graph
+                    .midi_followers(mapping.target, mapping.param)
+                    .iter()
+                    .filter_map(|&(module, param)| {
+                        let node = graph.nodes.get(&module)?;
+                        Some((node.slot? as u32, u16::try_from(param).ok()?))
+                    })
+                    .collect(),
             })
         })
         .collect();

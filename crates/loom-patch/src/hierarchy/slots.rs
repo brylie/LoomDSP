@@ -227,6 +227,10 @@ impl Hierarchy {
     /// that is leaving, or a swap fade.
     pub fn is_hidden(&self, id: ModuleId) -> bool {
         let Some(path) = self.ids.path_of(id) else { return false };
+        // Stack copies and the modules a mode adds are never tiles.
+        if path.is_implied() {
+            return true;
+        }
         let Some(level) = path.parent() else { return false };
         if self.slots.contains_key(&level) {
             return true;
@@ -238,7 +242,8 @@ impl Hierarchy {
     }
 
     /// The modules that exist only while a slot fades: every leaving part
-    /// and every swap fade. Left out of the file and of undo snapshots.
+    /// and every swap fade, and the implied modules of modes. Left out of
+    /// the file and of undo snapshots.
     pub fn transient_ids(&self) -> BTreeSet<ModuleId> {
         let mut ids = BTreeSet::new();
         for (path, state) in &self.slots {
@@ -256,6 +261,9 @@ impl Hierarchy {
             }
             ids.extend(fading.fades.iter().map(|(_, id)| *id));
         }
+        // Implied modules are not written either: the flattener makes them
+        // again from copy 0 (ADR-0040).
+        ids.extend(self.implied_ids());
         ids
     }
 

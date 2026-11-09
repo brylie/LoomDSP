@@ -12,7 +12,9 @@ use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
 use crate::live::{LiveTable, NO_CELL};
 use crate::midi::{HeldSet, MAX_MIDI_INPUTS, MidiEvent, MidiMessage};
-use crate::midi_map::{ControlOutcome, ControlState, MIDI_CONTROLS, MidiControl, MidiFeedback, MidiMode, later};
+use crate::midi_map::{
+    ControlOutcome, ControlState, MIDI_CONTROLS, MidiControl, MidiFeedback, MidiMapOp, MidiMode, later,
+};
 use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
@@ -903,12 +905,11 @@ impl Engine {
             for map in maps[start..].iter().take_while(|map| map.control == control) {
                 match self.midi_states[control.index()].control_change(&map.options, &map.spec, value) {
                     ControlOutcome::Set(base) => {
-                        set_base(
+                        set_mapped(
                             &mut self.slots,
                             &mut self.schedule.fills,
                             &self.schedule.copies,
-                            map.slot as usize,
-                            usize::from(map.param),
+                            map,
                             base,
                         );
                         self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
@@ -951,12 +952,11 @@ impl Engine {
                 // never copies it, so the module goes back to the compiled
                 // value too, and what plays is what shows. For a mapping that
                 // is new, the module holds this value already.
-                set_base(
+                set_mapped(
                     &mut self.slots,
                     &mut self.schedule.fills,
                     &self.schedule.copies,
-                    map.slot as usize,
-                    usize::from(map.param),
+                    map,
                     map.base,
                 );
                 continue;
@@ -965,13 +965,13 @@ impl Engine {
             let (token, edited) = self.midi_feedback.read_edit(map.control);
             let newest = token == 0 || later(entry.sequence, edited);
             if entry.id == map.id && !entry.waiting && Some(entry.sequence) != map.synced && newest {
-                set_base(
+                let value = self.midi_feedback.result(map.control);
+                set_mapped(
                     &mut self.slots,
                     &mut self.schedule.fills,
                     &self.schedule.copies,
-                    map.slot as usize,
-                    usize::from(map.param),
-                    self.midi_feedback.result(map.control),
+                    map,
+                    value,
                 );
             } else if state.value != map.base {
                 state.changed_elsewhere(&map.options, &map.spec, map.base);
@@ -1145,6 +1145,21 @@ impl Engine {
         }
 
         self.transport.end_block();
+    }
+}
+
+/// Sets the base value of a mapped parameter and of every parameter that
+/// follows its mapping (the copies of a stacked sub-patch).
+fn set_mapped(
+    slots: &mut [Option<Box<dyn Module>>],
+    fills: &mut [ParamFill],
+    copies: &[(u32, u32)],
+    map: &MidiMapOp,
+    value: f32,
+) {
+    set_base(slots, fills, copies, map.slot as usize, usize::from(map.param), value);
+    for &(slot, param) in &map.followers {
+        set_base(slots, fills, copies, slot as usize, usize::from(param), value);
     }
 }
 

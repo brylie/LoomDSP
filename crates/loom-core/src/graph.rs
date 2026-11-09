@@ -244,9 +244,20 @@ pub struct Graph {
     pub(crate) assignments: BTreeMap<AssignmentId, Assignment>,
     /// MIDI mappings. A parameter has at most one, and so does a control.
     pub(crate) midi_mappings: BTreeMap<MidiMappingId, MidiMapping>,
+    /// For a mapped parameter, the parameters that take every value its
+    /// mapping sets: the same parameter of each copy of a stacked sub-patch
+    /// (sub-patches.md, Copies in the editor; ADR-0040). Set by
+    /// [`Controller::set_midi_followers`](crate::Controller::set_midi_followers).
+    pub(crate) midi_followers: BTreeMap<(ModuleId, usize), Vec<(ModuleId, usize)>>,
 }
 
 impl Graph {
+    /// The parameters that follow the mapping on `module`'s parameter
+    /// `param`, or none.
+    pub fn midi_followers(&self, module: ModuleId, param: usize) -> &[(ModuleId, usize)] {
+        self.midi_followers.get(&(module, param)).map_or(&[], Vec::as_slice)
+    }
+
     /// All modules, sorted by ID.
     pub fn nodes(&self) -> impl Iterator<Item = (ModuleId, &Node)> {
         self.nodes.iter().map(|(id, node)| (*id, node))

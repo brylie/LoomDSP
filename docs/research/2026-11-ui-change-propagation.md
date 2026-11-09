@@ -2,7 +2,7 @@
 
 - **Kind:** Research snapshot. Non-normative.
 - **Date:** 2026-11-09. Repository facts were checked at commit `d0539429`.
-- **Related decisions:** [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0040](../adr/0040-own-ui-layer.md) (our own UI layer)
+- **Related decisions:** [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0041](../adr/0041-own-ui-layer.md) (our own UI layer)
 - **Related:** [UI layer specification](../design/ui-layer.md), [the plan for leaving Iced](../dev/leaving-iced-plan.md), [#683](https://github.com/brylie/LoomDSP/issues/683)
 
 This snapshot collects what three articles and two neighbouring projects teach about one question: how a UI layer knows what changed, and what it rebuilds as a result. It feeds the "Change and cost model" and "Identity" sections of the UI layer specification. It decides nothing.
@@ -110,7 +110,7 @@ What the sources say about each:
 What this means for LoomDSP:
 
 1. **The plan's foundations are the common ones.** Two independent projects reached the same set: `winit`, `wgpu`, a Rust text stack, and AccessKit. That lowers the risk of the plan's choice of crates.
-2. **Masonry is a real option, not only a source of ideas.** It offers what phase 3 would build: widgets, focus, layout, and an accessibility tree. It is also alpha and changing fast, which is the risk that made OQ-14 a question for Iced. ADR-0040 weighs it.
+2. **Masonry is a real option, not only a source of ideas.** It offers what phase 3 would build: widgets, focus, layout, and an accessibility tree. It is also alpha and changing fast, which is the risk that made OQ-14 a question for Iced. ADR-0041 weighs it.
 3. **Parley is a real candidate for text.** Accessible text fields and IME are the two parts of phase 3 the plan names as the most likely to overrun. A text crate that already reports AccessKit text properties may save more work than staying on the crate Iced uses. The UI layer specification lists this as an open point.
 
 ## What this means for the UI layer specification

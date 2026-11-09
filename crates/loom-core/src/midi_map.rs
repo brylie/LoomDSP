@@ -364,6 +364,10 @@ pub(crate) struct MidiMapOp {
     pub base: f32,
     /// True for a pickup that starts caught, because learning made it.
     pub caught: bool,
+    /// Parameters that take every value this mapping sets, as (slot,
+    /// parameter): the copies of a stacked sub-patch. Allocated on the
+    /// control thread with the schedule.
+    pub followers: Vec<(u32, u16)>,
 }
 
 /// What the engine reports to the controller. See the module docs.

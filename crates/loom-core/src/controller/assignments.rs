@@ -36,7 +36,7 @@ impl Controller {
                 enabled: true,
             },
         );
-        self.dirty = true;
+        self.mark_dirty();
         Ok(id)
     }
 
@@ -58,7 +58,7 @@ impl Controller {
                 ..assignment
             },
         );
-        self.dirty = true;
+        self.mark_dirty();
         Ok(())
     }
 
@@ -77,7 +77,7 @@ impl Controller {
         let fresh = AssignmentId(self.next_assignment);
         self.next_assignment += 1;
         self.graph.assignments.insert(fresh, assignment);
-        self.dirty = true;
+        self.mark_dirty();
         Ok(fresh)
     }
 
@@ -102,7 +102,7 @@ impl Controller {
             .assignments
             .remove(&id)
             .ok_or(LoomError::UnknownAssignment(id))?;
-        self.dirty = true;
+        self.mark_dirty();
         Ok(removed)
     }
 
@@ -123,7 +123,7 @@ impl Controller {
             assignment.source = source;
             assignment.target = target;
             assignment.param = param;
-            self.dirty = true;
+            self.mark_dirty();
         }
         Ok(())
     }

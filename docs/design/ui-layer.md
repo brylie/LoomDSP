@@ -4,7 +4,7 @@ How LoomDSP's own UI layer turns events into messages, decides what to rebuild, 
 
 - **Kind:** living specification.
 - **Status:** Agreed (2026-11-09). Each section gives the phase of [the plan](../dev/leaving-iced-plan.md) that first builds it. One choice, the text crate, is agreed as a decision rule and made at plan step 2.4 (section 8, rule 8).
-- **Decision behind it:** [ADR-0040](../adr/0040-own-ui-layer.md), superseding [ADR-0009](../adr/0009-ui-stack-iced.md) for the window and widgets, and [ADR-0028](../adr/0028-app-accessibility-waits-for-iced.md). Builds on [ADR-0010](../adr/0010-own-patch-canvas.md) (our own canvas), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), and [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value).
+- **Decision behind it:** [ADR-0041](../adr/0041-own-ui-layer.md), superseding [ADR-0009](../adr/0009-ui-stack-iced.md) for the window and widgets, and [ADR-0028](../adr/0028-app-accessibility-waits-for-iced.md). Builds on [ADR-0010](../adr/0010-own-patch-canvas.md) (our own canvas), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), and [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value).
 - **Use case and requirements:** NFR-UX-01 (keyboard), NFR-UX-06 (screen readers), NFR-PERF-04 (no redraw when idle), FR-SDK-06 (publishable crates), OQ-13 (plugin windows), OQ-14 (Iced churn).
 - **Background:** [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md). An explainer in `docs/learn/` follows in phase 4.
 - **Prior art:** the Elm architecture (one message type, one update), and the rebuild-and-compare approach that Levien describes for Xilem. Named only to explain ideas.
@@ -282,7 +282,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 
 ### Rules
 
-1. **Shaping, font fallback, line breaking, glyph drawing, and the editing model come from existing crates.** We write the glue, not a text engine. *Why:* ADR-0040, decision part 3.
+1. **Shaping, font fallback, line breaking, glyph drawing, and the editing model come from existing crates.** We write the glue, not a text engine. *Why:* ADR-0041, decision part 3.
 2. **A single-line field supports:** caret, selection, word movement, Home and End, clipboard through effects, and undo inside the field. *Why:* users expect these in any text field, and their absence is noticed at once.
 3. **Undo inside a field is separate from patch undo,** and ends when the field loses focus or commits. *Why:* Cmd+Z while typing a name should undo the typing, not the last patch edit.
 4. **IME composition goes to the focused field.** The shell sends preedit and commit events, shows the preedit text in the field, and reports the caret area so the candidate window appears beside it. *Why:* people who type Chinese, Japanese, or Korean need composition to type at all.
@@ -293,7 +293,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
    1. IME composition in a single-line field (rule 4).
    2. Reporting text runs, caret, and selection to AccessKit (rule 5).
    3. One font system shared by the canvas and the panels.
-   4. How its glyphs are drawn. `cosmic-text` has `glyphon` †, a `wgpu` glyph atlas that Iced's own `cryoglyph` forks. No such atlas for Parley is known to us †: its glyphs would be rasterised with `swash` into an atlas of our own, or drawn through Vello. An atlas of our own counts against rule 1 and must be costed in lines; Vello brings the compositing cost ADR-0040 names for Masonry.
+   4. How its glyphs are drawn. `cosmic-text` has `glyphon` †, a `wgpu` glyph atlas that Iced's own `cryoglyph` forks. No such atlas for Parley is known to us †: its glyphs would be rasterised with `swash` into an atlas of our own, or drawn through Vello. An atlas of our own counts against rule 1 and must be costed in lines; Vello brings the compositing cost ADR-0041 names for Masonry.
    5. It picks the same system font as today (rule 6).
    6. A licence that passes `cargo deny check`, and versions that match the `winit` and `wgpu` in the lock file.
 

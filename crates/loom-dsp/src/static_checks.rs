@@ -3,12 +3,15 @@
 //! each sample, so each must be `Copy`. Adding a field that breaks either fails
 //! the build here.
 
-use crate::{delay, dynamics, envelope, euclid, filter, limiter, loudness, noise, oscillator, phase, random, slew};
+use crate::{
+    blend, delay, dynamics, envelope, euclid, filter, limiter, loudness, noise, oscillator, phase, random, slew,
+};
 
 const fn is_send<T: Send>() {}
 const fn is_copy<T: Copy>() {}
 
 const _: () = {
+    is_send::<blend::MemberFade>();
     is_send::<delay::Allpass>();
     is_send::<delay::DelayLine>();
     is_send::<dynamics::Dynamics>();

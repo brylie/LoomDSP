@@ -96,4 +96,4 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Scale and tuning](scale-and-tuning.md) | [ADR-0033](../adr/0033-one-scale-and-tuning-per-patch.md) | Agreed, M2 |
 | [Module data](module-data.md) | [ADR-0032](../adr/0032-module-data-in-typed-slots.md), [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) | Agreed; buffer data M1, rest M2 |
 | [Polyphony and voice allocation](polyphony.md) | [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md), refining [ADR-0020](../adr/0020-inferred-channel-count.md) | Agreed, M2; the M3 sources are followed as checks only |
-| [UI layer](ui-layer.md) | [ADR-0040](../adr/0040-own-ui-layer.md) | Agreed, M2; each section names its phase, and the text crate is chosen at plan step 2.4 |
+| [UI layer](ui-layer.md) | [ADR-0041](../adr/0041-own-ui-layer.md) | Agreed, M2; each section names its phase, and the text crate is chosen at plan step 2.4 |

@@ -1,4 +1,4 @@
-# ADR-0040: Our own UI layer on winit, wgpu, and AccessKit
+# ADR-0041: Our own UI layer on winit, wgpu, and AccessKit
 
 - **Status:** Accepted
 - **Date:** 2026-11-09
@@ -61,5 +61,5 @@ Stop the work, keep what the finished phases gave, and revisit this decision if 
 - Easier: the UI layer can be published for other Rust audio tools (FR-SDK-06).
 - Harder: we own layout, focus, overlays, text fields, IME, and every accessibility bug. A tree that disagrees with the screen is worse than none, so the specification ties both to one source and the tests check it.
 - Harder: new contributors learn a UI layer documented only in this repository. Phase 4 adds an explainer in `docs/learn/`.
-- Done with this ADR: ADR-0009 and ADR-0028 are marked "Superseded by ADR-0040", NFR-UX-06 no longer waits for Iced, and OQ-14 is resolved. ADR-0010 still holds for the canvas; the canvas stays an Iced widget until phase 2 of the plan moves it to the custom element contract.
+- Done with this ADR: ADR-0009 and ADR-0028 are marked "Superseded by ADR-0041", NFR-UX-06 no longer waits for Iced, and OQ-14 is resolved. ADR-0010 still holds for the canvas; the canvas stays an Iced widget until phase 2 of the plan moves it to the custom element contract.
 - Must do: AccessKit's macOS adapter has two gaps the spike found (no accessibility label from the name, no spoken value beside a number). They are reported upstream only with the maintainer's approval. A pinned fork through `[patch.crates-io]` is allowed until a release has the fix.

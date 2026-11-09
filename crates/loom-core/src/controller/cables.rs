@@ -12,7 +12,7 @@ impl Controller {
     pub fn connect(&mut self, from: OutputRef, to: InputRef) -> Result<Option<OutputRef>, LoomError> {
         self.check_output(from)?;
         self.check_input(to)?;
-        self.dirty = true;
+        self.mark_dirty();
         Ok(self.graph.cables.insert(to, from))
     }
 
@@ -34,7 +34,7 @@ impl Controller {
         self.check_input(to)?;
         let removed = self.graph.cables.remove(&to);
         if removed.is_some() {
-            self.dirty = true;
+            self.mark_dirty();
         }
         Ok(removed)
     }

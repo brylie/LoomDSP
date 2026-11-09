@@ -109,6 +109,11 @@ impl App {
                 }
             }
             CanvasEvent::Connect { from, to } => {
+                // A layer or select level holds only its members, unwired.
+                if let Some(why) = self.session.hierarchy.level_refusal(&self.session.level) {
+                    self.alerts.warn(why);
+                    return;
+                }
                 let graph = self.session.controller.graph();
                 let both_modules =
                     graph.node(ModuleId(from.module)).is_some() && graph.node(ModuleId(to.module)).is_some();

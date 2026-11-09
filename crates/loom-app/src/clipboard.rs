@@ -144,6 +144,13 @@ pub struct Added {
 }
 
 impl Group {
+    /// True when the group holds a module that is not a sub-patch tile,
+    /// which a layer or select level refuses (sub-patches.md, The editor
+    /// for modes).
+    pub fn has_modules(&self) -> bool {
+        self.members.iter().any(|m| matches!(m, Member::Module(_)))
+    }
+
     /// Includes the selected tiles' saved dimensions in a copied group.
     pub fn with_sizes(mut self, sizes: &BTreeMap<u32, (u8, u8)>) -> Self {
         for member in &mut self.members {
@@ -790,10 +797,36 @@ impl Group {
                     // Its own definition, as a file inserted (sub-patches.md,
                     // Copies and editing): a copy of a linked tile follows the
                     // same file.
-                    let file = Patch::from_definition(definition, &self.definitions);
-                    let inserted = hierarchy
-                        .insert(controller, level, &file, definition.library.as_deref())
-                        .map_err(|e| e.to_string())?;
+                    // A sub-patch with a mode goes in whole, its mode and
+                    // members with it (sub-patches.md, How modes meet the
+                    // rest); a patch file has no place for a mode.
+                    let inserted = if definition.mode.is_single() {
+                        let file = Patch::from_definition(definition, &self.definitions);
+                        hierarchy.insert(controller, level, &file, definition.library.as_deref())
+                    } else {
+                        let nested = loom_patch::reachable_keys(definition, &self.definitions)
+                            .into_iter()
+                            .filter_map(|k| self.definitions.get(&k).map(|d| (k, d.clone())))
+                            .collect();
+                        hierarchy.insert_definition(
+                            controller,
+                            level,
+                            definition.clone(),
+                            nested,
+                            None,
+                            None,
+                            Vec::new(),
+                        )
+                    }
+                    .map_err(|e| e.to_string())?;
+                    // A select's Member value is the instance's.
+                    if let Some(&value) = instance.params.get(loom_patch::modes::MEMBER_PARAM)
+                        && let Some(member) = hierarchy.member_module(&hierarchy.path_of(inserted.instance))
+                    {
+                        controller
+                            .set_param_named(member, loom_patch::modes::MEMBER_PARAM, value)
+                            .map_err(|e| e.to_string())?;
+                    }
                     modules.extend(inserted.modules.iter().copied());
                     hierarchy.set_label(inserted.instance, instance.label.clone());
                     for (inner, layout) in &inserted.layouts {

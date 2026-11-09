@@ -43,7 +43,11 @@ pub fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
 /// Frequencies for [`busy_each`], in Hz. No one is a multiple of another, so two
 /// inputs never move together for long, and the lowest gives every input an edge
 /// before the copy checks' copy frame.
-const BUSY_HZ: [f32; 12] = [37.0, 41.0, 43.0, 47.0, 53.0, 59.0, 61.0, 67.0, 71.0, 73.0, 79.0, 83.0];
+/// Seventeen, for the most inputs a module has: the sixteen member inputs
+/// and `member` of a Select (sub-patches.md, The modules the flattener adds).
+const BUSY_HZ: [f32; 17] = [
+    37.0, 41.0, 43.0, 47.0, 53.0, 59.0, 61.0, 67.0, 71.0, 73.0, 79.0, 83.0, 89.0, 97.0, 101.0, 103.0, 107.0,
+];
 
 /// A busy signal on every input of `descriptor`, each at its own frequency. With
 /// one signal on every input, a routing module gives the same output whichever

@@ -497,6 +497,8 @@ impl App {
         if let Err(e) = self.session.controller.set_param(ModuleId(module), index, value) {
             self.alerts.warn(e.to_string());
         }
+        // Every copy of a stack takes the value at once (ADR-0040).
+        self.fan_out_param(module, index, value);
         self.session.edits.touch(module, index);
         self.sync_audio_input();
         self.refresh_values();
@@ -618,6 +620,7 @@ impl App {
         };
         match self.session.controller.set_assignment_depth(id, a.depth + delta) {
             Ok(depth) => {
+                self.fan_out_assignment(id, |c, copy| c.set_assignment_depth(copy, depth).map(|_| ()));
                 self.alerts.say(format!(
                     "{}: depth {}",
                     modulation::source_name(self.session.controller.graph(), a.source),
