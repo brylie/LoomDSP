@@ -100,8 +100,36 @@ pub struct SubPatchRows {
     pub outputs: Vec<String>,
     /// One row per exposed parameter, in exposure order: the inner
     /// parameter's row, named by its surface name (sub-patches.md,
-    /// Exposing).
+    /// Exposing). A select's Member control comes first.
     pub params: Vec<ExposedRow>,
+    /// The mode (sub-patches.md, The editor for modes).
+    pub mode: loom_patch::Mode,
+    /// Layer and select: the members, in order.
+    pub members: Vec<MemberRow>,
+    /// Stack: the copy count, 1 to 16.
+    pub copies: u32,
+    /// Stack: stereo spread on.
+    pub stereo_spread: bool,
+    /// Stack: one spread row per exposed item.
+    pub spread: Vec<SpreadRow>,
+}
+
+/// A member of a layer or select, in the sub-patch inspector.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MemberRow {
+    /// The member tile's id.
+    pub id: u32,
+    /// Its name.
+    pub name: String,
+}
+
+/// The spread of one exposed item of a stack, 0 to 1.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SpreadRow {
+    /// The exposed name.
+    pub name: String,
+    /// The amount, a share of the knob; 0 is not spread.
+    pub amount: f32,
 }
 
 /// The inspector's view of a slot tile.
@@ -141,6 +169,8 @@ pub struct ExposedRow {
     pub own: ExposureRow,
     /// The parameter's row, with the inner parameter's index.
     pub row: ParamRow,
+    /// True for a select's Member control, which cannot be unexposed.
+    pub member: bool,
 }
 
 /// The Expose or Unexpose button on a parameter's row (sub-patches.md,
@@ -824,9 +854,16 @@ impl App {
                                 let exposure = self.exposure_row(id, index, &exposed.name);
                                 let row =
                                     self.param_row(target.module.0, target.index, &target.spec, exposure, false)?;
+                                let member = loom_patch::Hierarchy::is_member_entry(exposed);
+                                let label = if member {
+                                    member_label(hierarchy, ModuleId(id), row_value(graph, target.module, target.index))
+                                } else {
+                                    exposed.name.clone()
+                                };
                                 Some(ExposedRow {
+                                    member,
                                     module: target.module.0,
-                                    label: exposed.name.clone(),
+                                    label,
                                     own: ExposureRow {
                                         module: id,
                                         index,
@@ -848,6 +885,18 @@ impl App {
                     inputs: inputs.into_iter().map(|(_, name)| name).collect(),
                     outputs: outputs.into_iter().map(|(_, name)| name).collect(),
                     params,
+                    mode: hierarchy.modes_of(ModuleId(id)).map(|m| m.mode).unwrap_or_default(),
+                    members: hierarchy
+                        .members_of(ModuleId(id))
+                        .into_iter()
+                        .map(|member| MemberRow {
+                            id: member.0,
+                            name: hierarchy.tile_name(member).unwrap_or_default(),
+                        })
+                        .collect(),
+                    copies: hierarchy.modes_of(ModuleId(id)).map_or(1, |m| m.copy_count()),
+                    stereo_spread: hierarchy.modes_of(ModuleId(id)).is_some_and(|m| m.stereo_spread),
+                    spread: spread_rows(hierarchy, ModuleId(id)),
                 });
             }
             Some(loom_patch::Tile::Slot(_)) => {
@@ -1104,12 +1153,13 @@ pub fn view<'a>(
                 text("Sub-patch").size(style::BODY).color(DIM),
             ]
             .spacing(6);
-            for (label, ports) in [("Inputs", s.inputs), ("Outputs", s.outputs)] {
+            for (label, ports) in [("Inputs", &s.inputs), ("Outputs", &s.outputs)] {
                 if !ports.is_empty() {
                     rows = rows.push(text(format!("{label}: {}", ports.join(", "))).size(style::BODY));
                 }
             }
             rows = rows.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(id)));
+            rows = mode_rows(rows, &s);
             if s.params.is_empty() {
                 rows = rows.push(
                     text("Nothing exposed. Open it and press Expose on a parameter.")
@@ -1118,11 +1168,13 @@ pub fn view<'a>(
                 );
             }
             for exposed in s.params {
+                // The Member control is the select's own: no Unexpose.
+                let own = (!exposed.member).then_some(exposed.own);
                 rows = rows.push(param_row_view(
                     exposed.module,
                     exposed.label,
                     exposed.row,
-                    Some(exposed.own),
+                    own,
                     drop_row,
                     dragging,
                 ));
@@ -1831,4 +1883,153 @@ fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, AppMessage> {
         }
     }
     list.into()
+}
+
+/// The value of parameter `index` of `module`, or 0 when it is gone.
+fn row_value(graph: &loom_core::Graph, module: ModuleId, index: usize) -> f32 {
+    graph
+        .node(module)
+        .and_then(|n| n.params.get(index).copied())
+        .unwrap_or(0.0)
+}
+
+/// The Member row's label: `Member: 2 (Square)`, naming the chosen member
+/// (sub-patches.md, The editor for modes).
+fn member_label(hierarchy: &loom_patch::Hierarchy, instance: ModuleId, value: f32) -> String {
+    let members = hierarchy.members_of(instance);
+    let n = (value.round().max(1.0) as usize).min(members.len().max(1));
+    match members.get(n - 1).and_then(|m| hierarchy.tile_name(*m)) {
+        Some(name) => format!("Member: {n} ({name})"),
+        None => format!("Member: {n}"),
+    }
+}
+
+/// A stack's spread rows: one per exposed item, with its amount or 0.
+fn spread_rows(hierarchy: &loom_patch::Hierarchy, instance: ModuleId) -> Vec<SpreadRow> {
+    let (Some(definition), Some(modes)) = (hierarchy.definition_of(instance), hierarchy.modes_of(instance)) else {
+        return Vec::new();
+    };
+    if modes.mode != loom_patch::Mode::Stack {
+        return Vec::new();
+    }
+    definition
+        .exposed
+        .iter()
+        .filter(|e| !loom_patch::Hierarchy::is_member_entry(e))
+        .map(|e| SpreadRow {
+            name: e.name.clone(),
+            amount: modes.spread.get(&e.name).copied().unwrap_or(0.0),
+        })
+        .collect()
+}
+
+/// A mode as the Mode list shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ModeChoice(loom_patch::Mode);
+
+impl std::fmt::Display for ModeChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.label())
+    }
+}
+
+/// The mode rows of a sub-patch tile's inspector (sub-patches.md, The
+/// editor for modes): the Mode list; for a layer or select, its members,
+/// each with Open, Up, Down, and Remove, and Add member; for a stack,
+/// Copies, Stereo spread, and a spread slider per exposed item.
+fn mode_rows<'a>(
+    mut rows: iced::widget::Column<'a, AppMessage>,
+    s: &SubPatchRows,
+) -> iced::widget::Column<'a, AppMessage> {
+    use crate::modes::Message as ModeMessage;
+    let id = s.id;
+    let choices: Vec<ModeChoice> = loom_patch::Mode::ALL.into_iter().map(ModeChoice).collect();
+    rows = rows.push(
+        row![
+            text("Mode").size(style::BODY),
+            pick_list(choices, Some(ModeChoice(s.mode)), move |choice: ModeChoice| {
+                AppMessage::Mode(ModeMessage::SetMode {
+                    tile: id,
+                    mode: choice.0,
+                })
+            })
+            .text_size(style::CONTROL),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    );
+    if s.mode.has_members() {
+        rows = rows.push(text("Members").size(style::BODY).color(DIM));
+        let last = s.members.len().saturating_sub(1);
+        for (n, member) in s.members.iter().enumerate() {
+            let m = member.id;
+            let mut line = row![text(format!("{}. {}", n + 1, member.name)).size(style::BODY)]
+                .spacing(6)
+                .align_y(iced::Alignment::Center);
+            line = line.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(m)));
+            let up = button(text("Up").size(style::CONTROL));
+            line = line.push(if n > 0 {
+                up.on_press(AppMessage::Mode(ModeMessage::MoveMember { member: m, up: true }))
+            } else {
+                up
+            });
+            let down = button(text("Down").size(style::CONTROL));
+            line = line.push(if n < last {
+                down.on_press(AppMessage::Mode(ModeMessage::MoveMember { member: m, up: false }))
+            } else {
+                down
+            });
+            line = line.push(
+                button(text("Remove").size(style::CONTROL)).on_press(AppMessage::Mode(ModeMessage::RemoveMember(m))),
+            );
+            rows = rows.push(line);
+        }
+        rows = rows.push(
+            button(text("Add member").size(style::CONTROL)).on_press(AppMessage::Mode(ModeMessage::AddMember(id))),
+        );
+    }
+    if s.mode == loom_patch::Mode::Stack {
+        let counts: Vec<u32> = (1..=loom_patch::MOST_MEMBERS as u32).collect();
+        rows = rows.push(
+            row![
+                text("Copies").size(style::BODY),
+                pick_list(counts, Some(s.copies), move |copies| {
+                    AppMessage::Mode(ModeMessage::SetCopies { tile: id, copies })
+                })
+                .text_size(style::CONTROL),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        );
+        rows = rows.push(
+            checkbox(s.stereo_spread)
+                .label("Stereo spread")
+                .on_toggle(move |on| AppMessage::Mode(ModeMessage::SetStereoSpread { tile: id, on }))
+                .text_size(style::BODY),
+        );
+        if !s.spread.is_empty() {
+            rows = rows.push(text("Spread").size(style::BODY).color(DIM));
+        }
+        for spread in &s.spread {
+            let name = spread.name.clone();
+            rows = rows.push(
+                row![
+                    text(spread.name.clone()).size(style::BODY),
+                    slider(0.0..=1.0, spread.amount, move |amount| {
+                        AppMessage::Mode(ModeMessage::SetSpread {
+                            tile: id,
+                            name: name.clone(),
+                            amount,
+                        })
+                    })
+                    .step(0.01_f32)
+                    .on_release(AppMessage::SliderReleased),
+                    text(format!("{:.0}%", spread.amount * 100.0)).size(style::BODY),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+    }
+    rows
 }

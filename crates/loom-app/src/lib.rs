@@ -46,6 +46,7 @@ mod licence_chooser;
 mod lights;
 mod live;
 mod matrix;
+mod modes;
 mod modulation;
 mod monitor;
 mod overlays;
@@ -326,6 +327,9 @@ enum Message {
     },
     /// Make this slot tile's part a plain module again (the tile menu).
     DissolveSlot(u32),
+    /// A gesture on a sub-patch tile's mode rows in the inspector
+    /// (sub-patches.md, The editor for modes).
+    Mode(modes::Message),
     /// A message for the open module browser.
     Browser(browser::Message),
     /// A message for the open probe menu.
@@ -578,6 +582,7 @@ impl Message {
             | Self::MakeSlot { .. }
             | Self::SwapSlot { .. }
             | Self::DissolveSlot(_)
+            | Self::Mode(_)
             | Self::Browser(_)
             | Self::ProbeMenu(_)
             | Self::AddProbe { .. }
@@ -1608,6 +1613,7 @@ impl App {
                 self.overlays.close_tile_menu();
                 self.dissolve_slot(id);
             }
+            Message::Mode(message) => self.mode_message(message),
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
                 self.overlays.help = self

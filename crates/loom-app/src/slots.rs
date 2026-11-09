@@ -193,6 +193,13 @@ impl App {
             self.alerts.warn(format!("Cannot make a slot: unknown role {role_id}"));
             return;
         };
+        // A swap's fades are added for one part; copies would each need
+        // their own (sub-patches.md, How modes meet the rest).
+        let level = self.session.hierarchy.level_of(ModuleId(module));
+        if self.session.hierarchy.in_stack(&level) {
+            self.alerts.warn(loom_patch::modes::NO_SLOT_IN_STACK.to_string());
+            return;
+        }
         self.session.step_name = Some(format!("make {} slot", role.name));
         let position = self.session.positions.get(&module).copied();
         let size = self.session.sizes.get(&module).copied();

@@ -1,0 +1,291 @@
+//! The mode gestures in the app (sub-patches.md, The editor for modes;
+//! ADR-0040).
+
+use super::*;
+use crate::inspector::Inspector;
+use crate::{Loaded, Message as AppMessage, Source};
+use loom_core::{EngineConfig, ModuleNames};
+use loom_patch::flatten::COPY_STEP;
+use loom_patch::{ModulePath, modes};
+
+/// A note into a Voice sub-patch (a phase into a sine into a filter, the
+/// filter's cutoff exposed), out to the audio output.
+const VOICE: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Modes"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch"), position: Some((0.0, 0.0))),
+                PatchModule(id: 2, kind: "loom.phase.generator@1", position: Some((200.0, 0.0))),
+                PatchModule(id: 3, kind: "loom.osc.sine@1", position: Some((400.0, 0.0))),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out"), position: Some((800.0, 0.0))),
+                PatchModule(id: 5, kind: "loom.filter.svf@1", params: {"cutoff": 1000.0}, position: Some((600.0, 0.0))),
+                PatchModule(id: 6, kind: "loom.math.mul@1", position: Some((600.0, 200.0))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "pitch")),
+                PatchCable(from: (2, "phase"), to: (3, "phase")),
+                PatchCable(from: (3, "out"), to: (5, "in")),
+                PatchCable(from: (5, "lowpass"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "Cutoff", module: 5, param: "cutoff")],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.midi.note@1", position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"), position: Some((200.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1", position: Some((400.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.clock.transport@1", position: Some((0.0, 200.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// The app with `text` open, no audio.
+fn app_with(text: &str) -> App {
+    let patch = loom_patch::Patch::from_ron(text).unwrap();
+    let loaded = Loaded::read(
+        EngineConfig::default(),
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    App::assemble(
+        Err("test".to_string()),
+        48_000.0,
+        loaded,
+        1,
+        &crate::tests::app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    )
+}
+
+/// Sends a mode gesture.
+fn mode(app: &mut App, message: Message) {
+    let _ = app.update(AppMessage::Mode(message));
+}
+
+/// The flat id at `path`, if any.
+fn at(app: &App, path: &[u32]) -> Option<ModuleId> {
+    app.session.hierarchy.ids().get(&ModulePath(path.to_vec()))
+}
+
+/// The inspector rows of the Voice tile.
+fn voice_rows(app: &mut App) -> crate::inspector::SubPatchRows {
+    app.session.selection = [2].into();
+    match app.ui_snapshot().inspector {
+        Inspector::SubPatch(rows) => rows,
+        other => panic!("not a sub-patch inspector: {other:?}"),
+    }
+}
+
+/// How many flat modules of `id` (such as `loom.filter.svf`) the graph holds.
+fn count(app: &App, id: &str) -> usize {
+    app.session
+        .controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == id)
+        .count()
+}
+
+/// Mode and Copies from the inspector: Stack, then 4 copies, each one undo
+/// step; a turn of the inner cutoff reaches every copy at once; undo takes
+/// the copies away and keeps copy 0.
+#[test]
+fn stack_from_the_inspector_with_copies_that_follow_a_turn() {
+    let mut app = app_with(VOICE);
+    assert_eq!(voice_rows(&mut app).mode, Mode::Single);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Stack,
+        },
+    );
+    assert_eq!(app.ui_snapshot().undo.as_deref(), Some("make stack"));
+    assert_eq!(count(&app, "loom.filter.svf"), 1, "one copy changes nothing");
+    mode(&mut app, Message::SetCopies { tile: 2, copies: 4 });
+    assert_eq!(app.ui_snapshot().undo.as_deref(), Some("set Copies"));
+    assert_eq!(count(&app, "loom.filter.svf"), 4);
+    let rows = voice_rows(&mut app);
+    assert_eq!((rows.mode, rows.copies), (Mode::Stack, 4));
+    assert_eq!(rows.spread.len(), 1);
+    // The breadcrumb names the count.
+    app.show_level(&ModulePath::top(2));
+    assert_eq!(app.ui_snapshot().level.last().map(String::as_str), Some("Voice ×4"));
+    let svf = at(&app, &[2, 5]).unwrap();
+    let copy = at(&app, &[2, COPY_STEP + 3, 5]).unwrap();
+    let cutoff = app
+        .session
+        .controller
+        .graph()
+        .node(svf)
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    app.set_param(svf.0, cutoff, 3000.0);
+    assert_eq!(
+        app.session.controller.graph().node(copy).unwrap().params[cutoff],
+        3000.0
+    );
+    // The copies are not tiles.
+    assert!(!app.ui_snapshot().tiles.iter().any(|t| t.id == copy.0));
+    app.show_level(&ModulePath::root());
+    app.undo();
+    app.undo();
+    assert_eq!(count(&app, "loom.filter.svf"), 1);
+    assert_eq!(at(&app, &[2, 5]), Some(svf), "copy 0 keeps its id");
+}
+
+/// A cable made inside a stack reaches every copy, and its undo is one
+/// step that takes it from every copy.
+#[test]
+fn an_edit_inside_reaches_every_copy_as_one_step() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Stack,
+        },
+    );
+    mode(&mut app, Message::SetCopies { tile: 2, copies: 3 });
+    app.show_level(&ModulePath::top(2));
+    let (sine, mul) = (at(&app, &[2, 3]).unwrap(), at(&app, &[2, 6]).unwrap());
+    let cables_into_muls = |app: &App| {
+        app.session
+            .controller
+            .graph()
+            .cables()
+            .filter(|(_, to)| app.session.controller.graph().node(to.module).unwrap().descriptor.id == "loom.math.mul")
+            .count()
+    };
+    let _ = app.update(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
+        from: loom_canvas::PortRef {
+            module: sine.0,
+            index: 0,
+            output: true,
+        },
+        to: loom_canvas::PortRef {
+            module: mul.0,
+            index: 0,
+            output: false,
+        },
+    }));
+    assert_eq!(cables_into_muls(&app), 3);
+    app.undo();
+    assert_eq!(cables_into_muls(&app), 0);
+}
+
+/// Select from the inspector: the Member control is first on the surface
+/// and in the inspector, `Member: 1 (Voice)`; Add member adds "Voice 2";
+/// single with two members is refused; the last member cannot go; inside,
+/// any other module is refused.
+#[test]
+fn select_members_and_the_member_control() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Select,
+        },
+    );
+    let rows = voice_rows(&mut app);
+    assert_eq!(rows.mode, Mode::Select);
+    assert_eq!(rows.members.len(), 1);
+    assert!(rows.params[0].member, "the Member control comes first");
+    assert_eq!(rows.params[0].label, "Member: 1 (Voice)");
+    mode(&mut app, Message::AddMember(2));
+    assert_eq!(app.ui_snapshot().undo.as_deref(), Some("add member"));
+    let rows = voice_rows(&mut app);
+    let names: Vec<&str> = rows.members.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["Voice", "Voice 2"]);
+    assert_eq!(count(&app, "loom.filter.svf"), 2);
+    // Member 2 from the surface control.
+    let member = app.session.hierarchy.member_module(&ModulePath::top(2)).unwrap();
+    let target = app.control_target(2, 0, loom_canvas::ControlPart::Main).unwrap();
+    assert_eq!(target.module, member);
+    assert_eq!((target.spec.min, target.spec.max), (1.0, 2.0));
+    app.set_param(member.0, target.index, 2.0);
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 2 (Voice 2)");
+    // Refusals.
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Single,
+        },
+    );
+    assert_eq!(app.alerts.status(), modes::several_members("Voice", Mode::Single));
+    mode(&mut app, Message::RemoveMember(rows.members[1].id));
+    assert_eq!(voice_rows(&mut app).members.len(), 1);
+    mode(&mut app, Message::RemoveMember(rows.members[0].id));
+    assert_eq!(app.alerts.status(), modes::last_member(Mode::Select));
+    app.show_level(&ModulePath::top(2));
+    let refused = app.refuses_kind("loom.osc.saw");
+    assert_eq!(refused, Some(modes::only_members(Mode::Select)));
+}
+
+/// A stack's dissolve and Save to library are refused with their texts,
+/// and a slot is refused inside a stack of more than one copy.
+#[test]
+fn a_stack_refuses_dissolve_library_and_slots() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Stack,
+        },
+    );
+    mode(&mut app, Message::SetCopies { tile: 2, copies: 2 });
+    app.session.selection = [2].into();
+    app.dissolve_subpatch();
+    assert_eq!(app.alerts.status(), modes::dissolve_single_only("Voice"));
+    assert!(!app.save_to_library(ModuleId(2)));
+    assert_eq!(app.alerts.status(), modes::no_library(Mode::Stack));
+    let svf = at(&app, &[2, 5]).unwrap();
+    app.make_slot(svf.0, "loom.role.filter");
+    assert_eq!(app.alerts.status(), modes::NO_SLOT_IN_STACK);
+}
+
+/// Stereo spread and a spread slider: the toggle is one step; one slider
+/// drag is one step and reaches the file as a share of the knob.
+#[test]
+fn spread_and_stereo_spread_from_the_inspector() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Stack,
+        },
+    );
+    mode(&mut app, Message::SetCopies { tile: 2, copies: 3 });
+    mode(&mut app, Message::SetStereoSpread { tile: 2, on: true });
+    assert!(voice_rows(&mut app).stereo_spread);
+    for amount in [0.1, 0.2, 0.3] {
+        mode(
+            &mut app,
+            Message::SetSpread {
+                tile: 2,
+                name: "Cutoff".to_string(),
+                amount,
+            },
+        );
+    }
+    let _ = app.update(AppMessage::SliderReleased);
+    assert_eq!(voice_rows(&mut app).spread[0].amount, 0.3);
+    app.undo();
+    assert_eq!(voice_rows(&mut app).spread[0].amount, 0.0, "one drag, one step");
+    app.undo();
+    assert!(!voice_rows(&mut app).stereo_spread);
+}

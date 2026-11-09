@@ -36,6 +36,7 @@ use loom_core::{
 use std::collections::{BTreeMap, BTreeSet};
 
 mod modes;
+pub use modes::MEMBER_LID;
 mod slots;
 pub use slots::{
     Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, expose_role_only_text, made_slot_text,
@@ -320,6 +321,7 @@ impl Hierarchy {
             &patch.subpatches,
             registry,
         )?;
+        hierarchy.refresh_member_entries();
         hierarchy.adopt(graph);
         hierarchy.implied = graph_cables(graph)
             .difference(&hierarchy.direct_cables(patch))
@@ -1265,7 +1267,12 @@ impl Hierarchy {
                 cables: level.cables,
                 modulation: level.modulation,
                 midi: level.midi,
-                exposed: definition.exposed.clone(),
+                exposed: definition
+                    .exposed
+                    .iter()
+                    .filter(|e| !Self::is_member_entry(e))
+                    .cloned()
+                    .collect(),
                 library: definition.library.clone(),
                 roles: definition.roles.clone(),
                 ..SubPatch::new("")
@@ -1466,6 +1473,7 @@ impl Hierarchy {
     ) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
         let mut skip: BTreeSet<ModuleId> = skip.iter().copied().collect();
         skip.extend(self.transient_ids());
+        self.refresh_member_entries();
         self.adopt(controller.graph());
         // What the links imply, from the links alone: a cable the graph
         // holds for a link that is gone must be written as direct now.

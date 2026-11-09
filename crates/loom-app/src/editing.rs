@@ -468,6 +468,9 @@ impl App {
     /// Sends the graph to the engine. Returns false if that failed; the
     /// status bar then holds the error.
     pub(crate) fn commit(&mut self) -> bool {
+        // Stack copies and the modules a mode adds follow an edit made
+        // straight on the graph (ADR-0040).
+        self.sync_modes();
         self.keep_run_state();
         // Probes follow the graph: a removed module loses its probes.
         self.sync_live();
@@ -653,6 +656,13 @@ impl App {
     pub(crate) fn add_group(&mut self, group: &clipboard::Group, origin: (f32, f32), verb: &str, done: &str) {
         if let Err(why) = group.check(&self.session.controller) {
             self.alerts.warn(format!("Cannot {verb}: {why}"));
+            return;
+        }
+        // A layer or select level holds only its members.
+        if group.has_modules()
+            && let Some(why) = self.session.hierarchy.level_refusal(&self.session.level)
+        {
+            self.alerts.warn(why);
             return;
         }
         self.session.step_name = Some(format!("{verb} {}", group.describe()));

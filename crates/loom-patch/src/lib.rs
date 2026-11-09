@@ -714,7 +714,7 @@ pub(crate) fn midi_entry(mapping: &loom_core::MidiMapping, target: (u32, String)
 
 /// `base`, or `base 2`, `base 3`, and so on, the first that `taken` does
 /// not report: how names are made unique everywhere in a patch.
-pub(crate) fn unique_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
+pub fn unique_name(base: &str, taken: impl Fn(&str) -> bool) -> String {
     if !taken(base) {
         return base.to_string();
     }

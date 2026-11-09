@@ -254,6 +254,10 @@ impl App {
         }
         let selection: Vec<u32> = self.session.selection.iter().copied().collect();
         let level = self.session.level.clone();
+        if let Some(why) = self.session.hierarchy.level_refusal(&level) {
+            self.alerts.warn(why);
+            return;
+        }
         let mut candidate = self.session.hierarchy.clone();
         let made = match candidate.collapse(self.session.controller.graph(), &level, &selection) {
             Ok(made) => made,
@@ -335,6 +339,18 @@ impl App {
                 return;
             }
         };
+        // Only a single sub-patch dissolves (sub-patches.md, The editor for
+        // modes).
+        if self
+            .session
+            .hierarchy
+            .modes_of(instance)
+            .is_some_and(|m| !m.mode.is_single())
+        {
+            let name = self.session.hierarchy.tile_name(instance).unwrap_or_default();
+            self.alerts.warn(loom_patch::modes::dissolve_single_only(&name));
+            return;
+        }
         let level = self.session.level.clone();
         let inside = self.session.hierarchy.path_of(instance);
         let mut candidate = self.session.hierarchy.clone();
@@ -406,8 +422,11 @@ impl App {
 
     /// True when a module of `kind` cannot be added at the shown level, with
     /// the reason: the Transport inside a sub-patch (rule 8).
-    pub(crate) fn refuses_kind(&self, kind: &str) -> Option<&'static str> {
-        (!self.session.level.is_root() && kind == TRANSPORT_MODULE).then_some(NO_TRANSPORT_INSIDE)
+    pub(crate) fn refuses_kind(&self, kind: &str) -> Option<String> {
+        if let Some(why) = self.session.hierarchy.level_refusal(&self.session.level) {
+            return Some(why);
+        }
+        (!self.session.level.is_root() && kind == TRANSPORT_MODULE).then(|| NO_TRANSPORT_INSIDE.to_string())
     }
 
     /// Inside a sub-patch, a Patch input or output from the browser is a

@@ -13,7 +13,12 @@
 //! do: the caller syncs and commits.
 
 use super::*;
-use crate::flatten::{Added, Flat, MEMBER_STEP};
+use crate::flatten::{ADDED_STEP, Added, Flat, MEMBER_STEP};
+
+/// The level id of a select's Member module: the added step of its path,
+/// so the surface entry for the Member control finds it as a member of the
+/// level.
+pub const MEMBER_LID: u32 = ADDED_STEP + MEMBER_STEP;
 use crate::modes::{self, MEMBER_PARAM, MOST_MEMBERS, Mode};
 
 /// One assignment as the overlay compares them: source end, target end.
@@ -63,6 +68,62 @@ impl Hierarchy {
             } if at == instance && name == port => Some(*id),
             _ => None,
         })
+    }
+
+    /// Keeps the Member control first on every select's surface, spanning 1
+    /// to the member count, and off every other surface (sub-patches.md,
+    /// The editor for modes). It is an exposed item of the Member module,
+    /// named by its reserved level id ([`MEMBER_LID`]), so every surface
+    /// path works on it unchanged; the file never holds it.
+    pub fn refresh_member_entries(&mut self) {
+        for definition in self.definitions.values_mut() {
+            definition.exposed.retain(|e| e.module != MEMBER_LID);
+            if definition.modes.mode == Mode::Select {
+                let count = definition.modes.members.len().max(1) as f32;
+                definition.exposed.insert(
+                    0,
+                    Exposed {
+                        name: MEMBER_PARAM.to_string(),
+                        module: MEMBER_LID,
+                        param: MEMBER_PARAM.to_string(),
+                        range: (count > 1.0).then_some((1.0, count)),
+                    },
+                );
+            }
+        }
+    }
+
+    /// True for the Member control's surface entry, which cannot be
+    /// unexposed or renamed.
+    pub fn is_member_entry(exposed: &Exposed) -> bool {
+        exposed.module == MEMBER_LID
+    }
+
+    /// True when any sub-patch has a mode other than single, or implied
+    /// modules are left from one (an undo back to single): only then does a
+    /// commit need a sync for the copies and added modules to follow.
+    pub fn has_modes(&self) -> bool {
+        self.definitions.values().any(|d| !d.modes.mode.is_single()) || self.ids.paths().any(|(p, _)| p.is_implied())
+    }
+
+    /// The definition of the sub-patch tile `instance` as the file would
+    /// write it, with every definition nested in it, mode fields included:
+    /// what Add member copies (sub-patches.md, The editor for modes).
+    pub fn whole_definition(
+        &self,
+        graph: &Graph,
+        layout: impl Fn(u32) -> Layout,
+        instance: ModuleId,
+    ) -> Option<(SubPatch, BTreeMap<String, SubPatch>)> {
+        let key = self.instances.get(self.ids.path_of(instance)?)?.key.clone();
+        let patch = self.unflatten(graph, layout);
+        let definition = patch.subpatches.get(&key)?.clone();
+        let nested = crate::reachable_keys(&definition, &patch.subpatches)
+            .into_iter()
+            .filter(|k| *k != key)
+            .filter_map(|k| patch.subpatches.get(&k).map(|d| (k, d.clone())))
+            .collect();
+        Some((definition, nested))
     }
 
     /// The mode settings of the definition shown at `level`.
