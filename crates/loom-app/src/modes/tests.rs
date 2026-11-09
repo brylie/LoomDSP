@@ -416,3 +416,23 @@ fn the_mode_rows_draw_and_answer_clicks() {
     ui.click_text("Stereo spread");
     assert!(ui.app.session.hierarchy.modes_of(ModuleId(2)).unwrap().stereo_spread);
 }
+
+/// A member cannot be dissolved inside its layer: its modules would sit at
+/// a level that holds only members.
+#[test]
+fn a_member_cannot_be_dissolved_inside_its_layer() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Layer,
+        },
+    );
+    let member = app.session.hierarchy.members_of(ModuleId(2))[0];
+    app.show_level(&ModulePath::top(2));
+    app.session.selection = [member.0].into();
+    app.dissolve_subpatch();
+    assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
+    assert_eq!(app.session.hierarchy.members_of(ModuleId(2)), vec![member]);
+}

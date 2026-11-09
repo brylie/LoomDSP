@@ -203,6 +203,17 @@ fn stack(fields: &str) -> String {
     )
 }
 
+/// The index of the `value` parameter of the constant `id`.
+fn node_index(parts: &EngineParts, id: ModuleId) -> usize {
+    parts
+        .controller
+        .graph()
+        .node(id)
+        .unwrap()
+        .parameter_index("value")
+        .unwrap()
+}
+
 /// The flat id of copy `k`'s constant in [`stack`].
 fn copy_constant(ids: &FlatIds, k: u32) -> ModuleId {
     if k == 0 {
@@ -319,4 +330,19 @@ fn a_mapping_on_a_stack_moves_every_copy() {
     // Copy 0 alone would give (value + 0.2 + 0.2)/√3.
     let want = blend::unison_gain(3) * 3.0 * value;
     assert!((left[4_799] - want).abs() < 1e-4, "{} vs {want}", left[4_799]);
+    // The graph holds the value for every copy too, so a commit before the
+    // copies sync again compiles what plays.
+    parts.controller.sync_midi();
+    let index = node_index(&parts, copy_constant(&ids, 0));
+    for k in 0..3 {
+        let copy = parts.controller.graph().node(copy_constant(&ids, k)).unwrap();
+        assert!((copy.params[index] - value).abs() < 1e-6, "copy {k}");
+    }
+    parts.controller.commit().unwrap();
+    let (left, _) = render(&mut parts, 512, 512, &[]);
+    assert!(
+        (left[511] - want).abs() < 1e-4,
+        "{} vs {want} after a commit",
+        left[511]
+    );
 }

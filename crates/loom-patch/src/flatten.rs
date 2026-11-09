@@ -118,7 +118,9 @@ impl ModulePath {
     /// the first, or a module it adds. Such a path is implied (ADR-0040):
     /// never a tile, never saved.
     pub fn is_implied(&self) -> bool {
-        self.0.iter().any(|&step| step >= FIRST_RESERVED_STEP)
+        // The first step is a top-level module's own flat id, which may be
+        // any id; reserved steps come only after an instance.
+        self.0.iter().skip(1).any(|&step| step >= FIRST_RESERVED_STEP)
     }
 
     /// The path with every copy step left out and the copy index of each
@@ -128,7 +130,11 @@ impl ModulePath {
     pub fn without_copies(&self) -> Option<(Self, Vec<u32>)> {
         let mut ids = Vec::new();
         let mut copies = Vec::new();
-        for &step in &self.0 {
+        for (n, &step) in self.0.iter().enumerate() {
+            if n == 0 {
+                ids.push(step);
+                continue;
+            }
             if (ADDED_STEP..COPY_STEP).contains(&step) {
                 return None;
             }

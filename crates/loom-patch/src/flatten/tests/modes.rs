@@ -59,6 +59,13 @@ fn a_stack_runs_copies_summed_at_one_over_root_n() {
     assert_eq!(flat.copies[&ModuleId(id(&ids, &[7, 5]))].len(), 3);
     assert!(ModulePath(vec![7, COPY_STEP + 1, 5]).is_implied());
     assert!(!ModulePath(vec![7, 5]).is_implied());
+    // A top-level id in the reserved range is a module's own flat id.
+    assert!(!ModulePath::top(COPY_STEP + 1).is_implied());
+    assert_eq!(
+        ModulePath(vec![7, COPY_STEP + 2, 5]).without_copies(),
+        Some((ModulePath(vec![7, 5]), vec![2]))
+    );
+    assert_eq!(ModulePath(vec![7, ADDED_STEP]).without_copies(), None);
 }
 
 /// One copy with no stereo spread is the single sub-patch, module for

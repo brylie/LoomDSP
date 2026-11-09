@@ -339,6 +339,13 @@ impl App {
                 return;
             }
         };
+        // A layer or select level holds only its members: a member dissolved
+        // would leave plain modules there (sub-patches.md, The editor for
+        // modes).
+        if let Some(why) = self.session.hierarchy.level_refusal(&self.session.level) {
+            self.alerts.warn(why);
+            return;
+        }
         // Only a single sub-patch dissolves (sub-patches.md, The editor for
         // modes).
         if self

@@ -379,6 +379,7 @@ impl MidiSync {
     /// parameters that changed.
     pub(super) fn sync(&mut self, graph: &mut Graph) -> Vec<(ModuleId, usize)> {
         let mut changed = Vec::new();
+        let mut updates = Vec::new();
         for (&id, mapping) in &graph.midi_mappings {
             let entry = self.feedback.read(mapping.control);
             let unseen = entry.id == id && self.seen.get(&id) != Some(&entry.sequence);
@@ -404,15 +405,27 @@ impl MidiSync {
             // A waiting pickup set nothing in the engine, so a newer screen
             // edit in the graph must stay. Otherwise the graph takes exactly
             // what the engine set, and maps nothing itself.
-            if apply
-                && !entry.waiting
-                && let Some(value) = graph
+            if apply && !entry.waiting {
+                updates.push((mapping.target, mapping.param, self.feedback.result(mapping.control)));
+            }
+        }
+        for (target, param, result) in updates {
+            // The followers took the same value in the engine, so the graph
+            // holds it for them too, and a commit before the next sync of
+            // the copies compiles what plays (ADR-0040).
+            let followers = graph.midi_followers(target, param).to_vec();
+            if let Some(value) = graph.nodes.get_mut(&target).and_then(|node| node.params.get_mut(param)) {
+                *value = result;
+                changed.push((target, param));
+            }
+            for (follower, index) in followers {
+                if let Some(value) = graph
                     .nodes
-                    .get_mut(&mapping.target)
-                    .and_then(|node| node.params.get_mut(mapping.param))
-            {
-                *value = self.feedback.result(mapping.control);
-                changed.push((mapping.target, mapping.param));
+                    .get_mut(&follower)
+                    .and_then(|node| node.params.get_mut(index))
+                {
+                    *value = result;
+                }
             }
         }
         changed

@@ -180,7 +180,7 @@ Controller(
 
 ### Engine
 
-- The controller resolves device mappings to parameters through the slots, and compiles them with the patch mappings into the one table the engine already reads (rule 1). An entry from a device mapping also carries its input index. *Why:* the engine path, the feedback table, and the real-time rules (rules 2 and 8) stay as they are.
+- The controller resolves device mappings to parameters through the slots, and compiles them with the patch mappings into the one table the engine already reads (rule 1). An entry from a device mapping also carries its input index. *Why:* the engine path, the feedback table, and the real-time rules (rules 2 and 9) stay as they are.
 - `loom play` and plugin export do not read device files. *Why:* `loom play` runs one patch on any rig, and a plugin gets its controls from the host's automation. Patch mappings still work in both.
 
 ### Acceptance criteria: device mappings
