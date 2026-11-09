@@ -143,6 +143,9 @@ pub fn stack_holds_slot(name: &str) -> String {
     format!("Cannot stack {name}: it holds a slot")
 }
 
+/// The refusal of a mode change on a tile that is not a sub-patch.
+pub const NOT_A_SUBPATCH: &str = "Only a sub-patch has a mode";
+
 /// The refusal of Make slot inside a stack of more than one copy.
 pub const NO_SLOT_IN_STACK: &str = "Cannot make a slot inside a stack yet";
 

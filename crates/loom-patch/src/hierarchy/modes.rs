@@ -419,13 +419,15 @@ impl Hierarchy {
             return Err(refusal);
         }
         let Some(path) = self.ids.path_of(instance).cloned() else {
-            return Err(EXPOSE_INSIDE_ONLY.to_string());
+            return Err(modes::NOT_A_SUBPATCH.to_string());
+        };
+        let Some(key) = self.instances.get(&path).map(|i| i.key.clone()) else {
+            return Err(modes::NOT_A_SUBPATCH.to_string());
         };
         let from = self.modes_at(&path).map(|m| m.mode).unwrap_or_default();
         if from == mode {
             return Ok(());
         }
-        let key = self.instances[&path].key.clone();
         if from.has_members() && !mode.has_members() {
             self.lift_member(graph, &path).map_err(|e| e.to_string())?;
         }

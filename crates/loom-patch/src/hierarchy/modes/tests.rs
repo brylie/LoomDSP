@@ -338,6 +338,18 @@ fn an_item_called_member_is_renamed_for_a_select() {
     assert_eq!(written(&again, &again_controller), text);
 }
 
+/// A mode change on a tile that is not a sub-patch is refused, not a panic.
+#[test]
+fn a_mode_change_on_a_plain_module_is_refused() {
+    let (controller, mut hierarchy) = load(VOICE);
+    for tile in [ModuleId(11), ModuleId(999)] {
+        assert_eq!(
+            hierarchy.set_mode(controller.graph(), tile, Mode::Stack, &role_name),
+            Err(modes::NOT_A_SUBPATCH.to_string())
+        );
+    }
+}
+
 /// An undo snapshot leaves implied modules out, and restoring one keeps
 /// the implied ids, so copies keep their state.
 #[test]
