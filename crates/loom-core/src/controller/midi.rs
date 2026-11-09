@@ -65,6 +65,33 @@ impl Controller {
         Ok((id, removed))
     }
 
+    /// Sets, for each mapped parameter, the parameters that take every value
+    /// its mapping sets: the same parameter of each copy of a stacked
+    /// sub-patch, which cannot have mappings of their own, since a control
+    /// has one mapping (sub-patches.md, Copies in the editor; ADR-0040).
+    /// Replaces what was set before. A follower of a parameter with no
+    /// mapping does nothing. Takes effect on the next [`Controller::commit`].
+    pub fn set_midi_followers(
+        &mut self,
+        followers: impl IntoIterator<Item = ((ModuleId, usize), Vec<(ModuleId, usize)>)>,
+    ) -> Result<(), LoomError> {
+        let mut wanted = BTreeMap::new();
+        for ((module, param), list) in followers {
+            self.check_param(module, param)?;
+            for &(follower, index) in &list {
+                self.check_param(follower, index)?;
+            }
+            if !list.is_empty() {
+                wanted.insert((module, param), list);
+            }
+        }
+        if wanted != self.graph.midi_followers {
+            self.graph.midi_followers = wanted;
+            self.dirty = true;
+        }
+        Ok(())
+    }
+
     /// Maps a hardware control to a parameter by name, with the default
     /// options.
     pub fn map_midi_named(

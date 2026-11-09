@@ -36,7 +36,11 @@ use core::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 /// NaN gives the middle.
 #[inline]
 pub fn equal_power(position: f32) -> (f32, f32) {
-    let position = if position.is_nan() { 0.5 } else { position.clamp(0.0, 1.0) };
+    let position = if position.is_nan() {
+        0.5
+    } else {
+        position.clamp(0.0, 1.0)
+    };
     let (sin, cos) = (position * FRAC_PI_2).sin_cos();
     (cos, sin)
 }
@@ -56,11 +60,7 @@ pub fn pan(offset: f32) -> (f32, f32) {
 /// of one: `1/√copies`. Zero copies gives 1, so nothing divides by zero.
 #[inline]
 pub fn unison_gain(copies: u32) -> f32 {
-    if copies <= 1 {
-        1.0
-    } else {
-        1.0 / (copies as f32).sqrt()
-    }
+    if copies <= 1 { 1.0 } else { 1.0 / (copies as f32).sqrt() }
 }
 
 /// The offset of copy `index` of `copies`, evenly spaced from -1 (the first)

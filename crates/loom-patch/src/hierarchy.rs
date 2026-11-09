@@ -24,6 +24,7 @@
 use crate::LoadWarning;
 use crate::flatten::{FlatIds, ModulePath, port_name};
 use crate::library::{LeftOut, reachable_keys, rekey};
+use crate::modes::ModeSettings;
 use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
     PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, Slot, SubPatch, unique_name,
@@ -133,6 +134,8 @@ pub struct Definition {
     pub library: Option<String>,
     /// The roles it declares (FR-ENCAP-09), as role kinds.
     pub roles: Vec<String>,
+    /// Its mode and the fields that go with it (sub-patches.md, Modes).
+    pub modes: ModeSettings,
     /// For a definition a slot holds but does not play: the definition
     /// whole, since no instance carries its modules. `None` for a
     /// definition with an instance.
@@ -360,6 +363,7 @@ impl Hierarchy {
                         defaults: defaults_of(definition, registry),
                         library: definition.library.clone(),
                         roles: definition.roles.clone(),
+                        modes: ModeSettings::of(definition),
                         stored: None,
                     },
                 );
@@ -411,6 +415,7 @@ impl Hierarchy {
                             defaults: BTreeMap::new(),
                             library: definition.library.clone(),
                             roles: definition.roles.clone(),
+                            modes: ModeSettings::of(definition),
                             stored: Some(Box::new(StoredPart {
                                 definition: definition.clone(),
                                 nested,
@@ -1171,19 +1176,19 @@ impl Hierarchy {
                 continue;
             };
             let level = levels.remove(path).unwrap_or_default();
-            patch.subpatches.insert(
-                instance.key.clone(),
-                SubPatch {
-                    metadata: definition.metadata.clone(),
-                    modules: level.modules,
-                    cables: level.cables,
-                    modulation: level.modulation,
-                    midi: level.midi,
-                    exposed: definition.exposed.clone(),
-                    library: definition.library.clone(),
-                    roles: definition.roles.clone(),
-                },
-            );
+            let mut written = SubPatch {
+                metadata: definition.metadata.clone(),
+                modules: level.modules,
+                cables: level.cables,
+                modulation: level.modulation,
+                midi: level.midi,
+                exposed: definition.exposed.clone(),
+                library: definition.library.clone(),
+                roles: definition.roles.clone(),
+                ..SubPatch::new("")
+            };
+            definition.modes.write(&mut written);
+            patch.subpatches.insert(instance.key.clone(), written);
         }
         // Definitions a slot holds but does not play, with what nests in
         // them, rekeyed where a live definition took the key since.
@@ -1841,6 +1846,7 @@ impl Hierarchy {
                 defaults: BTreeMap::new(),
                 library: None,
                 roles: Vec::new(),
+                modes: ModeSettings::default(),
                 stored: None,
             },
         );

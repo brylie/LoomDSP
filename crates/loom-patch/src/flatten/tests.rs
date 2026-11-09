@@ -1,4 +1,6 @@
 use super::*;
+
+mod modes;
 use crate::{LoadWarning, PatchError};
 use loom_core::{EngineConfig, create_engine};
 

@@ -43,6 +43,8 @@ pub mod resolve;
 pub use resolve::{Layout, ResolveError, ResolveOptions, ResolvedModule};
 pub mod subpatch;
 pub use subpatch::{Exposed, INPUT_KIND, OUTPUT_KIND, SUBPATCH_KIND, SubPatch};
+pub mod modes;
+pub use modes::{MOST_MEMBERS, Mode};
 pub mod slot;
 pub use slot::{Held, PartKey, SLOT_KIND, Slot};
 pub mod flatten;
@@ -466,7 +468,15 @@ pub enum PatchError {
         /// The definitions' names along the loop, first to last.
         path: Vec<String>,
     },
-    /// A slot that cannot be used: an unknown role, a part that is not in
+    /// A sub-patch whose mode fields do not fit together, or whose mode
+    /// needs a module this build lacks (`docs/design/sub-patches.md`,
+    /// Patch file).
+    #[error("{reason}")]
+    BadMode {
+        /// What is wrong with it.
+        reason: String,
+    },
+    /// A slot whose part is missing, is cabled directly, is not in
     /// its level or does not fill the role, or a held sub-patch the table
     /// lacks (`docs/design/sub-patches.md`, Patch file).
     #[error("slot {module}: {reason}")]

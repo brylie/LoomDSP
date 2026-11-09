@@ -103,6 +103,10 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &structure::INPUT,
     &structure::OUTPUT,
     &structure::FADE,
+    &structure::modes::SUM,
+    &structure::modes::SPREAD_SUM,
+    &structure::modes::MEMBER,
+    &structure::modes::SELECT,
 ];
 
 // Every built-in port and parameter has a label and a description, or this
@@ -110,10 +114,17 @@ pub static ALL: &[&ModuleDescriptor] = &[
 const _: () = loom_core::assert_documented(ALL);
 
 /// The modules in [`ALL`] that the editor adds itself and never offers to
-/// the player: the swap fade. Registered as internal, so the browser and
+/// the player: the swap fade, and the modules the flattener adds for
+/// sub-patch modes. Registered as internal, so the browser and
 /// the help pages leave them out, while every check that runs over `ALL`
 /// still covers them.
-pub static INTERNAL: &[&ModuleDescriptor] = &[&structure::FADE];
+pub static INTERNAL: &[&ModuleDescriptor] = &[
+    &structure::FADE,
+    &structure::modes::SUM,
+    &structure::modes::SPREAD_SUM,
+    &structure::modes::MEMBER,
+    &structure::modes::SELECT,
+];
 
 /// Adds every built-in module, the internal modules, and every initial
 /// role to a registry.

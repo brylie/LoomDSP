@@ -21,6 +21,8 @@ use loom_core::{
 };
 use std::f32::consts::FRAC_PI_2;
 
+pub mod modes;
+
 /// `loom.struct.input` (MT-STRUCT-02): an input port of a sub-patch.
 pub static INPUT: ModuleDescriptor = ModuleDescriptor {
     id: "loom.struct.input",

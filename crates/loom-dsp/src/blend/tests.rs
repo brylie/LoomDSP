@@ -90,14 +90,30 @@ fn spread_offsets_are_even() {
 #[test]
 fn a_fade_runs_its_length_on_a_quarter_circle() {
     let mut fade = MemberFade::new(4, 0);
-    assert_eq!(fade.tick(0), Blend { from: 0, to: 0, gain_from: 0.0, gain_to: 1.0 });
+    assert_eq!(
+        fade.tick(0),
+        Blend {
+            from: 0,
+            to: 0,
+            gain_from: 0.0,
+            gain_to: 1.0
+        }
+    );
     let frames: Vec<Blend> = (0..5).map(|_| fade.tick(1)).collect();
     for (n, blend) in frames.iter().take(4).enumerate() {
         let (gain_from, gain_to) = equal_power(n as f32 / 4.0);
         assert_eq!((blend.from, blend.to), (0, 1));
         assert_eq!((blend.gain_from, blend.gain_to), (gain_from, gain_to));
     }
-    assert_eq!(frames[4], Blend { from: 1, to: 1, gain_from: 0.0, gain_to: 1.0 });
+    assert_eq!(
+        frames[4],
+        Blend {
+            from: 1,
+            to: 1,
+            gain_from: 0.0,
+            gain_to: 1.0
+        }
+    );
     assert!(!fade.is_fading());
     assert_eq!(fade.member(), 1);
 }
@@ -166,7 +182,15 @@ fn a_cut_switches_on_the_frame() {
     let mut fade = MemberFade::new(480, 0);
     fade.tick(1);
     assert!(fade.is_fading());
-    assert_eq!(fade.cut(2), Blend { from: 2, to: 2, gain_from: 0.0, gain_to: 1.0 });
+    assert_eq!(
+        fade.cut(2),
+        Blend {
+            from: 2,
+            to: 2,
+            gain_from: 0.0,
+            gain_to: 1.0
+        }
+    );
     assert!(!fade.is_fading());
     assert_eq!(fade.tick(2).gain_to, 1.0);
 }

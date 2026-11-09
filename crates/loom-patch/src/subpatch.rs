@@ -14,9 +14,21 @@
 //! instance into ordinary modules before a patch is applied.
 
 use crate::level::LevelRef;
+use crate::modes::Mode;
 use crate::{Metadata, PatchCable, PatchMidiMapping, PatchModulation, PatchModule, canonicalise_lists};
 use loom_core::Registry;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+/// True for a copy count the file omits.
+fn at_most_one(copies: &u32) -> bool {
+    *copies <= 1
+}
+
+/// True for a flag the file omits.
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
 
 /// The kind of a sub-patch instance (MT-STRUCT-01). Not a registered
 /// module: the flattener expands it.
@@ -35,6 +47,27 @@ pub struct SubPatch {
     /// (`docs/design/patch-metadata.md`, credit for parts).
     #[serde(default)]
     pub metadata: Metadata,
+    /// How it runs its inside (sub-patches.md, Modes). Omitted when single.
+    #[serde(default, skip_serializing_if = "Mode::is_single")]
+    pub mode: Mode,
+    /// In layer and select mode: its members' module ids, in order. Each
+    /// is an instance among `modules`, and nothing else is. Omitted when
+    /// empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<u32>,
+    /// In stack mode: how many copies run, 1 to 16. 0 and 1 both mean one
+    /// copy; omitted when 1 or less. Read it with
+    /// [`SubPatch::copy_count`].
+    #[serde(default, skip_serializing_if = "at_most_one")]
+    pub copies: u32,
+    /// In stack mode: exposed name to spread amount, 0 to 1, a share of the
+    /// knob (TR-04). Omitted when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub spread: BTreeMap<String, f32>,
+    /// In stack mode: each output stereo, copy `k` panned by its offset.
+    /// Omitted when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stereo_spread: bool,
     /// Modules. A `loom.struct.input@1` or `loom.struct.output@1` here is a
     /// port of the sub-patch.
     #[serde(default)]
@@ -92,6 +125,11 @@ impl SubPatch {
                 name: name.into(),
                 ..Metadata::default()
             },
+            mode: Mode::Single,
+            members: Vec::new(),
+            copies: 0,
+            spread: BTreeMap::new(),
+            stereo_spread: false,
             modules: Vec::new(),
             cables: Vec::new(),
             modulation: Vec::new(),
@@ -127,6 +165,21 @@ impl SubPatch {
 }
 
 impl PatchModule {
+    /// A module of `kind` with id `id` and nothing else set.
+    pub fn new(id: u32, kind: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind: kind.into(),
+            subpatch: None,
+            slot: None,
+            label: None,
+            params: BTreeMap::new(),
+            position: None,
+            size: None,
+            ranges: BTreeMap::new(),
+        }
+    }
+
     /// True for a sub-patch instance.
     pub fn is_instance(&self) -> bool {
         self.kind == SUBPATCH_KIND
