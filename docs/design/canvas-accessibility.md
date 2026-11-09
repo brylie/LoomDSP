@@ -159,7 +159,7 @@ The outline is one focus stop. While it has focus, it takes these keys before th
 ### Rules
 
 15. **The app handles every key in the outline itself,** and keeps the expanded rows. It does not rely on the screen reader or the platform to expand rows or move between them. *Why:* `accesskit_macos` 0.27.2 has no expand or collapse action and does not report a row's level, and the Linux adapter was not found to either (research, section 4). Keys we handle work the same on every platform, and for keyboard users with no screen reader. The outline's nodes are built flat, as ui-layer.md, section 7, rule 12 says: the visible rows are direct children of the Tree node, in display order, each with its level, position in set, size of set, and expanded state. A collapsed row's children are not in the tree.
-16. **Expanded rows and the focused row survive a rebuild,** keyed by UI ID. If the focused module is deleted, focus goes to the next row, or the previous one at the end. *Why:* ui-layer.md, section 4, rule 2, and a user must not be thrown to the top of the outline because a cable changed elsewhere.
+16. **Expanded rows and the focused row survive a rebuild,** keyed by UI ID. If the focused module is deleted, focus goes to the next row, or the previous one at the end. *Why:* ui-layer.md, section 4, rule 3, and a user must not be thrown to the top of the outline because a cable changed elsewhere.
 17. **Delete and Backspace do nothing in the outline.** *Why:* the outline is for reading. A user who is listening must not remove a module by a key that, on the canvas, deletes the selection.
 18. **Space selects but Enter moves focus.** *Why:* the user can look at a module on the canvas without losing their place in the outline. Neither changes the patch.
 
