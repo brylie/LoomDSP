@@ -178,7 +178,7 @@ pub enum CanvasEvent {
         at: Point,
         /// The canvas area, in window coordinates, so the browser can stay
         /// inside it.
-        area: Rectangle,
+        area: Rect,
     },
     /// An output or a cable was right-clicked without moving: open the menu
     /// with Add scope and Add meter (`docs/design/panels.md`, Add scope and
@@ -193,7 +193,7 @@ pub enum CanvasEvent {
         at: Point,
         /// The canvas area, in window coordinates, so the menu can stay
         /// inside it.
-        area: Rectangle,
+        area: Rect,
     },
     /// A tile's header was double-clicked: open what the tile holds. The
     /// app opens a sub-patch tile and ignores it on a plain module. No
@@ -211,7 +211,7 @@ pub enum CanvasEvent {
         /// Menu position in window coordinates.
         at: Point,
         /// Canvas area for positioning the menu.
-        area: Rectangle,
+        area: Rect,
     },
     /// Ctrl+V or Cmd+V: paste the clipboard (`docs/design/clipboard.md`).
     /// `world` is the pointer when it is over the canvas, and the centre of

@@ -10,7 +10,7 @@
 
 use crate::controls::{fader_drawn, knob_centre, knob_drawn, light_centre, number_box, radio_centre, select_box};
 use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, WidgetViewKind, fit_label, text_width};
-use iced::{Point, Rectangle, Size};
+use loom_ui_core::{Point, Rect, Size};
 use std::borrow::Cow;
 
 /// Title size in world units.
@@ -67,7 +67,7 @@ pub struct TextItem<'a> {
 
 impl TextItem<'_> {
     /// The estimated box of the text, in world units.
-    pub fn bounds(&self) -> Rectangle {
+    pub fn bounds(&self) -> Rect {
         let width = text_width(&self.content, self.size).min(self.width);
         let x = match self.align {
             Align::Left => self.anchor.x,
@@ -75,16 +75,16 @@ impl TextItem<'_> {
             Align::Right => self.anchor.x - width,
         };
         let height = self.size * 1.2;
-        Rectangle::new(Point::new(x, self.anchor.y - height * 0.5), Size::new(width, height))
+        Rect::new(Point::new(x, self.anchor.y - height * 0.5), Size::new(width, height))
     }
 
     /// The faint bar that stands in for the text when it is too small to
     /// draw: as wide as the text, and half as tall as its font size, about
     /// the height of its lower-case letters.
-    pub fn bar(&self) -> Rectangle {
+    pub fn bar(&self) -> Rect {
         let text = self.bounds();
         let height = self.size * 0.5;
-        Rectangle::new(
+        Rect::new(
             Point::new(text.x, self.anchor.y - height * 0.5),
             Size::new(text.width, height),
         )
@@ -306,7 +306,7 @@ const VALUE_STAND_IN: &str = "00000";
 
 /// Where a widget's live text goes, if it has any: the anchor, the alignment,
 /// and the room.
-fn value_text_place(kind: &WidgetViewKind, rect: Rectangle) -> Option<(Point, Align, f32)> {
+fn value_text_place(kind: &WidgetViewKind, rect: Rect) -> Option<(Point, Align, f32)> {
     match kind {
         // The text starts 7 units in, and the arrow takes the last 11.
         WidgetViewKind::Select { .. } => {
@@ -333,7 +333,7 @@ struct PanelBox {
     /// The widget it belongs to, by index.
     owner: usize,
     /// Its box in world units.
-    bounds: Rectangle,
+    bounds: Rect,
     /// True for text: a caption or a radio option, at the width it has
     /// before any label grows. Other text shares the gap between them;
     /// drawn parts keep [`GAP`] clear.
@@ -356,13 +356,13 @@ fn panel_boxes(module: &ModuleView) -> Vec<PanelBox> {
             // The buttons, in a column below the caption row.
             WidgetViewKind::Radio { .. } => {
                 let right = radio_centre(rect, 0).x + 5.0;
-                Rectangle::new(
+                Rect::new(
                     Point::new(rect.x, rect.y + GRID),
                     Size::new(right - rect.x, rect.height - GRID),
                 )
             }
             // The segments, in the row below the caption.
-            WidgetViewKind::Segmented { .. } => Rectangle::new(
+            WidgetViewKind::Segmented { .. } => Rect::new(
                 Point::new(rect.x, rect.y + GRID),
                 Size::new(rect.width, rect.height - GRID),
             ),
@@ -398,7 +398,7 @@ fn panel_boxes(module: &ModuleView) -> Vec<PanelBox> {
 const GAP: f32 = 3.0;
 
 /// Where a widget's caption sits, as the vertical centre of its text.
-fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
+fn caption_y(kind: &WidgetViewKind, rect: Rect) -> f32 {
     match kind {
         WidgetViewKind::Knob { .. } => knob_centre(rect).y + 1.5 * GRID,
         WidgetViewKind::Fader { vertical: true, .. } | WidgetViewKind::Range { vertical: true, .. } => {
@@ -427,15 +427,15 @@ fn caption_y(kind: &WidgetViewKind, rect: Rectangle) -> f32 {
 
 /// The box of one line of label text from `x`, `width` wide, centred on
 /// `y`. As tall as [`TextItem::bounds`] makes it.
-fn line_box(x: f32, width: f32, y: f32) -> Rectangle {
+fn line_box(x: f32, width: f32, y: f32) -> Rect {
     let height = LABEL_SIZE * 1.2;
-    Rectangle::new(Point::new(x, y - height * 0.5), Size::new(width, height))
+    Rect::new(Point::new(x, y - height * 0.5), Size::new(width, height))
 }
 
 /// True when `b` reaches more than [`TOUCH`] into the line of text
 /// `line`. The line's box is 1.2 times the font size, taller than its
 /// letters, so a shape that only touches its edge does not meet the text.
-fn overlaps_line(b: Rectangle, line: Rectangle) -> bool {
+fn overlaps_line(b: Rect, line: Rect) -> bool {
     b.y < line.y + line.height - TOUCH && b.y + b.height > line.y + TOUCH
 }
 

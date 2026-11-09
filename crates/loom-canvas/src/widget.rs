@@ -9,6 +9,7 @@ use crate::controls::{
 use crate::draft::{DraftSubmit, TypedDraft};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
+use crate::iced_convert::{ToCore as _, ToIced as _};
 use crate::scene::{
     BADGE_TEXT_SIZE, GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH,
     WidgetView, WidgetViewKind,
@@ -21,8 +22,9 @@ use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph as _, Text};
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
-use iced::{Color, Element, Event, Font, Length, Pixels, Point, Rectangle, Size, Vector};
+use iced::{Element, Event, Font, Length, Pixels};
 use iced::{alignment, keyboard, mouse, window};
+use loom_ui_core::{Color, Point, Rect, Size, Vector};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -166,7 +168,7 @@ pub enum StillDrag {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasView {
     /// The canvas bounds in the window.
-    pub bounds: Rectangle,
+    pub bounds: Rect,
     /// The current camera.
     pub camera: Camera,
 }
@@ -414,7 +416,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         from: PortRef,
         at: Option<Point>,
         camera: Camera,
-        bounds: Rectangle,
+        bounds: Rect,
         shell: &mut Shell<'_, Message>,
     ) {
         if let Some(world) = self.scene.port_position(from) {
@@ -437,7 +439,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         &self,
         state: &mut State,
         event: &Event,
-        bounds: Rectangle,
+        bounds: Rect,
         cursor: mouse::Cursor,
         shell: &mut Shell<'_, Message>,
     ) {
@@ -668,6 +670,15 @@ enum Interaction {
     },
 }
 
+/// The cursor that says which way a value drag goes.
+fn drag_cursor(drag: &ValueDrag) -> mouse::Interaction {
+    if drag.is_horizontal() {
+        mouse::Interaction::ResizingHorizontally
+    } else {
+        mouse::Interaction::ResizingVertically
+    }
+}
+
 impl Interaction {
     /// The cursor during this gesture, or `None` with no gesture. A value drag
     /// shows its own direction, so a horizontal fader keeps the cursor it had
@@ -676,7 +687,7 @@ impl Interaction {
         Some(match self {
             Self::Panning { .. } | Self::Moving { .. } => mouse::Interaction::Grabbing,
             Self::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
-            Self::Turning { drag, .. } | Self::Depth { drag, .. } | Self::Range { drag, .. } => drag.cursor(),
+            Self::Turning { drag, .. } | Self::Depth { drag, .. } | Self::Range { drag, .. } => drag_cursor(drag),
             Self::Holding { .. } => mouse::Interaction::Pointer,
             Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
             Self::Idle => return None,
@@ -787,7 +798,7 @@ fn double_click(last: Option<(Instant, Point)>, screen: Point) -> bool {
     last.is_some_and(|(at, point)| at.elapsed() < DOUBLE_CLICK && point.distance(screen) < DOUBLE_CLICK_SLOP)
 }
 
-fn relative(cursor: mouse::Cursor, bounds: Rectangle) -> Option<Point> {
+fn relative(cursor: mouse::Cursor, bounds: Rect) -> Option<Point> {
     cursor.position().map(|p| Point::new(p.x - bounds.x, p.y - bounds.y))
 }
 
@@ -807,8 +818,8 @@ where
         tree::State::new(state)
     }
 
-    fn size(&self) -> Size<Length> {
-        Size::new(Length::Fill, Length::Fill)
+    fn size(&self) -> iced::Size<Length> {
+        iced::Size::new(Length::Fill, Length::Fill)
     }
 
     fn layout(&mut self, _tree: &mut Tree, _renderer: &Renderer, limits: &layout::Limits) -> layout::Node {
@@ -824,10 +835,10 @@ where
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        _viewport: &iced::Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State>();
-        self.on_event(state, event, layout.bounds(), cursor, shell);
+        self.on_event(state, event, layout.bounds().to_core(), cursor, shell);
     }
 
     fn operate(
@@ -839,7 +850,7 @@ where
     ) {
         let state = tree.state.downcast_ref::<State>();
         let mut view = CanvasView {
-            bounds: layout.bounds(),
+            bounds: layout.bounds().to_core(),
             camera: state.camera,
         };
         operation.custom(None, layout.bounds(), &mut view);
@@ -866,7 +877,7 @@ where
         tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _viewport: &Rectangle,
+        _viewport: &iced::Rectangle,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
@@ -885,10 +896,10 @@ where
         _style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
+        _viewport: &iced::Rectangle,
     ) {
         let state = tree.state.downcast_ref::<State>();
-        let bounds = layout.bounds();
+        let bounds = layout.bounds().to_core();
 
         let geometry = {
             let mut cache = state.geometry.borrow_mut();
@@ -949,13 +960,13 @@ where
 
         renderer.fill_quad(
             renderer::Quad {
-                bounds,
+                bounds: bounds.to_iced(),
                 ..renderer::Quad::default()
             },
-            self.palette.background,
+            self.palette.background.to_iced(),
         );
         renderer.draw_primitive(
-            bounds,
+            bounds.to_iced(),
             CanvasPrimitive {
                 geometry,
                 controls,

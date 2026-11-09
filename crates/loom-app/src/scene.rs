@@ -1,7 +1,6 @@
 //! Builds the canvas scene from the engine graph.
 
 use crate::clip::ClipHolds;
-use iced::{Color, Point};
 use loom_canvas::{
     CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue, PortShape, PortView,
     Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
@@ -12,6 +11,7 @@ use loom_core::{
     SignalType, WidgetKind,
 };
 use loom_patch::{Direction, End, Hierarchy, ModulePath, Tile};
+use loom_ui_core::{Color, Point};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Segments across a result preview. About one world unit per segment on a
@@ -24,7 +24,7 @@ pub type ShownValues = BTreeMap<(u32, usize), (f32, f32, Option<(f32, f32)>)>;
 /// Port and cable colour for a signal type (ADR-0007).
 pub fn signal_colour(signal: SignalType) -> Color {
     let [r, g, b] = signal.colour();
-    Color::from_rgb8(r, g, b)
+    Color::rgb8(r, g, b)
 }
 
 /// Marker shape for a signal type. Pitch and gate are square, so they differ

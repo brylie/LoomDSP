@@ -807,7 +807,7 @@ fn unknown_positions_round_trip_until_moved() {
     );
     ui.app.canvas_event(loom_canvas::CanvasEvent::Move {
         ids: vec![1],
-        delta: iced::Vector::new(12.0, 0.0),
+        delta: loom_ui_core::Vector::new(12.0, 0.0),
     });
     assert!(
         ui.app
@@ -1345,7 +1345,7 @@ fn a_select_only_parameter_is_a_modulation_target() {
 }
 
 /// The square of the XY pad on a new `test.panel`, in world units.
-fn pad_area(ui: &mut Ui, id: ModuleId) -> Rectangle {
+fn pad_area(ui: &mut Ui, id: ModuleId) -> Rect {
     loom_canvas::xy_area(ui.control_bounds(id.0, "pad_x"))
 }
 
@@ -2336,7 +2336,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     // Over the canvas, with the module selected, Backspace would delete it
     // and `a` would open the browser. The field has the keys all the same.
     let tile = ui.control(id.0, "level");
-    ui.cursor = mouse::Cursor::Available(tile);
+    ui.cursor = mouse::Cursor::Available(tile.to_iced());
     ui.tap(keyboard::Key::Named(Named::Backspace), none);
     assert!(
         ui.app.session.controller.graph().node(id).is_some(),

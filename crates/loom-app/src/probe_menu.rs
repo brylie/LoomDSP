@@ -4,9 +4,11 @@
 
 use crate::style::{self, button};
 use iced::widget::{column, container, text};
-use iced::{Element, Length, Point, Rectangle, Size, Theme};
+use iced::{Element, Length, Theme};
+use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{GRID, PortRef, tile_size};
 use loom_core::ModuleDescriptor;
+use loom_ui_core::{Point, Rect, Size};
 
 /// Width of the menu.
 const WIDTH: f32 = 140.0;
@@ -70,7 +72,7 @@ pub struct ProbeMenu {
 
 impl ProbeMenu {
     /// Opens the menu at a window point, moved so it stays inside `area`.
-    pub fn open(output: PortRef, world: Point, at: Point, area: Rectangle) -> Self {
+    pub fn open(output: PortRef, world: Point, at: Point, area: Rect) -> Self {
         let x = at.x.min(area.x + area.width - WIDTH).max(area.x);
         let y = at.y.min(area.y + area.height - HEIGHT).max(area.y);
         Self {
@@ -93,7 +95,9 @@ impl ProbeMenu {
             .padding(PADDING)
             .width(WIDTH);
         let menu = container(menu).style(menu_style);
-        iced::widget::pin(iced::widget::opaque(menu)).position(self.at).into()
+        iced::widget::pin(iced::widget::opaque(menu))
+            .position(self.at.to_iced())
+            .into()
     }
 }
 
@@ -101,7 +105,7 @@ impl ProbeMenu {
 /// `anchor`, with its first input as close to the anchor's height as the
 /// grid allows, moved down in steps of 2 grid units until it overlaps none
 /// of `tiles`.
-pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rectangle]) -> Point {
+pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rect]) -> Point {
     let (width, height) = crate::scene::default_panel_size(descriptor);
     let size: Size = tile_size(descriptor.inputs.len(), descriptor.outputs.len(), width, height);
     // The first input's centre, measured from the tile's top, as
@@ -113,7 +117,7 @@ pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rectangle]) 
     // stepping would reach. Each jump passes one tile, so this ends after at
     // most one jump per tile. Far from the origin, f32 can no longer add a
     // step, so stop if a jump does not move.
-    while let Some(tile) = tiles.iter().find(|tile| tile.intersects(&Rectangle::new(corner, size))) {
+    while let Some(tile) = tiles.iter().find(|tile| tile.intersects(&Rect::new(corner, size))) {
         let steps = ((tile.y + tile.height - start.y) / STEP).ceil();
         let next = start.y + steps * STEP;
         if next <= corner.y {

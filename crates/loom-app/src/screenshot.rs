@@ -12,12 +12,14 @@ use iced::advanced::renderer::{Headless, Style};
 use iced::advanced::widget::operation::Operation;
 use iced::advanced::widget::{Id, Tree};
 use iced::advanced::{Layout, layout, mouse};
-use iced::{Color, Element, Font, Pixels, Point, Rectangle, Size, Theme};
+use iced::{Color, Element, Font, Pixels, Rectangle, Size, Theme};
 use iced_runtime::user_interface::{Cache, UserInterface};
+use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
 use loom_canvas::{
     Camera, CanvasView, MAX_ZOOM, MIN_ZOOM, Palette, PanelValues, PatchCanvas, PortRef, Scene, Still, StillDrag,
 };
 use loom_core::{AssignmentId, Controller, ModuleId, OutputRef};
+use loom_ui_core::Point;
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -246,7 +248,7 @@ fn shown(
     level: &loom_patch::ModulePath,
     positions: &BTreeMap<u32, (f32, f32)>,
     sizes: &BTreeMap<u32, (u8, u8)>,
-    size: Size,
+    size: loom_ui_core::Size,
 ) -> Result<(Scene, Shown), String> {
     // A wire from a connected input picks up its cable, as in the app: the
     // cable leaves the patch and its loose end hangs from the source.
@@ -324,7 +326,7 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         &loom_patch::ModulePath::root(),
         &loaded.positions,
         &loaded.sizes,
-        logical,
+        logical.to_core(),
     )?;
     let mut values = PanelValues::new();
     crate::scene::update_panel_values_dragging(
@@ -450,7 +452,7 @@ fn physical_size(logical: Size, scale: f32) -> Result<Size<u32>, String> {
 
 /// The camera for an image of `size`: the whole scene framed, as when a
 /// patch opens, then the given zoom and centre in place of the framing's.
-fn camera(scene: &Scene, size: Size, zoom: Option<f32>, centre: Option<Point>) -> Camera {
+fn camera(scene: &Scene, size: loom_ui_core::Size, zoom: Option<f32>, centre: Option<Point>) -> Camera {
     let mut framed = Camera::default();
     if let Some(world) = scene.bounds() {
         framed.frame(world, size);
@@ -652,7 +654,12 @@ pub fn render(
         mouse::Cursor::Unavailable,
         &Rectangle::with_size(logical),
     );
-    Ok(Headless::screenshot(&mut renderer, size, scale, palette.background))
+    Ok(Headless::screenshot(
+        &mut renderer,
+        size,
+        scale,
+        palette.background.to_iced(),
+    ))
 }
 
 pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(), String> {

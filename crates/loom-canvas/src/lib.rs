@@ -6,6 +6,9 @@
 //! Text goes through Iced's text system. Zoomed out, where it is too small
 //! to read, faint bars from the instanced buffer stand in for it.
 //!
+//! Positions, sizes, and colours are `loom-ui-core` values. They become Iced
+//! values only where they cross into an Iced call, through [`iced_convert`].
+//!
 //! The application owns the data. It builds a [`Scene`], passes it to
 //! [`PatchCanvas`], and applies the [`CanvasEvent`]s the canvas reports.
 
@@ -15,6 +18,7 @@ mod draft;
 mod drag_line;
 mod gpu;
 mod hover;
+pub mod iced_convert;
 mod scene;
 pub mod stats;
 mod theme;

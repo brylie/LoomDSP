@@ -43,11 +43,13 @@ use iced::advanced::renderer::{Headless, Style};
 use iced::advanced::widget::Id;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
-use iced::{Event, Point, Rectangle, Size, Task, keyboard, mouse, window};
+use iced::{Event, Rectangle, Size, Task, keyboard, mouse, window};
 use iced_runtime::Action;
 use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
 use loom_canvas::CanvasView;
+use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
+use loom_ui_core::{Point, Rect};
 // The harness tests reach these through `use super::*`.
 #[cfg(test)]
 use loom_core::ModuleId;
@@ -394,13 +396,14 @@ impl Ui {
         }
         let mut find = Find(id, None);
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.1.expect("a field with that ID is on screen").center()
+        find.1.expect("a field with that ID is on screen").center().to_core()
     }
 
     /// Moves the pointer to a window point.
     pub(crate) fn move_to(&mut self, p: Point) -> Vec<Message> {
-        self.cursor = mouse::Cursor::Available(p);
-        self.step(&[Event::Mouse(mouse::Event::CursorMoved { position: p })])
+        let position = p.to_iced();
+        self.cursor = mouse::Cursor::Available(position);
+        self.step(&[Event::Mouse(mouse::Event::CursorMoved { position })])
     }
 
     /// Presses the left button where the pointer is.
@@ -511,7 +514,7 @@ impl Ui {
 
     /// The cell of the panel control bound to a parameter, in world
     /// coordinates.
-    pub(crate) fn control_bounds(&mut self, module: u32, param: &str) -> Rectangle {
+    pub(crate) fn control_bounds(&mut self, module: u32, param: &str) -> Rect {
         let target = screenshot::Named {
             module,
             name: param.to_string(),
@@ -567,7 +570,7 @@ impl Ui {
 
     /// The bounds of the first text widget that reads exactly `content`,
     /// for example an inspector row label. `None` if no widget shows it.
-    pub(crate) fn text(&mut self, content: &str) -> Option<Rectangle> {
+    pub(crate) fn text(&mut self, content: &str) -> Option<Rect> {
         struct Find<'a>(&'a str, Option<Rectangle>);
         impl Operation for Find<'_> {
             fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
@@ -586,7 +589,7 @@ impl Ui {
         }
         let mut find = Find(content, None);
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.1
+        find.1.map(|bounds| bounds.to_core())
     }
 }
 

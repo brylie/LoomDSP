@@ -4,6 +4,7 @@
 /// more (WCAG 1.4.3).
 #[test]
 fn quiet_text_meets_contrast() {
+    use loom_canvas::iced_convert::ToCore as _;
     use loom_canvas::{MIN_TEXT_CONTRAST, contrast_ratio};
     let app = crate::tests::app();
     let theme = app.theme();
@@ -34,7 +35,7 @@ fn quiet_text_meets_contrast() {
             palette.background.weak.color,
         ),
     ] {
-        let ratio = contrast_ratio(text, fill);
+        let ratio = contrast_ratio(text.to_core(), fill.to_core());
         assert!(ratio >= MIN_TEXT_CONTRAST, "{name}: {ratio:.2}:1");
     }
 }

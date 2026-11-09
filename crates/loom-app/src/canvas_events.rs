@@ -4,9 +4,9 @@
 use crate::edits::ArrowEvent;
 use crate::overlays::{ContextMenu, Overlay};
 use crate::{App, browser, gestures, probe_menu, scene, undo};
-use iced::Point;
 use loom_canvas::{CanvasEvent, ControlPart};
 use loom_core::{InputRef, ModuleId, OutputRef};
+use loom_ui_core::Point;
 
 impl App {
     pub(crate) fn canvas_event(&mut self, event: CanvasEvent) {

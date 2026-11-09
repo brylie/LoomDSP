@@ -26,7 +26,7 @@ fn simulate(colour: Color, matrix: Option<[[f32; 3]; 3]>) -> Color {
     let Some(m) = matrix else { return colour };
     let rgb = [linear(colour.r), linear(colour.g), linear(colour.b)];
     let row = |r: [f32; 3]| encode(r[0] * rgb[0] + r[1] * rgb[1] + r[2] * rgb[2]);
-    Color::from_rgb(row(m[0]), row(m[1]), row(m[2]))
+    Color::rgb(row(m[0]), row(m[1]), row(m[2]))
 }
 
 /// CIE L*a*b* of an sRGB colour, D65 white.
@@ -129,7 +129,7 @@ fn contrast_ratio_matches_reference_values() {
     assert!((contrast_ratio(Color::BLACK, Color::WHITE) - 21.0).abs() < 1e-3);
     assert!((contrast_ratio(Color::WHITE, Color::BLACK) - 21.0).abs() < 1e-3);
     assert!((contrast_ratio(Color::WHITE, Color::WHITE) - 1.0).abs() < 1e-6);
-    let grey = Color::from_rgb8(0x76, 0x76, 0x76);
+    let grey = Color::rgb8(0x76, 0x76, 0x76);
     assert!((contrast_ratio(grey, Color::WHITE) - 4.54).abs() < 0.01);
 }
 

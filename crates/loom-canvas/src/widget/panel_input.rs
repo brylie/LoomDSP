@@ -71,7 +71,7 @@ impl<Message> PatchCanvas<'_, Message> {
             .filter(|tile| {
                 let bounds = tile.bounds();
                 tile.is_growable()
-                    && Rectangle::new(
+                    && Rect::new(
                         Point::new(bounds.x + bounds.width - GRID, bounds.y + bounds.height - GRID),
                         Size::new(GRID, GRID),
                     )

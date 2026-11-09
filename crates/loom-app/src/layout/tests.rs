@@ -18,7 +18,7 @@ fn places_every_module_without_overlap() {
 }
 
 /// Whether the tile at `a` with size `sa` overlaps the one at `b`.
-fn overlaps(a: (f32, f32), sa: iced::Size, b: (f32, f32), sb: iced::Size) -> bool {
+fn overlaps(a: (f32, f32), sa: loom_ui_core::Size, b: (f32, f32), sb: loom_ui_core::Size) -> bool {
     a.0 < b.0 + sb.width && b.0 < a.0 + sa.width && a.1 < b.1 + sb.height && b.1 < a.1 + sa.height
 }
 

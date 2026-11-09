@@ -118,24 +118,23 @@ impl<Message> PatchCanvas<'_, Message> {
             .and_then(|(hit, world)| self.depth_drag_at(&hit, world));
         if let Some((module, widget, part)) = on_range {
             if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::XyPad { .. })) {
-                return ValueDrag::xy_axis(
+                return drag_cursor(&ValueDrag::xy_axis(
                     self.scene
                         .module(module)
                         .and_then(|m| m.widget_bounds(widget))
-                        .map_or(Rectangle::default(), xy_area),
+                        .map_or(Rect::default(), xy_area),
                     part,
                     state.camera.zoom,
-                )
-                .cursor();
+                ));
             }
-            return self.value_drag(module, widget, state.camera.zoom).cursor();
+            return drag_cursor(&self.value_drag(module, widget, state.camera.zoom));
         }
         match state.hover {
             Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
                 Some(WidgetViewKind::XyPad { .. }) => mouse::Interaction::Crosshair,
-                Some(WidgetViewKind::Range { .. }) => self.value_drag(module, widget, state.camera.zoom).cursor(),
-                Some(kind) if kind.is_one_number() => self.value_drag(module, widget, state.camera.zoom).cursor(),
+                Some(WidgetViewKind::Range { .. }) => drag_cursor(&self.value_drag(module, widget, state.camera.zoom)),
+                Some(kind) if kind.is_one_number() => drag_cursor(&self.value_drag(module, widget, state.camera.zoom)),
                 _ => mouse::Interaction::Pointer,
             },
             Some(Hit::Module(_)) => mouse::Interaction::Grab,
@@ -177,12 +176,12 @@ impl<Message> PatchCanvas<'_, Message> {
     /// lights and meters have a value line: their current value, which the
     /// app writes as the widget's text (port-and-parameter-text.md, Display
     /// values). A control's value shows on the control itself.
-    pub(super) fn hover_content(&self, target: HoverTarget) -> Option<(&str, &HoverText, Option<&str>, Rectangle)> {
+    pub(super) fn hover_content(&self, target: HoverTarget) -> Option<(&str, &HoverText, Option<&str>, Rect)> {
         match target {
             HoverTarget::Port(port) => {
                 let view = self.scene.port(port)?;
                 let at = self.scene.port_position(port)?;
-                let marker = Rectangle::new(
+                let marker = Rect::new(
                     Point::new(at.x - PORT_RADIUS, at.y - PORT_RADIUS),
                     Size::new(2.0 * PORT_RADIUS, 2.0 * PORT_RADIUS),
                 );
@@ -222,7 +221,7 @@ impl<Message> PatchCanvas<'_, Message> {
             HoverTarget::Title(id) => {
                 let module = self.scene.module(id)?;
                 let tile = module.bounds();
-                let header = Rectangle::new(tile.position(), Size::new(tile.width, HEADER));
+                let header = Rect::new(tile.position(), Size::new(tile.width, HEADER));
                 Some((&module.title, &module.hover, None, header))
             }
         }
@@ -232,7 +231,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// description, and the name when it differs, at a fixed screen size in
     /// a layer above the tiles. Drawn at any zoom, because hover text is
     /// what the user needs where tile text is too small to read.
-    pub(super) fn draw_hover_text<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle)
+    pub(super) fn draw_hover_text<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rect)
     where
         Renderer: text::Renderer<Font = Font>,
     {
@@ -258,7 +257,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let line = |content: &str, size: f32, colour: Color, font: Font| {
             let text = Text {
                 content: content.to_string(),
-                bounds: Size::new(inner, f32::INFINITY),
+                bounds: iced::Size::new(inner, f32::INFINITY),
                 size: Pixels(size),
                 line_height: text::LineHeight::Relative(1.3),
                 font,
@@ -270,7 +269,7 @@ impl<Message> PatchCanvas<'_, Message> {
             let measured = Renderer::Paragraph::with_text(text.as_ref()).min_bounds();
             (
                 Text {
-                    bounds: Size::new(measured.width.ceil() + 1.0, measured.height.ceil()),
+                    bounds: iced::Size::new(measured.width.ceil() + 1.0, measured.height.ceil()),
                     ..text
                 },
                 colour,
@@ -308,28 +307,33 @@ impl<Message> PatchCanvas<'_, Message> {
 
         let zoom = state.camera.zoom;
         let corner = state.camera.to_screen(world.position());
-        let anchor = Rectangle::new(
+        let anchor = Rect::new(
             Point::new(bounds.x + corner.x, bounds.y + corner.y),
             world.size() * zoom,
         );
         let at = crate::hover::place(size, anchor, bounds);
-        renderer.with_layer(bounds, |renderer| {
+        renderer.with_layer(bounds.to_iced(), |renderer| {
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds: Rectangle::new(at, size),
+                    bounds: Rect::new(at, size).to_iced(),
                     border: iced::Border {
-                        color: self.palette.tile_border,
+                        color: self.palette.tile_border.to_iced(),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
                     ..renderer::Quad::default()
                 },
-                self.palette.tile,
+                self.palette.tile.to_iced(),
             );
             let mut y = at.y + HOVER_PADDING;
             for (text, colour) in lines {
                 let height = text.bounds.height;
-                renderer.fill_text(text, Point::new(at.x + HOVER_PADDING, y), colour, bounds);
+                renderer.fill_text(
+                    text,
+                    Point::new(at.x + HOVER_PADDING, y).to_iced(),
+                    colour.to_iced(),
+                    bounds.to_iced(),
+                );
                 y += height + LINE_GAP;
             }
         });

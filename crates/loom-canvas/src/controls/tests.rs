@@ -1,4 +1,5 @@
 use super::*;
+use crate::iced_convert::ToIced as _;
 use crate::scene::{ModuleView, PanelView, WidgetView};
 use iced::advanced::graphics::color::pack;
 
@@ -91,7 +92,7 @@ fn a_knob_at_its_minimum_shows_a_start_cap() {
     let low = value_arc(0.0);
     assert_eq!(
         low.colour(),
-        pack(palette.control_value).components(),
+        pack(palette.control_value.to_iced()).components(),
         "in the value colour"
     );
     assert!(low.sweep() > 0.0, "a start cap at 0");
@@ -140,8 +141,8 @@ fn a_knob_range_draws_one_arc_and_no_dot() {
 
 #[test]
 fn dots_show_on_knobs_without_a_range_and_on_toggles_and_radios() {
-    let colour = pack(Palette::default().modulation).components();
-    let clear = pack(Color::TRANSPARENT).components();
+    let colour = pack(Palette::default().modulation.to_iced()).components();
+    let clear = pack(Color::TRANSPARENT.to_iced()).components();
     let scene = scene();
     let palette = Palette::default();
     let mut values = PanelValues::new();
@@ -177,7 +178,7 @@ fn dots_show_on_knobs_without_a_range_and_on_toggles_and_radios() {
 
 #[test]
 fn a_knob_focus_ring_clears_the_range_arc_and_the_caption() {
-    let rect = Rectangle::new(Point::ORIGIN, Size::new(3.0 * GRID, 3.0 * GRID));
+    let rect = Rect::new(Point::ORIGIN, Size::new(3.0 * GRID, 3.0 * GRID));
     let c = knob_centre(rect);
     let (ring, corner) = focus_ring(&WidgetViewKind::Knob { steps: 0 }, rect);
     // Signed distance from a point to the ring's outline: negative inside.
@@ -397,7 +398,7 @@ fn stereo_meter_draws_two_tracks() {
 
 #[test]
 fn radio_rows() {
-    let rect = Rectangle::new(Point::ORIGIN, Size::new(36.0, 48.0));
+    let rect = Rect::new(Point::ORIGIN, Size::new(36.0, 48.0));
     assert_eq!(radio_option(rect, 3, Point::new(5.0, 5.0)), None);
     assert_eq!(radio_option(rect, 3, Point::new(5.0, GRID + 1.0)), Some(0));
     assert_eq!(radio_option(rect, 3, Point::new(5.0, 3.0 * GRID + 1.0)), Some(2));
@@ -455,8 +456,8 @@ fn a_result_preview_is_one_joined_line() {
 /// fader at middle zoom is never coarse (panel-widgets.md, Fader).
 #[test]
 fn a_fader_drags_along_its_track_over_at_least_200_pixels() {
-    let tall = Rectangle::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID));
-    let wide = Rectangle::new(Point::ORIGIN, Size::new(6.0 * GRID, 2.0 * GRID));
+    let tall = Rect::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID));
+    let wide = Rect::new(Point::ORIGIN, Size::new(6.0 * GRID, 2.0 * GRID));
     let up = ValueDrag::fader(tall, true, 0.7);
     let right = ValueDrag::fader(wide, false, 0.7);
     assert_eq!(up.along(Point::new(9.0, 40.0)), -40.0);
@@ -478,8 +479,8 @@ fn a_fader_drags_along_its_track_over_at_least_200_pixels() {
 #[test]
 fn a_fader_handle_and_bar_are_where_they_should_be() {
     for (rect, vertical) in [
-        (Rectangle::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID)), true),
-        (Rectangle::new(Point::ORIGIN, Size::new(6.0 * GRID, 2.0 * GRID)), false),
+        (Rect::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID)), true),
+        (Rect::new(Point::ORIGIN, Size::new(6.0 * GRID, 2.0 * GRID)), false),
     ] {
         for t in [0.0, 0.5, 1.0] {
             let handle = fader_handle(rect, vertical, t);
@@ -504,7 +505,7 @@ fn a_fader_handle_and_bar_are_where_they_should_be() {
 /// dot when the reach has no length, as a knob does (rule 3).
 #[test]
 fn a_fader_shows_modulation_as_a_bar_with_a_live_dot() {
-    let rect = Rectangle::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID));
+    let rect = Rect::new(Point::ORIGIN, Size::new(2.0 * GRID, 6.0 * GRID));
     let palette = Palette::default();
     let kind = WidgetViewKind::Fader {
         vertical: true,
@@ -627,7 +628,7 @@ fn overlapping_range_handles_follow_the_first_movement() {
 /// thing (panel-widgets.md, Range).
 #[test]
 fn a_press_on_a_range_takes_what_is_under_it() {
-    let rect = Rectangle::new(Point::new(0.0, 0.0), Size::new(72.0, 24.0));
+    let rect = Rect::new(Point::new(0.0, 0.0), Size::new(72.0, 24.0));
     let at = |t: f32| range_point(rect, false, t);
     let take = |low, high, t| RangeGrab::at(rect, false, low, high, at(t));
     assert!(matches!(
@@ -660,8 +661,8 @@ fn a_press_on_a_range_takes_what_is_under_it() {
 #[test]
 fn a_range_has_a_bar_on_each_side() {
     for (vertical, rect) in [
-        (false, Rectangle::new(Point::new(0.0, 0.0), Size::new(72.0, 24.0))),
-        (true, Rectangle::new(Point::new(0.0, 0.0), Size::new(24.0, 72.0))),
+        (false, Rect::new(Point::new(0.0, 0.0), Size::new(72.0, 24.0))),
+        (true, Rect::new(Point::new(0.0, 0.0), Size::new(24.0, 72.0))),
     ] {
         let low = range_bar_point(rect, vertical, ControlPart::Main, 0.5);
         let high = range_bar_point(rect, vertical, ControlPart::Second, 0.5);
@@ -712,7 +713,7 @@ fn a_ghost_adds_a_hollow_mark() {
 /// bar stays clear of the readout's row.
 #[test]
 fn a_clip_light_shortens_the_bar() {
-    let rect = Rectangle::new(Point::ORIGIN, Size::new(36.0, 72.0));
+    let rect = Rect::new(Point::ORIGIN, Size::new(36.0, 72.0));
     let plain = meter_track(rect, false);
     let with_light = meter_track(rect, true);
     assert!(with_light.height < plain.height);

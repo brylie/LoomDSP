@@ -9,7 +9,7 @@
 
 use crate::input_owner::InputOwner;
 use crate::{browser, help, licence_chooser, patches, probe_menu, question, recent, settings};
-use iced::Point;
+use loom_ui_core::Point;
 
 /// The one panel that can be open.
 pub(crate) enum Overlay {

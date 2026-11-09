@@ -4,7 +4,7 @@
 //! tested without a window.
 
 use crate::scene::PortRef;
-use iced::{Point, Rectangle, Size};
+use loom_ui_core::{Point, Rect, Size};
 use std::time::{Duration, Instant};
 
 /// How long the pointer or keyboard focus must rest on one port or control
@@ -107,7 +107,7 @@ pub fn text_width(canvas_width: f32) -> f32 {
 /// Where a hover text box of `size` goes: centred above `anchor`, or below
 /// it when there is no room above, and always inside `bounds`. All in
 /// screen coordinates. Returns the box's top-left corner.
-pub fn place(size: Size, anchor: Rectangle, bounds: Rectangle) -> Point {
+pub fn place(size: Size, anchor: Rect, bounds: Rect) -> Point {
     let above = anchor.y - HOVER_GAP - size.height;
     let y = if above >= bounds.y + HOVER_GAP {
         above

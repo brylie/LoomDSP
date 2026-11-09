@@ -1,6 +1,6 @@
 use super::*;
 use crate::view::severity_colour;
-use iced::Rectangle;
+use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::time::Duration;
 
@@ -192,7 +192,7 @@ fn window_text_meets_wcag_minimum_contrast() {
         ("alarm text on background", severity_colour(alerts::Severity::Alarm)),
     ];
     for (name, text) in pairs {
-        let ratio = loom_canvas::contrast_ratio(text, theme.background);
+        let ratio = loom_canvas::contrast_ratio(text.to_core(), theme.background.to_core());
         assert!(
             ratio >= loom_canvas::MIN_TEXT_CONTRAST,
             "{name}: {ratio:.2}:1 is below {}:1",
@@ -321,7 +321,7 @@ fn open_at(app: &mut App, world: Point) {
     let _ = app.update(Message::Canvas(CanvasEvent::OpenBrowser {
         world,
         at: Point::ORIGIN,
-        area: Rectangle::new(Point::ORIGIN, iced::Size::new(1000.0, 800.0)),
+        area: loom_ui_core::Rect::new(Point::ORIGIN, loom_ui_core::Size::new(1000.0, 800.0)),
     }));
 }
 

@@ -390,7 +390,7 @@ fn restore_reports_unknown_modules() {
     let message = app.alerts.status().to_string();
     let _ = app.update(Message::Canvas(loom_canvas::CanvasEvent::Move {
         ids: vec![1],
-        delta: iced::Vector::new(12.0, 0.0),
+        delta: loom_ui_core::Vector::new(12.0, 0.0),
     }));
     assert_eq!(app.alerts.status(), message);
 }

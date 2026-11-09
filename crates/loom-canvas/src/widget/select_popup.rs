@@ -7,7 +7,7 @@ use super::*;
 
 impl<Message> PatchCanvas<'_, Message> {
     /// Screen rectangle of the open list, kept readable at any canvas zoom.
-    pub(super) fn select_popup_bounds(&self, state: &State, bounds: Rectangle) -> Option<Rectangle> {
+    pub(super) fn select_popup_bounds(&self, state: &State, bounds: Rect) -> Option<Rect> {
         state.focus.popup()?;
         let (module, widget) = state.focus.control()?;
         self.select_popup_bounds_for(state, bounds, module, widget)
@@ -18,10 +18,10 @@ impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn select_popup_bounds_for(
         &self,
         state: &State,
-        bounds: Rectangle,
+        bounds: Rect,
         module: u32,
         widget: usize,
-    ) -> Option<Rectangle> {
+    ) -> Option<Rect> {
         let tile = self.scene.module(module)?;
         let rect = tile.widget_bounds(widget)?;
         let WidgetViewKind::Select { options } = &tile.panel.widgets.get(widget)?.kind else {
@@ -42,7 +42,7 @@ impl<Message> PatchCanvas<'_, Message> {
         };
         // The box can be panned off either edge. The list stays in the canvas.
         let y = y.clamp(0.0, (bounds.height - height).max(0.0));
-        Some(Rectangle::new(Point::new(x, y), Size::new(width, height)))
+        Some(Rect::new(Point::new(x, y), Size::new(width, height)))
     }
 
     /// Opens a select list at its current value.
@@ -141,7 +141,7 @@ impl<Message> PatchCanvas<'_, Message> {
         &self,
         state: &mut State,
         event: &Event,
-        bounds: Rectangle,
+        bounds: Rect,
         over: bool,
         screen: Option<Point>,
         shell: &mut Shell<'_, Message>,

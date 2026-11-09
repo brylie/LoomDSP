@@ -265,7 +265,7 @@ pub fn name(graph: &Graph, hierarchy: &Hierarchy, part: Part) -> Option<String> 
 /// A name on an XY pad or a range aims at that value: inside the pad, at the
 /// middle of that value's edge, or at the handle (`docs/design/control-channel.md`,
 /// rule 10).
-pub fn world_bounds(scene: &Scene, values: &PanelValues, part: Part) -> Result<iced::Rectangle, String> {
+pub fn world_bounds(scene: &Scene, values: &PanelValues, part: Part) -> Result<loom_ui_core::Rect, String> {
     let not_drawn = || "it is not on the canvas".to_string();
     if let Part::Control(module, widget) | Part::Second(module, widget) = part
         && let Some(aim) = scene.module(module).and_then(|m| {
@@ -296,9 +296,9 @@ pub fn world_bounds(scene: &Scene, values: &PanelValues, part: Part) -> Result<i
         Part::Port(port) => {
             let centre = scene.port_position(port).ok_or_else(not_drawn)?;
             let r = PORT_HIT_RADIUS;
-            Ok(iced::Rectangle::new(
-                iced::Point::new(centre.x - r, centre.y - r),
-                iced::Size::new(2.0 * r, 2.0 * r),
+            Ok(loom_ui_core::Rect::new(
+                loom_ui_core::Point::new(centre.x - r, centre.y - r),
+                loom_ui_core::Size::new(2.0 * r, 2.0 * r),
             ))
         }
     }

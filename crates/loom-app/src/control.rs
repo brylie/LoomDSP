@@ -15,10 +15,12 @@ use iced::advanced::widget::operation::Outcome;
 use iced::advanced::widget::{Id, Operation};
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, Stream};
-use iced::{Point, Rectangle, keyboard};
+use iced::keyboard;
 use loom_canvas::PanelValues;
+use loom_canvas::iced_convert::ToCore as _;
 use loom_canvas::{CanvasEvent, CanvasView, ControlPart, PortRef};
 use loom_core::{Graph, MidiControl, MidiEvent, ModuleId, OutputSafety, WidgetKind};
+use loom_ui_core::{Point, Rect};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::any::Any;
@@ -403,7 +405,7 @@ pub(crate) fn end_samples(pending: Vec<Pending>) -> Vec<Pending> {
 pub(crate) enum Area {
     Window,
     /// Logical window pixels.
-    Rect(Rectangle),
+    Rect(Rect),
     /// The area around a target, found once the window is drawn.
     Target {
         target: String,

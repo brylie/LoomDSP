@@ -330,7 +330,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
         .copied()
         .find(|d| d.id == "loom.osc.sine")
         .unwrap();
-    ui.app.add_module(sine, iced::Point::ORIGIN);
+    ui.app.add_module(sine, loom_ui_core::Point::ORIGIN);
     ui.app.session.selection.clear();
     ui.redraw();
     let count = ui.app.session.controller.graph().nodes().count();

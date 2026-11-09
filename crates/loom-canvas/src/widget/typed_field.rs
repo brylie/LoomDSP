@@ -101,7 +101,7 @@ fn starts_a_number(text: &str) -> bool {
 /// Where the line with the reason for bad text goes: below the field, or above
 /// it when there is no room below, and inside the canvas. `width` is what the
 /// reason needs. A wider reason than the canvas is cut at its edge.
-pub(super) fn typed_reason_bounds(field: Rectangle, width: f32, bounds: Rectangle) -> Rectangle {
+pub(super) fn typed_reason_bounds(field: Rect, width: f32, bounds: Rect) -> Rect {
     let width = width.min(bounds.width);
     let below = field.y + FIELD_HEIGHT_PX + 2.0;
     let y = if below + FIELD_HEIGHT_PX <= bounds.y + bounds.height {
@@ -110,7 +110,7 @@ pub(super) fn typed_reason_bounds(field: Rectangle, width: f32, bounds: Rectangl
         field.y - FIELD_HEIGHT_PX - 2.0
     };
     let x = field.x.clamp(bounds.x, (bounds.x + bounds.width - width).max(bounds.x));
-    Rectangle::new(Point::new(x, y), Size::new(width, FIELD_HEIGHT_PX))
+    Rect::new(Point::new(x, y), Size::new(width, FIELD_HEIGHT_PX))
 }
 
 impl<Message> PatchCanvas<'_, Message> {
@@ -127,17 +127,14 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Screen rectangle of the open field: at a fixed size, centred on its
     /// widget, and inside the canvas.
-    pub(super) fn typed_field_bounds(&self, state: &State, bounds: Rectangle) -> Option<Rectangle> {
+    pub(super) fn typed_field_bounds(&self, state: &State, bounds: Rect) -> Option<Rect> {
         state.focus.typed()?;
         let (module, widget) = state.focus.control()?;
         let rect = self.scene.module(module)?.widget_bounds(widget)?;
         let centre = state.camera.to_screen(rect.center());
         let x = (centre.x - FIELD_WIDTH_PX * 0.5).clamp(0.0, (bounds.width - FIELD_WIDTH_PX).max(0.0));
         let y = (centre.y - FIELD_HEIGHT_PX * 0.5).clamp(0.0, (bounds.height - FIELD_HEIGHT_PX).max(0.0));
-        Some(Rectangle::new(
-            Point::new(x, y),
-            Size::new(FIELD_WIDTH_PX, FIELD_HEIGHT_PX),
-        ))
+        Some(Rect::new(Point::new(x, y), Size::new(FIELD_WIDTH_PX, FIELD_HEIGHT_PX)))
     }
 
     /// Opens the field if this key starts one on the focused control: Enter,
@@ -295,7 +292,7 @@ impl<Message> PatchCanvas<'_, Message> {
         &self,
         state: &mut State,
         event: &Event,
-        bounds: Rectangle,
+        bounds: Rect,
         screen: Option<Point>,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
@@ -327,22 +324,22 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Draws the open field above all tile text. Bad text gets a warning
     /// outline, and its reason on a line below (rule 8: not colour alone).
-    pub(super) fn draw_typed_field<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle)
+    pub(super) fn draw_typed_field<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rect)
     where
         Renderer: text::Renderer<Font = Font>,
     {
         let Some(field) = state.focus.typed() else {
             return;
         };
-        let Some(rect) = self.typed_field_bounds(state, Rectangle::new(Point::ORIGIN, bounds.size())) else {
+        let Some(rect) = self.typed_field_bounds(state, Rect::new(Point::ORIGIN, bounds.size())) else {
             return;
         };
-        let area = Rectangle::new(Point::new(bounds.x + rect.x, bounds.y + rect.y), rect.size());
+        let area = Rect::new(Point::new(bounds.x + rect.x, bounds.y + rect.y), rect.size());
         let font = renderer.default_font();
         let error = field.draft.error().map(str::to_string);
         let line = |content: String, width: f32| Text {
             content,
-            bounds: Size::new(width, FIELD_HEIGHT_PX),
+            bounds: iced::Size::new(width, FIELD_HEIGHT_PX),
             size: Pixels(FIELD_TEXT_PX),
             line_height: text::LineHeight::Relative(1.2),
             font,
@@ -355,7 +352,7 @@ impl<Message> PatchCanvas<'_, Message> {
         let width_of = |content: &str| {
             Renderer::Paragraph::with_text(Text {
                 content,
-                bounds: Size::new(f32::INFINITY, FIELD_HEIGHT_PX),
+                bounds: iced::Size::new(f32::INFINITY, FIELD_HEIGHT_PX),
                 size: Pixels(FIELD_TEXT_PX),
                 line_height: text::LineHeight::Relative(1.2),
                 font,
@@ -368,7 +365,7 @@ impl<Message> PatchCanvas<'_, Message> {
             .width
         };
         let text_at = Point::new(area.x + FIELD_PADDING_PX, area.center_y());
-        renderer.with_layer(bounds, |renderer| {
+        renderer.with_layer(bounds.to_iced(), |renderer| {
             let outline = if error.is_some() {
                 (self.palette.warning, 2.0)
             } else {
@@ -376,58 +373,64 @@ impl<Message> PatchCanvas<'_, Message> {
             };
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds: area,
+                    bounds: area.to_iced(),
                     border: iced::Border {
-                        color: outline.0,
+                        color: outline.0.to_iced(),
                         width: outline.1,
                         radius: 4.0.into(),
                     },
                     ..renderer::Quad::default()
                 },
-                self.palette.control_body,
+                self.palette.control_body.to_iced(),
             );
             if field.selected && !field.draft.text.is_empty() {
                 renderer.fill_quad(
                     renderer::Quad {
-                        bounds: Rectangle::new(
+                        bounds: Rect::new(
                             Point::new(text_at.x - 1.0, area.y + 3.0),
                             Size::new(width_of(&field.draft.text).min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
-                        ),
+                        )
+                        .to_iced(),
                         ..renderer::Quad::default()
                     },
-                    self.palette.control_track,
+                    self.palette.control_track.to_iced(),
                 );
             }
-            renderer.fill_text(line(field.draft.text.clone(), inner), text_at, self.palette.text, area);
+            renderer.fill_text(
+                line(field.draft.text.clone(), inner),
+                text_at.to_iced(),
+                self.palette.text.to_iced(),
+                area.to_iced(),
+            );
             if !field.selected {
                 let x = text_at.x + width_of(&field.draft.text[..field.caret]).min(inner);
                 renderer.fill_quad(
                     renderer::Quad {
-                        bounds: Rectangle::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),
+                        bounds: Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)).to_iced(),
                         ..renderer::Quad::default()
                     },
-                    self.palette.text,
+                    self.palette.text.to_iced(),
                 );
             }
             if let Some(reason) = error {
                 let place = typed_reason_bounds(area, width_of(&reason) + 2.0 * FIELD_PADDING_PX, bounds);
                 renderer.fill_quad(
                     renderer::Quad {
-                        bounds: place,
+                        bounds: place.to_iced(),
                         border: iced::Border {
-                            color: self.palette.tile_border,
+                            color: self.palette.tile_border.to_iced(),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
                         ..renderer::Quad::default()
                     },
-                    self.palette.control_body,
+                    self.palette.control_body.to_iced(),
                 );
                 renderer.fill_text(
                     line(reason, place.width),
-                    Point::new(place.x + FIELD_PADDING_PX, place.center_y()),
-                    self.palette.text,
-                    bounds,
+                    Point::new(place.x + FIELD_PADDING_PX, place.center_y()).to_iced(),
+                    self.palette.text.to_iced(),
+                    bounds.to_iced(),
                 );
             }
         });

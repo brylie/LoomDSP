@@ -244,8 +244,8 @@ pub fn tree(snapshot: &UiSnapshot, view: Option<&CanvasView>, scale: f32) -> Tre
     let mut nodes = Vec::new();
     let place = |node: &mut Node, world: Rect| {
         if let Some(view) = view {
-            let a = view.to_window(iced::Point::new(world.x, world.y));
-            let b = view.to_window(iced::Point::new(world.x + world.width, world.y + world.height));
+            let a = view.to_window(loom_ui_core::Point::new(world.x, world.y));
+            let b = view.to_window(loom_ui_core::Point::new(world.x + world.width, world.y + world.height));
             let s = f64::from(scale);
             node.set_bounds(accesskit::Rect {
                 x0: f64::from(a.x) * s,

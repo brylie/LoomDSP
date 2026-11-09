@@ -46,8 +46,8 @@ fn a_cut_label_shows_what_the_tile_draws() {
         id: 1,
         title: "Cramped".into(),
         hover: loom_canvas::HoverText::default(),
-        accent: iced::Color::BLACK,
-        position: iced::Point::ORIGIN,
+        accent: loom_ui_core::Color::BLACK,
+        position: loom_ui_core::Point::ORIGIN,
         inputs: Vec::new(),
         outputs: Vec::new(),
         panel: loom_canvas::PanelView {

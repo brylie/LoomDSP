@@ -181,8 +181,8 @@ fn each_zoom_draws_the_bars_for_the_text_it_hides() {
             .map(|s| s.fill)
             .collect()
     };
-    let label = pack(palette.text_bar).components();
-    let title = pack(palette.title_bar).components();
+    let label = pack(palette.text_bar.to_iced()).components();
+    let title = pack(palette.title_bar.to_iced()).components();
     // Close up: all text is drawn, so no bars.
     assert!(geometry.bars(false, false).is_empty());
     // Middle: the caption and both port labels, not the title.
@@ -205,7 +205,7 @@ fn a_clock_mark_shows_close_up_and_as_a_dot_at_middle_zoom() {
         id: 1,
         title: "LFO".into(),
         hover: crate::scene::HoverText::default(),
-        accent: Color::from_rgb8(0x5A, 0x4A, 0x82),
+        accent: Color::rgb8(0x5A, 0x4A, 0x82),
         position: Point::ORIGIN,
         inputs,
         outputs: vec![port()],
@@ -222,7 +222,7 @@ fn a_clock_mark_shows_close_up_and_as_a_dot_at_middle_zoom() {
     let close = marked.bars(false, false);
     assert_eq!(close.len(), 3);
     let ring = &marked.shapes[close.start as usize];
-    assert_eq!(ring.fill(), pack(Color::TRANSPARENT).components());
+    assert_eq!(ring.fill(), pack(Color::TRANSPARENT.to_iced()).components());
     assert!(ring.border_width() > 0.0);
     // Middle: the dot, then the same bars as without the mark.
     let middle = marked.bars(true, false);

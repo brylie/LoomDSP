@@ -696,7 +696,7 @@ fn pasting_a_sub_patch_tile_and_editing_inside_the_copy_leaves_the_original() {
     let copied = Patch::from_ron(&text).unwrap();
     assert_eq!(copied.subpatches.len(), 1, "the definition travels with the tile");
     assert!(copied.modules.iter().any(|m| m.is_instance()));
-    app.paste(iced::Point::new(300.0, 300.0), Some(text.clone()));
+    app.paste(loom_ui_core::Point::new(300.0, 300.0), Some(text.clone()));
     assert_eq!(app.ui_snapshot().status, "Pasted Voice");
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("paste Voice"));
     let copy = *app.session.selection.iter().next().unwrap();
@@ -788,7 +788,7 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
     });
     let inside = app.session.hierarchy.path_of(ModuleId(voice));
     app.show_level(&inside);
-    app.paste(iced::Point::ORIGIN, Some(with_transport.to_ron().unwrap()));
+    app.paste(loom_ui_core::Point::ORIGIN, Some(with_transport.to_ron().unwrap()));
     assert_eq!(
         app.ui_snapshot().status,
         "Pasted Voice. The Transport was left out: a patch has one, at the top level."

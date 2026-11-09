@@ -2,7 +2,8 @@
 
 use crate::gpu::{Cable, DragPrimitive};
 use iced::widget::shader::{self, Program};
-use iced::{Color, Length, Point, Rectangle, mouse};
+use iced::{Length, Rectangle, mouse};
+use loom_ui_core::{Color, Point};
 
 /// Draws one focused cable in window coordinates with the canvas shader.
 /// Its GPU buffers are separate from the patch canvas buffers.

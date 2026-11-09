@@ -544,7 +544,7 @@ fn a_lost_named_device_survives_takes_edits_and_reconnects_when_back() {
     // 2. Edits made while lost are kept and status bar continues to display the lost device message
     let initial_modules = run.app.session.controller.graph().len();
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
-    run.app.add_module(constant, iced::Point::new(50.0, 50.0));
+    run.app.add_module(constant, loom_ui_core::Point::new(50.0, 50.0));
     assert_eq!(run.app.session.controller.graph().len(), initial_modules + 1);
     assert_eq!(
         run.app.alerts.status(),

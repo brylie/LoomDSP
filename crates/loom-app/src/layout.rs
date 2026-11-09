@@ -13,7 +13,7 @@ const COLUMN_GAP: f32 = 4.0 * GRID;
 const GAP: f32 = 2.0 * GRID;
 
 /// Size of a module's tile in world units.
-fn size_of(node: &Node) -> iced::Size {
+fn size_of(node: &Node) -> loom_ui_core::Size {
     let d = node.descriptor;
     if node.unknown.is_some() {
         tile_size(node.input_count(), node.output_count(), 10, 4)

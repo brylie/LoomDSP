@@ -9,7 +9,7 @@ use crate::scene::{GRID, Scene, WidgetViewKind};
 use crate::theme::Palette;
 use crate::trace::Segment;
 use crate::widget::ControlPart;
-use iced::{Color, Point, Rectangle, Size};
+use loom_ui_core::{Color, Point, Rect, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -522,7 +522,7 @@ impl ControlGeometry {
                         let arrow_x = box_rect.x + box_rect.width - 9.0;
                         for (row, width) in [(0.0, 7.0), (1.4, 5.0), (2.8, 3.0)] {
                             shapes.push(Shape::new(
-                                Rectangle::new(
+                                Rect::new(
                                     Point::new(arrow_x + (7.0 - width) * 0.5, box_rect.center_y() - 2.0 + row),
                                     Size::new(width, 1.4),
                                 ),
@@ -555,8 +555,7 @@ impl ControlGeometry {
                         shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
                         // The zero line: thick enough to see at 100% zoom, so
                         // a signal's offset can be judged.
-                        let centre =
-                            Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
+                        let centre = Rect::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
                         shapes.push(Shape::new(centre, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                     }
                     WidgetViewKind::XyScope => {
@@ -564,9 +563,8 @@ impl ControlGeometry {
                         // own buffer.
                         let area = crate::trace::xy_scope_area(rect);
                         shapes.push(Shape::new(area, 3.0, palette.background, palette.tile_border, 1.0));
-                        let across =
-                            Rectangle::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
-                        let up = Rectangle::new(Point::new(area.center_x() - 0.5, area.y), Size::new(1.0, area.height));
+                        let across = Rect::new(Point::new(area.x, area.center_y() - 0.5), Size::new(area.width, 1.0));
+                        let up = Rect::new(Point::new(area.center_x() - 0.5, area.y), Size::new(1.0, area.height));
                         for line in [across, up] {
                             shapes.push(Shape::new(line, 0.0, palette.tile_border, Color::TRANSPARENT, 0.0));
                         }
@@ -582,7 +580,7 @@ impl ControlGeometry {
                         shapes.push(Shape::new(track, 2.0, palette.light_off, palette.tile_border, 1.0));
                         let (low, high) = (position.clamp(0.0, 1.0).min(*zero), position.clamp(0.0, 1.0).max(*zero));
                         if high > low {
-                            let bar = Rectangle::new(
+                            let bar = Rect::new(
                                 Point::new(track.x, track.y + track.height * (1.0 - high)),
                                 Size::new(track.width, track.height * (high - low)),
                             );
@@ -597,8 +595,7 @@ impl ControlGeometry {
                             // shape says it as well as colour (NFR-UX-03).
                             let centre = Point::new(rect.center_x(), rect.y + CLIP_ROW * 0.5);
                             if values.get(module.id, index).is_some_and(|value| value.clip) {
-                                let lit =
-                                    Rectangle::new(Point::new(centre.x - 4.0, centre.y - 4.0), Size::new(8.0, 8.0));
+                                let lit = Rect::new(Point::new(centre.x - 4.0, centre.y - 4.0), Size::new(8.0, 8.0));
                                 shapes.push(Shape::new(lit, 1.0, palette.warning, Color::TRANSPARENT, 0.0));
                             } else {
                                 shapes.push(circle(centre, 3.5, Color::TRANSPARENT, palette.tile_border, 1.0));
@@ -606,14 +603,14 @@ impl ControlGeometry {
                         }
                         let right = values.get(module.id, index).and_then(|value| value.right);
                         let left_track = if right.is_some() {
-                            Rectangle::new(Point::new(track.x - 2.0, track.y), Size::new(5.0, track.height))
+                            Rect::new(Point::new(track.x - 2.0, track.y), Size::new(5.0, track.height))
                         } else {
                             track
                         };
                         let channels = std::iter::once((left_track, position, values.peak(module.id, index))).chain(
                             right.map(|(rms, peak)| {
                                 (
-                                    Rectangle::new(Point::new(track.x + 5.0, track.y), Size::new(5.0, track.height)),
+                                    Rect::new(Point::new(track.x + 5.0, track.y), Size::new(5.0, track.height)),
                                     rms,
                                     peak,
                                 )
@@ -624,7 +621,7 @@ impl ControlGeometry {
                             let rms = rms.clamp(0.0, 1.0);
                             if rms > 0.0 {
                                 let height = track.height * rms;
-                                let bar = Rectangle::new(
+                                let bar = Rect::new(
                                     Point::new(track.x, track.y + track.height - height),
                                     Size::new(track.width, height),
                                 );
@@ -640,7 +637,7 @@ impl ControlGeometry {
                             let peak = peak.clamp(rms, 1.0);
                             if peak > 0.0 {
                                 let y = track.y + track.height * (1.0 - peak);
-                                let line = Rectangle::new(Point::new(track.x, y - 0.75), Size::new(track.width, 1.5));
+                                let line = Rect::new(Point::new(track.x, y - 0.75), Size::new(track.width, 1.5));
                                 shapes.push(Shape::new(line, 0.0, palette.text, Color::TRANSPARENT, 0.0));
                             }
                         }
@@ -649,7 +646,7 @@ impl ControlGeometry {
                         // The category tint marks this as a result display;
                         // orange remains the shared editable-value colour.
                         let line_colour = mix(module.accent, palette.text, 0.55);
-                        let plot = Rectangle::new(
+                        let plot = Rect::new(
                             Point::new(rect.x + 4.0, rect.y + 3.0),
                             Size::new(rect.width - 8.0, rect.height - GRID - 7.0),
                         );
@@ -673,7 +670,7 @@ impl ControlGeometry {
 /// at the bottom of `plot` to 1 at the top, inside a 2-unit margin. Each
 /// piece is an anti-aliased capsule, drawn like a scope trace, so the line
 /// stays smooth at every zoom (#455).
-fn preview_line(plot: Rectangle, samples: &[f32], colour: Color) -> impl Iterator<Item = Segment> + '_ {
+fn preview_line(plot: Rect, samples: &[f32], colour: Color) -> impl Iterator<Item = Segment> + '_ {
     let last = samples.len().saturating_sub(1).max(1) as f32;
     let at = move |i: usize, y: f32| {
         Point::new(
@@ -708,9 +705,9 @@ const EXPOSED_SIDE: f32 = 4.0;
 /// (sub-patches.md, Exposing). It differs from the round modulation dot
 /// and the hollow ghost ring by shape, so colour need not tell them apart
 /// (NFR-UX-03).
-pub(crate) fn exposed_mark(rect: Rectangle, palette: &Palette) -> Shape {
+pub(crate) fn exposed_mark(rect: Rect, palette: &Palette) -> Shape {
     Shape::new(
-        Rectangle::new(
+        Rect::new(
             Point::new(rect.x + 1.5, rect.y + 1.5),
             Size::new(EXPOSED_SIDE, EXPOSED_SIDE),
         ),
@@ -739,7 +736,7 @@ fn live_dot_centre(centre: Point, position: f32) -> Point {
 
 /// The modulation dot of a control, if it shows one. A knob shows it only
 /// when it has no range arc to draw.
-fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, palette: &Palette) -> Option<Shape> {
+fn modulation_dot(kind: &WidgetViewKind, rect: Rect, mark: ModulationMark, palette: &Palette) -> Option<Shape> {
     let centre = modulation_dot_centre(kind, rect);
     match (kind, mark) {
         (_, ModulationMark::None)
@@ -773,7 +770,7 @@ fn modulation_dot(kind: &WidgetViewKind, rect: Rectangle, mark: ModulationMark, 
 
 /// Where a control's modulation dot goes: next to the control, clear of its
 /// value and caption.
-pub(crate) fn modulation_dot_centre(kind: &WidgetViewKind, rect: Rectangle) -> Point {
+pub(crate) fn modulation_dot_centre(kind: &WidgetViewKind, rect: Rect) -> Point {
     match kind {
         // In the gap at the bottom of the ring, clear of the knob body.
         WidgetViewKind::Knob { .. } => {
@@ -793,7 +790,7 @@ pub(crate) fn modulation_dot_centre(kind: &WidgetViewKind, rect: Rectangle) -> P
 }
 
 /// Centre of a knob's dial: in the top two grid rows of its 3 × 3 cell.
-pub(crate) fn knob_centre(rect: Rectangle) -> Point {
+pub(crate) fn knob_centre(rect: Rect) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + GRID - 1.0)
 }
 
@@ -801,10 +798,10 @@ pub(crate) fn knob_centre(rect: Rectangle) -> Point {
 /// a knob may use the rest of the knob's cell (tile_text.rs). The focus
 /// ring is left out: it shows only while the knob has keyboard focus, and
 /// it stays above the caption anyway.
-pub(crate) fn knob_drawn(rect: Rectangle) -> Rectangle {
+pub(crate) fn knob_drawn(rect: Rect) -> Rect {
     let centre = knob_centre(rect);
     let reach = RANGE_RADIUS + LIVE_RADIUS;
-    Rectangle::new(
+    Rect::new(
         Point::new(centre.x - reach, centre.y - reach),
         Size::new(2.0 * reach, 2.0 * reach),
     )
@@ -814,27 +811,27 @@ pub(crate) fn knob_drawn(rect: Rectangle) -> Rectangle {
 /// where a press on a modulated knob drags depth, not the value
 /// (modulation.md, Arc drag). Both in world units. Tests use it to press
 /// on the ring without counting pixels.
-pub fn knob_range_ring(rect: Rectangle) -> (Point, f32) {
+pub fn knob_range_ring(rect: Rect) -> (Point, f32) {
     (knob_centre(rect), (RANGE_RING_INNER + RANGE_RING_OUTER) * 0.5)
 }
 
 /// Centre of a light: in the top row of its 3 × 2 cell.
-pub(crate) fn light_centre(rect: Rectangle) -> Point {
+pub(crate) fn light_centre(rect: Rect) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + GRID * 0.5 + 1.0)
 }
 
 /// The bar of a meter: a narrow column in its 3 × 6 cell, above the label
 /// row.
-pub(crate) fn meter_track(rect: Rectangle, clips: bool) -> Rectangle {
+pub(crate) fn meter_track(rect: Rect, clips: bool) -> Rect {
     let top = if clips { CLIP_ROW } else { 0.0 };
-    Rectangle::new(
+    Rect::new(
         Point::new(rect.x + rect.width * 0.5 - 4.0, rect.y + top + 1.0),
         Size::new(8.0, rect.height - top - GRID - 2.0),
     )
 }
 
 /// Where a meter's peak hold readout is centred: the row below its bar.
-pub(crate) fn meter_hold_centre(rect: Rectangle) -> Point {
+pub(crate) fn meter_hold_centre(rect: Rect) -> Point {
     Point::new(rect.center_x(), rect.y + rect.height - GRID * 0.5)
 }
 
@@ -861,7 +858,7 @@ pub(crate) fn meter_colour(level: f32, palette: &Palette) -> Color {
 /// The keyboard focus ring of a control, and its corner radius: around the
 /// control itself, never its caption, so a value shown there stays clear
 /// (panels.md, Interaction).
-pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, f32) {
+pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rect) -> (Rect, f32) {
     match kind {
         // Outside the modulation range arc, so focus never hides it. A
         // circle that wide would cut into the caption, so the ring is a
@@ -870,7 +867,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         WidgetViewKind::Knob { .. } => {
             let c = knob_centre(rect);
             (
-                Rectangle::new(
+                Rect::new(
                     Point::new(c.x - KNOB_FOCUS_HALF_WIDTH, c.y - KNOB_FOCUS_TOP),
                     Size::new(2.0 * KNOB_FOCUS_HALF_WIDTH, KNOB_FOCUS_TOP + KNOB_FOCUS_BOTTOM),
                 ),
@@ -892,7 +889,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
         WidgetViewKind::Button => (button_body(rect).expand(2.5), 8.0),
         // The options, below the caption row.
         WidgetViewKind::Radio { .. } => (
-            Rectangle::new(
+            Rect::new(
                 Point::new(rect.x, rect.y + GRID),
                 Size::new(rect.width, rect.height - GRID),
             )
@@ -913,14 +910,14 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rectangle) -> (Rectangle, 
 
 /// A fader's track: down the cell above the caption row, or across the cell
 /// below it.
-pub(crate) fn fader_track(rect: Rectangle, vertical: bool) -> Rectangle {
+pub(crate) fn fader_track(rect: Rect, vertical: bool) -> Rect {
     if vertical {
-        Rectangle::new(
+        Rect::new(
             Point::new(rect.center_x() - 1.5, rect.y + 4.0),
             Size::new(3.0, rect.height - GRID - 8.0),
         )
     } else {
-        Rectangle::new(
+        Rect::new(
             Point::new(rect.x + 4.0, rect.y + GRID + FADER_ACROSS - 1.5),
             Size::new(rect.width - 8.0, 3.0),
         )
@@ -928,14 +925,14 @@ pub(crate) fn fader_track(rect: Rectangle, vertical: bool) -> Rectangle {
 }
 
 /// The part of a track from position `low` to position `high`.
-fn fader_span(track: Rectangle, vertical: bool, low: f32, high: f32) -> Rectangle {
+fn fader_span(track: Rect, vertical: bool, low: f32, high: f32) -> Rect {
     if vertical {
-        Rectangle::new(
+        Rect::new(
             Point::new(track.x, track.y + track.height * (1.0 - high)),
             Size::new(track.width, track.height * (high - low)),
         )
     } else {
-        Rectangle::new(
+        Rect::new(
             Point::new(track.x + track.width * low, track.y),
             Size::new(track.width * (high - low), track.height),
         )
@@ -943,15 +940,15 @@ fn fader_span(track: Rectangle, vertical: bool, low: f32, high: f32) -> Rectangl
 }
 
 /// A fader's handle at position `t`.
-pub(crate) fn fader_handle(rect: Rectangle, vertical: bool, t: f32) -> Rectangle {
+pub(crate) fn fader_handle(rect: Rect, vertical: bool, t: f32) -> Rect {
     let track = fader_track(rect, vertical);
     if vertical {
-        Rectangle::new(
+        Rect::new(
             Point::new(track.center_x() - 6.0, track.y + track.height * (1.0 - t) - 2.5),
             Size::new(12.0, 5.0),
         )
     } else {
-        Rectangle::new(
+        Rect::new(
             Point::new(track.x + track.width * t - 2.5, track.center_y() - 4.0),
             Size::new(5.0, 8.0),
         )
@@ -959,16 +956,16 @@ pub(crate) fn fader_handle(rect: Rectangle, vertical: bool, t: f32) -> Rectangle
 }
 
 /// The modulation bar beside a track, from position `low` to `high`.
-fn fader_bar(rect: Rectangle, vertical: bool, low: f32, high: f32) -> Rectangle {
+fn fader_bar(rect: Rect, vertical: bool, low: f32, high: f32) -> Rect {
     let track = fader_track(rect, vertical);
     fader_span(
         if vertical {
-            Rectangle::new(
+            Rect::new(
                 Point::new(track.center_x() + FADER_BAR_AWAY - 1.0, track.y),
                 Size::new(2.0, track.height),
             )
         } else {
-            Rectangle::new(
+            Rect::new(
                 Point::new(track.x, track.center_y() + FADER_BAR_AWAY - 1.0),
                 Size::new(track.width, 2.0),
             )
@@ -981,7 +978,7 @@ fn fader_bar(rect: Rectangle, vertical: bool, low: f32, high: f32) -> Rectangle 
 
 /// The point at position `t` on the modulation bar: where the live dot goes.
 /// With `t` at 0.5, tests and scripts press here to drag depth.
-pub fn fader_bar_point(rect: Rectangle, vertical: bool, t: f32) -> Point {
+pub fn fader_bar_point(rect: Rect, vertical: bool, t: f32) -> Point {
     let track = fader_track(rect, vertical);
     let t = t.clamp(0.0, 1.0);
     if vertical {
@@ -993,7 +990,7 @@ pub fn fader_bar_point(rect: Rectangle, vertical: bool, t: f32) -> Point {
 
 /// True if a press at `world` is on the fader's modulation bar, or its place
 /// beside the track: there a drag changes depth, not the value.
-pub(crate) fn on_fader_bar(rect: Rectangle, vertical: bool, world: Point) -> bool {
+pub(crate) fn on_fader_bar(rect: Rect, vertical: bool, world: Point) -> bool {
     let track = fader_track(rect, vertical);
     let away = if vertical {
         world.x - track.center_x()
@@ -1010,11 +1007,11 @@ pub(crate) fn on_fader_bar(rect: Rectangle, vertical: bool, world: Point) -> boo
 
 /// What a fader always draws: its cell without the caption row. Text beside
 /// it may use the rest.
-pub(crate) fn fader_drawn(rect: Rectangle, vertical: bool) -> Rectangle {
+pub(crate) fn fader_drawn(rect: Rect, vertical: bool) -> Rect {
     if vertical {
-        Rectangle::new(rect.position(), Size::new(rect.width, rect.height - GRID))
+        Rect::new(rect.position(), Size::new(rect.width, rect.height - GRID))
     } else {
-        Rectangle::new(
+        Rect::new(
             Point::new(rect.x, rect.y + GRID - 2.0),
             Size::new(rect.width, rect.height - GRID + 2.0),
         )
@@ -1023,17 +1020,17 @@ pub(crate) fn fader_drawn(rect: Rectangle, vertical: bool) -> Rectangle {
 
 /// A range's track: as a fader's, with more room around it on a horizontal
 /// one for a bar on each side of the handles.
-pub(crate) fn range_track(rect: Rectangle, vertical: bool) -> Rectangle {
+pub(crate) fn range_track(rect: Rect, vertical: bool) -> Rect {
     let track = fader_track(rect, vertical);
     if vertical {
         track
     } else {
-        Rectangle::new(Point::new(track.x, rect.y + GRID + RANGE_ACROSS - 1.5), track.size())
+        Rect::new(Point::new(track.x, rect.y + GRID + RANGE_ACROSS - 1.5), track.size())
     }
 }
 
 /// The point at position `t` on a range's track.
-pub(crate) fn range_point(rect: Rectangle, vertical: bool, t: f32) -> Point {
+pub(crate) fn range_point(rect: Rect, vertical: bool, t: f32) -> Point {
     let track = range_track(rect, vertical);
     if vertical {
         Point::new(track.center_x(), track.y + track.height * (1.0 - t))
@@ -1043,12 +1040,12 @@ pub(crate) fn range_point(rect: Rectangle, vertical: bool, t: f32) -> Point {
 }
 
 /// A range's handle at position `t`.
-pub(crate) fn range_handle(rect: Rectangle, vertical: bool, t: f32) -> Rectangle {
+pub(crate) fn range_handle(rect: Rect, vertical: bool, t: f32) -> Rect {
     let at = range_point(rect, vertical, t);
     if vertical {
-        Rectangle::new(Point::new(at.x - 6.0, at.y - 2.5), Size::new(12.0, 5.0))
+        Rect::new(Point::new(at.x - 6.0, at.y - 2.5), Size::new(12.0, 5.0))
     } else {
-        Rectangle::new(Point::new(at.x - 2.5, at.y - 3.5), Size::new(5.0, 7.0))
+        Rect::new(Point::new(at.x - 2.5, at.y - 3.5), Size::new(5.0, 7.0))
     }
 }
 
@@ -1061,7 +1058,7 @@ fn range_bar_offset(vertical: bool, part: ControlPart) -> f32 {
 
 /// The point at position `t` on a handle's bar. With `t` at 0.5, tests and
 /// scripts press here to drag depth.
-pub fn range_bar_point(rect: Rectangle, vertical: bool, part: ControlPart, t: f32) -> Point {
+pub fn range_bar_point(rect: Rect, vertical: bool, part: ControlPart, t: f32) -> Point {
     let at = range_point(rect, vertical, t.clamp(0.0, 1.0));
     let offset = range_bar_offset(vertical, part);
     if vertical {
@@ -1072,16 +1069,16 @@ pub fn range_bar_point(rect: Rectangle, vertical: bool, part: ControlPart, t: f3
 }
 
 /// A handle's modulation bar, from position `low` to `high`.
-fn range_bar(rect: Rectangle, vertical: bool, part: ControlPart, low: f32, high: f32) -> Rectangle {
+fn range_bar(rect: Rect, vertical: bool, part: ControlPart, low: f32, high: f32) -> Rect {
     let track = range_track(rect, vertical);
     let offset = range_bar_offset(vertical, part);
     let beside = if vertical {
-        Rectangle::new(
+        Rect::new(
             Point::new(track.center_x() + offset - 1.0, track.y),
             Size::new(2.0, track.height),
         )
     } else {
-        Rectangle::new(
+        Rect::new(
             Point::new(track.x, track.center_y() + offset - 1.0),
             Size::new(track.width, 2.0),
         )
@@ -1090,18 +1087,18 @@ fn range_bar(rect: Rectangle, vertical: bool, part: ControlPart, low: f32, high:
 }
 
 /// The thin line at a handle's live value, across the track.
-fn range_live_line(rect: Rectangle, vertical: bool, t: f32) -> Rectangle {
+fn range_live_line(rect: Rect, vertical: bool, t: f32) -> Rect {
     let at = range_point(rect, vertical, t.clamp(0.0, 1.0));
     if vertical {
-        Rectangle::new(Point::new(at.x - 5.0, at.y - 0.5), Size::new(10.0, 1.0))
+        Rect::new(Point::new(at.x - 5.0, at.y - 0.5), Size::new(10.0, 1.0))
     } else {
-        Rectangle::new(Point::new(at.x - 0.5, at.y - 4.0), Size::new(1.0, 8.0))
+        Rect::new(Point::new(at.x - 0.5, at.y - 4.0), Size::new(1.0, 8.0))
     }
 }
 
 /// The handle whose modulation bar, or its place, is under `world`. There a
 /// drag changes depth, not the value.
-pub(crate) fn range_bar_at(rect: Rectangle, vertical: bool, world: Point) -> Option<ControlPart> {
+pub(crate) fn range_bar_at(rect: Rect, vertical: bool, world: Point) -> Option<ControlPart> {
     let track = range_track(rect, vertical);
     let (away, along) = if vertical {
         (
@@ -1127,7 +1124,7 @@ pub(crate) fn range_bar_at(rect: Rectangle, vertical: bool, world: Point) -> Opt
 }
 
 /// How far `world` lies from position `t`, along the track, in world units.
-fn range_distance(rect: Rectangle, vertical: bool, t: f32, world: Point) -> f32 {
+fn range_distance(rect: Rect, vertical: bool, t: f32, world: Point) -> f32 {
     let at = range_point(rect, vertical, t);
     if vertical {
         (world.y - at.y).abs()
@@ -1138,7 +1135,7 @@ fn range_distance(rect: Rectangle, vertical: bool, t: f32, world: Point) -> f32 
 
 /// The handle nearer `world` along the track. A dropped cable goes to it, and
 /// that handle's hover text shows (panel-widgets.md, Range).
-pub(crate) fn range_nearest(rect: Rectangle, vertical: bool, low: f32, high: f32, world: Point) -> ControlPart {
+pub(crate) fn range_nearest(rect: Rect, vertical: bool, low: f32, high: f32, world: Point) -> ControlPart {
     if range_distance(rect, vertical, low, world) <= range_distance(rect, vertical, high, world) {
         ControlPart::Main
     } else {
@@ -1175,7 +1172,7 @@ impl RangeGrab {
     }
 
     /// What a press at `world` takes, or `None` on the track outside the band.
-    pub(crate) fn at(rect: Rectangle, vertical: bool, low: f32, high: f32, world: Point) -> Option<Self> {
+    pub(crate) fn at(rect: Rect, vertical: bool, low: f32, high: f32, world: Point) -> Option<Self> {
         let on_low = range_distance(rect, vertical, low, world) <= RANGE_REACH;
         let on_high = range_distance(rect, vertical, high, world) <= RANGE_REACH;
         let track = range_point(rect, vertical, 0.0);
@@ -1243,7 +1240,7 @@ impl RangeGrab {
 /// Where a script aims to reach one value of a widget that binds two: the
 /// handle of a range, or inside an XY pad at the middle of that value's edge.
 /// `None` for any other widget.
-pub fn part_bounds(kind: &WidgetViewKind, rect: Rectangle, position: f32, part: ControlPart) -> Option<Rectangle> {
+pub fn part_bounds(kind: &WidgetViewKind, rect: Rect, position: f32, part: ControlPart) -> Option<Rect> {
     match kind {
         WidgetViewKind::Range { vertical, .. } => Some(range_handle(rect, *vertical, position)),
         WidgetViewKind::XyPad { .. } => {
@@ -1253,7 +1250,7 @@ pub fn part_bounds(kind: &WidgetViewKind, rect: Rectangle, position: f32, part: 
             } else {
                 Point::new(area.center_x(), area.y + area.height - 4.0)
             };
-            Some(Rectangle::new(Point::new(at.x - 2.0, at.y - 2.0), Size::new(4.0, 4.0)))
+            Some(Rect::new(Point::new(at.x - 2.0, at.y - 2.0), Size::new(4.0, 4.0)))
         }
         _ => None,
     }
@@ -1261,10 +1258,10 @@ pub fn part_bounds(kind: &WidgetViewKind, rect: Rectangle, position: f32, part: 
 
 /// An XY pad's square: above the caption row, with room at the left and at
 /// the bottom for the modulation bars.
-pub fn xy_area(rect: Rectangle) -> Rectangle {
+pub fn xy_area(rect: Rect) -> Rect {
     let away = XY_BAR_AWAY + XY_BAR_WIDTH;
     let side = (rect.height - GRID - away - 1.0).min(rect.width - 2.0 * away);
-    Rectangle::new(
+    Rect::new(
         Point::new(rect.center_x() - side * 0.5, rect.y + 1.0),
         Size::new(side, side),
     )
@@ -1272,12 +1269,12 @@ pub fn xy_area(rect: Rectangle) -> Rectangle {
 
 /// The world point of the pad's point at these positions: `x` grows to the
 /// right, and `y` grows upward.
-pub(crate) fn xy_point(area: Rectangle, x: f32, y: f32) -> Point {
+pub(crate) fn xy_point(area: Rect, x: f32, y: f32) -> Point {
     Point::new(area.x + area.width * x, area.y + area.height * (1.0 - y))
 }
 
 /// The positions of a world point on the pad, inside its square.
-pub(crate) fn xy_position(area: Rectangle, world: Point) -> (f32, f32) {
+pub(crate) fn xy_position(area: Rect, world: Point) -> (f32, f32) {
     (
         ((world.x - area.x) / area.width).clamp(0.0, 1.0),
         (1.0 - (world.y - area.y) / area.height).clamp(0.0, 1.0),
@@ -1286,9 +1283,9 @@ pub(crate) fn xy_position(area: Rectangle, world: Point) -> (f32, f32) {
 
 /// The modulation bar of one axis, from position `low` to `high`: along the
 /// bottom edge for `x`, and along the left edge for `y`.
-fn xy_bar(area: Rectangle, part: ControlPart, low: f32, high: f32) -> Rectangle {
+fn xy_bar(area: Rect, part: ControlPart, low: f32, high: f32) -> Rect {
     if part == ControlPart::Second {
-        Rectangle::new(
+        Rect::new(
             Point::new(
                 area.x - XY_BAR_AWAY - XY_BAR_WIDTH * 0.5,
                 area.y + area.height * (1.0 - high),
@@ -1296,7 +1293,7 @@ fn xy_bar(area: Rectangle, part: ControlPart, low: f32, high: f32) -> Rectangle 
             Size::new(XY_BAR_WIDTH, area.height * (high - low)),
         )
     } else {
-        Rectangle::new(
+        Rect::new(
             Point::new(
                 area.x + area.width * low,
                 area.y + area.height + XY_BAR_AWAY - XY_BAR_WIDTH * 0.5,
@@ -1308,7 +1305,7 @@ fn xy_bar(area: Rectangle, part: ControlPart, low: f32, high: f32) -> Rectangle 
 
 /// The point at position `t` on one axis's bar. With `t` at 0.5, tests and
 /// scripts press here to drag depth.
-pub fn xy_edge_point(area: Rectangle, part: ControlPart, t: f32) -> Point {
+pub fn xy_edge_point(area: Rect, part: ControlPart, t: f32) -> Point {
     if part == ControlPart::Second {
         Point::new(area.x - XY_BAR_AWAY, area.y + area.height * (1.0 - t))
     } else {
@@ -1318,7 +1315,7 @@ pub fn xy_edge_point(area: Rectangle, part: ControlPart, t: f32) -> Point {
 
 /// The axis whose modulation bar, or its place, is under `world`. There a
 /// drag changes depth, not the value.
-pub(crate) fn xy_bar_at(area: Rectangle, world: Point) -> Option<ControlPart> {
+pub(crate) fn xy_bar_at(area: Rect, world: Point) -> Option<ControlPart> {
     let beside = |distance: f32| (XY_BAR_AWAY - 2.5..=XY_BAR_AWAY + 2.5).contains(&distance);
     let along_x = area.x - 2.0 <= world.x && world.x <= area.x + area.width + 2.0;
     let along_y = area.y - 2.0 <= world.y && world.y <= area.y + area.height + 2.0;
@@ -1333,7 +1330,7 @@ pub(crate) fn xy_bar_at(area: Rectangle, world: Point) -> Option<ControlPart> {
 
 /// The axis whose edge is nearest `world`: the bottom edge for `x`, and the
 /// left edge for `y`. A dropped cable goes to it (panel-widgets.md, XY pad).
-pub(crate) fn xy_nearest_edge(area: Rectangle, world: Point) -> ControlPart {
+pub(crate) fn xy_nearest_edge(area: Rect, world: Point) -> ControlPart {
     let bottom = (area.y + area.height - world.y).abs();
     let left = (world.x - area.x).abs();
     if bottom <= left {
@@ -1344,24 +1341,24 @@ pub(crate) fn xy_nearest_edge(area: Rectangle, world: Point) -> ControlPart {
 }
 
 /// The outline that shows which edge takes a dropped cable.
-pub(crate) fn xy_edge_ring(area: Rectangle, part: ControlPart) -> Rectangle {
+pub(crate) fn xy_edge_ring(area: Rect, part: ControlPart) -> Rect {
     xy_bar(area, part, 0.0, 1.0).expand(1.5)
 }
 
 /// How many screen pixels make an XY pad's full range: its square on screen,
 /// and at least 200 pixels, as for a fader.
-pub(crate) fn xy_throw(area: Rectangle, zoom: f32) -> f32 {
+pub(crate) fn xy_throw(area: Rect, zoom: f32) -> f32 {
     (area.width * zoom).max(MIN_THROW)
 }
 
 /// A number's box, leaving a caption row above it.
-pub(crate) fn number_box(rect: Rectangle) -> Rectangle {
+pub(crate) fn number_box(rect: Rect) -> Rect {
     select_box(rect)
 }
 
 /// The closed select box, leaving a caption row above it.
-pub(crate) fn select_box(rect: Rectangle) -> Rectangle {
-    Rectangle::new(
+pub(crate) fn select_box(rect: Rect) -> Rect {
+    Rect::new(
         Point::new(rect.x + 2.0, rect.y + GRID + 1.0),
         Size::new(rect.width - 4.0, GRID - 3.0),
     )
@@ -1369,52 +1366,52 @@ pub(crate) fn select_box(rect: Rectangle) -> Rectangle {
 
 /// The face of a button: its whole cell, with its caption on it
 /// (panels.md, Panel layout, principle 10).
-pub(crate) fn button_body(rect: Rectangle) -> Rectangle {
-    Rectangle::new(
+pub(crate) fn button_body(rect: Rect) -> Rect {
+    Rect::new(
         Point::new(rect.x + 4.0, rect.y + 4.0),
         Size::new(rect.width - 8.0, rect.height - 8.0),
     )
 }
 
 /// The track of a toggle switch: in the top row of its 3 × 2 cell.
-fn toggle_track(rect: Rectangle) -> Rectangle {
-    Rectangle::new(Point::new(rect.x + 7.0, rect.y + 1.0), Size::new(22.0, 11.0))
+fn toggle_track(rect: Rect) -> Rect {
+    Rect::new(Point::new(rect.x + 7.0, rect.y + 1.0), Size::new(22.0, 11.0))
 }
 
 /// Centre of radio option `i`: one row each, below the label row.
-pub(crate) fn radio_centre(rect: Rectangle, i: usize) -> Point {
+pub(crate) fn radio_centre(rect: Rect, i: usize) -> Point {
     Point::new(rect.x + 6.0, rect.y + GRID * (i as f32 + 1.5))
 }
 
 /// The radio option under a world point, if any.
 /// Segment `index` of a segmented control with `count` segments: equal
 /// shares of the bottom row, with a 1-unit gap between them.
-pub(crate) fn segment_rect(rect: Rectangle, index: usize, count: usize) -> Rectangle {
+pub(crate) fn segment_rect(rect: Rect, index: usize, count: usize) -> Rect {
     let count = count.max(1) as f32;
     let width = (rect.width - 4.0) / count;
-    Rectangle::new(
+    Rect::new(
         Point::new(rect.x + 2.0 + width * index as f32, rect.y + GRID),
         Size::new(width - 1.0, GRID - 1.0),
     )
 }
 
 /// The centre of segment `index`, for tests and scripts that click it.
-pub fn segment_centre(rect: Rectangle, index: usize, count: usize) -> Point {
+pub fn segment_centre(rect: Rect, index: usize, count: usize) -> Point {
     segment_rect(rect, index, count).center()
 }
 
 /// The segment of a segmented control under a world point, if any.
-pub(crate) fn segment_at(rect: Rectangle, count: usize, point: Point) -> Option<usize> {
+pub(crate) fn segment_at(rect: Rect, count: usize, point: Point) -> Option<usize> {
     (0..count).find(|&i| segment_rect(rect, i, count).expand(0.5).contains(point))
 }
 
-pub(crate) fn radio_option(rect: Rectangle, options: usize, point: Point) -> Option<usize> {
+pub(crate) fn radio_option(rect: Rect, options: usize, point: Point) -> Option<usize> {
     let row = ((point.y - rect.y) / GRID).floor() as isize - 1;
     (row >= 0 && (row as usize) < options).then_some(row as usize)
 }
 
 fn circle(centre: Point, radius: f32, fill: Color, border: Color, border_width: f32) -> Shape {
-    let rect = Rectangle::new(
+    let rect = Rect::new(
         Point::new(centre.x - radius, centre.y - radius),
         Size::new(radius * 2.0, radius * 2.0),
     );
@@ -1422,7 +1419,7 @@ fn circle(centre: Point, radius: f32, fill: Color, border: Color, border_width: 
 }
 
 pub(crate) fn mix(a: Color, b: Color, t: f32) -> Color {
-    Color::from_rgba(
+    Color::rgba(
         a.r + (b.r - a.r) * t,
         a.g + (b.g - a.g) * t,
         a.b + (b.b - a.b) * t,
@@ -1450,7 +1447,7 @@ impl ValueDrag {
     /// A fader: along its track. The full range is the track on screen, and
     /// at least 200 pixels, so a short fader is never coarse (panel-widgets.md,
     /// Fader).
-    pub fn fader(rect: Rectangle, vertical: bool, zoom: f32) -> Self {
+    pub fn fader(rect: Rect, vertical: bool, zoom: f32) -> Self {
         let track = fader_track(rect, vertical);
         let length = if vertical { track.height } else { track.width };
         Self {
@@ -1460,12 +1457,12 @@ impl ValueDrag {
     }
 
     /// A range: along its track, like a fader.
-    pub fn range(rect: Rectangle, vertical: bool, zoom: f32) -> Self {
+    pub fn range(rect: Rect, vertical: bool, zoom: f32) -> Self {
         Self::fader(rect, vertical, zoom)
     }
 
     /// A bar on one axis of an XY pad: along that axis, over the pad's throw.
-    pub fn xy_axis(area: Rectangle, part: ControlPart, zoom: f32) -> Self {
+    pub fn xy_axis(area: Rect, part: ControlPart, zoom: f32) -> Self {
         Self {
             horizontal: part != ControlPart::Second,
             throw: xy_throw(area, zoom),
@@ -1501,13 +1498,9 @@ impl ValueDrag {
         moved / self.throw * scale
     }
 
-    /// The cursor that says which way this drag goes.
-    pub fn cursor(&self) -> iced::mouse::Interaction {
-        if self.horizontal {
-            iced::mouse::Interaction::ResizingHorizontally
-        } else {
-            iced::mouse::Interaction::ResizingVertically
-        }
+    /// Whether this drag goes left and right. Otherwise it goes up and down.
+    pub fn is_horizontal(&self) -> bool {
+        self.horizontal
     }
 }
 

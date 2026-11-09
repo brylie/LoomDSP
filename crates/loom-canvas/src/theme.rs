@@ -1,6 +1,6 @@
 //! Canvas colours.
 
-use iced::Color;
+use loom_ui_core::Color;
 
 /// Colours used by the canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,33 +51,33 @@ pub struct Palette {
 impl Default for Palette {
     fn default() -> Self {
         Self {
-            background: Color::from_rgb8(0x1C, 0x1E, 0x23),
-            tile: Color::from_rgb8(0x2B, 0x2E, 0x35),
-            tile_border: Color::from_rgb8(0x3C, 0x40, 0x4A),
-            text: Color::from_rgb8(0xEC, 0xEE, 0xF2),
-            text_dim: Color::from_rgb8(0x9A, 0xA0, 0xAD),
-            title_bar: Color::from_rgba8(0xEC, 0xEE, 0xF2, 0.4),
-            text_bar: Color::from_rgba8(0x9A, 0xA0, 0xAD, 0.3),
-            selection: Color::from_rgb8(0xF5, 0xA6, 0x23),
+            background: Color::rgb8(0x1C, 0x1E, 0x23),
+            tile: Color::rgb8(0x2B, 0x2E, 0x35),
+            tile_border: Color::rgb8(0x3C, 0x40, 0x4A),
+            text: Color::rgb8(0xEC, 0xEE, 0xF2),
+            text_dim: Color::rgb8(0x9A, 0xA0, 0xAD),
+            title_bar: Color::rgba8(0xEC, 0xEE, 0xF2, 0.4),
+            text_bar: Color::rgba8(0x9A, 0xA0, 0xAD, 0.3),
+            selection: Color::rgb8(0xF5, 0xA6, 0x23),
             hover: Color::WHITE,
-            marquee: Color::from_rgba8(0xF5, 0xA6, 0x23, 0.12),
-            control_track: Color::from_rgb8(0x45, 0x49, 0x54),
-            control_value: Color::from_rgb8(0xF5, 0xA6, 0x23),
-            control_body: Color::from_rgb8(0x3A, 0x3E, 0x47),
-            light_off: Color::from_rgb8(0x35, 0x38, 0x40),
-            light_on: Color::from_rgb8(0x7C, 0xE0, 0x8A),
-            focus: Color::from_rgb8(0x6C, 0xB4, 0xF0),
-            warning: Color::from_rgb8(0xE0, 0x4F, 0x4F),
-            modulation: Color::from_rgb8(0xE8, 0x6A, 0xC8),
+            marquee: Color::rgba8(0xF5, 0xA6, 0x23, 0.12),
+            control_track: Color::rgb8(0x45, 0x49, 0x54),
+            control_value: Color::rgb8(0xF5, 0xA6, 0x23),
+            control_body: Color::rgb8(0x3A, 0x3E, 0x47),
+            light_off: Color::rgb8(0x35, 0x38, 0x40),
+            light_on: Color::rgb8(0x7C, 0xE0, 0x8A),
+            focus: Color::rgb8(0x6C, 0xB4, 0xF0),
+            warning: Color::rgb8(0xE0, 0x4F, 0x4F),
+            modulation: Color::rgb8(0xE8, 0x6A, 0xC8),
             families: [
-                Color::from_rgb8(0x62, 0x22, 0x2C), // Sources: red, like audio
-                Color::from_rgb8(0x32, 0x45, 0x53), // Filters and effects: slate
-                Color::from_rgb8(0x38, 0x58, 0x9F), // Modulation: blue
-                Color::from_rgb8(0x46, 0x31, 0x72), // Time and rhythm: violet, like phase
-                Color::from_rgb8(0x62, 0x42, 0x22), // Notes and pitch: brown, near pitch
-                Color::from_rgb8(0x71, 0x6A, 0x28), // Logic and math: olive, like gates
-                Color::from_rgb8(0x2A, 0x79, 0x47), // Level and routing: green
-                Color::from_rgb8(0x60, 0x66, 0x76), // Interface: grey
+                Color::rgb8(0x62, 0x22, 0x2C), // Sources: red, like audio
+                Color::rgb8(0x32, 0x45, 0x53), // Filters and effects: slate
+                Color::rgb8(0x38, 0x58, 0x9F), // Modulation: blue
+                Color::rgb8(0x46, 0x31, 0x72), // Time and rhythm: violet, like phase
+                Color::rgb8(0x62, 0x42, 0x22), // Notes and pitch: brown, near pitch
+                Color::rgb8(0x71, 0x6A, 0x28), // Logic and math: olive, like gates
+                Color::rgb8(0x2A, 0x79, 0x47), // Level and routing: green
+                Color::rgb8(0x60, 0x66, 0x76), // Interface: grey
             ],
         }
     }
@@ -112,7 +112,7 @@ impl Palette {
 
 /// A swatch's lighter tint: halfway to white.
 fn tint(colour: Color) -> Color {
-    Color::from_rgb(
+    Color::rgb(
         colour.r + (1.0 - colour.r) * 0.5,
         colour.g + (1.0 - colour.g) * 0.5,
         colour.b + (1.0 - colour.b) * 0.5,

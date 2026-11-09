@@ -4,7 +4,7 @@
 //! the canvas. The canvas never edits the scene. It reports gestures as
 //! messages, and the application changes its model and the scene.
 
-use iced::{Color, Point, Rectangle, Vector};
+use loom_ui_core::{Color, Point, Rect, Size, Vector};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -387,7 +387,7 @@ pub struct PanelView {
 
 /// Size of a tile in world units, for layout code that places tiles before
 /// building a scene.
-pub fn tile_size(inputs: usize, outputs: usize, panel_width: u8, panel_height: u8) -> iced::Size {
+pub fn tile_size(inputs: usize, outputs: usize, panel_width: u8, panel_height: u8) -> Size {
     let units = (2 * LABEL_COLUMNS + panel_width).max((TILE_WIDTH / GRID) as u8);
     let rows = inputs.max(outputs).max(1) as f32;
     let ports = rows * ROW + PADDING;
@@ -397,7 +397,7 @@ pub fn tile_size(inputs: usize, outputs: usize, panel_width: u8, panel_height: u
         0.0
     };
     let height = ((HEADER + ports.max(panel)) / GRID).ceil() * GRID;
-    iced::Size::new(f32::from(units) * GRID, height)
+    Size::new(f32::from(units) * GRID, height)
 }
 
 /// One module tile.
@@ -433,7 +433,7 @@ impl ModuleView {
     }
 
     /// The panel's minimum tile size in world units.
-    pub fn minimum_size(&self) -> iced::Size {
+    pub fn minimum_size(&self) -> Size {
         tile_size(
             self.inputs.len(),
             self.outputs.len(),
@@ -442,10 +442,10 @@ impl ModuleView {
         )
     }
 
-    fn size(&self) -> iced::Size {
+    fn size(&self) -> Size {
         let minimum = self.minimum_size();
         match self.size.filter(|_| self.is_growable()) {
-            Some((w, h)) => iced::Size::new(
+            Some((w, h)) => Size::new(
                 (f32::from(w) * GRID).clamp(minimum.width, minimum.width.max(64.0 * GRID)),
                 (f32::from(h) * GRID).clamp(minimum.height, minimum.height.max(64.0 * GRID)),
             ),
@@ -466,8 +466,8 @@ impl ModuleView {
     }
 
     /// The tile rectangle in world coordinates.
-    pub fn bounds(&self) -> Rectangle {
-        Rectangle::new(self.position, self.size())
+    pub fn bounds(&self) -> Rect {
+        Rect::new(self.position, self.size())
     }
 
     /// Top-left corner of the panel. A narrow panel is centred between the
@@ -506,7 +506,7 @@ impl ModuleView {
     }
 
     /// The world bounds of panel widget `index`.
-    pub fn widget_bounds(&self, index: usize) -> Option<Rectangle> {
+    pub fn widget_bounds(&self, index: usize) -> Option<Rect> {
         let widget = self.panel.widgets.get(index).filter(|w| !w.hidden)?;
         let origin = self.panel_origin();
         let (w, h) = widget.size();
@@ -521,17 +521,17 @@ impl ModuleView {
                 } else {
                     0.0
                 };
-                iced::Size::new(extra.width, height)
+                Size::new(extra.width, height)
             }
             WidgetViewKind::Meter { .. } => self.meter_growth(widget),
-            _ => iced::Size::ZERO,
+            _ => Size::ZERO,
         };
-        Some(Rectangle::new(
+        Some(Rect::new(
             Point::new(
                 origin.x + f32::from(widget.x) * GRID,
                 origin.y + f32::from(widget.y) * GRID + self.display_push(widget),
             ),
-            iced::Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
+            Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
         ))
     }
 
@@ -564,7 +564,7 @@ impl ModuleView {
     /// widget. A hidden widget counts, so a meter does not jump when a setting
     /// shows or hides one, unless its columns closed up and it lies past the
     /// panel's edge (`docs/design/panels.md`, Resizable tiles).
-    fn meter_growth(&self, meter: &WidgetView) -> iced::Size {
+    fn meter_growth(&self, meter: &WidgetView) -> Size {
         let extra = self.size() - self.minimum_size();
         let (width, height) = meter.size();
         let (right, bottom) = (meter.x + width, meter.y + height);
@@ -580,7 +580,7 @@ impl ModuleView {
         // Growing both ways would reach a widget past the corner. A meter's
         // bar is tall, so it keeps its height and gives up the width.
         let past_corner = !below && others().any(|(o, _)| o.x >= right && o.y >= bottom);
-        iced::Size::new(
+        Size::new(
             if beside || past_corner { 0.0 } else { extra.width },
             if below { 0.0 } else { extra.height },
         )
@@ -626,7 +626,7 @@ impl ModuleView {
     /// port, within the tile. Either way it covers neither the port nor its
     /// cable, which leaves the port to the right. [`Scene::badge_bounds`]
     /// picks the side.
-    fn badge_place(&self, index: usize, inside: bool) -> Option<Rectangle> {
+    fn badge_place(&self, index: usize, inside: bool) -> Option<Rect> {
         let count = self.outputs.get(index).map(|p| p.badge).filter(|&n| n > 0)?;
         let digits = count.to_string().len() as f32;
         let width = (digits * BADGE_TEXT_SIZE * 0.6 + 5.0).max(BADGE_HEIGHT);
@@ -636,9 +636,9 @@ impl ModuleView {
         } else {
             port.x + PORT_RADIUS + 1.0
         };
-        Some(Rectangle::new(
+        Some(Rect::new(
             Point::new(x, port.y - 5.0 - BADGE_HEIGHT),
-            iced::Size::new(width, BADGE_HEIGHT),
+            Size::new(width, BADGE_HEIGHT),
         ))
     }
 }
@@ -762,7 +762,7 @@ impl Scene {
     /// The assignment count badge of output `index` on `module`, if it
     /// shows one. Above the port, outside the tile's right edge, or inside
     /// the tile when another tile is close to that place.
-    pub fn badge_bounds(&self, module: u32, index: usize) -> Option<Rectangle> {
+    pub fn badge_bounds(&self, module: u32, index: usize) -> Option<Rect> {
         let inside = self.badges_inside.contains(&(module, index));
         self.module(module)?.badge_place(index, inside)
     }
@@ -866,7 +866,7 @@ impl Scene {
     }
 
     /// The bounding box of all modules, or `None` for an empty scene.
-    pub fn bounds(&self) -> Option<Rectangle> {
+    pub fn bounds(&self) -> Option<Rect> {
         self.modules.iter().map(ModuleView::bounds).reduce(|a, b| a.union(&b))
     }
 
@@ -1006,7 +1006,7 @@ impl Scene {
     }
 
     /// IDs of modules whose tiles intersect a world rectangle.
-    pub fn modules_in(&self, area: Rectangle) -> Vec<u32> {
+    pub fn modules_in(&self, area: Rect) -> Vec<u32> {
         self.modules
             .iter()
             .filter(|m| m.bounds().intersects(&area))

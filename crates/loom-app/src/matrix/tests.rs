@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_test::Ui;
-use iced::{Point, keyboard::key::Named};
+use iced::keyboard::key::Named;
+use loom_ui_core::Point;
 
 /// Keyboard navigation keeps every row within the actual table viewport.
 #[test]
@@ -465,7 +466,9 @@ fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     ui.app.matrix_event(Event::Select(AssignmentId(1), Column::On));
     let tile = ui.app.session.scene.module(2).expect("phase tile").bounds();
-    let at = ui.canvas().to_window(iced::Point::new(tile.center().x, tile.y + 10.0));
+    let at = ui
+        .canvas()
+        .to_window(loom_ui_core::Point::new(tile.center().x, tile.y + 10.0));
     ui.move_to(at);
     ui.press();
     ui.release();

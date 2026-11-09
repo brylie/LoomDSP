@@ -317,7 +317,7 @@ fn a_tile_with_a_mode_copies_whole() {
     mode(&mut app, Message::SetCopies { tile: 2, copies: 3 });
     app.session.selection = [2].into();
     let text = app.copy().expect("the tile copies");
-    app.paste(iced::Point::new(600.0, 400.0), Some(text));
+    app.paste(loom_ui_core::Point::new(600.0, 400.0), Some(text));
     let copy = *top_instances(&app).iter().find(|id| **id != 2).expect("a pasted tile");
     let modes = app.session.hierarchy.modes_of(ModuleId(copy)).unwrap();
     assert_eq!((modes.mode, modes.copy_count()), (Mode::Stack, 3));
@@ -336,7 +336,7 @@ fn a_tile_with_a_mode_copies_whole() {
     app.set_param(member.0, 0, 2.0);
     app.session.selection = [2].into();
     let text = app.copy().expect("the tile copies");
-    app.paste(iced::Point::new(600.0, 400.0), Some(text));
+    app.paste(loom_ui_core::Point::new(600.0, 400.0), Some(text));
     let copy = *top_instances(&app).iter().find(|id| **id != 2).expect("a pasted tile");
     assert_eq!(app.session.hierarchy.members_of(ModuleId(copy)).len(), 2);
     let path = app.session.hierarchy.path_of(ModuleId(copy));
@@ -367,7 +367,7 @@ fn a_layer_level_refuses_pastes_of_modules_and_cables() {
     app.show_level(&ModulePath::top(2));
     app.session.selection = [members[0].0].into();
     let member_text = app.copy().expect("a member tile copies");
-    app.paste(iced::Point::new(0.0, 0.0), Some(note));
+    app.paste(loom_ui_core::Point::new(0.0, 0.0), Some(note));
     assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
     let _ = app.update(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
         from: loom_canvas::PortRef {
@@ -382,7 +382,7 @@ fn a_layer_level_refuses_pastes_of_modules_and_cables() {
         },
     }));
     assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
-    app.paste(iced::Point::new(0.0, 400.0), Some(member_text));
+    app.paste(loom_ui_core::Point::new(0.0, 400.0), Some(member_text));
     assert_eq!(app.session.hierarchy.members_of(ModuleId(2)).len(), 3);
 }
 

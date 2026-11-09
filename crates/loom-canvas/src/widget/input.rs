@@ -52,11 +52,11 @@ impl<Message> PatchCanvas<'_, Message> {
         &self,
         state: &mut State,
         event: &Event,
-        bounds: Rectangle,
+        bounds: Rect,
         cursor: mouse::Cursor,
         shell: &mut Shell<'_, Message>,
     ) {
-        let over = cursor.is_over(bounds);
+        let over = cursor.is_over(bounds.to_iced());
         let screen = relative(cursor, bounds);
         state.size = bounds.size();
 
@@ -566,14 +566,18 @@ impl<Message> PatchCanvas<'_, Message> {
                                     shell,
                                     CanvasEvent::AssignDrop {
                                         from,
-                                        at: if state.outside_window { None } else { cursor.position() },
+                                        at: if state.outside_window {
+                                            None
+                                        } else {
+                                            cursor.position().map(|point| point.to_core())
+                                        },
                                     },
                                 );
                             }
                         }
                     }
                     Interaction::Selecting { start, current, base } => {
-                        let area = Rectangle::new(
+                        let area = Rect::new(
                             Point::new(start.x.min(current.x), start.y.min(current.y)),
                             Size::new((start.x - current.x).abs(), (start.y - current.y).abs()),
                         );
@@ -638,7 +642,13 @@ impl<Message> PatchCanvas<'_, Message> {
                 if let Interaction::Wiring { from, pulled: false } = state.interaction
                     && from.output
                 {
-                    self.assign_drag(from, cursor.position(), state.camera, bounds, shell);
+                    self.assign_drag(
+                        from,
+                        cursor.position().map(|point| point.to_core()),
+                        state.camera,
+                        bounds,
+                        shell,
+                    );
                 }
             }
             Event::Window(window::Event::Unfocused) => {
@@ -661,7 +671,7 @@ impl<Message> PatchCanvas<'_, Message> {
         state: &mut State,
         world: Point,
         screen: Point,
-        bounds: Rectangle,
+        bounds: Rect,
         shell: &mut Shell<'_, Message>,
     ) {
         if let Some(tile) = self.resize_at(world) {
@@ -1000,7 +1010,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Sends [`CanvasEvent::OpenBrowser`] for a point given in world and
     /// canvas-relative screen coordinates.
-    pub(super) fn open_browser(&self, world: Point, screen: Point, bounds: Rectangle, shell: &mut Shell<'_, Message>) {
+    pub(super) fn open_browser(&self, world: Point, screen: Point, bounds: Rect, shell: &mut Shell<'_, Message>) {
         self.emit(
             shell,
             CanvasEvent::OpenBrowser {
@@ -1018,7 +1028,7 @@ impl<Message> PatchCanvas<'_, Message> {
         state: &State,
         world: Point,
         screen: Point,
-        bounds: Rectangle,
+        bounds: Rect,
         shell: &mut Shell<'_, Message>,
     ) {
         let (output, anchor) = match self.scene.hit(world, state.hit_radius()) {

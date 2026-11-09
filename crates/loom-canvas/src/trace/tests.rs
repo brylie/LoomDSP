@@ -200,14 +200,14 @@ fn an_xy_scope_fades_and_has_a_dot_at_the_middle_zoom() {
 /// its trace is drawn inside that square (panel-widgets.md, XY scope).
 #[test]
 fn an_xy_scope_stays_square_when_it_grows() {
-    let wide = xy_scope_area(Rectangle::new(Point::new(10.0, 20.0), iced::Size::new(400.0, 100.0)));
+    let wide = xy_scope_area(Rect::new(Point::new(10.0, 20.0), Size::new(400.0, 100.0)));
     assert_eq!(wide.width, wide.height);
     assert_eq!(wide.center(), Point::new(210.0, 70.0));
     assert_eq!(
         wide.height,
-        trace_area(Rectangle::new(Point::new(10.0, 20.0), iced::Size::new(400.0, 100.0))).height
+        trace_area(Rect::new(Point::new(10.0, 20.0), Size::new(400.0, 100.0))).height
     );
-    let tall = xy_scope_area(Rectangle::new(Point::ORIGIN, iced::Size::new(100.0, 400.0)));
+    let tall = xy_scope_area(Rect::new(Point::ORIGIN, Size::new(100.0, 400.0)));
     assert_eq!(tall.width, tall.height);
     assert_eq!(tall.center(), Point::new(50.0, 200.0));
 

@@ -65,7 +65,7 @@ pub(super) fn search(call: Call, target: String, then: AfterSearch) -> Task<Mess
 
 /// Captures the window as it was last drawn, and saves all of it, or the
 /// part inside `area` (logical window pixels).
-pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rectangle>) -> Task<Message> {
+pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rect>) -> Task<Message> {
     iced::window::latest()
         .then(|id| match id {
             Some(id) => iced::window::screenshot(id).map(Some),
@@ -77,12 +77,12 @@ pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rectangle>) -> Tas
 
 /// The part of a capture inside `area`, in physical pixels, cut to the
 /// image. `None` when nothing of it is inside.
-pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rectangle) -> Option<Rectangle<u32>> {
+pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rect) -> Option<iced::Rectangle<u32>> {
     let x0 = (area.x * scale).floor().max(0.0);
     let y0 = (area.y * scale).floor().max(0.0);
     let x1 = ((area.x + area.width) * scale).ceil().min(size.width as f32);
     let y1 = ((area.y + area.height) * scale).ceil().min(size.height as f32);
-    (x1 > x0 && y1 > y0).then_some(Rectangle {
+    (x1 > x0 && y1 > y0).then_some(iced::Rectangle {
         x: x0 as u32,
         y: y0 as u32,
         width: (x1 - x0) as u32,
@@ -96,7 +96,7 @@ pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rectangle) ->
 pub(super) fn save_screenshot(
     shot: Option<iced::window::Screenshot>,
     path: &std::path::Path,
-    area: Option<Rectangle>,
+    area: Option<Rect>,
 ) -> Answer {
     let mut shot = shot.ok_or("no window to capture")?;
     let mut saved = None;
@@ -511,7 +511,7 @@ impl App {
                     },
                     (None, Some([x, y, w, h])) if margin.is_none() => {
                         if w > 0.0 && h > 0.0 {
-                            Ok(Area::Rect(Rectangle::new(Point::new(x, y), iced::Size::new(w, h))))
+                            Ok(Area::Rect(Rect::new(Point::new(x, y), loom_ui_core::Size::new(w, h))))
                         } else {
                             Err("`rect` is [x, y, width, height], with a width and height above 0".to_string())
                         }

@@ -84,7 +84,7 @@ fn case_does_not_matter() {
 
 #[test]
 fn no_match_lists_nothing_and_enter_adds_nothing() {
-    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rectangle::default());
+    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default());
     let _ = browser.update(Message::Query("zzzz".into()));
     assert!(browser.results.is_empty());
     assert!(matches!(browser.update(Message::Submit).0, Outcome::Stay));
@@ -93,7 +93,7 @@ fn no_match_lists_nothing_and_enter_adds_nothing() {
 
 #[test]
 fn enter_adds_the_highlighted_module_at_the_snapped_point() {
-    let area = Rectangle::new(Point::ORIGIN, iced::Size::new(1000.0, 800.0));
+    let area = Rect::new(Point::ORIGIN, loom_ui_core::Size::new(1000.0, 800.0));
     let mut browser = Browser::open(modules(), Point::new(100.4, 29.0), Point::ORIGIN, area);
     let _ = browser.update(Message::Query("saw".into()));
     match browser.update(Message::Submit).0 {
@@ -107,7 +107,7 @@ fn enter_adds_the_highlighted_module_at_the_snapped_point() {
 
 #[test]
 fn arrows_move_the_highlight_and_stop_at_the_ends() {
-    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rectangle::default());
+    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default());
     let last = browser.results.len() - 1;
     let _ = browser.update(Message::Key(Nav::Up));
     assert_eq!(browser.highlight, 0);
@@ -129,14 +129,14 @@ fn arrows_move_the_highlight_and_stop_at_the_ends() {
 
 #[test]
 fn escape_and_a_click_outside_close_without_adding() {
-    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rectangle::default());
+    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default());
     assert!(matches!(browser.update(Message::Key(Nav::Escape)).0, Outcome::Close));
     assert!(matches!(browser.update(Message::Close).0, Outcome::Close));
 }
 
 #[test]
 fn the_panel_stays_inside_the_canvas() {
-    let area = Rectangle::new(Point::new(0.0, 40.0), iced::Size::new(1000.0, 700.0));
+    let area = Rect::new(Point::new(0.0, 40.0), loom_ui_core::Size::new(1000.0, 700.0));
     assert_eq!(inside(Point::new(100.0, 100.0), area), Point::new(100.0, 100.0));
     let corner = inside(Point::new(990.0, 730.0), area);
     assert_eq!(corner, Point::new(1000.0 - WIDTH, 740.0 - HEIGHT));

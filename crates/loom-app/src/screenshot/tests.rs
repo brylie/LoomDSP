@@ -256,7 +256,7 @@ fn scale_keeps_the_image_in_range() {
 #[test]
 fn camera_centres_the_given_point_at_the_given_zoom() {
     let scene = Scene::new(Vec::new(), Vec::new());
-    let size = Size::new(800.0, 600.0);
+    let size = loom_ui_core::Size::new(800.0, 600.0);
     let view = camera(&scene, size, Some(2.0), Some(Point::new(100.0, 50.0)));
     assert_eq!(view.zoom, 2.0);
     assert_eq!(view.to_screen(Point::new(100.0, 50.0)), Point::new(400.0, 300.0));

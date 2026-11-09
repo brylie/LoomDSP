@@ -685,7 +685,7 @@ fn a_rate_change_keeps_the_patch_and_its_history() {
     let mut app = start(args(&dir), &two_devices());
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
     for x in [100.0, 200.0, 300.0] {
-        app.add_module(constant, iced::Point::new(x, 100.0));
+        app.add_module(constant, loom_ui_core::Point::new(x, 100.0));
     }
     app.session.controller.set_tempo(90.0).unwrap();
     let before = undo::Snapshot::take(&app.session.controller, &app.session.positions);
@@ -767,7 +767,7 @@ fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
     let fake = Rc::new(fake);
     let mut app = start(args(&dir), &fake);
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
-    app.add_module(constant, iced::Point::new(100.0, 100.0));
+    app.add_module(constant, loom_ui_core::Point::new(100.0, 100.0));
     let modules = app.session.controller.graph().len();
 
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
@@ -813,7 +813,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
     // so edits still work, well past the queue's size (#220).
     assert!(app.session.engine.stream.is_idle());
     let constant = loom_modules::registry().resolve("loom.math.constant").unwrap();
-    app.add_module(constant, iced::Point::new(100.0, 100.0));
+    app.add_module(constant, loom_ui_core::Point::new(100.0, 100.0));
     let id = *app.session.selection.first().unwrap();
     for i in 0..2_000 {
         let _ = app.update(crate::Message::Inspector(crate::inspector::Message::Param {
@@ -862,7 +862,7 @@ fn turning_an_input_off_releases_its_notes_and_is_saved() {
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad", "Keys"]));
     let mut app = start(args(&dir), &fake);
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
-    app.add_module(note, iced::Point::new(100.0, 100.0));
+    app.add_module(note, loom_ui_core::Point::new(100.0, 100.0));
     let id = *app.session.selection.iter().next().unwrap();
     let gate = app
         .session
@@ -909,7 +909,7 @@ fn a_learned_panic_trigger_is_saved_and_runs_panic() {
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad"]));
     let mut app = start(args(&dir), &fake);
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
-    app.add_module(note, iced::Point::new(100.0, 100.0));
+    app.add_module(note, loom_ui_core::Point::new(100.0, 100.0));
     let id = loom_core::ModuleId(*app.session.selection.iter().next().unwrap());
     let gate = app
         .session
@@ -962,7 +962,7 @@ fn a_learned_panic_trigger_is_saved_and_runs_panic() {
 fn note_app(dir: &std::path::Path, fake: &Rc<Fake>) -> (App, impl Fn(&App, f32) -> bool + use<>) {
     let mut app = start(args(dir), fake);
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
-    app.add_module(note, iced::Point::new(100.0, 100.0));
+    app.add_module(note, loom_ui_core::Point::new(100.0, 100.0));
     let id = loom_core::ModuleId(*app.session.selection.iter().next().unwrap());
     let gate = note.display_index("gate").unwrap();
     let wait_for = move |app: &App, value: f32| {
@@ -1213,7 +1213,7 @@ fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
     assert_eq!(open(&app).len(), 2, "both ports open: {:?}", open(&app));
 
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
-    app.add_module(note, iced::Point::new(100.0, 100.0));
+    app.add_module(note, loom_ui_core::Point::new(100.0, 100.0));
     let id = loom_core::ModuleId(*app.session.selection.iter().next().unwrap());
     let gate = app
         .session

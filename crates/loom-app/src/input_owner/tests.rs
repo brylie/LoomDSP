@@ -3,9 +3,9 @@
 use super::*;
 use crate::ui_test::Ui;
 use iced::keyboard::Modifiers;
-use iced::{Point, Rectangle, Size};
 use loom_canvas::stats::{FrameCause, requests_this_thread};
 use loom_canvas::{CanvasEvent, PortRef};
+use loom_ui_core::{Point, Rect, Size};
 
 /// Every overlay, and the canvas with none.
 pub(crate) const OWNERS: [InputOwner; 10] = [
@@ -30,7 +30,7 @@ pub(crate) fn select_first_module(ui: &mut Ui) {
 
 /// Opens an overlay as the app does, as far as a headless test can.
 pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
-    let area = Rectangle::new(Point::ORIGIN, Size::new(1000.0, 800.0));
+    let area = Rect::new(Point::ORIGIN, Size::new(1000.0, 800.0));
     match owner {
         InputOwner::Question => {
             ui.app.edit(|app| {
@@ -89,7 +89,7 @@ fn the_listener_passes_only_what_a_row_can_use() {
     ))));
     assert!(!hears(iced::Event::Window(window::Event::FileDropped("a.ron".into()))));
     assert!(!hears(iced::Event::Mouse(mouse::Event::CursorMoved {
-        position: Point::ORIGIN
+        position: iced::Point::ORIGIN
     })));
     assert!(!hears(iced::Event::Mouse(mouse::Event::ButtonReleased(
         mouse::Button::Left
@@ -405,7 +405,7 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
         ),
         interaction(
             iced::Event::Mouse(mouse::Event::CursorMoved {
-                position: Point::ORIGIN,
+                position: iced::Point::ORIGIN,
             }),
             Status::Ignored,
         ),

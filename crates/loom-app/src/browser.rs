@@ -5,9 +5,11 @@
 
 use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Point, Rectangle, Task, Theme};
+use iced::{Element, Length, Task, Theme};
 use loom_canvas::GRID;
+use loom_canvas::iced_convert::ToIced as _;
 use loom_core::ModuleDescriptor;
+use loom_ui_core::{Point, Rect};
 use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 
@@ -137,7 +139,7 @@ impl Browser {
     /// Opens a browser over `modules`, adding at `world`. The panel opens at
     /// `at`, moved as needed to stay inside `area` (window coordinates).
     /// The library's items come with [`Message::Library`].
-    pub fn open(modules: Vec<&'static ModuleDescriptor>, world: Point, at: Point, area: Rectangle) -> Self {
+    pub fn open(modules: Vec<&'static ModuleDescriptor>, world: Point, at: Point, area: Rect) -> Self {
         let results = search(&modules, "").into_iter().map(Entry::Module).collect();
         Self {
             modules,
@@ -334,13 +336,13 @@ impl Browser {
                 // cue (ADR-0029).
                 Entry::Module(d) => row![
                     text(d.name).size(style::CONTROL),
-                    swatch(crate::scene::family_colour(d.family)),
+                    swatch(crate::scene::family_colour(d.family).to_iced()),
                     text(d.family.label()).size(style::SMALL).color(style::QUIET),
                 ],
                 // A sub-patch, in the colour of a sub-patch tile.
                 Entry::Library(item) => row![
                     text(self.library[*item].name.clone()).size(style::CONTROL),
-                    swatch(crate::scene::family_colour(loom_core::Family::Interface)),
+                    swatch(crate::scene::family_colour(loom_core::Family::Interface).to_iced()),
                     text(LIBRARY_MARK).size(style::SMALL).color(style::QUIET),
                 ],
             }
@@ -395,7 +397,9 @@ impl Browser {
             .padding(PADDING)
             .width(WIDTH);
         let panel = container(panel).style(panel_style);
-        let panel: Element<'_, Message> = iced::widget::pin(iced::widget::opaque(panel)).position(self.at).into();
+        let panel: Element<'_, Message> = iced::widget::pin(iced::widget::opaque(panel))
+            .position(self.at.to_iced())
+            .into();
         let Some(open) = self.menu else {
             return panel;
         };
@@ -408,10 +412,8 @@ impl Browser {
         ])
         .padding(4)
         .style(container::rounded_box);
-        let menu = iced::widget::pin(iced::widget::opaque(menu)).position(Point::new(
-            self.at.x + WIDTH - MENU_WIDTH - PADDING,
-            row_top + ROW_HEIGHT,
-        ));
+        let menu = iced::widget::pin(iced::widget::opaque(menu))
+            .position(Point::new(self.at.x + WIDTH - MENU_WIDTH - PADDING, row_top + ROW_HEIGHT).to_iced());
         iced::widget::stack![panel, menu].into()
     }
 }
@@ -530,7 +532,7 @@ pub fn snap(world: Point) -> Point {
 
 /// Moves the panel's corner so the whole panel fits inside `area`, where it
 /// can. A small area keeps the corner at its top-left.
-fn inside(at: Point, area: Rectangle) -> Point {
+fn inside(at: Point, area: Rect) -> Point {
     let x = at.x.min(area.x + area.width - WIDTH).max(area.x);
     let y = at.y.min(area.y + area.height - HEIGHT).max(area.y);
     Point::new(x, y)

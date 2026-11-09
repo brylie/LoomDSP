@@ -2,9 +2,10 @@ use crate::inspector::Inspector;
 use crate::ui_test::Ui;
 use crate::{App, Loaded, Message, Source};
 use iced::keyboard::{self, Modifiers, key::Named};
-use iced::{Event, Point, mouse};
+use iced::{Event, mouse};
 use loom_core::{EngineConfig, ModuleId};
 use loom_patch::{ModulePath, Patch};
+use loom_ui_core::Point;
 
 /// A patch with one sub-patch, Voice: a pitch port into a sine, out
 /// through an out port, into the audio output.

@@ -2,10 +2,10 @@
 //! (`docs/design/sub-patches.md`, Make, open, and dissolve; Editor model).
 
 use crate::{App, Message, browser};
-use iced::{Point, Rectangle};
 use loom_canvas::{GRID, PortRef, TILE_WIDTH};
 use loom_core::{ModuleId, OutputRef, TRANSPORT_MODULE};
 use loom_patch::{Direction, End, Hierarchy, INPUT_KIND, ModulePath, OUTPUT_KIND, Tile};
+use loom_ui_core::{Point, Rect, Size};
 use std::collections::BTreeSet;
 
 /// The status bar text when the Transport is added inside a sub-patch
@@ -245,7 +245,7 @@ impl App {
     }
 
     /// The bounding box of tiles on the canvas, in world units.
-    fn tiles_bounds(&self, ids: &[ModuleId]) -> Option<Rectangle> {
+    fn tiles_bounds(&self, ids: &[ModuleId]) -> Option<Rect> {
         ids.iter()
             .filter_map(|id| self.session.scene.module(id.0).map(|tile| tile.bounds()))
             .reduce(|a, b| a.union(&b))
@@ -279,7 +279,7 @@ impl App {
         self.edit(|app| {
             let bounds = app
                 .tiles_bounds(&made.members)
-                .unwrap_or(Rectangle::new(Point::ORIGIN, iced::Size::ZERO));
+                .unwrap_or(Rect::new(Point::ORIGIN, Size::ZERO));
             let origin = browser::snap(bounds.position());
             app.session.positions.insert(made.instance.0, (origin.x, origin.y));
             let column = |ids: &[ModuleId], x: f32, positions: &mut std::collections::BTreeMap<u32, (f32, f32)>| {

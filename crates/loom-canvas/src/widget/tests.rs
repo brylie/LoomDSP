@@ -514,10 +514,10 @@ fn button_module() -> ModuleView {
 }
 
 fn drive(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> Vec<CanvasEvent> {
-    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    canvas.handle(state, event, bounds, mouse::Cursor::Available(at), &mut shell);
+    canvas.handle(state, event, bounds, mouse::Cursor::Available(at.to_iced()), &mut shell);
     messages
 }
 
@@ -554,7 +554,7 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     );
     assert!(state.focus.popup().is_some());
     let list = canvas
-        .select_popup_bounds(&state, Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)))
+        .select_popup_bounds(&state, Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)))
         .unwrap();
     let choice = Point::new(list.x + 20.0, list.y + SELECT_ROW_PX * 1.5);
     let picked = drive(&canvas, &mut state, &click(mouse::Button::Left), choice);
@@ -593,7 +593,9 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     let events = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::CursorMoved { position: moved }),
+        &Event::Mouse(mouse::Event::CursorMoved {
+            position: moved.to_iced(),
+        }),
         moved,
     );
     assert!(events.iter().any(|event| matches!(event, CanvasEvent::Move { .. })));
@@ -878,7 +880,7 @@ fn a_long_select_list_scrolls() {
     let scene = long_list(30);
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let canvas_area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let canvas_area = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let box_at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let mut state = State::default();
     drive(&canvas, &mut state, &click(mouse::Button::Left), box_at);
@@ -963,7 +965,7 @@ fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
     };
     canvas.open_select(&mut state, 1, 0);
     let list = canvas
-        .select_popup_bounds(&state, Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)))
+        .select_popup_bounds(&state, Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)))
         .unwrap();
     let inside = Point::new(list.x + 20.0, list.y + 5.0);
     drive(
@@ -985,7 +987,7 @@ fn a_list_on_a_grown_canvas_has_no_blank_rows() {
     let scene = long_list(30);
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let area = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     // Scrolled to the end on a canvas 4 rows tall.
     let mut state = State {
         size: Size::new(800.0, 4.0 * SELECT_ROW_PX),
@@ -1119,7 +1121,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
                 Point::new(at.x + d, at.y)
             }
         };
-        let moved = |to: Point| Event::Mouse(mouse::Event::CursorMoved { position: to });
+        let moved = |to: Point| Event::Mouse(mouse::Event::CursorMoved { position: to.to_iced() });
         let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
 
         let mut state = State::default();
@@ -1323,7 +1325,7 @@ fn a_select_list_stays_in_the_canvas_when_its_box_is_off_an_edge() {
     let scene = long_list(5);
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let area = Rectangle::new(Point::ORIGIN, Size::new(400.0, 300.0));
+    let area = Rect::new(Point::ORIGIN, Size::new(400.0, 300.0));
     for pan in [-5000.0, 5000.0] {
         let mut state = State {
             size: area.size(),
@@ -1361,8 +1363,8 @@ fn no_typed_field_opens_during_a_drag() {
 /// bottom edge, and never past the right edge.
 #[test]
 fn the_reason_for_bad_text_stays_in_the_canvas() {
-    let canvas = Rectangle::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0));
-    let field = |x, y| Rectangle::new(Point::new(x, y), Size::new(110.0, 23.0));
+    let canvas = Rect::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0));
+    let field = |x, y| Rect::new(Point::new(x, y), Size::new(110.0, 23.0));
 
     let middle = typed_field::typed_reason_bounds(field(50.0, 100.0), 120.0, canvas);
     assert!(middle.y > 100.0, "below");
@@ -1624,7 +1626,7 @@ fn moving_focus_away_closes_the_field_with_no_change() {
     };
 
     let mut state = opened();
-    let area = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let area = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let on_field = canvas.typed_field_bounds(&state, area).unwrap().center();
     assert!(!edits(&drive(
         &canvas,
@@ -1949,7 +1951,9 @@ fn a_button_reports_release_outside() {
     let moved = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::CursorMoved { position: outside }),
+        &Event::Mouse(mouse::Event::CursorMoved {
+            position: outside.to_iced(),
+        }),
         outside,
     );
     assert!(moved.iter().all(|event| !matches!(event, CanvasEvent::Move { .. })));
@@ -2596,8 +2600,14 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
     };
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
-    canvas.handle(&mut state, &escape, bounds, mouse::Cursor::Available(at), &mut shell);
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    canvas.handle(
+        &mut state,
+        &escape,
+        bounds,
+        mouse::Cursor::Available(at.to_iced()),
+        &mut shell,
+    );
     assert_eq!(
         shell.event_status(),
         iced::event::Status::Ignored,
@@ -2611,7 +2621,7 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
         &mut state,
         &escape,
         bounds,
-        mouse::Cursor::Available(at),
+        mouse::Cursor::Available(at.to_iced()),
         &mut next_shell,
     );
     assert_eq!(
@@ -2639,7 +2649,7 @@ fn learn_outlines_cover_only_visible_tiles() {
     let learn = LearnView::default();
     let canvas = learning(&scene, &none, &learn);
     let plain = canvas.overlay(&State::default()).shapes.len();
-    let view = Rectangle::new(Point::new(-50.0, -50.0), Size::new(800.0, 600.0));
+    let view = Rect::new(Point::new(-50.0, -50.0), Size::new(800.0, 600.0));
     // Two controls (a knob and a toggle) on the one visible tile.
     assert_eq!(canvas.overlay_in(&State::default(), view).shapes.len(), plain + 2);
 }
@@ -2653,7 +2663,7 @@ fn knob_scene() -> (Scene, Point) {
 }
 
 fn moved(to: Point) -> Event {
-    Event::Mouse(mouse::Event::CursorMoved { position: to })
+    Event::Mouse(mouse::Event::CursorMoved { position: to.to_iced() })
 }
 
 /// A source tile with one output, and a tile with a knob, a light, and
@@ -2887,12 +2897,12 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
 
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     canvas.handle(
         &mut state,
         &escape(),
         bounds,
-        mouse::Cursor::Available(empty),
+        mouse::Cursor::Available(empty.to_iced()),
         &mut shell,
     );
     assert_eq!(shell.event_status(), iced::event::Status::Captured);
@@ -2903,7 +2913,7 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
         &mut state,
         &escape(),
         bounds,
-        mouse::Cursor::Available(empty),
+        mouse::Cursor::Available(empty.to_iced()),
         &mut shell,
     );
     assert_eq!(
@@ -3046,12 +3056,12 @@ fn a_pin_without_its_badge_takes_no_escape() {
     assert_eq!(canvas.pin(&state), None);
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     canvas.handle(
         &mut state,
         &escape(),
         bounds,
-        mouse::Cursor::Available(Point::ORIGIN),
+        mouse::Cursor::Available(Point::ORIGIN.to_iced()),
         &mut shell,
     );
     assert_eq!(shell.event_status(), iced::event::Status::Ignored);
@@ -3110,7 +3120,7 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
     let none = BTreeSet::new();
     let due = Instant::now() + Duration::from_millis(400);
     let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
-    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     // Already framed and reported, so a redraw asks for nothing itself.
     let mut state = State::default();
     let at = Point::new(100.0, 100.0);
@@ -3119,7 +3129,7 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
         &mut state,
         &redraw,
         bounds,
-        mouse::Cursor::Available(at),
+        mouse::Cursor::Available(at.to_iced()),
         &mut Shell::new(&mut Vec::new()),
     );
     for event in [
@@ -3128,14 +3138,26 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
     ] {
         let mut messages = Vec::new();
         let mut shell = Shell::new(&mut messages);
-        canvas.on_event(&mut state, &event, bounds, mouse::Cursor::Available(at), &mut shell);
+        canvas.on_event(
+            &mut state,
+            &event,
+            bounds,
+            mouse::Cursor::Available(at.to_iced()),
+            &mut shell,
+        );
         assert_eq!(shell.redraw_request(), window::RedrawRequest::At(due), "{event:?}");
     }
     let closed = PatchCanvas::new(&scene, &none, |e| e);
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
     let shift = Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT));
-    closed.on_event(&mut state, &shift, bounds, mouse::Cursor::Available(at), &mut shell);
+    closed.on_event(
+        &mut state,
+        &shift,
+        bounds,
+        mouse::Cursor::Available(at.to_iced()),
+        &mut shell,
+    );
     assert_ne!(
         shell.redraw_request(),
         window::RedrawRequest::At(due),
@@ -3522,7 +3544,7 @@ fn right_click_on_an_output_opens_the_probe_menu() {
             output,
             world: port,
             at: port,
-            area: Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+            area: Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)),
         }]
     );
 }
@@ -3576,9 +3598,13 @@ fn right_drag_pans_and_opens_no_menu() {
     let mut state = State::default();
     let mut events = drive(&canvas, &mut state, &click(mouse::Button::Right), port);
     let away = port + Vector::new(30.0, 0.0);
-    let moved = Event::Mouse(mouse::Event::CursorMoved { position: away });
+    let moved = Event::Mouse(mouse::Event::CursorMoved {
+        position: away.to_iced(),
+    });
     events.extend(drive(&canvas, &mut state, &moved, away));
-    let back = Event::Mouse(mouse::Event::CursorMoved { position: port });
+    let back = Event::Mouse(mouse::Event::CursorMoved {
+        position: port.to_iced(),
+    });
     events.extend(drive(&canvas, &mut state, &back, port));
     events.extend(drive(
         &canvas,
@@ -3758,7 +3784,7 @@ fn hiding_a_range_ends_the_inside() {
     let (shown, hidden) = (tile(false), tile(true));
     let selected = BTreeSet::from([1]);
     let at = shown.module(1).unwrap().bounds().center();
-    let moved = Event::Mouse(mouse::Event::CursorMoved { position: at });
+    let moved = Event::Mouse(mouse::Event::CursorMoved { position: at.to_iced() });
     let mut state = State {
         focus: FocusState::at(
             1,
@@ -3828,10 +3854,10 @@ fn command_key(named: keyboard::key::Named) -> Event {
 
 /// Drives one event and says whether the canvas captured it.
 fn captured(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> bool {
-    let bounds = Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    canvas.handle(state, event, bounds, mouse::Cursor::Available(at), &mut shell);
+    canvas.handle(state, event, bounds, mouse::Cursor::Available(at.to_iced()), &mut shell);
     shell.event_status() == iced::event::Status::Captured
 }
 
@@ -3857,7 +3883,9 @@ fn a_header_double_click_opens_the_tile_and_starts_no_move() {
     let moved = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::CursorMoved { position: away }),
+        &Event::Mouse(mouse::Event::CursorMoved {
+            position: away.to_iced(),
+        }),
         away,
     );
     assert!(moved.is_empty(), "{moved:?}");
@@ -3898,7 +3926,7 @@ fn the_end_of_a_pan_drag_reports_the_camera_once() {
         events.extend(drive(
             &canvas,
             &mut state,
-            &Event::Mouse(mouse::Event::CursorMoved { position: to }),
+            &Event::Mouse(mouse::Event::CursorMoved { position: to.to_iced() }),
             to,
         ));
     }

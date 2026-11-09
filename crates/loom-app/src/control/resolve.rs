@@ -10,7 +10,7 @@ pub(super) const MAX_DRAG_STEPS: u32 = 1000;
 pub(super) fn aim(target: Option<String>, x: Option<f32>, y: Option<f32>) -> Result<Option<Aim>, String> {
     match (target, x, y) {
         (Some(target), None, None) => Ok(Some(Aim::Target(target))),
-        (None, Some(x), Some(y)) => Ok(Some(Aim::At(Point::new(x, y)))),
+        (None, Some(x), Some(y)) => Ok(Some(Aim::At(iced::Point::new(x, y)))),
         (None, None, None) => Ok(None),
         _ => Err("give `target`, or `x` and `y`".to_string()),
     }
@@ -22,7 +22,7 @@ pub(super) fn drag_end(value: &Value, which: &str) -> Result<Aim, String> {
         Value::String(target) => Ok(Aim::Target(target.clone())),
         Value::Array(xy) => match xy.as_slice() {
             [x, y] => match (x.as_f64(), y.as_f64()) {
-                (Some(x), Some(y)) => Ok(Aim::At(Point::new(x as f32, y as f32))),
+                (Some(x), Some(y)) => Ok(Aim::At(iced::Point::new(x as f32, y as f32))),
                 _ => Err(format!("`{which}` is a target or [x, y]")),
             },
             _ => Err(format!("`{which}` is a target or [x, y]")),
@@ -47,7 +47,7 @@ pub(super) fn with_modifiers(modifiers: keyboard::Modifiers, steps: Vec<PointerS
 #[derive(Debug, Clone, Default)]
 pub struct Found {
     pub canvas: Option<CanvasView>,
-    pub text: Option<Rectangle>,
+    pub text: Option<Rect>,
 }
 
 /// Finds the canvas, and the first text widget that reads `text`.
@@ -61,15 +61,15 @@ impl Operation<Found> for Find {
         operate(self);
     }
 
-    fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Any) {
+    fn custom(&mut self, _id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Any) {
         if let Some(view) = state.downcast_ref::<CanvasView>() {
             self.found.canvas = Some(*view);
         }
     }
 
-    fn text(&mut self, _id: Option<&Id>, bounds: Rectangle, text: &str) {
+    fn text(&mut self, _id: Option<&Id>, bounds: iced::Rectangle, text: &str) {
         if self.found.text.is_none() && text == self.text {
-            self.found.text = Some(bounds);
+            self.found.text = Some(bounds.to_core());
         }
     }
 
@@ -110,15 +110,15 @@ pub(super) fn port(app: &App, text: &str, output: bool) -> Result<PortRef, Strin
 }
 
 /// A world rectangle in window coordinates.
-pub(super) fn to_window(view: &CanvasView, world: Rectangle) -> Rectangle {
+pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
     let a = view.to_window(Point::new(world.x, world.y));
     let b = view.to_window(Point::new(world.x + world.width, world.y + world.height));
-    Rectangle::new(a, iced::Size::new(b.x - a.x, b.y - a.y))
+    Rect::new(a, loom_ui_core::Size::new(b.x - a.x, b.y - a.y))
 }
 
 /// Where a target is in the window: a module, a control, port, light, or
 /// meter by name (rule 10), or any text the window shows.
-pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rectangle, String> {
+pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rect, String> {
     let Some((module, name)) = split_target(target) else {
         return found
             .text
@@ -138,7 +138,7 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rectangle, Strin
     Ok(to_window(view, world))
 }
 
-pub(super) fn rect_fields(r: Rectangle) -> Map<String, Value> {
+pub(super) fn rect_fields(r: Rect) -> Map<String, Value> {
     let mut map = Map::new();
     map.insert("x".to_string(), json!(r.center_x()));
     map.insert("y".to_string(), json!(r.center_y()));

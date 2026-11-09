@@ -986,7 +986,7 @@ fn locate_agrees_with_the_ui_harness() {
     assert!(tile.contains(knob.center()));
     assert!(locate(&ui.app, "4:nonsense", &found).is_err());
     let text = Found {
-        text: Some(Rectangle::new(Point::new(1.0, 2.0), iced::Size::new(3.0, 4.0))),
+        text: Some(Rect::new(Point::new(1.0, 2.0), loom_ui_core::Size::new(3.0, 4.0))),
         ..found
     };
     assert_eq!(locate(&ui.app, "Cutoff", &text).unwrap().x, 1.0);
@@ -1279,11 +1279,11 @@ fn a_capture_is_saved_whole_or_cut_to_an_area() {
         (json!(40), json!(20))
     );
     assert!(whole.get("area").is_none());
-    let area = Rectangle::new(Point::new(2.0, 1.0), iced::Size::new(5.0, 4.0));
+    let area = Rect::new(Point::new(2.0, 1.0), loom_ui_core::Size::new(5.0, 4.0));
     let cut = save_screenshot(shot(), &path, Some(area)).unwrap();
     assert_eq!((cut["width"].clone(), cut["height"].clone()), (json!(10), json!(8)));
     assert_eq!(cut["area"], json!({"x": 2.0, "y": 1.0, "width": 5.0, "height": 4.0}));
-    let outside = Rectangle::new(Point::new(100.0, 0.0), iced::Size::new(5.0, 4.0));
+    let outside = Rect::new(Point::new(100.0, 0.0), loom_ui_core::Size::new(5.0, 4.0));
     assert!(
         save_screenshot(shot(), &path, Some(outside))
             .unwrap_err()
@@ -1515,7 +1515,7 @@ fn a_scripted_key_routes_as_a_real_one_for_each_overlay() {
 #[test]
 fn a_scripted_press_routes_as_a_real_one_for_each_overlay() {
     use crate::input_owner::tests::OWNERS;
-    let at = iced::Point::new(5.0, 5.0);
+    let at = Point::new(5.0, 5.0);
     for owner in OWNERS {
         let mut scripted = with_overlay(owner);
         channel_messages(&mut scripted, r#"{"cmd": "hover", "x": 5.0, "y": 5.0}"#);
@@ -1693,7 +1693,7 @@ fn locate_finds_lights_and_meters() {
 #[test]
 fn a_screenshot_area_is_scaled_and_cut_to_the_window() {
     let size = iced::Size::new(200, 100);
-    let rect = |x, y, w, h| Rectangle::new(Point::new(x, y), iced::Size::new(w, h));
+    let rect = |x, y, w, h| Rect::new(Point::new(x, y), loom_ui_core::Size::new(w, h));
     let region = crop_region(size, 2.0, rect(10.0, 5.0, 20.0, 10.0)).unwrap();
     assert_eq!((region.x, region.y, region.width, region.height), (20, 10, 40, 20));
     let region = crop_region(size, 1.0, rect(-10.0, 90.0, 30.0, 30.0)).unwrap();

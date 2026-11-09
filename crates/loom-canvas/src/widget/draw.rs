@@ -17,7 +17,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// The overlay for a view whose visible world area is `visible`. Learn
     /// mode outlines only the controls there, so its cost follows what is on
     /// screen, not the size of the patch.
-    pub(super) fn overlay_in(&self, state: &State, visible: Rectangle) -> Overlay {
+    pub(super) fn overlay_in(&self, state: &State, visible: Rect) -> Overlay {
         let mut overlay = self.overlay(state);
         let p = &self.palette;
         // MIDI learn mode outlines every control on screen, and the armed
@@ -59,7 +59,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
         for tile in self.scene.modules().iter().filter(|tile| tile.is_growable()) {
             let bounds = tile.bounds();
-            let grip = Rectangle::new(
+            let grip = Rect::new(
                 Point::new(
                     bounds.x + bounds.width - GRID * 0.65,
                     bounds.y + bounds.height - GRID * 0.65,
@@ -96,7 +96,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     if let (Some(centre), Some(view)) = (self.scene.port_position(port), self.scene.port(port)) {
                         let r = PORT_RADIUS - 1.0;
-                        let rect = Rectangle::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
+                        let rect = Rect::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
                         let corner = if view.shape == crate::scene::PortShape::Round {
                             r
                         } else {
@@ -168,7 +168,7 @@ impl<Message> PatchCanvas<'_, Message> {
             && let Some(centre) = self.scene.port_position(port)
         {
             let r = PORT_RADIUS + 3.0;
-            let rect = Rectangle::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
+            let rect = Rect::new(Point::new(centre.x - r, centre.y - r), Size::new(2.0 * r, 2.0 * r));
             overlay
                 .shapes
                 .push(Shape::new(rect, r, Color::TRANSPARENT, p.hover, 1.2));
@@ -244,7 +244,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
             Interaction::Selecting { start, current, .. } => {
-                let rect = Rectangle::new(
+                let rect = Rect::new(
                     Point::new(start.x.min(current.x), start.y.min(current.y)),
                     Size::new((start.x - current.x).abs(), (start.y - current.y).abs()),
                 );
@@ -255,7 +255,7 @@ impl<Message> PatchCanvas<'_, Message> {
             Interaction::Resizing { module, current, .. } => {
                 if let Some(tile) = self.scene.module(*module) {
                     overlay.shapes.push(Shape::new(
-                        Rectangle::new(tile.position, *current),
+                        Rect::new(tile.position, *current),
                         2.0,
                         Color::TRANSPARENT,
                         p.selection,
@@ -388,13 +388,8 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
-    pub(super) fn draw_text<Renderer>(
-        &self,
-        state: &State,
-        values: &PanelValues,
-        renderer: &mut Renderer,
-        bounds: Rectangle,
-    ) where
+    pub(super) fn draw_text<Renderer>(&self, state: &State, values: &PanelValues, renderer: &mut Renderer, bounds: Rect)
+    where
         Renderer: text::Renderer<Font = Font>,
     {
         let zoom = state.camera.zoom;
@@ -415,7 +410,7 @@ impl<Message> PatchCanvas<'_, Message> {
         };
         let text = |content: &str, size: f32, width: f32, align: text::Alignment| Text {
             content: content.to_string(),
-            bounds: Size::new(width, size * 1.4),
+            bounds: iced::Size::new(width, size * 1.4),
             size: Pixels(size),
             line_height: text::LineHeight::Relative(1.2),
             font,
@@ -435,7 +430,7 @@ impl<Message> PatchCanvas<'_, Message> {
             if !tile.intersects(&visible) {
                 continue;
             }
-            let screen_tile = Rectangle::new(to_screen(tile.position()), tile.size() * zoom);
+            let screen_tile = Rect::new(to_screen(tile.position()), tile.size() * zoom);
             let Some(clip) = screen_tile.intersection(&bounds) else {
                 continue;
             };
@@ -455,9 +450,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         };
                         renderer.fill_text(
                             text(&shown, label_px, item.width * zoom, align),
-                            to_screen(item.anchor),
-                            self.palette.text,
-                            clip,
+                            to_screen(item.anchor).to_iced(),
+                            self.palette.text.to_iced(),
+                            clip.to_iced(),
                         );
                         return;
                     }
@@ -512,9 +507,9 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 renderer.fill_text(
                     text(value.unwrap_or(&item.content), size, item.width * zoom, align),
-                    to_screen(item.anchor),
-                    if value.is_some() { self.palette.text } else { colour },
-                    clip,
+                    to_screen(item.anchor).to_iced(),
+                    if value.is_some() { self.palette.text } else { colour }.to_iced(),
+                    clip.to_iced(),
                 );
             });
         }
@@ -544,9 +539,9 @@ impl<Message> PatchCanvas<'_, Message> {
                     let label = port.badge.to_string();
                     renderer.fill_text(
                         text(&label, badge_px, rect.width * zoom, text::Alignment::Center),
-                        to_screen(rect.center()),
-                        self.palette.background,
-                        bounds,
+                        to_screen(rect.center()).to_iced(),
+                        self.palette.background.to_iced(),
+                        bounds.to_iced(),
                     );
                 }
             }
@@ -566,34 +561,34 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// Draws the open choice list above all tile text, at a fixed screen size.
-    pub(super) fn draw_select_popup<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle)
+    pub(super) fn draw_select_popup<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rect)
     where
         Renderer: text::Renderer<Font = Font>,
     {
         let (Some(popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
             return;
         };
-        let Some(rect) = self.select_popup_bounds(state, Rectangle::new(Point::ORIGIN, bounds.size())) else {
+        let Some(rect) = self.select_popup_bounds(state, Rect::new(Point::ORIGIN, bounds.size())) else {
             return;
         };
         let Some(WidgetViewKind::Select { options }) = self.widget_kind(module, widget) else {
             return;
         };
         let at = Point::new(bounds.x + rect.x, bounds.y + rect.y);
-        let area = Rectangle::new(at, rect.size());
+        let area = Rect::new(at, rect.size());
         let font = renderer.default_font();
-        renderer.with_layer(bounds, |renderer| {
+        renderer.with_layer(bounds.to_iced(), |renderer| {
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds: area,
+                    bounds: area.to_iced(),
                     border: iced::Border {
-                        color: self.palette.tile_border,
+                        color: self.palette.tile_border.to_iced(),
                         width: 1.0,
                         radius: 5.0.into(),
                     },
                     ..renderer::Quad::default()
                 },
-                self.palette.control_body,
+                self.palette.control_body.to_iced(),
             );
             let rows = (rect.height / SELECT_ROW_PX).round() as usize;
             for (index, option) in options.iter().enumerate().skip(popup.scroll).take(rows) {
@@ -601,17 +596,18 @@ impl<Message> PatchCanvas<'_, Message> {
                 if index == popup.highlight {
                     renderer.fill_quad(
                         renderer::Quad {
-                            bounds: Rectangle::new(
+                            bounds: Rect::new(
                                 Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * row + 1.0),
                                 Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
-                            ),
+                            )
+                            .to_iced(),
                             border: iced::Border {
                                 radius: 3.0.into(),
                                 ..iced::Border::default()
                             },
                             ..renderer::Quad::default()
                         },
-                        self.palette.control_track,
+                        self.palette.control_track.to_iced(),
                     );
                 }
                 let chosen = self.position(module, widget).round().max(0.0) as usize == index;
@@ -623,7 +619,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 renderer.fill_text(
                     Text {
                         content: label,
-                        bounds: Size::new(rect.width - 12.0, 17.0),
+                        bounds: iced::Size::new(rect.width - 12.0, 17.0),
                         size: Pixels(12.0),
                         line_height: text::LineHeight::Relative(1.2),
                         font,
@@ -632,9 +628,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         shaping: text::Shaping::Advanced,
                         wrapping: text::Wrapping::None,
                     },
-                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)),
-                    self.palette.text,
-                    bounds,
+                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)).to_iced(),
+                    self.palette.text.to_iced(),
+                    bounds.to_iced(),
                 );
             }
             // A longer list has a bar at its right edge. Its length and place
@@ -644,17 +640,18 @@ impl<Message> PatchCanvas<'_, Message> {
                 let start = popup.scroll as f32 / options.len() as f32;
                 renderer.fill_quad(
                     renderer::Quad {
-                        bounds: Rectangle::new(
+                        bounds: Rect::new(
                             Point::new(at.x + rect.width - 5.0, at.y + 2.0 + (rect.height - 4.0) * start),
                             Size::new(3.0, (rect.height - 4.0) * share),
-                        ),
+                        )
+                        .to_iced(),
                         border: iced::Border {
                             radius: 1.5.into(),
                             ..iced::Border::default()
                         },
                         ..renderer::Quad::default()
                     },
-                    self.palette.text_dim,
+                    self.palette.text_dim.to_iced(),
                 );
             }
         });

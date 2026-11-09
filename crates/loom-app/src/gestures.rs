@@ -7,8 +7,8 @@
 //! the patch (an assignment, a depth, a label) stays with the app, because
 //! it goes through undo.
 
-use iced::Point;
 use loom_core::AssignmentId;
+use loom_ui_core::Point;
 
 /// A parameter: module ID and parameter index.
 pub type Param = (u32, usize);

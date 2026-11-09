@@ -2,10 +2,10 @@ use super::*;
 use crate::question::{Answer, Message as QuestionMessage};
 use crate::{CanvasEvent, Message, files, tests, ui_test::Ui};
 use iced::{
-    Point,
     keyboard::{Key, Modifiers, key::Named},
     mouse,
 };
+use loom_ui_core::Point;
 
 /// Every built-in example parses and loads with the running registry.
 #[test]

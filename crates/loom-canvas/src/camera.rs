@@ -1,6 +1,6 @@
 //! Pan and zoom.
 
-use iced::{Point, Rectangle, Size, Vector};
+use loom_ui_core::{Point, Rect, Size, Vector};
 
 /// Smallest zoom. Below this, tiles are a few pixels wide.
 pub const MIN_ZOOM: f32 = 0.1;
@@ -48,8 +48,8 @@ impl Camera {
     }
 
     /// The world rectangle visible in a widget of this size.
-    pub fn visible(&self, size: Size) -> Rectangle {
-        Rectangle::new(self.origin, Size::new(size.width / self.zoom, size.height / self.zoom))
+    pub fn visible(&self, size: Size) -> Rect {
+        Rect::new(self.origin, Size::new(size.width / self.zoom, size.height / self.zoom))
     }
 
     /// Moves the view by a screen offset (for example a mouse drag).
@@ -75,7 +75,7 @@ impl Camera {
 
     /// Shows all of `world` inside a widget of this size, with a margin.
     /// Never zooms in past 1.0, so small patches stay at natural size.
-    pub fn frame(&mut self, world: Rectangle, size: Size) {
+    pub fn frame(&mut self, world: Rect, size: Size) {
         let zoom_x = (size.width - 2.0 * FRAME_MARGIN).max(1.0) / world.width.max(1.0);
         let zoom_y = (size.height - 2.0 * FRAME_MARGIN).max(1.0) / world.height.max(1.0);
         self.zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, 1.0);
@@ -92,7 +92,7 @@ impl Camera {
     /// its top edge if it is also too tall; the user pans to the rest.
     /// *Why:* a patch that opens with every label turned into a bar shows
     /// a new user no words at all (panels.md, Level of detail).
-    pub fn frame_readable(&mut self, world: Rectangle, size: Size, readable: f32) {
+    pub fn frame_readable(&mut self, world: Rect, size: Size, readable: f32) {
         self.frame(world, size);
         if self.zoom >= readable {
             return;

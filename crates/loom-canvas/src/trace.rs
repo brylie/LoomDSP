@@ -8,11 +8,12 @@
 //! still scope costs nothing per frame.
 
 use crate::gpu::Shape;
+use crate::iced_convert::ToIced as _;
 use crate::scene::{Scene, WidgetViewKind};
 use crate::theme::Palette;
 use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::color::pack;
-use iced::{Color, Point, Rectangle};
+use loom_ui_core::{Color, Point, Rect, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -121,17 +122,17 @@ pub struct Segment {
 }
 
 impl Segment {
-    fn new(from: Point, to: Point, colour: Color, clip: Rectangle) -> Self {
+    fn new(from: Point, to: Point, colour: Color, clip: Rect) -> Self {
         Self::with_width(from, to, colour, clip, TRACE_WIDTH)
     }
 
     /// A piece `width` world units wide, never thinner than one physical
     /// pixel. Result previews use it for their curves, so a preview is one
     /// anti-aliased line with round joins at every zoom (#455).
-    pub(crate) fn with_width(from: Point, to: Point, colour: Color, clip: Rectangle, width: f32) -> Self {
+    pub(crate) fn with_width(from: Point, to: Point, colour: Color, clip: Rect, width: f32) -> Self {
         Self {
             ends: [from.x, from.y, to.x, to.y],
-            colour: pack(colour).components(),
+            colour: pack(colour.to_iced()).components(),
             clip: [clip.x, clip.y, clip.width, clip.height],
             params: [width, TRACE_MIN_PX, 0.0, 0.0],
         }
@@ -154,19 +155,19 @@ impl Segment {
 }
 
 /// The area inside a scope widget's rectangle that holds its trace.
-pub(crate) fn trace_area(rect: Rectangle) -> Rectangle {
-    rect.shrink(INSET)
+pub(crate) fn trace_area(rect: Rect) -> Rect {
+    rect.expand(-INSET)
 }
 
 /// The area inside an XY scope's rectangle that holds its trace: the largest
 /// centred square. Both axes then have the same scale at any tile size, so a
 /// circle stays a circle (panel-widgets.md, XY scope).
-pub(crate) fn xy_scope_area(rect: Rectangle) -> Rectangle {
+pub(crate) fn xy_scope_area(rect: Rect) -> Rect {
     let area = trace_area(rect);
     let side = area.width.min(area.height);
-    Rectangle::new(
+    Rect::new(
         Point::new(area.center_x() - side * 0.5, area.center_y() - side * 0.5),
-        iced::Size::new(side, side),
+        Size::new(side, side),
     )
 }
 
@@ -234,7 +235,7 @@ impl TraceGeometry {
                             // A little wider, so the soft edges of two columns
                             // do not leave a seam between them.
                             let width = (column + SEAM).min(area.x + area.width - top.x);
-                            let rect = Rectangle::new(top, iced::Size::new(width, height));
+                            let rect = Rect::new(top, Size::new(width, height));
                             fills.push(Shape::new(rect, 0.0, colour, Color::TRANSPARENT, 0.0));
                         }
                     }

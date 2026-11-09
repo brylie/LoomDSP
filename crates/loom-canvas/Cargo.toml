@@ -12,6 +12,7 @@ keywords = ["audio", "modular", "node-editor", "iced", "wgpu"]
 categories = ["gui", "multimedia::audio"]
 
 [dependencies]
+loom-ui-core.workspace = true
 iced = { workspace = true }
 iced_wgpu.workspace = true
 bytemuck.workspace = true

@@ -2,9 +2,9 @@ use super::*;
 use crate::Message;
 use crate::monitor::Update;
 use crate::ui_test::Ui;
-use iced::Point;
 use loom_canvas::CanvasEvent;
 use loom_core::ModuleId;
+use loom_ui_core::Point;
 
 /// A patch with one Level Meter, with its display on screen.
 fn with_meter() -> (Ui, u32) {

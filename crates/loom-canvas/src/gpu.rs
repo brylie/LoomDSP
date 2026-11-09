@@ -2,6 +2,7 @@
 
 use crate::camera::Camera;
 use crate::controls::ControlGeometry;
+use crate::iced_convert::ToIced as _;
 use crate::scene::{CLOCK_MARK_RADIUS, ModuleView, PORT_RADIUS, PortShape, Scene};
 use crate::stats::{self, Counter};
 use crate::theme::Palette;
@@ -11,7 +12,7 @@ use bytemuck::{Pod, Zeroable};
 use iced::advanced::graphics::color::pack;
 use iced::wgpu;
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
-use iced::{Color, Point, Rectangle};
+use loom_ui_core::{Color, Point, Rect, Size};
 
 /// Corner radius of tiles, in world units.
 const TILE_RADIUS: f32 = 5.0;
@@ -32,11 +33,11 @@ pub struct Shape {
 
 impl Shape {
     /// A filled rounded rectangle with an optional border.
-    pub fn new(rect: Rectangle, radius: f32, fill: Color, border: Color, border_width: f32) -> Self {
+    pub fn new(rect: Rect, radius: f32, fill: Color, border: Color, border_width: f32) -> Self {
         Self {
             rect: [rect.x, rect.y, rect.width, rect.height],
-            fill: pack(fill).components(),
-            border: pack(border).components(),
+            fill: pack(fill.to_iced()).components(),
+            border: pack(border.to_iced()).components(),
             params: [radius, border_width, 1.0, 0.0],
         }
     }
@@ -67,9 +68,9 @@ impl Shape {
 
     /// A circle or square marker centred on a point.
     fn marker(centre: Point, radius: f32, shape: PortShape, fill: Color, border: Color, border_width: f32) -> Self {
-        let rect = Rectangle::new(
+        let rect = Rect::new(
             Point::new(centre.x - radius, centre.y - radius),
-            iced::Size::new(radius * 2.0, radius * 2.0),
+            Size::new(radius * 2.0, radius * 2.0),
         );
         let corner = match shape {
             PortShape::Round => radius,
@@ -99,7 +100,7 @@ impl Arc {
         Self {
             circle: [centre.x, centre.y, radius, thickness],
             angles: [start, sweep, 0.0, 0.0],
-            colour: pack(colour).components(),
+            colour: pack(colour.to_iced()).components(),
             unused: [0.0; 4],
         }
     }
@@ -132,8 +133,8 @@ impl Cable {
     pub fn new(from: Point, to: Point, colour_from: Color, colour_to: Color, dashed: bool) -> Self {
         Self {
             ends: [from.x, from.y, to.x, to.y],
-            colour_from: pack(colour_from).components(),
-            colour_to: pack(colour_to).components(),
+            colour_from: pack(colour_from.to_iced()).components(),
+            colour_to: pack(colour_to.to_iced()).components(),
             params: [CABLE_WIDTH, if dashed { 1.0 } else { 0.0 }, CABLE_MIN_PX, 0.0],
         }
     }
@@ -237,7 +238,7 @@ impl Geometry {
                     let width = dash.min(bounds.width - x);
                     for y in [bounds.y, bounds.y + bounds.height - 1.0] {
                         shapes.push(Shape::new(
-                            Rectangle::new(Point::new(bounds.x + x, y), iced::Size::new(width, 1.0)),
+                            Rect::new(Point::new(bounds.x + x, y), Size::new(width, 1.0)),
                             0.0,
                             palette.text_dim,
                             Color::TRANSPARENT,
@@ -251,7 +252,7 @@ impl Geometry {
                     let height = dash.min(bounds.height - y);
                     for x in [bounds.x, bounds.x + bounds.width - 1.0] {
                         shapes.push(Shape::new(
-                            Rectangle::new(Point::new(x, bounds.y + y), iced::Size::new(1.0, height)),
+                            Rect::new(Point::new(x, bounds.y + y), Size::new(1.0, height)),
                             0.0,
                             palette.text_dim,
                             Color::TRANSPARENT,
@@ -263,11 +264,11 @@ impl Geometry {
             }
             // Header: a rounded strip, then a square strip over its lower
             // half so only the top corners are round.
-            let header = Rectangle::new(module.position, iced::Size::new(module.width(), crate::scene::HEADER));
+            let header = Rect::new(module.position, Size::new(module.width(), crate::scene::HEADER));
             shapes.push(Shape::new(header, TILE_RADIUS, module.accent, Color::TRANSPARENT, 0.0));
-            let lower = Rectangle::new(
+            let lower = Rect::new(
                 Point::new(header.x, header.y + header.height * 0.5),
-                iced::Size::new(header.width, header.height * 0.5),
+                Size::new(header.width, header.height * 0.5),
             );
             shapes.push(Shape::new(lower, 0.0, module.accent, Color::TRANSPARENT, 0.0));
 
@@ -401,7 +402,7 @@ impl Geometry {
 /// competing with the port marker (panels.md, Clock mark on transport inputs).
 fn clock_mark_colour(accent: Color, palette: &Palette) -> Color {
     let mix = |a: f32, b: f32| a + (b - a) * 0.5;
-    Color::from_rgba(
+    Color::rgba(
         mix(accent.r, palette.text_dim.r),
         mix(accent.g, palette.text_dim.g),
         mix(accent.b, palette.text_dim.b),
@@ -419,22 +420,22 @@ fn clock_marks(module: &ModuleView, palette: &Palette, marks: &mut Vec<Shape>, d
         let Some(c) = module.clock_mark_centre(index) else {
             continue;
         };
-        let ring = Rectangle::new(Point::new(c.x - r, c.y - r), iced::Size::new(2.0 * r, 2.0 * r));
+        let ring = Rect::new(Point::new(c.x - r, c.y - r), Size::new(2.0 * r, 2.0 * r));
         marks.push(Shape::new(ring, r, Color::TRANSPARENT, colour, 1.0));
         // Hands from the centre: a long one up, a short one to the right.
         let hand = 0.9;
-        let up = Rectangle::new(
+        let up = Rect::new(
             Point::new(c.x - hand * 0.5, c.y - r * 0.7),
-            iced::Size::new(hand, r * 0.7 + hand * 0.5),
+            Size::new(hand, r * 0.7 + hand * 0.5),
         );
-        let right = Rectangle::new(
+        let right = Rect::new(
             Point::new(c.x - hand * 0.5, c.y - hand * 0.5),
-            iced::Size::new(r * 0.5 + hand * 0.5, hand),
+            Size::new(r * 0.5 + hand * 0.5, hand),
         );
         marks.push(Shape::new(up, hand * 0.5, colour, Color::TRANSPARENT, 0.0));
         marks.push(Shape::new(right, hand * 0.5, colour, Color::TRANSPARENT, 0.0));
         let d = r * 0.6;
-        let dot = Rectangle::new(Point::new(c.x - d, c.y - d), iced::Size::new(2.0 * d, 2.0 * d));
+        let dot = Rect::new(Point::new(c.x - d, c.y - d), Size::new(2.0 * d, 2.0 * d));
         dots.push(Shape::new(dot, d, colour, Color::TRANSPARENT, 0.0));
     }
 }
@@ -700,7 +701,7 @@ impl Primitive for CanvasPrimitive {
         pipeline: &mut CanvasPipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bounds: &Rectangle,
+        bounds: &iced::Rectangle,
         viewport: &Viewport,
     ) {
         let globals = Globals {
@@ -859,7 +860,7 @@ impl Primitive for DragPrimitive {
         pipeline: &mut DragPipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bounds: &Rectangle,
+        bounds: &iced::Rectangle,
         viewport: &Viewport,
     ) {
         let state = &mut pipeline.0;

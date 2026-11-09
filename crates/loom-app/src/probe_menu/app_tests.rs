@@ -16,8 +16,8 @@ fn app() -> App {
     })
 }
 
-fn area() -> Rectangle {
-    Rectangle::new(Point::ORIGIN, Size::new(1000.0, 800.0))
+fn area() -> Rect {
+    Rect::new(Point::ORIGIN, Size::new(1000.0, 800.0))
 }
 
 /// The first cable of the patch, as the canvas names its source.
@@ -77,13 +77,13 @@ fn add_scope_and_meter_on_an_output_and_a_cable() {
             let (output, to) = first_cable(&app);
             let port = app.session.scene.port_position(output).unwrap();
             let world = if on_cable {
-                port + iced::Vector::new(20.0, 5.0)
+                port + loom_ui_core::Vector::new(20.0, 5.0)
             } else {
                 port
             };
             let modules = app.session.controller.graph().nodes().count();
             let cables = app.session.controller.graph().cables().count();
-            let tiles: Vec<Rectangle> = app.session.scene.modules().iter().map(|m| m.bounds()).collect();
+            let tiles: Vec<Rect> = app.session.scene.modules().iter().map(|m| m.bounds()).collect();
 
             open(&mut app, output, world);
             let _ = app.update(Message::ProbeMenu(super::Message::Pick(probe)));

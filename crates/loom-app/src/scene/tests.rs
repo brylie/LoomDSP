@@ -286,7 +286,7 @@ fn no_built_in_tile_text_is_cut_or_overlaps() {
             outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),
             panel: panel_view(d),
         };
-        let mut boxes: Vec<(String, iced::Rectangle)> = Vec::new();
+        let mut boxes: Vec<(String, loom_ui_core::Rect)> = Vec::new();
         loom_canvas::for_each_tile_text(&module, |item| {
             if item.content.ends_with('…') {
                 problems.push(format!("{}: {} is cut", d.id, item.content));
@@ -294,7 +294,7 @@ fn no_built_in_tile_text_is_cut_or_overlaps() {
             let text = item.bounds();
             // At least one unit apart side by side, so two labels never
             // read as one.
-            let spaced = iced::Rectangle {
+            let spaced = loom_ui_core::Rect {
                 x: text.x - 1.0,
                 width: text.width + 2.0,
                 ..text

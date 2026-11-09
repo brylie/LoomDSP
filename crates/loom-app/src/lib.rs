@@ -84,10 +84,11 @@ mod view;
 mod xy;
 
 use clap::Parser;
-use iced::{Color, Point, Size, Task, Theme};
+use iced::{Color, Size, Task, Theme};
 use loom_canvas::CanvasEvent;
 use loom_core::{Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId};
 use loom_patch::Patch;
+use loom_ui_core::Point;
 use matrix::{Event as MatrixEvent, Tab as RightTab};
 use overlays::Overlay;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1483,7 +1484,7 @@ impl App {
                 .warn(format!("Cannot {}: no module `{}`", probe.verb(), probe.id()));
             return;
         };
-        let tiles: Vec<iced::Rectangle> = self.session.scene.modules().iter().map(|m| m.bounds()).collect();
+        let tiles: Vec<loom_ui_core::Rect> = self.session.scene.modules().iter().map(|m| m.bounds()).collect();
         let corner = probe_menu::place(descriptor, world, &tiles);
         let source = OutputRef {
             module: ModuleId(output.module),

@@ -122,8 +122,8 @@ pub struct Point {
     pub y: f32,
 }
 
-impl From<iced::Point> for Point {
-    fn from(p: iced::Point) -> Self {
+impl From<loom_ui_core::Point> for Point {
+    fn from(p: loom_ui_core::Point) -> Self {
         Self { x: p.x, y: p.y }
     }
 }
@@ -137,8 +137,8 @@ pub struct Rect {
     pub height: f32,
 }
 
-impl From<iced::Rectangle> for Rect {
-    fn from(r: iced::Rectangle) -> Self {
+impl From<loom_ui_core::Rect> for Rect {
+    fn from(r: loom_ui_core::Rect) -> Self {
         Self {
             x: r.x,
             y: r.y,

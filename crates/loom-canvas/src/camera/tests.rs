@@ -51,7 +51,7 @@ fn zoom_is_clamped() {
 #[test]
 fn frame_fits_everything() {
     let mut camera = Camera::default();
-    let world = Rectangle::new(Point::new(0.0, 0.0), Size::new(4000.0, 1000.0));
+    let world = Rect::new(Point::new(0.0, 0.0), Size::new(4000.0, 1000.0));
     let size = Size::new(1000.0, 800.0);
     camera.frame(world, size);
     let visible = camera.visible(size);
@@ -63,7 +63,7 @@ fn frame_fits_everything() {
 /// A patch that fits at the readable zoom is framed as before.
 #[test]
 fn readable_framing_fits_a_small_patch_as_before() {
-    let world = Rectangle::new(Point::new(10.0, 20.0), Size::new(600.0, 300.0));
+    let world = Rect::new(Point::new(10.0, 20.0), Size::new(600.0, 300.0));
     let size = Size::new(1000.0, 800.0);
     let mut fitted = Camera::default();
     fitted.frame(world, size);
@@ -77,7 +77,7 @@ fn readable_framing_fits_a_small_patch_as_before() {
 /// vertically.
 #[test]
 fn readable_framing_shows_the_left_edge_of_a_wide_patch() {
-    let world = Rectangle::new(Point::new(-100.0, 0.0), Size::new(3000.0, 400.0));
+    let world = Rect::new(Point::new(-100.0, 0.0), Size::new(3000.0, 400.0));
     let size = Size::new(1000.0, 800.0);
     let mut camera = Camera::default();
     camera.frame_readable(world, size, 0.8);
@@ -90,7 +90,7 @@ fn readable_framing_shows_the_left_edge_of_a_wide_patch() {
 /// A patch also too tall shows its top-left corner at the margin.
 #[test]
 fn readable_framing_shows_the_top_of_a_tall_patch() {
-    let world = Rectangle::new(Point::new(0.0, 50.0), Size::new(3000.0, 3000.0));
+    let world = Rect::new(Point::new(0.0, 50.0), Size::new(3000.0, 3000.0));
     let size = Size::new(1000.0, 800.0);
     let mut camera = Camera::default();
     camera.frame_readable(world, size, 0.8);

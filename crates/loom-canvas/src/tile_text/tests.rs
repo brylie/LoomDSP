@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::{HoverText, PanelView, PortShape, PortView, Scene, WidgetView};
-use iced::Color;
+use loom_ui_core::Color;
 
 fn port(label: &str) -> PortView {
     PortView {
@@ -312,7 +312,7 @@ fn a_clock_mark_moves_the_input_label_clear_of_it() {
 /// value, so "120.0 BPM" is not cut (panel-widgets.md, Number).
 #[test]
 fn a_number_box_holds_a_tempo_whole() {
-    let rect = Rectangle::new(Point::ORIGIN, Size::new(5.0 * GRID, 2.0 * GRID));
+    let rect = Rect::new(Point::ORIGIN, Size::new(5.0 * GRID, 2.0 * GRID));
     let (anchor, _, width) = value_text_place(
         &WidgetViewKind::Number {
             key_step: 0.0,

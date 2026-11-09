@@ -11,6 +11,7 @@ use crate::{
 };
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
+use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{ArrowGroupView, DragLine, PatchCanvas};
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -96,7 +97,7 @@ impl App {
             let menu = container(items).padding(4).style(container::rounded_box);
             layers = layers
                 .push(outside)
-                .push(iced::widget::pin(iced::widget::opaque(menu)).position(at));
+                .push(iced::widget::pin(iced::widget::opaque(menu)).position(at.to_iced()));
         }
         if let Some(rows) = self.overlays.recent_rows() {
             let outside = mouse_area(space::horizontal().width(Length::Fill).height(Length::Fill))

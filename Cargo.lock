@@ -2105,6 +2105,7 @@ dependencies = [
  "loom-host-desktop",
  "loom-modules",
  "loom-patch",
+ "loom-ui-core",
  "png",
  "rfd",
  "ron",
@@ -2121,6 +2122,7 @@ dependencies = [
  "bytemuck",
  "iced",
  "iced_wgpu",
+ "loom-ui-core",
  "naga",
 ]
 
