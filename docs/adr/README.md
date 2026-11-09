@@ -75,3 +75,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0037](0037-finite-inputs-hold-at-the-largest-finite-value.md) | When finite inputs overflow, a module's result holds at the largest finite value | Accepted |
 | [0038](0038-notes-travel-as-per-voice-signals.md) | Notes travel as per-voice signals in a polyphonic bundle, which is an inferred cable width | Accepted |
 | [0039](0039-editor-keeps-the-hierarchy-as-an-overlay.md) | The editor keeps the sub-patch hierarchy as an overlay on the flat graph | Accepted |
+| [0040](0040-stack-copies-and-mode-modules-are-implied.md) | Stack copies and the modules a mode adds are implied by the flattener | Accepted |

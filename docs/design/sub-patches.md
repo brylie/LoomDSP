@@ -4,10 +4,10 @@ How a player collapses part of a patch into one module with its own ports and pa
 
 - **Kind:** living specification.
 - **Status:** Agreed, M2. The choices marked "Settled" were made with the maintainer on 2026-11-01. The [patch file](#patch-file) and [flattening](#flattening) are Implemented (slice 1 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-06), without `library`, `roles`, `panel`, and the mode fields, which their slices add. Collapse, dissolve, open, the breadcrumb, and undo across levels are Implemented (slice 2 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-07); see [Editor model](#editor-model). Exposing parameters, the sub-patch surface, modulation and MIDI learn through it, renaming, and the canonical assignment order are Implemented (slice 3 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-07); see [Exposing](#exposing). The library, linked library items, and copies of sub-patch tiles on the clipboard are Implemented (slice 4 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-08); see [Library](#library), [Linked library items](#linked-library-items), and [Notes from building](#notes-from-building). MIDI mappings follow an exposed range in the engine ([#687](https://github.com/brylie/LoomDSP/issues/687), 2026-11-08). Roles and slots are Implemented (slice 5 of [#51](https://github.com/brylie/LoomDSP/issues/51), 2026-11-08); see [Roles](#roles), [Slots](#slots), and [Notes from building: slots](#notes-from-building-slots). Modes follow.
-- **Decision behind it:** [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md) (definitions, flattening, library items as patch files). [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md) (the editor keeps the hierarchy as an overlay on the flat graph). [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) for roles and slots. [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) and [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) for the sub-patch's panel.
+- **Decision behind it:** [ADR-0031](../adr/0031-sub-patches-stored-as-definitions-and-flattened.md) (definitions, flattening, library items as patch files). [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md) (the editor keeps the hierarchy as an overlay on the flat graph). [ADR-0040](../adr/0040-stack-copies-and-mode-modules-are-implied.md) (stack copies and the modules a mode adds are implied by the flattener). [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) for roles and slots. [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) and [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) for the sub-patch's panel.
 - **Use case and requirements:** FR-ENCAP-01 to FR-ENCAP-10, FR-SDK-08, FR-PANEL-10, FR-PANEL-11, FR-LIB-24, FR-MOD-06. Settles OQ-20 and OQ-21.
 - **Builds on:** [Panels: exposed controls in a sub-patch](panels.md#exposed-controls-in-a-sub-patch) (what the surface shows), [Module data](module-data.md) (data in slots and copies), [Undo](undo.md), [Copy, paste, and duplicate](clipboard.md), [Changing a running patch](live-patching.md).
-- **Background:** [Flattening](../learn/flattening.md): how a sub-patch becomes plain modules, why a hierarchical engine was rejected, and why flat ids come from a table keyed by path. The explainer [Abstraction: roles, slots, and swapping](../learn/abstraction.md) covers why a swap needs a contract and why it crossfades with equal power.
+- **Background:** [Flattening](../learn/flattening.md): how a sub-patch becomes plain modules, why a hierarchical engine was rejected, and why flat ids come from a table keyed by path. The explainer [Abstraction: roles, slots, and swapping](../learn/abstraction.md) covers why a swap needs a contract and why it crossfades with equal power. [Unison](../learn/unison.md) covers copies, spread, why a stack sums at 1/√N, the constant-power pan law, and how a select fade reverses without a step.
 - **Prior art:** Max has both private sub-patchers and shared file abstractions. Reaktor and Bitwig Grid nest containers. Design tools have "instances" of a shared component. Named only to explain the trade-offs; the rules below are our own.
 - **Issues:** [#51](https://github.com/brylie/LoomDSP/issues/51) (umbrella), [#76](https://github.com/brylie/LoomDSP/issues/76) (panel editor).
 - **Code:** `crates/loom-patch/src/subpatch.rs` (the definition types), `flatten.rs` (flattening and the id table), `level.rs` (what the top patch and a definition share), `hierarchy.rs` (the editor's overlay: paths, definitions, ports, instances, boundary cables, `unflatten`, `collapse`, `dissolve`, `insert`, `unlink`), `library.rs` (the `Library` trait, a file as a definition and back, the refresh of linked copies on load, and the loop check through links), and `crates/loom-modules/src/structure.rs` (the Patch input and output modules). In the app: the library folder as a `Library` in `crates/loom-app/src/patch_file.rs`, library items in the module browser (`browser.rs`), Save to library in `file_commands.rs`, Unlink and inserting in `levels.rs`, the first edit inside a linked tile in `editing.rs`, and sub-patch tiles on the clipboard in `clipboard.rs`; tests in `crates/loom-app/src/library_tests.rs`. Flattening lives in `crates/loom-patch`, next to the patch file types and the code that applies a patch to a `Controller`. `loom-core`'s `Graph` stays the flat engine graph with no file types (ADR-0002, ADR-0034). ADR-0031 left the crate open; settled with the maintainer on 2026-11-06 ([#651](https://github.com/brylie/LoomDSP/issues/651)). Roles: `crates/loom-core/src/role.rs` (descriptors, declarations, the registry check) and `role/roles.rs` (the initial roles). Slots: `crates/loom-patch/src/slot.rs` (the file types and the definition role check), `hierarchy/slots.rs` (make, swap, finish, dissolve, the fade wiring), `crates/loom-modules/src/structure.rs` (the swap fade), `crates/loom-app/src/slots.rs` (the gestures).
@@ -167,7 +167,7 @@ The points marked "settled 2026-11-08" were put to the maintainer as a proposal 
 
 ### Modes
 
-A sub-patch's mode is a setting in its inspector. The default is **single**.
+A sub-patch's mode is a setting in its inspector. The default is **single**. The points below marked "settled 2026-11-09" were put to the maintainer as a proposal while building slice 6 and agreed. [ADR-0040](../adr/0040-stack-copies-and-mode-modules-are-implied.md) holds the decision on how copies and the modules a mode adds fit the editor's overlay.
 
 | Mode | Inside | Ports |
 |---|---|---|
@@ -179,10 +179,73 @@ A sub-patch's mode is a setting in its inspector. The default is **single**.
 - **Members** are added, removed, and reordered in the inspector. A member is opened like any sub-patch.
 - **Select switches click-free.** Every member runs. A change of the Member parameter crossfades the outputs over 10 ms, equal power. *Why every member runs:* a member that was paused would restart cold, and skipping members per block would make the output depend on the block size (AGENTS.md rule 2). See [Open points](#open-points) for CPU.
 - **Stack** copies come from flattening, so each copy is a full set of ordinary modules. **Copies** is a whole-number setting from 1 to 16. It changes the graph, so it is not modulatable.
-- **Spread** (TR-04): in stack mode, the player picks exposed parameters to spread and a spread amount for each. Copy `i` of `N` gets the parameter's value plus the amount times an offset evenly spaced from -1 to 1 (copy 0 at -1, the last at +1; one copy has offset 0). The result is clamped to the parameter's range.
+- **Spread** (TR-04): in stack mode, the player picks exposed parameters to spread and a spread amount for each, from 0 to 1, a share of the knob as a modulation depth is (settled 2026-11-09). Copy `i` of `N` gets the parameter's value moved by the amount times an offset evenly spaced from -1 to 1 (copy 0 at -1, the last at +1; one copy has offset 0), in the control's 0 to 1 range, and clamped there, as a modulation assignment is ([modulation](modulation.md), rules 2 and 5). The flattener adds it as hidden modulation: a constant source of 1.0 and, on each copy's parameter, an assignment of depth `amount × offset`. *Why a share of the knob:* the same amount gives a musical interval on a cutoff and a step on a whole-number parameter, like a depth. *Why modulation:* the base value stays the same in every copy, so MIDI and outside modulation, which act on the base, keep the offsets. A value written into each copy would be wiped by the first MIDI control change, which the engine applies to each copy's parameter.
 - **Stereo spread:** an option in stack mode. With it on, each output becomes stereo (ADR-0020): copy `i` is panned by the same offset, equal power. *Why:* unison is stereo more often than not.
 - Copies and members share the definition's data ([module data](module-data.md)).
 - Stack mode is not polyphony. Voices, voice allocation, and per-voice notes are in the [polyphony](polyphony.md) specification (FR-VOICE-*). A stacked sub-patch fed a bundle runs copies times voices ([polyphony](polyphony.md#the-voice-count), rule 13).
+
+#### Members are nested instances (settled 2026-11-09)
+
+- In layer and select mode, a definition's own `modules` hold only its members. Each member is an ordinary sub-patch instance with its own definition, and `members` lists their module ids in order. A member's name is its definition's name.
+- *Why:* a member is then a nested sub-patch in every way that exists: flat ids by path, opening, the breadcrumb, renaming, exposing its surface items on the layer's surface (flattening rule 12), slots inside it, Save to library on it, and its own link to a library file.
+- A file whose layer or select level holds anything else (another module, a cable, an assignment, a mapping, a Patch input or output), lists a member twice, leaves one out, or lists a module that is not an instance, is refused, naming the sub-patch.
+- At most **16 members**, as for copies and voices ([polyphony](polyphony.md), rule 1): the modules the flattener adds have a fixed number of inputs.
+- **Ports** of a layer or select instance are the union of its members' ports by name, in the order they first appear: member order, then each member's own port order. An outer input feeds the same-named Patch input of every member that has it. A member without an output adds nothing to that output's sum, or gives silence there when it is chosen.
+
+#### Copies in the editor (settled 2026-11-09)
+
+- **The editor shows copy 0.** Tiles, values, the inspector, probes, lights, meters, and live values inside a stack are copy 0's. The breadcrumb names the stack with its count: `Voice ×4`. The outer tile's outputs carry the sum. *Why copy 0:* its knob shows the base value, which is the same in every copy (the spread is modulation), and its signals are a copy that plays, not an average no module plays.
+- **Paths.** Copy 0 keeps the paths a single sub-patch has: `[instance, inner]`. Copy `k` (from 1) is `[instance, Copy(k), inner]`, where `Copy(k)` is a path step that no module id can take. Turning a sub-patch into a stack, or raising Copies, never moves copy 0, and copy `k` keeps its id and state while Copies stays above `k`. A removed copy's ids are not reused (rule 4).
+- **An edit inside reaches every copy, as one undo step.** A parameter write, from a control, an inspector row, a reset, or the control channel, writes the same value to every copy at once, so a knob drag moves every copy. Everything else (a module, a cable, an assignment, a mapping, an exposure, Copies, a spread) reaches the copies through `sync` before the commit, from the flattener's output. MIDI and modulation inside reach every copy by themselves, since each copy has its own mapping and assignment.
+- **Seeds differ.** Copy `k` of a module with a `seed` parameter gets copy 0's seed plus `k`, wrapped in the parameter's range. *Why:* copies that play the same random numbers are one sound in disguise ([stereo](stereo.md), rule 15).
+- **Undo snapshots** leave copies 1 to N-1 and every added module out, and `sync` rebuilds them after a restore.
+
+#### The modules the flattener adds (settled 2026-11-09)
+
+All are registered as internal: not in the browser or the help pages, checked by every test that runs over all modules. They have no panel, hold no buffer, allocate nothing on the audio thread, count per sample, and give the same output at any block size. Each has a flat id from a path `[instance, Added(n)]`, where `Added(n)` is a path step no module id can take, numbered by the outer port's place, so ids are deterministic (flattening rule 6). They are never shown or saved.
+
+| Module | Inputs | Output | Parameters | For |
+|---|---|---|---|---|
+| `loom.struct.sum@1` (Sum) | `in 1` to `in 16` | `out` | `gain` | each output of a layer (gain 1) and of a mono stack (gain 1/√N) |
+| `loom.struct.spread_sum@1` (Stereo spread sum) | `in 1` to `in 16` | `out`, stereo | `copies` | each output of a stack with stereo spread |
+| `loom.struct.member@1` (Member) | | `out` | `member`, 1 to 16, whole number | a select instance's Member control |
+| `loom.struct.select@1` (Select) | `in 1` to `in 16`, `member` | `out` | `fade`, on or off | each output of a select instance |
+
+- **Sum.** `out = gain × (sum of the inputs)`, the gain smoothed over 10 ms, so a change of Copies does not step the level. A copy added or removed fades in or out over 5 ms already, as a cable does ([live patching](live-patching.md), rule 9). *Why 1/√N for a stack:* copies that differ are uncorrelated, and the power of a sum of uncorrelated signals is the sum of their powers, so 1/√N keeps the loudness of one copy. Identical copies sum coherently and come out √N times louder; [Unison](../learn/unison.md) says why the spread matters.
+- **Stereo spread sum.** Copy `k` is panned by its offset `o`: `θ = (o + 1)·π/4`, left `cos θ`, right `sin θ`, both times 1/√N. Equal power, so a copy keeps its loudness wherever it sits, and the centre is -3 dB on each side, the constant-power pan law. One copy with stereo spread sits in the centre. The inputs are `Downmix` and the output `Stereo` (ADR-0020), so a stereo copy is folded to mono before it is panned, and the outer output is stereo.
+- **Member** owns the Member parameter, the one home of its value (ADR-0039), and outputs it per sample. Every Select of the instance reads it on its `member` input, so all outputs switch on the same frame.
+- **Select.** Per sample it takes `t = round(member)`, clamped to 1 to the member count, and runs one state machine:
+  1. **Not fading, and `t` is not the current member:** a fade starts from the current member to `t`: `out = from·cos θ + to·sin θ`, `θ = (π/2)·n/N`, `N = round(0.010 × sample rate)`, one step per sample. After `N` samples it outputs exactly `to`.
+  2. **`t` goes back to `from` during a fade:** the fade reverses from where it is (`from` and `to` swap, `n` becomes `N - n`). The gains on that frame are the same, since `cos((π/2)(N-n)/N) = sin((π/2)n/N)`, so nothing steps.
+  3. **`t` goes to a third member during a fade:** it waits. When the fade ends, a new one starts from there to the latest `t`. Only the latest is kept, so a fast sweep ends where the control stopped, never more than 10 ms late. *Why not finish at once, as a second slot swap does:* a swap is a gesture, but Member can be modulated at audio rate, and a jump would click each time.
+  4. **A modulated Member between two whole values** takes the nearest one, as every whole-number parameter does ([modulation](modulation.md), rule 5).
+  5. **Gate, trigger, and phase outputs** (by the signal type of what feeds the member's Patch output) have `fade` off: they switch to `t` on the frame it changes, with no fade and no wait, for the reason live-patching rule 9 gives.
+- **Spread sources** are `loom.math.constant` modules at 1.0, one per stack instance with a spread, also at `[instance, Added(n)]`, with hidden assignments (Spread, above). They are left out of the matrix, the inspector's modulation rows, the range arc, and the file.
+
+#### The editor for modes (settled 2026-11-09)
+
+- **Mode** is a choice row in the sub-patch tile's inspector: Single, Layer, Select, Stack. Changing it is one undo step and **never changes the sound by itself**:
+  - **Single to layer or select:** the inside becomes member 1, named after the sub-patch. Its modules keep their flat ids and state (their paths move under the new member, as a collapse moves paths), its Patch inputs and outputs keep their names, and each exposed item is exposed again through the member, so the surface keeps its names and values. Select starts at Member 1.
+  - **Single to stack:** Copies starts at 1, so nothing changes until the player raises it.
+  - **Layer to select, and back:** the members stay.
+  - **Layer or select to single or stack:** only with one member, whose inside moves back up. With more, it is refused with `Remove members until one is left to make Voice single` (`stack` in place of `single`).
+  - **Stack to single or another mode:** copies 1 to N-1 go, copy 0 keeps its state, and Copies, spread, and stereo spread are cleared.
+- **Members** (layer and select): the inspector lists them by name, each row with **Open**, **Up**, **Down**, and **Remove**, and **Add member** under them, which adds an independent copy of the last member, named as a duplicate is ("Saw 2"). Removing the last member is refused with `A layer needs at least one member` (`select` for a select). A 17th is refused with `A layer holds at most 16 members`. Reordering renumbers Member. Renaming is the member tile's own inspector, as for any sub-patch. Each is one undo step.
+- **Inside a layer or select.** Opening it shows its members as tiles in a row, with no cables and no port tiles; the breadcrumb reads `Patch › Layer › Saw`, and opening a member shows its inside. At the member level, inserting a library item or pasting sub-patch tiles adds members, and deleting a member tile removes it. Any other module, a cable, a port, or a collapse is refused with `A layer holds only its members; open a member to add modules` (`select` for a select). *Why:* the level has no ports of its own; its ports come from its members.
+- **Stack.** The inspector shows **Copies** (1 to 16, one undo step per change), **Stereo spread** (a toggle), and **Spread**: one row per exposed item with an amount from 0 to 1. A row at 0 is not spread and is left out of the file. *Why no separate pick list:* the amount says it, and an exposed item is what the player chose to show. Raising Copies keeps the state of existing copies; new copies start from reset at copy 0's values ([live patching](live-patching.md), rule 4). Opening a stack shows copy 0's inside.
+- **Member control.** A select instance's surface shows a stepped control labelled `Member` first, spanning 1 to the member count, so MIDI sweeps exactly the members. The inspector row names the chosen member: `Member: 2 (Square)`. Removing members clamps the value to the new count.
+- **Dissolve** of a layer, select, or stack instance is refused with `Make Voice single before dissolving it`.
+
+#### How modes meet the rest (settled 2026-11-09)
+
+Each refusal is a follow-up, not a gap.
+
+- **Linked library items.** Changing mode, members, Copies, a spread, or stereo spread is an edit inside, so the first one unlinks a linked tile, as any edit inside does. **Save to library** of a sub-patch that is not single is refused with `Cannot save a layer to the library yet` (`select`, `stack`): a patch file has no place for a mode yet. A member's own Save to library works, since a member is a single sub-patch.
+- **Roles.** A sub-patch that is not single fills no role: turning on Fills role on one is refused with `A layer cannot fill a role yet`, and changing the mode of one that fills a role is refused with `Voice fills Filter; turn that off before changing its mode`. A slot's part always fills its role, so this covers slots' parts too.
+- **Slots.** Copies above 1 on a sub-patch that holds a slot at any depth is refused with `Cannot stack Voice: it holds a slot`, and Make slot inside a stack of more than one copy with `Cannot make a slot inside a stack yet`. *Why:* a swap's fade modules are added by the app for one part, and each copy would need its own. Changing the mode of a sub-patch that holds a slot is refused with `Cannot change the mode of a sub-patch that holds a slot yet; dissolve the slot first`, as collapsing is. A slot inside a member works, since a member is a nested sub-patch.
+- **Clipboard.** A sub-patch tile copies whole, mode and members included. A copy inside a stack copies copy 0's modules. At a member level, a paste of sub-patch tiles adds members, and a paste with anything else is refused with the text above.
+- **Exposed parameters through members.** The layer's surface exposes a member's surface item with the existing Expose button. One surface control for the same parameter in every member is not built.
+- **Nesting.** A stack inside a stack runs copies times copies, and a layer inside a member works.
 
 ### Patch file
 
@@ -202,7 +265,7 @@ Patch(
             cables: [/* ... */],
             exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff", range: Some((200.0, 2000.0)))],
             roles: ["loom.role.voice@1"],
-            // panel, mode, members, copies, spread: present only when set
+            // panel, mode, members, copies, spread, stereo_spread: present only when set
         ),
         "delay": SubPatch(library: Some("Delays/Tape delay.ron"), /* stored copy */),
     },
@@ -215,6 +278,31 @@ Patch(
 - A definition's `metadata` is the same type as the patch's (name, description, authors, tags, licence), so a library item's credit travels with it ([#652](https://github.com/brylie/LoomDSP/issues/652)). Its name is what the player sees.
 - A patch file has an `exposed` list of its own, omitted when empty: the surface it shows when it is inserted as a sub-patch ([Library](#library)). Save to library writes the definition's list there, and inserting the file reads it back. Opened on its own, the list is kept and saved back, less an entry whose module is gone, and nothing shows it; an entry follows its module through a collapse (onto the new tile's surface) and a dissolve. *Why:* a library item is an ordinary patch file, and its surface has to live somewhere in it.
 - A linked definition's `library` is its path relative to the library folder, with `/` between the parts. The definition itself is the stored copy.
+
+A sub-patch with a mode (settled 2026-11-09) carries it in its definition. Every field is omitted at its default:
+
+```ron
+"layer": SubPatch(
+    metadata: Metadata(name: "Layer"),
+    mode: Select,                 // Single (omitted), Layer, Select, or Stack
+    members: [2, 1],              // layer and select: member instance ids, in order
+    modules: [
+        PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("saw")),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("square")),
+    ],
+),
+"unison": SubPatch(
+    metadata: Metadata(name: "Unison"),
+    mode: Stack,
+    copies: 4,                    // 1 to 16, omitted at 1
+    spread: {"detune": 0.2},      // exposed name to amount, 0 to 1; omitted when empty
+    stereo_spread: true,          // omitted when false
+    modules: [/* the one inside, as for single */],
+),
+```
+
+- A select instance holds its Member value in `params` under the reserved name `member`, 1-based: `params: {"member": 2.0}`. An exposed item cannot take that name on a select surface; the next free name is used ("member 2"). An assignment or MIDI mapping on Member is written on the instance, the form flattening rule 3 reads.
+- A `members`, `copies`, `spread`, or `stereo_spread` that does not fit the mode, a spread name that is not exposed, or an amount outside 0 to 1, is refused, naming the sub-patch.
 
 A slot (settled 2026-11-08) is a module of kind `loom.struct.slot@1` with a `slot` field, as an instance has a `subpatch` field. Its current part is an ordinary module of the same level, named by id:
 
@@ -254,7 +342,7 @@ These rules are for implementers. The player never sees the flat graph.
 2. A Patch input or output is removed. A cable into it continues from its other side.
 3. An exposed parameter's instance value is written to the inner parameter. A modulation assignment or MIDI mapping on the exposed parameter is attached to the inner parameter.
 4. Each flat module gets a `ModuleId` from a table keyed by its path (instance IDs, then the inner ID). A path keeps its ID across edits, so its state survives. A removed path's ID is not reused in the session.
-5. Stack copies, layer and select members, and slot parts expand into ordinary modules, with the mixing modules the flattener adds for modes. Added modules are not shown and not saved. A slot's part is already an ordinary module of its level: the flattener routes each cable, assignment, mapping, and exposure on the slot to the part's mapped port or parameter and adds nothing. The crossfade modules of a swap are added by the swap, not the flattener, and are never in the file (corrected 2026-11-08: a fade is a moment in a session, not a fact about the patch).
+5. Stack copies, layer and select members, and slot parts expand into ordinary modules, with the mixing modules the flattener adds for modes ([The modules the flattener adds](#the-modules-the-flattener-adds-settled-2026-11-09)). Added modules are not shown and not saved. Stack copies 1 to N-1 and the added modules are implied: the editor's `sync` rebuilds them from the flattener's output (ADR-0040). A slot's part is already an ordinary module of its level: the flattener routes each cable, assignment, mapping, and exposure on the slot to the part's mapped port or parameter and adds nothing. The crossfade modules of a swap are added by the swap, not the flattener, and are never in the file (corrected 2026-11-08: a fade is a moment in a session, not a fact about the patch).
 6. Flattening is deterministic: the same patch gives the same flat graph and the same IDs.
 7. The flattener never opens a file. Linked library items are read through a `Library` trait that the caller implements, before a patch is flattened: when it loads, every linked definition takes a fresh copy from the library (`Patch::refresh_linked`), and the flattener then sees only definitions. The desktop app reads the library folder, a test passes a map, and the command line and the web runtime pass `NoLibrary`, so a missing item falls back to the stored copy (rule 5). A file's own linked items are refreshed first, so a chain of links is followed to its end, and a chain that comes back to a file on the way is the loop the [patch file](#patch-file) refuses. *Why:* `loom-patch` must work on WebAssembly, which has no files (hard rule 6), and the loop check needs to read links while it follows them.
 8. **Ports with nothing behind them.** A cable or assignment from an instance output whose Patch output has no cable behind it is dropped; the outer input reads its default. A cable into an input port that feeds nothing inside is dropped too.
