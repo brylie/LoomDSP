@@ -2216,6 +2216,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-ui-core"
+version = "0.1.0"
+
+[[package]]
 name = "lru"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

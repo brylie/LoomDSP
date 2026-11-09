@@ -1,0 +1,19 @@
+[package]
+name = "loom-ui-core"
+description = "Plain geometry and colour types for a UI layer, with no toolkit behind them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords = ["gui", "geometry", "color", "ui"]
+categories = ["gui"]
+
+# No dependencies, on purpose: no UI toolkit and no LoomDSP crate
+# (docs/design/ui-layer.md, section 1, rule 1).
+[dependencies]
+
+[lints]
+workspace = true

@@ -10,6 +10,7 @@ members = [
     "crates/loom-analysis",
     "crates/loom-host-desktop",
     "crates/loom-cli",
+    "crates/loom-ui-core",
     "crates/loom-canvas",
     "crates/loom-app",
 ]
@@ -34,6 +35,7 @@ loom-patch = { path = "crates/loom-patch", version = "0.1.0" }
 loom-test = { path = "crates/loom-test", version = "0.1.0" }
 loom-analysis = { path = "crates/loom-analysis", version = "0.1.0" }
 loom-host-desktop = { path = "crates/loom-host-desktop", version = "0.1.0" }
+loom-ui-core = { path = "crates/loom-ui-core", version = "0.1.0" }
 loom-canvas = { path = "crates/loom-canvas", version = "0.1.0" }
 
 rtrb = "0.4"
