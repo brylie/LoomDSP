@@ -62,16 +62,16 @@ The app builds one `PatchMap` from the level being edited, beside its other view
 |---|---|
 | Modules: UI ID, name, kind, family, role (source, output, display), tile rectangle | The level's tiles: graph modules, sub-patch instances, and port tiles (ADR-0039) |
 | Connections: from module and port, to module and port, signal type, stereo or mono | Cables at this level, including boundary records to port tiles |
-| Modulation: source module, target module and parameter, depth as the screen shows it | Assignments whose source and target are both on this level |
+| Modulation: assignment ID, source module and output, target module and parameter, depth as the screen shows it | Assignments whose source and target are both on this level. The source is an output port (`OutputRef`), so a module with several outputs can say which one modulates |
 | Feedback loops: the modules in each, and where a delay was inserted | The compile report's `FeedbackLoop`s, mapped to this level's tiles |
-| Heard, seen only, or unused, for each module | The compiler's reachability (`reaches_a_root`, FR-GRAPH-09), mapped to this level |
+| Heard, seen only, or unused, for each tile | Two walks backwards over the flat graph's cables and assignments: one from the audio output (heard), one from every root of FR-GRAPH-09 (heard or seen). A module in neither is unused. The compiler's `reaches_a_root` gives only the second, as one flag per module, so it cannot tell heard from seen only on its own. A graph module or an instance takes the best class of the flat modules it stands for. A port tile has no flat module: it takes the best class of the flat cables that pass through it |
 | Signal-flow order | Rule 6 |
 | The camera's view rectangle | The canvas camera |
 
 ### Rules
 
 1. **One model for the map, the outline, and the canvas descriptions.** The map draws the patch map, the outline lists it, and each tile's and port's accessibility description (section 6) reads its connections from it. *Why:* the UI layer's first rule for the tree is that it and the screen come from one source (ui-layer.md, section 7, rule 1). A map that showed a cable the outline did not mention would be worse than no map.
-2. **It is rebuilt only when the level's structure changes:** a module, cable, assignment, label, level, or compile report changes. Moving a tile changes only its rectangle, and moving the camera changes only the view rectangle. Neither rebuilds the outline. *Why:* NFR-PERF-04, and a screen reader must not hear the outline refresh because a tile moved.
+2. **It is rebuilt only when the level's structure changes:** a module, cable, assignment, label, level, or compile report changes. Moving a tile changes only its rectangle, and moving the camera changes only the view rectangle. Neither rebuilds the names or connections. When a move ends (the drag is released, or a group of arrow-key moves ends, as for undo), the tie order of rule 6 is computed again, and only rows whose position changed are sent; focus stays on its row by UI ID. *Why:* NFR-PERF-04, and a screen reader must not hear the outline refresh while a tile is dragged. Recomputing at the end of the move keeps ties in the reading order the user now sees.
 3. **It never edits the patch.** Every action in the outline or on the map becomes an ordinary message: a selection, a camera move, or focus. *Why:* undo, autosave, and the control channel then need nothing new (ui-layer.md, section 7, rule 6).
 4. **Names come from the same place as the tile header:** the module's label if it has one, else its type name and, when the level has more than one of that type, its number ("Envelope 5"). The number is spoken without "#". *Why:* the user must hear the name they would see. "Envelope number 5" is slow to listen to, and "Envelope hash 5" is worse.
 
@@ -150,7 +150,7 @@ The outline is one focus stop. While it has focus, it takes these keys before th
 | Left | On an expanded row, collapse it. On a child row, go to its parent |
 | Home, End | First or last visible row |
 | Letters | Go to the next row whose name starts with the typed letters, as the module browser's results do |
-| Enter | On a module row, focus its tile on the canvas, on its first control. On a connection row, jump to the module at the other end. On a sub-patch row, open it |
+| Enter | On a module row, focus its tile on the canvas, on its first control. On a connection row with one module at the other end, jump there; with several, open the list of rule 23. On a sub-patch row, open it |
 | Space | Select the module on the canvas and centre the canvas on it, and stay in the outline |
 | `[`, `]` | Follow upstream, follow downstream: jump to the module that feeds this one, or that this one feeds (section 7) |
 | Cmd+`[` (Ctrl+`[` on Windows and Linux) | Back: return to where the last jump started (section 7) |
@@ -191,7 +191,7 @@ Following a cable works in the outline and on the canvas, with the same keys: `[
     - With none, nothing moves, and the screen reader hears "Nothing upstream" or "Nothing downstream".
 
     *Why:* a jump that guessed among several cables would take the user somewhere they did not choose, and they could not tell from the sound alone. The list says how many there are and lets them pick, as the planned cable-by-key list does (#524).
-24. **On the canvas, a jump selects the target module and centres the canvas on it.** If the jump started from a port, focus lands on the far port; otherwise on the tile. In the outline, a jump moves focus to the target's row and expands nothing. *Why:* the sighted user beside them sees where the jump went, and a jump from a port is usually followed by another along the same chain.
+24. **On the canvas, a jump selects the target module and centres the canvas on it.** If the jump started from a port, focus lands on the far port; otherwise on the tile. In the outline, a jump moves focus to the target's row. If that row is inside a collapsed section or loop, those rows are expanded first, since a collapsed row's children are not in the tree (rule 15); nothing else is expanded. *Why:* the sighted user beside them sees where the jump went, and a jump from a port is usually followed by another along the same chain.
 25. **Back returns to where the last jump started,** in the same view. Jumps form a list of up to 50 places, kept until the level changes; a place whose module was deleted is skipped. Back with no earlier place says "No earlier place". *Why:* tracing a signal is trying one branch, then the other. Without Back, the user must find their way to the fork again.
 26. **Jumps never change the patch, and are not undo steps.** *Why:* rule 3.
 
@@ -244,7 +244,7 @@ M on the canvas, with no text field focused, moves through the three settings, a
 ### Rules
 
 36. **`App::ui_snapshot` and `--dump-ui` include the patch map,** as rows with their names and descriptions. *Why:* agents and tests then check what a screen reader user hears with no screen reader, as they do for the rest of the window.
-37. **The outline's rows have UI IDs** from section 4 of the UI layer spec: a module row keyed by its module, a connection row by the module and port, a section and a loop by a fixed name and the loop's lowest module ID. The control channel's `locate` accepts them. *Why:* one identity scheme (ui-layer.md, section 4, rule 1).
+37. **The outline's rows have UI IDs** from section 4 of the UI layer spec: a module row keyed by its module, a connection row by the module and port, a modulation row by its `AssignmentId` (one output can modulate several parameters, so the port alone does not tell its rows apart), a section and a loop by a fixed name and the loop's lowest module ID. The control channel's `locate` accepts them. *Why:* one identity scheme (ui-layer.md, section 4, rule 1).
 
 ## Acceptance criteria
 
@@ -254,8 +254,12 @@ M on the canvas, with no text field focused, moves through the three settings, a
 - [ ] A test checks the three sections: a module not heard, one seen only, and a patch where all are heard has no section rows.
 - [ ] A test with a twelve-input mixer checks that its row names three neighbours and "and 9 more", and its connection rows list all twelve.
 - [ ] `Ui` harness: Down, Up, Right, Left, Home, End, and letters move as section 5 says, with no screen reader.
-- [ ] `Ui` harness: Enter on a module row focuses that tile's first control on the canvas; Escape on the canvas does not return to the outline, and the map key does, to the same row.
+- [ ] `Ui` harness: Enter on a module row focuses that tile's first control on the canvas; Escape on the canvas does not return to the outline, and O does, to the same row.
 - [ ] `Ui` harness: follow downstream from SVF, then Back, returns to SVF, in the outline and on the canvas. With two neighbours, the list opens and Enter picks one.
+- [ ] `Ui` harness: a jump to a module inside a collapsed section or loop expands it and focuses the module's row. Enter on an output connection row with two targets opens the list.
+- [ ] A test: a module that feeds only a meter is in Seen only, one that feeds the audio output is in Heard, and inside a sub-patch a port tile whose cables reach the output is heard.
+- [ ] A test: one LFO output modulating two parameters gives two source-side rows with different UI IDs.
+- [ ] A test: moving an independent tile above another reorders their rows when the move ends, and focus stays on the same row.
 - [ ] `Ui` harness: Delete in the outline removes nothing.
 - [ ] A test checks that moving a tile or the camera does not rebuild the patch map, and that adding a cable does.
 - [ ] A test checks that a tile's description and its module row name the same neighbours.

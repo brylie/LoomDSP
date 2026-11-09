@@ -60,7 +60,7 @@ Read from source: `accesskit` 0.25.2, `accesskit_consumer` 0.39.2, and `accesski
 **Findings:**
 
 1. **`controls` is the only relation mapped on all three platforms.** It is a reasonable meaning for an output port's cable to an input (the output does control what the input receives), not for the reverse.
-2. **A nested tree does not work as an outline on macOS today.** Rows nested inside rows are not listed as rows, and there is no expand, collapse, or level. An outline whose app handles its own keys, and whose structure is also said in words where it matters, works on every platform.
+2. **A nested tree does not work as an outline on macOS today.** Rows nested inside rows are not listed as rows, and there is no expand, collapse, or level. An outline whose app handles its own keys, and whose structure is also said in words where it matters, avoids those gaps. That it works for a screen reader is not shown here: the adapter mappings say what is sent, not whether VoiceOver, Narrator, and Orca follow and announce focus that the app moves itself. It is the proposed approach until the listening tests in the spec are done.
 3. **The native `controls` support differs from the web results above.** VoiceOver's linked-element jump is a native feature, so the poor web support for `aria-controls` does not settle whether it works here. It needs a listening test.
 
 ## 5. Not proposed here
