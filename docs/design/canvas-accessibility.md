@@ -62,7 +62,7 @@ The app builds one `PatchMap` from the level being edited, beside its other view
 |---|---|
 | Modules: UI ID, name, kind, family, role (source, output, display), tile rectangle | The level's tiles: graph modules, sub-patch instances, and port tiles (ADR-0039) |
 | Connections: from module and port, to module and port, signal type, stereo or mono | Cables at this level, including boundary records to port tiles |
-| Modulation: assignment ID, source module and output, target module and parameter, depth as the screen shows it | Assignments whose source and target are both on this level. The source is an output port (`OutputRef`), so a module with several outputs can say which one modulates |
+| Modulation: assignment ID, source module and output, target module and parameter, depth as the screen shows it, and whether it is on or off | Assignments whose source and target are both on this level. The source is an output port (`OutputRef`), so a module with several outputs can say which one modulates |
 | Feedback loops: the modules in each, and where a delay was inserted | The compile report's `FeedbackLoop`s, mapped to this level's tiles |
 | Heard, seen only, or unused, for each tile | Two walks backwards over the flat graph's cables and assignments: one from the audio output (heard), one from every root of FR-GRAPH-09 (heard or seen). A module in neither is unused. The compiler's `reaches_a_root` gives only the second, as one flag per module, so it cannot tell heard from seen only on its own. A graph module or an instance takes the best class of the flat modules it stands for. A port tile has no flat module: it takes the best class of the flat cables that pass through it |
 | Signal-flow order | Rule 6 |
@@ -126,6 +126,7 @@ A row has a short **name**, read at once, and a **description**, read after it o
 | Connection, output | "Lowpass, to Multiply 8 in and Scope a" | Signal type, stereo or mono |
 | Modulation, on a target | "Cutoff, modulated by Envelope 5, 40%" | None |
 | Modulation, on a source | "Modulates SVF cutoff, 40%" | None |
+| Modulation that is off | "Cutoff, modulated by Envelope 5, 40%, off" | None |
 
 ### Rules
 
@@ -133,6 +134,8 @@ A row has a short **name**, read at once, and a **description**, read after it o
 11. **At most three neighbours are named on each side,** then "and 4 more". *Why:* a mixer with twelve inputs would otherwise be one long sentence. The connection rows list them all.
 12. **A neighbour reached by more than one cable is named once.** *Why:* "From MIDI Note" says what feeds it; the two cables from MIDI Note's pitch and gate are a port-level detail.
 13. **Modulation is in the description, not the name,** on a module row; and in the connection rows. *Why:* modulation has no cable (ADR-0014), so the user cannot find it by following one, but naming it on every row would slow the scan. A sighted user sees it as a badge, not as a line, which is the same weight.
+
+    **An assignment that is off is still listed, and says "off" last** ("Cutoff modulated by LFO, off"). It keeps its place in the signal-flow order and in the heard, seen only, and unused walks. *Why:* the compiler keeps a switched-off assignment in the schedule and changes only its enabled flag (`compile/schedule.rs`), so turning it back on moves nothing, and the outline should not reorder either. The source badge already counts assignments that are off ([modulation](modulation.md)), and a user who cannot hear them could not find one to turn back on. "Off" comes last, so the scan hears what is connected first. On the map, a dotted line instead of a dashed one marks it by shape, not only by colour (NFR-UX-03).
 14. **Every word is our own, and the same words the screen shows.** *Why:* ui-layer.md, section 7, rule 3.
 
 ## 5. Keys in the outline
@@ -201,7 +204,7 @@ Following a cable works in the outline and on the canvas, with the same keys: `[
 
 ### Behaviour
 
-The map sits in the bottom-right corner of the canvas, over it, at most 200 by 150 logical pixels and never more than a quarter of the canvas's width or height, on a panel background so the tiles under it do not show through. It draws the whole level small: every tile as a box in its place on the canvas, with its name, coloured by family; one line for each pair of connected modules, coloured by signal type and thicker for stereo; modulation as a dashed line from source to target; and a mark on modules in a feedback loop. It draws no controls, ports, or live values. A rectangle shows the part of the level the canvas shows.
+The map sits in the bottom-right corner of the canvas, over it, at most 200 by 150 logical pixels and never more than a quarter of the canvas's width or height, on a panel background so the tiles under it do not show through. It draws the whole level small: every tile as a box in its place on the canvas, with its name, coloured by family; one line for each pair of connected modules, coloured by signal type and thicker for stereo; modulation as a dashed line from source to target, and modulation that is off as a dotted line; and a mark on modules in a feedback loop. It draws no controls, ports, or live values. A rectangle shows the part of the level the canvas shows.
 
 | Gesture | Result |
 |---|---|
@@ -259,6 +262,7 @@ M on the canvas, with no text field focused, moves through the three settings, a
 - [ ] `Ui` harness: a jump to a module inside a collapsed section or loop expands it and focuses the module's row. Enter on an output connection row with two targets opens the list.
 - [ ] A test: a module that feeds only a meter is in Seen only, one that feeds the audio output is in Heard, and inside a sub-patch a port tile whose cables reach the output is heard.
 - [ ] A test: one LFO output modulating two parameters gives two source-side rows with different UI IDs.
+- [ ] A test: an assignment that is off is listed with "off" at the end of its row, keeps its module's place in signal-flow order, and is drawn dotted on the map. Turning it on changes only that word and the line style.
 - [ ] A test: moving an independent tile above another reorders their rows when the move ends, and focus stays on the same row.
 - [ ] `Ui` harness: Delete in the outline removes nothing.
 - [ ] A test checks that moving a tile or the camera does not rebuild the patch map, and that adding a cable does.
