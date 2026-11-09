@@ -7,7 +7,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 | ID | Question | Decision | Where recorded |
 |---|---|---|---|
 | OQ-01 | Desktop first or browser first? | Desktop first. The browser is an optional target, deferred. | Vision, roadmap |
-| OQ-02 | UI framework and node editor | Iced for the application UI. Our own patch canvas as an Iced widget, after spikes with iced_nodegraph (GPU fill-rate bound on Retina) and egui-snarl (poor look). | ADR-0009, ADR-0010 |
+| OQ-02 | UI framework and node editor | Iced for the application UI. Our own patch canvas as an Iced widget, after spikes with iced_nodegraph (GPU fill-rate bound on Retina) and egui-snarl (poor look). Superseded on 2026-11-09: the app moves in phases to our own UI layer on `winit`, `wgpu`, and AccessKit; the canvas stays ours. | ADR-0009, ADR-0010, ADR-0040 |
 | OQ-03 | Stereo on every cable? | No. Channel count is inferred per cable. Stereo flows where audio needs it. | FR-SIG-07, ADR-0007, ADR-0020 |
 | OQ-04 | Pitch and value conventions | Our own documented conventions, following the Eurorack and Bitwig Grid idea of "patch anything to anything". | FR-SIG-03, 05, ADR-0007 |
 | OQ-05 | Patch file format | RON, because it keeps Serde's full data model (enums, structs, tuples). | FR-FILE-01, ADR-0008 |
@@ -17,6 +17,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 | OQ-09 | Block vs. per-sample processing | Hybrid: blocks for acyclic parts, per sample inside feedback loops. Validate with benchmarks in M0. | ADR-0002, NFR-PERF-08 |
 | OQ-10 | Project name | "LoomDSP" appears to be free (informal search). Do a formal trademark check before a 1.0 release. | |
 | OQ-12 | Maturity of `iced_nodegraph` | Not used for the canvas. Findings reported upstream as a courtesy. | ADR-0010 |
+| OQ-14 | Iced version churn | Settled (2026-11-09): churn is Iced's stated policy, so the app leaves Iced for our own UI layer, in phases. Until the last phase, Iced stays pinned and is upgraded once per release, in a dedicated issue. | ADR-0040, [plan](../dev/leaving-iced-plan.md) |
 | OQ-19 | What is a trigger? | An output is high for exactly one sample. Inputs count rising edges above 0.5, with no hysteresis, and the first frame counts as following a low one. A fixed 1 ms pulse was rejected, because close triggers would merge. | FR-SIG-06, ADR-0007 |
 | OQ-17 | Module data beyond parameters | Typed data slots (curve, pattern, buffer). Curves and patterns inline in the patch; audio as WAV files in a sidecar folder. Swapped in from the control thread. Undo covers player edits, not live recording. | FR-LIB-19, ADR-0032, [module data](../design/module-data.md) |
 | OQ-20 | How roles are named and versioned | Settled (2026-11-08): namespaced IDs with a version (`loom.role.filter@1`), each port and parameter required or optional. A new version only adds optional parameters, and a part fits a slot by role id. A part may fill several roles, and may map role names to its own. | FR-SDK-08, ADR-0017, [sub-patches](../design/sub-patches.md#roles) |
@@ -41,12 +42,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 - Plugins draw inside a window owned by the DAW. Iced normally creates its own window through `winit`.
 - `nice-plug-iced` shows this is possible, but it sits inside RustAudio and its AI policy.
 - **Action:** research when plugin export is scheduled (deferred). A small "embed Iced in a parent window" crate could be another published primitive (FR-SDK-06).
-- Trade-offs of leaving Iced for our own UI stack, and when to revisit: [research snapshot, 2026-11](../research/2026-11-own-ui-stack-tradeoffs.md).
-
-### OQ-14. Iced version churn
-
-- Iced is pre-1.0 and has breaking changes between releases. `iced_nodegraph` must keep up.
-- **Leaning:** pin versions. Upgrade once per Iced release, in a dedicated issue.
+- Since ADR-0040, embedding depends on our own `winit` shell rather than on Iced. The shell must accept a window it is given as well as one it creates ([UI layer spec](../design/ui-layer.md#out-of-scope)).
 - Trade-offs of leaving Iced for our own UI stack, and when to revisit: [research snapshot, 2026-11](../research/2026-11-own-ui-stack-tradeoffs.md).
 
 ### OQ-15. Looper recording

@@ -44,7 +44,7 @@ The status line holds one of these values and nothing else. The date line is the
 | [0006](0006-dependency-and-licence-policy.md) | Dependency and licence policy | Accepted |
 | [0007](0007-polymorphic-signal-model.md) | Polymorphic signal model | Accepted |
 | [0008](0008-patch-format-ron.md) | Patch format in RON | Accepted |
-| [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Accepted |
+| [0009](0009-ui-stack-iced.md) | UI stack: Iced (canvas decided in ADR-0010) | Superseded by ADR-0040 |
 | [0010](0010-own-patch-canvas.md) | Our own patch canvas, built as an Iced widget | Accepted |
 | [0011](0011-everything-is-a-module.md) | Everything is a module | Accepted |
 | [0012](0012-arrangement-from-phase-driven-primitives.md) | Arrangement from phase-driven primitives | Accepted |
@@ -63,7 +63,7 @@ The status line holds one of these values and nothing else. The date line is the
 | [0025](0025-one-design-language-and-derived-panels.md) | One design language, and panels derived from the declaration | Accepted |
 | [0026](0026-browser-demo-feasibility.md) | A browser demo waits for a spike; pre-rendered audio examples come first | Accepted |
 | [0027](0027-prebuilt-release-downloads.md) | Prebuilt release downloads from a tagged GitHub Actions build | Accepted |
-| [0028](0028-app-accessibility-waits-for-iced.md) | App accessibility waits for AccessKit support in Iced | Deferred |
+| [0028](0028-app-accessibility-waits-for-iced.md) | App accessibility waits for AccessKit support in Iced | Superseded by ADR-0040 |
 | [0029](0029-module-families-and-a-shared-palette.md) | Module families and a shared palette | Accepted |
 | [0030](0030-panels-hide-controls-a-mode-does-not-use.md) | Panels hide the controls a mode does not use | Accepted |
 | [0031](0031-sub-patches-stored-as-definitions-and-flattened.md) | Sub-patches are stored as definitions and flattened before compiling | Accepted |
@@ -75,3 +75,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0037](0037-finite-inputs-hold-at-the-largest-finite-value.md) | When finite inputs overflow, a module's result holds at the largest finite value | Accepted |
 | [0038](0038-notes-travel-as-per-voice-signals.md) | Notes travel as per-voice signals in a polyphonic bundle, which is an inferred cable width | Accepted |
 | [0039](0039-editor-keeps-the-hierarchy-as-an-overlay.md) | The editor keeps the sub-patch hierarchy as an overlay on the flat graph | Accepted |
+| [0040](0040-own-ui-layer.md) | Our own UI layer on winit, wgpu, and AccessKit | Accepted |
