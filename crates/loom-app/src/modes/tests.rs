@@ -289,3 +289,130 @@ fn spread_and_stereo_spread_from_the_inspector() {
     app.undo();
     assert!(!voice_rows(&mut app).stereo_spread);
 }
+
+/// The ids of the sub-patch tiles at the top level.
+fn top_instances(app: &App) -> Vec<u32> {
+    app.session
+        .hierarchy
+        .structural_tiles(&ModulePath::root())
+        .into_iter()
+        .filter(|(_, tile)| matches!(tile, loom_patch::Tile::Instance(_)))
+        .map(|(id, _)| id.0)
+        .collect()
+}
+
+/// A stack tile copies whole, its Copies and spread with it, and a select
+/// tile keeps its members and its Member value (sub-patches.md, How modes
+/// meet the rest: Clipboard).
+#[test]
+fn a_tile_with_a_mode_copies_whole() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Stack,
+        },
+    );
+    mode(&mut app, Message::SetCopies { tile: 2, copies: 3 });
+    app.session.selection = [2].into();
+    let text = app.copy().expect("the tile copies");
+    app.paste(iced::Point::new(600.0, 400.0), Some(text));
+    let copy = *top_instances(&app).iter().find(|id| **id != 2).expect("a pasted tile");
+    let modes = app.session.hierarchy.modes_of(ModuleId(copy)).unwrap();
+    assert_eq!((modes.mode, modes.copy_count()), (Mode::Stack, 3));
+    assert_eq!(count(&app, "loom.filter.svf"), 6);
+
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Select,
+        },
+    );
+    mode(&mut app, Message::AddMember(2));
+    let member = app.session.hierarchy.member_module(&ModulePath::top(2)).unwrap();
+    app.set_param(member.0, 0, 2.0);
+    app.session.selection = [2].into();
+    let text = app.copy().expect("the tile copies");
+    app.paste(iced::Point::new(600.0, 400.0), Some(text));
+    let copy = *top_instances(&app).iter().find(|id| **id != 2).expect("a pasted tile");
+    assert_eq!(app.session.hierarchy.members_of(ModuleId(copy)).len(), 2);
+    let path = app.session.hierarchy.path_of(ModuleId(copy));
+    assert_eq!(
+        app.session
+            .hierarchy
+            .member_value(app.session.controller.graph(), &path),
+        Some(2.0)
+    );
+}
+
+/// Inside a layer, a paste of a module and a cable between members are
+/// refused with the layer text; a paste of a sub-patch tile adds a member.
+#[test]
+fn a_layer_level_refuses_pastes_of_modules_and_cables() {
+    let mut app = app_with(VOICE);
+    app.session.selection = [1].into();
+    let note = app.copy().expect("the note module copies");
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Layer,
+        },
+    );
+    mode(&mut app, Message::AddMember(2));
+    let members = app.session.hierarchy.members_of(ModuleId(2));
+    app.show_level(&ModulePath::top(2));
+    app.session.selection = [members[0].0].into();
+    let member_text = app.copy().expect("a member tile copies");
+    app.paste(iced::Point::new(0.0, 0.0), Some(note));
+    assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
+    let _ = app.update(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
+        from: loom_canvas::PortRef {
+            module: members[0].0,
+            index: 0,
+            output: true,
+        },
+        to: loom_canvas::PortRef {
+            module: members[1].0,
+            index: 0,
+            output: false,
+        },
+    }));
+    assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
+    app.paste(iced::Point::new(0.0, 400.0), Some(member_text));
+    assert_eq!(app.session.hierarchy.members_of(ModuleId(2)).len(), 3);
+}
+
+/// The mode rows draw and their controls work through the view: Add member
+/// from a click, then Stereo spread on a stack from a click.
+#[test]
+fn the_mode_rows_draw_and_answer_clicks() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Select,
+        },
+    );
+    app.session.selection = [2].into();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.click_text("Add member");
+    assert_eq!(ui.app.session.hierarchy.members_of(ModuleId(2)).len(), 2);
+    assert!(ui.text("Members").is_some() && ui.text("Remove").is_some());
+    ui.send(AppMessage::Mode(Message::RemoveMember(
+        ui.app.session.hierarchy.members_of(ModuleId(2))[1].0,
+    )));
+    ui.send(AppMessage::Mode(Message::SetMode {
+        tile: 2,
+        mode: Mode::Stack,
+    }));
+    ui.send(AppMessage::Mode(Message::SetCopies { tile: 2, copies: 2 }));
+    ui.redraw();
+    assert!(ui.text("Copies").is_some() && ui.text("Spread").is_some());
+    ui.click_text("Stereo spread");
+    assert!(ui.app.session.hierarchy.modes_of(ModuleId(2)).unwrap().stereo_spread);
+}
