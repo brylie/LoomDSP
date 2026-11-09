@@ -75,10 +75,9 @@ Patch(
         PatchModule(id: 3, kind: "loom.pitch.constant@1", params: {"semitones": 3}),
         PatchModule(id: 4, kind: "loom.pitch.constant@1", params: {"semitones": 7}),
         PatchModule(id: 5, kind: "loom.route.selector@1", params: {"count": 3, "fade": 0.0}),
-        PatchModule(id: 6, kind: "loom.phase.generator@1"),
-        PatchModule(id: 7, kind: "loom.osc.saw@1"),
-        PatchModule(id: 8, kind: "loom.math.mul@1", params: {"gain": 0.2}),
-        PatchModule(id: 9, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 6, kind: "loom.osc.saw@1"),
+        PatchModule(id: 7, kind: "loom.math.mul@1", params: {"gain": 0.2}),
+        PatchModule(id: 8, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "beat"), to: (5, "step")),
@@ -86,9 +85,8 @@ Patch(
         PatchCable(from: (3, "out"), to: (5, "in2")),
         PatchCable(from: (4, "out"), to: (5, "in3")),
         PatchCable(from: (5, "out"), to: (6, "pitch")),
-        PatchCable(from: (6, "phase"), to: (7, "phase")),
-        PatchCable(from: (7, "out"), to: (8, "a")),
-        PatchCable(from: (8, "out"), to: (9, "in")),
+        PatchCable(from: (6, "out"), to: (7, "a")),
+        PatchCable(from: (7, "out"), to: (8, "in")),
     ],
 )
 ```

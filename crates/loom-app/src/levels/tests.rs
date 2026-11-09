@@ -21,7 +21,7 @@ const NESTED: &str = r#"Patch(
                 PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out"), position: Some((400.0, 0.0))),
             ],
             cables: [
-                PatchCable(from: (1, "out"), to: (2, "phase")),
+                PatchCable(from: (1, "out"), to: (2, "pitch")),
                 PatchCable(from: (2, "out"), to: (3, "in")),
             ],
         ),
@@ -37,6 +37,9 @@ const NESTED: &str = r#"Patch(
         PatchCable(from: (2, "out"), to: (3, "in")),
     ],
 )"#;
+
+/// The sine's phase input, which the clocked sub-patch feeds.
+const SINE_PHASE_IN: usize = loom_modules::osc::SINE.input_index("phase").unwrap();
 
 /// The app with [`NESTED`] open, no audio.
 fn nested_app() -> App {
@@ -463,10 +466,10 @@ fn cables_through_a_port_are_removed_replaced_and_restored() {
     use loom_canvas::{CanvasEvent, PortRef};
     let mut app = nested_app();
     let sine = app.session.hierarchy.id_at(&voice(), 2).unwrap();
-    let phase = loom_core::InputRef { module: sine, port: 0 };
-    let into_phase = |app: &App| app.session.controller.graph().source_of(phase);
+    let pitch = loom_core::InputRef { module: sine, port: 0 };
+    let into_pitch = |app: &App| app.session.controller.graph().source_of(pitch);
     assert_eq!(
-        into_phase(&app),
+        into_pitch(&app),
         Some(loom_core::OutputRef {
             module: ModuleId(1),
             port: 0
@@ -479,7 +482,7 @@ fn cables_through_a_port_are_removed_replaced_and_restored() {
         output: false,
         index: 0,
     }));
-    assert_eq!(into_phase(&app), None, "the port no longer feeds the sine");
+    assert_eq!(into_pitch(&app), None, "the port no longer feeds the sine");
     assert_eq!(app.ui_snapshot().cables.len(), 1);
     let port = app.session.hierarchy.id_at(&voice(), 1).unwrap();
     app.canvas_event(CanvasEvent::Connect {
@@ -495,7 +498,7 @@ fn cables_through_a_port_are_removed_replaced_and_restored() {
         },
     });
     assert_eq!(
-        into_phase(&app),
+        into_pitch(&app),
         Some(loom_core::OutputRef {
             module: ModuleId(1),
             port: 0
@@ -518,7 +521,7 @@ fn cables_through_a_port_are_removed_replaced_and_restored() {
         },
     });
     assert_eq!(
-        into_phase(&app),
+        into_pitch(&app),
         Some(loom_core::OutputRef {
             module: ModuleId(1),
             port: 1
@@ -538,7 +541,7 @@ fn cables_through_a_port_are_removed_replaced_and_restored() {
         output: false,
         index: 0,
     }));
-    assert_eq!(into_phase(&app), None);
+    assert_eq!(into_pitch(&app), None);
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("remove cable"));
 }
 
@@ -706,10 +709,10 @@ fn deleting_everything_keeps_the_transport_and_its_cable_into_a_port() {
         "the Transport keeps its place"
     );
     assert_eq!(
-        app.session
-            .controller
-            .graph()
-            .source_of(loom_core::InputRef { module: sine, port: 0 }),
+        app.session.controller.graph().source_of(loom_core::InputRef {
+            module: sine,
+            port: SINE_PHASE_IN
+        }),
         Some(loom_core::OutputRef {
             module: ModuleId(1),
             port: 1
@@ -754,9 +757,9 @@ fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
             index: 0,
         },
     });
-    let phase = loom_core::InputRef { module: sine, port: 0 };
+    let pitch = loom_core::InputRef { module: sine, port: 0 };
     assert_eq!(
-        app.session.controller.graph().source_of(phase),
+        app.session.controller.graph().source_of(pitch),
         None,
         "nothing stands behind the new port"
     );
@@ -779,7 +782,7 @@ fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
         },
     });
     assert_eq!(
-        app.session.controller.graph().source_of(phase),
+        app.session.controller.graph().source_of(pitch),
         Some(loom_core::OutputRef {
             module: ModuleId(lfo),
             port: 0
@@ -792,14 +795,14 @@ fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
         "one cable into the sine"
     );
     let saved = app.current_patch();
-    let into_phase: Vec<_> = saved.subpatches["voice"]
+    let into_pitch: Vec<_> = saved.subpatches["voice"]
         .cables
         .iter()
-        .filter(|c| c.to == (2, "phase".to_string()))
+        .filter(|c| c.to == (2, "pitch".to_string()))
         .collect();
-    assert_eq!(into_phase.len(), 1);
+    assert_eq!(into_pitch.len(), 1);
     assert_eq!(
-        into_phase[0].from.0,
+        into_pitch[0].from.0,
         app.session.hierarchy.path_of(ModuleId(lfo)).last()
     );
     // And the file loads with that cable.

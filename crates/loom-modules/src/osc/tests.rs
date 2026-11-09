@@ -1,6 +1,9 @@
 use super::*;
 use loom_core::testing::run;
 
+/// An unconnected pitch input: middle C, longer than any test's block.
+const MIDDLE_C: [f32; 4096] = [0.0; 4096];
+
 /// Checks that the saw wave stays within `[-1, 1]` and rises across the cycle.
 #[test]
 fn saw_is_bounded_and_rises() {
@@ -14,7 +17,14 @@ fn saw_is_bounded_and_rises() {
     let mut saw = create(&config);
     let phase: Vec<f32> = (0..64).map(|i| (i as f32 * 0.01) % 1.0).collect();
     let mut out = vec![0.0; 64];
-    run(saw.as_mut(), 48_000.0, &[&phase], &[true], &mut [&mut out], &[]);
+    run(
+        saw.as_mut(),
+        48_000.0,
+        &[&MIDDLE_C[..phase.len()], &phase],
+        &[false, true],
+        &mut [&mut out],
+        &[],
+    );
     assert!(out.iter().all(|v| v.abs() <= 1.0 + 1e-6));
     assert!(out[10] > out[5]);
 }
@@ -32,10 +42,17 @@ fn pulse_duty_cycle_and_bounds() {
     let phase: Vec<f32> = (0..200).map(|i| (i % 100) as f32 / 100.0).collect();
     for &(width, expected_mean) in &[(0.5, 0.0), (0.25, -0.5), (0.75, 0.5)] {
         let mut pulse = create(&config);
-        pulse.set_param(0, width);
+        pulse.set_param(Pulse::WIDTH, width);
         pulse.reset();
         let mut out = vec![0.0; 200];
-        run(pulse.as_mut(), 48_000.0, &[&phase], &[true], &mut [&mut out], &[]);
+        run(
+            pulse.as_mut(),
+            48_000.0,
+            &[&MIDDLE_C[..phase.len()], &phase],
+            &[false, true],
+            &mut [&mut out],
+            &[],
+        );
         assert!(out.iter().all(|v| v.abs() <= 1.0 + 1e-6), "width {width}: {out:?}");
         // Steady second cycle: average equals 2 * width - 1.
         let mean: f32 = out[100..].iter().sum::<f32>() / 100.0;
@@ -56,11 +73,18 @@ fn pulse_width_sweep_at_stationary_phase_is_smoothed() {
     let phase = vec![0.5; 64];
     for &(start, end) in &[(0.75, 0.25), (0.25, 0.75)] {
         let mut pulse = create(&config);
-        pulse.set_param(0, start);
+        pulse.set_param(Pulse::WIDTH, start);
         pulse.reset();
-        pulse.set_param(0, end);
+        pulse.set_param(Pulse::WIDTH, end);
         let mut out = vec![0.0; 64];
-        run(pulse.as_mut(), 4_000.0, &[&phase], &[true], &mut [&mut out], &[]);
+        run(
+            pulse.as_mut(),
+            4_000.0,
+            &[&MIDDLE_C[..phase.len()], &phase],
+            &[false, true],
+            &mut [&mut out],
+            &[],
+        );
         assert!(out.iter().all(|v| v.abs() <= 1.0 + 1e-6), "{start}->{end}: {out:?}");
         assert!(
             out.iter().any(|v| v.abs() < 0.99),
@@ -86,13 +110,27 @@ fn pulse_overlapping_edges_with_unequal_velocities_stay_bounded() {
     // Step 1 sets `previous = 0.75` and `width = 0.80` (`previous_fall = 0.95`).
     // Step 2 advances phase to `0.95` (`step = 0.20`) and width to `0.99` (`step_fall = 0.01`).
     let mut out = [0.0; 1];
-    pulse.set_param(0, 0.80);
+    pulse.set_param(Pulse::WIDTH, 0.80);
     pulse.reset();
-    run(pulse.as_mut(), 1.0, &[&[0.75]], &[true], &mut [&mut out], &[]);
+    run(
+        pulse.as_mut(),
+        1.0,
+        &[&MIDDLE_C[..1], &[0.75]],
+        &[false, true],
+        &mut [&mut out],
+        &[],
+    );
     assert!(out[0].abs() <= 1.0 + 1e-6, "step 1: {}", out[0]);
 
-    pulse.set_param(0, 0.99);
-    run(pulse.as_mut(), 1.0, &[&[0.95]], &[true], &mut [&mut out], &[]);
+    pulse.set_param(Pulse::WIDTH, 0.99);
+    run(
+        pulse.as_mut(),
+        1.0,
+        &[&MIDDLE_C[..1], &[0.95]],
+        &[false, true],
+        &mut [&mut out],
+        &[],
+    );
     assert!(out[0].abs() <= 1.0 + 1e-6, "step 2: {}", out[0]);
 }
 
@@ -109,7 +147,14 @@ fn triangle_is_bounded_and_sine_aligned() {
     let mut tri = create(&config);
     let phase: Vec<f32> = (0..200).map(|i| (i % 100) as f32 / 100.0).collect();
     let mut out = vec![0.0; 200];
-    run(tri.as_mut(), 48_000.0, &[&phase], &[true], &mut [&mut out], &[]);
+    run(
+        tri.as_mut(),
+        48_000.0,
+        &[&MIDDLE_C[..phase.len()], &phase],
+        &[false, true],
+        &mut [&mut out],
+        &[],
+    );
     assert!(out.iter().all(|v| v.abs() <= 1.0 + 1e-6), "{out:?}");
     // Second cycle: 0 at start, rises to +1 at quarter cycle, 0 at half, -1 at three-quarters.
     assert!(out[100].abs() < 0.05, "start of cycle: {}", out[100]);
@@ -174,7 +219,14 @@ fn aliasing_at_high_note_is_suppressed() {
         };
         let mut module = create(&config);
         let mut out = vec![0.0; WARMUP + N];
-        run(module.as_mut(), 48_000.0, &[phase_in], &[true], &mut [&mut out], &[]);
+        run(
+            module.as_mut(),
+            48_000.0,
+            &[&MIDDLE_C[..phase_in.len()], phase_in],
+            &[false, true],
+            &mut [&mut out],
+            &[],
+        );
         out[WARMUP..].to_vec()
     };
     let render_module = |descriptor: &ModuleDescriptor| render_with_phase(descriptor, &phase);

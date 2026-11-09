@@ -55,19 +55,17 @@ Patch(
     version: 1,
     metadata: Metadata(name: "Tremolo"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.sine@1"),
-        PatchModule(id: 3, kind: "loom.mod.lfo@1", params: {"rate": 5}),
-        PatchModule(id: 4, kind: "loom.level.scale@1", params: {"factor": 0.5, "offset": 0.5}),
-        PatchModule(id: 5, kind: "loom.level.amp@1", params: {"response": 0}),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.mod.lfo@1", params: {"rate": 5}),
+        PatchModule(id: 3, kind: "loom.level.scale@1", params: {"factor": 0.5, "offset": 0.5}),
+        PatchModule(id: 4, kind: "loom.level.amp@1", params: {"response": 0}),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (2, "out"), to: (5, "in")),
-        PatchCable(from: (3, "out"), to: (4, "in")),
-        PatchCable(from: (4, "out"), to: (5, "level")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (1, "out"), to: (4, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (3, "out"), to: (4, "level")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

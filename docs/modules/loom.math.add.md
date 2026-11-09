@@ -44,7 +44,7 @@ Use Add to sum two signals and a fixed offset: mix two control signals, or move 
 
 ## Example patch
 
-Adds an LFO vibrato to a keyboard pitch before the oscillator phase generator.
+Adds an LFO vibrato to a keyboard pitch before the oscillator.
 
 ```ron
 Patch(
@@ -55,17 +55,15 @@ Patch(
         PatchModule(id: 2, kind: "loom.mod.lfo@1", params: {"rate": 5}),
         PatchModule(id: 3, kind: "loom.level.scale@1", params: {"factor": 0.01}),
         PatchModule(id: 4, kind: "loom.math.add@1"),
-        PatchModule(id: 5, kind: "loom.phase.generator@1"),
-        PatchModule(id: 6, kind: "loom.osc.triangle@1"),
-        PatchModule(id: 7, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.osc.triangle@1"),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "pitch"), to: (4, "a")),
         PatchCable(from: (2, "out"), to: (3, "in")),
         PatchCable(from: (3, "out"), to: (4, "b")),
         PatchCable(from: (4, "out"), to: (5, "pitch")),
-        PatchCable(from: (5, "phase"), to: (6, "phase")),
-        PatchCable(from: (6, "out"), to: (7, "in")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
     ],
 )
 ```

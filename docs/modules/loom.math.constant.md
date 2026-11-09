@@ -48,17 +48,15 @@ Patch(
     version: 1,
     metadata: Metadata(name: "Fixed Offset"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.saw@1"),
-        PatchModule(id: 3, kind: "loom.math.constant@1", params: {"value": 0.2}),
-        PatchModule(id: 4, kind: "loom.filter.svf@1"),
-        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.saw@1"),
+        PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": 0.2}),
+        PatchModule(id: 3, kind: "loom.filter.svf@1"),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (2, "out"), to: (4, "in")),
-        PatchCable(from: (3, "out"), to: (4, "cutoff")),
-        PatchCable(from: (4, "lowpass"), to: (5, "in")),
+        PatchCable(from: (1, "out"), to: (3, "in")),
+        PatchCable(from: (2, "out"), to: (3, "cutoff")),
+        PatchCable(from: (3, "lowpass"), to: (4, "in")),
     ],
 )
 ```

@@ -1,4 +1,5 @@
 use super::*;
+use loom_core::signal::pitch;
 use loom_core::testing::run;
 
 fn phase_trigger(input: &[f32]) -> Vec<f32> {

@@ -55,15 +55,13 @@ Patch(
     version: 1,
     metadata: Metadata(name: "Allpass Diffuser"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.pulse@1", params: {"width": 0.1}),
-        PatchModule(id: 3, kind: "loom.time.allpass@1", params: {"time": 0.02, "gain": 0.6}),
-        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.pulse@1", params: {"width": 0.1}),
+        PatchModule(id: 2, kind: "loom.time.allpass@1", params: {"time": 0.02, "gain": 0.6}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (1, "out"), to: (2, "in")),
         PatchCable(from: (2, "out"), to: (3, "in")),
-        PatchCable(from: (3, "out"), to: (4, "in")),
     ],
 )
 ```

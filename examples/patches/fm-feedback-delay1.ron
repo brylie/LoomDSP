@@ -11,7 +11,6 @@ Patch(
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         PatchModule(id: 2, kind: "loom.math.add@1"),
-        PatchModule(id: 3, kind: "loom.phase.generator@1"),
         PatchModule(id: 4, kind: "loom.osc.sine@1"),
         // Feedback amount, in pitch units.
         PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.08}),
@@ -26,8 +25,7 @@ Patch(
         PatchCable(from: (1, "pitch"), to: (2, "a")),
         PatchCable(from: (5, "out"), to: (9, "in")),
         PatchCable(from: (9, "out"), to: (2, "b")),
-        PatchCable(from: (2, "out"), to: (3, "pitch")),
-        PatchCable(from: (3, "phase"), to: (4, "phase")),
+        PatchCable(from: (2, "out"), to: (4, "pitch")),
         PatchCable(from: (4, "out"), to: (5, "a")),
         PatchCable(from: (1, "gate"), to: (6, "gate")),
         PatchCable(from: (4, "out"), to: (7, "a")),

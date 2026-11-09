@@ -54,20 +54,32 @@ const fn optional(name: &'static str, label: &'static str, unit: &'static str, d
     }
 }
 
-/// `loom.role.source`: something that makes a sound from a phase.
+/// `loom.role.source`: something that makes a sound, at a pitch or from a phase.
 pub static SOURCE: RoleDescriptor = RoleDescriptor {
     id: "loom.role.source",
     version: 1,
     name: "Sound source",
-    description: "Makes a sound. Reads a phase when it has a phase input.",
-    inputs: &[optional_port(
-        "phase",
-        "Phase",
-        SignalType::Phase,
-        "Position in the wave, from 0 to 1, from a phase generator.",
-    )],
+    description: "Makes a sound. An oscillator plays at its pitch, or follows a phase cable.",
+    inputs: &[
+        optional_port(
+            "pitch",
+            "Pitch",
+            SignalType::Pitch,
+            "Sets the frequency. 0 is middle C, and +0.1 is one octave up.",
+        ),
+        optional_port(
+            "phase",
+            "Phase",
+            SignalType::Phase,
+            "Position in the wave, from 0 to 1. Replaces the source's own phase.",
+        ),
+    ],
     outputs: &[port("out", "Out", SignalType::Audio, "The sound.")],
-    params: &[optional("level", "Level", "", "How loud the sound is, from 0 to 1.")],
+    params: &[
+        optional("level", "Level", "", "How loud the sound is, from 0 to 1."),
+        optional("tune", "Tune", "st", "Shifts the pitch in semitones."),
+        optional("octave", "Octave", "oct", "Shifts the pitch in octaves."),
+    ],
 };
 
 /// `loom.role.filter`: shapes the spectrum of a signal around a cutoff.

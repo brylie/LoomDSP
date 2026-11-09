@@ -142,6 +142,7 @@ LoomDSP is a grid for building living musical systems: patches that play, evolve
 | FR-CANVAS-10 | Each tile shows its module's panel: controls and displays, edited directly on the canvas (ADR-0013). An inspector shows every parameter of the selected module, for exact values and settings that do not fit on the tile. | Must | M1 | Direct manipulation: users edit things where they see them, as in Bitwig's Grid and Eurorack. |
 | FR-CANVAS-11 | Level of detail: when zoomed out, modules draw as simple tiles without text or live views. | Should | M1 | Large patches stay fast and readable. |
 | FR-CANVAS-12 | Cable styles show meaning: colour by signal type, thicker for stereo and polyphonic signals, a visible mark where the engine inserted a 1-sample delay. | Should | M2 | Users should read signal flow from the cables alone. |
+| FR-CANVAS-13 | A patch map: a small drawing of the whole level being edited, with every module named and every connection shown, but no controls. It marks the part shown on the canvas, and a click or drag on it pans the canvas there. The same model gives the screen reader outline of NFR-UX-07. | Should | M2 | Large patches need a map to find your way, and one model for the map and the outline keeps them from disagreeing. Spec: [canvas accessibility](../design/canvas-accessibility.md). |
 
 ## 8. Visual feedback (`VIS`)
 

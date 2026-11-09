@@ -69,7 +69,7 @@ fn transport_default(spec: &PortSpec) -> Option<TransportSignal> {
         PortDefault::BarPhase => Some(TransportSignal::BarPhase),
         PortDefault::BeatPhase => Some(TransportSignal::BeatPhase),
         PortDefault::Playing => Some(TransportSignal::Playing),
-        PortDefault::Value(_) => None,
+        PortDefault::Value(_) | PortDefault::OwnPhase => None,
     }
 }
 

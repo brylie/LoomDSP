@@ -956,6 +956,7 @@ fn default_signal(default: PortDefault, transport: &[TransportSpan], frames: usi
     let at = |frame: usize| transport_at_frame(transport, frame);
     match default {
         PortDefault::Value(value) => vec![value; frames],
+        PortDefault::OwnPhase => vec![0.0; frames],
         PortDefault::BarPhase => (0..frames).map(|frame| at(frame).bar_phase_at(0)).collect(),
         PortDefault::BeatPhase => (0..frames).map(|frame| at(frame).beat_phase_at(0)).collect(),
         PortDefault::Playing => (0..frames)

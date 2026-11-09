@@ -261,17 +261,17 @@ fn a_clock_mark_shows_only_while_the_input_follows_the_transport() {
     let filter = filter.tiles.iter().find(|t| t.id == 4).expect("the filter");
     assert!(filter.inputs.iter().all(|p| p.follows_transport.is_none()));
 
-    let from = ui.output(2, "phase");
+    let from = ui.output(3, "out");
     let to = ui.input(5, "phase");
     ui.drag(from, to, 12);
-    assert!(connected(&ui, (2, 0), (5, 0)), "the drag made a cable");
+    assert!(connected(&ui, (3, 0), (5, 0)), "the drag made a cable");
     assert_eq!(mark(&ui), None);
     assert_eq!(canvas_mark(&ui), None);
 
     // Pull the cable out of the input and drop it on empty canvas.
     let away = Point::new(to.x - 60.0, to.y - 80.0);
     ui.drag(to, away, 12);
-    assert!(!connected(&ui, (2, 0), (5, 0)), "the cable is gone");
+    assert!(!connected(&ui, (3, 0), (5, 0)), "the cable is gone");
     assert_eq!(mark(&ui), Some("bar_phase"));
     assert!(canvas_mark(&ui).is_some());
 }

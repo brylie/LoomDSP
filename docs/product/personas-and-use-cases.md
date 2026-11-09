@@ -45,6 +45,13 @@
 - Pain today: in a DAW, arrangement lives on a fixed timeline. Clip launchers have next actions, but they cannot respond to logic, such as "after this group has looped four times, move on".
 - Needs: loopers, polymetric sequencers, modulators, randomness, counters and logic, scenes, and a canvas that shows what the system is doing.
 
+### Eero, the musician who uses a screen reader
+
+- Blind since childhood. Makes electronic music and sound design with a DAW and a screen reader (VoiceOver on a Mac, or NVDA on Windows), and plays a MIDI keyboard and a controller.
+- Wants to build and change patches as quickly as a sighted user, and to understand a patch someone else made.
+- Pain today: most modular software draws its graph as a picture with nothing behind it for a screen reader. Where an app does expose its controls, it exposes them one at a time, so learning what connects to what means visiting every knob of every module.
+- Needs: an overview first (how big the patch is, where the sound comes from and where it goes), then a way to follow one signal from module to module, and only then the controls of the module they stop at. Short names first and details after a pause, so the screen reader is not slow to listen to.
+
 ## Key use cases
 
 Each use case links to the requirements that enable it.
@@ -52,7 +59,7 @@ Each use case links to the requirements that enable it.
 ### UC1. Build an instrument from primitives (Mira, Sanna)
 
 1. Create a new patch.
-2. Add a phase generator, an oscillator shaper, a filter, an envelope, and an output.
+2. Add an oscillator, a filter, an envelope, and an output. Patch a phase into the oscillator only to share or bend one.
 3. Connect them. Hear sound immediately while patching.
 4. Add a feedback path from the filter output back to its input with a one-sample delay.
 5. Save the patch.
@@ -157,3 +164,16 @@ Goal: a chord progression and a set of note clips play an 8-voice instrument, an
 7. Send the same notes out as MIDI to a hardware synth.
 
 Requirements: FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-LIB-13, FR-LIB-19, FR-LIB-20, FR-LIB-21, FR-LIB-29, FR-MIDI-04. Open questions: OQ-15 (recording); OQ-16 (how notes travel on cables) is settled by ADR-0038. Specifications: [polyphony](../design/polyphony.md), which follows this use case's chord sequencer and note cycle end to end, [arrangement](../design/arrangement.md), and [scale and tuning](../design/scale-and-tuning.md).
+
+### UC11. Trace the signal path of a patch by ear (Eero, Sanna)
+
+A sighted user glances at the canvas and sees what connects to what before looking at any knob. This use case gives the same overview to someone who listens to the patch's structure instead of looking at it, and to anyone who wants a quick text outline of a large patch.
+
+1. Open a shared patch with the screen reader on. Open the outline with one key. Hear its first line: the patch name, how many modules it has, how many feedback loops, and how many modules are not heard.
+2. Move down the outline. Hear the modules in the order the signal flows, from the sources to the output, one short line each: "Saw. From Phase. To SVF."
+3. Hear where a feedback loop starts and ends, and which modules modulate which parameters, although modulation has no cables (ADR-0014).
+4. Stop at the filter. Jump to what feeds it, then back. Jump to what it feeds, picking from a short list because it feeds two modules, and on to the output, without passing through any control.
+5. Press Enter on the filter, and land on its tile on the canvas, on its first control. Change the cutoff. Return to the outline where you left it.
+6. A sighted user beside them sees the same map drawn small, with the part of the patch in the window marked, and drags that mark to pan the canvas to another part of a large patch.
+
+Requirements: NFR-UX-06, NFR-UX-07, FR-CANVAS-13, FR-CANVAS-06. Specification: [canvas accessibility](../design/canvas-accessibility.md). Research: [overviews of node-link diagrams for screen reader users](../research/2026-11-screen-reader-graph-overviews.md).

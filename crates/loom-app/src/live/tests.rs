@@ -49,7 +49,7 @@ fn engine_telemetry_reaches_levels_and_traces() {
     live.set_activity(true);
     live.sync(&mut parts.controller, &BTreeSet::new());
     // One meter per output with a cable.
-    assert_eq!(live.meters.len(), 6);
+    assert_eq!(live.meters.len(), 5);
     let sine = parts.controller.output_ref(ModuleId(3), "out").unwrap();
     let env = parts.controller.output_ref(ModuleId(4), "out").unwrap();
     let probe = parts.controller.add_probe(sine, ProbeKind::Scope).unwrap();
@@ -89,8 +89,8 @@ fn engine_telemetry_reaches_levels_and_traces() {
     // Removing a module drops the meters on its cables.
     parts.controller.remove_module(ModuleId(3)).unwrap();
     live.sync(&mut parts.controller, &BTreeSet::new());
-    assert_eq!(live.meters.len(), 4);
-    assert_eq!(parts.controller.probes().count(), 4);
+    assert_eq!(live.meters.len(), 3);
+    assert_eq!(parts.controller.probes().count(), 3);
 
     live.set_activity(false);
     live.sync(&mut parts.controller, &BTreeSet::new());

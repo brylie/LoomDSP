@@ -42,9 +42,9 @@ Ramp from 0 to 1 at the pitch frequency. Drives oscillators and LFOs.
 
 ## When to use it
 
-Use Phase to set the speed of an oscillator. It makes a ramp from 0 to 1 that repeats at the pitch's frequency; Sine, Saw, Pulse, and Triangle turn that ramp into a wave.
+Use Phase when a phase should be shared or shaped. It makes a ramp from 0 to 1 that repeats at the pitch's frequency. Every oscillator already runs a phase of its own, so a single oscillator does not need one.
 
-One Phase can drive several of them at once, so they stay exactly in step. Tune and Octave shift the pitch, and a rising edge on Reset starts the ramp again.
+Patch Phase into the phase input of several oscillators and they stay exactly in step. Put Phase Shift, Phase Scale, or another phase module between Phase and an oscillator to bend the wave. Tune and Octave shift the pitch, and a rising edge on Reset starts the ramp again.
 
 ## Example patch
 
@@ -74,4 +74,5 @@ Patch(
 ## See also
 
 - [Phase and cycles](../learn/phase-and-cycles.md)
+- [Oscillators](../design/oscillators.md)
 - [Pitch at 0.1 per octave](../learn/pitch.md)

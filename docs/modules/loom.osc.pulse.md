@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A pulse wave with a set width, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean.
+A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.
 
 | | |
 |---|---|
@@ -15,7 +15,8 @@ A pulse wave with a set width, shaped from a phase input. Its sharp edges are sm
 
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
-| **Phase** (`phase`) | phase | 0 | Position in the wave, from 0 to 1. One ramp is one cycle. |
+| **Pitch** (`pitch`) | pitch | 0 | Sets the frequency. 0 is middle C, and +0.1 is one octave up. Ignored while a phase cable is connected. |
+| **Phase** (`phase`) | phase | own phase | Position in the wave, from 0 to 1. With no cable, the oscillator runs its own phase at the pitch. A cable replaces it. |
 
 ## Outputs
 
@@ -27,12 +28,16 @@ A pulse wave with a set width, shaped from a phase input. Its sharp edges are sm
 
 | Parameter | Range | Default | Description |
 |---|---|---|---|
+| **Tune** (`tune`) | -48 to 48 st | 0 st | Shifts the pitch in semitones. Ignored while a phase cable is connected. |
+| **Octave** (`octave`) | -10 to 10 oct | 0 oct | Shifts the pitch in octaves. Ignored while a phase cable is connected. |
 | **Width** (`width`) | 0.01 to 0.99 | 0.5 | Share of the cycle spent high, from 0.01 to 0.99. 0.5 is a square wave. |
 
 ## Panel
 
-3 by 3 grid units.
+9 by 3 grid units.
 
+- Knob: **Tune** (`tune`)
+- Knob: **Octave** (`octave`)
 - Knob: **Width** (`width`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
@@ -41,29 +46,28 @@ A pulse wave with a set width, shaped from a phase input. Its sharp edges are sm
 
 Use Pulse for hollow and buzzy sounds. Width sets how much of each cycle is high: 0.5 is a square wave, and narrow widths sound thinner. Moving the width with an LFO gives a slowly changing tone.
 
-It needs a phase input, usually from Phase. Its sharp edges are smoothed, so high notes do not gain harsh extra tones.
+Patch a pitch into it and it plays, at middle C with nothing connected. Tune and Octave shift the pitch. A cable into Phase replaces its own phase, and then the wave follows the cable: share one Phase between several oscillators to keep them in step, or bend the phase first for a new wave. Its sharp edges are smoothed, so high notes do not gain harsh extra tones.
 
 ## Example patch
 
-Plays a pulse wave driven by a phase generator.
+Plays a thin pulse wave at middle C, with no cables in.
 
 ```ron
 Patch(
     version: 1,
     metadata: Metadata(name: "Pulse Voice"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.pulse@1", params: {"width": 0.25}),
-        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.pulse@1", params: {"width": 0.25}),
+        PatchModule(id: 2, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (1, "out"), to: (2, "in")),
     ],
 )
 ```
 
 ## See also
 
+- [Oscillators](../design/oscillators.md)
 - [Phase and cycles](../learn/phase-and-cycles.md)
 - [Saw](loom.osc.saw.md)

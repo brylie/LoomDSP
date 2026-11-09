@@ -77,3 +77,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0039](0039-editor-keeps-the-hierarchy-as-an-overlay.md) | The editor keeps the sub-patch hierarchy as an overlay on the flat graph | Accepted |
 | [0040](0040-stack-copies-and-mode-modules-are-implied.md) | Stack copies and the modules a mode adds are implied by the flattener | Accepted |
 | [0041](0041-own-ui-layer.md) | Our own UI layer on winit, wgpu, and AccessKit | Accepted |
+| [0042](0042-unpatched-phase-inputs-are-wired-for-the-player.md) | Unpatched phase inputs are wired for the player | Accepted |

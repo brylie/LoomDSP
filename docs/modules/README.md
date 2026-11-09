@@ -9,10 +9,10 @@ One page for each built-in module, made from its descriptor. After you change a 
 | Module | ID | Description |
 |---|---|---|
 | [Noise](loom.osc.noise.md) | `loom.osc.noise` | White, pink, or brown noise. The seed makes every render the same. |
-| [Pulse](loom.osc.pulse.md) | `loom.osc.pulse` | A pulse wave with a set width, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean. |
-| [Saw](loom.osc.saw.md) | `loom.osc.saw` | A sawtooth wave, with every harmonic, shaped from a phase input. Its sharp edges are smoothed so high notes stay clean. |
-| [Sine](loom.osc.sine.md) | `loom.osc.sine` | Sine wave shaped from a phase input. |
-| [Triangle](loom.osc.triangle.md) | `loom.osc.triangle` | A triangle wave with few harmonics, shaped from a phase input. Its corners are smoothed so high notes stay clean. |
+| [Pulse](loom.osc.pulse.md) | `loom.osc.pulse` | A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean. |
+| [Saw](loom.osc.saw.md) | `loom.osc.saw` | A sawtooth wave, with every harmonic, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean. |
+| [Sine](loom.osc.sine.md) | `loom.osc.sine` | A sine wave at the pitch, or shaped from a phase cable. |
+| [Triangle](loom.osc.triangle.md) | `loom.osc.triangle` | A triangle wave with few harmonics, at the pitch or shaped from a phase cable. Its corners are smoothed so high notes stay clean. |
 
 ## Filters and effects
 

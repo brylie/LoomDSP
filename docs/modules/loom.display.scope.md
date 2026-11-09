@@ -60,17 +60,15 @@ Patch(
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"shape": 1}),
         PatchModule(id: 2, kind: "loom.display.scope@1"),
-        PatchModule(id: 3, kind: "loom.phase.generator@1"),
-        PatchModule(id: 4, kind: "loom.osc.saw@1"),
-        PatchModule(id: 5, kind: "loom.filter.svf@1"),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 3, kind: "loom.osc.saw@1"),
+        PatchModule(id: 4, kind: "loom.filter.svf@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "out"), to: (2, "in")),
-        PatchCable(from: (2, "out"), to: (5, "cutoff")),
-        PatchCable(from: (3, "phase"), to: (4, "phase")),
-        PatchCable(from: (4, "out"), to: (5, "in")),
-        PatchCable(from: (5, "lowpass"), to: (6, "in")),
+        PatchCable(from: (2, "out"), to: (4, "cutoff")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (4, "lowpass"), to: (5, "in")),
     ],
 )
 ```

@@ -89,6 +89,7 @@ These apply only if the optional, deferred web target goes ahead.
 | NFR-UX-04 | UI text is translatable. English is the source language. | Could | Wider community reach. |
 | NFR-UX-05 | Error messages say what happened and what the user can do next, in plain language. | Must | Learners are a key audience. |
 | NFR-UX-06 | The desktop app exposes its toolbar, inspector, module browser, and canvas controls to the platform accessibility API, with names, values with their units ("800 Hz", not "800"), and states, so a screen reader and keyboard users can work it. | Should | Blind and low-vision musicians, and people who cannot use a mouse. Built on our own UI layer through AccessKit (ADR-0041, [UI layer spec](../design/ui-layer.md#7-the-accessibility-tree)). |
+| NFR-UX-07 | A screen reader user can get an overview of a whole patch, or of one sub-patch level, and trace a signal from module to module, without passing through each module's controls: a one-line summary, the modules in signal-flow order with what feeds them and what they feed, feedback loops and modulation marked, and keys to jump to the module upstream or downstream and back. | Should | A sighted user scans the graph before looking at details. Without an overview, a screen reader user must visit every control to learn what connects to what. Spec: [canvas accessibility](../design/canvas-accessibility.md). |
 
 ## Maintainability and openness (`OSS`)
 

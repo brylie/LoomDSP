@@ -513,14 +513,14 @@ fn the_breadcrumb_names_and_tiles_follow_the_path() {
     let shown = hierarchy.level_cables(controller.graph(), &filter);
     assert_eq!(shown.len(), 5);
     assert_eq!(shown.iter().filter(|c| c.link).count(), 3);
-    // Behind the Voice's pitch port stands the phase generator's input;
-    // behind its out port, the VCA.
+    // Behind the Voice's pitch port stands the saw's pitch input; behind
+    // its out port, the VCA.
     let (inputs, outputs) = hierarchy.instance_ports(ModuleId(2));
     assert_eq!(inputs.len(), 2);
     assert_eq!(outputs.len(), 2);
     let voice = ModulePath::top(2);
     let behind = hierarchy.inputs_behind(controller.graph(), &ModulePath::root(), &(2, "pitch".to_string()));
-    assert_eq!(behind, vec![(hierarchy.id_at(&voice, 3).unwrap(), "pitch".to_string())]);
+    assert_eq!(behind, vec![(hierarchy.id_at(&voice, 4).unwrap(), "pitch".to_string())]);
     let behind = hierarchy.source_behind(controller.graph(), &ModulePath::root(), &(2, "out".to_string()));
     assert_eq!(behind, Some((hierarchy.id_at(&voice, 7).unwrap(), "out".to_string())));
 }
@@ -646,12 +646,12 @@ fn removing_a_connected_port_drops_the_cables_through_it() {
     let removed = hierarchy.remove(controller.graph(), pitch);
     assert!(removed.modules.is_empty());
     hierarchy.sync(&mut controller).unwrap();
-    let phase = hierarchy.id_at(&voice, 3).unwrap();
+    let saw = hierarchy.id_at(&voice, 4).unwrap();
     assert!(
         !cables(&controller)
             .iter()
-            .any(|(from, to)| from.0 == 1 && to.0 == phase.0),
-        "the note no longer reaches the phase generator"
+            .any(|(from, to)| from.0 == 1 && to.0 == saw.0),
+        "the note no longer reaches the saw"
     );
     let saved = written(&hierarchy, &controller, &file.metadata);
     assert!(!saved.cables.iter().any(|c| c.to == (2, "pitch".to_string())));

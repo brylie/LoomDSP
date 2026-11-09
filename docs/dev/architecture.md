@@ -247,7 +247,7 @@ pub static DIVIDE: ModuleDescriptor = ModuleDescriptor {
 
 Names (`id`, port and parameter `name`) are stable IDs that patch files store. Labels and descriptions are text for people and can change at any time (ADR-0016). `loom-modules` checks at compile time that none is empty: `const _: () = loom_core::assert_documented(ALL);`. See [port and parameter text](../design/port-and-parameter-text.md).
 
-An unconnected input reads its `default`: a fixed value, or a transport signal such as `PortDefault::BarPhase`. A module reads the transport inside `process` with `ctx.transport()`, and takes the position at a frame with `TransportInfo::position_at(i)`, so the result is the same at any block size ([clock and transport](../design/clock.md)).
+An unconnected input reads its `default`: a fixed value, a transport signal such as `PortDefault::BarPhase`, or `PortDefault::OwnPhase`. The engine fills the first two, so the module reads the same slice with or without a cable. For an own phase the engine feeds zeros, and the module runs its own phase while its phase input has no cable (`!io.is_connected` on that input), with the shared code in `crates/loom-modules/src/own_phase.rs` ([ADR-0042](../adr/0042-unpatched-phase-inputs-are-wired-for-the-player.md), [oscillators](../design/oscillators.md)). A module reads the transport inside `process` with `ctx.transport()`, and takes the position at a frame with `TransportInfo::position_at(i)`, so the result is the same at any block size ([clock and transport](../design/clock.md)).
 
 ## Where to start
 

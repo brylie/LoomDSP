@@ -4,12 +4,13 @@
 //! ramp drive any shaper, and lets users bend time (sync, phase distortion,
 //! step indexing) before it becomes sound.
 
-use loom_core::signal::{EdgeDetector, WrapDetector, pitch, trigger};
+use crate::own_phase::{OCTAVE_PARAM, PitchedPhase, TUNE_PARAM};
+use loom_core::signal::{EdgeDetector, WrapDetector, trigger};
 use loom_core::{
     Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, TriggerFlag, Widget,
 };
-use loom_dsp::phase::{Phasor, wrap};
+use loom_dsp::phase::wrap;
 use loom_rt::Smoothed;
 
 /// `loom.phase.generator`: a ramp from 0 to 1 at the frequency set by pitch.
@@ -49,28 +50,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
         range: loom_core::PortRange::Signal,
         channels: Channels::PerChannel,
     }],
-    params: &[
-        ParamSpec {
-            name: "tune",
-            label: "Tune",
-            description: "Shifts the pitch in semitones.",
-            min: -48.0,
-            max: 48.0,
-            default: 0.0,
-            unit: "st",
-            options: ParamOptions::DEFAULT,
-        },
-        ParamSpec {
-            name: "octave",
-            label: "Octave",
-            description: "Shifts the pitch in octaves.",
-            min: -10.0,
-            max: 10.0,
-            default: 0.0,
-            unit: "oct",
-            options: ParamOptions::DEFAULT,
-        },
-    ],
+    params: &[TUNE_PARAM, OCTAVE_PARAM],
     role: ModuleRole::Dsp(|config| Box::new(Phase::new(config))),
     panel: Panel::new(6, 3, &[Widget::knob(0, 0, "tune"), Widget::knob(3, 0, "octave")]),
     displays: &[],
@@ -79,10 +59,7 @@ pub static PHASE: ModuleDescriptor = ModuleDescriptor {
 
 #[derive(Clone)]
 struct Phase {
-    phasor: Phasor,
-    sample_rate: f32,
-    tune: f32,
-    octave: f32,
+    phase: PitchedPhase,
     reset_in: EdgeDetector,
 }
 
@@ -92,10 +69,7 @@ impl Phase {
 
     fn new(config: &ModuleConfig) -> Self {
         Self {
-            phasor: Phasor::new(),
-            sample_rate: config.sample_rate,
-            tune: 0.0,
-            octave: 0.0,
+            phase: PitchedPhase::new(config.sample_rate),
             reset_in: EdgeDetector::new(),
         }
     }
@@ -112,30 +86,23 @@ impl Module for Phase {
         let octave = io.param(Self::OCTAVE);
         let ([pitch_in, reset], [out]) = io.split::<2, 1>();
         for (i, ((out, &p), &r)) in out.iter_mut().zip(pitch_in).zip(reset).enumerate() {
-            let offset =
-                tune.at_or(i, self.tune) * pitch::PER_SEMITONE + octave.at_or(i, self.octave) * pitch::PER_OCTAVE;
             if self.reset_in.rising(r) {
-                self.phasor.reset();
+                self.phase.reset();
             }
-
-            // A high pitch overflows `to_hz` to infinity, and `step_for` limits
-            // that, so a patch recovers when the pitch comes back (#121).
-            *out = self
-                .phasor
-                .tick(Phasor::step_for(pitch::to_hz(p + offset), self.sample_rate));
+            *out = self.phase.tick(i, p, tune, octave);
         }
     }
 
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
-            Self::TUNE => self.tune = value,
-            Self::OCTAVE => self.octave = value.round(),
+            Self::TUNE => self.phase.set_tune(value),
+            Self::OCTAVE => self.phase.set_octave(value),
             _ => {}
         }
     }
 
     fn reset(&mut self) {
-        self.phasor.reset();
+        self.phase.reset();
         self.reset_in.reset();
     }
 }

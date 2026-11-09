@@ -16,6 +16,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 /// render, and why: `(module, input, reason)`. The module must still stay finite
 /// and return to a normal size. Every other input of the module gets the full
 /// check, so a reason only excuses the input it is about.
+/// Why an oscillator's `pitch` input cannot match a clean render (ADR-0042).
+const OWN_PHASE_PITCH: &str = "A huge pitch runs the own phase at its fastest for a while, so the wave comes back at another point in its cycle, as a Phase module's output does.";
+
 const EXCEPTIONS: &[(&str, &str, &str)] = &[
     (
         "loom.dyn.dynamics",
@@ -32,6 +35,10 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "gate",
         "A huge gate is a real rising edge, so the envelope really plays.",
     ),
+    ("loom.osc.pulse", "pitch", OWN_PHASE_PITCH),
+    ("loom.osc.saw", "pitch", OWN_PHASE_PITCH),
+    ("loom.osc.sine", "pitch", OWN_PHASE_PITCH),
+    ("loom.osc.triangle", "pitch", OWN_PHASE_PITCH),
     (
         "loom.logic.memory",
         "a",

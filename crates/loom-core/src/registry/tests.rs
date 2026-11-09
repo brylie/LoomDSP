@@ -95,6 +95,23 @@ macro_rules! with_ports {
     }};
 }
 
+/// Own phase stands in for a phase, so only a phase input may default to
+/// it (oscillators.md, rule 8).
+#[test]
+fn own_phase_default_needs_a_phase_input() {
+    let wrong = with_ports!(
+        &[port("in", crate::SignalType::Pitch).with_default(PortDefault::OwnPhase)],
+        &[]
+    );
+    let error = wrong.unwrap_err();
+    assert!(error.to_string().contains("own phase"), "{error}");
+    let right = with_ports!(
+        &[port("phase", crate::SignalType::Phase).with_default(PortDefault::OwnPhase)],
+        &[]
+    );
+    assert!(right.is_ok(), "{right:?}");
+}
+
 /// Port spans must be finite and strictly increasing on both sides.
 #[test]
 fn rejects_invalid_port_ranges() {

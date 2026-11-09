@@ -91,18 +91,16 @@ Patch(
     metadata: Metadata(name: "Ducked Saw"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
-        PatchModule(id: 3, kind: "loom.osc.saw@1"),
-        PatchModule(id: 4, kind: "loom.env.envelope@1", params: {"mode": 1, "decay": 0.3}),
-        PatchModule(id: 5, kind: "loom.dyn.dynamics@1", params: {"mode": 4, "threshold": -30, "range": 18, "release": 0.2}),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 2, kind: "loom.osc.saw@1"),
+        PatchModule(id: 3, kind: "loom.env.envelope@1", params: {"mode": 1, "decay": 0.3}),
+        PatchModule(id: 4, kind: "loom.dyn.dynamics@1", params: {"mode": 4, "threshold": -30, "range": 18, "release": 0.2}),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
-        PatchCable(from: (1, "gate"), to: (4, "gate")),
-        PatchCable(from: (3, "out"), to: (5, "in")),
-        PatchCable(from: (4, "out"), to: (5, "sidechain")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (1, "gate"), to: (3, "gate")),
+        PatchCable(from: (2, "out"), to: (4, "in")),
+        PatchCable(from: (3, "out"), to: (4, "sidechain")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

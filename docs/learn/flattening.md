@@ -8,7 +8,7 @@ A sub-patch is a group of modules shown as one tile. The player sees a box with 
 
 ## Start from a real patch
 
-[`examples/patches/nested-subtractive.ron`](../../examples/patches/nested-subtractive.ron) is the subtractive example built as three levels. The top patch holds a MIDI note input, a **Voice** sub-patch, the audio output, the transport, and a scope. The Voice holds a phase generator, a saw, a **Filter** sub-patch, an amplitude envelope, and a VCA. The Filter holds the state variable filter, its envelope, and a scaler.
+[`examples/patches/nested-subtractive.ron`](../../examples/patches/nested-subtractive.ron) is the subtractive example built as three levels. The top patch holds a MIDI note input, a **Voice** sub-patch, the audio output, the transport, and a scope. The Voice holds a saw, a **Filter** sub-patch, an amplitude envelope, and a VCA. The Filter holds the state variable filter, its envelope, and a scaler.
 
 Each level is written once in the file, in a `subpatches` table, and used by an instance:
 
@@ -36,24 +36,23 @@ Three things to notice. The Patch input and Patch output modules are ordinary en
 
 ## What the engine gets
 
-Before the patch is applied to the engine, `loom-patch` flattens it. The result is a plain graph of eleven modules, the same eleven as `examples/patches/subtractive.ron`:
+Before the patch is applied to the engine, `loom-patch` flattens it. The result is a plain graph of ten modules, the same ten as `examples/patches/subtractive.ron`:
 
 | Flat id | Path | Module |
 |---|---|---|
 | 1 | 1 | MIDI note |
 | 2 | 2 | *(the Voice instance; it owns the id, but there is no module)* |
-| 12 | 2 › 3 | Phase generator |
-| 13 | 2 › 4 | Saw |
-| 14 | 2 › 5 › 3 | State variable filter, cutoff 300 Hz |
-| 15 | 2 › 5 › 4 | Filter envelope |
-| 16 | 2 › 5 › 5 | Scaler |
-| 17 | 2 › 6 | Amplitude envelope |
-| 18 | 2 › 7 | VCA |
+| 12 | 2 › 4 | Saw |
+| 13 | 2 › 5 › 3 | State variable filter, cutoff 300 Hz |
+| 14 | 2 › 5 › 4 | Filter envelope |
+| 15 | 2 › 5 › 5 | Scaler |
+| 16 | 2 › 6 | Amplitude envelope |
+| 17 | 2 › 7 | VCA |
 | 9 | 9 | Audio out |
 | 10 | 10 | Transport |
 | 11 | 11 | Scope |
 
-The **path** is where a module came from: the ids of the instances it is inside, then its own id. The ports are gone. The cable from the note's `pitch` to the Voice's `pitch` port, and the cable from the port to the phase generator inside, became one cable from module 1 to module 12. The cable out of the Filter's `out` port fans out to the VCA and, through the Voice's `filter` port, to the scope. The exposed cutoff was written into module 14 before it was resolved, clamped to the exposed range.
+The **path** is where a module came from: the ids of the instances it is inside, then its own id. The ports are gone. The cable from the note's `pitch` to the Voice's `pitch` port, and the cable from the port to the saw inside, became one cable from module 1 to module 12. The cable out of the Filter's `out` port fans out to the VCA and, through the Voice's `filter` port, to the scope. The exposed cutoff was written into module 13 before it was resolved, clamped to the exposed range.
 
 A test renders this file and the flat one at host buffers of 1, 77, and 512 frames and asserts the output is bit-identical (`crates/loom-modules/tests/subpatches.rs`). That is what "encapsulation has no run-time cost" (FR-ENCAP-07) means: not "cheap", but "the same".
 
@@ -75,7 +74,7 @@ The engine keeps each module's state in a slot found by its `ModuleId`. When the
 
 Flattening runs again after every edit. If it numbered the inner modules afresh each time, adding one module to the Voice would shift every id after it, and every shifted module would lose its state. The filter would restart cold in the middle of a note.
 
-So flat ids come from a table keyed by path. "2 › 5 › 3" got id 14 the first time; it gets 14 every time after, whatever is added or removed around it. A removed path keeps its entry, so its id is never handed to something else while the patch is open. Top-level ids are reserved first, instances included, so an inner module can never take the id of a module at the top that is visited later. The result is deterministic: the same patch gives the same table.
+So flat ids come from a table keyed by path. "2 › 5 › 3" got id 13 the first time; it gets 13 every time after, whatever is added or removed around it. A removed path keeps its entry, so its id is never handed to something else while the patch is open. Top-level ids are reserved first, instances included, so an inner module can never take the id of a module at the top that is visited later. The result is deterministic: the same patch gives the same table.
 
 ## Ports with nothing behind them
 

@@ -70,18 +70,16 @@ Patch(
         PatchModule(id: 2, kind: "loom.phase.scale@1", params: {"multiply": 4}),
         PatchModule(id: 3, kind: "loom.phase.trigger@1"),
         PatchModule(id: 4, kind: "loom.rand.random@1", params: {"mode": 1, "low": -0.2, "high": 0.2, "step": 0.3, "glide": 0.05}),
-        PatchModule(id: 5, kind: "loom.phase.generator@1"),
-        PatchModule(id: 6, kind: "loom.osc.sine@1"),
-        PatchModule(id: 7, kind: "loom.math.mul@1", params: {"gain": 0.3}),
-        PatchModule(id: 8, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.osc.sine@1"),
+        PatchModule(id: 6, kind: "loom.math.mul@1", params: {"gain": 0.3}),
+        PatchModule(id: 7, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (2, "phase"), to: (3, "phase")),
         PatchCable(from: (3, "trigger"), to: (4, "trigger")),
         PatchCable(from: (4, "out"), to: (5, "pitch")),
-        PatchCable(from: (5, "phase"), to: (6, "phase")),
-        PatchCable(from: (6, "out"), to: (7, "a")),
-        PatchCable(from: (7, "out"), to: (8, "in")),
+        PatchCable(from: (5, "out"), to: (6, "a")),
+        PatchCable(from: (6, "out"), to: (7, "in")),
     ],
 )
 ```

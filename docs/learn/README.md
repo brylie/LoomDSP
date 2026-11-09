@@ -13,6 +13,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Output safety](output-safety.md) | Why DC harms speakers, why a hard clip is not enough, what a limiter's lookahead costs, and why audio fades in. |
 | [Hot patching](hot-patching.md) | Why a new cable into a running patch can click, what state must carry over, and why a crossfade does not hide a cold start. |
 | [Feedback loops and the unit delay](feedback-loops.md) | Why a loop needs a one-sample delay, why loops run one sample at a time, and where the compiler puts the delay. |
+| [Reading a patch by ear](reading-a-patch-by-ear.md) | Why a screen reader needs an overview before details, why the outline lists modules in signal-flow order, and why it handles its own keys. |
 | [Why feedback FM turns to noise](feedback-fm.md) | Why pitch feedback swings by octaves, why the loop turns chaotic, how aliasing adds noise, and why phase feedback is tamer. |
 | [Triggers and gates](triggers-and-gates.md) | Why a trigger is one sample, why inputs count rising edges, and why a 1 ms pulse was rejected. |
 | [Pitch at 0.1 per octave](pitch.md) | How pitch relates to 1 V per octave, why 20 octaves fit in -1 to 1, and how to convert to Hz and MIDI notes. |

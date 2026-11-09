@@ -5,16 +5,17 @@ Why a sine that modulates its own pitch is a clean, bright tone at low depth and
 - **Kind:** explainer.
 - **Used by:** [control ranges specification](../design/control-ranges.md), the example patch `examples/patches/fm-feedback.ron`.
 - **Related:** [Feedback loops and the unit delay](feedback-loops.md), [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0007](../adr/0007-polymorphic-signal-model.md), [Pitch at 0.1 per octave](pitch.md).
-- **Code:** `loom.phase.generator`, `loom.osc.sine`, `loom.math.mul`.
+- **Code:** `loom.osc.sine` (its own phase comes from the same code as `loom.phase.generator`), `loom.math.mul`.
 
 ## The patch
 
-In `fm-feedback.ron` the output of a sine goes through Multiply and back into the pitch of the Phase generator that drives the same sine. The Multiply gain is the **feedback depth**.
+In `fm-feedback.ron` the output of a sine goes through Multiply and back into the same sine's pitch. The sine runs its own phase from that pitch, so the loop changes how fast its own phase turns. The Multiply gain is the **feedback depth**.
 
 ```
-note pitch ---> Add ---> Phase generator ---> Sine ---> out
-                 ^                              |
-                 +------ Multiply (depth) <-----+
+note pitch ---> Add ---> Sine ---> out
+                 ^        |
+                 |        v
+                 +--- Multiply (depth)
 ```
 
 At a depth of 0.08 it sounds like a sine with a brighter edge. At 1 it is rough. At 3 it is noise. Nothing is broken. Four ideas explain it.
@@ -30,7 +31,7 @@ Pitch on a cable is 0.1 per octave ([pitch explainer](pitch.md)). The sine's out
 | 1 | 1 | 10 |
 | 10 | 10 | 100 |
 
-A depth of 1 looks small on a knob. It sends the frequency of middle C (261.6 Hz) as low as 0.26 Hz and as high as 268 kHz. A depth of 10 asks for 100 octaves, which is a frequency no `f32` can hold. The Phase generator limits its step to 0.49 of a cycle per sample, so that the phase stays a number ([phase explainer](phase-and-cycles.md#why-more-than-05)). The limit protects the patch. It does not make the sound gentler.
+A depth of 1 looks small on a knob. It sends the frequency of middle C (261.6 Hz) as low as 0.26 Hz and as high as 268 kHz. A depth of 10 asks for 100 octaves, which is a frequency no `f32` can hold. The sine's own phase, like a Phase module's, limits its step to 0.49 of a cycle per sample, so that the phase stays a number ([phase explainer](phase-and-cycles.md#why-more-than-05)). The limit protects the patch. It does not make the sound gentler.
 
 ## 2. The loop has a one-sample delay
 

@@ -106,7 +106,7 @@ fn a_loop_across_a_boundary_gets_a_unit_delay() {
     assert!(report.loops[0].inserted_delays.is_empty(), "{report:?}");
 }
 
-/// Collapsing three modules of the flat subtractive patch into a sub-patch
+/// Collapsing two modules of the flat subtractive patch into a sub-patch
 /// renders bit-identical to the flat patch at host buffers of 1, 77, and
 /// 512 frames: the file the editor writes after a collapse plays the same
 /// (sub-patches.md, rule 2).
@@ -114,8 +114,8 @@ fn a_loop_across_a_boundary_gets_a_unit_delay() {
 fn a_collapse_renders_bit_identical_to_the_flat_patch() {
     use loom_patch::{FlatIds, Hierarchy, Layout, ModulePath};
     let flat = load_patch(&patch_path("subtractive.ron"));
-    // The editor's steps: load, collapse the phase generator, the saw, and
-    // the filter, sync, and write the file.
+    // The editor's steps: load, collapse the saw and the filter, sync, and
+    // write the file.
     let mut parts = load(&flat);
     let mut ids = FlatIds::new();
     let mut edited = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
@@ -125,10 +125,10 @@ fn a_collapse_renders_bit_identical_to_the_flat_patch() {
     let oscillator = flat
         .modules
         .iter()
-        .filter(|m| ["loom.phase.generator@1", "loom.osc.saw@1", "loom.filter.svf@1"].contains(&m.kind.as_str()))
+        .filter(|m| ["loom.osc.saw@1", "loom.filter.svf@1"].contains(&m.kind.as_str()))
         .map(|m| m.id)
         .collect::<Vec<_>>();
-    assert_eq!(oscillator.len(), 3, "the subtractive example has these three");
+    assert_eq!(oscillator.len(), 2, "the subtractive example has these two");
     let made = hierarchy
         .collapse(edited.controller.graph(), &ModulePath::root(), &oscillator)
         .unwrap();
