@@ -263,6 +263,7 @@ M on the canvas, with no text field focused, moves through the three settings, a
 - [ ] `Ui` harness: a click on the map centres the canvas there, and dragging the view rectangle pans it.
 - [ ] `Ui` harness: with the Auto setting, the map shows while the level overflows the view and hides when it fits; M moves through Auto, Always, and Hidden, and the setting is saved in preferences.
 - [ ] `Ui` harness: O on the canvas opens the Outline tab and focuses its first row; Ctrl+Tab reaches it; Escape returns to the canvas with the tab still open.
+- [ ] `Ui` harness: with an outline row focused, Ctrl+Tab and Ctrl+Shift+Tab move to the next and previous region, and the outline takes neither key (ui-layer.md, section 6, rule 7).
 - [ ] `Ui` harness: on the canvas, `]` on a selected SVF selects Multiply 8 and centres it, and Cmd+`[` (Ctrl+`[`) returns to SVF.
 - [ ] Inside a sub-patch, the outline shows the inside, with the port tiles as source and output rows.
 - [ ] A VoiceOver check, recorded in the pull request: the summary, a scan of `subtractive.ron`, a jump and Back, Enter to a tile, and what VoiceOver says about a row's level and position (rule 15). Narrator and Orca checks are recorded, or listed as not checked.
