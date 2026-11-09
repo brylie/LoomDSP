@@ -6,7 +6,7 @@ How LoomDSP's own UI layer turns events into messages, decides what to rebuild, 
 - **Status:** Agreed (2026-11-09). Each section gives the phase of [the plan](../dev/leaving-iced-plan.md) that first builds it. One choice, the text crate, is agreed as a decision rule and made at plan step 2.4 (section 8, rule 8).
 - **Decision behind it:** [ADR-0041](../adr/0041-own-ui-layer.md), superseding [ADR-0009](../adr/0009-ui-stack-iced.md) for the window and widgets, and [ADR-0028](../adr/0028-app-accessibility-waits-for-iced.md). Builds on [ADR-0010](../adr/0010-own-patch-canvas.md) (our own canvas), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), and [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) (widgets follow the kind of value).
 - **Use case and requirements:** NFR-UX-01 (keyboard), NFR-UX-06 (screen readers), NFR-PERF-04 (no redraw when idle), FR-SDK-06 (publishable crates), OQ-13 (plugin windows), OQ-14 (Iced churn).
-- **Background:** [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md). An explainer in `docs/learn/` follows in phase 4.
+- **Background:** [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md). An explainer in `docs/learn/` follows in phase 4. The [canvas accessibility spec](canvas-accessibility.md) builds on sections 6, 7, and 9 for the patch outline, the patch map, and following cables.
 - **Prior art:** the Elm architecture (one message type, one update), and the rebuild-and-compare approach that Levien describes for Xilem. Named only to explain ideas.
 - **Issues:** [#683](https://github.com/brylie/LoomDSP/issues/683). The step-by-step work is in [the plan](../dev/leaving-iced-plan.md).
 - **Code:** `crates/loom-ui-core` and `crates/loom-ui`, once they exist. Until then, `crates/loom-app` and `crates/loom-canvas`.
@@ -107,7 +107,7 @@ The table covers every use of Iced's `Task`, its widget operations, and `rfd` in
 
 | Effect | Used today by | What the shell does | What the headless harness does |
 |---|---|---|---|
-| Focus an element, by UI ID, or the next or previous one | Focusing a field, Tab between fields (`editing.rs`, `StepFocus`) | Moves keyboard focus | The same |
+| Focus an element, by UI ID, or the next or previous one. The UI ID may name an inner part of a custom element (section 9, rule 6) | Focusing a field, Tab between fields (`editing.rs`, `StepFocus`); later, Enter on an outline row focusing a tile control | Moves keyboard focus | The same |
 | Ask which text field has focus, then queue a message with the answer | `Message::TextFocus` (`editing.rs`) | Answers from the focus state | The same |
 | Select all text in a field | Opening a field for typing (`editing.rs`) | Sets the field's selection | The same |
 | Scroll an element into view | The module browser and patches lists, a matrix row (`matrix.rs`) | Changes its scroll offset | The same |
@@ -204,7 +204,7 @@ The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar
 
 ## 6. Focus and the keyboard
 
-**Status:** Agreed. Rules 1, 3, and 5 for the canvas and the inspector in phase 1; the rest in phase 3, for every view.
+**Status:** Agreed. Rules 1, 3, and 5 for the canvas and the inspector in phase 1; the rest in phase 3, for every view. Rule 7 comes with the canvas accessibility spec's outline.
 
 ### Rules
 
@@ -222,6 +222,7 @@ The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar
    6. **The app's shortcuts** (`Message::Key`): undo, redo, save, delete, and the rest.
 
    A change to this order is a behaviour change. It is listed in its pull request and in this rule. *Why:* today the order is spread across Iced's widget status and a list of listeners, so a rebuilt layer could change it without anyone noticing. Cmd+Z in a name field must undo the typing, and the canvas must have its arrows before panel navigation does.
+7. **F6 moves focus from region to region:** the canvas, the right column, then the toolbar, and round again. Each region remembers the element it last had focused, and F6 returns to it; the first time, focus goes to the region's first focus stop. In the right column, that is the open tab's content, so F6 lands on the outline when the Outline tab is open ([canvas accessibility](canvas-accessibility.md)). F6 is an app shortcut (rule 6, step 6), and does nothing while an overlay or a question holds focus (rule 4). *Why:* Tab moves one element at a time, which is slow across a toolbar, an inspector, and a canvas of tiles. A key that jumps between the window's large parts is what keyboard and screen reader users expect from desktop apps.
 
 ## 7. The accessibility tree
 
@@ -246,6 +247,9 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 | Text field | Text input | Its text, as text runs with caret and selection (rule 10) | SetValue, SetTextSelection, ReplaceSelectedText, Focus |
 | Meter | Meter | Number, with its unit in the description | None |
 | Light | Image, named, with its state in words in the description | None | None |
+| A drawing whose text alternative is another element (the patch map) | Image, named ("Patch map"), with a description that says where its text alternative is | None | None |
+| An app-driven tree (the patch outline) | Tree, named | None | Focus |
+| A row of that tree | Tree item, with its level, position in set, size of set, and expanded state | None | Focus, and Click where a click does something |
 | A message meant to be announced (an output safety warning, an alert in the status line) | Status | Its text | None |
 | Tile | Group, named by its module | None | Focus |
 | Panel | Group, named | None | None |
@@ -275,6 +279,8 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 9. **Focus on a node never changes the patch.** Selecting a tile follows only an explicit Click or Enter, not the Focus action. *Why:* an assistive tool that only inspects the window must not change it. The spike's tile selection on focus is removed.
 10. **A text field gives its text as AccessKit text runs,** with the caret and the selection as positions in them, and handles SetTextSelection and ReplaceSelectedText. *Why:* with only SetValue, a screen reader cannot move its cursor through the text or read where the caret is.
 11. **The adapter attaches before the window first shows.** The shell creates the window hidden, attaches `accesskit_winit`, then shows it. *Why:* AccessKit documents this order. The spike worked without it by luck.
+12. **A tree is driven by the app.** The app handles Up, Down, Right, Left, Home, End, and type-ahead in a tree, and keeps which rows are expanded. The tree's visible rows are sent as direct children of the Tree node, in the order shown, and each still carries its level, its position in set, its size of set, and its expanded state. *Why:* `accesskit_macos` 0.27.2 has no expand or collapse action, reports no level, position, or size of set, and lists only a tree's direct items as its rows (`node.rs`, `accessibilityRows`). Rows nested as children of rows would not be listed there. The Windows adapter maps level, position, size, and expand state †, and the Linux adapter position and size †, so sending them costs nothing and helps where they are read. Keys the app handles work the same everywhere, with or without a screen reader.
+13. **Elements may set `controls` relations to other nodes by UI ID,** inside or outside their own panel or custom element, and no other relation. The runtime turns each UI ID into its node ID when the tree is sent, and drops a relation whose target is gone. *Why:* `controls` is the only AccessKit relation the three platform adapters map: on macOS to linked UI elements (`node.rs`, `accessibilityLinkedUIElements`), on Windows and Linux to "controller for" †. `flow_to`, `described_by`, and `details` are mapped by none †, so a relation of those kinds would reach no screen reader. The canvas uses it from each output port to the inputs its cables feed ([canvas accessibility](canvas-accessibility.md), rule 21).
 
 ## 8. Text input and IME
 
@@ -312,6 +318,8 @@ A custom element is the layer's supported escape hatch. The patch canvas is the 
 3. **It gives accessibility nodes under its own UI ID,** one per inner part a user can reach (a tile, a control, a port), in its own focus order.
 4. **It reports when it needs a redraw or animation frames.** That decides whether the runtime composes a frame, not which layers the frame holds: each composed frame draws every visible layer, the canvas included, from its retained GPU data. A panel change therefore redraws the canvas with no rebuild of its scene. Pan and zoom only update its uniforms (ADR-0010).
 5. **It reports events to the app as messages,** and never edits app state itself. The canvas already works this way (`CanvasEvent`).
+6. **It takes focus requests for its inner parts.** A focus effect whose UI ID names an inner part (a tile control on the canvas) is passed to the custom element, which focuses that part, and the tree reports it (section 6, rule 5). *Why:* a panel can then send focus into the canvas, as Enter on an outline row does, and the screen reader follows.
+7. **Its nodes may set `controls` relations,** to its own nodes or to nodes outside it, by section 7, rule 13.
 
 *Why:* a pure pipeline never covers everything. An editor or a canvas needs its own drawing and input. A hatch that is part of the contract keeps such elements inside focus, the accessibility tree, and the tests, rather than beside them.
 
@@ -368,6 +376,10 @@ Phase 3:
 - [ ] Tab and Shift+Tab reach every interactive element in every view, with a visible ring, and the screen reader follows.
 - [ ] Opening an overlay moves focus into it and hides the layers below from the tree; closing it restores focus, or moves it by section 6, rule 4 when its element is gone.
 - [ ] A test checks the key order of section 6, rule 6, step by step.
+- [ ] F6 cycles the canvas, the right column, and the toolbar, returns to each region's last focused element, and does nothing while an overlay holds focus.
+- [ ] A focus effect with the UI ID of a tile control, sent from a panel, focuses that control on the canvas, and the tree reports it.
+- [ ] A tree's visible rows are direct children of its Tree node, each with its level, position in set, size of set, and expanded state.
+- [ ] A `controls` relation to a removed element is dropped from the tree.
 - [ ] A screen reader can move its cursor through the browser search text and hear the caret position.
 - [ ] IME composition works in the browser search on macOS with a Japanese or Chinese input method. Recorded in the pull request.
 
@@ -393,6 +405,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Number or text for a slider's value on macOS | A number, with the unit in the description, until AccessKit's adapter gives value text | Section 7, rule 4 |
 | How often live value nodes update | At most every 250 ms. While a screen reader is active, every live value node on screen updates, focused or not, because AccessKit does not report where the screen reader's cursor is. Widened from "only while focused" on the same day, so a meter under the cursor is never stale | Section 7, rule 7 |
 | Which text crate | Chosen at plan step 2.4 by the criteria in the rule, including how its glyphs are drawn | Section 8, rule 8 |
+| Hooks for the canvas accessibility spec | Added at the maintainer's request: `controls` relations, focus into a custom element's parts, an app-driven tree, an image with its text alternative elsewhere, and F6 between regions | Section 6, rule 7; section 7, rules 12 and 13; section 9, rules 6 and 7 |
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.
