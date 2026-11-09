@@ -1354,11 +1354,11 @@ fn select_fade(signals: &[Option<SignalType>]) -> f32 {
 /// 1/√N for audio, whose different copies add in power; 1/N for pitch and
 /// modulation, so the output is the copies' mean; 1 for a gate, which stays
 /// high while any copy is high (sub-patches.md, The modules the flattener
-/// adds, Sum).
+/// adds, Sum). A phase output takes no Sum at all: see [`flatten_stack`].
 fn stack_gain(signal: Option<SignalType>, copies: u32) -> f32 {
     match signal {
         Some(SignalType::Pitch | SignalType::Modulation) => 1.0 / copies.max(1) as f32,
-        Some(SignalType::Gate | SignalType::Phase) => 1.0,
+        Some(SignalType::Gate) => 1.0,
         _ => blend::unison_gain(copies),
     }
 }
@@ -1526,6 +1526,14 @@ fn flatten_stack(
         for (i, name) in names.iter().enumerate() {
             let step = path.added(i as u32);
             let signal = signal_of(&inner, outputs[0].get(name).and_then(Option::as_ref));
+            // A sum of ramps that wrap is no phase: copy 0's phase alone goes
+            // out, as it would from a single sub-patch.
+            if signal == Some(SignalType::Phase) {
+                inner
+                    .outputs
+                    .insert(name.clone(), outputs[0].get(name).cloned().flatten());
+                continue;
+            }
             // Only audio is spread across stereo; a pitch or a gate has no side.
             let audio = !matches!(
                 signal,

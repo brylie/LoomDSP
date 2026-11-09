@@ -69,8 +69,8 @@ fn a_stack_runs_copies_summed_at_one_over_root_n() {
 }
 
 /// A stack's pitch and modulation outputs are the copies' mean, a gate is
-/// their plain sum, and stereo spread leaves them mono: only audio is
-/// summed at 1/√N and panned.
+/// their plain sum, a phase is copy 0's alone, and stereo spread leaves
+/// them mono: only audio is summed at 1/√N and panned.
 #[test]
 fn control_outputs_of_a_stack_are_averaged_and_stay_mono() {
     let text = voice_with("mode: Stack, copies: 4, stereo_spread: true,").replace(
@@ -79,14 +79,24 @@ fn control_outputs_of_a_stack_are_averaged_and_stay_mono() {
         r#"PatchCable(from: (5, "lowpass"), to: (6, "a")),
                 PatchCable(from: (2, "phase"), to: (4, "in")),"#,
     );
-    let (flat, _) = flatten(&text);
-    let sum = module(&flat, &[7, ADDED_STEP]);
-    assert_eq!(
-        sum.module.descriptor.kind(),
-        SUM_KIND,
-        "a phase is not spread across stereo"
+    let (flat, ids) = flatten(&text);
+    // A sum of ramps is no phase: copy 0's phase goes out alone.
+    assert!(
+        ids.get(&ModulePath(vec![7, ADDED_STEP])).is_none(),
+        "no Sum on a phase output"
     );
-    assert_eq!(sum.module.params[0], 1.0, "a phase or gate sums plainly");
+    let phase = id(&ids, &[7, 2]);
+    assert!(
+        cables(&flat).contains(&((phase, "phase"), (9, "in"))),
+        "copy 0's phase, straight out"
+    );
+    let copy = id(&ids, &[7, COPY_STEP + 1, 2]);
+    assert!(
+        !cables(&flat)
+            .iter()
+            .any(|(from, to)| *from == (copy, "phase") && *to == (9, "in"))
+    );
+    assert_eq!(stack_gain(Some(SignalType::Gate), 4), 1.0, "a gate sums plainly");
     assert_eq!(stack_gain(Some(SignalType::Pitch), 4), 0.25);
     assert_eq!(stack_gain(Some(SignalType::Modulation), 4), 0.25);
     assert_eq!(stack_gain(Some(SignalType::Audio), 4), 0.5);

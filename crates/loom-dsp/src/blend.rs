@@ -6,15 +6,16 @@
 //! Two signals that are different sounds add in power, not in amplitude.
 //! Gains on a quarter circle keep the sum of their squares at 1, so loudness
 //! holds through a fade or across a pan, where linear gains dip by 3 dB in the
-//! middle. Pitch and modulation are values, not sounds, so they fade with
-//! linear gains that sum to 1, and a value both members share stays put (C. Roads, *The Computer Music Tutorial*, MIT Press, 1996, on
+//! middle (C. Roads, *The Computer Music Tutorial*, MIT Press, 1996, on
 //! crossfading and panning; U. Zölzer (ed.), *DAFX: Digital Audio Effects*,
 //! 2nd ed., Wiley, 2011, on constant-power laws). The power of a sum of `n`
 //! uncorrelated signals is the sum of their powers (A. Papoulis and
 //! S. U. Pillai, *Probability, Random Variables and Stochastic Processes*,
 //! 4th ed., McGraw-Hill, 2002, the variance of a sum of independent
 //! variables), so scaling the sum by `1/√n` keeps the loudness of one.
-//! The explainer is `docs/learn/unison.md`.
+//! Pitch and modulation are values, not sounds, so they fade with linear
+//! gains that sum to 1, and a value both members share stays put. The
+//! explainer is `docs/learn/unison.md`.
 //!
 //! ```
 //! use loom_dsp::blend::{equal_power, MemberFade};

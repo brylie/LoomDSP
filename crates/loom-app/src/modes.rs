@@ -262,6 +262,8 @@ impl App {
                 .and_then(|n| loom_core::ModuleNames::parameter_index(n, loom_patch::modes::MEMBER_PARAM));
             if let Some(index) = index {
                 let _ = self.session.controller.set_param(module, index, value);
+                // A select inside a stack: every copy's Member follows.
+                self.fan_out_param(module.0, index, value);
             }
         }
     }

@@ -516,3 +516,76 @@ fn undo_puts_member_back() {
     app.undo();
     assert_eq!(voice_rows(&mut app).params[0].label, "Member: 1 (Voice)");
 }
+
+/// A stack of two copies whose inside is a select of two constant members.
+const STACKED_SELECT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stacked select"),
+    subpatches: {
+        "stack": SubPatch(
+            metadata: Metadata(name: "Stack"),
+            mode: Stack,
+            copies: 2,
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("select"), params: {"member": 2.0}),
+                PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+        ),
+        "select": SubPatch(
+            metadata: Metadata(name: "Select"),
+            mode: Select,
+            members: [1, 2],
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("saw")),
+                PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("square")),
+            ],
+        ),
+        "saw": SubPatch(
+            metadata: Metadata(name: "Saw"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.25}),
+                PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+        ),
+        "square": SubPatch(
+            metadata: Metadata(name: "Square"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": -0.25}),
+                PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+        ),
+    },
+    modules: [
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("stack")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [PatchCable(from: (2, "out"), to: (3, "in"))],
+)"#;
+
+/// A select inside a stack: when its playing member moves, Member follows
+/// it in every copy, not only copy 0, so the copies play the same member.
+#[test]
+fn member_follows_its_member_in_every_copy_of_a_stack() {
+    use loom_patch::flatten::{ADDED_STEP, MEMBER_STEP};
+    let mut app = app_with(STACKED_SELECT);
+    let member = |app: &App, path: &[u32]| {
+        let id = at(app, path).expect("a Member module");
+        app.session.controller.graph().node(id).unwrap().params[0]
+    };
+    let copy0 = [2, 1, ADDED_STEP + MEMBER_STEP];
+    let copy1 = [2, COPY_STEP + 1, 1, ADDED_STEP + MEMBER_STEP];
+    assert_eq!((member(&app, &copy0), member(&app, &copy1)), (2.0, 2.0));
+    let square = app.session.hierarchy.members_of(at(&app, &[2, 1]).unwrap())[1];
+    mode(
+        &mut app,
+        Message::MoveMember {
+            member: square.0,
+            up: true,
+        },
+    );
+    assert_eq!((member(&app, &copy0), member(&app, &copy1)), (1.0, 1.0));
+}

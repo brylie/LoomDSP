@@ -37,7 +37,7 @@ A stack's copies are meant to differ: each is detuned a little, or plays its own
 
 A layer is different: its members are different sounds that the player chose to hear together, so a layer adds them at full level, as a mixer with every fader at 1 does.
 
-All of this is about audio. A stack's pitch and modulation outputs are values, so the stack gives their **mean** (1/N): four copies of pitch 0.2 give 0.2. A gate output is a plain sum, so it stays high while any copy is high. Stereo spread pans only audio outputs; a pitch has no left or right.
+All of this is about audio. A stack's pitch and modulation outputs are values, so the stack gives their **mean** (1/N): four copies of pitch 0.2 give 0.2. A gate output is a plain sum, so it stays high while any copy is high. A phase output is copy 0's alone, since a sum of wrapping ramps is no ramp. Stereo spread pans only audio outputs; a pitch has no left or right.
 
 ## Why the copies must differ
 
