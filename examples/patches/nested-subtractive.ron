@@ -37,7 +37,6 @@ Patch(
             modules: [
                 PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("pitch")),
                 PatchModule(id: 2, kind: "loom.struct.input@1", label: Some("gate")),
-                PatchModule(id: 3, kind: "loom.phase.generator@1"),
                 PatchModule(id: 4, kind: "loom.osc.saw@1"),
                 PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("filter")),
                 // Amplitude envelope and VCA.
@@ -47,8 +46,7 @@ Patch(
                 PatchModule(id: 9, kind: "loom.struct.output@1", label: Some("filter")),
             ],
             cables: [
-                PatchCable(from: (1, "out"), to: (3, "pitch")),
-                PatchCable(from: (3, "phase"), to: (4, "phase")),
+                PatchCable(from: (1, "out"), to: (4, "pitch")),
                 PatchCable(from: (4, "out"), to: (5, "in")),
                 PatchCable(from: (2, "out"), to: (5, "gate")),
                 PatchCable(from: (2, "out"), to: (6, "gate")),

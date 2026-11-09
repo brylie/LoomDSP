@@ -53,19 +53,15 @@ Patch(
     version: 1,
     metadata: Metadata(name: "Ring Modulation"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1", params: {"tune": 0}),
-        PatchModule(id: 2, kind: "loom.osc.sine@1"),
-        PatchModule(id: 3, kind: "loom.phase.generator@1", params: {"tune": 7}),
-        PatchModule(id: 4, kind: "loom.osc.sine@1"),
-        PatchModule(id: 5, kind: "loom.math.mul@1", params: {"gain": 0.5}),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.sine@1", params: {"tune": 0}),
+        PatchModule(id: 2, kind: "loom.osc.sine@1", params: {"tune": 7}),
+        PatchModule(id: 3, kind: "loom.math.mul@1", params: {"gain": 0.5}),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (3, "phase"), to: (4, "phase")),
-        PatchCable(from: (2, "out"), to: (5, "a")),
-        PatchCable(from: (4, "out"), to: (5, "b")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (1, "out"), to: (3, "a")),
+        PatchCable(from: (2, "out"), to: (3, "b")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
     ],
 )
 ```

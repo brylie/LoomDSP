@@ -68,6 +68,7 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Module test harness](module-test-harness.md) | [ADR-0002](../adr/0002-graph-execution-and-feedback.md) | Implemented, M1; reset check, shared check blind spots, all inputs at once, and changes during a render Implemented, M2 |
 | [Clock and transport](clock.md) | [ADR-0015](../adr/0015-one-transport-per-patch.md) | Engine sections, Clock Divide, and Phase Trigger Implemented (M1); Transport, Clock, Phase Scale, and rules 10 and 11 Agreed (M1); MIDI clock and Clock to phase Agreed (M2); rest Draft |
 | [DSP algorithms](dsp-algorithms.md) | [ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md) | Implemented |
+| [Oscillators](oscillators.md) | None (builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) and [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md)) | Implemented, M1 |
 | [Delay line and all-pass](delay.md) | [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md), [ADR-0002](../adr/0002-graph-execution-and-feedback.md), [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md), [ADR-0020](../adr/0020-inferred-channel-count.md) | Implemented, M1 |
 | [Port and parameter text](port-and-parameter-text.md) | [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) | Implemented, M1 |
 | [Open, Save, and Save As](files.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md)) | Implemented, M1; recent files and dropping a file Agreed, M2 |

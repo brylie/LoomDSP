@@ -42,13 +42,11 @@ Patch(
     version: 1,
     metadata: Metadata(name: "Direct Output"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.sine@1"),
-        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (1, "out"), to: (2, "in")),
     ],
 )
 ```

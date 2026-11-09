@@ -57,18 +57,16 @@ Patch(
     metadata: Metadata(name: "Mod Wheel Filter"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
-        PatchModule(id: 3, kind: "loom.osc.saw@1"),
-        PatchModule(id: 4, kind: "loom.midi.controller@1", params: {"controller": 1}),
-        PatchModule(id: 5, kind: "loom.filter.ladder@1", params: {"cutoff": 200, "resonance": 0.5}),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 2, kind: "loom.osc.saw@1"),
+        PatchModule(id: 3, kind: "loom.midi.controller@1", params: {"controller": 1}),
+        PatchModule(id: 4, kind: "loom.filter.ladder@1", params: {"cutoff": 200, "resonance": 0.5}),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "pitch"), to: (2, "pitch")),
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
-        PatchCable(from: (3, "out"), to: (5, "in")),
-        PatchCable(from: (4, "out"), to: (5, "cutoff")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (2, "out"), to: (4, "in")),
+        PatchCable(from: (3, "out"), to: (4, "cutoff")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

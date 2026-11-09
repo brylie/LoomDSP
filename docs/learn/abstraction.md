@@ -37,9 +37,9 @@ The first is units. If one filter's cutoff were in Hz and another's in pitch, th
 
 The second is a parameter that only some parts have. The catalogue's first draft listed `level` on every sound source, but no LoomDSP oscillator has one: an oscillator's level is set by the amplifier after it. Making every listed parameter required would have left the role with no part that fits. Making a parameter optional says: carry it when both parts have it, show it when the part has it, and never refuse a part for lacking it.
 
-### Why a sound source takes a phase
+### Why a sound source takes a pitch and a phase
 
-The catalogue said "pitch in" for a sound source. Every LoomDSP oscillator takes a **phase** instead, a ramp from 0 to 1 that a phase generator makes from the pitch ([Phase and cycles](phase-and-cycles.md), ADR-0012). The role follows the modules, not the sketch: a source's input is `phase`, and it is optional, because noise has no input at all.
+Every LoomDSP oscillator is driven by a **phase**, a ramp from 0 to 1 ([Phase and cycles](phase-and-cycles.md)). But it makes that phase itself from its `pitch` input, so a note cabled into an oscillator plays, as on any synthesizer. A cable into its `phase` input takes over, so one phase can drive several shapes in lock, or a bent phase can make a new wave ([oscillators](../design/oscillators.md)). The role has both inputs, and both are optional, because noise has neither. Its `tune` and `octave` knobs are optional role parameters, so a Saw swapped for a Pulse keeps its tuning.
 
 ## What a slot is, and what it is not
 

@@ -77,6 +77,7 @@ A module can declare a **default** for any input. The default is used while noth
 | Value | A fixed number. Most inputs use 0. |
 | Bar phase, beat phase | The transport's phase. |
 | Playing | The transport's play gate. |
+| Own phase | The module runs its own phase. An oscillator does this from its pitch ([oscillators](oscillators.md), rule 8). |
 
 - Connecting a cable replaces the default for that module. Removing the cable brings it back.
 - An input that is following the transport shows a small clock mark next to the port ([the mark](panels.md#clock-mark-on-transport-inputs)). *Why:* behaviour without a cable must still be visible.

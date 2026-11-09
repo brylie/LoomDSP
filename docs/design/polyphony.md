@@ -217,13 +217,13 @@ These check the model. Only the first is built in M2.
 
 ### A keyboard into an 8-voice synth (M2)
 
-Note input (`voices` 8, Oldest) `pitch` → Phase generator `pitch` → Saw `phase` → SVF `in` → Amplifier `in` → Voice merge `in` (Sum) → Audio Out. Note input's `gate` goes to an Envelope's `gate`, whose `out` goes to the Amplifier's `level` input and to Note input's `level`. These are today's modules with today's ports; the `pitch`, `phase`, `gate`, and `level` inputs are `Downmix`, which rule 3 leaves as it is.
+Note input (`voices` 8, Oldest) `pitch` → Saw `pitch` → SVF `in` → Amplifier `in` → Voice merge `in` (Sum) → Audio Out. Note input's `gate` goes to an Envelope's `gate`, whose `out` goes to the Amplifier's `level` input and to Note input's `level`. These are today's modules with today's ports; the `pitch`, `gate`, and `level` inputs are `Downmix`, which rule 3 leaves as it is.
 
-1. The compiler finds a `Voices` output on Note input, so the Phase generator, Saw, SVF, Envelope, and Amplifier run as 8 copies each (rule 4), and Voice merge and Note input, which have `Voices` inputs, run as one.
+1. The compiler finds a `Voices` output on Note input, so the Saw, SVF, Envelope, and Amplifier run as 8 copies each (rule 4), and Voice merge and Note input, which have `Voices` inputs, run as one.
 2. Eight keys down: the allocator gives each a voice in the order the notes arrived. Each gate rises on its note's frame and each pitch holds. Velocity is output per voice too; this chain does not patch it, but a second Amplifier with `velocity` on its `level` input would scale each voice by it.
 3. A ninth key: no voice is free. Oldest steals the voice whose note started first; its gate is low on that frame and high on the next with the new pitch. Switching Mode to Quietest would steal the voice whose envelope has decayed furthest instead, because Note input reads all 8 levels in one instance.
 4. A key up: its gate drops, the envelope releases, the voice holds its pitch, and the voice is free. The next key takes the voice free longest.
-5. A mono LFO into the SVF's `cutoff` input: every copy reads it (rule 6). A Voice spread between Note input's `pitch` and the Phase generator's `pitch`: each copy adds its own detune.
+5. A mono LFO into the SVF's `cutoff` input: every copy reads it (rule 6). A Voice spread between Note input's `pitch` and the Saw's `pitch`: each copy adds its own detune.
 6. Voice merge sums the 8 amplifiers' outputs into one audio cable into Audio Out.
 
 ### A chord sequencer into the same synth (M3)

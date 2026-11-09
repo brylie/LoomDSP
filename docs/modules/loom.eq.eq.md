@@ -80,16 +80,14 @@ Patch(
     metadata: Metadata(name: "EQ on a Saw"),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
-        PatchModule(id: 3, kind: "loom.osc.saw@1"),
-        PatchModule(id: 4, kind: "loom.eq.eq@1", params: {"low_slope": 2, "low_cut": 80, "mid_freq": 500, "mid_gain": -6, "high_gain": 4}),
-        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 2, kind: "loom.osc.saw@1"),
+        PatchModule(id: 3, kind: "loom.eq.eq@1", params: {"low_slope": 2, "low_cut": 80, "mid_freq": 500, "mid_gain": -6, "high_gain": 4}),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "pitch"), to: (2, "pitch")),
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
         PatchCable(from: (3, "out"), to: (4, "in")),
-        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

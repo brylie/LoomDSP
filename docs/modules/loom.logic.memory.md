@@ -60,17 +60,15 @@ Patch(
     modules: [
         PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 1}),
         PatchModule(id: 2, kind: "loom.logic.memory@1", params: {"mode": 1}),
-        PatchModule(id: 3, kind: "loom.phase.generator@1"),
-        PatchModule(id: 4, kind: "loom.osc.sine@1"),
-        PatchModule(id: 5, kind: "loom.level.amp@1"),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 3, kind: "loom.osc.sine@1"),
+        PatchModule(id: 4, kind: "loom.level.amp@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "gate"), to: (2, "a")),
-        PatchCable(from: (3, "phase"), to: (4, "phase")),
+        PatchCable(from: (3, "out"), to: (4, "in")),
+        PatchCable(from: (2, "out"), to: (4, "level")),
         PatchCable(from: (4, "out"), to: (5, "in")),
-        PatchCable(from: (2, "out"), to: (5, "level")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
     ],
 )
 ```

@@ -52,19 +52,17 @@ Patch(
     version: 1,
     metadata: Metadata(name: "Wavefolder"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.sine@1"),
-        PatchModule(id: 3, kind: "loom.level.amp@1", params: {"gain": 2}),
-        PatchModule(id: 4, kind: "loom.phase.wrap@1", params: {"mode": 1}),
-        PatchModule(id: 5, kind: "loom.osc.sine@1"),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.level.amp@1", params: {"gain": 2}),
+        PatchModule(id: 3, kind: "loom.phase.wrap@1", params: {"mode": 1}),
+        PatchModule(id: 4, kind: "loom.osc.sine@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
+        PatchCable(from: (1, "out"), to: (2, "in")),
         PatchCable(from: (2, "out"), to: (3, "in")),
-        PatchCable(from: (3, "out"), to: (4, "in")),
-        PatchCable(from: (4, "out"), to: (5, "phase")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (3, "out"), to: (4, "phase")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

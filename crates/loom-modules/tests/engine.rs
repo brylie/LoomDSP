@@ -153,10 +153,7 @@ fn compiler_reports_feedback_loops() {
     let report = parts.controller.last_report();
     assert_eq!(report.loops.len(), 1);
     let feedback = &report.loops[0];
-    assert_eq!(
-        feedback.modules,
-        vec![ModuleId(2), ModuleId(3), ModuleId(4), ModuleId(5)]
-    );
+    assert_eq!(feedback.modules, vec![ModuleId(2), ModuleId(4), ModuleId(5)]);
     assert_eq!(feedback.inserted_delays.len(), 1);
     let (from, to) = feedback.inserted_delays[0];
     assert_eq!((from.module, to.module), (ModuleId(5), ModuleId(2)));
@@ -316,7 +313,7 @@ fn scope_probe_reproduces_the_signal_and_meters_match_it() {
 fn probes_inside_feedback_loops_see_every_sample() {
     // Loop members run one sample at a time, into the same buffers.
     let mut parts = load("fm-feedback.ron");
-    let probes: Vec<_> = [2, 3, 4, 5]
+    let probes: Vec<_> = [2, 4, 5]
         .into_iter()
         .map(|m| {
             // Each of these modules has one output.

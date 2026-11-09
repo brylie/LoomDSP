@@ -54,17 +54,15 @@ Patch(
         PatchModule(id: 2, kind: "loom.phase.trigger@1"),
         PatchModule(id: 3, kind: "loom.osc.noise@1"),
         PatchModule(id: 4, kind: "loom.rand.sample-hold@1"),
-        PatchModule(id: 5, kind: "loom.phase.generator@1"),
-        PatchModule(id: 6, kind: "loom.osc.sine@1"),
-        PatchModule(id: 7, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.osc.sine@1"),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "phase"), to: (2, "phase")),
         PatchCable(from: (2, "trigger"), to: (4, "trigger")),
         PatchCable(from: (3, "out"), to: (4, "in")),
         PatchCable(from: (4, "out"), to: (5, "pitch")),
-        PatchCable(from: (5, "phase"), to: (6, "phase")),
-        PatchCable(from: (6, "out"), to: (7, "in")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
     ],
 )
 ```

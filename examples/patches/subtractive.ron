@@ -8,7 +8,6 @@ Patch(
     ),
     modules: [
         PatchModule(id: 1, kind: "loom.midi.note@1"),
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
         PatchModule(id: 3, kind: "loom.osc.saw@1"),
         PatchModule(id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 300.0, "resonance": 0.6}),
         // Filter envelope, scaled to +3 octaves (pitch units: 0.1 per octave).
@@ -25,8 +24,7 @@ Patch(
         PatchModule(id: 11, kind: "loom.display.scope@1", params: {"window": 0.005}),
     ],
     cables: [
-        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (1, "pitch"), to: (3, "pitch")),
         PatchCable(from: (3, "out"), to: (4, "in")),
         PatchCable(from: (1, "gate"), to: (5, "gate")),
         PatchCable(from: (5, "out"), to: (6, "a")),

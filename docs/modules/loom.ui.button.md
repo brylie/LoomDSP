@@ -53,16 +53,14 @@ Patch(
     metadata: Metadata(name: "Manual Gate Button"),
     modules: [
         PatchModule(id: 1, kind: "loom.ui.button@1", params: {"mode": 0, "on": 1}),
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
-        PatchModule(id: 3, kind: "loom.osc.sine@1"),
-        PatchModule(id: 4, kind: "loom.level.amp@1"),
-        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 2, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.level.amp@1"),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "gate"), to: (4, "level")),
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (1, "gate"), to: (3, "level")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
         PatchCable(from: (3, "out"), to: (4, "in")),
-        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

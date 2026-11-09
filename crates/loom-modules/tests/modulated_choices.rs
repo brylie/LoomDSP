@@ -279,3 +279,28 @@ fn a_modulated_seed_picks_another_repeatable_sequence() {
         assert_eq!(modulated, seeded_on_a_clock(kind, trigger, output, true), "{kind}");
     }
 }
+
+/// A modulated octave moves in whole octaves, as the knob does
+/// (`docs/design/oscillators.md`, rule 4): a fifth of an octave of
+/// modulation on top of octave 1 still plays octave 1.
+#[test]
+fn a_modulated_octave_rounds_to_whole_octaves() {
+    let play = |depth: Option<f32>| {
+        let mut parts = engine();
+        let saw = module(&mut parts.controller, "loom.osc.saw", "octave", 1.0);
+        if let Some(depth) = depth {
+            let amount = source(&mut parts.controller, 1.0);
+            parts
+                .controller
+                .add_assignment_named(amount, "out", saw, "octave", depth)
+                .unwrap();
+        }
+        listen(&mut parts.controller, saw, "out");
+        parts.controller.commit().unwrap();
+        render(&mut parts, 2_000)
+    };
+    let steady = play(None);
+    // The octave knob spans 20 octaves, so a depth of 0.01 adds 0.2.
+    assert_eq!(play(Some(0.01)), steady);
+    assert_ne!(play(Some(0.05)), steady, "a whole octave more does change it");
+}

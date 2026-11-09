@@ -46,16 +46,14 @@ Patch(
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"rate": 2, "shape": 1}),
         PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": 2}),
         PatchModule(id: 3, kind: "loom.math.div@1"),
-        PatchModule(id: 4, kind: "loom.phase.generator@1"),
-        PatchModule(id: 5, kind: "loom.osc.sine@1"),
-        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.osc.sine@1"),
+        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
     ],
     cables: [
         PatchCable(from: (1, "out"), to: (3, "a")),
         PatchCable(from: (2, "out"), to: (3, "b")),
         PatchCable(from: (3, "out"), to: (4, "pitch")),
-        PatchCable(from: (4, "phase"), to: (5, "phase")),
-        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (4, "out"), to: (5, "in")),
     ],
 )
 ```

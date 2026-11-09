@@ -464,16 +464,16 @@ fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
     let mut ui = Ui::open("modulation.ron");
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
     ui.app.matrix_event(Event::Select(AssignmentId(1), Column::On));
-    let tile = ui.app.session.scene.module(2).expect("phase tile").bounds();
+    let tile = ui.app.session.scene.module(3).expect("saw tile").bounds();
     let at = ui.canvas().to_window(iced::Point::new(tile.center().x, tile.y + 10.0));
     ui.move_to(at);
     ui.press();
     ui.release();
     assert!(!ui.app.session.matrix.focused);
-    assert!(ui.app.session.selection.contains(&2));
+    assert!(ui.app.session.selection.contains(&3));
 
     ui.tap(keyboard::Key::Named(Named::Delete), keyboard::Modifiers::default());
-    assert!(ui.app.session.controller.graph().node(ModuleId(2)).is_none());
+    assert!(ui.app.session.controller.graph().node(ModuleId(3)).is_none());
     assert_eq!(ui.app.session.controller.graph().assignments().count(), 2);
 }
 

@@ -23,6 +23,8 @@ Many things in a modular patch are phases:
 
 *Why separate timing from shape:* one phase can drive any shape, and you can bend time before it becomes sound. Speed a phase up, slow it down, reverse it, or curve it, and everything it drives follows. A [Fugue Machine](https://alexandernaut.com/fugue-machine-classic/)-style patch is one clip read by several phases at different speeds and directions.
 
+*Why you rarely patch a phase by hand:* a module whose phase input has no cable still gets one. An oscillator runs its own phase from its pitch, and an LFO or sequencer follows the transport's bar phase ([clock](../design/clock.md#default-inputs)). So a note into an oscillator plays at once, and a phase cable is only needed to share a phase or to bend it ([oscillators](../design/oscillators.md)).
+
 **In Eurorack** a phase is just a ramp or sawtooth voltage. **In Bitwig Grid**, phase is a signal type of its own, with a whole family of modules that change it (the Ø modules: shift, reverse, mirror, bend, and others). LoomDSP follows Grid here: everything is a number on a cable, and phase is one way to read that number.
 
 ## A phase on a cable is a list of samples
@@ -47,7 +49,7 @@ In the table above, sample 3 to sample 4 is a jump of 0.991. That can only be a 
 
 A phase moving normally changes by a small amount per sample. It only moves 0.5 or more per sample if it runs faster than half the sample rate (24 kHz at 48 kHz). At that speed the samples cannot show its direction anyway (this is the Nyquist limit). So any phase we can follow moves less than 0.5 per sample, and a bigger jump must be a wrap.
 
-The Phase generator keeps to this limit itself. Its largest step is 0.49 per sample, just under Nyquist, and any higher pitch runs it at that speed. Not exactly 0.5: then it would read 0, 0.5, 0, 0.5, and no jump would be more than half a cycle, so its wraps would never be seen. This also protects a patch from very high pitch. Pitch is exponential, so a pitch of 20 (200 octaves) is more hertz than a 32-bit float can hold. Without the limit the phase would become "not a number" (NaN) and stay that way, and the patch would be silent until reloaded ([#121](https://github.com/brylie/LoomDSP/issues/121)).
+The Phase generator keeps to this limit itself, and so does every oscillator's own phase, which is the same code. Its largest step is 0.49 per sample, just under Nyquist, and any higher pitch runs it at that speed. Not exactly 0.5: then it would read 0, 0.5, 0, 0.5, and no jump would be more than half a cycle, so its wraps would never be seen. This also protects a patch from very high pitch. Pitch is exponential, so a pitch of 20 (200 octaves) is more hertz than a 32-bit float can hold. Without the limit the phase would become "not a number" (NaN) and stay that way, and the patch would be silent until reloaded ([#121](https://github.com/brylie/LoomDSP/issues/121)).
 
 ### Why not "the phase equals 0"?
 
@@ -122,7 +124,8 @@ The event that marks the end of a cycle is a **trigger**. In LoomDSP a trigger o
 | Piece | What it does |
 |---|---|
 | `loom_dsp::phase::Phasor` | The running phase and its step limit, usable outside a patch. |
-| `loom.phase.generator` | Makes a phase at a pitch, with a `Phasor`. |
+| `loom.phase.generator` | Makes a phase at a pitch, with a `Phasor`, to share or to bend. |
+| `loom.osc.sine`, `saw`, `pulse`, `triangle` | Run the same phase from their own pitch while their phase input has no cable ([oscillators](../design/oscillators.md)). |
 | `loom_dsp::oscillator` | Shapes from a phase. A function takes the true step, and a struct works it out from the last phase. |
 | `loom.phase.trigger` (Phase Trigger) | A trigger on each wrap of its input phase. |
 | `loom.logic.divide` (Clock Divide) | Passes on every Nth trigger. |

@@ -16,7 +16,6 @@ Patch(
         // Keyboard: pitch and gate.
         PatchModule(id: 1, kind: "loom.midi.note@1"),
         // Audio oscillator: a saw at the keyboard pitch.
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
         PatchModule(id: 3, kind: "loom.osc.saw@1"),
         // Resonant lowpass filter. Its cutoff knob is the base that both
         // assignments move.
@@ -33,8 +32,7 @@ Patch(
         PatchModule(id: 10, kind: "loom.clock.transport@1"),
     ],
     cables: [
-        PatchCable(from: (1, "pitch"), to: (2, "pitch")),
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
+        PatchCable(from: (1, "pitch"), to: (3, "pitch")),
         PatchCable(from: (3, "out"), to: (4, "in")),
         PatchCable(from: (1, "gate"), to: (6, "gate")),
         PatchCable(from: (1, "gate"), to: (7, "gate")),

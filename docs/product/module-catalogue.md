@@ -56,7 +56,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SRC-01 | Oscillator | A band-limited periodic wave with pitch, phase, and frequency modulation inputs, hard sync, and a sub output. The shape comes from the shape source trait. Can be read by an external phase, so it also works as a lookup table. | Shape source, Timebase, Retrigger, Quality | M1 | FR-LIB-02 | Built in part (`loom.osc.sine`, `loom.osc.saw`, `loom.osc.pulse`, `loom.osc.triangle`) |
+| MT-SRC-01 | Oscillator | A band-limited periodic wave with pitch, phase, and frequency modulation inputs, hard sync, and a sub output. The shape comes from the shape source trait. Can be read by an external phase, so it also works as a lookup table. | Shape source, Timebase, Retrigger, Quality | M1 | FR-LIB-02 | Built in part (`loom.osc.sine`, `loom.osc.saw`, `loom.osc.pulse`, `loom.osc.triangle`: pitch and phase inputs, tune and octave, [oscillators](../design/oscillators.md); frequency modulation, hard sync, and the sub output to come) |
 | MT-SRC-02 | Noise | White, pink, and other noise colours. | Seed | M1 | FR-LIB-02 | Built (`loom.osc.noise`: white, pink, and brown) |
 | MT-SRC-03 | Additive oscillator | Builds a tone from many sine partials, with level control per partial and per group. | Quality | M4 | New | Planned |
 | MT-SRC-04 | Chaotic source | Signals from chaotic systems, such as iterated maps, attractors, and stochastic waveforms. | Seed | M4 | New | Planned |
@@ -338,7 +338,7 @@ A role is a contract: a set of port names and core parameter names that a module
 
 | Role | Inputs | Outputs | Core parameters | Declared on |
 |---|---|---|---|---|
-| Sound source `loom.role.source` | `phase` (phase, optional) | `out` (audio) | `level` (optional) | Sine, Saw, Pulse, Triangle, Noise. Later: Buffer reader, Grain engine, String model |
+| Sound source `loom.role.source` | `pitch` (pitch, optional), `phase` (phase, optional) | `out` (audio) | `level` (optional), `tune` (st, optional), `octave` (oct, optional) | Sine, Saw, Pulse, Triangle, Noise. Later: Buffer reader, Grain engine, String model |
 | Filter `loom.role.filter` | `in` (audio), `cutoff` (pitch, optional) | `out` (audio) | `cutoff` (Hz), `resonance` (optional), `drive` (optional) | SVF, One-pole, Ladder. Later: Comb filter, Formant filter |
 | Shaper `loom.role.shaper` | `in` (audio) | `out` (audio) | `drive`, `mix` (optional) | Later: Shaper, Bit and rate reducer |
 | Envelope `loom.role.envelope` | `gate` (gate) | `out` (modulation) | `attack` (s), `release` (s), `decay` (s, optional), `sustain` (optional) | Envelope. Later: Segment envelope, Function generator |
@@ -346,7 +346,7 @@ A role is a contract: a set of port names and core parameter names that a module
 | Effect `loom.role.effect` | `in` (audio) | `out` (audio) | `mix` (optional) | Delay line, All-pass, Dynamics, EQ. Later: Reverb, Modulated delay |
 | Voice `loom.role.voice` | `pitch` (pitch), `gate` (gate), `velocity` (modulation, optional) | `out` (audio) | `level` (optional) | User sub-patches. Later: Synth voice, Drum voice, Sampler |
 
-Sound source takes a phase, not a pitch, because every LoomDSP oscillator is phase driven (ADR-0012). Voice takes the per-voice signals of ADR-0038 in place of a "note in". Most core parameters are optional because the built-in modules do not all have them; `level` and `amount` have no built-in part yet.
+Sound source takes a pitch, and a phase that replaces the source's own: an oscillator plays at its pitch with no phase cable, and any phase can drive it ([oscillators](../design/oscillators.md)). Both are optional, because Noise has neither. Voice takes the per-voice signals of ADR-0038 in place of a "note in". Most core parameters are optional because the built-in modules do not all have them; `level` and `amount` have no built-in part yet.
 
 A user's own sub-patch can declare a role and then fill any matching slot (FR-ENCAP-09).
 

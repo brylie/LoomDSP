@@ -62,16 +62,14 @@ Patch(
     metadata: Metadata(name: "Filter LFO"),
     modules: [
         PatchModule(id: 1, kind: "loom.mod.lfo@1", params: {"sync": 0, "rate": 0.5, "shape": 0}),
-        PatchModule(id: 2, kind: "loom.phase.generator@1"),
-        PatchModule(id: 3, kind: "loom.osc.saw@1"),
-        PatchModule(id: 4, kind: "loom.filter.svf@1", params: {"cutoff": 1200, "resonance": 0.3}),
-        PatchModule(id: 5, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 2, kind: "loom.osc.saw@1"),
+        PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 1200, "resonance": 0.3}),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "out"), to: (4, "cutoff")),
-        PatchCable(from: (2, "phase"), to: (3, "phase")),
-        PatchCable(from: (3, "out"), to: (4, "in")),
-        PatchCable(from: (4, "lowpass"), to: (5, "in")),
+        PatchCable(from: (1, "out"), to: (3, "cutoff")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (3, "lowpass"), to: (4, "in")),
     ],
 )
 ```

@@ -82,7 +82,7 @@ fn nested_patches_check_and_render() {
         String::from_utf8_lossy(&check.stderr)
     );
     assert!(stdout.contains("2 sub-patches, flattened"), "{stdout}");
-    assert!(stdout.contains("11 modules"), "{stdout}");
+    assert!(stdout.contains("10 modules"), "{stdout}");
     // A module inside a definition is named by its own id and its
     // sub-patch, since its flat id appears nowhere in the file.
     let skipped = dir.join("skipped.ron");

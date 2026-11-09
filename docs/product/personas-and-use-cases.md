@@ -52,7 +52,7 @@ Each use case links to the requirements that enable it.
 ### UC1. Build an instrument from primitives (Mira, Sanna)
 
 1. Create a new patch.
-2. Add a phase generator, an oscillator shaper, a filter, an envelope, and an output.
+2. Add an oscillator, a filter, an envelope, and an output. Patch a phase into the oscillator only to share or bend one.
 3. Connect them. Hear sound immediately while patching.
 4. Add a feedback path from the filter output back to its input with a one-sample delay.
 5. Save the patch.

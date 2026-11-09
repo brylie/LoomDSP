@@ -107,10 +107,12 @@ impl PitchedPhase {
     }
 
     /// The phase for frame `i`, then one step on at `pitch` plus the knobs.
-    /// A modulated knob counts for this frame only.
+    /// A modulated knob counts for this frame only, and a modulated octave
+    /// rounds to a whole octave as the knob does.
     #[inline]
     pub(crate) fn tick(&mut self, i: usize, pitch_in: f32, tune: Param<'_>, octave: Param<'_>) -> f32 {
-        let offset = tune.at_or(i, self.tune) * pitch::PER_SEMITONE + octave.at_or(i, self.octave) * pitch::PER_OCTAVE;
+        let octave = octave.map_or(i, self.octave, f32::round);
+        let offset = tune.at_or(i, self.tune) * pitch::PER_SEMITONE + octave * pitch::PER_OCTAVE;
         // A high pitch overflows `to_hz` to infinity, and `step_for` limits
         // that, so a patch recovers when the pitch comes back (#121).
         self.phasor

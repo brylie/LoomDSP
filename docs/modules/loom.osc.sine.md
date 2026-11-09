@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-Sine wave shaped from a phase input.
+A sine wave at the pitch, or shaped from a phase cable.
 
 | | |
 |---|---|
@@ -15,7 +15,8 @@ Sine wave shaped from a phase input.
 
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
-| **Phase** (`phase`) | phase | 0 | Position in the wave, from 0 to 1. One ramp is one cycle. |
+| **Pitch** (`pitch`) | pitch | 0 | Sets the frequency. 0 is middle C, and +0.1 is one octave up. Ignored while a phase cable is connected. |
+| **Phase** (`phase`) | phase | own phase | Position in the wave, from 0 to 1. With no cable, the oscillator runs its own phase at the pitch. A cable replaces it. |
 
 ## Outputs
 
@@ -25,7 +26,17 @@ Sine wave shaped from a phase input.
 
 ## Parameters
 
-None.
+| Parameter | Range | Default | Description |
+|---|---|---|---|
+| **Tune** (`tune`) | -48 to 48 st | 0 st | Shifts the pitch in semitones. Ignored while a phase cable is connected. |
+| **Octave** (`octave`) | -10 to 10 oct | 0 oct | Shifts the pitch in octaves. Ignored while a phase cable is connected. |
+
+## Panel
+
+6 by 3 grid units.
+
+- Knob: **Tune** (`tune`)
+- Knob: **Octave** (`octave`)
 
 <!-- Hand-written notes go below this line. `loom modules --markdown` keeps them. -->
 
@@ -33,30 +44,29 @@ None.
 
 Use Sine for a pure tone with no harmonics: a deep sub bass, a test tone, or either side of frequency modulation.
 
-It needs a phase input, usually from Phase.
+Patch a pitch into it and it plays, at middle C with nothing connected. Tune and Octave shift the pitch. A cable into Phase replaces its own phase, and then the wave follows the cable: share one Phase between several oscillators to keep them in step, or bend the phase first for a new wave.
 
 ## Example patch
 
-Generates a pure sine tone driven by a phase generator.
+Plays a pure sine tone at middle C, with no cables in.
 
 ```ron
 Patch(
     version: 1,
     metadata: Metadata(name: "Pure Sine"),
     modules: [
-        PatchModule(id: 1, kind: "loom.phase.generator@1"),
-        PatchModule(id: 2, kind: "loom.osc.sine@1"),
-        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.io.audio-out@1"),
     ],
     cables: [
-        PatchCable(from: (1, "phase"), to: (2, "phase")),
-        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (1, "out"), to: (2, "in")),
     ],
 )
 ```
 
 ## See also
 
+- [Oscillators](../design/oscillators.md)
 - [Phase and cycles](../learn/phase-and-cycles.md)
 - [Why feedback FM turns to noise](../learn/feedback-fm.md)
 - [Sine patch](../../examples/patches/sine.ron)
