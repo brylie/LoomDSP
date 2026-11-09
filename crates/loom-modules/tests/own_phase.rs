@@ -28,8 +28,10 @@ fn own_phase_modules() -> Vec<(&'static ModuleDescriptor, usize)> {
         .collect()
 }
 
-/// The first output of `descriptor` over [`FRAMES`] frames, with every input
-/// at its fixed default, and `phase_in` on a cable of zeros when `cabled`.
+/// The first output of `descriptor` over [`FRAMES`] frames, with `phase_in`
+/// on a cable of zeros when `cabled`. A `Value` input reads its value, and
+/// any other input reads zeros: what an own phase feeds, and what bar phase,
+/// beat phase, and the play gate read on the stopped transport `run` uses.
 fn render(descriptor: &ModuleDescriptor, phase_in: usize, cabled: bool) -> Vec<f32> {
     let ModuleRole::Dsp(create) = descriptor.role else {
         unreachable!("filtered to DSP modules")

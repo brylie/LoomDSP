@@ -30,7 +30,7 @@ Option 3. **Every phase input has a phase when nothing is patched into it.** A c
 | The phase comes from | Default | Who fills it | What the module reads with no cable |
 |---|---|---|---|
 | Outside the module: the transport | `PortDefault::BarPhase`, `BeatPhase` | The engine, into a shared buffer | The transport's phase. The same slice as with a cable, so the module never checks. |
-| The module's own pitch: an oscillator | `PortDefault::OwnPhase` | The module | Zeros. The module runs its own phase while `!io.is_connected(PHASE_IN)`. |
+| The module's own pitch: an oscillator | `PortDefault::OwnPhase` | The module | Zeros. The module runs its own phase while its phase input has no cable (`!io.is_connected` on that input). |
 
 - **Engine-filled defaults** keep ADR-0015's promise: the module reads the same slice either way.
 - **Module-filled defaults** cannot keep it, because the phase depends on the module's own pitch and knobs, and one shared buffer cannot hold every module's phase. So `OwnPhase` reads zeros, and the module branches on `io.is_connected`. The registry allows `OwnPhase` only on a phase input.
