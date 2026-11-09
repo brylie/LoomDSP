@@ -417,6 +417,64 @@ fn the_mode_rows_draw_and_answer_clicks() {
     assert!(ui.app.session.hierarchy.modes_of(ModuleId(2)).unwrap().stereo_spread);
 }
 
+/// Member follows the member that plays: moving it up keeps it playing,
+/// and removing an earlier member keeps it too (sub-patches.md, The editor
+/// for modes).
+#[test]
+fn member_follows_its_member_when_members_move() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Select,
+        },
+    );
+    mode(&mut app, Message::AddMember(2));
+    mode(&mut app, Message::AddMember(2));
+    let member = app.session.hierarchy.member_module(&ModulePath::top(2)).unwrap();
+    app.set_param(member.0, 0, 2.0);
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 2 (Voice 2)");
+    let second = voice_rows(&mut app).members[1].id;
+    mode(
+        &mut app,
+        Message::MoveMember {
+            member: second,
+            up: true,
+        },
+    );
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 1 (Voice 2)");
+    // Undo puts both the order and Member back, as one step.
+    app.undo();
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 2 (Voice 2)");
+    let first = voice_rows(&mut app).members[0].id;
+    mode(&mut app, Message::RemoveMember(first));
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 1 (Voice 2)");
+}
+
+/// Deleting the last member with the Delete key, or every member at once,
+/// says the named refusal and keeps them.
+#[test]
+fn deleting_the_last_member_by_key_is_refused_with_its_text() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Layer,
+        },
+    );
+    mode(&mut app, Message::AddMember(2));
+    let members = app.session.hierarchy.members_of(ModuleId(2));
+    app.show_level(&ModulePath::top(2));
+    assert!(!app.delete_tiles(&[members[0].0, members[1].0]));
+    assert_eq!(app.alerts.status(), modes::last_member(Mode::Layer));
+    assert!(app.delete_tiles(&[members[0].0]));
+    assert!(!app.delete_tiles(&[members[1].0]));
+    assert_eq!(app.alerts.status(), modes::last_member(Mode::Layer));
+    assert_eq!(app.session.hierarchy.members_of(ModuleId(2)), vec![members[1]]);
+}
+
 /// A member cannot be dissolved inside its layer: its modules would sit at
 /// a level that holds only members.
 #[test]
@@ -435,4 +493,26 @@ fn a_member_cannot_be_dissolved_inside_its_layer() {
     app.dissolve_subpatch();
     assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
     assert_eq!(app.session.hierarchy.members_of(ModuleId(2)), vec![member]);
+}
+
+/// A Member change is an undo step like any parameter's: the Member module
+/// is in the undo snapshot, though the file writes its value on the
+/// instance.
+#[test]
+fn undo_puts_member_back() {
+    let mut app = app_with(VOICE);
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Select,
+        },
+    );
+    mode(&mut app, Message::AddMember(2));
+    let member = app.session.hierarchy.member_module(&ModulePath::top(2)).unwrap();
+    app.turn_param(member.0, 0, 2.0);
+    let _ = app.update(AppMessage::SliderReleased);
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 2 (Voice 2)");
+    app.undo();
+    assert_eq!(voice_rows(&mut app).params[0].label, "Member: 1 (Voice)");
 }

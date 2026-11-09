@@ -13,7 +13,7 @@ use loom_core::{
     Channels, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec,
     ProcessContext, SignalType,
 };
-use loom_dsp::blend::{self, MemberFade};
+use loom_dsp::blend::{self, Law, MemberFade};
 use loom_rt::Smoothed;
 
 /// The most members or copies a mode runs, and so the inputs of each added
@@ -367,21 +367,21 @@ pub static SELECT: ModuleDescriptor = ModuleDescriptor {
         ParamSpec {
             name: "fade",
             label: "Fade",
-            description: "On for audio and modulation; off for gates, triggers, and phases, which switch on the frame.",
+            description: "Equal power for audio, linear for pitch and modulation, off for gates, triggers, and phases, which switch on the frame.",
             min: 0.0,
-            max: 1.0,
-            default: 1.0,
+            max: 2.0,
+            default: 2.0,
             unit: "",
             options: ParamOptions::DEFAULT,
         }
         .integer()
-        .choices(&["Off", "On"]),
+        .choices(&["Off", "Linear", "Equal power"]),
     ],
     role: ModuleRole::Dsp(|config| {
         Box::new(Select {
-            fade: MemberFade::new((MODE_FADE_SECONDS * config.sample_rate).round() as u32, 0),
+            fader: MemberFade::new((MODE_FADE_SECONDS * config.sample_rate).round() as u32, 0),
             members: 1,
-            fades: true,
+            fade: Some(Law::EqualPower),
             fresh: true,
         })
     }),
@@ -393,11 +393,12 @@ pub static SELECT: ModuleDescriptor = ModuleDescriptor {
 /// Select: the member fade, per sample.
 #[derive(Clone)]
 struct Select {
-    fade: MemberFade,
+    fader: MemberFade,
     /// How many member inputs count, 1 to 16.
     members: usize,
-    /// False for gate, trigger, and phase outputs.
-    fades: bool,
+    /// The fade's law: equal power for audio, linear for pitch and
+    /// modulation, `None` for gate, trigger, and phase outputs.
+    fade: Option<Law>,
     /// True until the first frame, which starts on its member with no fade:
     /// a new Select must not fade in from member 1.
     fresh: bool,
@@ -423,13 +424,13 @@ impl Module for Select {
         let member = inputs[MOST_MEMBERS];
         for (i, out) in out.iter_mut().enumerate() {
             let target = self.target(member[i]);
-            let blend = if self.fresh {
-                self.fresh = false;
-                self.fade.cut(target)
-            } else if self.fades {
-                self.fade.tick(target)
-            } else {
-                self.fade.cut(target)
+            let blend = match self.fade {
+                _ if self.fresh => {
+                    self.fresh = false;
+                    self.fader.cut(target)
+                }
+                Some(law) => self.fader.tick_with(target, law),
+                None => self.fader.cut(target),
             };
             let (from, to) = (inputs[blend.from][i], inputs[blend.to][i]);
             *out = held(from * blend.gain_from + to * blend.gain_to, || {
@@ -441,7 +442,13 @@ impl Module for Select {
     fn set_param(&mut self, index: usize, value: f32) {
         match index {
             Self::MEMBERS => self.members = (value.round() as usize).clamp(1, MOST_MEMBERS),
-            Self::FADE => self.fades = value >= 0.5,
+            Self::FADE => {
+                self.fade = match value.round() as i32 {
+                    0 => None,
+                    1 => Some(Law::Linear),
+                    _ => Some(Law::EqualPower),
+                }
+            }
             _ => {}
         }
     }
@@ -449,8 +456,8 @@ impl Module for Select {
     /// Back to a new Select: the next frame starts on its member, with no
     /// fade.
     fn reset(&mut self) {
-        let member = self.fade.member().min(self.members - 1);
-        self.fade.reset(member);
+        let member = self.fader.member().min(self.members - 1);
+        self.fader.reset(member);
         self.fresh = true;
     }
 

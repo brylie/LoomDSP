@@ -22,6 +22,7 @@ use crate::{
     INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping, PatchModulation,
     PatchModule, ResolveOptions, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, SubPatch,
 };
+use loom_core::SignalType;
 use loom_core::{
     Controller, FillsRole, Graph, LoomError, MidiControl, ModuleId, ModuleNames, ParamRange, Registry, RoleDescriptor,
     TRANSPORT_MODULE,
@@ -1314,18 +1315,52 @@ fn member_input(k: usize) -> String {
     format!("in{}", k + 1)
 }
 
-/// True when `source` is a gate, trigger, or phase output, which a select
-/// switches with no fade (live-patching rule 9).
-fn cuts(inner: &Inner, source: Option<&Source>) -> bool {
+/// The signal type of the output behind `source`, or `None` for a
+/// pass-through or nothing, which the modes treat as audio.
+fn signal_of(inner: &Inner, source: Option<&Source>) -> Option<SignalType> {
     let Some(Source::Module(id, port)) = source else {
-        return false;
+        return None;
     };
     inner
         .modules
         .iter()
         .find(|m| m.id == *id)
         .and_then(|m| m.module.descriptor.outputs.iter().find(|p| p.name == port))
-        .is_some_and(|p| matches!(p.signal, loom_core::SignalType::Gate | loom_core::SignalType::Phase))
+        .map(|p| p.signal)
+}
+
+/// The Select's `fade` for an output whose members give `signals`: off when
+/// any is a gate, trigger, or phase, which switch on the frame (live-patching
+/// rule 9); linear when any is pitch or modulation, whose values must not
+/// swell mid-fade; equal power for audio (sub-patches.md, The modules the
+/// flattener adds, Select).
+fn select_fade(signals: &[Option<SignalType>]) -> f32 {
+    if signals
+        .iter()
+        .any(|s| matches!(s, Some(SignalType::Gate | SignalType::Phase)))
+    {
+        0.0
+    } else if signals
+        .iter()
+        .any(|s| matches!(s, Some(SignalType::Pitch | SignalType::Modulation)))
+    {
+        1.0
+    } else {
+        2.0
+    }
+}
+
+/// The gain a stack's Sum takes for an output of `signal` over `copies`:
+/// 1/√N for audio, whose different copies add in power; 1/N for pitch and
+/// modulation, so the output is the copies' mean; 1 for a gate, which stays
+/// high while any copy is high (sub-patches.md, The modules the flattener
+/// adds, Sum).
+fn stack_gain(signal: Option<SignalType>, copies: u32) -> f32 {
+    match signal {
+        Some(SignalType::Pitch | SignalType::Modulation) => 1.0 / copies.max(1) as f32,
+        Some(SignalType::Gate | SignalType::Phase) => 1.0,
+        _ => blend::unison_gain(copies),
+    }
 }
 
 /// A layer's or a select's ports and mixing (sub-patches.md, Members are
@@ -1394,11 +1429,8 @@ fn mix_members(
         let mix = match member_id {
             None => added_module(ctx, &step, SUM_KIND, &[("gain", 1.0)])?,
             Some(_) => {
-                let fade = if sources.iter().any(|s| cuts(&inner, *s)) {
-                    0.0
-                } else {
-                    1.0
-                };
+                let signals: Vec<Option<SignalType>> = sources.iter().map(|s| signal_of(&inner, *s)).collect();
+                let fade = select_fade(&signals);
                 added_module(ctx, &step, SELECT_KIND, &[("members", count as f32), ("fade", fade)])?
             }
         };
@@ -1493,10 +1525,16 @@ fn flatten_stack(
         let names: Vec<String> = outputs[0].keys().cloned().collect();
         for (i, name) in names.iter().enumerate() {
             let step = path.added(i as u32);
-            let mix = if definition.stereo_spread {
+            let signal = signal_of(&inner, outputs[0].get(name).and_then(Option::as_ref));
+            // Only audio is spread across stereo; a pitch or a gate has no side.
+            let audio = !matches!(
+                signal,
+                Some(SignalType::Pitch | SignalType::Modulation | SignalType::Gate | SignalType::Phase)
+            );
+            let mix = if definition.stereo_spread && audio {
                 added_module(ctx, &step, SPREAD_SUM_KIND, &[("copies", n as f32)])?
             } else {
-                added_module(ctx, &step, SUM_KIND, &[("gain", blend::unison_gain(n))])?
+                added_module(ctx, &step, SUM_KIND, &[("gain", stack_gain(signal, n))])?
             };
             let id = mix.id;
             inner.modules.push(mix);

@@ -96,6 +96,13 @@ pub fn several_members(name: &str, mode: Mode) -> String {
     format!("Remove members until one is left to make {name} {}", mode.word())
 }
 
+/// `Make Saw single before making Pad single` (`stack` in place of
+/// `single`): a layer or select whose one member has a mode of its own
+/// cannot leave the member modes, since its inside would lose that mode.
+pub fn member_has_mode(member: &str, name: &str, mode: Mode) -> String {
+    format!("Make {member} single before making {name} {}", mode.word())
+}
+
 /// `A layer needs at least one member` (`select` for a select).
 pub fn last_member(mode: Mode) -> String {
     format!("A {} needs at least one member", mode.word())

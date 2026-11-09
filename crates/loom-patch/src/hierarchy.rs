@@ -36,7 +36,7 @@ use loom_core::{
 use std::collections::{BTreeMap, BTreeSet};
 
 mod modes;
-pub use modes::MEMBER_LID;
+pub use modes::{MEMBER_LID, PlayingMember};
 mod slots;
 pub use slots::{
     Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, expose_role_only_text, made_slot_text,

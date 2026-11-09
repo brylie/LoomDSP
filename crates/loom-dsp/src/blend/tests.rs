@@ -176,6 +176,52 @@ fn a_third_member_waits_for_the_fade() {
     assert_eq!(next.gain_from, 1.0);
 }
 
+/// A linear fade keeps a value both members share exactly, where equal
+/// power would lift it by up to √2 in the middle; its gains sum to 1.
+#[test]
+fn a_linear_fade_keeps_a_shared_value() {
+    for step in 0..=100 {
+        let (a, b) = linear(step as f32 / 100.0);
+        assert_eq!(a + b, 1.0, "step {step}");
+    }
+    assert_eq!(linear(-1.0), (1.0, 0.0));
+    assert_eq!(linear(f32::NAN), (0.5, 0.5));
+    let mut fade = MemberFade::new(480, 0);
+    fade.tick_with(0, Law::Linear);
+    let mut largest: f32 = 0.0;
+    for n in 0..480 {
+        let blend = fade.tick_with(1, Law::Linear);
+        let value = 0.2 * blend.gain_from + 0.2 * blend.gain_to;
+        largest = largest.max((value - 0.2).abs());
+        let _ = n;
+    }
+    assert!(largest < 1e-7, "{largest}");
+    let (a, b) = Law::EqualPower.gains(0.5);
+    assert!(
+        (0.2 * (a + b) - 0.2 * std::f32::consts::SQRT_2).abs() < 1e-6,
+        "equal power lifts it"
+    );
+}
+
+/// A linear fade turns back without a step, as an equal-power one does.
+#[test]
+fn a_linear_fade_turns_back_without_a_step() {
+    let mut fade = MemberFade::new(100, 0);
+    fade.tick_with(0, Law::Linear);
+    let mut last = 0.0;
+    for _ in 0..40 {
+        let b = fade.tick_with(1, Law::Linear);
+        last = b.gain_to;
+    }
+    let turned = fade.tick_with(0, Law::Linear);
+    // Member 1's gain on the turning frame is the next one along the way in.
+    assert!(
+        (turned.gain_from - (last + 0.01)).abs() < 1e-6,
+        "{} vs {last}",
+        turned.gain_from
+    );
+}
+
 /// A cut switches on the frame, with no fade.
 #[test]
 fn a_cut_switches_on_the_frame() {

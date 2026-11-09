@@ -96,6 +96,7 @@ impl App {
         }
         self.session.step_name = Some(verb.to_string());
         self.edit(|app| {
+            let playing = app.session.hierarchy.playing_members(app.session.controller.graph());
             let mut candidate = app.session.hierarchy.clone();
             if let Err(why) = change(&mut candidate, app.session.controller.graph()) {
                 app.alerts.warn(why);
@@ -105,6 +106,7 @@ impl App {
                 Ok(renamed) => {
                     app.session.hierarchy = candidate;
                     app.assignments_renumbered(&renamed);
+                    app.keep_members_playing(&playing);
                     app.commit();
                 }
                 Err(e) => app.alerts.warn(format!("Cannot {verb}: {e}")),
@@ -244,6 +246,23 @@ impl App {
                 self.commit();
             }
             Err(e) => self.alerts.warn(format!("Cannot set the spread: {e}")),
+        }
+    }
+
+    /// After an edit to a select's members: Member follows the member that
+    /// played, so reordering or removing members never switches the sound
+    /// (sub-patches.md, The editor for modes). Part of the edit's undo step.
+    pub(crate) fn keep_members_playing(&mut self, before: &[loom_patch::hierarchy::PlayingMember]) {
+        for (module, value) in self.session.hierarchy.members_kept_playing(before) {
+            let index = self
+                .session
+                .controller
+                .graph()
+                .node(module)
+                .and_then(|n| loom_core::ModuleNames::parameter_index(n, loom_patch::modes::MEMBER_PARAM));
+            if let Some(index) = index {
+                let _ = self.session.controller.set_param(module, index, value);
+            }
         }
     }
 

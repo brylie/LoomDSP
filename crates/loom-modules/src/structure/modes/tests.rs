@@ -100,11 +100,12 @@ fn member_outputs_its_value() {
     assert_eq!(out, vec![3.0; 4]);
 }
 
-/// A Select with `members` members and `fade` on or off, run over `member`.
-fn select(members: usize, fade: bool, member: &[f32]) -> Vec<f32> {
+/// A Select with `members` members and `fade` (0 off, 1 linear, 2 equal
+/// power), run over `member`.
+fn select_law(members: usize, fade: f32, member: &[f32]) -> Vec<f32> {
     let mut select = create(&SELECT);
     select.set_param(Select::MEMBERS, members as f32);
-    select.set_param(Select::FADE, if fade { 1.0 } else { 0.0 });
+    select.set_param(Select::FADE, fade);
     select.reset();
     let frames = member.len();
     let mut inputs = numbered(frames);
@@ -120,6 +121,24 @@ fn select(members: usize, fade: bool, member: &[f32]) -> Vec<f32> {
         &[],
     );
     out
+}
+
+/// A Select with `members` members, equal power or no fade, run over
+/// `member`.
+fn select(members: usize, fade: bool, member: &[f32]) -> Vec<f32> {
+    select_law(members, if fade { 2.0 } else { 0.0 }, member)
+}
+
+/// A linear Select fades member 3 to member 1 with gains that sum to 1.
+#[test]
+fn a_linear_select_fades_with_gains_that_sum_to_one() {
+    let mut member = vec![3.0; 2_000];
+    member[1_000..].fill(1.0);
+    let out = select_law(4, 1.0, &member);
+    for n in 0..FADE {
+        let (from, to) = blend::linear(n as f32 / FADE as f32);
+        assert!((out[1_000 + n] - (3.0 * from + to)).abs() < 1e-5, "frame {n}");
+    }
 }
 
 /// A new Select starts on its member with no fade, and a change fades

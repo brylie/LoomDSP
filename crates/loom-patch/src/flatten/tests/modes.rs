@@ -68,6 +68,34 @@ fn a_stack_runs_copies_summed_at_one_over_root_n() {
     assert_eq!(ModulePath(vec![7, ADDED_STEP]).without_copies(), None);
 }
 
+/// A stack's pitch and modulation outputs are the copies' mean, a gate is
+/// their plain sum, and stereo spread leaves them mono: only audio is
+/// summed at 1/√N and panned.
+#[test]
+fn control_outputs_of_a_stack_are_averaged_and_stay_mono() {
+    let text = voice_with("mode: Stack, copies: 4, stereo_spread: true,").replace(
+        r#"PatchCable(from: (5, "lowpass"), to: (6, "a")),
+                PatchCable(from: (6, "out"), to: (4, "in")),"#,
+        r#"PatchCable(from: (5, "lowpass"), to: (6, "a")),
+                PatchCable(from: (2, "phase"), to: (4, "in")),"#,
+    );
+    let (flat, _) = flatten(&text);
+    let sum = module(&flat, &[7, ADDED_STEP]);
+    assert_eq!(
+        sum.module.descriptor.kind(),
+        SUM_KIND,
+        "a phase is not spread across stereo"
+    );
+    assert_eq!(sum.module.params[0], 1.0, "a phase or gate sums plainly");
+    assert_eq!(stack_gain(Some(SignalType::Pitch), 4), 0.25);
+    assert_eq!(stack_gain(Some(SignalType::Modulation), 4), 0.25);
+    assert_eq!(stack_gain(Some(SignalType::Audio), 4), 0.5);
+    assert_eq!(stack_gain(None, 4), 0.5);
+    assert_eq!(select_fade(&[Some(SignalType::Audio), None]), 2.0);
+    assert_eq!(select_fade(&[Some(SignalType::Audio), Some(SignalType::Pitch)]), 1.0);
+    assert_eq!(select_fade(&[Some(SignalType::Pitch), Some(SignalType::Gate)]), 0.0);
+}
+
 /// One copy with no stereo spread is the single sub-patch, module for
 /// module: a mode change alone never changes the sound.
 #[test]
@@ -319,7 +347,9 @@ fn a_select_reads_one_member_module() {
     let trig = module(&flat, &[7, ADDED_STEP + 1]);
     assert_eq!(out.module.descriptor.kind(), SELECT_KIND);
     let fade = out.module.descriptor.param_index("fade").unwrap();
-    assert_eq!(out.module.params[fade], 1.0);
+    // Member b's constant is a modulation signal: linear, so a value both
+    // members share does not swell mid-fade.
+    assert_eq!(out.module.params[fade], 1.0, "linear for modulation");
     assert_eq!(trig.module.params[fade], 0.0, "a gate switches on the frame");
     for select in [out.id, trig.id] {
         assert!(cables(&flat).contains(&((member.id.0, "out"), (select.0, "member"))));

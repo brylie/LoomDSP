@@ -289,6 +289,30 @@ fn mode_changes_refuse_what_the_spec_refuses() {
     );
 }
 
+/// A layer whose one member is a stack cannot become single: the stack
+/// would be lost when its inside moves up. The file stays as it was.
+#[test]
+fn leaving_a_layer_whose_member_has_a_mode_is_refused() {
+    let (mut controller, mut hierarchy) = load(VOICE);
+    let instance = ModuleId(7);
+    hierarchy
+        .set_mode(controller.graph(), instance, Mode::Layer, &role_name)
+        .unwrap();
+    commit(&mut hierarchy, &mut controller);
+    let member = hierarchy.members_of(instance)[0];
+    hierarchy
+        .set_mode(controller.graph(), member, Mode::Stack, &role_name)
+        .unwrap();
+    hierarchy.set_copies(member, 4).unwrap();
+    commit(&mut hierarchy, &mut controller);
+    let before = written(&hierarchy, &controller);
+    assert_eq!(
+        hierarchy.set_mode(controller.graph(), instance, Mode::Single, &role_name),
+        Err(modes::member_has_mode("Voice", "Voice", Mode::Single))
+    );
+    assert_eq!(written(&hierarchy, &controller), before);
+}
+
 /// An undo snapshot leaves implied modules out, and restoring one keeps
 /// the implied ids, so copies keep their state.
 #[test]

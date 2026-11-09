@@ -6,7 +6,8 @@
 //! Two signals that are different sounds add in power, not in amplitude.
 //! Gains on a quarter circle keep the sum of their squares at 1, so loudness
 //! holds through a fade or across a pan, where linear gains dip by 3 dB in the
-//! middle (C. Roads, *The Computer Music Tutorial*, MIT Press, 1996, on
+//! middle. Pitch and modulation are values, not sounds, so they fade with
+//! linear gains that sum to 1, and a value both members share stays put (C. Roads, *The Computer Music Tutorial*, MIT Press, 1996, on
 //! crossfading and panning; U. Zölzer (ed.), *DAFX: Digital Audio Effects*,
 //! 2nd ed., Wiley, 2011, on constant-power laws). The power of a sum of `n`
 //! uncorrelated signals is the sum of their powers (A. Papoulis and
@@ -43,6 +44,42 @@ pub fn equal_power(position: f32) -> (f32, f32) {
     };
     let (sin, cos) = (position * FRAC_PI_2).sin_cos();
     (cos, sin)
+}
+
+/// The gains of a linear blend at `position` from 0 to 1: `(1 - p, p)`.
+/// They sum to 1, so a value both signals share passes through unchanged:
+/// the law for pitch and modulation, which add in value, not in power. A
+/// position outside 0 to 1 is clamped, and NaN gives the middle.
+#[inline]
+pub fn linear(position: f32) -> (f32, f32) {
+    let position = if position.is_nan() {
+        0.5
+    } else {
+        position.clamp(0.0, 1.0)
+    };
+    (1.0 - position, position)
+}
+
+/// How a fade shares two signals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Law {
+    /// Gains on a quarter circle, for audio: the power stays the same
+    /// ([`equal_power`]).
+    EqualPower,
+    /// Gains that sum to 1, for pitch and modulation: a shared value stays
+    /// the same ([`linear`]).
+    Linear,
+}
+
+impl Law {
+    /// The two gains at `position` from 0 to 1.
+    #[inline]
+    pub fn gains(self, position: f32) -> (f32, f32) {
+        match self {
+            Law::EqualPower => equal_power(position),
+            Law::Linear => linear(position),
+        }
+    }
 }
 
 /// The left and right gains of the constant-power pan law at `offset` from -1
@@ -144,9 +181,18 @@ impl MemberFade {
         self.count < self.length
     }
 
-    /// One frame toward `target`: the members and gains for this frame.
+    /// One frame toward `target`, equal power: the members and gains for
+    /// this frame.
     #[inline]
     pub fn tick(&mut self, target: usize) -> Blend {
+        self.tick_with(target, Law::EqualPower)
+    }
+
+    /// One frame toward `target` with the gains of `law`. Either law keeps
+    /// the turn back continuous: the gains at `N - n` are the gains at `n`
+    /// swapped.
+    #[inline]
+    pub fn tick_with(&mut self, target: usize, law: Law) -> Blend {
         if self.is_fading() {
             if target == self.from {
                 core::mem::swap(&mut self.from, &mut self.to);
@@ -165,7 +211,7 @@ impl MemberFade {
                 gain_to: 1.0,
             };
         }
-        let (gain_from, gain_to) = equal_power(self.count as f32 / self.length as f32);
+        let (gain_from, gain_to) = law.gains(self.count as f32 / self.length as f32);
         self.count += 1;
         Blend {
             from: self.from,

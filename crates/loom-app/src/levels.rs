@@ -203,6 +203,13 @@ impl App {
     /// stays, as the controller would refuse it. Returns whether the
     /// commit was sent.
     pub(crate) fn delete_tiles(&mut self, ids: &[u32]) -> bool {
+        // A layer or select keeps one member, whatever key removes them.
+        let tiles: Vec<ModuleId> = ids.iter().map(|id| ModuleId(*id)).collect();
+        if let Some(why) = self.session.hierarchy.removal_refusal(&tiles) {
+            self.alerts.warn(why);
+            return false;
+        }
+        let playing = self.session.hierarchy.playing_members(self.session.controller.graph());
         let transport = self.session.controller.transport_module();
         let mut candidate = self.session.hierarchy.clone();
         let mut modules: Vec<ModuleId> = Vec::new();
@@ -233,6 +240,7 @@ impl App {
             self.session.cameras.remove(&self.session.hierarchy.path_of(*id));
         }
         self.session.hierarchy = candidate;
+        self.keep_members_playing(&playing);
         self.commit()
     }
 

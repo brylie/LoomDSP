@@ -113,7 +113,7 @@ impl Snapshot {
         // What exists only while a slot fades is no part of the patch
         // (sub-patches.md, How a swap crossfades), so a step never adds or
         // removes it; the hierarchy is kept without the fade.
-        let transient = hierarchy.transient_ids();
+        let transient = hierarchy.undo_skip_ids();
         let mut without_fades = hierarchy.clone();
         without_fades.carry_fading_from(&Hierarchy::flat());
         Self {

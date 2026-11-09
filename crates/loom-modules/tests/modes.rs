@@ -140,15 +140,35 @@ fn constant_member(key: &str, value: f32) -> String {
     )
 }
 
-/// A select of a constant 0.5 and a constant -0.25, at Member 1.
-fn select() -> String {
-    let members = format!("{}{}", constant_member("a", 0.5), constant_member("b", -0.25));
+/// [`constant_member`] through a multiplier, so its output is audio.
+fn audio_member(key: &str, value: f32) -> String {
+    constant_member(key, value)
+        .replace(
+            r#"PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),"#,
+            r#"PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")), PatchModule(id: 3, kind: "loom.math.mul@1"),"#,
+        )
+        .replace(
+            r#"cables: [PatchCable(from: (1, "out"), to: (2, "in"))],"#,
+            r#"cables: [PatchCable(from: (1, "out"), to: (3, "a")), PatchCable(from: (3, "out"), to: (2, "in"))],"#,
+        )
+}
+
+/// A select of 0.5 and -0.25, at Member 1: audio (through a multiplier),
+/// or the constants' own modulation outputs.
+fn select(audio: bool) -> String {
+    let member = if audio { audio_member } else { constant_member };
+    let members = format!("{}{}", member("a", 0.5), member("b", -0.25));
     patch(&two_members("Select"), &members, r#", params: {"member": 1.0}"#)
 }
 
 /// Renders the select with Member set to 2 before frame `at`.
 fn select_change(at: usize, frames: usize, block: usize) -> Vec<f32> {
-    let (mut parts, ids) = load(&select());
+    select_change_of(true, at, frames, block)
+}
+
+/// [`select_change`] for audio members or modulation members.
+fn select_change_of(audio: bool, at: usize, frames: usize, block: usize) -> Vec<f32> {
+    let (mut parts, ids) = load(&select(audio));
     let member = id(&ids, &[7, ADDED_STEP + MEMBER_STEP]);
     let (left, _) = render_with(&mut parts, frames, block, &[], |position, parts| {
         if position == at {
@@ -185,6 +205,24 @@ fn a_select_change_crossfades_over_10_ms() {
     }
 }
 
+/// A select of modulation outputs fades linearly, so the gains sum to 1 and
+/// a value both members share would stay put; equal power would swell it
+/// by up to √2 in the middle.
+#[test]
+fn a_select_of_modulation_fades_linearly() {
+    let at = 77 * 512;
+    let left = select_change_of(false, at, at + 2 * FADE, 512);
+    for n in 0..FADE {
+        let (from, to) = blend::linear(n as f32 / FADE as f32);
+        let want = 0.5 * from - 0.25 * to;
+        assert!(
+            (left[at + n] - want).abs() < 1e-6,
+            "frame {n}: {} vs {want}",
+            left[at + n]
+        );
+    }
+}
+
 /// A stack definition `outer` of a constant at 0.2 exposed as `value`, with
 /// `fields` added.
 fn stack(fields: &str) -> String {
@@ -214,6 +252,20 @@ fn node_index(parts: &EngineParts, id: ModuleId) -> usize {
         .unwrap()
 }
 
+/// [`stack`] with the constant through a multiplier, so the output is
+/// audio, which a stack sums at 1/√N and stereo spread pans.
+fn audio_stack(fields: &str) -> String {
+    stack(fields)
+        .replace(
+            r#"PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),"#,
+            r#"PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")), PatchModule(id: 3, kind: "loom.math.mul@1"),"#,
+        )
+        .replace(
+            r#"cables: [PatchCable(from: (1, "out"), to: (2, "in"))],"#,
+            r#"cables: [PatchCable(from: (1, "out"), to: (3, "a")), PatchCable(from: (3, "out"), to: (2, "in"))],"#,
+        )
+}
+
 /// The flat id of copy `k`'s constant in [`stack`].
 fn copy_constant(ids: &FlatIds, k: u32) -> ModuleId {
     if k == 0 {
@@ -225,7 +277,8 @@ fn copy_constant(ids: &FlatIds, k: u32) -> ModuleId {
 
 /// Stack mode with 4 copies and a spread of 0.3 on `value` gives each copy
 /// its offset value, the base moved by 0.3 times -1, -1/3, 1/3, and 1 in the
-/// control's range, and the output is their sum at 1/√4.
+/// control's range. A Constant's output is modulation, so the stack's output
+/// is the copies' mean.
 #[test]
 fn a_stack_of_four_gives_each_copy_its_spread_value() {
     let text = patch(&stack(r#"copies: 4, spread: {"value": 0.3},"#), "", "");
@@ -251,7 +304,7 @@ fn a_stack_of_four_gives_each_copy_its_spread_value() {
         );
         want += spec.denormalize(position);
     }
-    let want = 0.5 * want;
+    let want = want / 4.0;
     assert!((left[frames - 1] - want).abs() < 1e-4, "{} vs {want}", left[frames - 1]);
     for block in [1, 77, 512] {
         assert_eq!(render(&mut load(&text).0, frames, block, &[]).0, left, "block {block}");
@@ -276,7 +329,7 @@ fn a_stack_of_one_plays_as_the_single_sub_patch() {
 #[test]
 fn stereo_spread_gives_a_stereo_output() {
     let text = patch(
-        &stack(r#"copies: 4, spread: {"value": 0.3}, stereo_spread: true,"#),
+        &audio_stack(r#"copies: 4, spread: {"value": 0.3}, stereo_spread: true,"#),
         "",
         "",
     );
@@ -327,8 +380,9 @@ fn a_mapping_on_a_stack_moves_every_copy() {
         .spec(node.parameter_index("value").unwrap())
         .unwrap()
         .denormalize(80.0 / 127.0);
-    // Copy 0 alone would give (value + 0.2 + 0.2)/√3.
-    let want = blend::unison_gain(3) * 3.0 * value;
+    // A Constant's output is modulation, so the stack plays the copies'
+    // mean; copy 0 alone would give (value + 0.2 + 0.2)/3.
+    let want = value;
     assert!((left[4_799] - want).abs() < 1e-4, "{} vs {want}", left[4_799]);
     // The graph holds the value for every copy too, so a commit before the
     // copies sync again compiles what plays.

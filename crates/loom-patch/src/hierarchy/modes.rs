@@ -21,6 +21,20 @@ use crate::flatten::{ADDED_STEP, Added, Flat, MEMBER_STEP};
 pub const MEMBER_LID: u32 = ADDED_STEP + MEMBER_STEP;
 use crate::modes::{self, MEMBER_PARAM, MOST_MEMBERS, Mode};
 
+/// What a select plays before an edit to its members
+/// ([`Hierarchy::playing_members`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayingMember {
+    /// The select instance's path.
+    pub instance: ModulePath,
+    /// Its Member module.
+    pub module: ModuleId,
+    /// The member tile it plays, if any.
+    pub playing: Option<ModuleId>,
+    /// Its Member value.
+    pub value: f32,
+}
+
 /// One assignment as the overlay compares them: source end, target end.
 type AssignmentEnds = (End, End);
 
@@ -33,6 +47,20 @@ impl Hierarchy {
             .filter(|(path, _)| path.is_implied())
             .map(|(_, id)| id)
             .collect()
+    }
+
+    /// The modules an undo snapshot leaves out: [`Hierarchy::transient_ids`]
+    /// less each select's Member module, whose value, assignments, and
+    /// mappings are the player's and saved on the instance, so undo must
+    /// restore them (sub-patches.md, Copies in the editor).
+    pub fn undo_skip_ids(&self) -> BTreeSet<ModuleId> {
+        let mut ids = self.transient_ids();
+        for (id, added) in &self.added {
+            if matches!(added, Added::Member { .. }) {
+                ids.remove(id);
+            }
+        }
+        ids
     }
 
     /// True for an implied module.
@@ -339,6 +367,16 @@ impl Hierarchy {
         if from.has_members() && !mode.has_members() && definition.modes.members.len() > 1 {
             return Some(modes::several_members(&name, mode));
         }
+        // The one member's own mode would be lost when its inside moves up.
+        if from.has_members() && !mode.has_members() {
+            let member = definition.modes.members.first().map(|lid| path.child(*lid));
+            if let Some(member) = member
+                && let Some(inner) = self.definition_at(&member)
+                && !inner.modes.mode.is_single()
+            {
+                return Some(modes::member_has_mode(&inner.metadata.name, &name, mode));
+            }
+        }
         None
     }
 
@@ -638,6 +676,67 @@ impl Hierarchy {
         let mode = self.member_level(&level)?;
         let members = &self.modes_at(&level)?.members;
         (members.len() <= 1 && members.contains(&path.last())).then(|| modes::last_member(mode))
+    }
+
+    /// Why the tiles `ids` cannot be removed together, or `None`: a layer
+    /// or select keeps at least one member, however many go at once.
+    pub fn removal_refusal(&self, ids: &[ModuleId]) -> Option<String> {
+        let mut gone: BTreeMap<ModulePath, usize> = BTreeMap::new();
+        for id in ids {
+            let Some(path) = self.ids.path_of(*id) else { continue };
+            let Some(level) = path.parent() else { continue };
+            if self.modes_at(&level).is_some_and(|m| m.members.contains(&path.last())) {
+                *gone.entry(level).or_default() += 1;
+            }
+        }
+        gone.into_iter().find_map(|(level, count)| {
+            let mode = self.member_level(&level)?;
+            (count >= self.modes_at(&level)?.members.len()).then(|| modes::last_member(mode))
+        })
+    }
+
+    /// Every select instance's path, its Member module, the member tile it
+    /// plays, and its Member value, read before an edit to its members.
+    pub fn playing_members(&self, graph: &Graph) -> Vec<PlayingMember> {
+        self.instances
+            .keys()
+            .filter(|path| self.modes_at(path).is_some_and(|m| m.mode == Mode::Select))
+            .filter_map(|path| {
+                let module = self.member_module(path)?;
+                let value = self.member_value(graph, path)?;
+                let members = &self.modes_at(path)?.members;
+                let n = (value.round().max(1.0) as usize).min(members.len().max(1));
+                let playing = members.get(n - 1).and_then(|lid| self.ids.get(&path.child(*lid)));
+                Some(PlayingMember {
+                    instance: path.clone(),
+                    module,
+                    playing,
+                    value,
+                })
+            })
+            .collect()
+    }
+
+    /// The Member value each select of `before` takes after an edit to its
+    /// members, so the member that played still plays: its new place, or,
+    /// when it is gone, the place it had, held to the members left
+    /// (sub-patches.md, The editor for modes). Only those that change.
+    pub fn members_kept_playing(&self, before: &[PlayingMember]) -> Vec<(ModuleId, f32)> {
+        before
+            .iter()
+            .filter_map(|was| {
+                let members = &self.modes_at(&was.instance)?.members;
+                let ids: Vec<ModuleId> = members
+                    .iter()
+                    .filter_map(|lid| self.ids.get(&was.instance.child(*lid)))
+                    .collect();
+                let value = match was.playing.and_then(|p| ids.iter().position(|id| *id == p)) {
+                    Some(at) => (at + 1) as f32,
+                    None => was.value.round().clamp(1.0, ids.len().max(1) as f32),
+                };
+                (value != was.value).then_some((was.module, value))
+            })
+            .collect()
     }
 
     /// Why a tile other than a member cannot be added or moved into `level`,
