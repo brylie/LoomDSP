@@ -2,12 +2,18 @@
 
 use super::*;
 
-impl<Message> PatchCanvas<'_, Message> {
+impl CanvasProps<'_> {
     /// Updates hover text after an event (panels.md, Labels and hover
     /// text). It asks for a frame only when the text appears or hides, and
     /// for a single timed frame while it waits, so it never draws while
     /// nothing changes.
-    pub(super) fn sync_hover_text(&self, state: &mut State, event: Option<&Event>, now: Instant, out: &mut Reaction) {
+    pub(super) fn sync_hover_text(
+        &self,
+        state: &mut CanvasInput,
+        event: Option<&Event>,
+        now: Instant,
+        out: &mut Reaction,
+    ) {
         let redrawing = matches!(event, Some(Event::Redraw));
         let target = self.hover_target(state);
         let mut changed = state.hover_text.rest(target, now);
@@ -25,7 +31,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// pointer, or else the control focused with Tab. Right after a Tab
     /// press, the focused control comes first, until the pointer moves.
     /// Nothing during a drag.
-    pub(super) fn hover_target(&self, state: &State) -> Option<HoverTarget> {
+    pub(super) fn hover_target(&self, state: &CanvasInput) -> Option<HoverTarget> {
         if state.focus.has_overlay() || !matches!(state.interaction, Interaction::Idle) {
             return None;
         }
@@ -95,7 +101,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// The pinned output, while its badge shows. A pin on an output that
     /// lost its last assignment, or whose module is gone, counts as none:
     /// it draws nothing, so it must not take Escape or pick an arc drag.
-    pub(super) fn pin(&self, state: &State) -> Option<PortRef> {
+    pub(super) fn pin(&self, state: &CanvasInput) -> Option<PortRef> {
         state
             .pinned
             .filter(|p| self.scene.badge_bounds(p.module, p.index).is_some())
@@ -105,7 +111,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// The ring of a modulated knob reaches a little past the knob's cell,
     /// so it is checked first, as `press` does: there a press drags depth,
     /// and the cursor says so (modulation.md, Arc drag).
-    pub(super) fn hover_interaction(&self, state: &State) -> CursorShape {
+    pub(super) fn hover_interaction(&self, state: &CanvasInput) -> CursorShape {
         if state.cursor.is_some_and(|point| self.resize_at(point).is_some()) {
             return CursorShape::ResizeDiagonal;
         }
@@ -140,7 +146,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The module tile under the cursor, if any (not counting its ports).
-    pub(super) fn hovered_module(state: &State) -> Option<u32> {
+    pub(super) fn hovered_module(state: &CanvasInput) -> Option<u32> {
         match state.hover? {
             Hit::Module(id) => Some(id),
             _ => None,
@@ -148,7 +154,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The port under the cursor, if any.
-    pub(super) fn hovered_port(state: &State) -> Option<PortRef> {
+    pub(super) fn hovered_port(state: &CanvasInput) -> Option<PortRef> {
         match state.hover? {
             Hit::Port(port) => Some(port),
             _ => None,
@@ -156,7 +162,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The cable under the cursor, if any.
-    pub(super) fn hovered_cable(state: &State) -> Option<usize> {
+    pub(super) fn hovered_cable(state: &CanvasInput) -> Option<usize> {
         match state.hover? {
             Hit::Cable(index) => Some(index),
             _ => None,
@@ -173,7 +179,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// lights and meters have a value line: their current value, which the
     /// app writes as the widget's text (port-and-parameter-text.md, Display
     /// values). A control's value shows on the control itself.
-    pub(super) fn hover_content(&self, target: HoverTarget) -> Option<(&str, &HoverText, Option<&str>, Rect)> {
+    pub(crate) fn hover_content(&self, target: HoverTarget) -> Option<(&str, &HoverText, Option<&str>, Rect)> {
         match target {
             HoverTarget::Port(port) => {
                 let view = self.scene.port(port)?;
@@ -222,117 +228,5 @@ impl<Message> PatchCanvas<'_, Message> {
                 Some((&module.title, &module.hover, None, header))
             }
         }
-    }
-
-    /// Hover text (panels.md, Labels and hover text): the label, the
-    /// description, and the name when it differs, at a fixed screen size in
-    /// a layer above the tiles. Drawn at any zoom, because hover text is
-    /// what the user needs where tile text is too small to read.
-    pub(super) fn draw_hover_text<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rect)
-    where
-        Renderer: text::Renderer<Font = Font>,
-    {
-        if state.focus.has_overlay() {
-            return;
-        }
-        let Some(target) = state.hover_text.shown() else {
-            return;
-        };
-        let Some((label, hover, value, world)) = self.hover_content(target) else {
-            return;
-        };
-        // A port with a clock mark says which transport signal it follows
-        // (panels.md, Clock mark on transport inputs).
-        let follows = match target {
-            HoverTarget::Port(port) => self.scene.port(port).and_then(|p| p.follows_transport),
-            HoverTarget::Control(..) | HoverTarget::Second(..) | HoverTarget::Title(_) => None,
-        };
-        let font = renderer.default_font();
-        let inner = crate::hover::text_width(bounds.width);
-        // Each line is measured as a paragraph, then drawn as text in that
-        // size, wrapped at word boundaries.
-        let line = |content: &str, size: f32, colour: Color, font: Font| {
-            let text = Text {
-                content: content.to_string(),
-                bounds: iced::Size::new(inner, f32::INFINITY),
-                size: Pixels(size),
-                line_height: text::LineHeight::Relative(1.3),
-                font,
-                align_x: text::Alignment::Left,
-                align_y: alignment::Vertical::Top,
-                shaping: text::Shaping::Basic,
-                wrapping: text::Wrapping::Word,
-            };
-            let measured = Renderer::Paragraph::with_text(text.as_ref()).min_bounds();
-            (
-                Text {
-                    bounds: iced::Size::new(measured.width.ceil() + 1.0, measured.height.ceil()),
-                    ..text
-                },
-                colour,
-            )
-        };
-        // A light's or meter's label is bold, so it stands apart from its
-        // value line (port-and-parameter-text.md, Display values).
-        let bold = Font {
-            weight: iced::font::Weight::Bold,
-            ..font
-        };
-        let title = if value.is_some() { bold } else { font };
-        let mut lines = vec![line(label, HOVER_TEXT_PX, self.palette.text, title)];
-        if !hover.description.is_empty() {
-            lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, font));
-        }
-        // What a control stands for across a sub-patch boundary
-        // (sub-patches.md, Exposing).
-        if let Some(note) = &hover.note {
-            lines.push(line(note, HOVER_TEXT_PX, self.palette.text_dim, font));
-        }
-        if let Some(signal) = follows {
-            lines.push(line(signal.hover_line(), HOVER_TEXT_PX, self.palette.text, font));
-        }
-        if let Some(value) = value {
-            lines.push(line(value, HOVER_TEXT_PX, self.palette.text, font));
-        }
-        if let Some(name) = &hover.name {
-            lines.push(line(name, HOVER_TEXT_PX - 1.0, self.palette.text_dim, font));
-        }
-        const LINE_GAP: f32 = 3.0;
-        let width = lines.iter().map(|(t, _)| t.bounds.width).fold(0.0, f32::max);
-        let height = lines.iter().map(|(t, _)| t.bounds.height).sum::<f32>() + LINE_GAP * (lines.len() - 1) as f32;
-        let size = Size::new(width + 2.0 * HOVER_PADDING, height + 2.0 * HOVER_PADDING);
-
-        let zoom = state.camera.zoom;
-        let corner = state.camera.to_screen(world.position());
-        let anchor = Rect::new(
-            Point::new(bounds.x + corner.x, bounds.y + corner.y),
-            world.size() * zoom,
-        );
-        let at = crate::hover::place(size, anchor, bounds);
-        renderer.with_layer(bounds.to_iced(), |renderer| {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rect::new(at, size).to_iced(),
-                    border: iced::Border {
-                        color: self.palette.tile_border.to_iced(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..renderer::Quad::default()
-                },
-                self.palette.tile.to_iced(),
-            );
-            let mut y = at.y + HOVER_PADDING;
-            for (text, colour) in lines {
-                let height = text.bounds.height;
-                renderer.fill_text(
-                    text,
-                    Point::new(at.x + HOVER_PADDING, y).to_iced(),
-                    colour.to_iced(),
-                    bounds.to_iced(),
-                );
-                y += height + LINE_GAP;
-            }
-        });
     }
 }

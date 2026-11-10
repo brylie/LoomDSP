@@ -2,12 +2,12 @@
 
 use super::*;
 
-impl<Message> PatchCanvas<'_, Message> {
+impl CanvasProps<'_> {
     /// The first state for a still image: as if the user had framed the
     /// view, focused a control with Tab, moved the pointer, pinned a badge,
     /// and started a drag, in that order.
-    pub(super) fn still_state(&self, still: Still, now: Instant) -> State {
-        let mut state = State {
+    pub(super) fn still_state(&self, still: Still, now: Instant) -> CanvasInput {
+        let mut state = CanvasInput {
             camera: still.camera,
             // Already framed, so the first redraw keeps this camera.
             framed_key: Some(self.frame_key),
@@ -17,7 +17,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 focus::FocusState::at(module, widget, true, focus::FocusMode::Browse)
             }),
             pinned: still.pinned,
-            ..State::default()
+            ..CanvasInput::default()
         };
         if let Some(world) = still.pointer {
             state.cursor = Some(world);
@@ -49,7 +49,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// Handles one event: everything but hover text.
     pub(super) fn handle(
         &self,
-        state: &mut State,
+        state: &mut CanvasInput,
         event: Option<&Event>,
         pointer: Option<Point>,
         bounds: Rect,
@@ -664,7 +664,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     pub(super) fn press(
         &self,
-        state: &mut State,
+        state: &mut CanvasInput,
         world: Point,
         screen: Point,
         bounds: Rect,
@@ -935,7 +935,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     .is_some_and(|m| world.y >= m.position.y && world.y < m.position.y + HEADER);
                 let last = state.last_header_click.take();
                 if on_header {
-                    let again = last.is_some_and(|(at, m, point)| m == id && double_click(Some((at, point)), screen));
+                    let again =
+                        last.is_some_and(|(at, m, point)| m == id && double_click(Some((at, point)), screen, now));
                     if again {
                         self.emit(out, CanvasEvent::OpenTile(id));
                         return;
@@ -954,7 +955,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 let last = state.last_meter_click.take();
                 let again = meter.filter(|&widget| {
                     last.is_some_and(|(at, m, w, point)| {
-                        m == id && w == widget && double_click(Some((at, point)), screen)
+                        m == id && w == widget && double_click(Some((at, point)), screen, now)
                     })
                 });
                 let click = if let Some(widget) = again {
@@ -979,7 +980,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     );
                 }
             }
-            Hit::Nothing if double_click(state.last_empty_click.take(), screen) => {
+            Hit::Nothing if double_click(state.last_empty_click.take(), screen, now) => {
                 self.open_browser(world, screen, bounds, out);
             }
             Hit::Cable(_) | Hit::Nothing => {
@@ -998,7 +999,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Frames the whole scene at a readable zoom. A scene with no modules
     /// keeps the camera it has.
-    fn frame(&self, state: &mut State, size: Size) {
+    fn frame(&self, state: &mut CanvasInput, size: Size) {
         if let Some(world) = self.scene.bounds() {
             state.camera.frame_readable(world, size, READABLE_ZOOM);
         }
@@ -1019,7 +1020,14 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Sends [`CanvasEvent::ProbeMenu`] if an output or a cable is at this
     /// point. Anything else opens no menu.
-    pub(super) fn open_probe_menu(&self, state: &State, world: Point, screen: Point, bounds: Rect, out: &mut Reaction) {
+    pub(super) fn open_probe_menu(
+        &self,
+        state: &CanvasInput,
+        world: Point,
+        screen: Point,
+        bounds: Rect,
+        out: &mut Reaction,
+    ) {
         let (output, anchor) = match self.scene.hit(world, state.hit_radius()) {
             Hit::Port(port) if port.output => match self.scene.port_position(port) {
                 Some(position) => (port, position),

@@ -5,9 +5,9 @@
 
 use super::*;
 
-impl<Message> PatchCanvas<'_, Message> {
+impl CanvasProps<'_> {
     /// Screen rectangle of the open list, kept readable at any canvas zoom.
-    pub(super) fn select_popup_bounds(&self, state: &State, bounds: Rect) -> Option<Rect> {
+    pub(crate) fn select_popup_bounds(&self, state: &CanvasInput, bounds: Rect) -> Option<Rect> {
         state.focus.popup()?;
         let (module, widget) = state.focus.control()?;
         self.select_popup_bounds_for(state, bounds, module, widget)
@@ -17,7 +17,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// `module`.
     pub(super) fn select_popup_bounds_for(
         &self,
-        state: &State,
+        state: &CanvasInput,
         bounds: Rect,
         module: u32,
         widget: usize,
@@ -46,7 +46,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// Opens a select list at its current value.
-    pub(super) fn open_select(&self, state: &mut State, module: u32, widget: usize) {
+    pub(super) fn open_select(&self, state: &mut CanvasInput, module: u32, widget: usize) {
         let count = self.select_options(module, widget).map_or(0, <[String]>::len);
         let mut popup = SelectPopup {
             highlight: self.position(module, widget).round().max(0.0) as usize,
@@ -58,7 +58,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The choices of a select list, by module and widget.
-    pub(super) fn select_options(&self, module: u32, widget: usize) -> Option<&[String]> {
+    pub(crate) fn select_options(&self, module: u32, widget: usize) -> Option<&[String]> {
         match self.widget_kind(module, widget)? {
             WidgetViewKind::Select { options } => Some(options),
             _ => None,
@@ -73,7 +73,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// or Alt is used up, so `a` or Backspace cannot act behind the list.
     pub(super) fn select_popup_key(
         &self,
-        state: &mut State,
+        state: &mut CanvasInput,
         key: &Key,
         modifiers: Modifiers,
         text: Option<&str>,
@@ -138,7 +138,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// resets the control.
     pub(super) fn select_popup_event(
         &self,
-        state: &mut State,
+        state: &mut CanvasInput,
         event: &Event,
         pointer: Option<Point>,
         bounds: Rect,
@@ -230,7 +230,7 @@ const SELECT_MAX_ROWS: usize = 12;
 
 /// How many rows of a list with `count` choices show: up to 12, and no more
 /// than fit in a canvas `height` pixels tall, so the list stays inside it.
-pub(super) fn select_rows(height: f32, count: usize) -> usize {
+pub(crate) fn select_rows(height: f32, count: usize) -> usize {
     let room = (height / SELECT_ROW_PX).floor().max(1.0) as usize;
     count.min(SELECT_MAX_ROWS).min(room)
 }

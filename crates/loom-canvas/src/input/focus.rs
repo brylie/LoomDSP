@@ -9,7 +9,7 @@
 //!
 //! The scene and the selection come from the app, so a focused control can
 //! still vanish, be hidden by a mode, or lose its selection between two
-//! events. [`PatchCanvas::reconcile_focus`] brings a mode that no longer
+//! events. [`CanvasProps::reconcile_focus`] brings a mode that no longer
 //! fits back to browsing, on every event. Plain focus is checked only when a
 //! key arrives, in `focus_keys`, so reselecting a module before any key
 //! press keeps its focus.
@@ -233,7 +233,7 @@ impl FocusState {
     }
 }
 
-impl<Message> PatchCanvas<'_, Message> {
+impl CanvasProps<'_> {
     /// Brings a mode that no longer fits its control back to browsing. This
     /// runs on every event, redraws too, so a control hidden and shown again
     /// between two key presses does not keep its list, field, or grab.
@@ -248,7 +248,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// - A typed field closes, with no change, when its control has gone or
     ///   been hidden, its module is no longer the one selected, or MIDI
     ///   learn starts.
-    pub(super) fn reconcile_focus(&self, state: &mut State) {
+    pub(super) fn reconcile_focus(&self, state: &mut CanvasInput) {
         let height = state.size.height;
         let FocusState::Control(focused) = &mut state.focus else {
             return;

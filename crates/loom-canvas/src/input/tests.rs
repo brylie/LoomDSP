@@ -2,6 +2,7 @@ use super::focus::{FocusMode, FocusState, RangePart};
 use super::panel_input::{focusable, next_focus};
 use super::*;
 use crate::WidgetValue;
+use crate::reaction::Redraw;
 use crate::scene::{CableView, ModuleView, PanelView, PortShape, PortView, WidgetView};
 
 /// Shift alone.
@@ -146,13 +147,16 @@ fn a_control_focused_by_keyboard_has_a_ring_clear_of_its_caption() {
     m.panel = panel();
     let scene = Scene::new(vec![m], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let unfocused = canvas.overlay(&State::default()).shapes.len();
-    let tabbed = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let unfocused = canvas
+        .overlay(&CanvasInput::default(), &LinesCache::default())
+        .shapes
+        .len();
+    let tabbed = CanvasInput {
         focus: FocusState::at(1, 0, true, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    let overlay = canvas.overlay(&tabbed);
+    let overlay = canvas.overlay(&tabbed, &LinesCache::default());
     assert_eq!(overlay.shapes.len(), unfocused + 1);
     // The ring stays above the caption, where the value shows.
     let ring = overlay.shapes.last().unwrap().rect();
@@ -169,11 +173,11 @@ fn a_control_focused_by_keyboard_has_a_ring_clear_of_its_caption() {
         "ring {ring:?} clear of caption {caption:?}"
     );
     // Focus from a click or a drag shows no ring (#92).
-    let clicked = State {
+    let clicked = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    assert_eq!(canvas.overlay(&clicked).shapes.len(), unfocused);
+    assert_eq!(canvas.overlay(&clicked, &LinesCache::default()).shapes.len(), unfocused);
 }
 
 #[test]
@@ -182,15 +186,15 @@ fn hover_text_is_about_the_port_or_control_under_the_pointer() {
     m.panel = panel();
     let scene = Scene::new(vec![m], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let port = PortRef {
         module: 1,
         output: true,
         index: 0,
     };
-    let on = |hover| State {
+    let on = |hover| CanvasInput {
         hover: Some(hover),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert_eq!(canvas.hover_target(&on(Hit::Port(port))), Some(HoverTarget::Port(port)));
     let knob = Hit::Widget { module: 1, widget: 0 };
@@ -204,7 +208,7 @@ fn hover_text_is_about_the_port_or_control_under_the_pointer() {
             label = Some(item.bounds().center());
         }
     });
-    let on_label = State {
+    let on_label = CanvasInput {
         cursor: label,
         ..on(Hit::Module(1))
     };
@@ -224,11 +228,11 @@ fn the_header_hovers_with_the_module_family() {
     let tile = m.bounds();
     let scene = Scene::new(vec![m], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let at = |y: f32| State {
+    let canvas = CanvasProps::new(&scene, &none);
+    let at = |y: f32| CanvasInput {
         hover: Some(Hit::Module(1)),
         cursor: Some(Point::new(tile.center_x(), y)),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert_eq!(
         canvas.hover_target(&at(tile.y + HEADER * 0.5)),
@@ -267,11 +271,11 @@ fn a_port_label_over_a_header_hovers_as_the_port() {
     let header = scene.module(2).unwrap().bounds();
     assert!(label.y < header.y + HEADER, "the label is in the cover's header");
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let state = State {
+    let canvas = CanvasProps::new(&scene, &none);
+    let state = CanvasInput {
         hover: Some(Hit::Module(2)),
         cursor: Some(label),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert_eq!(canvas.hover_target(&state), Some(HoverTarget::Port(port)));
 }
@@ -310,17 +314,17 @@ fn a_light_shows_its_description_and_value() {
     );
     let scene = Scene::new(vec![m, meter], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
     // The pointer rests on the middle of a display widget. The hit is
     // the tile, so a press there still moves it.
     let resting_on = |scene: &Scene, module: u32, widget: usize| {
         let point = scene.module(module).unwrap().widget_bounds(widget).unwrap().center();
         let hit = scene.hit(point, 8.0);
         assert_eq!(hit, Hit::Module(module), "a display belongs to the tile");
-        State {
+        CanvasInput {
             hover: Some(hit),
             cursor: Some(point),
-            ..State::default()
+            ..CanvasInput::default()
         }
     };
     assert_eq!(
@@ -340,7 +344,7 @@ fn a_light_shows_its_description_and_value() {
 
     // A light with no description shows none.
     let scene = Scene::new(vec![plain], Vec::new());
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     assert_eq!(canvas.hover_target(&resting_on(&scene, 1, 1)), None);
 }
 
@@ -350,7 +354,7 @@ fn no_hover_text_during_a_drag() {
     m.panel = panel();
     let scene = Scene::new(vec![m], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let port = PortRef {
         module: 1,
         output: true,
@@ -381,10 +385,10 @@ fn no_hover_text_during_a_drag() {
         },
     ];
     for interaction in drags {
-        let state = State {
+        let state = CanvasInput {
             hover: Some(Hit::Port(port)),
             interaction: interaction.clone(),
-            ..State::default()
+            ..CanvasInput::default()
         };
         assert_eq!(canvas.hover_target(&state), None, "{interaction:?}");
     }
@@ -396,23 +400,23 @@ fn tab_focus_shows_hover_text_but_a_click_does_not() {
     m.panel = panel();
     let scene = Scene::new(vec![m], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let focused = |tab_focus| State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let focused = |tab_focus| CanvasInput {
         focus: FocusState::at(1, 2, tab_focus, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert_eq!(canvas.hover_target(&focused(true)), Some(HoverTarget::Control(1, 2)));
     assert_eq!(canvas.hover_target(&focused(false)), None);
     // With the pointer resting on the knob, a Tab press to the toggle
     // shows the toggle's text until the pointer moves.
     let knob = Hit::Widget { module: 1, widget: 0 };
-    let tabbed = State {
+    let tabbed = CanvasInput {
         hover: Some(knob),
         focus_first: true,
         ..focused(true)
     };
     assert_eq!(canvas.hover_target(&tabbed), Some(HoverTarget::Control(1, 2)));
-    let moved = State {
+    let moved = CanvasInput {
         hover: Some(knob),
         focus_first: false,
         ..focused(true)
@@ -420,7 +424,7 @@ fn tab_focus_shows_hover_text_but_a_click_does_not() {
     assert_eq!(canvas.hover_target(&moved), Some(HoverTarget::Control(1, 0)));
     // Focus on a module that is no longer selected shows nothing.
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     assert_eq!(canvas.hover_target(&focused(true)), None);
 }
 
@@ -448,11 +452,11 @@ fn chain() -> Scene {
 fn activity_fills_connected_ports_from_overlay() {
     let scene = chain();
     let selection = BTreeSet::new();
-    let idle = PatchCanvas::new(&scene, &selection, |event| event);
-    let active = PatchCanvas::new(&scene, &selection, |event| event).activity([(1, 0)]);
-    let state = State::default();
-    let before = idle.overlay(&state);
-    let after = active.overlay(&state);
+    let idle = CanvasProps::new(&scene, &selection);
+    let active = CanvasProps::new(&scene, &selection).activity([(1, 0)]);
+    let state = CanvasInput::default();
+    let before = idle.overlay(&state, &LinesCache::default());
+    let after = active.overlay(&state, &LinesCache::default());
     assert_eq!(after.cables.len(), before.cables.len());
     assert_eq!(after.shapes.len(), before.shapes.len() + 2);
     assert!(after.shapes.iter().take(2).all(|shape| shape.fill()[3] > 0.0));
@@ -461,19 +465,19 @@ fn activity_fills_connected_ports_from_overlay() {
 #[test]
 fn selected_modules_bring_their_cables_forward() {
     let scene = chain();
-    let state = State::default();
+    let state = CanvasInput::default();
 
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    assert!(canvas.overlay(&state).cables.is_empty());
+    let canvas = CanvasProps::new(&scene, &none);
+    assert!(canvas.overlay(&state, &LinesCache::default()).cables.is_empty());
 
     let first = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &first, |e| e);
-    assert_eq!(canvas.overlay(&state).cables.len(), 1);
+    let canvas = CanvasProps::new(&scene, &first);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 1);
 
     let middle = BTreeSet::from([2]);
-    let canvas = PatchCanvas::new(&scene, &middle, |e| e);
-    assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    let canvas = CanvasProps::new(&scene, &middle);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 2);
 }
 
 #[test]
@@ -481,7 +485,7 @@ fn tiles_stay_draggable_when_zoomed_out() {
     // At the smallest zoom, the port hit radius must not cover the whole
     // tile, or pressing anywhere on it would start a cable.
     let scene = chain();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     state.camera.zoom = crate::camera::MIN_ZOOM;
     let centre = scene.module(2).unwrap().bounds().center();
     assert_eq!(scene.hit(centre, state.hit_radius()), Hit::Module(2));
@@ -491,51 +495,51 @@ fn tiles_stay_draggable_when_zoomed_out() {
 fn hovering_a_module_brings_its_cables_forward() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let state = State {
+    let canvas = CanvasProps::new(&scene, &none);
+    let state = CanvasInput {
         hover: Some(Hit::Module(3)),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    assert_eq!(canvas.overlay(&state).cables.len(), 1);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 1);
 }
 
 #[test]
 fn hovering_a_port_brings_only_its_cables_forward() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     // Module 2's input carries cable 1 -> 2; its output carries 2 -> 3.
-    let state = State {
+    let state = CanvasInput {
         hover: Some(Hit::Port(PortRef {
             module: 2,
             output: false,
             index: 0,
         })),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    assert_eq!(canvas.overlay(&state).cables.len(), 1);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 1);
     // A port with no cable highlights nothing.
-    let state = State {
+    let state = CanvasInput {
         hover: Some(Hit::Port(PortRef {
             module: 1,
             output: false,
             index: 0,
         })),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    assert!(canvas.overlay(&state).cables.is_empty());
+    assert!(canvas.overlay(&state, &LinesCache::default()).cables.is_empty());
 }
 
 #[test]
 fn hovering_a_cable_brings_only_that_cable_forward() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let state = State {
+    let canvas = CanvasProps::new(&scene, &none);
+    let state = CanvasInput {
         hover: Some(Hit::Cable(1)),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    assert_eq!(canvas.overlay(&state).cables.len(), 1);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 1);
 }
 
 fn button_module() -> ModuleView {
@@ -548,7 +552,7 @@ fn button_module() -> ModuleView {
     module
 }
 
-fn drive(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> Vec<CanvasEvent> {
+fn drive(canvas: &CanvasProps<'_>, state: &mut CanvasInput, event: &Event, at: Point) -> Vec<CanvasEvent> {
     drive_at(canvas, state, Some(event), at, Instant::now())
 }
 
@@ -556,8 +560,8 @@ fn drive(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event
 /// canvas, with the pointer at `at` and the clock at `now`. Returns what
 /// the canvas reported.
 fn drive_at(
-    canvas: &PatchCanvas<'_, CanvasEvent>,
-    state: &mut State,
+    canvas: &CanvasProps<'_>,
+    state: &mut CanvasInput,
     event: Option<&Event>,
     at: Point,
     now: Instant,
@@ -589,8 +593,8 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     };
     let scene = Scene::new(vec![view], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     drive(
@@ -669,10 +673,10 @@ fn select_popup_keyboard_choices_are_explicit() {
     };
     let scene = Scene::new(vec![view], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     assert!(drive(&canvas, &mut state, &key_event(Key::Space, true), at).is_empty());
@@ -719,10 +723,10 @@ fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
     };
     let scene = Scene::new(vec![view], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let at = scene.module(1).unwrap().bounds().center();
     for key in [Key::Down, Key::Enter] {
-        let mut state = State {
+        let mut state = CanvasInput {
             focus: FocusState::at(
                 1,
                 0,
@@ -733,7 +737,7 @@ fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
                     wheel: 0.0,
                 }),
             ),
-            ..State::default()
+            ..CanvasInput::default()
         };
         let events = drive(&canvas, &mut state, &key_event(key, true), at);
         assert!(events.is_empty(), "{key:?}: {events:?}");
@@ -746,10 +750,10 @@ fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
 fn stale_select_popup_passes_escape_to_normal_key_handling() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let at = scene.module(1).unwrap().bounds().center();
     for module in [1, 999] {
-        let mut state = State {
+        let mut state = CanvasInput {
             focus: FocusState::at(
                 module,
                 999,
@@ -760,7 +764,7 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
                     wheel: 0.0,
                 }),
             ),
-            ..State::default()
+            ..CanvasInput::default()
         };
         let events = drive(&canvas, &mut state, &key_event(Key::Escape, true), at);
         assert_eq!(events, vec![CanvasEvent::Select(Vec::new())]);
@@ -775,7 +779,7 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
 fn stale_select_popup_passes_the_pointer_to_normal_handling() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let stale = || {
         FocusState::at(
             999,
@@ -789,17 +793,17 @@ fn stale_select_popup_passes_the_pointer_to_normal_handling() {
         )
     };
     let empty = Point::new(790.0, 590.0);
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: stale(),
-        ..State::default()
+        ..CanvasInput::default()
     };
     drive(&canvas, &mut state, &click(PointerButton::Left), empty);
     assert!(state.focus.popup().is_none());
     assert!(matches!(state.interaction, Interaction::Selecting { .. }));
 
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: stale(),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let zoom = state.camera.zoom;
     drive(
@@ -827,7 +831,7 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
     };
     let scene = Scene::new(vec![view], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let at = scene.module(1).unwrap().widget_bounds(1).unwrap().center();
     // The list is the focused control's own, whatever had the focus before.
     let open = || {
@@ -842,9 +846,9 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
             }),
         )
     };
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: open(),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let chosen = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert_eq!(
@@ -857,9 +861,9 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
         }]
     );
 
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: open(),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let unfocused = drive(&canvas, &mut state, &Event::WindowUnfocused, at);
     assert!(state.focus.popup().is_none());
@@ -900,10 +904,10 @@ fn typed(key: Key, text: &str) -> Event {
 fn a_long_select_list_scrolls() {
     let scene = long_list(30);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let canvas_area = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let box_at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), box_at);
     drive(
         &canvas,
@@ -948,7 +952,7 @@ fn a_long_select_list_scrolls() {
     }));
 
     // The keyboard scrolls the highlight into view.
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     drive_at(&canvas, &mut state, None, box_at, Instant::now());
     canvas.open_select(&mut state, 1, 0);
     for _ in 0..15 {
@@ -968,10 +972,10 @@ fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
 
     let scene = long_list(3);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         size: Size::new(800.0, 600.0),
-        ..State::default()
+        ..CanvasInput::default()
     };
     canvas.open_select(&mut state, 1, 0);
     let list = canvas
@@ -994,12 +998,12 @@ fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
 fn a_list_on_a_grown_canvas_has_no_blank_rows() {
     let scene = long_list(30);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let area = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     // Scrolled to the end on a canvas 4 rows tall.
-    let mut state = State {
+    let mut state = CanvasInput {
         size: Size::new(800.0, 4.0 * SELECT_ROW_PX),
-        ..State::default()
+        ..CanvasInput::default()
     };
     canvas.open_select(&mut state, 1, 0);
     state.focus.popup_mut().unwrap().scroll = 26;
@@ -1038,15 +1042,15 @@ fn typing_in_an_open_list_jumps_to_the_next_match() {
     };
     let scene = Scene::new(vec![view], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     canvas.open_select(&mut state, 1, 0);
     let letter = |c: &str| typed(key_of(c), c);
-    let highlight = |state: &State| state.focus.popup().copied().unwrap().highlight;
+    let highlight = |state: &CanvasInput| state.focus.popup().copied().unwrap().highlight;
 
     drive(&canvas, &mut state, &letter("s"), at);
     assert_eq!(highlight(&state), 1, "searches from after the highlight");
@@ -1095,10 +1099,10 @@ fn a_fader_drag_keeps_its_cursor() {
     ] {
         let (scene, values) = fader_scene(vertical);
         let selected = BTreeSet::from([1]);
-        let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+        let canvas = CanvasProps::new(&scene, &selected).values(&values);
         let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
         let at = crate::controls::fader_track(rect, vertical).center();
-        let mut state = State::default();
+        let mut state = CanvasInput::default();
         drive(&canvas, &mut state, &click(PointerButton::Left), at);
         assert!(matches!(state.interaction, Interaction::Turning { .. }));
         assert_eq!(state.interaction.cursor(), Some(expected));
@@ -1114,7 +1118,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
     for vertical in [true, false] {
         let (scene, values) = fader_scene(vertical);
         let selected = BTreeSet::from([1]);
-        let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+        let canvas = CanvasProps::new(&scene, &selected).values(&values);
         let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
         let at = crate::controls::fader_track(rect, vertical).center();
         let way = |d: f32| {
@@ -1128,7 +1132,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
         let moved = |_to: Point| Event::Pointer(PointerEvent::Moved);
         let released = Event::Pointer(PointerEvent::Released(PointerButton::Left));
 
-        let mut state = State::default();
+        let mut state = CanvasInput::default();
         let pressed = drive(&canvas, &mut state, &click(PointerButton::Left), at);
         assert!(
             !pressed.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })),
@@ -1152,7 +1156,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
         } else {
             Point::new(at.x, at.y + 40.0)
         };
-        let mut state = State::default();
+        let mut state = CanvasInput::default();
         drive(&canvas, &mut state, &click(PointerButton::Left), at);
         let events = drive(&canvas, &mut state, &moved(across), across);
         assert!(!events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
@@ -1167,7 +1171,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
                 Point::new(bar.x + d, bar.y)
             }
         };
-        let mut state = State::default();
+        let mut state = CanvasInput::default();
         drive(&canvas, &mut state, &click(PointerButton::Left), bar);
         assert!(matches!(state.interaction, Interaction::Depth { .. }));
         let events = drive(&canvas, &mut state, &moved(on_bar(20.0)), on_bar(20.0));
@@ -1187,11 +1191,11 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
 fn a_fader_takes_the_keys_of_a_knob() {
     let (scene, values) = fader_scene(true);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let events = drive(&canvas, &mut state, &key_event(Key::Up, true), at);
     assert!(events.contains(&CanvasEvent::SetControl {
@@ -1241,7 +1245,7 @@ fn typed_key(key: Key, text: Option<&str>, modifiers: Modifiers, repeat: bool) -
 }
 
 /// Types text into the canvas, one character per key press.
-fn type_text(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, text: &str, at: Point) -> Vec<CanvasEvent> {
+fn type_text(canvas: &CanvasProps<'_>, state: &mut CanvasInput, text: &str, at: Point) -> Vec<CanvasEvent> {
     let mut events = Vec::new();
     for c in text.chars() {
         let c = c.to_string();
@@ -1258,14 +1262,14 @@ fn a_focused_text_field_keeps_keys_from_the_canvas() {
     use Key;
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+    let canvas = CanvasProps::new(&scene, &selected)
         .values(&values)
         .focus_policy(CanvasFocusPolicy {
             text_field_keys: true,
             ..CanvasFocusPolicy::default()
         });
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     for key in [Key::Enter, Key::Left, Key::Space, Key::Escape, Key::Backspace] {
         let events = drive(&canvas, &mut state, &key_event(key, true), at);
         assert!(events.is_empty(), "{key:?} did nothing, but sent {events:?}");
@@ -1286,11 +1290,11 @@ fn a_focused_text_field_keeps_keys_from_the_canvas() {
 fn a_press_outside_closes_a_select_list_and_clears_focus() {
     let scene = long_list(3);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         size: Size::new(800.0, 600.0),
-        ..State::default()
+        ..CanvasInput::default()
     };
     canvas.open_select(&mut state, 1, 0);
     let events = drive(
@@ -1309,12 +1313,12 @@ fn a_press_outside_closes_a_select_list_and_clears_focus() {
 fn a_select_list_stays_in_the_canvas_when_its_box_is_off_an_edge() {
     let scene = long_list(5);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
+    let canvas = CanvasProps::new(&scene, &selected);
     let area = Rect::new(Point::ORIGIN, Size::new(400.0, 300.0));
     for pan in [-5000.0, 5000.0] {
-        let mut state = State {
+        let mut state = CanvasInput {
             size: area.size(),
-            ..State::default()
+            ..CanvasInput::default()
         };
         state.camera.pan(Vector::new(0.0, pan));
         canvas.open_select(&mut state, 1, 0);
@@ -1329,16 +1333,16 @@ fn a_select_list_stays_in_the_canvas_when_its_box_is_off_an_edge() {
 fn no_typed_field_opens_during_a_drag() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         interaction: Interaction::Panning {
             last: Point::ORIGIN,
             click: None,
             start: Camera::default(),
         },
-        ..State::default()
+        ..CanvasInput::default()
     };
     type_text(&canvas, &mut state, "5", at);
     assert!(state.focus.typed().is_none());
@@ -1371,11 +1375,11 @@ fn the_reason_for_bad_text_stays_in_the_canvas() {
 fn a_digit_opens_the_typed_field_and_enter_commits() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert!(type_text(&canvas, &mut state, "129", at).is_empty());
     assert_eq!(state.focus.typed().unwrap().draft.text, "129");
@@ -1413,7 +1417,7 @@ fn a_digit_opens_the_typed_field_and_enter_commits() {
 fn the_field_opens_on_what_was_typed_not_on_the_key() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
     let none = Modifiers::default();
     for (key, text, opens) in [
@@ -1424,9 +1428,9 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
         ("1", "&", false),
         ("x", "x", false),
     ] {
-        let mut state = State {
+        let mut state = CanvasInput {
             focus: FocusState::at(1, 0, false, FocusMode::Browse),
-            ..State::default()
+            ..CanvasInput::default()
         };
         let event = typed_key(key_of(key), Some(text), none, false);
         drive(&canvas, &mut state, &event, at);
@@ -1436,15 +1440,15 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
         }
     }
     // With Command, a digit or a dot stays a shortcut, so Cmd+. can panic.
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let event = typed_key(Key::Character('.'), Some("."), command(), false);
     drive(&canvas, &mut state, &event, at);
     assert!(state.focus.typed().is_none());
     // A control that does not take numbers ignores a digit.
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &typed(Key::Character('1'), "1"), at);
     assert!(state.focus.typed().is_none(), "no focus, no field");
 }
@@ -1456,11 +1460,11 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
 fn the_open_field_takes_every_key() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     use Key;
     type_text(&canvas, &mut state, "1", at);
@@ -1499,11 +1503,11 @@ fn the_open_field_takes_every_key() {
 fn enter_on_unchanged_text_commits_nothing() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     use Key;
     assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
@@ -1535,7 +1539,7 @@ fn enter_on_unchanged_text_commits_nothing() {
 fn bad_typed_text_blocks_enter_until_it_is_corrected() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
+    let canvas = CanvasProps::new(&scene, &selected)
         .values(&values)
         .typed_check(|_, _, text| {
             text.parse::<f32>()
@@ -1543,9 +1547,9 @@ fn bad_typed_text_blocks_enter_until_it_is_corrected() {
                 .map_err(|_| "Not a number in Hz".to_string())
         });
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     use Key;
     type_text(&canvas, &mut state, "1a", at);
@@ -1564,12 +1568,12 @@ fn bad_typed_text_blocks_enter_until_it_is_corrected() {
 fn moving_focus_away_closes_the_field_with_no_change() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
     let opened = || {
-        let mut state = State {
+        let mut state = CanvasInput {
             focus: FocusState::at(1, 0, false, FocusMode::Browse),
-            ..State::default()
+            ..CanvasInput::default()
         };
         type_text(&canvas, &mut state, "5", at);
         state
@@ -1615,7 +1619,7 @@ fn moving_focus_away_closes_the_field_with_no_change() {
     // The module has gone from the selection.
     let mut state = opened();
     let none = BTreeSet::new();
-    let unselected = PatchCanvas::new(&scene, &none, |event| event).values(&values);
+    let unselected = CanvasProps::new(&scene, &none).values(&values);
     assert!(!edits(&drive(
         &unselected,
         &mut state,
@@ -1631,10 +1635,10 @@ fn moving_focus_away_closes_the_field_with_no_change() {
 fn a_press_outside_the_canvas_takes_its_focus() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     drive(
         &canvas,
@@ -1653,13 +1657,11 @@ fn no_field_opens_in_midi_learn_mode() {
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
     let learn = LearnView::default();
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event)
-        .values(&values)
-        .learn(Some(&learn));
+    let canvas = CanvasProps::new(&scene, &selected).values(&values).learn(Some(&learn));
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert!(type_text(&canvas, &mut state, "5", at).is_empty());
     assert!(state.focus.typed().is_none());
@@ -1678,11 +1680,11 @@ fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
     let tile = scene.module(1).unwrap().bounds().center();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     let pressed = drive(&canvas, &mut state, &click(PointerButton::Left), tile);
     assert_eq!(pressed, vec![CanvasEvent::GestureStart]);
-    let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+    let blocked = CanvasProps::new(&scene, &selected).focus_policy(CanvasFocusPolicy {
         interactive: false,
         ..CanvasFocusPolicy::default()
     });
@@ -1695,10 +1697,10 @@ fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
 
     let scene = Scene::new(vec![button_module()], Vec::new());
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), centre);
-    let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+    let blocked = CanvasProps::new(&scene, &selected).focus_policy(CanvasFocusPolicy {
         interactive: false,
         ..CanvasFocusPolicy::default()
     });
@@ -1725,9 +1727,9 @@ fn key_a(modifiers: Modifiers) -> Event {
 fn only_a_with_no_modifier_opens_the_browser() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let at = Point::new(100.0, 300.0);
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let events = drive(&canvas, &mut state, &key_a(Modifiers::default()), at);
     assert!(
         matches!(events.as_slice(), [CanvasEvent::OpenBrowser { at: p, .. }] if *p == at),
@@ -1749,7 +1751,7 @@ fn only_a_with_no_modifier_opens_the_browser() {
 fn command_zero_resets_the_zoom_to_100_percent() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let zero = |modifiers| {
         let key = Key::Character('0');
         Event::Key(KeyEvent::Pressed {
@@ -1761,7 +1763,7 @@ fn command_zero_resets_the_zoom_to_100_percent() {
     };
     let at = Point::new(300.0, 200.0);
     for start in [crate::camera::MIN_ZOOM, 0.5, 1.0, 2.25, crate::camera::MAX_ZOOM] {
-        let mut state = State::default();
+        let mut state = CanvasInput::default();
         state.camera.zoom = start;
         state.camera.origin = Point::new(-40.0, 60.0);
         let before = state.camera.to_world(at);
@@ -1783,8 +1785,8 @@ fn command_zero_resets_the_zoom_to_100_percent() {
 fn paste_goes_to_the_pointer_or_the_centre_of_the_view() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &none);
+    let mut state = CanvasInput::default();
     let key = Key::Character('v');
     let paste = Event::Key(KeyEvent::Pressed {
         key,
@@ -1808,7 +1810,7 @@ fn paste_goes_to_the_pointer_or_the_centre_of_the_view() {
         }]
     );
     // While a pop-up has the keys, paste is the pop-up's.
-    let blocked = PatchCanvas::new(&scene, &none, |e| e).focus_policy(CanvasFocusPolicy {
+    let blocked = CanvasProps::new(&scene, &none).focus_policy(CanvasFocusPolicy {
         interactive: false,
         ..CanvasFocusPolicy::default()
     });
@@ -1823,16 +1825,16 @@ fn modifiers_stay_current_while_the_canvas_is_not_interactive() {
     let selected = BTreeSet::from([1]);
     let tile = scene.module(2).unwrap().bounds().center();
     let shift = Event::Key(KeyEvent::ModifiersChanged(SHIFT));
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
 
-    let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+    let blocked = CanvasProps::new(&scene, &selected).focus_policy(CanvasFocusPolicy {
         interactive: false,
         ..CanvasFocusPolicy::default()
     });
     assert!(drive(&blocked, &mut state, &shift, tile).is_empty());
     assert!(state.modifiers.shift);
 
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let events = drive(&canvas, &mut state, &click(PointerButton::Left), tile);
     assert!(events.contains(&CanvasEvent::Select(vec![1, 2])), "{events:?}");
 }
@@ -1844,8 +1846,8 @@ fn a_button_reports_press_and_a_second_press_is_not_a_reset() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     let first = drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     assert_eq!(first, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
     assert!(matches!(
@@ -1876,8 +1878,8 @@ fn a_button_reports_release_outside() {
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let outside = Point::new(centre.x + 400.0, centre.y);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
 
     let down = drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     assert_eq!(down, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
@@ -1902,8 +1904,8 @@ fn another_mouse_button_releases_a_hold() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), centre);
 
     let right = drive(&canvas, &mut state, &click(PointerButton::Right), centre);
@@ -1918,8 +1920,8 @@ fn losing_the_window_releases_a_hold() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         interaction: Interaction::Holding { module: 1, widget: 0 },
         key_holds: [
             Some(KeyHold {
@@ -1929,7 +1931,7 @@ fn losing_the_window_releases_a_hold() {
             }),
             None,
         ],
-        ..State::default()
+        ..CanvasInput::default()
     };
     let events = drive(&canvas, &mut state, &Event::WindowUnfocused, centre);
     assert_eq!(
@@ -1966,10 +1968,10 @@ fn each_key_releases_only_its_own_hold() {
     module.panel.widgets.push(widget(WidgetViewKind::Button, 6));
     let scene = Scene::new(vec![module], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let at = Point::new(20.0, 20.0);
 
@@ -1992,10 +1994,10 @@ fn each_key_releases_only_its_own_hold() {
 fn releasing_one_key_keeps_a_button_the_other_key_holds() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let at = Point::new(20.0, 20.0);
     drive(&canvas, &mut state, &key_event(Key::Space, true), at);
@@ -2014,8 +2016,8 @@ fn releasing_another_mouse_button_keeps_the_left_hold() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), centre);
 
     let right = drive(
@@ -2037,10 +2039,10 @@ fn a_key_hold_survives_pointer_up_and_the_pointer_survives_a_key_up() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     drive(&canvas, &mut state, &key_event(Key::Space, true), centre);
@@ -2078,8 +2080,8 @@ fn space_with_no_focus_toggles_run() {
     let scene = Scene::new(vec![button_module()], Vec::new());
     let at = Point::new(10.0, 10.0);
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
 
     let space = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(space, vec![CanvasEvent::ToggleRun]);
@@ -2099,8 +2101,8 @@ fn space_with_no_focus_toggles_run() {
     assert_eq!(focused, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
 }
 
-fn learning<'a>(scene: &'a Scene, selected: &'a BTreeSet<u32>, learn: &'a LearnView) -> PatchCanvas<'a, CanvasEvent> {
-    PatchCanvas::new(scene, selected, |e| e).learn(Some(learn))
+fn learning<'a>(scene: &'a Scene, selected: &'a BTreeSet<u32>, learn: &'a LearnView) -> CanvasProps<'a> {
+    CanvasProps::new(scene, selected).learn(Some(learn))
 }
 
 fn arrow_up() -> Event {
@@ -2132,9 +2134,9 @@ fn keyboard_focus_follows_tiles_and_controls() {
     second.panel = panel();
     let scene = Scene::new(vec![first, second], Vec::new());
     let at = Point::new(700.0, 500.0);
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     assert_eq!(
         drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
         vec![CanvasEvent::Select(vec![2])]
@@ -2145,13 +2147,13 @@ fn keyboard_focus_follows_tiles_and_controls() {
         "Shift-Tab starts at the last tile"
     );
     let selected = BTreeSet::from([2]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     assert_eq!(
         drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
         vec![CanvasEvent::Select(vec![1])]
     );
     let first_selected = BTreeSet::from([1]);
-    let first_canvas = PatchCanvas::new(&scene, &first_selected, |e| e);
+    let first_canvas = CanvasProps::new(&scene, &first_selected);
     assert_eq!(
         drive(&first_canvas, &mut state, &shifted(Key::Tab), at),
         vec![CanvasEvent::Select(vec![2])]
@@ -2204,8 +2206,8 @@ fn released_group() -> ArrowGroupView {
 fn a_modifier_alone_keeps_a_released_group() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let selected = BTreeSet::from([1]);
-    let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
-    let mut state = State::default();
+    let released = CanvasProps::new(&scene, &selected).arrow_group(released_group());
+    let mut state = CanvasInput::default();
     let at = Point::new(700.0, 500.0);
     // Which modifier key it was is not told apart here: every one is
     // `Key::Modifier`. The conversion's own tests cover each of them.
@@ -2225,8 +2227,8 @@ fn a_modifier_alone_keeps_a_released_group() {
 fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let selected = BTreeSet::from([1]);
-    let closed = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let closed = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     let at = Point::new(700.0, 500.0);
     let first = untimed(drive(&closed, &mut state, &arrow_up(), at));
     assert_eq!(
@@ -2245,7 +2247,7 @@ fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
         vec![CanvasEvent::ArrowReleased { at: epoch() }]
     );
 
-    let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
+    let released = CanvasProps::new(&scene, &selected).arrow_group(released_group());
     let next = untimed(drive(&released, &mut state, &shifted(Key::Right), at));
     assert_eq!(
         next,
@@ -2278,12 +2280,12 @@ fn pointer_press_ends_an_open_arrow_group() {
     let selected = BTreeSet::from([1]);
     let at = Point::new(700.0, 500.0);
     for group in [ArrowGroupView::Held, released_group()] {
-        let canvas = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(group);
-        let press = drive(&canvas, &mut State::default(), &click(PointerButton::Left), at);
+        let canvas = CanvasProps::new(&scene, &selected).arrow_group(group);
+        let press = drive(&canvas, &mut CanvasInput::default(), &click(PointerButton::Left), at);
         assert_eq!(press.first(), Some(&CanvasEvent::ArrowGroupEnd), "{group:?}: {press:?}");
     }
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let press = drive(&canvas, &mut State::default(), &click(PointerButton::Left), at);
+    let canvas = CanvasProps::new(&scene, &selected);
+    let press = drive(&canvas, &mut CanvasInput::default(), &click(PointerButton::Left), at);
     assert!(!press.contains(&CanvasEvent::ArrowGroupEnd), "{press:?}");
 }
 
@@ -2293,8 +2295,13 @@ fn pointer_press_ends_an_open_arrow_group() {
 fn losing_the_window_always_ends_the_arrow_group() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let lost = drive(&canvas, &mut State::default(), &Event::WindowUnfocused, Point::ORIGIN);
+    let canvas = CanvasProps::new(&scene, &selected);
+    let lost = drive(
+        &canvas,
+        &mut CanvasInput::default(),
+        &Event::WindowUnfocused,
+        Point::ORIGIN,
+    );
     assert!(lost.contains(&CanvasEvent::ArrowGroupEnd), "{lost:?}");
 }
 
@@ -2309,13 +2316,13 @@ fn keys_leaving_the_canvas_end_only_an_open_group() {
         ..CanvasFocusPolicy::default()
     };
     let at = Point::new(700.0, 500.0);
-    let quiet = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(policy);
-    assert!(drive(&quiet, &mut State::default(), &arrow_up(), at).is_empty());
-    let open = PatchCanvas::new(&scene, &selected, |e| e)
+    let quiet = CanvasProps::new(&scene, &selected).focus_policy(policy);
+    assert!(drive(&quiet, &mut CanvasInput::default(), &arrow_up(), at).is_empty());
+    let open = CanvasProps::new(&scene, &selected)
         .focus_policy(policy)
         .arrow_group(released_group());
     assert_eq!(
-        drive(&open, &mut State::default(), &arrow_up(), at),
+        drive(&open, &mut CanvasInput::default(), &arrow_up(), at),
         vec![CanvasEvent::ArrowGroupEnd]
     );
 }
@@ -2328,15 +2335,15 @@ fn keys_reach_and_leave_a_panel_control() {
     first.panel = panel();
     let scene = Scene::new(vec![first], Vec::new());
     let none = BTreeSet::new();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let at = Point::new(700.0, 500.0);
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     assert_eq!(
         drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
         vec![CanvasEvent::Select(vec![1])]
     );
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert_eq!(state.focus.control(), Some((1, 0)));
     let changed = drive(&canvas, &mut state, &arrow_up(), at);
@@ -2353,7 +2360,7 @@ fn keys_reach_and_leave_a_panel_control() {
     );
     drive(&canvas, &mut state, &key_event(Key::Up, false), at);
     // The app now shows the group released, so Escape ends it first.
-    let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
+    let released = CanvasProps::new(&scene, &selected).arrow_group(released_group());
     assert_eq!(
         drive(&released, &mut state, &escape(), at),
         vec![CanvasEvent::ArrowGroupEnd]
@@ -2380,9 +2387,9 @@ fn a_learn_click_arms_and_focuses_without_changing_a_value() {
     let selected = BTreeSet::from([1]);
     let learn = LearnView::default();
     let canvas = learning(&scene, &selected, &learn);
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 2, true, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let events = drive(&canvas, &mut state, &click(PointerButton::Left), knob);
@@ -2411,8 +2418,8 @@ fn outside_learn_mode_a_click_arms_nothing() {
     m.panel = panel();
     let scene = Scene::new(vec![m], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let events = drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     assert!(
@@ -2429,23 +2436,23 @@ fn a_mapped_control_shows_its_label_in_learn_mode() {
     let mut learn = LearnView::default();
     learn.labels.insert((1, 0), "CC 74".to_string());
     assert_eq!(
-        draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(0)),
+        overlay::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(0)),
         Some("CC 74")
     );
     assert_eq!(
-        draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(1)),
+        overlay::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Caption(1)),
         None
     );
     assert_eq!(
-        draw::learned_label(Some(&learn), 2, crate::tile_text::TextKind::Caption(0)),
+        overlay::learned_label(Some(&learn), 2, crate::tile_text::TextKind::Caption(0)),
         None
     );
     assert_eq!(
-        draw::learned_label(None, 1, crate::tile_text::TextKind::Caption(0)),
+        overlay::learned_label(None, 1, crate::tile_text::TextKind::Caption(0)),
         None
     );
     assert_eq!(
-        draw::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Title),
+        overlay::learned_label(Some(&learn), 1, crate::tile_text::TextKind::Title),
         None
     );
 }
@@ -2461,9 +2468,9 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
     let learn = LearnView::default();
     let canvas = learning(&scene, &selected, &learn);
     let at = Point::new(10.0, 10.0);
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, true, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     for key in [Key::Space, Key::Enter] {
         let events = drive(&canvas, &mut state, &key_event(key, true), at);
@@ -2518,10 +2525,19 @@ fn learn_outlines_cover_only_visible_tiles() {
     let none = BTreeSet::new();
     let learn = LearnView::default();
     let canvas = learning(&scene, &none, &learn);
-    let plain = canvas.overlay(&State::default()).shapes.len();
+    let plain = canvas
+        .overlay(&CanvasInput::default(), &LinesCache::default())
+        .shapes
+        .len();
     let view = Rect::new(Point::new(-50.0, -50.0), Size::new(800.0, 600.0));
     // Two controls (a knob and a toggle) on the one visible tile.
-    assert_eq!(canvas.overlay_in(&State::default(), view).shapes.len(), plain + 2);
+    assert_eq!(
+        canvas
+            .overlay_in(&CanvasInput::default(), &LinesCache::default(), view)
+            .shapes
+            .len(),
+        plain + 2
+    );
 }
 
 fn knob_scene() -> (Scene, Point) {
@@ -2557,13 +2573,13 @@ const OUT: PortRef = PortRef {
 /// Drags from the source output to widget `widget` on tile 2 and lets
 /// go there. Returns the events and the overlay shape count while over
 /// the widget.
-fn drop_on(canvas: &PatchCanvas<'_, CanvasEvent>, scene: &Scene, widget: usize) -> (Vec<CanvasEvent>, usize) {
-    let mut state = State::default();
+fn drop_on(canvas: &CanvasProps<'_>, scene: &Scene, widget: usize) -> (Vec<CanvasEvent>, usize) {
+    let mut state = CanvasInput::default();
     let start = scene.port_position(OUT).unwrap();
     drive(canvas, &mut state, &click(PointerButton::Left), start);
     let over = scene.module(2).unwrap().widget_bounds(widget).unwrap().center();
     drive(canvas, &mut state, &moved(over), over);
-    let shapes = canvas.overlay(&state).shapes.len();
+    let shapes = canvas.overlay(&state, &LinesCache::default()).shapes.len();
     (drive(canvas, &mut state, &released(), over), shapes)
 }
 
@@ -2574,7 +2590,7 @@ fn drop_on(canvas: &PatchCanvas<'_, CanvasEvent>, scene: &Scene, widget: usize) 
 fn dropping_an_output_on_a_control_assigns_it() {
     let scene = assign_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let (events, on_knob) = drop_on(&canvas, &scene, 0);
     assert_eq!(
         events,
@@ -2653,7 +2669,7 @@ fn modulated_scene() -> (Scene, PanelValues) {
 fn output_hover_text_goes_above_its_badge() {
     let (scene, _) = modulated_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let out = PortRef {
         module: 1,
         output: true,
@@ -2693,12 +2709,16 @@ fn a_still_seeds_pointer_pin_drag_and_hover_text() {
         hover_text: true,
         ..Still::default()
     };
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values).still(still);
+    let canvas = CanvasProps::new(&scene, &none).values(&values).still(still);
     let state = canvas.still_state(still, Instant::now());
     assert_eq!(state.hover, Some(Hit::Widget { module: 2, widget: 0 }));
     assert_eq!(state.pinned, Some(OUT));
     assert_eq!(state.hover_text.shown(), Some(HoverTarget::Control(2, 0)));
-    assert_eq!(canvas.overlay(&state).cables.len(), 1, "the modulation line");
+    assert_eq!(
+        canvas.overlay(&state, &LinesCache::default()).cables.len(),
+        1,
+        "the modulation line"
+    );
 
     // Wiring from the output to the knob: the loose cable and the drop
     // highlight, and no hover text during a drag.
@@ -2719,23 +2739,29 @@ fn a_still_seeds_pointer_pin_drag_and_hover_text() {
         }
     ));
     assert_eq!(state.hover_text.shown(), None);
-    let overlay = canvas.overlay(&state);
+    let overlay = canvas.overlay(&state, &LinesCache::default());
     assert_eq!(overlay.cables.len(), 2, "the line and the loose cable");
-    let resting = canvas.overlay(&canvas.still_state(Still { drag: None, ..wiring }, Instant::now()));
+    let resting = canvas.overlay(
+        &canvas.still_state(Still { drag: None, ..wiring }, Instant::now()),
+        &LinesCache::default(),
+    );
     assert_eq!(overlay.shapes.len(), resting.shapes.len() + 1, "the drop highlight");
 
     // A cable pulled off an input assigns nothing on a drop, so the
     // control is not highlighted.
-    let pulled = canvas.overlay(&canvas.still_state(
-        Still {
-            drag: Some(StillDrag::Wire {
-                from: OUT,
-                pulled: true,
-            }),
-            ..wiring
-        },
-        Instant::now(),
-    ));
+    let pulled = canvas.overlay(
+        &canvas.still_state(
+            Still {
+                drag: Some(StillDrag::Wire {
+                    from: OUT,
+                    pulled: true,
+                }),
+                ..wiring
+            },
+            Instant::now(),
+        ),
+        &LinesCache::default(),
+    );
     assert_eq!(pulled.shapes.len(), resting.shapes.len());
 }
 
@@ -2746,15 +2772,15 @@ fn a_still_seeds_pointer_pin_drag_and_hover_text() {
 fn modulation_lines_follow_hover_and_the_pinned_badge() {
     let (scene, values) = modulated_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
-    let lines = |state: &State| canvas.overlay(state).cables.len();
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
+    let lines = |state: &CanvasInput| canvas.overlay(state, &LinesCache::default()).cables.len();
     let badge = scene.badge_bounds(1, 0).unwrap().center();
     assert_eq!(scene.hit(badge, PORT_HIT_RADIUS), Hit::Badge(OUT));
     let knob = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
     let port = scene.port_position(OUT).unwrap();
     let empty = Point::new(200.0, 400.0);
 
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     for (at, shown) in [(port, 1), (badge, 1), (knob, 1), (empty, 0)] {
         drive(&canvas, &mut state, &moved(at), at);
         assert_eq!(lines(&state), shown, "pointer at {at:?}");
@@ -2803,12 +2829,12 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
 fn modulation_outlines_show_direction_only_for_pointing() {
     let (scene, _) = modulated_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let mut pointed = Overlay::default();
     canvas.build_modulation_lines(
-        &State {
+        &CanvasInput {
             hover: Some(Hit::Port(OUT)),
-            ..State::default()
+            ..CanvasInput::default()
         },
         &mut pointed,
     );
@@ -2816,9 +2842,9 @@ fn modulation_outlines_show_direction_only_for_pointing() {
     assert_eq!(pointed.shapes.len(), 3, "two source rings and one target ring");
 
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let mut selected_only = Overlay::default();
-    canvas.build_modulation_lines(&State::default(), &mut selected_only);
+    canvas.build_modulation_lines(&CanvasInput::default(), &mut selected_only);
     assert_eq!(selected_only.cables.len(), 1);
     assert!(selected_only.shapes.is_empty());
 }
@@ -2830,12 +2856,12 @@ fn disabled_assignment_keeps_a_visible_line() {
     let (mut scene, _) = modulated_scene();
     scene.set_modulation_enabled(1, false);
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let canvas = CanvasProps::new(&scene, &none);
     let mut overlay = Overlay::default();
     canvas.build_modulation_lines(
-        &State {
+        &CanvasInput {
             hover: Some(Hit::Port(OUT)),
-            ..State::default()
+            ..CanvasInput::default()
         },
         &mut overlay,
     );
@@ -2863,14 +2889,14 @@ fn assignment_state_updates_only_modulation_overlay() {
 fn dragging_the_range_ring_changes_depth() {
     let (scene, values) = modulated_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
     let rect = scene.module(2).unwrap().widget_bounds(0).unwrap();
     let centre = crate::controls::knob_centre(rect);
     let ring = Point::new(centre.x, centre.y - 12.0);
 
-    let mut state = State {
+    let mut state = CanvasInput {
         pinned: Some(OUT),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let down = drive(&canvas, &mut state, &click(PointerButton::Left), ring);
     assert!(down.contains(&CanvasEvent::GestureStart), "{down:?}");
@@ -2897,7 +2923,7 @@ fn dragging_the_range_ring_changes_depth() {
         vec![CanvasEvent::GestureEnd]
     );
 
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     let up = Point::new(centre.x, centre.y - 20.0);
     let turned = drive(&canvas, &mut state, &moved(up), up);
@@ -2917,10 +2943,10 @@ fn a_pin_without_its_badge_takes_no_escape() {
     source.outputs[0].badge = 0;
     scene = Scene::new(vec![source, modules[1].clone()], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
+    let mut state = CanvasInput {
         pinned: Some(OUT),
-        ..State::default()
+        ..CanvasInput::default()
     };
     assert_eq!(canvas.pin(&state), None);
     let mut out = Reaction::default();
@@ -2942,11 +2968,11 @@ fn a_pin_without_its_badge_takes_no_escape() {
 fn a_new_patch_clears_old_canvas_state() {
     let (scene, values) = modulated_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values).frame_key(2);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &none).values(&values).frame_key(2);
+    let mut state = CanvasInput {
         pinned: Some(OUT),
         framed_key: Some(1),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let redraw = Event::Redraw;
     let events = drive(&canvas, &mut state, &redraw, Point::ORIGIN);
@@ -2961,8 +2987,8 @@ fn a_redraw_past_the_deadline_reports_it() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let none = BTreeSet::new();
     let due = Instant::now() + Duration::from_millis(100);
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &none).arrow_group(ArrowGroupView::Released { due });
+    let mut state = CanvasInput::default();
     let early = drive_at(
         &canvas,
         &mut state,
@@ -2988,10 +3014,10 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let none = BTreeSet::new();
     let due = Instant::now() + Duration::from_millis(400);
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
+    let canvas = CanvasProps::new(&scene, &none).arrow_group(ArrowGroupView::Released { due });
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     // Already framed and reported, so a redraw asks for nothing itself.
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let at = Point::new(100.0, 100.0);
     let redraw = Event::Redraw;
     canvas.on_event(
@@ -3007,7 +3033,7 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
         canvas.on_event(&mut state, Some(&event), Some(at), bounds, Instant::now(), &mut out);
         assert_eq!(out.redraw, Redraw::At(due), "{event:?}");
     }
-    let closed = PatchCanvas::new(&scene, &none, |e| e);
+    let closed = CanvasProps::new(&scene, &none);
     let mut out = Reaction::default();
     let shift = Event::Key(KeyEvent::ModifiersChanged(SHIFT));
     closed.on_event(&mut state, Some(&shift), Some(at), bounds, Instant::now(), &mut out);
@@ -3022,9 +3048,9 @@ fn an_event_with_no_meaning_still_asks_for_a_redraw_at_the_deadline() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let none = BTreeSet::new();
     let due = Instant::now() + Duration::from_millis(400);
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
+    let canvas = CanvasProps::new(&scene, &none).arrow_group(ArrowGroupView::Released { due });
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let mut out = Reaction::default();
     canvas.on_event(&mut state, None, None, bounds, Instant::now(), &mut out);
     assert_eq!(out.redraw, Redraw::At(due));
@@ -3038,12 +3064,13 @@ fn an_event_with_no_meaning_still_asks_for_a_redraw_at_the_deadline() {
 fn modulation_lines_are_reused_until_their_inputs_change() {
     let (scene, values) = modulated_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e).values(&values);
-    let state = State::default();
-    let first = canvas.overlay(&state).cables.len();
-    let key = state.lines.borrow().as_ref().map(|(k, _)| k.clone());
-    assert_eq!(canvas.overlay(&state).cables.len(), first);
-    assert_eq!(state.lines.borrow().as_ref().map(|(k, _)| k.clone()), key);
+    let canvas = CanvasProps::new(&scene, &selected).values(&values);
+    let state = CanvasInput::default();
+    let lines = LinesCache::default();
+    let first = canvas.overlay(&state, &lines).cables.len();
+    let key = lines.0.borrow().as_ref().map(|(k, _)| k.clone());
+    assert_eq!(canvas.overlay(&state, &lines).cables.len(), first);
+    assert_eq!(lines.0.borrow().as_ref().map(|(k, _)| k.clone()), key);
     assert_eq!(first, 1, "the selected source's line");
 }
 
@@ -3053,14 +3080,17 @@ fn modulation_lines_are_reused_until_their_inputs_change() {
 fn matrix_row_shows_one_line_without_pinning() {
     let (scene, values) = modulated_scene();
     let none = BTreeSet::new();
-    let plain = PatchCanvas::new(&scene, &none, |e| e).values(&values);
-    assert!(plain.overlay(&State::default()).cables.is_empty());
+    let plain = CanvasProps::new(&scene, &none).values(&values);
+    assert!(
+        plain
+            .overlay(&CanvasInput::default(), &LinesCache::default())
+            .cables
+            .is_empty()
+    );
     let line = scene.modulations()[0].clone();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e)
-        .values(&values)
-        .matrix_line(Some(line));
-    let state = State::default();
-    assert_eq!(canvas.overlay(&state).cables.len(), 1);
+    let canvas = CanvasProps::new(&scene, &none).values(&values).matrix_line(Some(line));
+    let state = CanvasInput::default();
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 1);
     assert_eq!(state.pinned, None);
 }
 
@@ -3088,17 +3118,17 @@ fn matrix_line_preserves_pinned_and_hovered_lines() {
         },
     ]);
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e)
+    let canvas = CanvasProps::new(&scene, &none)
         .values(&values)
         .matrix_line(Some(selected));
-    let mut state = State {
+    let mut state = CanvasInput {
         pinned: Some(pin),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 2);
     state.pinned = None;
     state.hover = Some(Hit::Port(pin));
-    assert_eq!(canvas.overlay(&state).cables.len(), 2);
+    assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 2);
 }
 
 /// Escape can clear a canvas pin while matrix keyboard focus owns the key.
@@ -3106,16 +3136,16 @@ fn matrix_line_preserves_pinned_and_hovered_lines() {
 fn matrix_escape_clears_canvas_pin() {
     let (scene, values) = modulated_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e)
+    let canvas = CanvasProps::new(&scene, &none)
         .values(&values)
         .focus_policy(CanvasFocusPolicy {
             matrix_keyboard: true,
             matrix_escape: true,
             ..CanvasFocusPolicy::default()
         });
-    let mut state = State {
+    let mut state = CanvasInput {
         pinned: Some(OUT),
-        ..State::default()
+        ..CanvasInput::default()
     };
     drive(&canvas, &mut state, &escape(), Point::ORIGIN);
     assert_eq!(state.pinned, None);
@@ -3127,11 +3157,11 @@ fn matrix_keyboard_focus_keeps_canvas_pointer_active() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
     let tile = scene.module(2).unwrap().bounds().center();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
+    let canvas = CanvasProps::new(&scene, &selected).focus_policy(CanvasFocusPolicy {
         matrix_keyboard: true,
         ..CanvasFocusPolicy::default()
     });
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
 
     assert!(drive(&canvas, &mut state, &key_event(Key::Space, true), tile).is_empty());
     let events = drive(&canvas, &mut state, &click(PointerButton::Left), tile);
@@ -3153,9 +3183,9 @@ fn a_zero_length_arc_still_takes_a_depth_drag() {
         },
     );
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
     let centre = crate::controls::knob_centre(scene.module(2).unwrap().widget_bounds(0).unwrap());
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     drive(
         &canvas,
         &mut state,
@@ -3178,24 +3208,22 @@ fn the_range_ring_shows_the_resize_cursor_above_the_cell() {
     let above = Point::new(centre.x, centre.y - distance);
     assert!(above.y < rect.y, "the point should be above the cell");
     let none = BTreeSet::new();
-    let cursor_at = |canvas: &PatchCanvas<'_, CanvasEvent>| {
-        let mut state = State::default();
+    let cursor_at = |canvas: &CanvasProps<'_>| {
+        let mut state = CanvasInput::default();
         drive(canvas, &mut state, &moved(above), above);
         assert!(matches!(state.hover, Some(Hit::Module(2))), "{:?}", state.hover);
         canvas.hover_interaction(&state)
     };
 
-    let modulated = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let modulated = CanvasProps::new(&scene, &none).values(&values);
     assert_eq!(cursor_at(&modulated), CursorShape::ResizeVertical);
 
     let plain_values = PanelValues::new();
-    let plain = PatchCanvas::new(&scene, &none, |e| e).values(&plain_values);
+    let plain = CanvasProps::new(&scene, &none).values(&plain_values);
     assert_eq!(cursor_at(&plain), CursorShape::Grab);
 
     let learn = LearnView::default();
-    let learning = PatchCanvas::new(&scene, &none, |e| e)
-        .values(&values)
-        .learn(Some(&learn));
+    let learning = CanvasProps::new(&scene, &none).values(&values).learn(Some(&learn));
     assert_eq!(cursor_at(&learning), CursorShape::Grab);
 }
 
@@ -3206,11 +3234,11 @@ fn an_unmodulated_knob_has_no_range_ring() {
     let (scene, _) = modulated_scene();
     let values = PanelValues::new();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
     let centre = crate::controls::knob_centre(scene.module(2).unwrap().widget_bounds(0).unwrap());
     // Beside the knob, inside its cell, where the ring would be.
     let ring = Point::new(centre.x + 12.0, centre.y);
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), ring);
     assert!(matches!(state.interaction, Interaction::Turning { .. }));
 }
@@ -3232,8 +3260,8 @@ fn a_pulled_cable_dropped_on_a_control_does_not_assign() {
     };
     let scene = Scene::new(vec![module(1, 0.0), target], vec![cable]);
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &none);
+    let mut state = CanvasInput::default();
     let input = PortRef {
         module: 2,
         output: false,
@@ -3253,8 +3281,8 @@ fn a_pulled_cable_dropped_on_a_control_does_not_assign() {
 fn an_input_drag_does_not_assign() {
     let scene = assign_scene();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &none);
+    let mut state = CanvasInput::default();
     let input = PortRef { output: false, ..OUT };
     let start = scene.port_position(input).unwrap();
     drive(&canvas, &mut state, &click(PointerButton::Left), start);
@@ -3276,8 +3304,8 @@ fn released() -> Event {
 fn a_knob_drag_is_bracketed_by_a_gesture_start_and_end() {
     let (scene, knob) = knob_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     let down = drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     assert_eq!(down, vec![CanvasEvent::GestureStart]);
     let up = Point::new(knob.x, knob.y - 20.0);
@@ -3295,8 +3323,8 @@ fn a_knob_drag_is_bracketed_by_a_gesture_start_and_end() {
 fn losing_the_window_ends_a_drag_gesture() {
     let (scene, knob) = knob_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     let lost = drive(&canvas, &mut state, &Event::WindowUnfocused, knob);
     // The arrow group ends too: losing the window always sends its end.
@@ -3311,8 +3339,8 @@ fn losing_the_window_ends_a_drag_gesture() {
 fn another_button_during_a_drag_ends_the_gesture() {
     let (scene, knob) = knob_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput::default();
     drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     let events = drive(&canvas, &mut state, &click(PointerButton::Right), knob);
     assert_eq!(events, vec![CanvasEvent::GestureEnd]);
@@ -3324,10 +3352,10 @@ fn another_button_during_a_drag_ends_the_gesture() {
 fn a_held_arrow_key_reports_each_step_and_the_release() {
     let (scene, knob) = knob_scene();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let first = untimed(drive(&canvas, &mut state, &arrow_up(), knob));
     assert_eq!(
@@ -3365,7 +3393,7 @@ fn a_held_arrow_key_reports_each_step_and_the_release() {
 }
 
 /// A right press and release at `at`, with no move in between.
-fn right_click(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, at: Point) -> Vec<CanvasEvent> {
+fn right_click(canvas: &CanvasProps<'_>, state: &mut CanvasInput, at: Point) -> Vec<CanvasEvent> {
     let mut events = drive(canvas, state, &click(PointerButton::Right), at);
     events.extend(drive(
         canvas,
@@ -3382,14 +3410,14 @@ fn right_click(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, at: Poi
 fn right_click_on_an_output_opens_the_probe_menu() {
     let scene = chain();
     let selected = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let output = PortRef {
         module: 1,
         output: true,
         index: 0,
     };
     let port = scene.port_position(output).unwrap();
-    let events = right_click(&canvas, &mut State::default(), port);
+    let events = right_click(&canvas, &mut CanvasInput::default(), port);
     assert_eq!(
         events,
         vec![CanvasEvent::ProbeMenu {
@@ -3407,7 +3435,7 @@ fn right_click_on_an_output_opens_the_probe_menu() {
 fn right_click_on_a_cable_opens_the_menu_for_its_source() {
     let scene = chain();
     let selected = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let from = scene.port_position(PortRef {
         module: 2,
         output: true,
@@ -3423,7 +3451,7 @@ fn right_click_on_a_cable_opens_the_menu_for_its_source() {
         (a.x + 3.0 * b.x + 3.0 * c.x + d.x) / 8.0,
         (a.y + 3.0 * b.y + 3.0 * c.y + d.y) / 8.0,
     );
-    let events = right_click(&canvas, &mut State::default(), middle);
+    let events = right_click(&canvas, &mut CanvasInput::default(), middle);
     assert!(
         matches!(
             events.as_slice(),
@@ -3439,7 +3467,7 @@ fn right_click_on_a_cable_opens_the_menu_for_its_source() {
 fn right_drag_pans_and_opens_no_menu() {
     let scene = chain();
     let selected = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let port = scene
         .port_position(PortRef {
             module: 1,
@@ -3447,7 +3475,7 @@ fn right_drag_pans_and_opens_no_menu() {
             index: 0,
         })
         .unwrap();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let mut events = drive(&canvas, &mut state, &click(PointerButton::Right), port);
     let away = port + Vector::new(30.0, 0.0);
     let moved = Event::Pointer(PointerEvent::Moved);
@@ -3469,7 +3497,7 @@ fn right_drag_pans_and_opens_no_menu() {
 fn only_the_right_release_opens_the_menu() {
     let scene = chain();
     let selected = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let port = scene
         .port_position(PortRef {
             module: 1,
@@ -3477,7 +3505,7 @@ fn only_the_right_release_opens_the_menu() {
             index: 0,
         })
         .unwrap();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let pressed = drive(&canvas, &mut state, &click(PointerButton::Right), port);
     let left = drive(
         &canvas,
@@ -3500,7 +3528,7 @@ fn only_the_right_release_opens_the_menu() {
 fn right_click_elsewhere_opens_no_menu() {
     let scene = chain();
     let selected = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let input = scene
         .port_position(PortRef {
             module: 2,
@@ -3510,11 +3538,11 @@ fn right_click_elsewhere_opens_no_menu() {
         .unwrap();
     let tile = scene.module(1).unwrap().bounds().center();
     assert!(matches!(
-        right_click(&canvas, &mut State::default(), tile).as_slice(),
+        right_click(&canvas, &mut CanvasInput::default(), tile).as_slice(),
         [CanvasEvent::TileMenu { module: 1, .. }]
     ));
     for at in [input, Point::new(300.0, 500.0)] {
-        let events = right_click(&canvas, &mut State::default(), at);
+        let events = right_click(&canvas, &mut CanvasInput::default(), at);
         assert!(events.is_empty(), "{at:?}: {events:?}");
     }
     let output = scene
@@ -3524,7 +3552,7 @@ fn right_click_elsewhere_opens_no_menu() {
             index: 0,
         })
         .unwrap();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let mut events = drive(&canvas, &mut state, &click(PointerButton::Middle), output);
     events.extend(drive(
         &canvas,
@@ -3584,11 +3612,11 @@ fn hover_text_follows_the_part_under_the_pointer() {
         },
     );
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values);
-    let at = |point: Point| State {
+    let canvas = CanvasProps::new(&scene, &none).values(&values);
+    let at = |point: Point| CanvasInput {
         hover: Some(scene.hit(point, 8.0)),
         cursor: Some(point),
-        ..State::default()
+        ..CanvasInput::default()
     };
 
     let area = xy_area(scene.module(1).unwrap().widget_bounds(0).unwrap());
@@ -3633,7 +3661,7 @@ fn hiding_a_range_ends_the_inside() {
     let selected = BTreeSet::from([1]);
     let at = shown.module(1).unwrap().bounds().center();
     let moved = Event::Pointer(PointerEvent::Moved);
-    let mut state = State {
+    let mut state = CanvasInput {
         focus: FocusState::at(
             1,
             0,
@@ -3643,18 +3671,18 @@ fn hiding_a_range_ends_the_inside() {
                 grab: Some(RangeGrab::Band),
             }),
         ),
-        ..State::default()
+        ..CanvasInput::default()
     };
 
-    let canvas = PatchCanvas::new(&shown, &selected, |event| event);
+    let canvas = CanvasProps::new(&shown, &selected);
     drive(&canvas, &mut state, &moved, at);
     assert!(state.focus.range_part().is_some(), "a shown range keeps its grab");
 
-    let canvas = PatchCanvas::new(&hidden, &selected, |event| event);
+    let canvas = CanvasProps::new(&hidden, &selected);
     drive(&canvas, &mut state, &moved, at);
     assert!(state.focus.range_part().is_none(), "hiding ends it");
 
-    let canvas = PatchCanvas::new(&shown, &selected, |event| event);
+    let canvas = CanvasProps::new(&shown, &selected);
     let events = drive(&canvas, &mut state, &key_event(Key::Right, true), at);
     assert!(
         !events
@@ -3676,10 +3704,10 @@ fn a_focused_xy_pad_does_not_use_space() {
     };
     let scene = Scene::new(vec![pad], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |event| event);
-    let mut state = State {
+    let canvas = CanvasProps::new(&scene, &selected);
+    let mut state = CanvasInput {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
-        ..State::default()
+        ..CanvasInput::default()
     };
     let at = scene.module(1).unwrap().bounds().center();
     let events = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
@@ -3696,7 +3724,7 @@ fn command_key(named: Key) -> Event {
 }
 
 /// Drives one event and says whether the canvas captured it.
-fn captured(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> bool {
+fn captured(canvas: &CanvasProps<'_>, state: &mut CanvasInput, event: &Event, at: Point) -> bool {
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let mut out = Reaction::default();
     canvas.handle(state, Some(event), Some(at), bounds, Instant::now(), &mut out);
@@ -3710,10 +3738,10 @@ fn captured(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Ev
 fn a_header_double_click_opens_the_tile_and_starts_no_move() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let tile = scene.module(1).unwrap().bounds();
     let header = Point::new(tile.center_x(), tile.y + HEADER * 0.5);
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let released = Event::Pointer(PointerEvent::Released(PointerButton::Left));
     let first = drive(&canvas, &mut state, &click(PointerButton::Left), header);
     assert_eq!(first, vec![CanvasEvent::GestureStart], "a single press still moves");
@@ -3734,11 +3762,11 @@ fn a_header_double_click_opens_the_tile_and_starts_no_move() {
 fn a_double_click_on_the_tile_body_opens_nothing() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let tile = scene.module(1).unwrap().bounds();
     let body = tile.center();
     assert!(body.y >= tile.y + HEADER, "the centre is below the header");
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     let released = Event::Pointer(PointerEvent::Released(PointerButton::Left));
     drive(&canvas, &mut state, &click(PointerButton::Left), body);
     drive(&canvas, &mut state, &released, body);
@@ -3752,8 +3780,8 @@ fn a_double_click_on_the_tile_body_opens_nothing() {
 fn the_end_of_a_pan_drag_reports_the_camera_once() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &none);
+    let mut state = CanvasInput::default();
     let start = Point::new(400.0, 300.0);
     let mut events = drive(&canvas, &mut state, &click(PointerButton::Middle), start);
     for step in 1..=3 {
@@ -3777,8 +3805,8 @@ fn the_end_of_a_pan_drag_reports_the_camera_once() {
 fn a_zoom_step_and_a_frame_report_the_camera() {
     let scene = chain();
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let mut state = State::default();
+    let canvas = CanvasProps::new(&scene, &none);
+    let mut state = CanvasInput::default();
     let at = Point::new(200.0, 150.0);
     let wheel = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }));
     let zoomed = drive(&canvas, &mut state, &wheel, at);
@@ -3807,14 +3835,14 @@ fn a_level_change_adopts_its_camera_or_frames_the_scene() {
         origin: Point::new(-120.0, 80.0),
         zoom: 1.5,
     };
-    let shown = || State {
+    let shown = || CanvasInput {
         framed_key: Some(0),
         level_key: Some(0),
         reported_lights: Some(Vec::new()),
         reported_full_traces: Some(true),
-        ..State::default()
+        ..CanvasInput::default()
     };
-    let adopt = PatchCanvas::new(&scene, &none, |e| e).level(1, Some(kept));
+    let adopt = CanvasProps::new(&scene, &none).level(1, Some(kept));
     let mut state = shown();
     let events = drive(&adopt, &mut state, &redraw, Point::ORIGIN);
     assert_eq!(state.camera, kept);
@@ -3824,7 +3852,7 @@ fn a_level_change_adopts_its_camera_or_frames_the_scene() {
     let again = drive(&adopt, &mut state, &redraw, Point::ORIGIN);
     assert!(again.is_empty(), "{again:?}");
 
-    let first_visit = PatchCanvas::new(&scene, &none, |e| e).level(2, None);
+    let first_visit = CanvasProps::new(&scene, &none).level(2, None);
     let mut state = shown();
     state.camera = kept;
     let events = drive(&first_visit, &mut state, &redraw, Point::ORIGIN);
@@ -3843,9 +3871,9 @@ fn command_enter_is_left_to_the_app() {
     m.panel = panel();
     let scene = Scene::new(vec![m], Vec::new());
     let selected = BTreeSet::from([1]);
-    let canvas = PatchCanvas::new(&scene, &selected, |e| e);
+    let canvas = CanvasProps::new(&scene, &selected);
     let at = scene.module(1).unwrap().bounds().center();
-    let mut state = State::default();
+    let mut state = CanvasInput::default();
     assert!(!captured(&canvas, &mut state, &command_key(Key::Enter), at));
     assert_eq!(state.focus.control(), None);
     let plain = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
@@ -3856,72 +3884,114 @@ fn command_enter_is_left_to_the_app() {
     assert_eq!(state.focus.control(), Some((1, 0)));
 }
 
-/// Applying a reaction hands Iced the events as messages in their order,
-/// and leaves the input not captured and no redraw asked for when the
-/// reaction says neither.
+/// The moment for a test: the pointer at `pointer`, a canvas of 800 by 600
+/// at the window's corner, and the clock at `now`.
+fn moment(pointer: Option<Point>, now: Instant) -> Moment {
+    Moment {
+        pointer,
+        bounds: Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+        now,
+    }
+}
+
+/// `handle` answers with what the event led to: here a press on a tile
+/// starts a move, so the canvas reports it and takes the input.
 #[test]
-fn applying_a_reaction_publishes_its_events_in_order() {
-    let scene = Scene::new(Vec::new(), Vec::new());
+fn handle_reports_what_an_event_led_to() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let reaction = Reaction {
-        events: vec![
-            CanvasEvent::GestureStart,
-            CanvasEvent::PointerDown,
-            CanvasEvent::GestureEnd,
-        ],
-        ..Reaction::default()
-    };
-    let mut messages = Vec::new();
-    let mut shell = iced::advanced::Shell::new(&mut messages);
-    canvas.apply(reaction, &mut shell);
-    assert_eq!(shell.event_status(), iced::event::Status::Ignored);
-    assert_eq!(shell.redraw_request(), window::RedrawRequest::Wait);
+    let props = CanvasProps::new(&scene, &none);
+    let mut input = CanvasInput::default();
+    let now = Instant::now();
+    let tile = scene.module(1).expect("the module").bounds();
+    let at = input
+        .view(moment(None, now).bounds)
+        .to_window(Point::new(tile.center_x(), tile.y + 10.0));
+    input.handle(&props, &Event::Pointer(PointerEvent::Moved), moment(Some(at), now));
+    let reaction = input.handle(&props, &click(PointerButton::Left), moment(Some(at), now));
+    assert!(reaction.taken, "a press on a tile is the canvas's");
+    assert!(!reaction.events.is_empty(), "a press on a tile reports something");
+    assert_eq!(input.pointer(&props).hover, Some(Hit::Module(1)));
+}
+
+/// `handle` and `pass` both ask for the redraw at an arrow group's
+/// deadline, and `pass` reports nothing and takes nothing.
+#[test]
+fn handle_and_pass_both_keep_the_deadline() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let now = Instant::now();
+    let due = now + Duration::from_millis(400);
+    let props = CanvasProps::new(&scene, &none).arrow_group(ArrowGroupView::Released { due });
+    let mut input = CanvasInput::default();
+    // The first redraw frames the patch and asks for a frame of its own.
+    input.handle(&props, &Event::Redraw, moment(None, now));
+    let handled = input.handle(&props, &Event::Redraw, moment(None, now));
+    assert_eq!(handled.redraw, Redraw::At(due));
+    let passed = input.pass(&props, moment(None, now));
+    assert_eq!(passed.redraw, Redraw::At(due));
+    assert!(passed.events.is_empty(), "{:?}", passed.events);
+    assert!(!passed.taken);
+}
+
+/// The cursor is the plain arrow off the canvas, and says what a press
+/// would do on it.
+#[test]
+fn the_cursor_follows_what_is_under_the_pointer() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let props = CanvasProps::new(&scene, &none);
+    let mut input = CanvasInput::default();
+    let now = Instant::now();
+    assert_eq!(input.cursor(&props, false), CursorShape::Default);
+    let tile = scene.module(1).expect("the module").bounds();
+    let at = input
+        .view(moment(None, now).bounds)
+        .to_window(Point::new(tile.center_x(), tile.y + 10.0));
+    input.handle(&props, &Event::Pointer(PointerEvent::Moved), moment(Some(at), now));
+    assert_eq!(input.cursor(&props, true), CursorShape::Grab, "a tile can be picked up");
     assert_eq!(
-        messages,
-        [
-            CanvasEvent::GestureStart,
-            CanvasEvent::PointerDown,
-            CanvasEvent::GestureEnd
-        ]
+        input.cursor(&props, false),
+        CursorShape::Default,
+        "the pointer is elsewhere"
+    );
+    input.handle(&props, &click(PointerButton::Left), moment(Some(at), now));
+    assert_eq!(
+        input.cursor(&props, false),
+        CursorShape::Grabbing,
+        "a drag keeps its cursor anywhere"
     );
 }
 
-/// Applying a taken reaction captures the Iced event.
+/// A double-click is judged by the time passed in, not by the clock: two
+/// presses in the same place count only when they are close in time.
 #[test]
-fn applying_a_taken_reaction_captures_the_event() {
-    let scene = Scene::new(Vec::new(), Vec::new());
-    let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let reaction = Reaction {
-        taken: true,
-        ..Reaction::default()
-    };
-    let mut messages = Vec::new();
-    let mut shell = iced::advanced::Shell::new(&mut messages);
-    canvas.apply(reaction, &mut shell);
-    assert_eq!(shell.event_status(), iced::event::Status::Captured);
+fn a_double_click_is_judged_by_the_time_given() {
+    let at = Point::new(10.0, 10.0);
+    let first = Instant::now();
+    assert!(double_click(Some((first, at)), at, first + Duration::from_millis(100)));
+    assert!(!double_click(Some((first, at)), at, first + DOUBLE_CLICK));
+    assert!(!double_click(None, at, first));
+    let far = Point::new(10.0 + DOUBLE_CLICK_SLOP, 10.0);
+    assert!(!double_click(
+        Some((first, at)),
+        far,
+        first + Duration::from_millis(100)
+    ));
 }
 
-/// Each redraw request becomes the Iced request of the same meaning.
+/// The view, the pointer report, and the typed field report describe a new
+/// canvas as empty.
 #[test]
-fn applying_a_reaction_asks_iced_for_its_redraw() {
-    let scene = Scene::new(Vec::new(), Vec::new());
+fn a_new_canvas_reports_nothing_under_the_pointer_and_no_field() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let none = BTreeSet::new();
-    let canvas = PatchCanvas::new(&scene, &none, |e| e);
-    let time = Instant::now() + Duration::from_millis(250);
-    for (redraw, expected) in [
-        (Redraw::No, window::RedrawRequest::Wait),
-        (Redraw::At(time), window::RedrawRequest::At(time)),
-        (Redraw::Now, window::RedrawRequest::NextFrame),
-    ] {
-        let reaction = Reaction {
-            redraw,
-            ..Reaction::default()
-        };
-        let mut messages = Vec::new();
-        let mut shell = iced::advanced::Shell::new(&mut messages);
-        canvas.apply(reaction, &mut shell);
-        assert_eq!(shell.redraw_request(), expected, "{redraw:?}");
-    }
+    let props = CanvasProps::new(&scene, &none);
+    let input = CanvasInput::default();
+    let bounds = Rect::new(Point::new(20.0, 30.0), Size::new(800.0, 600.0));
+    assert_eq!(input.view(bounds).bounds, bounds);
+    let pointer = input.pointer(&props);
+    assert_eq!((pointer.hover, pointer.pinned), (None, None));
+    assert!(pointer.drag.is_none());
+    assert!(input.typed().is_none());
 }

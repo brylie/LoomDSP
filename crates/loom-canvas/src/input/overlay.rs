@@ -1,10 +1,10 @@
-//! Drawing on top of the GPU scene: the overlay, cable highlights, panel text, and choice pop-ups.
+//! What to draw on top of the GPU scene: the overlay of outlines, drag feedback, and modulation lines, as plain shapes.
 
 use super::*;
 
 /// The mapping label that replaces a caption in MIDI learn mode, if this text
 /// is the caption of a mapped control (midi-learn.md, Making a mapping).
-pub(super) fn learned_label(learn: Option<&LearnView>, module: u32, kind: TextKind) -> Option<&str> {
+pub(crate) fn learned_label(learn: Option<&LearnView>, module: u32, kind: TextKind) -> Option<&str> {
     match kind {
         TextKind::Caption(widget) => learn
             .and_then(|learn| learn.labels.get(&(module, widget)))
@@ -13,12 +13,12 @@ pub(super) fn learned_label(learn: Option<&LearnView>, module: u32, kind: TextKi
     }
 }
 
-impl<Message> PatchCanvas<'_, Message> {
+impl CanvasProps<'_> {
     /// The overlay for a view whose visible world area is `visible`. Learn
     /// mode outlines only the controls there, so its cost follows what is on
     /// screen, not the size of the patch.
-    pub(super) fn overlay_in(&self, state: &State, visible: Rect) -> Overlay {
-        let mut overlay = self.overlay(state);
+    pub(crate) fn overlay_in(&self, state: &CanvasInput, lines: &LinesCache, visible: Rect) -> Overlay {
+        let mut overlay = self.overlay(state, lines);
         let p = &self.palette;
         // MIDI learn mode outlines every control on screen, and the armed
         // one more strongly, so the user sees what a click will do.
@@ -53,7 +53,9 @@ impl<Message> PatchCanvas<'_, Message> {
         overlay
     }
 
-    pub(super) fn overlay(&self, state: &State) -> Overlay {
+    /// The overlay with nothing left out for being off screen. `lines`
+    /// keeps the modulation lines between frames.
+    pub(super) fn overlay(&self, state: &CanvasInput, lines: &LinesCache) -> Overlay {
         let mut overlay = Overlay::default();
         let p = &self.palette;
 
@@ -154,7 +156,7 @@ impl<Message> PatchCanvas<'_, Message> {
             }
         }
 
-        self.modulation_lines(state, &mut overlay);
+        self.modulation_lines(state, lines, &mut overlay);
 
         for id in self.selection {
             if let Some(module) = self.scene.module(*id) {
@@ -273,7 +275,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// or badge under the pointer, the control under the pointer, and the
     /// modules in focus as for cables. Pointed and pinned sources get a
     /// double outline; their targets get a single one. A pinned badge gets a ring.
-    pub(super) fn modulation_lines(&self, state: &State, overlay: &mut Overlay) {
+    pub(super) fn modulation_lines(&self, state: &CanvasInput, cache: &LinesCache, overlay: &mut Overlay) {
         let key = LinesKey {
             scene: self.scene.generation(),
             overlay: self.scene.overlay_generation(),
@@ -282,7 +284,7 @@ impl<Message> PatchCanvas<'_, Message> {
             selection: self.selection.iter().copied().collect(),
             matrix_line: self.matrix_line.clone(),
         };
-        let mut cache = state.lines.borrow_mut();
+        let mut cache = cache.0.borrow_mut();
         if cache.as_ref().is_none_or(|(k, _)| *k != key) {
             let mut lines = Overlay::default();
             self.build_modulation_lines(state, &mut lines);
@@ -294,7 +296,7 @@ impl<Message> PatchCanvas<'_, Message> {
         }
     }
 
-    pub(super) fn build_modulation_lines(&self, state: &State, overlay: &mut Overlay) {
+    pub(super) fn build_modulation_lines(&self, state: &CanvasInput, overlay: &mut Overlay) {
         let p = &self.palette;
         if let Some(port) = self.pin(state)
             && let Some(badge) = self.scene.badge_bounds(port.module, port.index)
@@ -386,274 +388,5 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
             }
         }
-    }
-
-    pub(super) fn draw_text<Renderer>(&self, state: &State, values: &PanelValues, renderer: &mut Renderer, bounds: Rect)
-    where
-        Renderer: text::Renderer<Font = Font>,
-    {
-        let zoom = state.camera.zoom;
-        // Quantise sizes so zooming does not create a new text layout every
-        // frame for every label.
-        let quantise = |size: f32| (size * 2.0).round() / 2.0;
-        let title_px = quantise(TITLE_SIZE * zoom);
-        if title_px < TITLE_MIN_PX {
-            return;
-        }
-        let label_px = quantise(LABEL_SIZE * zoom);
-        let show_labels = label_px >= LABEL_MIN_PX;
-        let visible = state.camera.visible(bounds.size());
-        let font = renderer.default_font();
-        let to_screen = |world: Point| {
-            let s = state.camera.to_screen(world);
-            Point::new(bounds.x + s.x, bounds.y + s.y)
-        };
-        let text = |content: &str, size: f32, width: f32, align: text::Alignment| Text {
-            content: content.to_string(),
-            bounds: iced::Size::new(width, size * 1.4),
-            size: Pixels(size),
-            line_height: text::LineHeight::Relative(1.2),
-            font,
-            align_x: align,
-            align_y: alignment::Vertical::Center,
-            shaping: text::Shaping::Basic,
-            wrapping: text::Wrapping::None,
-        };
-        // The control whose value shows instead of its label.
-        let active = match state.interaction {
-            Interaction::Turning { module, widget, .. } => Some((module, widget)),
-            _ => state.focus.control(),
-        };
-
-        for module in self.scene.modules() {
-            let tile = module.bounds();
-            if !tile.intersects(visible) {
-                continue;
-            }
-            let screen_tile = Rect::new(to_screen(tile.position()), tile.size() * zoom);
-            let Some(clip) = screen_tile.intersection(bounds) else {
-                continue;
-            };
-            tile_text::for_each(module, |item| {
-                let (size, colour) = match item.kind {
-                    TextKind::Title => (title_px, self.palette.text),
-                    _ if !show_labels => return,
-                    // A box's live text, cut with "…" and never wrapped. The
-                    // bar at middle zoom stands in for it.
-                    TextKind::Value(widget) => {
-                        let shown = self.box_text(values, module, widget);
-                        let shown = crate::scene::fit_label(shown, item.width, crate::tile_text::LABEL_SIZE);
-                        let align = match item.align {
-                            Align::Left => text::Alignment::Left,
-                            Align::Center => text::Alignment::Center,
-                            Align::Right => text::Alignment::Right,
-                        };
-                        renderer.fill_text(
-                            text(&shown, label_px, item.width * zoom, align),
-                            to_screen(item.anchor).to_iced(),
-                            self.palette.text.to_iced(),
-                            clip.to_iced(),
-                        );
-                        return;
-                    }
-                    // The chosen segment is filled with the value colour,
-                    // so its name is dark (visual-system.md, contrast).
-                    TextKind::Option(widget, option)
-                        if matches!(
-                            module.panel.widgets.get(widget).map(|w| &w.kind),
-                            Some(WidgetViewKind::Segmented { .. })
-                        ) && self.position(module.id, widget).round() as usize == option =>
-                    {
-                        (label_px, self.palette.background)
-                    }
-                    TextKind::Option(..) => (label_px, self.palette.text),
-                    // A button's label is on its face: light on the off
-                    // face, dark on the orange face while on.
-                    TextKind::Caption(widget)
-                        if matches!(
-                            module.panel.widgets.get(widget).map(|w| &w.kind),
-                            Some(WidgetViewKind::Button)
-                        ) =>
-                    {
-                        let on = self.position(module.id, widget) > 0.5;
-                        (label_px, if on { self.palette.background } else { self.palette.text })
-                    }
-                    _ => (label_px, self.palette.text_dim),
-                };
-                // A focused or turning knob shows its value instead of its
-                // caption.
-                // In MIDI learn mode, a mapped control shows its mapping.
-                let learned = learned_label(self.learn, module.id, item.kind);
-                let value = match item.kind {
-                    _ if learned.is_some() => learned,
-                    TextKind::Caption(widget) if active == Some((module.id, widget)) => values
-                        .get(module.id, widget)
-                        .filter(|_| {
-                            matches!(
-                                module.panel.widgets[widget].kind,
-                                WidgetViewKind::Knob { .. }
-                                    | WidgetViewKind::Fader { .. }
-                                    | WidgetViewKind::XyPad { .. }
-                                    | WidgetViewKind::Range { .. }
-                            )
-                        })
-                        .map(|v| v.text.as_str()),
-                    _ => None,
-                };
-                let align = match item.align {
-                    Align::Left => text::Alignment::Left,
-                    Align::Center => text::Alignment::Center,
-                    Align::Right => text::Alignment::Right,
-                };
-                renderer.fill_text(
-                    text(value.unwrap_or(&item.content), size, item.width * zoom, align),
-                    to_screen(item.anchor).to_iced(),
-                    if value.is_some() { self.palette.text } else { colour }.to_iced(),
-                    clip.to_iced(),
-                );
-            });
-        }
-
-        // Badge numbers usually sit outside their tile, so they are checked
-        // against their own bounds, not the tile's, and clip to the canvas.
-        // They show exactly when port labels do (#249): with its own
-        // threshold, a badge could show as an empty pill beside labels.
-        // Zoomed out further, the pill alone shows.
-        let badge_px = quantise(BADGE_TEXT_SIZE * zoom);
-        if !show_labels {
-            return;
-        }
-        for module in self.scene.modules() {
-            // A badge reaches past its tile's right edge by at most this
-            // much: the gap after the port and a pill with several digits.
-            const BADGE_REACH: f32 = 40.0;
-            if !module.bounds().expand(BADGE_REACH).intersects(visible) {
-                continue;
-            }
-            for (index, port) in module.outputs.iter().enumerate() {
-                if let Some(rect) = self
-                    .scene
-                    .badge_bounds(module.id, index)
-                    .filter(|r| r.intersects(visible))
-                {
-                    let label = port.badge.to_string();
-                    renderer.fill_text(
-                        text(&label, badge_px, rect.width * zoom, text::Alignment::Center),
-                        to_screen(rect.center()).to_iced(),
-                        self.palette.background.to_iced(),
-                        bounds.to_iced(),
-                    );
-                }
-            }
-        }
-    }
-
-    /// The text in a widget's box: a select list's choice, or the value text.
-    fn box_text<'t>(&self, values: &'t PanelValues, module: &'t crate::scene::ModuleView, widget: usize) -> &'t str {
-        match module.panel.widgets.get(widget).map(|w| &w.kind) {
-            Some(WidgetViewKind::Select { options }) => {
-                let chosen = values.position(module.id, widget).round().max(0.0) as usize;
-                options.get(chosen).map_or("", String::as_str)
-            }
-            Some(WidgetViewKind::Meter { .. }) => values.get(module.id, widget).map_or("", |v| v.hold.as_str()),
-            _ => values.get(module.id, widget).map_or("", |v| v.text.as_str()),
-        }
-    }
-
-    /// Draws the open choice list above all tile text, at a fixed screen size.
-    pub(super) fn draw_select_popup<Renderer>(&self, state: &State, renderer: &mut Renderer, bounds: Rect)
-    where
-        Renderer: text::Renderer<Font = Font>,
-    {
-        let (Some(popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
-            return;
-        };
-        let Some(rect) = self.select_popup_bounds(state, Rect::new(Point::ORIGIN, bounds.size())) else {
-            return;
-        };
-        let Some(WidgetViewKind::Select { options }) = self.widget_kind(module, widget) else {
-            return;
-        };
-        let at = Point::new(bounds.x + rect.x, bounds.y + rect.y);
-        let area = Rect::new(at, rect.size());
-        let font = renderer.default_font();
-        renderer.with_layer(bounds.to_iced(), |renderer| {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: area.to_iced(),
-                    border: iced::Border {
-                        color: self.palette.tile_border.to_iced(),
-                        width: 1.0,
-                        radius: 5.0.into(),
-                    },
-                    ..renderer::Quad::default()
-                },
-                self.palette.control_body.to_iced(),
-            );
-            let rows = (rect.height / SELECT_ROW_PX).round() as usize;
-            for (index, option) in options.iter().enumerate().skip(popup.scroll).take(rows) {
-                let row = (index - popup.scroll) as f32;
-                if index == popup.highlight {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rect::new(
-                                Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * row + 1.0),
-                                Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
-                            )
-                            .to_iced(),
-                            border: iced::Border {
-                                radius: 3.0.into(),
-                                ..iced::Border::default()
-                            },
-                            ..renderer::Quad::default()
-                        },
-                        self.palette.control_track.to_iced(),
-                    );
-                }
-                let chosen = self.position(module, widget).round().max(0.0) as usize == index;
-                let label = if chosen {
-                    format!("✓  {option}")
-                } else {
-                    format!("    {option}")
-                };
-                renderer.fill_text(
-                    Text {
-                        content: label,
-                        bounds: iced::Size::new(rect.width - 12.0, 17.0),
-                        size: Pixels(12.0),
-                        line_height: text::LineHeight::Relative(1.2),
-                        font,
-                        align_x: text::Alignment::Left,
-                        align_y: alignment::Vertical::Center,
-                        shaping: text::Shaping::Advanced,
-                        wrapping: text::Wrapping::None,
-                    },
-                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)).to_iced(),
-                    self.palette.text.to_iced(),
-                    bounds.to_iced(),
-                );
-            }
-            // A longer list has a bar at its right edge. Its length and place
-            // show how much is out of view (rule 8: a shape, not a colour).
-            if rows < options.len() {
-                let share = rows as f32 / options.len() as f32;
-                let start = popup.scroll as f32 / options.len() as f32;
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rect::new(
-                            Point::new(at.x + rect.width - 5.0, at.y + 2.0 + (rect.height - 4.0) * start),
-                            Size::new(3.0, (rect.height - 4.0) * share),
-                        )
-                        .to_iced(),
-                        border: iced::Border {
-                            radius: 1.5.into(),
-                            ..iced::Border::default()
-                        },
-                        ..renderer::Quad::default()
-                    },
-                    self.palette.text_dim.to_iced(),
-                );
-            }
-        });
     }
 }

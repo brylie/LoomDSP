@@ -26,6 +26,7 @@ pub mod stats;
 mod theme;
 mod tile_text;
 mod trace;
+mod widget;
 
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
 pub use controls::{
@@ -36,8 +37,8 @@ pub use controls::{part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
 pub use drag_line::DragLine;
 pub use input::{
-    ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasPointer, CanvasTyped, CanvasView, ControlPart, LearnView,
-    PatchCanvas, PointerDrag, Still, StillDrag,
+    ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasPointer, CanvasProps, CanvasTyped, CanvasView,
+    ControlPart, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
 pub use reaction::{CursorShape, Reaction, Redraw};
 pub use scene::{
@@ -48,3 +49,4 @@ pub use scene::{
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{Align, TextItem, TextKind, for_each as for_each_tile_text};
 pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace};
+pub use widget::PatchCanvas;

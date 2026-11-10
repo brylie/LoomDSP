@@ -54,7 +54,7 @@ pub(super) struct KeyPress<'a> {
     pub(super) repeat: bool,
 }
 
-impl<Message> PatchCanvas<'_, Message> {
+impl CanvasProps<'_> {
     pub(super) fn is_control(&self, module: u32, widget: usize) -> bool {
         self.scene
             .module(module)
@@ -62,7 +62,7 @@ impl<Message> PatchCanvas<'_, Message> {
             .is_some_and(|w| w.is_control())
     }
 
-    pub(super) fn widget_kind(&self, module: u32, widget: usize) -> Option<&WidgetViewKind> {
+    pub(crate) fn widget_kind(&self, module: u32, widget: usize) -> Option<&WidgetViewKind> {
         Some(&self.scene.module(module)?.panel.widgets.get(widget)?.kind)
     }
 
@@ -148,7 +148,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// Learn mode has its own keys, and Tab always leaves.
     fn range_keys(
         &self,
-        state: &mut State,
+        state: &mut CanvasInput,
         key: &Key,
         modifiers: Modifiers,
         repeat: bool,
@@ -256,7 +256,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// The position of one value of a control.
-    pub(super) fn part_position(&self, module: u32, widget: usize, part: ControlPart) -> f32 {
+    pub(crate) fn part_position(&self, module: u32, widget: usize, part: ControlPart) -> f32 {
         self.values.map_or(0.0, |v| v.part_position(module, widget, part))
     }
 
@@ -301,12 +301,12 @@ impl<Message> PatchCanvas<'_, Message> {
         .then_some(part)
     }
 
-    pub(super) fn position(&self, module: u32, widget: usize) -> f32 {
+    pub(crate) fn position(&self, module: u32, widget: usize) -> f32 {
         self.values.map_or(0.0, |v| v.position(module, widget))
     }
 
     /// True when Space or Enter is still holding this button.
-    pub(super) fn key_holds_button(state: &State, module: u32, widget: usize) -> bool {
+    pub(super) fn key_holds_button(state: &CanvasInput, module: u32, widget: usize) -> bool {
         state
             .key_holds
             .iter()
@@ -315,7 +315,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// True when the pointer is still down on this button.
-    pub(super) fn pointer_holds_button(state: &State, module: u32, widget: usize) -> bool {
+    pub(super) fn pointer_holds_button(state: &CanvasInput, module: u32, widget: usize) -> bool {
         matches!(
             state.interaction,
             Interaction::Holding {
@@ -327,7 +327,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Ends a pointer hold, if there is one. The release is reported only
     /// when no key is still holding that button.
-    pub(super) fn release_pointer_hold(&self, state: &mut State, out: &mut Reaction) {
+    pub(super) fn release_pointer_hold(&self, state: &mut CanvasInput, out: &mut Reaction) {
         if let Interaction::Holding { module, widget } = state.interaction {
             state.interaction = Interaction::Idle;
             if !Self::key_holds_button(state, module, widget) {
@@ -338,7 +338,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Ends what keys are doing on the canvas, because something else now
     /// takes them: no button stays held, and an arrow-key edit closes.
-    pub(super) fn leave_keys(&self, state: &mut State, out: &mut Reaction) {
+    pub(super) fn leave_keys(&self, state: &mut CanvasInput, out: &mut Reaction) {
         self.release_every_key_hold(state, out);
         self.end_arrow_group(out, false);
     }
@@ -353,7 +353,14 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Starts a hold for one key. If that key was holding another button, and
     /// nothing else is, that button is released first.
-    pub(super) fn press_button_key(&self, state: &mut State, key: Key, module: u32, widget: usize, out: &mut Reaction) {
+    pub(super) fn press_button_key(
+        &self,
+        state: &mut CanvasInput,
+        key: Key,
+        module: u32,
+        widget: usize,
+        out: &mut Reaction,
+    ) {
         let same = state
             .key_holds
             .iter()
@@ -370,7 +377,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// Ends one key's hold. The button stays down while another key holds it.
-    pub(super) fn release_button_key(&self, state: &mut State, key: Key, out: &mut Reaction) {
+    pub(super) fn release_button_key(&self, state: &mut CanvasInput, key: Key, out: &mut Reaction) {
         let Some(index) = state
             .key_holds
             .iter()
@@ -398,7 +405,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Ends every keyboard hold. Used when the window loses focus, because
     /// the key releases never arrive.
-    pub(super) fn release_every_key_hold(&self, state: &mut State, out: &mut Reaction) {
+    pub(super) fn release_every_key_hold(&self, state: &mut CanvasInput, out: &mut Reaction) {
         let holds = std::mem::take(&mut state.key_holds);
         let mut reported = [(0_u32, 0_usize); 2];
         let mut count = 0;
@@ -425,7 +432,7 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// Ends the hold for the key that came up.
-    pub(super) fn release_key(&self, state: &mut State, key: &Key, now: Instant, out: &mut Reaction) {
+    pub(super) fn release_key(&self, state: &mut CanvasInput, key: &Key, now: Instant, out: &mut Reaction) {
         if let Some(named) = Self::button_key(key) {
             self.release_button_key(state, named, out);
         }
@@ -461,14 +468,20 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Pointer down on a button. The tile stays put. Pointer up reports a
     /// release, whichever mode the app has stored.
-    pub(super) fn press_button(&self, state: &mut State, module: u32, widget: usize, out: &mut Reaction) {
+    pub(super) fn press_button(&self, state: &mut CanvasInput, module: u32, widget: usize, out: &mut Reaction) {
         self.emit(out, CanvasEvent::ButtonPressed { module, widget });
         state.interaction = Interaction::Holding { module, widget };
     }
 
     /// The keyboard path to panel controls (NFR-UX-01). Returns true if the
     /// key was used.
-    pub(super) fn focus_keys(&self, state: &mut State, press: KeyPress<'_>, now: Instant, out: &mut Reaction) -> bool {
+    pub(super) fn focus_keys(
+        &self,
+        state: &mut CanvasInput,
+        press: KeyPress<'_>,
+        now: Instant,
+        out: &mut Reaction,
+    ) -> bool {
         let KeyPress {
             key,
             modifiers,
