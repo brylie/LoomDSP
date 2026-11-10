@@ -10,7 +10,7 @@ pub(super) const MAX_DRAG_STEPS: u32 = 1000;
 pub(super) fn aim(target: Option<String>, x: Option<f32>, y: Option<f32>) -> Result<Option<Aim>, String> {
     match (target, x, y) {
         (Some(target), None, None) => Ok(Some(Aim::Target(target))),
-        (None, Some(x), Some(y)) => Ok(Some(Aim::At(iced::Point::new(x, y)))),
+        (None, Some(x), Some(y)) => Ok(Some(Aim::At(Point::new(x, y)))),
         (None, None, None) => Ok(None),
         _ => Err("give `target`, or `x` and `y`".to_string()),
     }
@@ -22,7 +22,7 @@ pub(super) fn drag_end(value: &Value, which: &str) -> Result<Aim, String> {
         Value::String(target) => Ok(Aim::Target(target.clone())),
         Value::Array(xy) => match xy.as_slice() {
             [x, y] => match (x.as_f64(), y.as_f64()) {
-                (Some(x), Some(y)) => Ok(Aim::At(iced::Point::new(x as f32, y as f32))),
+                (Some(x), Some(y)) => Ok(Aim::At(Point::new(x as f32, y as f32))),
                 _ => Err(format!("`{which}` is a target or [x, y]")),
             },
             _ => Err(format!("`{which}` is a target or [x, y]")),

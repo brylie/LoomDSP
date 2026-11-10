@@ -255,7 +255,15 @@ impl Rect {
         self.intersection(other).is_some()
     }
 
-    /// The smallest rectangle that covers both.
+    /// The smallest rectangle that reaches the outermost edge of both on
+    /// every side.
+    ///
+    /// The union goes by edges, not by area. A rectangle with no width or
+    /// no height still has edges, so it counts as the place it sits at, and
+    /// the union reaches out to it. A caller that wants to leave empty
+    /// rectangles out does so before it calls this. A rectangle with a
+    /// negative size is not put right first: its `x` is still read as its
+    /// left edge and `x + width` as its right, though they are swapped.
     #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         let left = self.x.min(other.x);

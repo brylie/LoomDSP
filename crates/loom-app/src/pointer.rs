@@ -36,7 +36,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Aim {
     /// Logical window pixels.
-    At(Point),
+    At(loom_ui_core::Point),
     /// A target as `locate` takes it.
     Target(String),
 }
@@ -178,7 +178,7 @@ impl Pointer {
         while let Some(Queued { serial, step }) = inner.queue.pop_front() {
             let at = inner.at;
             let mut find = |aim: &Aim| match aim {
-                Aim::At(p) => Ok(*p),
+                Aim::At(p) => Ok(p.to_iced()),
                 Aim::Target(target) => resolve(target),
             };
             let event = match step {

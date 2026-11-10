@@ -215,3 +215,22 @@ fn shrinking_past_the_centre_gives_a_negative_size() {
     assert!(!gone.intersects(&r));
     assert_eq!(gone.expand(20.0), r);
 }
+
+/// The union goes by edges, so a rectangle with no area still pulls the
+/// union out to where it sits.
+#[test]
+fn the_union_reaches_an_empty_rect() {
+    let tile = rect(0.0, 0.0, 10.0, 10.0);
+    let far = Rect::new(Point::new(100.0, 50.0), Size::ZERO);
+    assert_eq!(tile.union(&far), rect(0.0, 0.0, 100.0, 50.0));
+    assert_eq!(far.union(&tile), tile.union(&far));
+}
+
+/// A rectangle with a negative width is not put right first: `x` is read as
+/// its left edge and `x + width` as its right, though they are swapped.
+#[test]
+fn the_union_uses_the_edges_of_a_negative_size_rect() {
+    let tile = rect(0.0, 0.0, 10.0, 10.0);
+    let inverted = rect(30.0, 0.0, -10.0, 10.0);
+    assert_eq!(tile.union(&inverted), rect(0.0, 0.0, 20.0, 10.0));
+}
