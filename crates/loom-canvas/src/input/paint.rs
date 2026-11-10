@@ -419,25 +419,25 @@ impl CanvasModel<'_> {
         };
         // A light's or meter's label is bold, so it stands apart from its
         // value line (port-and-parameter-text.md, Display values).
-        let font = Weight::Regular;
-        let title = if value.is_some() { Weight::Bold } else { font };
+        let regular = Weight::Regular;
+        let title = if value.is_some() { Weight::Bold } else { regular };
         let mut lines = vec![line(label, HOVER_TEXT_PX, self.palette.text, title)];
         if !hover.description.is_empty() {
-            lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, font));
+            lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, regular));
         }
         // What a control stands for across a sub-patch boundary
         // (sub-patches.md, Exposing).
         if let Some(note) = &hover.note {
-            lines.push(line(note, HOVER_TEXT_PX, self.palette.text_dim, font));
+            lines.push(line(note, HOVER_TEXT_PX, self.palette.text_dim, regular));
         }
         if let Some(signal) = follows {
-            lines.push(line(signal.hover_line(), HOVER_TEXT_PX, self.palette.text, font));
+            lines.push(line(signal.hover_line(), HOVER_TEXT_PX, self.palette.text, regular));
         }
         if let Some(value) = value {
-            lines.push(line(value, HOVER_TEXT_PX, self.palette.text, font));
+            lines.push(line(value, HOVER_TEXT_PX, self.palette.text, regular));
         }
         if let Some(name) = &hover.name {
-            lines.push(line(name, HOVER_TEXT_PX - 1.0, self.palette.text_dim, font));
+            lines.push(line(name, HOVER_TEXT_PX - 1.0, self.palette.text_dim, regular));
         }
         const LINE_GAP: f32 = 3.0;
         let width = lines.iter().map(|line| line.2.width).fold(0.0, f32::max);
