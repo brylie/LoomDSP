@@ -4,9 +4,9 @@ use super::*;
 
 impl CanvasModel<'_> {
     /// Updates hover text after an event (panels.md, Labels and hover
-    /// text). It asks for a frame only when the text appears or hides, and
-    /// for a single timed frame while it waits, so it never draws while
-    /// nothing changes.
+    /// text). It asks for a frame only when the text appears or hides, so
+    /// it never draws while nothing changes. When waiting text is due is
+    /// reported by [`CanvasInput::next_deadline`].
     pub(super) fn sync_hover_text(
         &self,
         state: &mut CanvasInput,

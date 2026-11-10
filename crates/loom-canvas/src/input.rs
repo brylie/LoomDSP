@@ -439,8 +439,9 @@ impl<'a> CanvasModel<'a> {
         }
     }
 
-    /// Everything one event does: what it means, the hover text, and the
-    /// wake-up for the arrow group's deadline.
+    /// Everything one event does: what it means, and the hover text. When
+    /// the canvas next needs to wake is not part of it: see
+    /// [`CanvasInput::next_deadline`].
     ///
     /// `event` is `None` for something the window reported that means
     /// nothing to the canvas. The steps that run on every event still run.
