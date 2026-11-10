@@ -1,9 +1,9 @@
-//! Plain geometry, colour, and input event types for a UI layer.
+//! Plain geometry, colour, input event, and identity types for a UI layer.
 //!
 //! This crate is the bottom of LoomDSP's own UI layer (ADR-0041,
 //! `docs/design/ui-layer.md`). It holds the values every other part passes
-//! around: where something is, how big it is, what colour it has, and what
-//! the pointer and the keys did. It depends on no UI toolkit and on no
+//! around: where something is, how big it is, what colour it has, what the
+//! pointer and the keys did, and which element is which ([`UiId`]). It depends on no UI toolkit and on no
 //! LoomDSP crate, so a tool that has nothing to do with patches can use it.
 //!
 //! # Units
@@ -23,6 +23,9 @@
 //!   claim the point on their shared edge.
 //! - **Rectangles that only touch do not overlap.** An overlap with no area
 //!   is no overlap, for the same reason.
+//! - **An element is named by what it shows.** A [`UiId`] is built from the
+//!   app's own names and numbers, never from a position on screen, so it
+//!   stays the same when the things around it change.
 //! - **A colour is four channels as given.** The crate does no colour space
 //!   conversion. What a renderer does with the channels is its own concern.
 //!
@@ -39,7 +42,9 @@
 mod color;
 mod geometry;
 mod input;
+mod ui_id;
 
 pub use color::Color;
 pub use geometry::{Point, Rect, Size, Vector};
 pub use input::{Event, Key, KeyEvent, Modifiers, Platform, PointerButton, PointerEvent, ScrollDelta};
+pub use ui_id::{IdKey, IdTable, ParseUiIdError, UiId};
