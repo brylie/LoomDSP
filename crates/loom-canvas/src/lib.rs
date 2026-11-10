@@ -1,12 +1,12 @@
 //! The LoomDSP patch canvas (ADR-0010).
 //!
-//! It draws modules, ports, and cables with one custom wgpu primitive.
+//! It draws modules, ports, and cables with its own wgpu pipelines.
 //! Shapes are instanced quads and cables are triangle strips, so GPU cost
-//! follows the number of things drawn, not the number of pixels. Text goes
-//! through Iced's text system. Zoomed out, where it is too small to read,
-//! faint bars from the instanced buffer stand in for it.
+//! follows the number of things drawn, not the number of pixels. Zoomed
+//! out, where text is too small to read, faint bars from the instanced
+//! buffer stand in for it.
 //!
-//! The crate has two halves:
+//! The crate has three parts:
 //!
 //! - **Input, with no UI toolkit in it.** [`CanvasInput`] keeps the lasting
 //!   state and handles one `loom-ui-core` event at a time, with the
@@ -14,9 +14,17 @@
 //!   frame. The answer is a [`Reaction`]: the [`CanvasEvent`]s to report,
 //!   whether the input was used, and whether to redraw. The canvas also
 //!   says when it next needs to wake (`CanvasInput::next_deadline`).
+//! - **Drawing, with no UI toolkit in it either.** [`CanvasInput::frame`]
+//!   builds a [`CanvasFrame`], and a [`CanvasRenderer`] draws it into a
+//!   `wgpu` render pass that the host gives it, at a [`Target`]. The host
+//!   owns the window, the pass, and its viewport. [`CanvasInput::paint`]
+//!   hands the text, and the boxes of the floating parts, to a
+//!   [`Painter`], and sizes text with a [`TextMeasure`].
 //! - **The Iced widget,** [`PatchCanvas`]. It converts Iced's events through
 //!   [`iced_convert`], calls [`CanvasInput`], applies the [`Reaction`],
-//!   schedules the next deadline, and draws.
+//!   schedules the next deadline, wraps the renderer as an Iced shader
+//!   primitive, and paints through Iced's text renderer. Iced is named
+//!   only here and in [`iced_convert`].
 //!
 //! Positions, sizes, colours, and input events are `loom-ui-core` values.
 //! They become Iced values only where they cross into an Iced call.
