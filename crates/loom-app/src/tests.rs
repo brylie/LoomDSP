@@ -2906,9 +2906,10 @@ fn tab_steps_forward_and_shift_tab_back() {
     assert_eq!(step("other", false), Id::new("other"), "a field not listed stays");
 }
 
-/// Without the accessibility spike, opening the window starts no task.
-#[cfg(not(all(feature = "a11y-spike", target_os = "macos")))]
+/// Where no accessibility adapter exists yet, opening the window starts no
+/// task. On macOS it attaches the adapter to the window.
+#[cfg(not(target_os = "macos"))]
 #[test]
-fn start_task_is_empty_without_the_spike() {
+fn start_task_is_empty_without_an_adapter() {
     assert_eq!(App::start_task().units(), 0);
 }

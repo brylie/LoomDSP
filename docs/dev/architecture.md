@@ -200,6 +200,18 @@ The inspector is the example (`crates/loom-app/src/inspector.rs`, added in PR #2
 
 Widget identity: Iced keeps widget state (a scroll offset, an open list, the canvas camera) by widget type and position in the parent. Keep the structure of `view` stable around stateful widgets. This is why `view` always returns a `stack!`, even when the module browser is closed. For a list of stateful rows that can be added or removed, use `keyed_column` with a stable ID as the key. It does not follow rows that swap places. Use `widget::Id` with operations for focus and scrolling, as the module browser does. ADR-0021 lists the details and the source they were checked against.
 
+## The accessibility tree
+
+A screen reader reads the window through an accessibility tree, built with AccessKit (`crates/loom-app/src/a11y.rs`, [UI layer spec](../design/ui-layer.md), section 7). It comes from the same view models the window draws, so it cannot say something the screen does not show.
+
+- **`a11y/tree.rs`** builds an AccessKit `TreeUpdate` from `UiSnapshot`. It has no platform code, so it builds and is tested on every OS.
+- **`a11y/actions.rs`** turns a screen reader's request into ordinary messages, the same ones the pointer sends. Undo, autosave, and MIDI feedback then need nothing extra.
+- **`a11y/macos.rs`** attaches AccessKit's adapter to the window Iced made. It is the only platform so far. Our own shell replaces it on every platform ([plan](leaving-iced-plan.md), phase 2).
+
+Every node is named by a UI ID (`loom_ui_core::UiId`): a path of keys taken from what the element shows, such as the canvas, a module ID, the kind `param`, and a parameter name, written `canvas/4/param/cutoff`. A table (`loom_ui_core::IdTable`) gives each UI ID its AccessKit node ID. An ID keeps its number while its element exists, and a number is never used for another element, because a screen reader keeps its place by it.
+
+So far the tree holds the status line, the tiles, and the controls on them, and it is rebuilt on a timer while a screen reader listens. The rest of plan step 1.4 adds the other panels and sends only what changed.
+
 ## Describing a module
 
 A module is a `static` `ModuleDescriptor` plus a struct that implements `Module`. The descriptor is plain data, written with named fields. The descriptor types live in `crates/loom-core/src/descriptor.rs` and its submodules: `port.rs`, `param.rs`, `display.rs`, `panel.rs`, `format.rs` for value text, and `lint.rs` for the label and description checks. This is Clock Divide's descriptor, shortened; the full one is in `crates/loom-modules/src/logic.rs`:

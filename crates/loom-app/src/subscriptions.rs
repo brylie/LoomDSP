@@ -151,7 +151,7 @@ impl App {
             .into_iter()
             .chain(control)
             .chain(input_watch)
-            .chain(self.a11y_subscription()),
+            .chain(std::iter::once(self.a11y_subscription().map(Message::A11y))),
         )
     }
 
@@ -269,20 +269,9 @@ pub(crate) fn browser_key(
 }
 
 impl App {
-    /// Spike: the accessibility layer's events, when the feature is on.
-    fn a11y_subscription(&self) -> Option<Subscription<Message>> {
-        #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
-        return Some(crate::a11y::subscription().map(Message::A11y));
-        #[cfg(not(all(feature = "a11y-spike", target_os = "macos")))]
-        None
-    }
-
-    /// The task that runs once the window opens. With the spike feature it
-    /// attaches the accessibility layer; otherwise it does nothing.
+    /// The task that runs once the window opens: it attaches the
+    /// accessibility layer, where the platform has an adapter for it.
     pub(crate) fn start_task() -> Task<Message> {
-        #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
-        return crate::a11y::attach().map(Message::A11y);
-        #[cfg(not(all(feature = "a11y-spike", target_os = "macos")))]
-        Task::none()
+        crate::a11y::attach().map(Message::A11y)
     }
 }

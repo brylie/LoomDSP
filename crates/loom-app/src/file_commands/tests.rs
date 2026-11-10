@@ -118,6 +118,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         still: _,
         // Set and taken within one `update`.
         history_key: _,
+        // The window's, so it stays, but the tiles' node IDs are dropped.
+        // `a11y/tests.rs` covers both.
+        a11y: _,
     } = &app;
     let PatchSession {
         controller,

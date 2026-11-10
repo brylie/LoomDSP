@@ -185,7 +185,14 @@ Keys come from what the element shows, not from where it sits:
 2. **A key names its kind where a module shows more than one kind of item.** The kind is one of `param`, `exposed`, `display`, `input`, `output`, and `badge`, as the control channel's prefixes already name them. An instance's exposed "Cutoff" and the inner module's "cutoff" row then never share a key. A flat ID needs no level beside it: the flat ID table is keyed by path and never gives an ID to something else while the patch is open ([flattening](../learn/flattening.md)). *Why:* that table already lets the canvas, the selection, and undo work across levels, so identity can rest on it too.
 3. **Elements in a list that can change are keyed by a stable domain ID, never by position.** *Why:* by position, removing one row moves every later row's state, focus, and accessibility node onto its neighbour. ADR-0021 recorded this limit in Iced's `keyed_column`.
 4. **An accessibility node ID stays the same while its element exists,** and is not reused for another element in the same run. The runtime keeps a table from UI ID to the 64-bit AccessKit node ID. It gives out IDs from a counter that only increases, and removes an entry when its element is gone; if the same UI ID comes back later, it gets a new node ID. *Why:* a screen reader keeps its place by node ID, and a reused ID would make it read the wrong element. Removing entries keeps the table the size of the window, not of the session. The spike packed a module ID and a widget index into 64 bits, which works for tiles but not for rows and overlays.
-5. **A UI ID can be written as text,** and that text is what the control channel's `locate` accepts beside its existing names. *Why:* agents, tests, and people then use the same names.
+5. **A UI ID can be written as text,** and that text is what the control channel's `locate` accepts beside its existing names. The text is the keys joined by `/`: `canvas/4/param/cutoff`, `canvas/5/badge/out`, `toolbar/undo`, `inspector/4/param/cutoff`.
+   - A key made only of digits is a number. Any other key is a name.
+   - Inside a name, `/` is written `%2F` and `%` is written `%25`, so a library item's path stays one key: `browser/library/pads%2Fwarm`.
+   - A name made only of digits has its first digit escaped, so it does not read back as a number: the name `12` is written `%312`.
+   - Writing a UI ID and reading the text back gives the same UI ID, for every UI ID. A test checks it.
+   - The control channel's short names, such as `4:cutoff`, keep working beside it.
+
+   *Why:* agents, tests, and people then use the same names. A path reads like the tree it names, and one escape rule keeps every ID readable back.
 
 ## 5. Layers, hit-testing, and who has the input
 
@@ -255,7 +262,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 | An app-driven tree (the patch outline) | Tree, named | None | Focus |
 | A row of that tree | Tree item, with its level, position in set, size of set, and expanded state | None | Focus, and Click where a click does something |
 | A message meant to be announced (an output safety warning, an alert in the status line) | Status | Its text | None |
-| Tile | Group, named by its module | None | Focus |
+| Tile | Group, named by its module | None | Focus, and Click to select its module |
 | Panel | Group, named | None | None |
 
 ### Rules
@@ -280,7 +287,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
    - **The cap keeps a meter from flooding the screen reader.** `accesskit_macos` posts a value-changed notification for every node whose value changes (`event.rs`, `node_updated`). Whether VoiceOver speaks those for nodes it is not on is checked in the phase 1 listening test.
    - **No polling.** The spike rebuilt the whole tree every 500 ms (NFR-PERF-04). Here only changed live nodes are sent, and nothing is sent while no screen reader listens.
 8. **Bounds are sent in physical pixels,** converted from the logical layout with the window's current scale factor, as AccessKit expects. A scale factor change resends the bounds of every node. *Why:* layout and the control channel use logical pixels. Sending them unconverted would put VoiceOver's cursor at half the right place on a Retina display.
-9. **Focus on a node never changes the patch.** Selecting a tile follows only an explicit Click or Enter, not the Focus action. *Why:* an assistive tool that only inspects the window must not change it. The spike's tile selection on focus is removed.
+9. **Focus on a node never changes the patch.** Selecting a tile follows only an explicit Click or Enter, not the Focus action. A tile's node offers Click, which selects its module through the same message as a pointer click, so the inspector follows. *Why:* an assistive tool that only inspects the window must not change it. The spike's tile selection on focus is removed.
 10. **A text field gives its text as AccessKit text runs,** with the caret and the selection as positions in them, and handles SetTextSelection and ReplaceSelectedText. *Why:* with only SetValue, a screen reader cannot move its cursor through the text or read where the caret is.
 11. **The adapter attaches before the window first shows.** The shell creates the window hidden, attaches `accesskit_winit`, then shows it. *Why:* AccessKit documents this order. The spike worked without it by luck.
 12. **A tree is driven by the app.** The app handles Up, Down, Right, Left, Home, End, and type-ahead in a tree, and keeps which rows are expanded. The tree's visible rows are sent as direct children of the Tree node, in the order shown, and each still carries its level, its position in set, its size of set, and its expanded state. *Why:* `accesskit_macos` 0.27.2 has no expand or collapse action, reports no level, position, or size of set, and lists only a tree's direct items as its rows (`node.rs`, `accessibilityRows`). Rows nested as children of rows would not be listed there. The Windows adapter maps level, position, size, and expand state †, and the Linux adapter position and size †, so sending them costs nothing and helps where they are read. Keys the app handles work the same everywhere, with or without a screen reader.
@@ -412,5 +419,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Hooks for the canvas accessibility spec | Added at the maintainer's request: `controls` relations, focus into a custom element's parts, an app-driven tree, an image with its text alternative elsewhere, and a key between regions | Section 6, rule 7; section 7, rules 12 and 13; section 9, rules 6 and 7 |
 | Which key moves between regions | Ctrl+Tab forward and Ctrl+Shift+Tab back, wrapping, with Ctrl on every platform, and working from a text field. Chosen over F6, which needs Fn on most keyboards | Section 6, rule 7 |
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
+| How a UI ID is written as text (2026-11-10) | A path: keys joined by `/`, digits as numbers, `/` and `%` escaped inside a name, and a name of digits escaped so it reads back as a name. The control channel's short names stay | Section 4, rule 5 |
+| Whether a tile's node offers Click (2026-11-10) | Yes. Click selects the tile's module; Focus alone still changes nothing | Section 7, the role table and rule 9 |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.

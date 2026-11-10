@@ -7,7 +7,6 @@
 //! A library, so that tests under `tests/` can import `ui_test::Ui` with the
 //! `test-ui` feature. The program in `src/bin/loom-app.rs` calls [`run`].
 
-#[cfg(all(feature = "a11y-spike", target_os = "macos"))]
 mod a11y;
 mod alerts;
 mod audio_watch;
@@ -457,8 +456,7 @@ enum Message {
         text: Option<String>,
         generation: u64,
     },
-    /// Spike: the accessibility tree beside Iced (`a11y.rs`).
-    #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+    /// The accessibility tree for screen readers (`a11y.rs`).
     A11y(a11y::Event),
 }
 
@@ -521,8 +519,7 @@ impl Message {
     /// No wildcard, on purpose: a new message must choose a side.
     fn allowed_during_question(&self) -> bool {
         match self {
-            // Spike: screen reader actions wait like clicks; the rest keeps the tree current.
-            #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
+            // Screen reader actions wait like clicks; the rest keeps the tree current.
             Self::A11y(event) => !matches!(event, a11y::Event::Action(_)),
             Self::Question(_)
             // Never asked: `update` routes it before this check, and each
@@ -697,6 +694,9 @@ struct App {
     /// An undo (`false`) or redo (`true`) shortcut waiting for the check
     /// that no text field has focus.
     history_key: Option<bool>,
+    /// The accessibility tree's node IDs and whether a screen reader
+    /// listens. It belongs to the window, so it stays when the patch changes.
+    a11y: a11y::Access,
 }
 
 /// Where a patch comes from.
@@ -1334,7 +1334,6 @@ impl App {
                 self.type_after_focus_check(call, &text, focused);
                 Task::none()
             }
-            #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
             Message::A11y(event) => self.a11y_event(event),
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
@@ -1544,7 +1543,6 @@ impl App {
             | Message::TypeFocus { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}
-            #[cfg(all(feature = "a11y-spike", target_os = "macos"))]
             Message::A11y(_) => {}
             Message::ShowHelp => {
                 if self.overlays.help.is_none() {

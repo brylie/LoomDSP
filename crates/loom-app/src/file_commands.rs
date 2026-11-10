@@ -360,6 +360,7 @@ impl App {
         );
         // Goes last, as the threads of the old engine's watchers end with it.
         let old = std::mem::replace(&mut self.session, session);
+        self.a11y.patch_replaced();
         // The canvas keeps its state across the swap and compares this key
         // with the one it saw. A new frame key resets pan and zoom to show the
         // whole patch.

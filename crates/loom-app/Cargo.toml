@@ -26,9 +26,6 @@ test = false
 [features]
 # The headless `Ui` harness, for the tests in `tests/`. It changes no behaviour.
 test-ui = []
-# Spike (not for release): an accessibility tree for screen readers on macOS,
-# built from the UI snapshot while Iced has no AccessKit support (ADR-0028).
-a11y-spike = ["dep:accesskit", "dep:accesskit_macos"]
 
 [dependencies]
 loom-core.workspace = true
@@ -52,13 +49,17 @@ jiff.workspace = true
 iced_runtime.workspace = true
 # The spectrum display. On the telemetry thread only, never in the engine crates.
 rustfft.workspace = true
+# The accessibility tree for screen readers (ADR-0041). Built and tested on
+# every platform; `a11y/macos.rs` attaches it to the window.
+accesskit = "0.25"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-accesskit = { version = "0.25", optional = true }
-accesskit_macos = { version = "0.27", optional = true }
+# Attaches the accessibility tree to the window Iced made, until our own
+# shell does it on every platform (docs/dev/leaving-iced-plan.md, phase 2).
+accesskit_macos = "0.27"
 
 [target.'cfg(windows)'.dependencies]
 # Where Documents really is: OneDrive or the user can move it (#556).
