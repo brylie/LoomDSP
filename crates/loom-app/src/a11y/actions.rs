@@ -60,7 +60,8 @@ pub(super) fn canvas_events(
         (Action::Increment, "knob" | "fader" | "number") => set(widget.position + STEP),
         (Action::Decrement, "knob" | "fader" | "number") => set(widget.position - STEP),
         (Action::SetValue, "knob" | "fader" | "number") => match request.data {
-            Some(ActionData::NumericValue(v)) => set(v as f32),
+            // NaN has no place on a control, and clamping would pass it on.
+            Some(ActionData::NumericValue(v)) if !v.is_nan() => set(v as f32),
             _ => Vec::new(),
         },
         (Action::Click, "toggle") => set(if widget.position >= 0.5 { 0.0 } else { 1.0 }),

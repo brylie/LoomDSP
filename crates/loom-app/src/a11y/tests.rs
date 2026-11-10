@@ -455,6 +455,17 @@ fn set_value_is_clamped() {
         set(&app, ActionData::Value("loud".into())).is_empty(),
         "a knob takes a number"
     );
+    assert!(
+        set(&app, ActionData::NumericValue(f64::NAN)).is_empty(),
+        "NaN is not a position"
+    );
+    let at = |events: Vec<CanvasEvent>| match events.as_slice() {
+        [CanvasEvent::SetControl { position, .. }] => *position,
+        other => panic!("expected one set, got {other:?}"),
+    };
+    assert_eq!(at(set(&app, ActionData::NumericValue(f64::INFINITY))), 1.0);
+    assert_eq!(at(set(&app, ActionData::NumericValue(f64::NEG_INFINITY))), 0.0);
+    assert_eq!(at(set(&app, ActionData::NumericValue(-2.0))), 0.0);
 }
 
 /// A click turns a toggle over, and presses a button.
