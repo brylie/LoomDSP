@@ -4,6 +4,41 @@ use super::*;
 use crate::WidgetValue;
 use crate::scene::{CableView, ModuleView, PanelView, PortShape, PortView, WidgetView};
 
+/// Shift alone.
+const SHIFT: Modifiers = Modifiers {
+    shift: true,
+    ..Modifiers::NONE
+};
+/// Control alone.
+const CTRL: Modifiers = Modifiers {
+    control: true,
+    ..Modifiers::NONE
+};
+/// Alt alone.
+const ALT: Modifiers = Modifiers {
+    alt: true,
+    ..Modifiers::NONE
+};
+/// The system key alone: Command on a Mac.
+const LOGO: Modifiers = Modifiers {
+    meta: true,
+    ..Modifiers::NONE
+};
+
+/// The key that types the one character in `text`.
+fn key_of(text: &str) -> Key {
+    let mut characters = text.chars();
+    match (characters.next(), characters.next()) {
+        (Some(only), None) => Key::Character(only),
+        _ => Key::Other,
+    }
+}
+
+/// The shortcut key of the platform the tests run on, alone.
+fn command() -> Modifiers {
+    if LOGO.shortcut() { LOGO } else { CTRL }
+}
+
 fn module(id: u32, x: f32) -> ModuleView {
     let port = || PortView {
         label: "p".into(),
@@ -514,15 +549,28 @@ fn button_module() -> ModuleView {
 }
 
 fn drive(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> Vec<CanvasEvent> {
+    drive_at(canvas, state, Some(event), at, Instant::now())
+}
+
+/// Sends one event, or `None` for something that means nothing to the
+/// canvas, with the pointer at `at` and the clock at `now`. Returns what
+/// the canvas reported.
+fn drive_at(
+    canvas: &PatchCanvas<'_, CanvasEvent>,
+    state: &mut State,
+    event: Option<&Event>,
+    at: Point,
+    now: Instant,
+) -> Vec<CanvasEvent> {
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    canvas.handle(state, event, bounds, mouse::Cursor::Available(at.to_iced()), &mut shell);
+    canvas.handle(state, event, Some(at), bounds, now, &mut shell);
     messages
 }
 
-fn click(button: mouse::Button) -> Event {
-    Event::Mouse(mouse::Event::ButtonPressed(button))
+fn click(button: PointerButton) -> Event {
+    Event::Pointer(PointerEvent::Pressed(button))
 }
 
 /// A select click opens a list and a list choice sets one value. Dragging
@@ -545,11 +593,11 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     let canvas = PatchCanvas::new(&scene, &selected, |event| event);
     let mut state = State::default();
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         centre,
     );
     assert!(state.focus.popup().is_some());
@@ -557,7 +605,7 @@ fn select_popup_preserves_choice_and_tile_gestures() {
         .select_popup_bounds(&state, Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)))
         .unwrap();
     let choice = Point::new(list.x + 20.0, list.y + SELECT_ROW_PX * 1.5);
-    let picked = drive(&canvas, &mut state, &click(mouse::Button::Left), choice);
+    let picked = drive(&canvas, &mut state, &click(PointerButton::Left), choice);
     assert!(picked.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
@@ -567,11 +615,11 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     assert!(state.focus.popup().is_none());
 
     // Scrolling dismisses the open list without changing the canvas zoom.
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         centre,
     );
     assert!(state.focus.popup().is_some());
@@ -579,30 +627,21 @@ fn select_popup_preserves_choice_and_tile_gestures() {
     let events = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::WheelScrolled {
-            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-        }),
+        &Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 })),
         centre,
     );
     assert!(events.is_empty());
     assert!(state.focus.popup().is_none());
     assert_eq!(state.camera.zoom, zoom);
 
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     let moved = Point::new(centre.x + GRID * 2.0, centre.y);
-    let events = drive(
-        &canvas,
-        &mut state,
-        &Event::Mouse(mouse::Event::CursorMoved {
-            position: moved.to_iced(),
-        }),
-        moved,
-    );
+    let events = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Moved), moved);
     assert!(events.iter().any(|event| matches!(event, CanvasEvent::Move { .. })));
     let released = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         moved,
     );
     assert!(
@@ -637,27 +676,15 @@ fn select_popup_keyboard_choices_are_explicit() {
         ..State::default()
     };
     let at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
-    assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Space, true), at).is_empty());
     assert!(state.focus.popup().is_some());
-    assert!(
-        drive(
-            &canvas,
-            &mut state,
-            &key_event(keyboard::key::Named::ArrowDown, true),
-            at
-        )
-        .is_empty()
-    );
-    for key in [
-        keyboard::key::Named::ArrowLeft,
-        keyboard::key::Named::ArrowRight,
-        keyboard::key::Named::Tab,
-    ] {
+    assert!(drive(&canvas, &mut state, &key_event(Key::Down, true), at).is_empty());
+    for key in [Key::Left, Key::Right, Key::Tab] {
         assert!(drive(&canvas, &mut state, &key_event(key, true), at).is_empty());
         assert_eq!(state.focus.control(), Some((1, 0)));
         assert_eq!(state.focus.popup().map(|popup| popup.highlight), Some(1));
     }
-    let chosen = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    let chosen = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert_eq!(
         chosen,
         vec![CanvasEvent::SetControl {
@@ -668,8 +695,8 @@ fn select_popup_keyboard_choices_are_explicit() {
         }]
     );
     assert!(state.focus.popup().is_none());
-    drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
-    assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at).is_empty());
+    drive(&canvas, &mut state, &key_event(Key::Space, true), at);
+    assert!(drive(&canvas, &mut state, &key_event(Key::Escape, true), at).is_empty());
     assert!(state.focus.popup().is_none());
 }
 
@@ -695,7 +722,7 @@ fn hiding_the_focused_select_closes_it_and_uses_up_the_key() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event);
     let at = scene.module(1).unwrap().bounds().center();
-    for key in [keyboard::key::Named::ArrowDown, keyboard::key::Named::Enter] {
+    for key in [Key::Down, Key::Enter] {
         let mut state = State {
             focus: FocusState::at(
                 1,
@@ -736,7 +763,7 @@ fn stale_select_popup_passes_escape_to_normal_key_handling() {
             ),
             ..State::default()
         };
-        let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Escape, true), at);
+        let events = drive(&canvas, &mut state, &key_event(Key::Escape, true), at);
         assert_eq!(events, vec![CanvasEvent::Select(Vec::new())]);
         assert!(state.focus.popup().is_none());
     }
@@ -767,7 +794,7 @@ fn stale_select_popup_passes_the_pointer_to_normal_handling() {
         focus: stale(),
         ..State::default()
     };
-    drive(&canvas, &mut state, &click(mouse::Button::Left), empty);
+    drive(&canvas, &mut state, &click(PointerButton::Left), empty);
     assert!(state.focus.popup().is_none());
     assert!(matches!(state.interaction, Interaction::Selecting { .. }));
 
@@ -779,9 +806,7 @@ fn stale_select_popup_passes_the_pointer_to_normal_handling() {
     drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::WheelScrolled {
-            delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-        }),
+        &Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 })),
         empty,
     );
     assert_ne!(state.camera.zoom, zoom, "the wheel zooms again");
@@ -822,7 +847,7 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
         focus: open(),
         ..State::default()
     };
-    let chosen = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    let chosen = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert_eq!(
         chosen,
         vec![CanvasEvent::SetControl {
@@ -837,7 +862,7 @@ fn select_popup_commits_to_its_own_widget_and_closes_with_no_edit() {
         focus: open(),
         ..State::default()
     };
-    let unfocused = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), at);
+    let unfocused = drive(&canvas, &mut state, &Event::WindowUnfocused, at);
     assert!(state.focus.popup().is_none());
     assert!(!unfocused.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
 }
@@ -860,13 +885,10 @@ fn long_list(count: usize) -> Scene {
 }
 
 /// A key press that carries typed text, as a real keyboard sends it.
-fn typed(key: keyboard::Key, text: &str) -> Event {
-    Event::Keyboard(keyboard::Event::KeyPressed {
-        key: key.clone(),
-        modified_key: key,
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: keyboard::Modifiers::default(),
+fn typed(key: Key, text: &str) -> Event {
+    Event::Key(KeyEvent::Pressed {
+        key,
+        modifiers: Modifiers::default(),
         text: Some(text.into()),
         repeat: false,
     })
@@ -883,34 +905,28 @@ fn a_long_select_list_scrolls() {
     let canvas_area = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let box_at = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), box_at);
+    drive(&canvas, &mut state, &click(PointerButton::Left), box_at);
     drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         box_at,
     );
     let list = canvas.select_popup_bounds(&state, canvas_area).unwrap();
     assert_eq!(list.height, SELECT_ROW_PX * 12.0, "12 rows show");
 
     let inside = Point::new(list.x + 20.0, list.y + SELECT_ROW_PX * 0.5);
-    let wheel = |y| {
-        Event::Mouse(mouse::Event::WheelScrolled {
-            delta: mouse::ScrollDelta::Lines { x: 0.0, y },
-        })
-    };
+    let wheel = |y| Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y }));
     let zoom = state.camera.zoom;
     drive(&canvas, &mut state, &wheel(-3.0), inside);
     assert_eq!(state.focus.popup().copied().unwrap().scroll, 3);
     assert_eq!(state.camera.zoom, zoom, "the wheel does not zoom over a list");
 
     // Small trackpad steps add up to a whole row.
-    let pixels = Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Pixels {
-            x: 0.0,
-            y: -SELECT_ROW_PX * 0.6,
-        },
-    });
+    let pixels = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Pixels {
+        x: 0.0,
+        y: -SELECT_ROW_PX * 0.6,
+    }));
     drive(&canvas, &mut state, &pixels, inside);
     assert_eq!(state.focus.popup().copied().unwrap().scroll, 3);
     drive(&canvas, &mut state, &pixels, inside);
@@ -924,7 +940,7 @@ fn a_long_select_list_scrolls() {
 
     // A press picks the row it is on, counting what has scrolled away.
     drive(&canvas, &mut state, &wheel(-5.0), inside);
-    let picked = drive(&canvas, &mut state, &click(mouse::Button::Left), inside);
+    let picked = drive(&canvas, &mut state, &click(PointerButton::Left), inside);
     assert!(picked.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
@@ -934,15 +950,10 @@ fn a_long_select_list_scrolls() {
 
     // The keyboard scrolls the highlight into view.
     let mut state = State::default();
-    drive(&canvas, &mut state, &Event::Window(window::Event::Focused), box_at);
+    drive_at(&canvas, &mut state, None, box_at, Instant::now());
     canvas.open_select(&mut state, 1, 0);
     for _ in 0..15 {
-        drive(
-            &canvas,
-            &mut state,
-            &key_event(keyboard::key::Named::ArrowDown, true),
-            box_at,
-        );
+        drive(&canvas, &mut state, &key_event(Key::Down, true), box_at);
     }
     let popup = state.focus.popup().copied().unwrap();
     assert_eq!((popup.highlight, popup.scroll), (15, 4));
@@ -971,9 +982,7 @@ fn a_select_list_fits_the_canvas_and_a_short_one_keeps_the_wheel() {
     drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::WheelScrolled {
-            delta: mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-        }),
+        &Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: -1.0 })),
         inside,
     );
     let popup = state.focus.popup().copied().expect("stays open");
@@ -1000,7 +1009,7 @@ fn a_list_on_a_grown_canvas_has_no_blank_rows() {
     state.size = area.size();
     let list = canvas.select_popup_bounds(&state, area).unwrap();
     let last = Point::new(list.x + 20.0, list.y + list.height - 1.0);
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), last);
+    let events = drive(&canvas, &mut state, &click(PointerButton::Left), last);
     assert!(
         events.contains(&CanvasEvent::SetControl {
             module: 1,
@@ -1037,7 +1046,7 @@ fn typing_in_an_open_list_jumps_to_the_next_match() {
         ..State::default()
     };
     canvas.open_select(&mut state, 1, 0);
-    let letter = |c: &str| typed(keyboard::Key::Character(c.into()), c);
+    let letter = |c: &str| typed(key_of(c), c);
     let highlight = |state: &State| state.focus.popup().copied().unwrap().highlight;
 
     drive(&canvas, &mut state, &letter("s"), at);
@@ -1053,12 +1062,7 @@ fn typing_in_an_open_list_jumps_to_the_next_match() {
     assert!(state.focus.popup().is_some());
 
     // Backspace sends a control character, and must not delete the module.
-    let events = drive(
-        &canvas,
-        &mut state,
-        &typed(keyboard::Key::Named(keyboard::key::Named::Backspace), "\u{8}"),
-        at,
-    );
+    let events = drive(&canvas, &mut state, &typed(Key::Backspace, "\u{8}"), at);
     assert!(events.is_empty(), "{events:?}");
 }
 
@@ -1096,7 +1100,7 @@ fn a_fader_drag_keeps_its_cursor() {
         let rect = scene.module(1).unwrap().widget_bounds(0).unwrap();
         let at = crate::controls::fader_track(rect, vertical).center();
         let mut state = State::default();
-        drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        drive(&canvas, &mut state, &click(PointerButton::Left), at);
         assert!(matches!(state.interaction, Interaction::Turning { .. }));
         assert_eq!(state.interaction.cursor(), Some(expected));
     }
@@ -1121,11 +1125,12 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
                 Point::new(at.x + d, at.y)
             }
         };
-        let moved = |to: Point| Event::Mouse(mouse::Event::CursorMoved { position: to.to_iced() });
-        let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
+        // The place travels beside the event, so a move itself says nothing of it.
+        let moved = |_to: Point| Event::Pointer(PointerEvent::Moved);
+        let released = Event::Pointer(PointerEvent::Released(PointerButton::Left));
 
         let mut state = State::default();
-        let pressed = drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        let pressed = drive(&canvas, &mut state, &click(PointerButton::Left), at);
         assert!(
             !pressed.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })),
             "a press moves nothing"
@@ -1149,7 +1154,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
             Point::new(at.x, at.y + 40.0)
         };
         let mut state = State::default();
-        drive(&canvas, &mut state, &click(mouse::Button::Left), at);
+        drive(&canvas, &mut state, &click(PointerButton::Left), at);
         let events = drive(&canvas, &mut state, &moved(across), across);
         assert!(!events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. })));
         drive(&canvas, &mut state, &released, across);
@@ -1164,7 +1169,7 @@ fn a_fader_drags_along_its_track_and_its_bar_drags_depth() {
             }
         };
         let mut state = State::default();
-        drive(&canvas, &mut state, &click(mouse::Button::Left), bar);
+        drive(&canvas, &mut state, &click(PointerButton::Left), bar);
         assert!(matches!(state.interaction, Interaction::Depth { .. }));
         let events = drive(&canvas, &mut state, &moved(on_bar(20.0)), on_bar(20.0));
         assert!(
@@ -1189,7 +1194,7 @@ fn a_fader_takes_the_keys_of_a_knob() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::ArrowUp, true), at);
+    let events = drive(&canvas, &mut state, &key_event(Key::Up, true), at);
     assert!(events.contains(&CanvasEvent::SetControl {
         module: 1,
         widget: 0,
@@ -1227,12 +1232,9 @@ fn typed_scene() -> (Scene, PanelValues) {
 
 /// A key press with `key` and `text` set apart, and modifiers held. On a layout
 /// such as AZERTY a digit's key is not the digit.
-fn typed_key(key: keyboard::Key, text: Option<&str>, modifiers: keyboard::Modifiers, repeat: bool) -> Event {
-    Event::Keyboard(keyboard::Event::KeyPressed {
-        key: key.clone(),
-        modified_key: key,
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
+fn typed_key(key: Key, text: Option<&str>, modifiers: Modifiers, repeat: bool) -> Event {
+    Event::Key(KeyEvent::Pressed {
+        key,
         modifiers,
         text: text.map(Into::into),
         repeat,
@@ -1244,12 +1246,7 @@ fn type_text(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, text: &st
     let mut events = Vec::new();
     for c in text.chars() {
         let c = c.to_string();
-        events.extend(drive(
-            canvas,
-            state,
-            &typed(keyboard::Key::Character(c.as_str().into()), &c),
-            at,
-        ));
+        events.extend(drive(canvas, state, &typed(key_of(&c), &c), at));
     }
     events
 }
@@ -1259,7 +1256,7 @@ fn type_text(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, text: &st
 /// focus, and the pointer still works.
 #[test]
 fn a_focused_text_field_keeps_keys_from_the_canvas() {
-    use keyboard::key::Named;
+    use Key;
     let (scene, values) = typed_scene();
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event)
@@ -1270,29 +1267,18 @@ fn a_focused_text_field_keeps_keys_from_the_canvas() {
         });
     let at = scene.module(1).unwrap().bounds().center();
     let mut state = State::default();
-    for key in [
-        Named::Enter,
-        Named::ArrowLeft,
-        Named::Space,
-        Named::Escape,
-        Named::Backspace,
-    ] {
+    for key in [Key::Enter, Key::Left, Key::Space, Key::Escape, Key::Backspace] {
         let events = drive(&canvas, &mut state, &key_event(key, true), at);
         assert!(events.is_empty(), "{key:?} did nothing, but sent {events:?}");
     }
     assert_eq!(state.focus.control(), None, "Enter did not focus a control");
 
-    let paste = typed_key(
-        keyboard::Key::Character("v".into()),
-        None,
-        keyboard::Modifiers::COMMAND,
-        false,
-    );
+    let paste = typed_key(Key::Character('v'), None, command(), false);
     assert!(drive(&canvas, &mut state, &paste, at).is_empty(), "the field pastes");
 
-    let events = drive(&canvas, &mut state, &key_event(Named::Tab, true), at);
+    let events = drive(&canvas, &mut state, &key_event(Key::Tab, true), at);
     assert!(!events.is_empty(), "Tab still moves focus");
-    assert!(!drive(&canvas, &mut state, &click(mouse::Button::Left), at).is_empty());
+    assert!(!drive(&canvas, &mut state, &click(PointerButton::Left), at).is_empty());
 }
 
 /// A press outside the canvas with a list open also takes the keys from the
@@ -1311,7 +1297,7 @@ fn a_press_outside_closes_a_select_list_and_clears_focus() {
     let events = drive(
         &canvas,
         &mut state,
-        &click(mouse::Button::Left),
+        &click(PointerButton::Left),
         Point::new(-10.0, -10.0),
     );
     assert!(events.is_empty());
@@ -1396,29 +1382,19 @@ fn a_digit_opens_the_typed_field_and_enter_commits() {
     assert_eq!(state.focus.typed().unwrap().draft.text, "129");
 
     let named = |key| key_event(key, true);
-    use keyboard::key::Named;
-    drive(&canvas, &mut state, &named(Named::ArrowLeft), at);
-    drive(&canvas, &mut state, &named(Named::Backspace), at);
+    use Key;
+    drive(&canvas, &mut state, &named(Key::Left), at);
+    drive(&canvas, &mut state, &named(Key::Backspace), at);
     assert_eq!(state.focus.typed().unwrap().draft.text, "19", "Backspace takes the 2");
-    drive(&canvas, &mut state, &named(Named::Home), at);
-    drive(&canvas, &mut state, &named(Named::Delete), at);
+    drive(&canvas, &mut state, &named(Key::Home), at);
+    drive(&canvas, &mut state, &named(Key::Delete), at);
     assert_eq!(state.focus.typed().unwrap().draft.text, "9", "Delete takes the 1");
-    drive(
-        &canvas,
-        &mut state,
-        &typed(keyboard::Key::Character("1".into()), "1"),
-        at,
-    );
-    drive(&canvas, &mut state, &named(Named::End), at);
-    drive(
-        &canvas,
-        &mut state,
-        &typed(keyboard::Key::Character("0".into()), "0"),
-        at,
-    );
+    drive(&canvas, &mut state, &typed(Key::Character('1'), "1"), at);
+    drive(&canvas, &mut state, &named(Key::End), at);
+    drive(&canvas, &mut state, &typed(Key::Character('0'), "0"), at);
     assert_eq!(state.focus.typed().unwrap().draft.text, "190");
 
-    let committed = drive(&canvas, &mut state, &named(Named::Enter), at);
+    let committed = drive(&canvas, &mut state, &named(Key::Enter), at);
     assert_eq!(
         committed,
         vec![CanvasEvent::TypedValue {
@@ -1440,7 +1416,7 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |event| event).values(&values);
     let at = scene.module(1).unwrap().bounds().center();
-    let none = keyboard::Modifiers::default();
+    let none = Modifiers::default();
     for (key, text, opens) in [
         ("&", "1", true),
         ("-", "-", true),
@@ -1453,7 +1429,7 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
             focus: FocusState::at(1, 0, false, FocusMode::Browse),
             ..State::default()
         };
-        let event = typed_key(keyboard::Key::Character(key.into()), Some(text), none, false);
+        let event = typed_key(key_of(key), Some(text), none, false);
         drive(&canvas, &mut state, &event, at);
         assert_eq!(state.focus.typed().is_some(), opens, "{key} {text}");
         if opens {
@@ -1465,22 +1441,12 @@ fn the_field_opens_on_what_was_typed_not_on_the_key() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    let event = typed_key(
-        keyboard::Key::Character(".".into()),
-        Some("."),
-        keyboard::Modifiers::COMMAND,
-        false,
-    );
+    let event = typed_key(Key::Character('.'), Some("."), command(), false);
     drive(&canvas, &mut state, &event, at);
     assert!(state.focus.typed().is_none());
     // A control that does not take numbers ignores a digit.
     let mut state = State::default();
-    drive(
-        &canvas,
-        &mut state,
-        &typed(keyboard::Key::Character("1".into()), "1"),
-        at,
-    );
+    drive(&canvas, &mut state, &typed(Key::Character('1'), "1"), at);
     assert!(state.focus.typed().is_none(), "no focus, no field");
 }
 
@@ -1497,21 +1463,16 @@ fn the_open_field_takes_every_key() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    use keyboard::key::Named;
+    use Key;
     type_text(&canvas, &mut state, "1", at);
     let camera = state.camera;
     for event in [
-        key_event(Named::Backspace, true),
-        key_event(Named::Delete, true),
-        typed(keyboard::Key::Character("f".into()), "f"),
-        typed(keyboard::Key::Character("a".into()), "a"),
-        typed_key(
-            keyboard::Key::Character("v".into()),
-            Some("v"),
-            keyboard::Modifiers::COMMAND,
-            false,
-        ),
-        key_event(Named::ArrowUp, true),
+        key_event(Key::Backspace, true),
+        key_event(Key::Delete, true),
+        typed(Key::Character('f'), "f"),
+        typed(Key::Character('a'), "a"),
+        typed_key(Key::Character('v'), Some("v"), command(), false),
+        key_event(Key::Up, true),
     ] {
         let events = drive(&canvas, &mut state, &event, at);
         assert!(events.is_empty(), "{event:?}: {events:?}");
@@ -1523,16 +1484,11 @@ fn the_open_field_takes_every_key() {
         "letters are text; Cmd+V is not"
     );
 
-    let held = typed_key(
-        keyboard::Key::Named(Named::Enter),
-        None,
-        keyboard::Modifiers::default(),
-        true,
-    );
+    let held = typed_key(Key::Enter, None, Modifiers::default(), true);
     assert!(drive(&canvas, &mut state, &held, at).is_empty());
     assert!(state.focus.typed().is_some(), "a repeat does not commit");
 
-    let tabbed = drive(&canvas, &mut state, &key_event(Named::Tab, true), at);
+    let tabbed = drive(&canvas, &mut state, &key_event(Key::Tab, true), at);
     assert!(state.focus.typed().is_none());
     assert_eq!(tabbed, vec![CanvasEvent::Select(vec![1])], "Tab moves on as usual");
 }
@@ -1550,27 +1506,27 @@ fn enter_on_unchanged_text_commits_nothing() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    use keyboard::key::Named;
-    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    use Key;
+    assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert_eq!(state.focus.typed().unwrap().draft.text, "128.0 BPM");
-    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert!(state.focus.typed().is_none(), "closed, with no edit");
 
-    drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
+    drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     type_text(&canvas, &mut state, "9", at);
     assert_eq!(
         state.focus.typed().unwrap().draft.text,
         "9",
         "the selection is replaced"
     );
-    assert!(drive(&canvas, &mut state, &key_event(Named::Escape, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Escape, true), at).is_empty());
     assert!(state.focus.typed().is_none());
     assert_eq!(state.focus.control(), Some((1, 0)), "Escape closes only the field");
 
     // Selected text and Backspace leave an empty field, and the next character
     // goes in it.
-    drive(&canvas, &mut state, &key_event(Named::Enter, true), at);
-    drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
+    drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
+    drive(&canvas, &mut state, &key_event(Key::Backspace, true), at);
     assert_eq!(state.focus.typed().unwrap().draft.text, "");
 }
 
@@ -1592,14 +1548,14 @@ fn bad_typed_text_blocks_enter_until_it_is_corrected() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    use keyboard::key::Named;
+    use Key;
     type_text(&canvas, &mut state, "1a", at);
     assert_eq!(state.focus.typed().unwrap().draft.error(), Some("Not a number in Hz"));
-    assert!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert!(state.focus.typed().is_some(), "bad text keeps the field open");
-    drive(&canvas, &mut state, &key_event(Named::Backspace, true), at);
+    drive(&canvas, &mut state, &key_event(Key::Backspace, true), at);
     assert!(state.focus.typed().unwrap().draft.error().is_none());
-    assert_eq!(drive(&canvas, &mut state, &key_event(Named::Enter, true), at).len(), 1);
+    assert_eq!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).len(), 1);
 }
 
 /// A press outside, the wheel, the window losing focus, or the widget going
@@ -1631,7 +1587,7 @@ fn moving_focus_away_closes_the_field_with_no_change() {
     assert!(!edits(&drive(
         &canvas,
         &mut state,
-        &click(mouse::Button::Left),
+        &click(PointerButton::Left),
         on_field
     )));
     assert!(state.focus.typed().is_some(), "a press on the field stays");
@@ -1639,7 +1595,7 @@ fn moving_focus_away_closes_the_field_with_no_change() {
 
     let mut state = opened();
     let empty = Point::new(790.0, 590.0);
-    assert!(!edits(&drive(&canvas, &mut state, &click(mouse::Button::Left), empty)));
+    assert!(!edits(&drive(&canvas, &mut state, &click(PointerButton::Left), empty)));
     assert!(state.focus.typed().is_none());
     assert!(
         matches!(state.interaction, Interaction::Selecting { .. }),
@@ -1648,20 +1604,13 @@ fn moving_focus_away_closes_the_field_with_no_change() {
 
     let mut state = opened();
     let zoom = state.camera.zoom;
-    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-    });
+    let wheel = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }));
     assert!(!edits(&drive(&canvas, &mut state, &wheel, at)));
     assert!(state.focus.typed().is_none());
     assert_ne!(state.camera.zoom, zoom, "the wheel still zooms");
 
     let mut state = opened();
-    assert!(!edits(&drive(
-        &canvas,
-        &mut state,
-        &Event::Window(window::Event::Unfocused),
-        at
-    )));
+    assert!(!edits(&drive(&canvas, &mut state, &Event::WindowUnfocused, at)));
     assert!(state.focus.typed().is_none());
 
     // The module has gone from the selection.
@@ -1671,7 +1620,7 @@ fn moving_focus_away_closes_the_field_with_no_change() {
     assert!(!edits(&drive(
         &unselected,
         &mut state,
-        &key_event(keyboard::key::Named::Enter, true),
+        &key_event(Key::Enter, true),
         at
     )));
     assert!(state.focus.typed().is_none());
@@ -1691,7 +1640,7 @@ fn a_press_outside_the_canvas_takes_its_focus() {
     drive(
         &canvas,
         &mut state,
-        &click(mouse::Button::Left),
+        &click(PointerButton::Left),
         Point::new(5_000.0, 10.0),
     );
     assert_eq!(state.focus.control(), None);
@@ -1715,7 +1664,7 @@ fn no_field_opens_in_midi_learn_mode() {
     };
     assert!(type_text(&canvas, &mut state, "5", at).is_empty());
     assert!(state.focus.typed().is_none());
-    let armed = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    let armed = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert_eq!(armed, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
     assert!(state.focus.typed().is_none());
 }
@@ -1725,14 +1674,14 @@ fn no_field_opens_in_midi_learn_mode() {
 /// and key event. A button held by the pointer is released too.
 #[test]
 fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
-    let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+    let redraw = Event::Redraw;
 
     let scene = chain();
     let selected = BTreeSet::from([1]);
     let tile = scene.module(1).unwrap().bounds().center();
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    let pressed = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+    let pressed = drive(&canvas, &mut state, &click(PointerButton::Left), tile);
     assert_eq!(pressed, vec![CanvasEvent::GestureStart]);
     let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
         interactive: false,
@@ -1749,7 +1698,7 @@ fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
         interactive: false,
         ..CanvasFocusPolicy::default()
@@ -1761,13 +1710,10 @@ fn a_redraw_ends_gestures_and_holds_when_the_canvas_is_not_interactive() {
     );
 }
 
-fn key_a(modifiers: keyboard::Modifiers) -> Event {
-    let key = keyboard::Key::Character("a".into());
-    Event::Keyboard(keyboard::Event::KeyPressed {
-        modified_key: key.clone(),
+fn key_a(modifiers: Modifiers) -> Event {
+    let key = Key::Character('a');
+    Event::Key(KeyEvent::Pressed {
         key,
-        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyA),
-        location: keyboard::Location::Standard,
         modifiers,
         text: None,
         repeat: false,
@@ -1783,17 +1729,12 @@ fn only_a_with_no_modifier_opens_the_browser() {
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     let at = Point::new(100.0, 300.0);
     let mut state = State::default();
-    let events = drive(&canvas, &mut state, &key_a(keyboard::Modifiers::default()), at);
+    let events = drive(&canvas, &mut state, &key_a(Modifiers::default()), at);
     assert!(
         matches!(events.as_slice(), [CanvasEvent::OpenBrowser { at: p, .. }] if *p == at),
         "{events:?}"
     );
-    for modifiers in [
-        keyboard::Modifiers::SHIFT,
-        keyboard::Modifiers::CTRL,
-        keyboard::Modifiers::ALT,
-        keyboard::Modifiers::LOGO,
-    ] {
+    for modifiers in [SHIFT, CTRL, ALT, LOGO] {
         let events = drive(&canvas, &mut state, &key_a(modifiers), at);
         assert!(
             !events.iter().any(|e| matches!(e, CanvasEvent::OpenBrowser { .. })),
@@ -1811,12 +1752,9 @@ fn command_zero_resets_the_zoom_to_100_percent() {
     let none = BTreeSet::new();
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     let zero = |modifiers| {
-        let key = keyboard::Key::Character("0".into());
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            modified_key: key.clone(),
+        let key = Key::Character('0');
+        Event::Key(KeyEvent::Pressed {
             key,
-            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Digit0),
-            location: keyboard::Location::Standard,
             modifiers,
             text: None,
             repeat: false,
@@ -1828,9 +1766,9 @@ fn command_zero_resets_the_zoom_to_100_percent() {
         state.camera.zoom = start;
         state.camera.origin = Point::new(-40.0, 60.0);
         let before = state.camera.to_world(at);
-        drive(&canvas, &mut state, &zero(keyboard::Modifiers::default()), at);
+        drive(&canvas, &mut state, &zero(Modifiers::default()), at);
         assert_eq!(state.camera.zoom, start, "0 alone leaves the zoom at {start}");
-        drive(&canvas, &mut state, &zero(keyboard::Modifiers::COMMAND), at);
+        drive(&canvas, &mut state, &zero(command()), at);
         assert_eq!(state.camera.zoom, 1.0, "from {start}");
         let after = state.camera.to_world(at);
         assert!(
@@ -1848,13 +1786,10 @@ fn paste_goes_to_the_pointer_or_the_centre_of_the_view() {
     let none = BTreeSet::new();
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     let mut state = State::default();
-    let key = keyboard::Key::Character("v".into());
-    let paste = Event::Keyboard(keyboard::Event::KeyPressed {
-        modified_key: key.clone(),
+    let key = Key::Character('v');
+    let paste = Event::Key(KeyEvent::Pressed {
         key,
-        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyV),
-        location: keyboard::Location::Standard,
-        modifiers: keyboard::Modifiers::COMMAND,
+        modifiers: command(),
         text: None,
         repeat: false,
     });
@@ -1888,7 +1823,7 @@ fn modifiers_stay_current_while_the_canvas_is_not_interactive() {
     let scene = chain();
     let selected = BTreeSet::from([1]);
     let tile = scene.module(2).unwrap().bounds().center();
-    let shift = Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT));
+    let shift = Event::Key(KeyEvent::ModifiersChanged(SHIFT));
     let mut state = State::default();
 
     let blocked = PatchCanvas::new(&scene, &selected, |e| e).focus_policy(CanvasFocusPolicy {
@@ -1896,10 +1831,10 @@ fn modifiers_stay_current_while_the_canvas_is_not_interactive() {
         ..CanvasFocusPolicy::default()
     });
     assert!(drive(&blocked, &mut state, &shift, tile).is_empty());
-    assert!(state.modifiers.shift());
+    assert!(state.modifiers.shift);
 
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+    let events = drive(&canvas, &mut state, &click(PointerButton::Left), tile);
     assert!(events.contains(&CanvasEvent::Select(vec![1, 2])), "{events:?}");
 }
 
@@ -1912,14 +1847,14 @@ fn a_button_reports_press_and_a_second_press_is_not_a_reset() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    let first = drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    let first = drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     assert_eq!(first, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
     assert!(matches!(
         state.interaction,
         Interaction::Holding { module: 1, widget: 0 }
     ));
 
-    let second = drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    let second = drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     assert_eq!(
         second,
         vec![
@@ -1945,23 +1880,16 @@ fn a_button_reports_release_outside() {
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
 
-    let down = drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    let down = drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     assert_eq!(down, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
 
-    let moved = drive(
-        &canvas,
-        &mut state,
-        &Event::Mouse(mouse::Event::CursorMoved {
-            position: outside.to_iced(),
-        }),
-        outside,
-    );
+    let moved = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Moved), outside);
     assert!(moved.iter().all(|event| !matches!(event, CanvasEvent::Move { .. })));
 
     let up = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         outside,
     );
     assert_eq!(up, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
@@ -1977,9 +1905,9 @@ fn another_mouse_button_releases_a_hold() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
 
-    let right = drive(&canvas, &mut state, &click(mouse::Button::Right), centre);
+    let right = drive(&canvas, &mut state, &click(PointerButton::Right), centre);
     assert_eq!(right, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
     assert!(matches!(state.interaction, Interaction::Panning { .. }));
 }
@@ -1996,7 +1924,7 @@ fn losing_the_window_releases_a_hold() {
         interaction: Interaction::Holding { module: 1, widget: 0 },
         key_holds: [
             Some(KeyHold {
-                key: keyboard::key::Named::Space,
+                key: Key::Space,
                 module: 1,
                 widget: 0,
             }),
@@ -2004,7 +1932,7 @@ fn losing_the_window_releases_a_hold() {
         ],
         ..State::default()
     };
-    let events = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), centre);
+    let events = drive(&canvas, &mut state, &Event::WindowUnfocused, centre);
     assert_eq!(
         events,
         vec![
@@ -2016,31 +1944,17 @@ fn losing_the_window_releases_a_hold() {
     assert!(state.key_holds.iter().all(Option::is_none));
 }
 
-fn key_event(named: keyboard::key::Named, pressed: bool) -> Event {
-    let key = keyboard::Key::Named(named);
-    let code = match named {
-        keyboard::key::Named::Enter => keyboard::key::Code::Enter,
-        _ => keyboard::key::Code::Space,
-    };
-    let physical_key = keyboard::key::Physical::Code(code);
+fn key_event(named: Key, pressed: bool) -> Event {
+    let key = named;
     if pressed {
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            modified_key: key.clone(),
+        Event::Key(KeyEvent::Pressed {
             key,
-            physical_key,
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
+            modifiers: Modifiers::default(),
             text: None,
             repeat: false,
         })
     } else {
-        Event::Keyboard(keyboard::Event::KeyReleased {
-            modified_key: key.clone(),
-            key,
-            physical_key,
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
-        })
+        Event::Key(KeyEvent::Released { key })
     }
 }
 
@@ -2060,17 +1974,17 @@ fn each_key_releases_only_its_own_hold() {
     };
     let at = Point::new(20.0, 20.0);
 
-    let space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    let space = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(space, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
 
     state.focus.set(1, 1, false);
-    let enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    let enter = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert_eq!(enter, vec![CanvasEvent::ButtonPressed { module: 1, widget: 1 }]);
 
-    let up_space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, false), at);
+    let up_space = drive(&canvas, &mut state, &key_event(Key::Space, false), at);
     assert_eq!(up_space, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
 
-    let up_enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, false), at);
+    let up_enter = drive(&canvas, &mut state, &key_event(Key::Enter, false), at);
     assert_eq!(up_enter, vec![CanvasEvent::ButtonReleased { module: 1, widget: 1 }]);
 }
 
@@ -2085,13 +1999,13 @@ fn releasing_one_key_keeps_a_button_the_other_key_holds() {
         ..State::default()
     };
     let at = Point::new(20.0, 20.0);
-    drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
-    drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    drive(&canvas, &mut state, &key_event(Key::Space, true), at);
+    drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
 
-    let up_space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, false), at);
+    let up_space = drive(&canvas, &mut state, &key_event(Key::Space, false), at);
     assert!(up_space.is_empty());
 
-    let up_enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, false), at);
+    let up_enter = drive(&canvas, &mut state, &key_event(Key::Enter, false), at);
     assert_eq!(up_enter, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
 }
 
@@ -2103,12 +2017,12 @@ fn releasing_another_mouse_button_keeps_the_left_hold() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
 
     let right = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Right)),
         centre,
     );
     assert!(right.is_empty());
@@ -2129,30 +2043,20 @@ fn a_key_hold_survives_pointer_up_and_the_pointer_survives_a_key_up() {
         focus: FocusState::at(1, 0, false, FocusMode::Browse),
         ..State::default()
     };
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
-    drive(
-        &canvas,
-        &mut state,
-        &key_event(keyboard::key::Named::Space, true),
-        centre,
-    );
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
+    drive(&canvas, &mut state, &key_event(Key::Space, true), centre);
 
     let pointer_up = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         centre,
     );
     assert!(pointer_up.is_empty());
     assert!(matches!(state.interaction, Interaction::Idle));
 
     state.interaction = Interaction::Holding { module: 1, widget: 0 };
-    let key_up = drive(
-        &canvas,
-        &mut state,
-        &key_event(keyboard::key::Named::Space, false),
-        centre,
-    );
+    let key_up = drive(&canvas, &mut state, &key_event(Key::Space, false), centre);
     assert!(key_up.is_empty());
     assert!(matches!(
         state.interaction,
@@ -2162,7 +2066,7 @@ fn a_key_hold_survives_pointer_up_and_the_pointer_survives_a_key_up() {
     let pointer_up = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         centre,
     );
     assert_eq!(pointer_up, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
@@ -2178,21 +2082,21 @@ fn space_with_no_focus_toggles_run() {
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
 
-    let space = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    let space = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(space, vec![CanvasEvent::ToggleRun]);
 
-    let mut repeat = key_event(keyboard::key::Named::Space, true);
-    if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = &mut repeat {
+    let mut repeat = key_event(Key::Space, true);
+    if let Event::Key(KeyEvent::Pressed { repeat, .. }) = &mut repeat {
         *repeat = true;
     }
     let again = drive(&canvas, &mut state, &repeat, at);
     assert!(again.is_empty());
 
-    let enter = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    let enter = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert!(enter.is_empty());
 
     state.focus.set(1, 0, false);
-    let focused = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    let focused = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(focused, vec![CanvasEvent::ButtonPressed { module: 1, widget: 0 }]);
 }
 
@@ -2201,23 +2105,20 @@ fn learning<'a>(scene: &'a Scene, selected: &'a BTreeSet<u32>, learn: &'a LearnV
 }
 
 fn arrow_up() -> Event {
-    let key = keyboard::Key::Named(keyboard::key::Named::ArrowUp);
-    Event::Keyboard(keyboard::Event::KeyPressed {
-        modified_key: key.clone(),
+    let key = Key::Up;
+    Event::Key(KeyEvent::Pressed {
         key,
-        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::ArrowUp),
-        location: keyboard::Location::Standard,
-        modifiers: keyboard::Modifiers::default(),
+        modifiers: Modifiers::default(),
         text: None,
         repeat: false,
     })
 }
 
 /// A key event with Shift held, for reverse focus and coarse movement.
-fn shifted(named: keyboard::key::Named) -> Event {
+fn shifted(named: Key) -> Event {
     let mut event = key_event(named, true);
-    if let Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) = &mut event {
-        *modifiers = keyboard::Modifiers::SHIFT;
+    if let Event::Key(KeyEvent::Pressed { modifiers, .. }) = &mut event {
+        *modifiers = SHIFT;
     }
     event
 }
@@ -2236,33 +2137,33 @@ fn keyboard_focus_follows_tiles_and_controls() {
     let none = BTreeSet::new();
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     assert_eq!(
-        drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+        drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
         vec![CanvasEvent::Select(vec![2])]
     );
     assert_eq!(
-        drive(&canvas, &mut state, &shifted(keyboard::key::Named::Tab), at),
+        drive(&canvas, &mut state, &shifted(Key::Tab), at),
         vec![CanvasEvent::Select(vec![1])],
         "Shift-Tab starts at the last tile"
     );
     let selected = BTreeSet::from([2]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     assert_eq!(
-        drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+        drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
         vec![CanvasEvent::Select(vec![1])]
     );
     let first_selected = BTreeSet::from([1]);
     let first_canvas = PatchCanvas::new(&scene, &first_selected, |e| e);
     assert_eq!(
-        drive(&first_canvas, &mut state, &shifted(keyboard::key::Named::Tab), at),
+        drive(&first_canvas, &mut state, &shifted(Key::Tab), at),
         vec![CanvasEvent::Select(vec![2])]
     );
-    assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert_eq!(state.focus.control(), Some((2, 0)));
-    assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Tab, true), at).is_empty());
     assert_eq!(state.focus.control(), Some((2, 2)), "the light is skipped");
-    assert!(drive(&canvas, &mut state, &shifted(keyboard::key::Named::Tab), at).is_empty());
+    assert!(drive(&canvas, &mut state, &shifted(Key::Tab), at).is_empty());
     assert_eq!(state.focus.control(), Some((2, 0)));
-    let toggle = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    let toggle = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(
         toggle,
         vec![CanvasEvent::ToggleRun],
@@ -2307,14 +2208,14 @@ fn a_modifier_alone_keeps_a_released_group() {
     let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
     let mut state = State::default();
     let at = Point::new(700.0, 500.0);
-    for modifier in [keyboard::key::Named::Shift, keyboard::key::Named::Control] {
-        let events = drive(&released, &mut state, &key_event(modifier, true), at);
-        assert!(
-            !events.contains(&CanvasEvent::ArrowGroupEnd),
-            "{modifier:?} alone ended the group: {events:?}"
-        );
-    }
-    let other = drive(&released, &mut state, &key_event(keyboard::key::Named::Tab, true), at);
+    // Which modifier key it was is not told apart here: every one is
+    // `Key::Modifier`. The conversion's own tests cover each of them.
+    let events = drive(&released, &mut state, &key_event(Key::Modifier, true), at);
+    assert!(
+        !events.contains(&CanvasEvent::ArrowGroupEnd),
+        "a modifier alone ended the group: {events:?}"
+    );
+    let other = drive(&released, &mut state, &key_event(Key::Tab, true), at);
     assert!(other.contains(&CanvasEvent::ArrowGroupEnd), "{other:?}");
 }
 
@@ -2339,19 +2240,14 @@ fn keyboard_moves_selected_tile_and_closes_group_on_next_key() {
             }
         ]
     );
-    let up = key_event(keyboard::key::Named::ArrowUp, false);
+    let up = key_event(Key::Up, false);
     assert_eq!(
         untimed(drive(&closed, &mut state, &up, at)),
         vec![CanvasEvent::ArrowReleased { at: epoch() }]
     );
 
     let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
-    let next = untimed(drive(
-        &released,
-        &mut state,
-        &shifted(keyboard::key::Named::ArrowRight),
-        at,
-    ));
+    let next = untimed(drive(&released, &mut state, &shifted(Key::Right), at));
     assert_eq!(
         next,
         vec![
@@ -2384,11 +2280,11 @@ fn pointer_press_ends_an_open_arrow_group() {
     let at = Point::new(700.0, 500.0);
     for group in [ArrowGroupView::Held, released_group()] {
         let canvas = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(group);
-        let press = drive(&canvas, &mut State::default(), &click(mouse::Button::Left), at);
+        let press = drive(&canvas, &mut State::default(), &click(PointerButton::Left), at);
         assert_eq!(press.first(), Some(&CanvasEvent::ArrowGroupEnd), "{group:?}: {press:?}");
     }
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let press = drive(&canvas, &mut State::default(), &click(mouse::Button::Left), at);
+    let press = drive(&canvas, &mut State::default(), &click(PointerButton::Left), at);
     assert!(!press.contains(&CanvasEvent::ArrowGroupEnd), "{press:?}");
 }
 
@@ -2399,12 +2295,7 @@ fn losing_the_window_always_ends_the_arrow_group() {
     let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    let lost = drive(
-        &canvas,
-        &mut State::default(),
-        &Event::Window(window::Event::Unfocused),
-        Point::ORIGIN,
-    );
+    let lost = drive(&canvas, &mut State::default(), &Event::WindowUnfocused, Point::ORIGIN);
     assert!(lost.contains(&CanvasEvent::ArrowGroupEnd), "{lost:?}");
 }
 
@@ -2442,12 +2333,12 @@ fn keys_reach_and_leave_a_panel_control() {
     let at = Point::new(700.0, 500.0);
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     assert_eq!(
-        drive(&canvas, &mut state, &key_event(keyboard::key::Named::Tab, true), at),
+        drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
         vec![CanvasEvent::Select(vec![1])]
     );
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
-    assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at).is_empty());
+    assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert_eq!(state.focus.control(), Some((1, 0)));
     let changed = drive(&canvas, &mut state, &arrow_up(), at);
     assert!(
@@ -2461,12 +2352,7 @@ fn keys_reach_and_leave_a_panel_control() {
         )),
         "{changed:?}"
     );
-    drive(
-        &canvas,
-        &mut state,
-        &key_event(keyboard::key::Named::ArrowUp, false),
-        at,
-    );
+    drive(&canvas, &mut state, &key_event(Key::Up, false), at);
     // The app now shows the group released, so Escape ends it first.
     let released = PatchCanvas::new(&scene, &selected, |e| e).arrow_group(released_group());
     assert_eq!(
@@ -2500,13 +2386,13 @@ fn a_learn_click_arms_and_focuses_without_changing_a_value() {
         ..State::default()
     };
     let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+    let events = drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     assert_eq!(events, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
     assert!(matches!(state.interaction, Interaction::Idle));
     assert_eq!(state.focus.control(), Some((1, 0)));
 
     let button = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), button);
+    let events = drive(&canvas, &mut state, &click(PointerButton::Left), button);
     assert!(
         events.contains(&CanvasEvent::Learn { module: 2, widget: 0 }),
         "{events:?}"
@@ -2529,7 +2415,7 @@ fn outside_learn_mode_a_click_arms_nothing() {
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
     let knob = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+    let events = drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     assert!(
         events.iter().all(|e| !matches!(e, CanvasEvent::Learn { .. })),
         "{events:?}"
@@ -2580,20 +2466,17 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
         focus: FocusState::at(1, 0, true, FocusMode::Browse),
         ..State::default()
     };
-    for key in [keyboard::key::Named::Space, keyboard::key::Named::Enter] {
+    for key in [Key::Space, Key::Enter] {
         let events = drive(&canvas, &mut state, &key_event(key, true), at);
         assert_eq!(events, vec![CanvasEvent::Learn { module: 1, widget: 0 }]);
     }
     assert!(drive(&canvas, &mut state, &arrow_up(), at).is_empty());
 
     let escape = {
-        let key = keyboard::Key::Named(keyboard::key::Named::Escape);
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            modified_key: key.clone(),
-            key: key.clone(),
-            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
+        let key = Key::Escape;
+        Event::Key(KeyEvent::Pressed {
+            key,
+            modifiers: Modifiers::default(),
             text: None,
             repeat: false,
         })
@@ -2601,13 +2484,7 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
-    canvas.handle(
-        &mut state,
-        &escape,
-        bounds,
-        mouse::Cursor::Available(at.to_iced()),
-        &mut shell,
-    );
+    canvas.handle(&mut state, Some(&escape), Some(at), bounds, Instant::now(), &mut shell);
     assert_eq!(
         shell.event_status(),
         iced::event::Status::Ignored,
@@ -2619,9 +2496,10 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
     let mut next_shell = Shell::new(&mut next_messages);
     canvas.handle(
         &mut state,
-        &escape,
+        Some(&escape),
+        Some(at),
         bounds,
-        mouse::Cursor::Available(at.to_iced()),
+        Instant::now(),
         &mut next_shell,
     );
     assert_eq!(
@@ -2631,7 +2509,7 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
     );
 
     // With nothing focused, Space is still the Run shortcut.
-    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    let events = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(events, vec![CanvasEvent::ToggleRun]);
 }
 
@@ -2662,8 +2540,10 @@ fn knob_scene() -> (Scene, Point) {
     (scene, knob)
 }
 
-fn moved(to: Point) -> Event {
-    Event::Mouse(mouse::Event::CursorMoved { position: to.to_iced() })
+/// A pointer move. The place travels beside the event, so `_to` is only
+/// here to say where the caller means.
+fn moved(_to: Point) -> Event {
+    Event::Pointer(PointerEvent::Moved)
 }
 
 /// A source tile with one output, and a tile with a knob, a light, and
@@ -2688,7 +2568,7 @@ const OUT: PortRef = PortRef {
 fn drop_on(canvas: &PatchCanvas<'_, CanvasEvent>, scene: &Scene, widget: usize) -> (Vec<CanvasEvent>, usize) {
     let mut state = State::default();
     let start = scene.port_position(OUT).unwrap();
-    drive(canvas, &mut state, &click(mouse::Button::Left), start);
+    drive(canvas, &mut state, &click(PointerButton::Left), start);
     let over = scene.module(2).unwrap().widget_bounds(widget).unwrap().center();
     drive(canvas, &mut state, &moved(over), over);
     let shapes = canvas.overlay(&state).shapes.len();
@@ -2799,13 +2679,10 @@ fn output_hover_text_goes_above_its_badge() {
 }
 
 fn escape() -> Event {
-    let key = keyboard::Key::Named(keyboard::key::Named::Escape);
-    Event::Keyboard(keyboard::Event::KeyPressed {
-        modified_key: key.clone(),
+    let key = Key::Escape;
+    Event::Key(KeyEvent::Pressed {
         key,
-        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
-        location: keyboard::Location::Standard,
-        modifiers: keyboard::Modifiers::default(),
+        modifiers: Modifiers::default(),
         text: None,
         repeat: false,
     })
@@ -2825,7 +2702,7 @@ fn a_still_seeds_pointer_pin_drag_and_hover_text() {
         ..Still::default()
     };
     let canvas = PatchCanvas::new(&scene, &none, |e| e).values(&values).still(still);
-    let state = canvas.still_state(still);
+    let state = canvas.still_state(still, Instant::now());
     assert_eq!(state.hover, Some(Hit::Widget { module: 2, widget: 0 }));
     assert_eq!(state.pinned, Some(OUT));
     assert_eq!(state.hover_text.shown(), Some(HoverTarget::Control(2, 0)));
@@ -2841,7 +2718,7 @@ fn a_still_seeds_pointer_pin_drag_and_hover_text() {
         pinned: None,
         ..still
     };
-    let state = canvas.still_state(wiring);
+    let state = canvas.still_state(wiring, Instant::now());
     assert!(matches!(
         state.interaction,
         Interaction::Wiring {
@@ -2852,18 +2729,21 @@ fn a_still_seeds_pointer_pin_drag_and_hover_text() {
     assert_eq!(state.hover_text.shown(), None);
     let overlay = canvas.overlay(&state);
     assert_eq!(overlay.cables.len(), 2, "the line and the loose cable");
-    let resting = canvas.overlay(&canvas.still_state(Still { drag: None, ..wiring }));
+    let resting = canvas.overlay(&canvas.still_state(Still { drag: None, ..wiring }, Instant::now()));
     assert_eq!(overlay.shapes.len(), resting.shapes.len() + 1, "the drop highlight");
 
     // A cable pulled off an input assigns nothing on a drop, so the
     // control is not highlighted.
-    let pulled = canvas.overlay(&canvas.still_state(Still {
-        drag: Some(StillDrag::Wire {
-            from: OUT,
-            pulled: true,
-        }),
-        ..wiring
-    }));
+    let pulled = canvas.overlay(&canvas.still_state(
+        Still {
+            drag: Some(StillDrag::Wire {
+                from: OUT,
+                pulled: true,
+            }),
+            ..wiring
+        },
+        Instant::now(),
+    ));
     assert_eq!(pulled.shapes.len(), resting.shapes.len());
 }
 
@@ -2889,7 +2769,7 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
     }
 
     drive(&canvas, &mut state, &moved(badge), badge);
-    assert!(drive(&canvas, &mut state, &click(mouse::Button::Left), badge).is_empty());
+    assert!(drive(&canvas, &mut state, &click(PointerButton::Left), badge).is_empty());
     drive(&canvas, &mut state, &released(), badge);
     drive(&canvas, &mut state, &moved(empty), empty);
     assert_eq!(state.pinned, Some(OUT));
@@ -2900,9 +2780,10 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     canvas.handle(
         &mut state,
-        &escape(),
+        Some(&escape()),
+        Some(empty),
         bounds,
-        mouse::Cursor::Available(empty.to_iced()),
+        Instant::now(),
         &mut shell,
     );
     assert_eq!(shell.event_status(), iced::event::Status::Captured);
@@ -2911,9 +2792,10 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
     let mut shell = Shell::new(&mut messages);
     canvas.handle(
         &mut state,
-        &escape(),
+        Some(&escape()),
+        Some(empty),
         bounds,
-        mouse::Cursor::Available(empty.to_iced()),
+        Instant::now(),
         &mut shell,
     );
     assert_eq!(
@@ -2923,8 +2805,8 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
     );
 
     // Two clicks on the badge pin and unpin.
-    drive(&canvas, &mut state, &click(mouse::Button::Left), badge);
-    drive(&canvas, &mut state, &click(mouse::Button::Left), badge);
+    drive(&canvas, &mut state, &click(PointerButton::Left), badge);
+    drive(&canvas, &mut state, &click(PointerButton::Left), badge);
     assert_eq!(state.pinned, None);
 }
 
@@ -3003,7 +2885,7 @@ fn dragging_the_range_ring_changes_depth() {
         pinned: Some(OUT),
         ..State::default()
     };
-    let down = drive(&canvas, &mut state, &click(mouse::Button::Left), ring);
+    let down = drive(&canvas, &mut state, &click(PointerButton::Left), ring);
     assert!(down.contains(&CanvasEvent::GestureStart), "{down:?}");
     // The selection stays: a selected source picks the assignment.
     assert!(!down.iter().any(|e| matches!(e, CanvasEvent::Select(_))), "{down:?}");
@@ -3029,7 +2911,7 @@ fn dragging_the_range_ring_changes_depth() {
     );
 
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), centre);
+    drive(&canvas, &mut state, &click(PointerButton::Left), centre);
     let up = Point::new(centre.x, centre.y - 20.0);
     let turned = drive(&canvas, &mut state, &moved(up), up);
     assert!(
@@ -3059,9 +2941,10 @@ fn a_pin_without_its_badge_takes_no_escape() {
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     canvas.handle(
         &mut state,
-        &escape(),
+        Some(&escape()),
+        Some(Point::ORIGIN),
         bounds,
-        mouse::Cursor::Available(Point::ORIGIN.to_iced()),
+        Instant::now(),
         &mut shell,
     );
     assert_eq!(shell.event_status(), iced::event::Status::Ignored);
@@ -3079,7 +2962,7 @@ fn a_new_patch_clears_old_canvas_state() {
         framed_key: Some(1),
         ..State::default()
     };
-    let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+    let redraw = Event::Redraw;
     let events = drive(&canvas, &mut state, &redraw, Point::ORIGIN);
     assert!(!events.contains(&CanvasEvent::ArrowGroupEnd), "{events:?}");
     assert_eq!(state.pinned, None);
@@ -3093,19 +2976,19 @@ fn a_redraw_past_the_deadline_reports_it() {
     let none = BTreeSet::new();
     let due = Instant::now() + Duration::from_millis(100);
     let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
-    let redraw = |at| Event::Window(window::Event::RedrawRequested(at));
     let mut state = State::default();
-    let early = drive(
+    let early = drive_at(
         &canvas,
         &mut state,
-        &redraw(due - Duration::from_millis(1)),
+        Some(&Event::Redraw),
         Point::ORIGIN,
+        due - Duration::from_millis(1),
     );
     assert!(
         !early.iter().any(|e| matches!(e, CanvasEvent::ArrowGroupDue { .. })),
         "{early:?}"
     );
-    let late = drive(&canvas, &mut state, &redraw(due), Point::ORIGIN);
+    let late = drive_at(&canvas, &mut state, Some(&Event::Redraw), Point::ORIGIN, due);
     assert!(late.contains(&CanvasEvent::ArrowGroupDue { at: due }), "{late:?}");
 }
 
@@ -3124,45 +3007,50 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
     // Already framed and reported, so a redraw asks for nothing itself.
     let mut state = State::default();
     let at = Point::new(100.0, 100.0);
-    let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+    let redraw = Event::Redraw;
     canvas.on_event(
         &mut state,
-        &redraw,
+        Some(&redraw),
+        Some(at),
         bounds,
-        mouse::Cursor::Available(at.to_iced()),
+        Instant::now(),
         &mut Shell::new(&mut Vec::new()),
     );
-    for event in [
-        redraw,
-        Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT)),
-    ] {
+    for event in [redraw, Event::Key(KeyEvent::ModifiersChanged(SHIFT))] {
         let mut messages = Vec::new();
         let mut shell = Shell::new(&mut messages);
-        canvas.on_event(
-            &mut state,
-            &event,
-            bounds,
-            mouse::Cursor::Available(at.to_iced()),
-            &mut shell,
-        );
+        canvas.on_event(&mut state, Some(&event), Some(at), bounds, Instant::now(), &mut shell);
         assert_eq!(shell.redraw_request(), window::RedrawRequest::At(due), "{event:?}");
     }
     let closed = PatchCanvas::new(&scene, &none, |e| e);
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    let shift = Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT));
-    closed.on_event(
-        &mut state,
-        &shift,
-        bounds,
-        mouse::Cursor::Available(at.to_iced()),
-        &mut shell,
-    );
+    let shift = Event::Key(KeyEvent::ModifiersChanged(SHIFT));
+    closed.on_event(&mut state, Some(&shift), Some(at), bounds, Instant::now(), &mut shell);
     assert_ne!(
         shell.redraw_request(),
         window::RedrawRequest::At(due),
         "no group, no wake"
     );
+}
+
+/// Something the window reports that means nothing to the canvas, such as
+/// the window moving, still asks for the redraw at the deadline. Without
+/// this the deadline could wait for some later event.
+#[test]
+fn an_event_with_no_meaning_still_asks_for_a_redraw_at_the_deadline() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let due = Instant::now() + Duration::from_millis(400);
+    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let mut state = State::default();
+    let mut messages = Vec::new();
+    let mut shell = Shell::new(&mut messages);
+    canvas.on_event(&mut state, None, None, bounds, Instant::now(), &mut shell);
+    assert_eq!(shell.redraw_request(), window::RedrawRequest::At(due));
+    assert_eq!(shell.event_status(), iced::event::Status::Ignored);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 /// The lines are built once for a given pin, pointer, and selection,
@@ -3266,8 +3154,8 @@ fn matrix_keyboard_focus_keeps_canvas_pointer_active() {
     });
     let mut state = State::default();
 
-    assert!(drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), tile).is_empty());
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Left), tile);
+    assert!(drive(&canvas, &mut state, &key_event(Key::Space, true), tile).is_empty());
+    let events = drive(&canvas, &mut state, &click(PointerButton::Left), tile);
     assert!(events.contains(&CanvasEvent::Select(vec![2])), "{events:?}");
 }
 
@@ -3292,7 +3180,7 @@ fn a_zero_length_arc_still_takes_a_depth_drag() {
     drive(
         &canvas,
         &mut state,
-        &click(mouse::Button::Left),
+        &click(PointerButton::Left),
         Point::new(centre.x + 12.0, centre.y),
     );
     assert!(matches!(state.interaction, Interaction::Depth { .. }));
@@ -3344,7 +3232,7 @@ fn an_unmodulated_knob_has_no_range_ring() {
     // Beside the knob, inside its cell, where the ring would be.
     let ring = Point::new(centre.x + 12.0, centre.y);
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), ring);
+    drive(&canvas, &mut state, &click(PointerButton::Left), ring);
     assert!(matches!(state.interaction, Interaction::Turning { .. }));
 }
 
@@ -3373,7 +3261,7 @@ fn a_pulled_cable_dropped_on_a_control_does_not_assign() {
         index: 0,
     };
     let start = scene.port_position(input).unwrap();
-    let down = drive(&canvas, &mut state, &click(mouse::Button::Left), start);
+    let down = drive(&canvas, &mut state, &click(PointerButton::Left), start);
     assert!(down.contains(&CanvasEvent::Disconnect(input)), "{down:?}");
     let knob = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
     drive(&canvas, &mut state, &moved(knob), knob);
@@ -3390,7 +3278,7 @@ fn an_input_drag_does_not_assign() {
     let mut state = State::default();
     let input = PortRef { output: false, ..OUT };
     let start = scene.port_position(input).unwrap();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), start);
+    drive(&canvas, &mut state, &click(PointerButton::Left), start);
     let knob = scene.module(2).unwrap().widget_bounds(0).unwrap().center();
     drive(&canvas, &mut state, &moved(knob), knob);
     assert_eq!(
@@ -3400,7 +3288,7 @@ fn an_input_drag_does_not_assign() {
 }
 
 fn released() -> Event {
-    Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+    Event::Pointer(PointerEvent::Released(PointerButton::Left))
 }
 
 /// A knob drag is one gesture: start at pointer down, end at pointer up
@@ -3411,7 +3299,7 @@ fn a_knob_drag_is_bracketed_by_a_gesture_start_and_end() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    let down = drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
+    let down = drive(&canvas, &mut state, &click(PointerButton::Left), knob);
     assert_eq!(down, vec![CanvasEvent::GestureStart]);
     let up = Point::new(knob.x, knob.y - 20.0);
     let during = drive(&canvas, &mut state, &moved(up), up);
@@ -3430,8 +3318,8 @@ fn losing_the_window_ends_a_drag_gesture() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
-    let lost = drive(&canvas, &mut state, &Event::Window(window::Event::Unfocused), knob);
+    drive(&canvas, &mut state, &click(PointerButton::Left), knob);
+    let lost = drive(&canvas, &mut state, &Event::WindowUnfocused, knob);
     // The arrow group ends too: losing the window always sends its end.
     assert_eq!(lost, vec![CanvasEvent::GestureEnd, CanvasEvent::ArrowGroupEnd]);
     let later = drive(&canvas, &mut state, &released(), knob);
@@ -3446,8 +3334,8 @@ fn another_button_during_a_drag_ends_the_gesture() {
     let selected = BTreeSet::from([1]);
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let mut state = State::default();
-    drive(&canvas, &mut state, &click(mouse::Button::Left), knob);
-    let events = drive(&canvas, &mut state, &click(mouse::Button::Right), knob);
+    drive(&canvas, &mut state, &click(PointerButton::Left), knob);
+    let events = drive(&canvas, &mut state, &click(PointerButton::Right), knob);
     assert_eq!(events, vec![CanvasEvent::GestureEnd]);
 }
 
@@ -3472,23 +3360,14 @@ fn a_held_arrow_key_reports_each_step_and_the_release() {
         !first.iter().any(|e| matches!(e, CanvasEvent::GestureStart)),
         "an arrow sends no drag gesture: {first:?}"
     );
-    let Event::Keyboard(keyboard::Event::KeyPressed {
-        key,
-        modified_key,
-        physical_key,
-        location,
-        modifiers,
-        text,
-        ..
+    let Event::Key(KeyEvent::Pressed {
+        key, modifiers, text, ..
     }) = arrow_up()
     else {
         unreachable!()
     };
-    let again = Event::Keyboard(keyboard::Event::KeyPressed {
-        key: key.clone(),
-        modified_key,
-        physical_key,
-        location,
+    let again = Event::Key(KeyEvent::Pressed {
+        key,
         modifiers,
         text,
         repeat: true,
@@ -3499,13 +3378,7 @@ fn a_held_arrow_key_reports_each_step_and_the_release() {
         Some(&CanvasEvent::ArrowStep { at: epoch() }),
         "{repeat:?}"
     );
-    let up = Event::Keyboard(keyboard::Event::KeyReleased {
-        modified_key: key.clone(),
-        key,
-        physical_key,
-        location: keyboard::Location::Standard,
-        modifiers,
-    });
+    let up = Event::Key(KeyEvent::Released { key });
     assert_eq!(
         untimed(drive(&canvas, &mut state, &up, knob)),
         vec![CanvasEvent::ArrowReleased { at: epoch() }]
@@ -3514,11 +3387,11 @@ fn a_held_arrow_key_reports_each_step_and_the_release() {
 
 /// A right press and release at `at`, with no move in between.
 fn right_click(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, at: Point) -> Vec<CanvasEvent> {
-    let mut events = drive(canvas, state, &click(mouse::Button::Right), at);
+    let mut events = drive(canvas, state, &click(PointerButton::Right), at);
     events.extend(drive(
         canvas,
         state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Right)),
         at,
     ));
     events
@@ -3596,20 +3469,16 @@ fn right_drag_pans_and_opens_no_menu() {
         })
         .unwrap();
     let mut state = State::default();
-    let mut events = drive(&canvas, &mut state, &click(mouse::Button::Right), port);
+    let mut events = drive(&canvas, &mut state, &click(PointerButton::Right), port);
     let away = port + Vector::new(30.0, 0.0);
-    let moved = Event::Mouse(mouse::Event::CursorMoved {
-        position: away.to_iced(),
-    });
+    let moved = Event::Pointer(PointerEvent::Moved);
     events.extend(drive(&canvas, &mut state, &moved, away));
-    let back = Event::Mouse(mouse::Event::CursorMoved {
-        position: port.to_iced(),
-    });
+    let back = Event::Pointer(PointerEvent::Moved);
     events.extend(drive(&canvas, &mut state, &back, port));
     events.extend(drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Right)),
         port,
     ));
     assert!(events.is_empty(), "{events:?}");
@@ -3630,18 +3499,18 @@ fn only_the_right_release_opens_the_menu() {
         })
         .unwrap();
     let mut state = State::default();
-    let pressed = drive(&canvas, &mut state, &click(mouse::Button::Right), port);
+    let pressed = drive(&canvas, &mut state, &click(PointerButton::Right), port);
     let left = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Left)),
         port,
     );
     assert!(pressed.is_empty() && left.is_empty(), "{left:?}");
     let right = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Right)),
         port,
     );
     assert!(matches!(right.as_slice(), [CanvasEvent::ProbeMenu { .. }]), "{right:?}");
@@ -3677,11 +3546,11 @@ fn right_click_elsewhere_opens_no_menu() {
         })
         .unwrap();
     let mut state = State::default();
-    let mut events = drive(&canvas, &mut state, &click(mouse::Button::Middle), output);
+    let mut events = drive(&canvas, &mut state, &click(PointerButton::Middle), output);
     events.extend(drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Middle)),
         output,
     ));
     assert!(events.is_empty(), "{events:?}");
@@ -3784,7 +3653,7 @@ fn hiding_a_range_ends_the_inside() {
     let (shown, hidden) = (tile(false), tile(true));
     let selected = BTreeSet::from([1]);
     let at = shown.module(1).unwrap().bounds().center();
-    let moved = Event::Mouse(mouse::Event::CursorMoved { position: at.to_iced() });
+    let moved = Event::Pointer(PointerEvent::Moved);
     let mut state = State {
         focus: FocusState::at(
             1,
@@ -3807,12 +3676,7 @@ fn hiding_a_range_ends_the_inside() {
     assert!(state.focus.range_part().is_none(), "hiding ends it");
 
     let canvas = PatchCanvas::new(&shown, &selected, |event| event);
-    let events = drive(
-        &canvas,
-        &mut state,
-        &key_event(keyboard::key::Named::ArrowRight, true),
-        at,
-    );
+    let events = drive(&canvas, &mut state, &key_event(Key::Right, true), at);
     assert!(
         !events
             .iter()
@@ -3839,15 +3703,15 @@ fn a_focused_xy_pad_does_not_use_space() {
         ..State::default()
     };
     let at = scene.module(1).unwrap().bounds().center();
-    let events = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Space, true), at);
+    let events = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
     assert_eq!(events, vec![CanvasEvent::ToggleRun]);
 }
 
 /// The second press of a double-click, with the command modifier held.
-fn command_key(named: keyboard::key::Named) -> Event {
+fn command_key(named: Key) -> Event {
     let mut event = key_event(named, true);
-    if let Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) = &mut event {
-        *modifiers = keyboard::Modifiers::COMMAND;
+    if let Event::Key(KeyEvent::Pressed { modifiers, .. }) = &mut event {
+        *modifiers = command();
     }
     event
 }
@@ -3857,7 +3721,7 @@ fn captured(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Ev
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let mut messages = Vec::new();
     let mut shell = Shell::new(&mut messages);
-    canvas.handle(state, event, bounds, mouse::Cursor::Available(at.to_iced()), &mut shell);
+    canvas.handle(state, Some(event), Some(at), bounds, Instant::now(), &mut shell);
     shell.event_status() == iced::event::Status::Captured
 }
 
@@ -3872,22 +3736,15 @@ fn a_header_double_click_opens_the_tile_and_starts_no_move() {
     let tile = scene.module(1).unwrap().bounds();
     let header = Point::new(tile.center_x(), tile.y + HEADER * 0.5);
     let mut state = State::default();
-    let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
-    let first = drive(&canvas, &mut state, &click(mouse::Button::Left), header);
+    let released = Event::Pointer(PointerEvent::Released(PointerButton::Left));
+    let first = drive(&canvas, &mut state, &click(PointerButton::Left), header);
     assert_eq!(first, vec![CanvasEvent::GestureStart], "a single press still moves");
     drive(&canvas, &mut state, &released, header);
-    let second = drive(&canvas, &mut state, &click(mouse::Button::Left), header);
+    let second = drive(&canvas, &mut state, &click(PointerButton::Left), header);
     assert_eq!(second, vec![CanvasEvent::OpenTile(1)]);
     assert!(matches!(state.interaction, Interaction::Idle), "no drag is left open");
     let away = header + Vector::new(100.0, 100.0);
-    let moved = drive(
-        &canvas,
-        &mut state,
-        &Event::Mouse(mouse::Event::CursorMoved {
-            position: away.to_iced(),
-        }),
-        away,
-    );
+    let moved = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Moved), away);
     assert!(moved.is_empty(), "{moved:?}");
     let up = drive(&canvas, &mut state, &released, away);
     assert!(up.is_empty(), "{up:?}");
@@ -3904,10 +3761,10 @@ fn a_double_click_on_the_tile_body_opens_nothing() {
     let body = tile.center();
     assert!(body.y >= tile.y + HEADER, "the centre is below the header");
     let mut state = State::default();
-    let released = Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left));
-    drive(&canvas, &mut state, &click(mouse::Button::Left), body);
+    let released = Event::Pointer(PointerEvent::Released(PointerButton::Left));
+    drive(&canvas, &mut state, &click(PointerButton::Left), body);
     drive(&canvas, &mut state, &released, body);
-    let second = drive(&canvas, &mut state, &click(mouse::Button::Left), body);
+    let second = drive(&canvas, &mut state, &click(PointerButton::Left), body);
     assert_eq!(second, vec![CanvasEvent::GestureStart]);
     assert!(matches!(state.interaction, Interaction::Moving { .. }));
 }
@@ -3920,22 +3777,17 @@ fn the_end_of_a_pan_drag_reports_the_camera_once() {
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     let mut state = State::default();
     let start = Point::new(400.0, 300.0);
-    let mut events = drive(&canvas, &mut state, &click(mouse::Button::Middle), start);
+    let mut events = drive(&canvas, &mut state, &click(PointerButton::Middle), start);
     for step in 1..=3 {
         let to = start + Vector::new(10.0 * step as f32, 5.0 * step as f32);
-        events.extend(drive(
-            &canvas,
-            &mut state,
-            &Event::Mouse(mouse::Event::CursorMoved { position: to.to_iced() }),
-            to,
-        ));
+        events.extend(drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Moved), to));
     }
     assert!(events.is_empty(), "nothing before the release: {events:?}");
     let end = start + Vector::new(30.0, 15.0);
     let released = drive(
         &canvas,
         &mut state,
-        &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)),
+        &Event::Pointer(PointerEvent::Released(PointerButton::Middle)),
         end,
     );
     assert_eq!(released, vec![CanvasEvent::Camera(state.camera)]);
@@ -3950,13 +3802,11 @@ fn a_zoom_step_and_a_frame_report_the_camera() {
     let canvas = PatchCanvas::new(&scene, &none, |e| e);
     let mut state = State::default();
     let at = Point::new(200.0, 150.0);
-    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-    });
+    let wheel = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }));
     let zoomed = drive(&canvas, &mut state, &wheel, at);
     assert_eq!(zoomed, vec![CanvasEvent::Camera(state.camera)]);
     assert!(state.camera.zoom > 1.0);
-    let framed = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Home, true), at);
+    let framed = drive(&canvas, &mut state, &key_event(Key::Home, true), at);
     assert_eq!(framed, vec![CanvasEvent::Camera(state.camera)]);
 }
 
@@ -3974,7 +3824,7 @@ fn a_level_change_adopts_its_camera_or_frames_the_scene() {
     };
     let scene = chain();
     let none = BTreeSet::new();
-    let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+    let redraw = Event::Redraw;
     let kept = Camera {
         origin: Point::new(-120.0, 80.0),
         zoom: 1.5,
@@ -4018,22 +3868,12 @@ fn command_enter_is_left_to_the_app() {
     let canvas = PatchCanvas::new(&scene, &selected, |e| e);
     let at = scene.module(1).unwrap().bounds().center();
     let mut state = State::default();
-    assert!(!captured(
-        &canvas,
-        &mut state,
-        &command_key(keyboard::key::Named::Enter),
-        at
-    ));
+    assert!(!captured(&canvas, &mut state, &command_key(Key::Enter), at));
     assert_eq!(state.focus.control(), None);
-    let plain = drive(&canvas, &mut state, &key_event(keyboard::key::Named::Enter, true), at);
+    let plain = drive(&canvas, &mut state, &key_event(Key::Enter, true), at);
     assert!(plain.is_empty(), "{plain:?}");
     assert_eq!(state.focus.control(), Some((1, 0)));
     // With a control focused, Ctrl+Enter is still not the canvas's.
-    assert!(!captured(
-        &canvas,
-        &mut state,
-        &command_key(keyboard::key::Named::Enter),
-        at
-    ));
+    assert!(!captured(&canvas, &mut state, &command_key(Key::Enter), at));
     assert_eq!(state.focus.control(), Some((1, 0)));
 }

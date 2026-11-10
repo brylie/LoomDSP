@@ -22,9 +22,11 @@ use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph as _, Text};
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
-use iced::{Element, Event, Font, Length, Pixels};
-use iced::{alignment, keyboard, mouse, window};
-use loom_ui_core::{Color, Point, Rect, Size, Vector};
+use iced::{Element, Font, Length, Pixels};
+use iced::{alignment, mouse, window};
+use loom_ui_core::{
+    Color, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, Vector,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -435,16 +437,22 @@ impl<'a, Message> PatchCanvas<'a, Message> {
 
     /// Everything one event does: what it means, the hover text, and the
     /// wake-up for the arrow group's deadline.
+    ///
+    /// `event` is `None` for something the window reported that means
+    /// nothing to the canvas. The steps that run on every event still run.
+    /// `pointer` is the pointer in window pixels, or `None` when the canvas
+    /// may not see it. `now` is the time of the event.
     fn on_event(
         &self,
         state: &mut State,
-        event: &Event,
+        event: Option<&Event>,
+        pointer: Option<Point>,
         bounds: Rect,
-        cursor: mouse::Cursor,
+        now: Instant,
         shell: &mut Shell<'_, Message>,
     ) {
-        self.handle(state, event, bounds, cursor, shell);
-        self.sync_hover_text(state, event, shell);
+        self.handle(state, event, pointer, bounds, now, shell);
+        self.sync_hover_text(state, event, now, shell);
         // Asked again on every event, because a later request for the next
         // frame replaces a pending one for a time, and the group would then
         // stay open on an idle patch.
@@ -503,8 +511,8 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     }
 
     /// Reports an arrow key about to edit.
-    fn arrow_step(&self, shell: &mut Shell<'_, Message>) {
-        self.emit(shell, CanvasEvent::ArrowStep { at: Instant::now() });
+    fn arrow_step(&self, now: Instant, shell: &mut Shell<'_, Message>) {
+        self.emit(shell, CanvasEvent::ArrowStep { at: now });
     }
 }
 
@@ -729,7 +737,7 @@ struct State {
     hover: Option<Hit>,
     /// Cursor in world coordinates, while over the canvas or dragging.
     cursor: Option<Point>,
-    modifiers: keyboard::Modifiers,
+    modifiers: Modifiers,
     geometry: RefCell<Option<Arc<Geometry>>>,
     controls: RefCell<Option<Arc<ControlGeometry>>>,
     traces: RefCell<Option<Arc<TraceGeometry>>>,
@@ -787,7 +795,7 @@ impl State {
 /// One key holding one button down.
 #[derive(Clone, Copy)]
 struct KeyHold {
-    key: keyboard::key::Named,
+    key: Key,
     module: u32,
     widget: usize,
 }
@@ -798,8 +806,9 @@ fn double_click(last: Option<(Instant, Point)>, screen: Point) -> bool {
     last.is_some_and(|(at, point)| at.elapsed() < DOUBLE_CLICK && point.distance(screen) < DOUBLE_CLICK_SLOP)
 }
 
-fn relative(cursor: mouse::Cursor, bounds: Rect) -> Option<Point> {
-    cursor.position().map(|p| Point::new(p.x - bounds.x, p.y - bounds.y))
+/// The pointer's place measured from the top-left corner of `bounds`.
+fn relative(pointer: Option<Point>, bounds: Rect) -> Option<Point> {
+    pointer.map(|p| Point::new(p.x - bounds.x, p.y - bounds.y))
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for PatchCanvas<'_, Message>
@@ -812,7 +821,7 @@ where
 
     fn state(&self) -> tree::State {
         let state = match self.still {
-            Some(still) => self.still_state(still),
+            Some(still) => self.still_state(still, Instant::now()),
             None => State::default(),
         };
         tree::State::new(state)
@@ -829,7 +838,7 @@ where
     fn update(
         &mut self,
         tree: &mut Tree,
-        event: &Event,
+        event: &iced::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _renderer: &Renderer,
@@ -838,7 +847,15 @@ where
         _viewport: &iced::Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State>();
-        self.on_event(state, event, layout.bounds().to_core(), cursor, shell);
+        // A redraw carries the time of its frame. Every other event
+        // happened now.
+        let now = match event {
+            iced::Event::Window(window::Event::RedrawRequested(at)) => *at,
+            _ => Instant::now(),
+        };
+        let event = crate::iced_convert::event_to_core(event);
+        let pointer = cursor.position().map(|point| point.to_core());
+        self.on_event(state, event.as_ref(), pointer, layout.bounds().to_core(), now, shell);
     }
 
     fn operate(

@@ -74,13 +74,12 @@ impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn select_popup_key(
         &self,
         state: &mut State,
-        key: &keyboard::Key,
-        modifiers: keyboard::Modifiers,
+        key: &Key,
+        modifiers: Modifiers,
         text: Option<&str>,
         repeat: bool,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
-        use keyboard::key::Named;
         let (Some(mut popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
             return false;
         };
@@ -88,14 +87,14 @@ impl<Message> PatchCanvas<'_, Message> {
             return false;
         };
         let rows = select_rows(state.size.height, options.len());
-        let used = match key.as_ref() {
-            keyboard::Key::Named(Named::Escape) => {
+        let used = match *key {
+            Key::Escape => {
                 state.focus.close_popup();
                 state.last_click = None;
                 true
             }
-            keyboard::Key::Named(named @ (Named::ArrowUp | Named::ArrowDown)) => {
-                let delta = if named == Named::ArrowUp { -1 } else { 1 };
+            named @ (Key::Up | Key::Down) => {
+                let delta = if named == Key::Up { -1 } else { 1 };
                 popup.highlight =
                     (popup.highlight as isize + delta).clamp(0, options.len().saturating_sub(1) as isize) as usize;
                 popup.reveal_highlight(rows);
@@ -104,14 +103,14 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 true
             }
-            keyboard::Key::Named(Named::Enter | Named::Space) => {
+            Key::Enter | Key::Space => {
                 if !repeat {
                     self.set_control(shell, module, widget, popup.highlight as f32);
                     state.focus.close_popup();
                 }
                 true
             }
-            _ if modifiers.command() || modifiers.control() || modifiers.alt() => false,
+            _ if modifiers.shortcut() || modifiers.control || modifiers.alt => false,
             _ => {
                 if let Some(next) = text.and_then(|text| type_ahead(options, popup.highlight, text)) {
                     popup.highlight = next;
@@ -141,16 +140,18 @@ impl<Message> PatchCanvas<'_, Message> {
         &self,
         state: &mut State,
         event: &Event,
+        pointer: Option<Point>,
         bounds: Rect,
-        over: bool,
-        screen: Option<Point>,
+        now: Instant,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
+        let over = pointer.is_some_and(|at| bounds.contains(at));
+        let screen = relative(pointer, bounds);
         let (Some(mut popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
             return false;
         };
         match event {
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if over && screen.is_some() => {
+            Event::Pointer(PointerEvent::Scrolled(delta)) if over && screen.is_some() => {
                 let list = self.select_popup_bounds_for(state, bounds, module, widget);
                 if let (Some(list), Some(at)) = (list, screen)
                     && list.contains(at)
@@ -171,7 +172,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.capture_event();
                 true
             }
-            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over => {
+            Event::Pointer(PointerEvent::Pressed(_)) if !over => {
                 state.last_click = None;
                 // The press took the keys from the canvas, as it does with no
                 // list open.
@@ -179,13 +180,13 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
                 true
             }
-            Event::Mouse(mouse::Event::ButtonPressed(button)) => {
+            Event::Pointer(PointerEvent::Pressed(button)) => {
                 let Some(screen) = screen else {
                     return true;
                 };
                 state.focus.close_popup();
                 let last_click = state.last_click.take();
-                let left = *button == mouse::Button::Left;
+                let left = *button == PointerButton::Left;
                 // A press on a row is always a pick, even right after the
                 // click that opened the list.
                 if let Some(rect) = self.select_popup_bounds_for(state, bounds, module, widget)
@@ -199,7 +200,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     && self.scene.hit(state.camera.to_world(screen), state.hit_radius())
                         == (Hit::Widget { module, widget })
                     && last_click.is_some_and(|(at, clicked, clicked_widget, _)| {
-                        clicked == module && clicked_widget == widget && Instant::now() - at < DOUBLE_CLICK
+                        clicked == module && clicked_widget == widget && now - at < DOUBLE_CLICK
                     })
                 {
                     self.emit(
@@ -215,7 +216,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.capture_event();
                 true
             }
-            Event::Window(window::Event::Unfocused) => {
+            Event::WindowUnfocused => {
                 state.focus.close_popup();
                 false
             }
@@ -260,10 +261,10 @@ impl SelectPopup {
     /// Scrolls for one wheel event. A mouse wheel moves whole rows, one per
     /// line. A trackpad sends small pixel steps, so they add up in `wheel`
     /// until they make a row.
-    fn scroll_by(&mut self, delta: mouse::ScrollDelta, count: usize, rows: usize) {
+    fn scroll_by(&mut self, delta: ScrollDelta, count: usize, rows: usize) {
         let rows_moved = match delta {
-            mouse::ScrollDelta::Lines { y, .. } => y,
-            mouse::ScrollDelta::Pixels { y, .. } => y / SELECT_ROW_PX,
+            ScrollDelta::Lines { y, .. } => y,
+            ScrollDelta::Pixels { y, .. } => y / SELECT_ROW_PX,
         };
         self.wheel += rows_moved;
         let whole = self.wheel.trunc();

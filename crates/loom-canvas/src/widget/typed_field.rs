@@ -146,16 +146,15 @@ impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn open_typed_field(
         &self,
         state: &mut State,
-        key: &keyboard::Key,
-        modifiers: keyboard::Modifiers,
+        key: &Key,
+        modifiers: Modifiers,
         text: Option<&str>,
         repeat: bool,
     ) -> bool {
-        use keyboard::key::Named;
         if self.learn.is_some()
-            || modifiers.command()
-            || modifiers.control()
-            || modifiers.alt()
+            || modifiers.shortcut()
+            || modifiers.control
+            || modifiers.alt
             || !matches!(state.interaction, Interaction::Idle)
         {
             return false;
@@ -171,7 +170,7 @@ impl<Message> PatchCanvas<'_, Message> {
         if !is_number {
             return false;
         }
-        if matches!(key.as_ref(), keyboard::Key::Named(Named::Enter)) {
+        if matches!(*key, Key::Enter) {
             // A held Enter must not open the field again after a commit.
             if !repeat {
                 let shown = self
@@ -202,24 +201,23 @@ impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn typed_field_key(
         &self,
         state: &mut State,
-        key: &keyboard::Key,
-        modifiers: keyboard::Modifiers,
+        key: &Key,
+        modifiers: Modifiers,
         text: Option<&str>,
         repeat: bool,
         shell: &mut Shell<'_, Message>,
     ) -> bool {
-        use keyboard::key::Named;
         let Some((module, widget)) = state.focus.control() else {
             return false;
         };
         let Some(mut field) = state.focus.take_typing() else {
             return false;
         };
-        match key.as_ref() {
-            keyboard::Key::Named(Named::Tab) => return false,
-            keyboard::Key::Named(Named::Escape) => {}
-            keyboard::Key::Named(Named::Enter) if repeat => state.focus.open_typing(field),
-            keyboard::Key::Named(Named::Enter) => match field.draft.submit(field.unchanged.as_deref()) {
+        match *key {
+            Key::Tab => return false,
+            Key::Escape => {}
+            Key::Enter if repeat => state.focus.open_typing(field),
+            Key::Enter => match field.draft.submit(field.unchanged.as_deref()) {
                 // Nothing was typed, so nothing changes.
                 DraftSubmit::Unchanged => {}
                 DraftSubmit::Blocked => state.focus.open_typing(field),
@@ -234,41 +232,41 @@ impl<Message> PatchCanvas<'_, Message> {
             },
             named_key => {
                 match named_key {
-                    keyboard::Key::Named(Named::Backspace) => {
+                    Key::Backspace => {
                         if !field.clear_selected() && field.caret > 0 {
                             let at = field.before();
                             field.draft.text.remove(at);
                             field.caret = at;
                         }
                     }
-                    keyboard::Key::Named(Named::Delete) => {
+                    Key::Delete => {
                         if !field.clear_selected() && field.caret < field.draft.text.len() {
                             field.draft.text.remove(field.caret);
                         }
                     }
-                    keyboard::Key::Named(Named::ArrowLeft) => {
+                    Key::Left => {
                         field.caret = if std::mem::take(&mut field.selected) {
                             0
                         } else {
                             field.before()
                         };
                     }
-                    keyboard::Key::Named(Named::ArrowRight) => {
+                    Key::Right => {
                         field.caret = if std::mem::take(&mut field.selected) {
                             field.draft.text.len()
                         } else {
                             field.after()
                         };
                     }
-                    keyboard::Key::Named(Named::Home) => {
+                    Key::Home => {
                         field.selected = false;
                         field.caret = 0;
                     }
-                    keyboard::Key::Named(Named::End) => {
+                    Key::End => {
                         field.selected = false;
                         field.caret = field.draft.text.len();
                     }
-                    _ if modifiers.command() || modifiers.control() || modifiers.alt() => {}
+                    _ if modifiers.shortcut() || modifiers.control || modifiers.alt => {}
                     _ => {
                         if let Some(typed) = text.filter(|typed| !typed.chars().any(char::is_control)) {
                             field.insert(typed);
@@ -300,7 +298,7 @@ impl<Message> PatchCanvas<'_, Message> {
             return false;
         }
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(_)) => {
+            Event::Pointer(PointerEvent::Pressed(_)) => {
                 let inside = self
                     .typed_field_bounds(state, bounds)
                     .zip(screen)
@@ -313,7 +311,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 shell.request_redraw();
                 false
             }
-            Event::Mouse(mouse::Event::WheelScrolled { .. }) | Event::Window(window::Event::Unfocused) => {
+            Event::Pointer(PointerEvent::Scrolled(_)) | Event::WindowUnfocused => {
                 state.focus.close_typing();
                 shell.request_redraw();
                 false

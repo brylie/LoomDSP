@@ -6,7 +6,7 @@ impl<Message> PatchCanvas<'_, Message> {
     /// The first state for a still image: as if the user had framed the
     /// view, focused a control with Tab, moved the pointer, pinned a badge,
     /// and started a drag, in that order.
-    pub(super) fn still_state(&self, still: Still) -> State {
+    pub(super) fn still_state(&self, still: Still, now: Instant) -> State {
         let mut state = State {
             camera: still.camera,
             // Already framed, so the first redraw keeps this camera.
@@ -40,7 +40,6 @@ impl<Message> PatchCanvas<'_, Message> {
         if still.hover_text {
             // Start the wait in the past, so the text is due now and shows
             // in the first frame. One frame cannot wait for the delay.
-            let now = Instant::now();
             state.hover_text.rest(self.hover_target(&state), now);
             state.hover_text.tick(now + crate::hover::HOVER_DELAY);
         }
@@ -51,23 +50,18 @@ impl<Message> PatchCanvas<'_, Message> {
     pub(super) fn handle(
         &self,
         state: &mut State,
-        event: &Event,
+        event: Option<&Event>,
+        pointer: Option<Point>,
         bounds: Rect,
-        cursor: mouse::Cursor,
+        now: Instant,
         shell: &mut Shell<'_, Message>,
     ) {
-        let over = cursor.is_over(bounds.to_iced());
-        let screen = relative(cursor, bounds);
+        let over = pointer.is_some_and(|at| bounds.contains(at));
+        let screen = relative(pointer, bounds);
         state.size = bounds.size();
 
         if self.focus_policy.matrix_escape
-            && matches!(
-                event,
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                    ..
-                })
-            )
+            && matches!(event, Some(Event::Key(KeyEvent::Pressed { key: Key::Escape, .. })))
             && self.pin(state).is_some()
         {
             state.pinned = None;
@@ -77,11 +71,10 @@ impl<Message> PatchCanvas<'_, Message> {
         }
 
         let keys_elsewhere = match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                (self.focus_policy.matrix_keyboard && !modifiers.command())
+            Some(Event::Key(KeyEvent::Pressed { key, modifiers, .. })) => {
+                (self.focus_policy.matrix_keyboard && !modifiers.shortcut())
                     || (self.focus_policy.text_field_keys
-                        && (self.focus_policy.text_field_keeps_tab
-                            || !matches!(key, keyboard::Key::Named(keyboard::key::Named::Tab))))
+                        && (self.focus_policy.text_field_keeps_tab || !matches!(key, Key::Tab)))
             }
             _ => false,
         };
@@ -93,7 +86,7 @@ impl<Message> PatchCanvas<'_, Message> {
         if !self.focus_policy.interactive {
             // Modifiers still count, so Shift held while the pop-up closes
             // is known on the next click.
-            if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+            if let Some(Event::Key(KeyEvent::ModifiersChanged(modifiers))) = event {
                 state.modifiers = *modifiers;
             }
             // A pop-up has the keys. Nothing may stay held or half dragged
@@ -106,7 +99,8 @@ impl<Message> PatchCanvas<'_, Message> {
             self.end_arrow_group(shell, false);
             state.interaction = Interaction::Idle;
             state.focus.close_typing();
-            if !matches!(event, Event::Window(_)) {
+            // Only what the window itself reports goes on from here.
+            if !matches!(event, Some(Event::Redraw | Event::WindowUnfocused)) {
                 return;
             }
         }
@@ -114,8 +108,12 @@ impl<Message> PatchCanvas<'_, Message> {
         // A list, field, or grab whose control has gone is closed first, so
         // the event still does its normal work.
         self.reconcile_focus(state);
+        // Something that means nothing to the canvas ends here.
+        let Some(event) = event else {
+            return;
+        };
         // An open list comes before every other use of the pointer.
-        if self.select_popup_event(state, event, bounds, over, screen, shell) {
+        if self.select_popup_event(state, event, pointer, bounds, now, shell) {
             return;
         }
         if self.typed_field_event(state, event, bounds, screen, shell) {
@@ -123,21 +121,20 @@ impl<Message> PatchCanvas<'_, Message> {
         }
 
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                ..
-            }) if matches!(state.interaction, Interaction::Wiring { .. }) => {
+            Event::Key(KeyEvent::Pressed { key: Key::Escape, .. })
+                if matches!(state.interaction, Interaction::Wiring { .. }) =>
+            {
                 self.end_gestures(state, shell);
                 self.end_arrow_group(shell, false);
                 shell.request_redraw();
                 shell.capture_event();
             }
-            Event::Window(window::Event::RedrawRequested(now)) => {
+            Event::Redraw => {
                 let new_frame = state.framed_key != Some(self.frame_key);
                 if let ArrowGroupView::Released { due } = self.arrow_group
-                    && *now >= due
+                    && now >= due
                 {
-                    self.emit(shell, CanvasEvent::ArrowGroupDue { at: *now });
+                    self.emit(shell, CanvasEvent::ArrowGroupDue { at: now });
                 }
                 if state
                     .browser_key
@@ -169,8 +166,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     self.emit(shell, CanvasEvent::Camera(state.camera));
                 }
                 if self.animate {
-                    let (start, base) = *state.animation.get_or_insert((*now, state.camera));
-                    let t = (*now - start).as_secs_f32();
+                    let (start, base) = *state.animation.get_or_insert((now, state.camera));
+                    let t = (now - start).as_secs_f32();
                     state.camera = animated(base, bounds.size(), t);
                     shell.request_redraw();
                 } else if let Some((_, base)) = state.animation.take() {
@@ -187,27 +184,37 @@ impl<Message> PatchCanvas<'_, Message> {
                     self.emit(shell, CanvasEvent::TraceDetail(full));
                 }
             }
-            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+            Event::Key(KeyEvent::ModifiersChanged(modifiers)) => {
                 state.modifiers = *modifiers;
             }
-            Event::Keyboard(keyboard::Event::KeyPressed {
+            Event::Key(KeyEvent::Pressed {
                 key,
                 modifiers,
                 repeat,
                 text,
                 ..
-            }) if self.focus_keys(state, key, *modifiers, text.as_deref(), *repeat, shell) => {}
-            Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
-                self.release_key(state, key, shell);
+            }) if self.focus_keys(
+                state,
+                super::panel_input::KeyPress {
+                    key,
+                    modifiers: *modifiers,
+                    text: text.as_deref(),
+                    repeat: *repeat,
+                },
+                now,
+                shell,
+            ) => {}
+            Event::Key(KeyEvent::Released { key }) => {
+                self.release_key(state, key, now, shell);
             }
             // Paste works with the pointer anywhere in the window. Only the
             // canvas knows where the pointer is in the patch, and where the
             // view's centre is.
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Character(c),
+            Event::Key(KeyEvent::Pressed {
+                key: Key::Character(c),
                 modifiers,
                 ..
-            }) if modifiers.command() && c.eq_ignore_ascii_case("v") => {
+            }) if modifiers.shortcut() && c.eq_ignore_ascii_case(&'v') => {
                 let at = screen
                     .filter(|_| over)
                     .unwrap_or(Point::new(bounds.width / 2.0, bounds.height / 2.0));
@@ -219,14 +226,13 @@ impl<Message> PatchCanvas<'_, Message> {
                 );
                 shell.capture_event();
             }
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) if over => {
-                use keyboard::key::Named;
-                match key.as_ref() {
-                    keyboard::Key::Named(Named::Delete | Named::Backspace) if !self.selection.is_empty() => {
+            Event::Key(KeyEvent::Pressed { key, modifiers, .. }) if over => {
+                match *key {
+                    Key::Delete | Key::Backspace if !self.selection.is_empty() => {
                         self.emit(shell, CanvasEvent::Delete(self.selection.iter().copied().collect()));
                         shell.capture_event();
                     }
-                    keyboard::Key::Named(Named::Home) | keyboard::Key::Character("f") => {
+                    Key::Home | Key::Character('f') => {
                         if let Some(world) = self.scene.bounds() {
                             state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
                             shell.request_redraw();
@@ -236,19 +242,19 @@ impl<Message> PatchCanvas<'_, Message> {
                     }
                     // Cmd/Ctrl+0 resets the zoom to 100%, about the pointer
                     // like the wheel, so what the user points at stays put.
-                    keyboard::Key::Character("0") if modifiers.command() => {
+                    Key::Character('0') if modifiers.shortcut() => {
                         let at = screen.unwrap_or(Point::new(bounds.width / 2.0, bounds.height / 2.0));
                         state.camera.zoom_to(at, 1.0);
                         shell.request_redraw();
                         self.emit(shell, CanvasEvent::Camera(state.camera));
                         shell.capture_event();
                     }
-                    keyboard::Key::Character("a") if modifiers.command() => {
+                    Key::Character('a') if modifiers.shortcut() => {
                         let all = self.scene.modules().iter().map(|m| m.id).collect();
                         self.emit(shell, CanvasEvent::Select(all));
                         shell.capture_event();
                     }
-                    keyboard::Key::Character("a") if modifiers.is_empty() => {
+                    Key::Character('a') if modifiers.none() => {
                         if let Some(screen) = screen {
                             self.open_browser(state.camera.to_world(screen), screen, bounds, shell);
                         }
@@ -257,16 +263,16 @@ impl<Message> PatchCanvas<'_, Message> {
                     _ => {}
                 }
             }
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if over => {
+            Event::Pointer(PointerEvent::Scrolled(delta)) if over => {
                 let Some(screen) = screen else { return };
                 match *delta {
                     // A mouse wheel zooms.
-                    mouse::ScrollDelta::Lines { y, .. } => {
+                    ScrollDelta::Lines { y, .. } => {
                         state.camera.zoom_at(screen, 1.15_f32.powf(y));
                     }
                     // A trackpad pans, or zooms with Ctrl or Cmd held.
-                    mouse::ScrollDelta::Pixels { x, y } => {
-                        if state.modifiers.command() || state.modifiers.control() {
+                    ScrollDelta::Pixels { x, y } => {
+                        if state.modifiers.shortcut() || state.modifiers.control {
                             state.camera.zoom_at(screen, (y * 0.01).exp());
                         } else {
                             state.camera.pan(Vector::new(x, y));
@@ -276,7 +282,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.cursor = Some(state.camera.to_world(screen));
                 // The view moved under the pointer: hover text hides, and
                 // shows again only after the pointer rests anew.
-                state.hover_text.restart(Instant::now());
+                state.hover_text.restart(now);
                 state.hover = Some(self.scene.hit(state.camera.to_world(screen), state.hit_radius()));
                 // Each wheel event is one step of a zoom or a trackpad pan,
                 // and nothing marks its end, so each one reports the view.
@@ -287,10 +293,10 @@ impl<Message> PatchCanvas<'_, Message> {
             // A press elsewhere in the window, such as an inspector field,
             // takes the keys from the canvas, so a digit never opens a field
             // on a control the player has left.
-            Event::Mouse(mouse::Event::ButtonPressed(_)) if !over => {
+            Event::Pointer(PointerEvent::Pressed(_)) if !over => {
                 state.focus.clear();
             }
-            Event::Mouse(mouse::Event::ButtonPressed(button)) if over => {
+            Event::Pointer(PointerEvent::Pressed(button)) if over => {
                 let Some(screen) = screen else { return };
                 if self.focus_policy.matrix_keyboard {
                     self.emit(shell, CanvasEvent::PointerDown);
@@ -302,29 +308,29 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.end_arrow_group(shell, false);
                 let world = state.camera.to_world(screen);
                 match button {
-                    mouse::Button::Middle => {
+                    PointerButton::Middle => {
                         state.interaction = Interaction::Panning {
                             last: screen,
                             click: None,
                             start: state.camera,
                         };
                     }
-                    mouse::Button::Right => {
+                    PointerButton::Right => {
                         state.interaction = Interaction::Panning {
                             last: screen,
                             click: Some(screen),
                             start: state.camera,
                         };
                     }
-                    mouse::Button::Left => {
-                        self.press(state, world, screen, bounds, shell);
+                    PointerButton::Left => {
+                        self.press(state, world, screen, bounds, now, shell);
                     }
                     _ => {}
                 }
                 shell.request_redraw();
                 shell.capture_event();
             }
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+            Event::Pointer(PointerEvent::Moved) => {
                 state.focus_first = false;
                 let Some(screen) = screen else { return };
                 let world = state.camera.to_world(screen);
@@ -381,7 +387,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         position,
                     } => {
                         let along = drag.along(screen);
-                        let next = drag.moved(*position, along - *last, state.modifiers.shift());
+                        let next = drag.moved(*position, along - *last, state.modifiers.shift);
                         *last = along;
                         if next != *position {
                             *position = next;
@@ -401,7 +407,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         last,
                         position,
                     } => {
-                        let scale = if state.modifiers.shift() { 0.1 } else { 1.0 } / *throw;
+                        let scale = if state.modifiers.shift { 0.1 } else { 1.0 } / *throw;
                         let moved = screen - *last;
                         *last = screen;
                         let next = (
@@ -421,7 +427,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         position,
                     } => {
                         let along = drag.along(screen);
-                        let delta = drag.delta(along - *last, state.modifiers.shift());
+                        let delta = drag.delta(along - *last, state.modifiers.shift);
                         *last = along;
                         let (next_grab, low, high) = grab.moved(position.0, position.1, delta);
                         *grab = next_grab;
@@ -441,7 +447,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         *last = along;
                         // The control's own drag scale: the way that raises
                         // the value raises the depth.
-                        let delta = drag.delta(moved, state.modifiers.shift());
+                        let delta = drag.delta(moved, state.modifiers.shift);
                         if delta != 0.0 {
                             let event = CanvasEvent::DragDepth {
                                 module: *module,
@@ -482,15 +488,15 @@ impl<Message> PatchCanvas<'_, Message> {
                     shell.request_redraw();
                 }
             }
-            Event::Mouse(mouse::Event::ButtonReleased(button)) => {
+            Event::Pointer(PointerEvent::Released(button)) => {
                 // The left button is what started the hold. Releasing another
                 // button, one that was already down, must not end it.
-                if *button != mouse::Button::Left && matches!(state.interaction, Interaction::Holding { .. }) {
+                if *button != PointerButton::Left && matches!(state.interaction, Interaction::Holding { .. }) {
                     return;
                 }
                 // Only the right button's own release ends a right click. A
                 // left button let go meanwhile must not open the menu.
-                if *button != mouse::Button::Right
+                if *button != PointerButton::Right
                     && matches!(state.interaction, Interaction::Panning { click: Some(_), .. })
                 {
                     return;
@@ -566,11 +572,7 @@ impl<Message> PatchCanvas<'_, Message> {
                                     shell,
                                     CanvasEvent::AssignDrop {
                                         from,
-                                        at: if state.outside_window {
-                                            None
-                                        } else {
-                                            cursor.position().map(|point| point.to_core())
-                                        },
+                                        at: if state.outside_window { None } else { pointer },
                                     },
                                 );
                             }
@@ -625,7 +627,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 }
                 shell.request_redraw();
             }
-            Event::Mouse(mouse::Event::CursorLeft) => {
+            Event::Pointer(PointerEvent::LeftWindow) => {
                 state.outside_window = true;
                 if let Interaction::Wiring { from, pulled: false } = state.interaction
                     && from.output
@@ -637,21 +639,15 @@ impl<Message> PatchCanvas<'_, Message> {
                     shell.request_redraw();
                 }
             }
-            Event::Mouse(mouse::Event::CursorEntered) => {
+            Event::Pointer(PointerEvent::EnteredWindow) => {
                 state.outside_window = false;
                 if let Interaction::Wiring { from, pulled: false } = state.interaction
                     && from.output
                 {
-                    self.assign_drag(
-                        from,
-                        cursor.position().map(|point| point.to_core()),
-                        state.camera,
-                        bounds,
-                        shell,
-                    );
+                    self.assign_drag(from, pointer, state.camera, bounds, shell);
                 }
             }
-            Event::Window(window::Event::Unfocused) => {
+            Event::WindowUnfocused => {
                 // A key release never arrives if the window loses focus
                 // while Space or Enter is held. End every hold here.
                 self.release_pointer_hold(state, shell);
@@ -672,6 +668,7 @@ impl<Message> PatchCanvas<'_, Message> {
         world: Point,
         screen: Point,
         bounds: Rect,
+        now: Instant,
         shell: &mut Shell<'_, Message>,
     ) {
         if let Some(tile) = self.resize_at(world) {
@@ -690,7 +687,7 @@ impl<Message> PatchCanvas<'_, Message> {
             );
             return;
         }
-        let shift = state.modifiers.shift();
+        let shift = state.modifiers.shift;
         let hit = self.scene.hit(world, state.hit_radius());
         // A press ends the keyboard's inside of a composite widget and any
         // grab (panel-widgets.md, rule 4).
@@ -734,7 +731,6 @@ impl<Message> PatchCanvas<'_, Message> {
             Hit::Widget { module, widget } => {
                 self.select_for_edit(module, shell);
                 state.focus.set(module, widget, false);
-                let now = Instant::now();
                 // Where a double-click resets, and so what it must land on
                 // twice: `low` then `high` is not a double-click.
                 let reset = self.reset_part(module, widget, world);
@@ -802,7 +798,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         let before = (position, self.part_position(module, widget, ControlPart::Second));
                         // Only with Alt held does a press move the point
                         // (panel-widgets.md, rule 2).
-                        let jump = state.modifiers.alt().then(|| xy_position(area, world));
+                        let jump = state.modifiers.alt.then(|| xy_position(area, world));
                         self.begin(
                             state,
                             Interaction::Pad {
@@ -944,7 +940,7 @@ impl<Message> PatchCanvas<'_, Message> {
                         self.emit(shell, CanvasEvent::OpenTile(id));
                         return;
                     }
-                    state.last_header_click = Some((Instant::now(), id, screen));
+                    state.last_header_click = Some((now, id, screen));
                 }
                 // A meter's clip light clears on release, so a drag from it
                 // moves the tile and leaves it lit. A second press on the
@@ -965,7 +961,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     self.emit(shell, CanvasEvent::ResetMeter { module: id, widget });
                     None
                 } else {
-                    state.last_meter_click = meter.map(|widget| (Instant::now(), id, widget, screen));
+                    state.last_meter_click = meter.map(|widget| (now, id, widget, screen));
                     module
                         .and_then(|m| m.clip_light_at(world))
                         .map(|widget| ChoiceClick::ClearClip(id, widget))
@@ -988,7 +984,7 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Hit::Cable(_) | Hit::Nothing => {
                 if matches!(hit, Hit::Nothing) {
-                    state.last_empty_click = Some((Instant::now(), screen));
+                    state.last_empty_click = Some((now, screen));
                 }
                 let base = if shift { self.selection.clone() } else { BTreeSet::new() };
                 state.interaction = Interaction::Selecting {

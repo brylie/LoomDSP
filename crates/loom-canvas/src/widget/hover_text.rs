@@ -7,11 +7,14 @@ impl<Message> PatchCanvas<'_, Message> {
     /// text). It asks for a frame only when the text appears or hides, and
     /// for a single timed frame while it waits, so it never draws while
     /// nothing changes.
-    pub(super) fn sync_hover_text(&self, state: &mut State, event: &Event, shell: &mut Shell<'_, Message>) {
-        let (now, redrawing) = match event {
-            Event::Window(window::Event::RedrawRequested(now)) => (*now, true),
-            _ => (Instant::now(), false),
-        };
+    pub(super) fn sync_hover_text(
+        &self,
+        state: &mut State,
+        event: Option<&Event>,
+        now: Instant,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let redrawing = matches!(event, Some(Event::Redraw));
         let target = self.hover_target(state);
         let mut changed = state.hover_text.rest(target, now);
         // This frame is being drawn already, so text due now needs no other.
