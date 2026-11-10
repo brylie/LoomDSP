@@ -7,14 +7,13 @@
 
 use crate::CanvasEvent;
 use crate::camera::Camera;
-use crate::controls::{ControlGeometry, PanelValues};
-use crate::gpu::{CanvasFrame, Geometry};
+use crate::controls::PanelValues;
 use crate::iced_convert::{ToCore as _, ToIced as _};
 use crate::input::*;
 use crate::reaction::Reaction;
 use crate::scene::Scene;
 use crate::theme::Palette;
-use crate::trace::{ScopeTraces, TraceGeometry};
+use crate::trace::ScopeTraces;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::text;
@@ -22,9 +21,7 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{Element, Font, Length};
 use iced::{mouse, window};
-use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use std::time::Instant;
 
 mod drag_line;
@@ -50,10 +47,7 @@ pub struct PatchCanvas<'a, Message> {
 #[derive(Default)]
 struct State {
     input: CanvasInput,
-    geometry: RefCell<Option<Arc<Geometry>>>,
-    controls: RefCell<Option<Arc<ControlGeometry>>>,
-    traces: RefCell<Option<Arc<TraceGeometry>>>,
-    lines: LinesCache,
+    cache: FrameCache,
 }
 
 impl<'a, Message> PatchCanvas<'a, Message> {
@@ -305,65 +299,6 @@ where
         let bounds = layout.bounds().to_core();
         let model = &self.model;
         let input = &state.input;
-        let camera = input.camera();
-
-        let geometry = {
-            let mut cache = state.geometry.borrow_mut();
-            match cache.as_ref() {
-                Some(g) if g.generation == model.scene.generation() => g.clone(),
-                _ => {
-                    let built = Arc::new(Geometry::build(model.scene, &model.palette));
-                    *cache = Some(built.clone());
-                    built
-                }
-            }
-        };
-
-        // Controls follow the titles: drawn as shapes once titles show, and
-        // not at all when zoomed further out (panels.md, Level of detail).
-        let empty = PanelValues::default();
-        let values = model.values.unwrap_or(&empty);
-        let controls = (detail(camera.zoom) != Detail::Far).then(|| {
-            let key = (model.scene.generation(), values.generation());
-            let mut cache = state.controls.borrow_mut();
-            match cache.as_ref() {
-                Some(c) if c.key == key => c.clone(),
-                _ => {
-                    let built = Arc::new(ControlGeometry::build(model.scene, values, &model.palette));
-                    *cache = Some(built.clone());
-                    built
-                }
-            }
-        });
-
-        // Scope traces: full close up, a flat line at the middle zoom, and
-        // not drawn far out (panels.md, Drawing the scope trace).
-        let traces = model
-            .traces
-            .filter(|_| detail(camera.zoom) != Detail::Far)
-            .map(|traces| {
-                let full = detail(camera.zoom) == Detail::Close;
-                let key = (model.scene.generation(), traces.generation(), full);
-                let mut cache = state.traces.borrow_mut();
-                match cache.as_ref() {
-                    Some(t) if t.key == key => t.clone(),
-                    _ => {
-                        let built = Arc::new(TraceGeometry::build(model.scene, traces, full, &model.palette));
-                        *cache = Some(built.clone());
-                        built
-                    }
-                }
-            });
-
-        // Text too small to draw leaves a bar in its place.
-        let bars = match detail(camera.zoom) {
-            Detail::Close => geometry.bars(false, false),
-            Detail::Middle => geometry.bars(true, false),
-            Detail::Far => geometry.bars(true, true),
-        };
-        // A box's text bar draws over the box, and only at middle zoom.
-        let value_bars = geometry.value_bars(detail(camera.zoom) == Detail::Middle);
-
         renderer.fill_quad(
             renderer::Quad {
                 bounds: bounds.to_iced(),
@@ -373,19 +308,10 @@ where
         );
         renderer.draw_primitive(
             bounds.to_iced(),
-            CanvasPrimitive(CanvasFrame {
-                geometry,
-                controls,
-                traces,
-                overlay: model.overlay_in(input, &state.lines, camera.visible(bounds.size())),
-                bars,
-                value_bars,
-                camera,
-                cable_dim: CABLE_OPACITY,
-            }),
+            CanvasPrimitive(input.frame(model, bounds.size(), &state.cache)),
         );
         let measure = IcedMeasure::new(&*renderer);
-        model.paint(input, values, bounds, &measure, &mut IcedPainter::new(renderer));
+        input.paint(model, bounds, &measure, &mut IcedPainter::new(renderer));
     }
 }
 

@@ -2,8 +2,16 @@
 //! the typed field, and hover text. Each piece goes to a [`Painter`], and
 //! text is sized by a [`TextMeasure`], so nothing here names a text
 //! renderer.
+//!
+//! This is drawing, in a folder named for input. It is here because it
+//! reads [`CanvasInput`]'s private state: the focus, the open list or
+//! field, and the hover timer. `CanvasInput` now holds all of the canvas's
+//! lasting state and also paints, so its name and this folder's no longer
+//! fit. They are settled when the canvas becomes a custom element
+//! (docs/design/ui-layer.md, section 9), not here.
 
 use super::*;
+use crate::controls::PanelValues;
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX};
 use crate::painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
 use crate::scene::BADGE_TEXT_SIZE;
@@ -34,30 +42,27 @@ fn one_line(text: &str, size: f32, width: f32, align: Align, anchor: Point, colo
     }
 }
 
-impl CanvasModel<'_> {
+impl CanvasInput {
     /// Paints everything above the GPU shapes, back to front: tile text,
     /// then the open choice list, the open typed field, and hover text,
     /// each in its own layer. `bounds` is the canvas's place in the host's
-    /// logical pixels.
-    pub(crate) fn paint(
-        &self,
-        state: &CanvasInput,
-        values: &PanelValues,
-        bounds: Rect,
-        measure: &dyn TextMeasure,
-        painter: &mut dyn Painter,
-    ) {
-        self.paint_tile_text(state, values, bounds, painter);
-        self.paint_select_popup(state, bounds, painter);
-        self.paint_typed_field(state, bounds, measure, painter);
-        self.paint_hover_text(state, bounds, measure, painter);
+    /// logical pixels. Call it after the renderer has drawn the frame.
+    pub fn paint(&self, model: &CanvasModel<'_>, bounds: Rect, measure: &dyn TextMeasure, painter: &mut dyn Painter) {
+        let empty = PanelValues::default();
+        let values = model.values.unwrap_or(&empty);
+        model.paint_tile_text(self, values, bounds, painter);
+        model.paint_select_popup(self, bounds, painter);
+        model.paint_typed_field(self, bounds, measure, painter);
+        model.paint_hover_text(self, bounds, measure, painter);
     }
+}
 
+impl CanvasModel<'_> {
     /// Paints the text on the tiles and in the badges, at the size the
     /// zoom gives it. Text too small to read is left out (panels.md, Level
     /// of detail).
     fn paint_tile_text(&self, state: &CanvasInput, values: &PanelValues, bounds: Rect, painter: &mut dyn Painter) {
-        let zoom = state.camera().zoom;
+        let zoom = state.camera.zoom;
         // Quantise sizes so zooming does not create a new text layout every
         // frame for every label.
         let quantise = |size: f32| (size * 2.0).round() / 2.0;
@@ -67,9 +72,9 @@ impl CanvasModel<'_> {
         }
         let label_px = quantise(LABEL_SIZE * zoom);
         let show_labels = label_px >= LABEL_MIN_PX;
-        let visible = state.camera().visible(bounds.size());
+        let visible = state.camera.visible(bounds.size());
         let to_screen = |world: Point| {
-            let s = state.camera().to_screen(world);
+            let s = state.camera.to_screen(world);
             Point::new(bounds.x + s.x, bounds.y + s.y)
         };
         // The control whose value shows instead of its label.
@@ -211,7 +216,7 @@ impl CanvasModel<'_> {
 
     /// Paints the open choice list above all tile text, at a fixed screen size.
     fn paint_select_popup(&self, state: &CanvasInput, bounds: Rect, painter: &mut dyn Painter) {
-        let (Some(popup), Some((module, widget))) = (state.popup().copied(), state.focused_control()) else {
+        let (Some(popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
             return;
         };
         let Some(rect) = self.select_popup_bounds(state, Rect::new(Point::ORIGIN, bounds.size())) else {
@@ -293,7 +298,7 @@ impl CanvasModel<'_> {
         measure: &dyn TextMeasure,
         painter: &mut dyn Painter,
     ) {
-        let Some(field) = state.typed_field() else {
+        let Some(field) = state.focus.typed() else {
             return;
         };
         let Some(rect) = self.typed_field_bounds(state, Rect::new(Point::ORIGIN, bounds.size())) else {
@@ -381,10 +386,10 @@ impl CanvasModel<'_> {
         measure: &dyn TextMeasure,
         painter: &mut dyn Painter,
     ) {
-        if state.has_overlay() {
+        if state.focus.has_overlay() {
             return;
         }
-        let Some(target) = state.hover_text().shown() else {
+        let Some(target) = state.hover_text.shown() else {
             return;
         };
         let Some((label, hover, value, world)) = self.hover_content(target) else {
@@ -439,8 +444,8 @@ impl CanvasModel<'_> {
         let height = lines.iter().map(|line| line.2.height).sum::<f32>() + LINE_GAP * (lines.len() - 1) as f32;
         let size = Size::new(width + 2.0 * HOVER_PADDING, height + 2.0 * HOVER_PADDING);
 
-        let zoom = state.camera().zoom;
-        let corner = state.camera().to_screen(world.position());
+        let zoom = state.camera.zoom;
+        let corner = state.camera.to_screen(world.position());
         let anchor = Rect::new(
             Point::new(bounds.x + corner.x, bounds.y + corner.y),
             world.size() * zoom,
@@ -472,3 +477,6 @@ impl CanvasModel<'_> {
         painter.end_layer();
     }
 }
+
+#[cfg(test)]
+mod tests;

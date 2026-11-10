@@ -47,9 +47,10 @@ pub use controls::{
 };
 pub use controls::{part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
+pub use gpu::{CanvasFrame, CanvasRenderer, Target};
 pub use input::{
     ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
-    ControlPart, LearnView, Moment, PointerDrag, Still, StillDrag,
+    ControlPart, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
 pub use painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
 pub use reaction::{CursorShape, Reaction};
