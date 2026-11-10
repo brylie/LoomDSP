@@ -8,7 +8,7 @@
 use crate::CanvasEvent;
 use crate::camera::Camera;
 use crate::controls::{ControlGeometry, PanelValues};
-use crate::gpu::{CanvasPrimitive, Geometry};
+use crate::gpu::{CanvasFrame, CanvasPrimitive, Geometry};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget};
 use crate::iced_convert::{ToCore as _, ToIced as _};
 use crate::input::*;
@@ -370,7 +370,7 @@ where
         );
         renderer.draw_primitive(
             bounds.to_iced(),
-            CanvasPrimitive {
+            CanvasPrimitive(CanvasFrame {
                 geometry,
                 controls,
                 traces,
@@ -379,7 +379,7 @@ where
                 value_bars,
                 camera,
                 cable_dim: CABLE_OPACITY,
-            },
+            }),
         );
         model.draw_text(input, values, renderer, bounds);
         model.draw_select_popup(input, renderer, bounds);
