@@ -8,7 +8,7 @@
 use crate::CanvasEvent;
 use crate::camera::Camera;
 use crate::controls::{ControlGeometry, PanelValues};
-use crate::gpu::{CanvasFrame, CanvasPrimitive, Geometry};
+use crate::gpu::{CanvasFrame, Geometry};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget};
 use crate::iced_convert::{ToCore as _, ToIced as _};
 use crate::input::*;
@@ -30,7 +30,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+mod drag_line;
 mod draw;
+mod primitive;
+
+pub use drag_line::DragLine;
+use primitive::CanvasPrimitive;
 
 /// The patch canvas as an Iced widget. Draws a [`Scene`] and reports
 /// gestures as [`CanvasEvent`]s, through the message `on_event` makes.
