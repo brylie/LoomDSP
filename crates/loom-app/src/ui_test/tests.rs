@@ -430,7 +430,7 @@ fn finds_controls_and_text_by_name() {
     ui.release();
     assert_eq!(ui.app.session.selection, [4].into());
     let row = ui.text("Cutoff").expect("the inspector shows the Cutoff row");
-    assert!(!canvas.bounds.intersects(&row), "the row {row:?} is beside the canvas");
+    assert!(!canvas.bounds.intersects(row), "the row {row:?} is beside the canvas");
 }
 
 /// A mapping's options rows are closed until asked, show what its mode

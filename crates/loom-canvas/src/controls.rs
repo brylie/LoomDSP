@@ -884,7 +884,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rect) -> (Rect, f32) {
         WidgetViewKind::Segmented { options, .. } => {
             let first = segment_rect(rect, 0, options.len());
             let last = segment_rect(rect, options.len().saturating_sub(1), options.len());
-            (first.union(&last).expand(2.0), 5.0)
+            (first.union(last).expand(2.0), 5.0)
         }
         WidgetViewKind::Button => (button_body(rect).expand(2.5), 8.0),
         // The options, below the caption row.

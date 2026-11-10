@@ -31,7 +31,7 @@ fn main() {
         })
         .collect();
 
-    let toolbar = buttons.iter().fold(first, |all, button| all.union(button));
+    let toolbar = buttons.iter().fold(first, |all, button| all.union(*button));
     println!("toolbar covers {toolbar:?}");
 
     // The second pointer is exactly on the edge "Open" and "Save" share.
@@ -49,5 +49,5 @@ fn main() {
     // A focus ring is the button grown by two units on every side.
     let ring = buttons[1].expand(2.0);
     println!("focus ring around Save: {ring:?}");
-    println!("ring overlaps Open: {}", ring.intersects(&buttons[0]));
+    println!("ring overlaps Open: {}", ring.intersects(buttons[0]));
 }

@@ -27,7 +27,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 .scene
                 .modules()
                 .iter()
-                .filter(|module| module.bounds().intersects(&visible));
+                .filter(|module| module.bounds().intersects(visible));
             for module in visible_modules {
                 for (index, view) in module.panel.widgets.iter().enumerate() {
                     // A widget with two values is armed in the inspector
@@ -427,11 +427,11 @@ impl<Message> PatchCanvas<'_, Message> {
 
         for module in self.scene.modules() {
             let tile = module.bounds();
-            if !tile.intersects(&visible) {
+            if !tile.intersects(visible) {
                 continue;
             }
             let screen_tile = Rect::new(to_screen(tile.position()), tile.size() * zoom);
-            let Some(clip) = screen_tile.intersection(&bounds) else {
+            let Some(clip) = screen_tile.intersection(bounds) else {
                 continue;
             };
             tile_text::for_each(module, |item| {
@@ -527,14 +527,14 @@ impl<Message> PatchCanvas<'_, Message> {
             // A badge reaches past its tile's right edge by at most this
             // much: the gap after the port and a pill with several digits.
             const BADGE_REACH: f32 = 40.0;
-            if !module.bounds().expand(BADGE_REACH).intersects(&visible) {
+            if !module.bounds().expand(BADGE_REACH).intersects(visible) {
                 continue;
             }
             for (index, port) in module.outputs.iter().enumerate() {
                 if let Some(rect) = self
                     .scene
                     .badge_bounds(module.id, index)
-                    .filter(|r| r.intersects(&visible))
+                    .filter(|r| r.intersects(visible))
                 {
                     let label = port.badge.to_string();
                     renderer.fill_text(

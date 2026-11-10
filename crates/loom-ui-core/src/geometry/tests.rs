@@ -140,9 +140,9 @@ fn an_empty_rect_holds_no_point() {
 fn the_intersection_is_the_shared_area() {
     let a = rect(0.0, 0.0, 10.0, 10.0);
     let b = rect(6.0, 4.0, 10.0, 10.0);
-    assert_eq!(a.intersection(&b), Some(rect(6.0, 4.0, 4.0, 6.0)));
-    assert_eq!(b.intersection(&a), a.intersection(&b));
-    assert!(a.intersects(&b));
+    assert_eq!(a.intersection(b), Some(rect(6.0, 4.0, 4.0, 6.0)));
+    assert_eq!(b.intersection(a), a.intersection(b));
+    assert!(a.intersects(b));
 }
 
 /// A rectangle inside another shares exactly its own area with it.
@@ -150,7 +150,7 @@ fn the_intersection_is_the_shared_area() {
 fn a_rect_inside_another_intersects_as_itself() {
     let outer = rect(0.0, 0.0, 100.0, 100.0);
     let inner = rect(20.0, 30.0, 5.0, 6.0);
-    assert_eq!(outer.intersection(&inner), Some(inner));
+    assert_eq!(outer.intersection(inner), Some(inner));
 }
 
 /// Rectangles that touch along an edge or at a corner share no area.
@@ -161,8 +161,8 @@ fn rects_that_only_touch_do_not_intersect() {
     let below = rect(0.0, 10.0, 10.0, 10.0);
     let corner = rect(10.0, 10.0, 10.0, 10.0);
     for other in [beside, below, corner] {
-        assert_eq!(a.intersection(&other), None);
-        assert!(!a.intersects(&other));
+        assert_eq!(a.intersection(other), None);
+        assert!(!a.intersects(other));
     }
 }
 
@@ -170,8 +170,8 @@ fn rects_that_only_touch_do_not_intersect() {
 #[test]
 fn rects_apart_do_not_intersect() {
     let a = rect(0.0, 0.0, 10.0, 10.0);
-    assert!(!a.intersects(&rect(50.0, 0.0, 10.0, 10.0)));
-    assert!(!a.intersects(&rect(0.0, 50.0, 10.0, 10.0)));
+    assert!(!a.intersects(rect(50.0, 0.0, 10.0, 10.0)));
+    assert!(!a.intersects(rect(0.0, 50.0, 10.0, 10.0)));
 }
 
 /// The union reaches from the outermost edge on each side.
@@ -179,10 +179,10 @@ fn rects_apart_do_not_intersect() {
 fn the_union_covers_both() {
     let a = rect(0.0, 5.0, 10.0, 10.0);
     let b = rect(20.0, 0.0, 5.0, 8.0);
-    let both = a.union(&b);
+    let both = a.union(b);
     assert_eq!(both, rect(0.0, 0.0, 25.0, 15.0));
-    assert_eq!(b.union(&a), both);
-    assert_eq!(a.union(&a), a);
+    assert_eq!(b.union(a), both);
+    assert_eq!(a.union(a), a);
 }
 
 /// Expanding moves each side out by the margin and keeps the centre.
@@ -212,7 +212,7 @@ fn shrinking_past_the_centre_gives_a_negative_size() {
     assert_eq!(gone, rect(30.0, 40.0, -10.0, 0.0));
     assert_eq!(gone.center(), r.center());
     assert!(!gone.contains(gone.center()));
-    assert!(!gone.intersects(&r));
+    assert!(!gone.intersects(r));
     assert_eq!(gone.expand(20.0), r);
 }
 
@@ -222,8 +222,8 @@ fn shrinking_past_the_centre_gives_a_negative_size() {
 fn the_union_reaches_an_empty_rect() {
     let tile = rect(0.0, 0.0, 10.0, 10.0);
     let far = Rect::new(Point::new(100.0, 50.0), Size::ZERO);
-    assert_eq!(tile.union(&far), rect(0.0, 0.0, 100.0, 50.0));
-    assert_eq!(far.union(&tile), tile.union(&far));
+    assert_eq!(tile.union(far), rect(0.0, 0.0, 100.0, 50.0));
+    assert_eq!(far.union(tile), tile.union(far));
 }
 
 /// A rectangle with a negative width is not put right first: `x` is read as
@@ -232,5 +232,5 @@ fn the_union_reaches_an_empty_rect() {
 fn the_union_uses_the_edges_of_a_negative_size_rect() {
     let tile = rect(0.0, 0.0, 10.0, 10.0);
     let inverted = rect(30.0, 0.0, -10.0, 10.0);
-    assert_eq!(tile.union(&inverted), rect(0.0, 0.0, 20.0, 10.0));
+    assert_eq!(tile.union(inverted), rect(0.0, 0.0, 20.0, 10.0));
 }

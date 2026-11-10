@@ -192,7 +192,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     .then(|| self.scene.badge_bounds(port.module, port.index))
                     .flatten()
                 {
-                    Some(badge) => marker.union(&badge),
+                    Some(badge) => marker.union(badge),
                     None => marker,
                 };
                 Some((&view.label, &view.hover, None, anchor))

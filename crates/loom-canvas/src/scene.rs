@@ -751,7 +751,7 @@ impl Scene {
                 let crowded = self
                     .modules
                     .iter()
-                    .any(|other| other.id != module.id && other.bounds().expand(BADGE_CLEARANCE).intersects(&badge));
+                    .any(|other| other.id != module.id && other.bounds().expand(BADGE_CLEARANCE).intersects(badge));
                 if crowded {
                     self.badges_inside.insert((module.id, index));
                 }
@@ -867,7 +867,7 @@ impl Scene {
 
     /// The bounding box of all modules, or `None` for an empty scene.
     pub fn bounds(&self) -> Option<Rect> {
-        self.modules.iter().map(ModuleView::bounds).reduce(|a, b| a.union(&b))
+        self.modules.iter().map(ModuleView::bounds).reduce(|a, b| a.union(b))
     }
 
     /// What is under a world point. Ports win over tiles, because they sit
@@ -1009,7 +1009,7 @@ impl Scene {
     pub fn modules_in(&self, area: Rect) -> Vec<u32> {
         self.modules
             .iter()
-            .filter(|m| m.bounds().intersects(&area))
+            .filter(|m| m.bounds().intersects(area))
             .map(|m| m.id)
             .collect()
     }

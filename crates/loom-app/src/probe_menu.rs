@@ -117,7 +117,7 @@ pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rect]) -> Po
     // stepping would reach. Each jump passes one tile, so this ends after at
     // most one jump per tile. Far from the origin, f32 can no longer add a
     // step, so stop if a jump does not move.
-    while let Some(tile) = tiles.iter().find(|tile| tile.intersects(&Rect::new(corner, size))) {
+    while let Some(tile) = tiles.iter().find(|tile| tile.intersects(Rect::new(corner, size))) {
         let steps = ((tile.y + tile.height - start.y) / STEP).ceil();
         let next = start.y + steps * STEP;
         if next <= corner.y {

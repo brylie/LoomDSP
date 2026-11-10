@@ -103,7 +103,7 @@ fn add_scope_and_meter_on_an_output_and_a_cable() {
             assert!(graph.cables().any(|c| c == (source, to)), "the clicked cable stays");
             let tile = app.session.scene.module(id).unwrap().bounds();
             assert!(tile.x > world.x, "the new tile is right of where the menu opened");
-            assert!(!tiles.iter().any(|t| t.intersects(&tile)), "{probe:?} overlaps a tile");
+            assert!(!tiles.iter().any(|t| t.intersects(tile)), "{probe:?} overlaps a tile");
             assert_eq!(
                 app.session
                     .edits

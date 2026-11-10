@@ -101,7 +101,7 @@ fn a_meter_does_not_grow_over_a_widget() {
     let grown = m.widget_bounds(0).unwrap();
     assert_eq!(grown.width, meter.width, "the toggle is past the corner");
     assert_eq!(grown.height - meter.height, m.bounds().height - initial.height);
-    assert!(grown.intersection(&toggle).is_none());
+    assert!(grown.intersection(toggle).is_none());
 
     // Alone, it takes all of it.
     m.size = None;
@@ -151,7 +151,7 @@ fn a_growing_scope_moves_the_controls_below_it_down() {
     assert_eq!(moved.y - below.y, grown);
     assert_eq!(moved.x, below.x);
     assert_eq!(moved.size(), below.size());
-    assert!(scope.intersection(&moved).is_none());
+    assert!(scope.intersection(moved).is_none());
     assert!(moved.y + moved.height <= m.bounds().y + m.bounds().height);
 }
 
@@ -422,9 +422,9 @@ fn a_badge_moves_inside_its_tile_when_another_tile_is_close() {
             Point::new(input.x - GRID, input.y - PORT_RADIUS),
             Size::new(GRID + PORT_RADIUS, 2.0 * PORT_RADIUS),
         );
-        assert!(!badge.intersects(&reach), "badge {badge:?} covers input {index}");
+        assert!(!badge.intersects(reach), "badge {badge:?} covers input {index}");
     }
-    assert!(!badge.intersects(&neighbour.bounds()));
+    assert!(!badge.intersects(neighbour.bounds()));
     // The click target moves with it.
     assert_eq!(
         scene.hit(badge.center(), PORT_HIT_RADIUS),

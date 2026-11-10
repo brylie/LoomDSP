@@ -45,6 +45,9 @@ impl Color {
     }
 
     /// A colour from 8-bit channels and an opacity between 0 and 1.
+    ///
+    /// The opacity is a fraction and not an 8-bit value, because that is how
+    /// it is written beside a colour code: a hex colour "at 35%".
     #[must_use]
     pub const fn rgba8(r: u8, g: u8, b: u8, a: f32) -> Self {
         Self::rgba(channel(r), channel(g), channel(b), a)

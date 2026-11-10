@@ -1016,7 +1016,7 @@ fn visible_lights(scene: &Scene, camera: &Camera, size: Size) -> Vec<u32> {
     scene
         .modules()
         .iter()
-        .filter(|m| m.panel.widgets.iter().any(|w| !w.is_control()) && m.bounds().intersects(&visible))
+        .filter(|m| m.panel.widgets.iter().any(|w| !w.is_control()) && m.bounds().intersects(visible))
         .map(|m| m.id)
         .collect()
 }

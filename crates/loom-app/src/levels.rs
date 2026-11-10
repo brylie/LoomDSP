@@ -248,7 +248,7 @@ impl App {
     fn tiles_bounds(&self, ids: &[ModuleId]) -> Option<Rect> {
         ids.iter()
             .filter_map(|id| self.session.scene.module(id.0).map(|tile| tile.bounds()))
-            .reduce(|a, b| a.union(&b))
+            .reduce(|a, b| a.union(b))
     }
 
     /// Ctrl+G, Make sub-patch: the selection becomes one sub-patch tile

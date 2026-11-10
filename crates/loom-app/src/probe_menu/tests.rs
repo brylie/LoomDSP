@@ -20,7 +20,7 @@ fn moves_down_past_tiles() {
     let descriptor = &loom_modules::display::METER;
     let (width, height) = crate::scene::default_panel_size(descriptor);
     let size = tile_size(1, 1, width, height);
-    assert!(!blocker.intersects(&Rect::new(corner, size)));
+    assert!(!blocker.intersects(Rect::new(corner, size)));
 }
 
 /// Tiles stacked below each other push the module past all of them.

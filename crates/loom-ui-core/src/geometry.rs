@@ -181,41 +181,41 @@ impl Rect {
 
     /// The top-left corner.
     #[must_use]
-    pub const fn position(&self) -> Point {
+    pub const fn position(self) -> Point {
         Point::new(self.x, self.y)
     }
 
     /// The width and height.
     #[must_use]
-    pub const fn size(&self) -> Size {
+    pub const fn size(self) -> Size {
         Size::new(self.width, self.height)
     }
 
     /// The X coordinate halfway between the left and right edges.
     #[must_use]
-    pub fn center_x(&self) -> f32 {
+    pub fn center_x(self) -> f32 {
         self.x + self.width / 2.0
     }
 
     /// The Y coordinate halfway between the top and bottom edges.
     #[must_use]
-    pub fn center_y(&self) -> f32 {
+    pub fn center_y(self) -> f32 {
         self.y + self.height / 2.0
     }
 
     /// The point in the middle.
     #[must_use]
-    pub fn center(&self) -> Point {
+    pub fn center(self) -> Point {
         Point::new(self.center_x(), self.center_y())
     }
 
     /// The X coordinate of the right edge, which the rectangle does not hold.
-    fn right(&self) -> f32 {
+    fn right(self) -> f32 {
         self.x + self.width
     }
 
     /// The Y coordinate of the bottom edge, which the rectangle does not hold.
-    fn bottom(&self) -> f32 {
+    fn bottom(self) -> f32 {
         self.y + self.height
     }
 
@@ -225,7 +225,7 @@ impl Rect {
     /// bottom edge is not, so a rectangle with no width or no height holds
     /// no point at all.
     #[must_use]
-    pub fn contains(&self, point: Point) -> bool {
+    pub fn contains(self, point: Point) -> bool {
         let across = self.x <= point.x && point.x < self.right();
         let down = self.y <= point.y && point.y < self.bottom();
         across && down
@@ -236,7 +236,7 @@ impl Rect {
     /// Rectangles that only touch along an edge or at a corner share no
     /// area, which follows from the half-open rule.
     #[must_use]
-    pub fn intersection(&self, other: &Self) -> Option<Self> {
+    pub fn intersection(self, other: Self) -> Option<Self> {
         let left = self.x.max(other.x);
         let top = self.y.max(other.y);
         let width = self.right().min(other.right()) - left;
@@ -251,7 +251,7 @@ impl Rect {
 
     /// Whether the two rectangles share some area.
     #[must_use]
-    pub fn intersects(&self, other: &Self) -> bool {
+    pub fn intersects(self, other: Self) -> bool {
         self.intersection(other).is_some()
     }
 
@@ -265,7 +265,7 @@ impl Rect {
     /// negative size is not put right first: its `x` is still read as its
     /// left edge and `x + width` as its right, though they are swapped.
     #[must_use]
-    pub fn union(&self, other: &Self) -> Self {
+    pub fn union(self, other: Self) -> Self {
         let left = self.x.min(other.x);
         let top = self.y.min(other.y);
         Self {

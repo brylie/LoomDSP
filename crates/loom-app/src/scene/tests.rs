@@ -301,7 +301,7 @@ fn no_built_in_tile_text_is_cut_or_overlaps() {
             };
             for (other, b) in &boxes {
                 if spaced
-                    .intersection(b)
+                    .intersection(*b)
                     .is_some_and(|i| i.width > 0.01 && i.height > 0.01)
                 {
                     problems.push(format!("{}: {} touches {other}", d.id, item.content));
@@ -574,7 +574,7 @@ fn the_all_modules_patch_has_every_module_without_overlap() {
         .collect();
     for (i, (a, ra)) in tiles.iter().enumerate() {
         for (b, rb) in &tiles[i + 1..] {
-            assert!(ra.intersection(rb).is_none(), "{a} overlaps {b}");
+            assert!(ra.intersection(*rb).is_none(), "{a} overlaps {b}");
         }
     }
 }
