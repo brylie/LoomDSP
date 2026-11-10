@@ -111,9 +111,11 @@ pub enum KeyEvent {
         modifiers: Modifiers,
         /// True when the key was already down and the system repeats it.
         repeat: bool,
-        /// The text the press types, if it types any. This is separate
-        /// from `key`: a key that types more than one character is
-        /// [`Key::Other`], and its text still arrives here.
+        /// The text the press types, if it types any, with every modifier
+        /// applied: Shift and `a` give `A` here. This is separate from
+        /// `key`, which names the key with no modifier applied. A key that
+        /// types more than one character is [`Key::Other`], and its text
+        /// still arrives here.
         text: Option<String>,
     },
     /// A key came up.
@@ -157,8 +159,11 @@ pub enum Key {
     /// ones are held is in [`Modifiers`].
     Modifier,
     /// A key that types exactly one character, such as `a` or `5`. The
-    /// character is as the key gives it, so Shift or Caps Lock can make it
-    /// `A`.
+    /// character is the one the keyboard layout gives the key with no
+    /// modifier applied: Shift, Caps Lock, and Control do not change it, so
+    /// the `a` key is `Character('a')` whatever is held. A shortcut can
+    /// then match one character. What the press types, such as `A`, is in
+    /// the `text` of [`KeyEvent::Pressed`].
     Character(char),
     /// Any other key. It exists because nothing yet uses those keys, not
     /// because they will never have names.

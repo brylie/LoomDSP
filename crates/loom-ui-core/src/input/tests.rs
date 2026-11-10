@@ -83,9 +83,10 @@ fn the_current_platform_follows_the_build_target() {
     assert_eq!(Platform::current(), expected);
 }
 
-/// A character key keeps its case, so `a` and `A` are different keys.
+/// Character keys compare by their exact character, so `a` and `A` are
+/// different keys.
 #[test]
-fn a_character_key_keeps_its_case() {
+fn character_keys_compare_by_exact_character() {
     assert_eq!(Key::Character('a'), Key::Character('a'));
     assert_ne!(Key::Character('a'), Key::Character('A'));
     assert_ne!(Key::Character('a'), Key::Other);

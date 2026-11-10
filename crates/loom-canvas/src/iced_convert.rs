@@ -183,6 +183,11 @@ impl ToCore for &keyboard::Key {
     /// A key that types exactly one character is [`Key::Character`]. A key
     /// that types more, or that has no use here, is [`Key::Other`]; its
     /// text still reaches the element in the press event.
+    ///
+    /// Give this the press's `key`, never its `modified_key`. On desktop
+    /// Iced fills `key` with the key with no modifier applied, which is
+    /// what [`Key::Character`] promises, and `modified_key` with the key
+    /// after Shift and Caps Lock. [`event_to_core`] reads `key`.
     fn to_core(self) -> Key {
         use keyboard::key::Named;
         match self.as_ref() {

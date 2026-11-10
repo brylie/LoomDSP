@@ -62,7 +62,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         }
     }
 
-    /// Starts the canvas with this camera and focus instead of framing the
+    /// Starts the canvas with this camera and focus, for one still image.
     /// See [`CanvasModel::still`].
     pub fn still(mut self, still: Still) -> Self {
         self.model = self.model.still(still);
@@ -83,7 +83,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
-    /// Says who else in the window has the keyboard, so the canvas leaves
+    /// Says who else in the window has the keyboard.
     /// See [`CanvasModel::focus_policy`].
     pub fn focus_policy(mut self, policy: CanvasFocusPolicy) -> Self {
         self.model = self.model.focus_policy(policy);
@@ -111,7 +111,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
-    /// Sets the scope traces (`docs/design/panels.md`, Drawing the scope
+    /// Sets the scope traces.
     /// See [`CanvasModel::traces`].
     pub fn traces(mut self, traces: &'a ScopeTraces) -> Self {
         self.model = self.model.traces(traces);
@@ -125,28 +125,28 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
-    /// The canvas frames the whole scene when it first appears and whenever
+    /// Frames the whole scene whenever this key changes.
     /// See [`CanvasModel::frame_key`].
     pub fn frame_key(mut self, key: u64) -> Self {
         self.model = self.model.frame_key(key);
         self
     }
 
-    /// Says which level of a nested patch the scene shows, and the camera
+    /// Says which level of a nested patch the scene shows, and its camera.
     /// See [`CanvasModel::level`].
     pub fn level(mut self, key: u64, camera: Option<Camera>) -> Self {
         self.model = self.model.level(key, camera);
         self
     }
 
-    /// The canvas sends [`CanvasEvent::OpenBrowser`] at the centre of the
+    /// Opens the module browser at the centre whenever this key changes.
     /// See [`CanvasModel::browser_key`].
     pub fn browser_key(mut self, key: u64) -> Self {
         self.model = self.model.browser_key(key);
         self
     }
 
-    /// Moves the camera continuously in a slow loop. For measuring frame
+    /// Moves the camera continuously in a slow loop, for measuring.
     /// See [`CanvasModel::animate`].
     pub fn animate(mut self, animate: bool) -> Self {
         self.model = self.model.animate(animate);

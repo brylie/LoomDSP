@@ -68,6 +68,20 @@ fn press(key: keyboard::Key, text: Option<&str>, modifiers: keyboard::Modifiers,
     })
 }
 
+/// An Iced key press as desktop Iced gives it with Shift held, repeating:
+/// `key` has no modifier applied, `modified_key` and `text` have.
+fn shifted_press(key: &str, modified_key: &str, text: &str) -> iced::Event {
+    iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: characters(key),
+        modified_key: characters(modified_key),
+        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::SHIFT,
+        text: Some(text.into()),
+        repeat: true,
+    })
+}
+
 /// An Iced key release.
 fn release(key: keyboard::Key) -> iced::Event {
     iced::Event::Keyboard(keyboard::Event::KeyReleased {
@@ -136,18 +150,13 @@ fn a_key_with_no_use_is_other() {
     assert_eq!((&keyboard::Key::Unidentified).to_core(), Key::Other);
 }
 
-/// A key that types one character keeps that character and its case.
+/// A key that types one character passes that character through unchanged.
+/// Iced gives the key with no modifier applied, so the conversion has
+/// nothing to fold: an uppercase character here is only a pass-through, not
+/// what a desktop press delivers.
 #[test]
-fn a_one_character_key_keeps_its_character_and_case() {
-    for (text, character) in [
-        ("f", 'f'),
-        ("F", 'F'),
-        ("0", '0'),
-        ("a", 'a'),
-        ("v", 'v'),
-        ("V", 'V'),
-        ("ß", 'ß'),
-    ] {
+fn a_one_character_key_passes_its_character_through() {
+    for (text, character) in [("f", 'f'), ("0", '0'), ("a", 'a'), ("v", 'v'), ("ß", 'ß'), ("F", 'F')] {
         assert_eq!((&characters(text)).to_core(), Key::Character(character), "{text}");
     }
 }
@@ -203,14 +212,16 @@ fn each_modifier_maps_to_its_own_field() {
     );
 }
 
-/// A key press keeps its key, modifiers, repeat flag, and text.
+/// A key press keeps its key, modifiers, repeat flag, and text. With Shift
+/// held, the key is still the unmodified `a`, and the text is the `A` it
+/// types.
 #[test]
 fn a_key_press_keeps_every_part() {
-    let event = event_to_core(&press(characters("A"), Some("A"), keyboard::Modifiers::SHIFT, true));
+    let event = event_to_core(&shifted_press("a", "A", "A"));
     assert_eq!(
         event,
         Some(Event::Key(KeyEvent::Pressed {
-            key: Key::Character('A'),
+            key: Key::Character('a'),
             modifiers: Modifiers {
                 shift: true,
                 ..Modifiers::NONE
