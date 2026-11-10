@@ -78,7 +78,7 @@ impl<Message> PatchCanvas<'_, Message> {
         modifiers: Modifiers,
         text: Option<&str>,
         repeat: bool,
-        shell: &mut Shell<'_, Message>,
+        out: &mut Reaction,
     ) -> bool {
         let (Some(mut popup), Some((module, widget))) = (state.focus.popup().copied(), state.focus.control()) else {
             return false;
@@ -105,7 +105,7 @@ impl<Message> PatchCanvas<'_, Message> {
             }
             Key::Enter | Key::Space => {
                 if !repeat {
-                    self.set_control(shell, module, widget, popup.highlight as f32);
+                    self.set_control(out, module, widget, popup.highlight as f32);
                     state.focus.close_popup();
                 }
                 true
@@ -123,8 +123,8 @@ impl<Message> PatchCanvas<'_, Message> {
             }
         };
         if used {
-            shell.request_redraw();
-            shell.capture_event();
+            out.redraw();
+            out.take();
         }
         used
     }
@@ -143,7 +143,7 @@ impl<Message> PatchCanvas<'_, Message> {
         pointer: Option<Point>,
         bounds: Rect,
         now: Instant,
-        shell: &mut Shell<'_, Message>,
+        out: &mut Reaction,
     ) -> bool {
         let over = pointer.is_some_and(|at| bounds.contains(at));
         let screen = relative(pointer, bounds);
@@ -162,14 +162,14 @@ impl<Message> PatchCanvas<'_, Message> {
                     if let Some(open) = state.focus.popup_mut() {
                         *open = popup;
                     }
-                    shell.request_redraw();
-                    shell.capture_event();
+                    out.redraw();
+                    out.take();
                     return true;
                 }
                 state.focus.close_popup();
                 state.last_click = None;
-                shell.request_redraw();
-                shell.capture_event();
+                out.redraw();
+                out.take();
                 true
             }
             Event::Pointer(PointerEvent::Pressed(_)) if !over => {
@@ -177,7 +177,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 // The press took the keys from the canvas, as it does with no
                 // list open.
                 state.focus.clear();
-                shell.request_redraw();
+                out.redraw();
                 true
             }
             Event::Pointer(PointerEvent::Pressed(button)) => {
@@ -194,7 +194,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 {
                     if left {
                         let row = ((screen.y - rect.y) / SELECT_ROW_PX).floor() as usize;
-                        self.set_control(shell, module, widget, (popup.scroll + row) as f32);
+                        self.set_control(out, module, widget, (popup.scroll + row) as f32);
                     }
                 } else if left
                     && self.scene.hit(state.camera.to_world(screen), state.hit_radius())
@@ -204,7 +204,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     })
                 {
                     self.emit(
-                        shell,
+                        out,
                         CanvasEvent::ResetControl {
                             module,
                             widget,
@@ -212,8 +212,8 @@ impl<Message> PatchCanvas<'_, Message> {
                         },
                     );
                 }
-                shell.request_redraw();
-                shell.capture_event();
+                out.redraw();
+                out.take();
                 true
             }
             Event::WindowUnfocused => {

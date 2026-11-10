@@ -153,7 +153,7 @@ impl<Message> PatchCanvas<'_, Message> {
         modifiers: Modifiers,
         repeat: bool,
         now: Instant,
-        shell: &mut Shell<'_, Message>,
+        out: &mut Reaction,
     ) -> bool {
         let Some((module, widget)) = state.focus.control() else {
             return false;
@@ -237,8 +237,8 @@ impl<Message> PatchCanvas<'_, Message> {
                 };
                 let step = if modifiers.shift { 0.001 } else { 0.01 };
                 let (_, next_low, next_high) = grab.moved(low, high, if up { step } else { -step });
-                self.arrow_step(now, shell);
-                self.set_pad(shell, module, widget, (low, high), (next_low, next_high));
+                self.arrow_step(now, out);
+                self.set_pad(out, module, widget, (low, high), (next_low, next_high));
                 true
             }
             _ => false,
@@ -246,19 +246,12 @@ impl<Message> PatchCanvas<'_, Message> {
     }
 
     /// Sends the values of an XY pad that changed.
-    pub(super) fn set_pad(
-        &self,
-        shell: &mut Shell<'_, Message>,
-        module: u32,
-        widget: usize,
-        before: (f32, f32),
-        next: (f32, f32),
-    ) {
+    pub(super) fn set_pad(&self, out: &mut Reaction, module: u32, widget: usize, before: (f32, f32), next: (f32, f32)) {
         if next.0 != before.0 {
-            self.set_part(shell, module, widget, ControlPart::Main, next.0);
+            self.set_part(out, module, widget, ControlPart::Main, next.0);
         }
         if next.1 != before.1 {
-            self.set_part(shell, module, widget, ControlPart::Second, next.1);
+            self.set_part(out, module, widget, ControlPart::Second, next.1);
         }
     }
 
@@ -334,20 +327,20 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Ends a pointer hold, if there is one. The release is reported only
     /// when no key is still holding that button.
-    pub(super) fn release_pointer_hold(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+    pub(super) fn release_pointer_hold(&self, state: &mut State, out: &mut Reaction) {
         if let Interaction::Holding { module, widget } = state.interaction {
             state.interaction = Interaction::Idle;
             if !Self::key_holds_button(state, module, widget) {
-                self.emit(shell, CanvasEvent::ButtonReleased { module, widget });
+                self.emit(out, CanvasEvent::ButtonReleased { module, widget });
             }
         }
     }
 
     /// Ends what keys are doing on the canvas, because something else now
     /// takes them: no button stays held, and an arrow-key edit closes.
-    pub(super) fn leave_keys(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
-        self.release_every_key_hold(state, shell);
-        self.end_arrow_group(shell, false);
+    pub(super) fn leave_keys(&self, state: &mut State, out: &mut Reaction) {
+        self.release_every_key_hold(state, out);
+        self.end_arrow_group(out, false);
     }
 
     /// Space or Enter, the keys that hold a button.
@@ -360,14 +353,7 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Starts a hold for one key. If that key was holding another button, and
     /// nothing else is, that button is released first.
-    pub(super) fn press_button_key(
-        &self,
-        state: &mut State,
-        key: Key,
-        module: u32,
-        widget: usize,
-        shell: &mut Shell<'_, Message>,
-    ) {
+    pub(super) fn press_button_key(&self, state: &mut State, key: Key, module: u32, widget: usize, out: &mut Reaction) {
         let same = state
             .key_holds
             .iter()
@@ -376,15 +362,15 @@ impl<Message> PatchCanvas<'_, Message> {
         if same {
             return;
         }
-        self.release_button_key(state, key, shell);
-        self.emit(shell, CanvasEvent::ButtonPressed { module, widget });
+        self.release_button_key(state, key, out);
+        self.emit(out, CanvasEvent::ButtonPressed { module, widget });
         if let Some(slot) = state.key_holds.iter_mut().find(|slot| slot.is_none()) {
             *slot = Some(KeyHold { key, module, widget });
         }
     }
 
     /// Ends one key's hold. The button stays down while another key holds it.
-    pub(super) fn release_button_key(&self, state: &mut State, key: Key, shell: &mut Shell<'_, Message>) {
+    pub(super) fn release_button_key(&self, state: &mut State, key: Key, out: &mut Reaction) {
         let Some(index) = state
             .key_holds
             .iter()
@@ -399,20 +385,20 @@ impl<Message> PatchCanvas<'_, Message> {
             || Self::pointer_holds_button(state, hold.module, hold.widget);
         if !still_held {
             self.emit(
-                shell,
+                out,
                 CanvasEvent::ButtonReleased {
                     module: hold.module,
                     widget: hold.widget,
                 },
             );
-            shell.request_redraw();
-            shell.capture_event();
+            out.redraw();
+            out.take();
         }
     }
 
     /// Ends every keyboard hold. Used when the window loses focus, because
     /// the key releases never arrive.
-    pub(super) fn release_every_key_hold(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+    pub(super) fn release_every_key_hold(&self, state: &mut State, out: &mut Reaction) {
         let holds = std::mem::take(&mut state.key_holds);
         let mut reported = [(0_u32, 0_usize); 2];
         let mut count = 0;
@@ -425,7 +411,7 @@ impl<Message> PatchCanvas<'_, Message> {
             reported[count] = (hold.module, hold.widget);
             count += 1;
             self.emit(
-                shell,
+                out,
                 CanvasEvent::ButtonReleased {
                     module: hold.module,
                     widget: hold.widget,
@@ -433,44 +419,37 @@ impl<Message> PatchCanvas<'_, Message> {
             );
         }
         if count > 0 {
-            shell.request_redraw();
-            shell.capture_event();
+            out.redraw();
+            out.take();
         }
     }
 
     /// Ends the hold for the key that came up.
-    pub(super) fn release_key(&self, state: &mut State, key: &Key, now: Instant, shell: &mut Shell<'_, Message>) {
+    pub(super) fn release_key(&self, state: &mut State, key: &Key, now: Instant, out: &mut Reaction) {
         if let Some(named) = Self::button_key(key) {
-            self.release_button_key(state, named, shell);
+            self.release_button_key(state, named, out);
         }
         if is_arrow(key) {
-            self.emit(shell, CanvasEvent::ArrowReleased { at: now });
+            self.emit(out, CanvasEvent::ArrowReleased { at: now });
         }
     }
 
     /// Selects the module of a control being edited, so the inspector
     /// follows.
-    pub(super) fn select_for_edit(&self, module: u32, shell: &mut Shell<'_, Message>) {
+    pub(super) fn select_for_edit(&self, module: u32, out: &mut Reaction) {
         if self.selection.len() != 1 || !self.selection.contains(&module) {
-            self.emit(shell, CanvasEvent::Select(vec![module]));
+            self.emit(out, CanvasEvent::Select(vec![module]));
         }
     }
 
-    pub(super) fn set_control(&self, shell: &mut Shell<'_, Message>, module: u32, widget: usize, position: f32) {
-        self.set_part(shell, module, widget, ControlPart::Main, position);
+    pub(super) fn set_control(&self, out: &mut Reaction, module: u32, widget: usize, position: f32) {
+        self.set_part(out, module, widget, ControlPart::Main, position);
     }
 
     /// Sets one value of a control.
-    pub(super) fn set_part(
-        &self,
-        shell: &mut Shell<'_, Message>,
-        module: u32,
-        widget: usize,
-        part: ControlPart,
-        position: f32,
-    ) {
+    pub(super) fn set_part(&self, out: &mut Reaction, module: u32, widget: usize, part: ControlPart, position: f32) {
         self.emit(
-            shell,
+            out,
             CanvasEvent::SetControl {
                 module,
                 widget,
@@ -482,20 +461,14 @@ impl<Message> PatchCanvas<'_, Message> {
 
     /// Pointer down on a button. The tile stays put. Pointer up reports a
     /// release, whichever mode the app has stored.
-    pub(super) fn press_button(&self, state: &mut State, module: u32, widget: usize, shell: &mut Shell<'_, Message>) {
-        self.emit(shell, CanvasEvent::ButtonPressed { module, widget });
+    pub(super) fn press_button(&self, state: &mut State, module: u32, widget: usize, out: &mut Reaction) {
+        self.emit(out, CanvasEvent::ButtonPressed { module, widget });
         state.interaction = Interaction::Holding { module, widget };
     }
 
     /// The keyboard path to panel controls (NFR-UX-01). Returns true if the
     /// key was used.
-    pub(super) fn focus_keys(
-        &self,
-        state: &mut State,
-        press: KeyPress<'_>,
-        now: Instant,
-        shell: &mut Shell<'_, Message>,
-    ) -> bool {
+    pub(super) fn focus_keys(&self, state: &mut State, press: KeyPress<'_>, now: Instant, out: &mut Reaction) -> bool {
         let KeyPress {
             key,
             modifiers,
@@ -507,9 +480,9 @@ impl<Message> PatchCanvas<'_, Message> {
         // the next arrow is part of that arrow.
         if let ArrowGroupView::Released { .. } = self.arrow_group {
             if is_arrow(key) {
-                self.emit(shell, CanvasEvent::ArrowPressed { at: now });
+                self.emit(out, CanvasEvent::ArrowPressed { at: now });
             } else if !is_modifier(key) {
-                self.end_arrow_group(shell, false);
+                self.end_arrow_group(out, false);
             }
         }
         // Focus is only valid on a control of the one selected module.
@@ -550,24 +523,24 @@ impl<Message> PatchCanvas<'_, Message> {
                 Key::Up | Key::Right | Key::Down | Key::Left | Key::Space | Key::Enter
             )
         {
-            shell.capture_event();
+            out.take();
             return true;
         }
         // An open list or field comes before every other use of a key.
-        if self.select_popup_key(state, key, modifiers, text, repeat, shell) {
+        if self.select_popup_key(state, key, modifiers, text, repeat, out) {
             return true;
         }
-        if self.typed_field_key(state, key, modifiers, text, repeat, shell) {
+        if self.typed_field_key(state, key, modifiers, text, repeat, out) {
             return true;
         }
         if self.open_typed_field(state, key, modifiers, text, repeat) {
-            shell.request_redraw();
-            shell.capture_event();
+            out.redraw();
+            out.take();
             return true;
         }
-        if self.range_keys(state, key, modifiers, repeat, now, shell) {
-            shell.request_redraw();
-            shell.capture_event();
+        if self.range_keys(state, key, modifiers, repeat, now, out) {
+            out.redraw();
+            out.take();
             return true;
         }
         // Ctrl+Enter (Cmd+Enter on macOS) and a command-modified Escape are
@@ -609,8 +582,8 @@ impl<Message> PatchCanvas<'_, Message> {
                     if let Some(next) = next {
                         state.focus.set(module, controls[next], true);
                         state.focus_first = true;
-                        shell.request_redraw();
-                        shell.capture_event();
+                        out.redraw();
+                        out.take();
                         return true;
                     }
                 }
@@ -622,7 +595,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     None => 0,
                 };
                 state.focus.clear();
-                self.emit(shell, CanvasEvent::Select(vec![order[next].id]));
+                self.emit(out, CanvasEvent::Select(vec![order[next].id]));
                 true
             }
             Key::Escape if !command && state.focus.control().is_some() => {
@@ -632,7 +605,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 self.learn.is_none()
             }
             Key::Escape if !command && !self.selection.is_empty() && self.learn.is_none() => {
-                self.emit(shell, CanvasEvent::Select(Vec::new()));
+                self.emit(out, CanvasEvent::Select(Vec::new()));
                 true
             }
             Key::Enter if !command && state.focus.control().is_none() => {
@@ -651,7 +624,7 @@ impl<Message> PatchCanvas<'_, Message> {
             // the transport, not a parameter.
             Key::Space | Key::Enter if !command && self.learn.is_some() && state.focus.control().is_some() => {
                 if !repeat && let Some((module, widget)) = state.focus.control() {
-                    self.emit(shell, CanvasEvent::Learn { module, widget });
+                    self.emit(out, CanvasEvent::Learn { module, widget });
                 }
                 true
             }
@@ -669,10 +642,10 @@ impl<Message> PatchCanvas<'_, Message> {
                             Key::Right => (width.saturating_add(1), height),
                             _ => unreachable!(),
                         };
-                        self.arrow_step(now, shell);
-                        self.emit(shell, CanvasEvent::Resize { module: id, size });
-                        shell.request_redraw();
-                        shell.capture_event();
+                        self.arrow_step(now, out);
+                        self.emit(out, CanvasEvent::Resize { module: id, size });
+                        out.redraw();
+                        out.take();
                         return true;
                     }
                     return false;
@@ -689,16 +662,16 @@ impl<Message> PatchCanvas<'_, Message> {
                         Key::Left => Vector::new(-step, 0.0),
                         _ => unreachable!(),
                     };
-                    self.arrow_step(now, shell);
+                    self.arrow_step(now, out);
                     self.emit(
-                        shell,
+                        out,
                         CanvasEvent::Move {
                             ids: self.selection.iter().copied().collect(),
                             delta,
                         },
                     );
-                    shell.request_redraw();
-                    shell.capture_event();
+                    out.redraw();
+                    out.take();
                     return true;
                 };
                 let up = matches!(named, Key::Up | Key::Right);
@@ -712,13 +685,13 @@ impl<Message> PatchCanvas<'_, Message> {
                     };
                     let position = self.part_position(module, widget, part);
                     let next = knob_step(position, up, modifiers.shift, 0);
-                    self.arrow_step(now, shell);
+                    self.arrow_step(now, out);
                     if next != position {
-                        self.set_part(shell, module, widget, part, next);
+                        self.set_part(out, module, widget, part, next);
                     }
                 } else if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
                     self.emit(
-                        shell,
+                        out,
                         CanvasEvent::ButtonArrow {
                             module,
                             widget,
@@ -756,9 +729,9 @@ impl<Message> PatchCanvas<'_, Message> {
                         }
                         _ => return false,
                     };
-                    self.arrow_step(now, shell);
+                    self.arrow_step(now, out);
                     if next != position {
-                        self.set_control(shell, module, widget, next);
+                        self.set_control(out, module, widget, next);
                     }
                 }
                 true
@@ -774,21 +747,21 @@ impl<Message> PatchCanvas<'_, Message> {
                         .is_some_and(WidgetViewKind::is_two_numbers);
                     match self.widget_kind(module, widget) {
                         Some(WidgetViewKind::Toggle) => {
-                            self.set_control(shell, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
+                            self.set_control(out, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
                         }
                         // A repeated key must not press again. The first press is
                         // still held, so key up can release it.
                         Some(WidgetViewKind::Button) if repeat => {}
                         Some(WidgetViewKind::Button) => {
-                            self.press_button_key(state, named, module, widget, shell);
+                            self.press_button_key(state, named, module, widget, out);
                         }
                         Some(WidgetViewKind::Radio { options } | WidgetViewKind::Segmented { options, .. }) => {
                             let next = (position.round() as usize + 1) % options.len().max(1);
-                            self.set_control(shell, module, widget, next as f32);
+                            self.set_control(out, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
                         _ if (one_number || two_numbers) && matches!(named, Key::Space) && !repeat => {
-                            self.emit(shell, CanvasEvent::ToggleRun);
+                            self.emit(out, CanvasEvent::ToggleRun);
                         }
                         _ => {}
                     }
@@ -798,7 +771,7 @@ impl<Message> PatchCanvas<'_, Message> {
                     // repeat is swallowed so holding the key does not toggle
                     // again. Enter is not that shortcut.
                     if !repeat {
-                        self.emit(shell, CanvasEvent::ToggleRun);
+                        self.emit(out, CanvasEvent::ToggleRun);
                     }
                     true
                 } else {
@@ -808,8 +781,8 @@ impl<Message> PatchCanvas<'_, Message> {
             _ => false,
         };
         if used {
-            shell.request_redraw();
-            shell.capture_event();
+            out.redraw();
+            out.take();
         }
         used
     }

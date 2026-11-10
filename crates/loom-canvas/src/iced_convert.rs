@@ -216,6 +216,24 @@ impl ToCore for &keyboard::Key {
     }
 }
 
+impl ToIced for crate::CursorShape {
+    type Iced = mouse::Interaction;
+
+    fn to_iced(self) -> mouse::Interaction {
+        use crate::CursorShape;
+        match self {
+            CursorShape::Default => mouse::Interaction::default(),
+            CursorShape::Grab => mouse::Interaction::Grab,
+            CursorShape::Grabbing => mouse::Interaction::Grabbing,
+            CursorShape::Pointer => mouse::Interaction::Pointer,
+            CursorShape::Crosshair => mouse::Interaction::Crosshair,
+            CursorShape::ResizeHorizontal => mouse::Interaction::ResizingHorizontally,
+            CursorShape::ResizeVertical => mouse::Interaction::ResizingVertically,
+            CursorShape::ResizeDiagonal => mouse::Interaction::ResizingDiagonallyDown,
+        }
+    }
+}
+
 /// Turns an Iced event into ours, or `None` for an event with no meaning to
 /// our elements yet: touch, text composition, and the window events other
 /// than a redraw and losing focus.

@@ -563,10 +563,9 @@ fn drive_at(
     now: Instant,
 ) -> Vec<CanvasEvent> {
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
-    canvas.handle(state, event, Some(at), bounds, now, &mut shell);
-    messages
+    let mut out = Reaction::default();
+    canvas.handle(state, event, Some(at), bounds, now, &mut out);
+    out.events
 }
 
 fn click(button: PointerButton) -> Event {
@@ -1091,8 +1090,8 @@ fn fader_scene(vertical: bool) -> (Scene, PanelValues) {
 #[test]
 fn a_fader_drag_keeps_its_cursor() {
     for (vertical, expected) in [
-        (true, mouse::Interaction::ResizingVertically),
-        (false, mouse::Interaction::ResizingHorizontally),
+        (true, CursorShape::ResizeVertical),
+        (false, CursorShape::ResizeHorizontal),
     ] {
         let (scene, values) = fader_scene(vertical);
         let selected = BTreeSet::from([1]);
@@ -2481,30 +2480,23 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
             repeat: false,
         })
     };
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
+    let mut out = Reaction::default();
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
-    canvas.handle(&mut state, Some(&escape), Some(at), bounds, Instant::now(), &mut shell);
-    assert_eq!(
-        shell.event_status(),
-        iced::event::Status::Ignored,
-        "the app must see Escape"
-    );
+    canvas.handle(&mut state, Some(&escape), Some(at), bounds, Instant::now(), &mut out);
+    assert!(!out.taken, "the app must see Escape");
     assert_eq!(state.focus.control(), None);
 
-    let mut next_messages = Vec::new();
-    let mut next_shell = Shell::new(&mut next_messages);
+    let mut next_out = Reaction::default();
     canvas.handle(
         &mut state,
         Some(&escape),
         Some(at),
         bounds,
         Instant::now(),
-        &mut next_shell,
+        &mut next_out,
     );
-    assert_eq!(
-        next_shell.event_status(),
-        iced::event::Status::Ignored,
+    assert!(
+        !next_out.taken,
         "learn mode must receive Escape even with a selected tile"
     );
 
@@ -2775,8 +2767,7 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
     assert_eq!(state.pinned, Some(OUT));
     assert_eq!(lines(&state), 1, "pinned lines stay");
 
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
+    let mut out = Reaction::default();
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     canvas.handle(
         &mut state,
@@ -2784,25 +2775,21 @@ fn modulation_lines_follow_hover_and_the_pinned_badge() {
         Some(empty),
         bounds,
         Instant::now(),
-        &mut shell,
+        &mut out,
     );
-    assert_eq!(shell.event_status(), iced::event::Status::Captured);
+    assert!(out.taken);
     assert_eq!(state.pinned, None);
     assert_eq!(lines(&state), 0);
-    let mut shell = Shell::new(&mut messages);
+    let mut out = Reaction::default();
     canvas.handle(
         &mut state,
         Some(&escape()),
         Some(empty),
         bounds,
         Instant::now(),
-        &mut shell,
+        &mut out,
     );
-    assert_eq!(
-        shell.event_status(),
-        iced::event::Status::Ignored,
-        "with nothing pinned the app sees Escape"
-    );
+    assert!(!out.taken, "with nothing pinned the app sees Escape");
 
     // Two clicks on the badge pin and unpin.
     drive(&canvas, &mut state, &click(PointerButton::Left), badge);
@@ -2936,8 +2923,7 @@ fn a_pin_without_its_badge_takes_no_escape() {
         ..State::default()
     };
     assert_eq!(canvas.pin(&state), None);
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
+    let mut out = Reaction::default();
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     canvas.handle(
         &mut state,
@@ -2945,9 +2931,9 @@ fn a_pin_without_its_badge_takes_no_escape() {
         Some(Point::ORIGIN),
         bounds,
         Instant::now(),
-        &mut shell,
+        &mut out,
     );
-    assert_eq!(shell.event_status(), iced::event::Status::Ignored);
+    assert!(!out.taken);
 }
 
 /// A new patch drops the pin. Module IDs repeat between patches. The arrow
@@ -3014,24 +3000,18 @@ fn every_event_asks_for_a_redraw_at_the_deadline() {
         Some(at),
         bounds,
         Instant::now(),
-        &mut Shell::new(&mut Vec::new()),
+        &mut Reaction::default(),
     );
     for event in [redraw, Event::Key(KeyEvent::ModifiersChanged(SHIFT))] {
-        let mut messages = Vec::new();
-        let mut shell = Shell::new(&mut messages);
-        canvas.on_event(&mut state, Some(&event), Some(at), bounds, Instant::now(), &mut shell);
-        assert_eq!(shell.redraw_request(), window::RedrawRequest::At(due), "{event:?}");
+        let mut out = Reaction::default();
+        canvas.on_event(&mut state, Some(&event), Some(at), bounds, Instant::now(), &mut out);
+        assert_eq!(out.redraw, Redraw::At(due), "{event:?}");
     }
     let closed = PatchCanvas::new(&scene, &none, |e| e);
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
+    let mut out = Reaction::default();
     let shift = Event::Key(KeyEvent::ModifiersChanged(SHIFT));
-    closed.on_event(&mut state, Some(&shift), Some(at), bounds, Instant::now(), &mut shell);
-    assert_ne!(
-        shell.redraw_request(),
-        window::RedrawRequest::At(due),
-        "no group, no wake"
-    );
+    closed.on_event(&mut state, Some(&shift), Some(at), bounds, Instant::now(), &mut out);
+    assert_ne!(out.redraw, Redraw::At(due), "no group, no wake");
 }
 
 /// Something the window reports that means nothing to the canvas, such as
@@ -3045,12 +3025,11 @@ fn an_event_with_no_meaning_still_asks_for_a_redraw_at_the_deadline() {
     let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
     let mut state = State::default();
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
-    canvas.on_event(&mut state, None, None, bounds, Instant::now(), &mut shell);
-    assert_eq!(shell.redraw_request(), window::RedrawRequest::At(due));
-    assert_eq!(shell.event_status(), iced::event::Status::Ignored);
-    assert!(messages.is_empty(), "{messages:?}");
+    let mut out = Reaction::default();
+    canvas.on_event(&mut state, None, None, bounds, Instant::now(), &mut out);
+    assert_eq!(out.redraw, Redraw::At(due));
+    assert!(!out.taken);
+    assert!(out.events.is_empty(), "{:?}", out.events);
 }
 
 /// The lines are built once for a given pin, pointer, and selection,
@@ -3207,17 +3186,17 @@ fn the_range_ring_shows_the_resize_cursor_above_the_cell() {
     };
 
     let modulated = PatchCanvas::new(&scene, &none, |e| e).values(&values);
-    assert_eq!(cursor_at(&modulated), mouse::Interaction::ResizingVertically);
+    assert_eq!(cursor_at(&modulated), CursorShape::ResizeVertical);
 
     let plain_values = PanelValues::new();
     let plain = PatchCanvas::new(&scene, &none, |e| e).values(&plain_values);
-    assert_eq!(cursor_at(&plain), mouse::Interaction::Grab);
+    assert_eq!(cursor_at(&plain), CursorShape::Grab);
 
     let learn = LearnView::default();
     let learning = PatchCanvas::new(&scene, &none, |e| e)
         .values(&values)
         .learn(Some(&learn));
-    assert_eq!(cursor_at(&learning), mouse::Interaction::Grab);
+    assert_eq!(cursor_at(&learning), CursorShape::Grab);
 }
 
 /// A knob with no enabled assignment has no ring to grab: a press there
@@ -3719,10 +3698,9 @@ fn command_key(named: Key) -> Event {
 /// Drives one event and says whether the canvas captured it.
 fn captured(canvas: &PatchCanvas<'_, CanvasEvent>, state: &mut State, event: &Event, at: Point) -> bool {
     let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
-    let mut messages = Vec::new();
-    let mut shell = Shell::new(&mut messages);
-    canvas.handle(state, Some(event), Some(at), bounds, Instant::now(), &mut shell);
-    shell.event_status() == iced::event::Status::Captured
+    let mut out = Reaction::default();
+    canvas.handle(state, Some(event), Some(at), bounds, Instant::now(), &mut out);
+    out.taken
 }
 
 /// A double-click on a tile's header opens the tile and starts no move,
@@ -3876,4 +3854,74 @@ fn command_enter_is_left_to_the_app() {
     // With a control focused, Ctrl+Enter is still not the canvas's.
     assert!(!captured(&canvas, &mut state, &command_key(Key::Enter), at));
     assert_eq!(state.focus.control(), Some((1, 0)));
+}
+
+/// Applying a reaction hands Iced the events as messages in their order,
+/// and leaves the input not captured and no redraw asked for when the
+/// reaction says neither.
+#[test]
+fn applying_a_reaction_publishes_its_events_in_order() {
+    let scene = Scene::new(Vec::new(), Vec::new());
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let reaction = Reaction {
+        events: vec![
+            CanvasEvent::GestureStart,
+            CanvasEvent::PointerDown,
+            CanvasEvent::GestureEnd,
+        ],
+        ..Reaction::default()
+    };
+    let mut messages = Vec::new();
+    let mut shell = iced::advanced::Shell::new(&mut messages);
+    canvas.apply(reaction, &mut shell);
+    assert_eq!(shell.event_status(), iced::event::Status::Ignored);
+    assert_eq!(shell.redraw_request(), window::RedrawRequest::Wait);
+    assert_eq!(
+        messages,
+        [
+            CanvasEvent::GestureStart,
+            CanvasEvent::PointerDown,
+            CanvasEvent::GestureEnd
+        ]
+    );
+}
+
+/// Applying a taken reaction captures the Iced event.
+#[test]
+fn applying_a_taken_reaction_captures_the_event() {
+    let scene = Scene::new(Vec::new(), Vec::new());
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let reaction = Reaction {
+        taken: true,
+        ..Reaction::default()
+    };
+    let mut messages = Vec::new();
+    let mut shell = iced::advanced::Shell::new(&mut messages);
+    canvas.apply(reaction, &mut shell);
+    assert_eq!(shell.event_status(), iced::event::Status::Captured);
+}
+
+/// Each redraw request becomes the Iced request of the same meaning.
+#[test]
+fn applying_a_reaction_asks_iced_for_its_redraw() {
+    let scene = Scene::new(Vec::new(), Vec::new());
+    let none = BTreeSet::new();
+    let canvas = PatchCanvas::new(&scene, &none, |e| e);
+    let time = Instant::now() + Duration::from_millis(250);
+    for (redraw, expected) in [
+        (Redraw::No, window::RedrawRequest::Wait),
+        (Redraw::At(time), window::RedrawRequest::At(time)),
+        (Redraw::Now, window::RedrawRequest::NextFrame),
+    ] {
+        let reaction = Reaction {
+            redraw,
+            ..Reaction::default()
+        };
+        let mut messages = Vec::new();
+        let mut shell = iced::advanced::Shell::new(&mut messages);
+        canvas.apply(reaction, &mut shell);
+        assert_eq!(shell.redraw_request(), expected, "{redraw:?}");
+    }
 }

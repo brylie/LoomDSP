@@ -205,7 +205,7 @@ impl<Message> PatchCanvas<'_, Message> {
         modifiers: Modifiers,
         text: Option<&str>,
         repeat: bool,
-        shell: &mut Shell<'_, Message>,
+        out: &mut Reaction,
     ) -> bool {
         let Some((module, widget)) = state.focus.control() else {
             return false;
@@ -222,7 +222,7 @@ impl<Message> PatchCanvas<'_, Message> {
                 DraftSubmit::Unchanged => {}
                 DraftSubmit::Blocked => state.focus.open_typing(field),
                 DraftSubmit::Commit => self.emit(
-                    shell,
+                    out,
                     CanvasEvent::TypedValue {
                         module,
                         widget,
@@ -277,8 +277,8 @@ impl<Message> PatchCanvas<'_, Message> {
                 state.focus.open_typing(field);
             }
         }
-        shell.request_redraw();
-        shell.capture_event();
+        out.redraw();
+        out.take();
         true
     }
 
@@ -292,7 +292,7 @@ impl<Message> PatchCanvas<'_, Message> {
         event: &Event,
         bounds: Rect,
         screen: Option<Point>,
-        shell: &mut Shell<'_, Message>,
+        out: &mut Reaction,
     ) -> bool {
         if state.focus.typed().is_none() {
             return false;
@@ -304,16 +304,16 @@ impl<Message> PatchCanvas<'_, Message> {
                     .zip(screen)
                     .is_some_and(|(rect, at)| rect.contains(at));
                 if inside {
-                    shell.capture_event();
+                    out.take();
                     return true;
                 }
                 state.focus.close_typing();
-                shell.request_redraw();
+                out.redraw();
                 false
             }
             Event::Pointer(PointerEvent::Scrolled(_)) | Event::WindowUnfocused => {
                 state.focus.close_typing();
-                shell.request_redraw();
+                out.redraw();
                 false
             }
             _ => false,

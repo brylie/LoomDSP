@@ -19,6 +19,7 @@ mod drag_line;
 mod gpu;
 mod hover;
 pub mod iced_convert;
+mod reaction;
 mod scene;
 pub mod stats;
 mod theme;
@@ -34,6 +35,7 @@ pub use controls::{
 pub use controls::{part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
 pub use drag_line::DragLine;
+pub use reaction::{CursorShape, Reaction, Redraw};
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
     PORT_HIT_RADIUS, PanelView, PartText, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal,

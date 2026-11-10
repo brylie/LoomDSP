@@ -10,6 +10,7 @@ use crate::draft::{DraftSubmit, TypedDraft};
 use crate::gpu::{Cable, CanvasPrimitive, Geometry, Overlay, Shape};
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX, HoverTarget, HoverTimer};
 use crate::iced_convert::{ToCore as _, ToIced as _};
+use crate::reaction::{CursorShape, Reaction, Redraw};
 use crate::scene::{
     BADGE_TEXT_SIZE, GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH,
     WidgetView, WidgetViewKind,
@@ -413,18 +414,11 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     }
 
     /// Reports an output drag in window coordinates for the inspector layer.
-    fn assign_drag(
-        &self,
-        from: PortRef,
-        at: Option<Point>,
-        camera: Camera,
-        bounds: Rect,
-        shell: &mut Shell<'_, Message>,
-    ) {
+    fn assign_drag(&self, from: PortRef, at: Option<Point>, camera: Camera, bounds: Rect, out: &mut Reaction) {
         if let Some(world) = self.scene.port_position(from) {
             let screen = camera.to_screen(world);
             self.emit(
-                shell,
+                out,
                 CanvasEvent::AssignDrag {
                     from,
                     start: Point::new(bounds.x + screen.x, bounds.y + screen.y),
@@ -449,32 +443,48 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         pointer: Option<Point>,
         bounds: Rect,
         now: Instant,
-        shell: &mut Shell<'_, Message>,
+        out: &mut Reaction,
     ) {
-        self.handle(state, event, pointer, bounds, now, shell);
-        self.sync_hover_text(state, event, now, shell);
+        self.handle(state, event, pointer, bounds, now, out);
+        self.sync_hover_text(state, event, now, out);
         // Asked again on every event, because a later request for the next
         // frame replaces a pending one for a time, and the group would then
         // stay open on an idle patch.
         if let ArrowGroupView::Released { due } = self.arrow_group {
-            shell.request_redraw_at(due);
+            out.redraw_at(due);
         }
     }
 
-    fn emit(&self, shell: &mut Shell<'_, Message>, event: CanvasEvent) {
-        shell.publish((self.on_event)(event));
+    /// Hands a reaction to Iced: the events as messages, the input as
+    /// captured, and the redraw as a request.
+    fn apply(&self, reaction: Reaction, shell: &mut Shell<'_, Message>) {
+        for event in reaction.events {
+            shell.publish((self.on_event)(event));
+        }
+        if reaction.taken {
+            shell.capture_event();
+        }
+        match reaction.redraw {
+            Redraw::Now => shell.request_redraw(),
+            Redraw::At(time) => shell.request_redraw_at(time),
+            Redraw::No => {}
+        }
+    }
+
+    fn emit(&self, out: &mut Reaction, event: CanvasEvent) {
+        out.emit(event);
     }
 
     /// Starts a gesture and sets the interaction that lasts through it.
-    fn begin(&self, state: &mut State, interaction: Interaction, shell: &mut Shell<'_, Message>) {
-        self.emit(shell, CanvasEvent::GestureStart);
+    fn begin(&self, state: &mut State, interaction: Interaction, out: &mut Reaction) {
+        self.emit(out, CanvasEvent::GestureStart);
         state.interaction = interaction;
     }
 
     /// Ends the gesture of the current interaction, if it has one. Used when
     /// the interaction is replaced or cut off, so a start always has an end.
     /// The arrow group ends separately, with [`PatchCanvas::end_arrow_group`].
-    fn end_gestures(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+    fn end_gestures(&self, state: &mut State, out: &mut Reaction) {
         if matches!(
             state.interaction,
             Interaction::Wiring {
@@ -482,7 +492,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
                 pulled: false
             }
         ) {
-            self.emit(shell, CanvasEvent::AssignCancel);
+            self.emit(out, CanvasEvent::AssignCancel);
         }
         if matches!(
             state.interaction,
@@ -495,7 +505,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
                 | Interaction::Depth { .. }
         ) {
             state.interaction = Interaction::Idle;
-            self.emit(shell, CanvasEvent::GestureEnd);
+            self.emit(out, CanvasEvent::GestureEnd);
         }
     }
 
@@ -504,15 +514,15 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     /// The app ignores an end with no group open, so sending one too many is
     /// safe; with `always` true it is sent where no key-up or timer would
     /// follow to close a group the view does not show yet.
-    fn end_arrow_group(&self, shell: &mut Shell<'_, Message>, always: bool) {
+    fn end_arrow_group(&self, out: &mut Reaction, always: bool) {
         if always || self.arrow_group != ArrowGroupView::Closed {
-            self.emit(shell, CanvasEvent::ArrowGroupEnd);
+            self.emit(out, CanvasEvent::ArrowGroupEnd);
         }
     }
 
     /// Reports an arrow key about to edit.
-    fn arrow_step(&self, now: Instant, shell: &mut Shell<'_, Message>) {
-        self.emit(shell, CanvasEvent::ArrowStep { at: now });
+    fn arrow_step(&self, now: Instant, out: &mut Reaction) {
+        self.emit(out, CanvasEvent::ArrowStep { at: now });
     }
 }
 
@@ -679,11 +689,11 @@ enum Interaction {
 }
 
 /// The cursor that says which way a value drag goes.
-fn drag_cursor(drag: &ValueDrag) -> mouse::Interaction {
+fn drag_cursor(drag: &ValueDrag) -> CursorShape {
     if drag.is_horizontal() {
-        mouse::Interaction::ResizingHorizontally
+        CursorShape::ResizeHorizontal
     } else {
-        mouse::Interaction::ResizingVertically
+        CursorShape::ResizeVertical
     }
 }
 
@@ -691,13 +701,13 @@ impl Interaction {
     /// The cursor during this gesture, or `None` with no gesture. A value drag
     /// shows its own direction, so a horizontal fader keeps the cursor it had
     /// on hover.
-    fn cursor(&self) -> Option<mouse::Interaction> {
+    fn cursor(&self) -> Option<CursorShape> {
         Some(match self {
-            Self::Panning { .. } | Self::Moving { .. } => mouse::Interaction::Grabbing,
-            Self::Resizing { .. } => mouse::Interaction::ResizingDiagonallyDown,
+            Self::Panning { .. } | Self::Moving { .. } => CursorShape::Grabbing,
+            Self::Resizing { .. } => CursorShape::ResizeDiagonal,
             Self::Turning { drag, .. } | Self::Depth { drag, .. } | Self::Range { drag, .. } => drag_cursor(drag),
-            Self::Holding { .. } => mouse::Interaction::Pointer,
-            Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => mouse::Interaction::Crosshair,
+            Self::Holding { .. } => CursorShape::Pointer,
+            Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => CursorShape::Crosshair,
             Self::Idle => return None,
         })
     }
@@ -855,7 +865,9 @@ where
         };
         let event = crate::iced_convert::event_to_core(event);
         let pointer = cursor.position().map(|point| point.to_core());
-        self.on_event(state, event.as_ref(), pointer, layout.bounds().to_core(), now, shell);
+        let mut out = Reaction::default();
+        self.on_event(state, event.as_ref(), pointer, layout.bounds().to_core(), now, &mut out);
+        self.apply(out, shell);
     }
 
     fn operate(
@@ -898,11 +910,12 @@ where
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
-        match state.interaction.cursor() {
+        let shape = match state.interaction.cursor() {
             Some(gesture) => gesture,
             None if cursor.is_over(layout.bounds()) => self.hover_interaction(state),
-            None => mouse::Interaction::default(),
-        }
+            None => CursorShape::default(),
+        };
+        shape.to_iced()
     }
 
     fn draw(

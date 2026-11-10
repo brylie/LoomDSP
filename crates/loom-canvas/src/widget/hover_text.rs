@@ -7,23 +7,17 @@ impl<Message> PatchCanvas<'_, Message> {
     /// text). It asks for a frame only when the text appears or hides, and
     /// for a single timed frame while it waits, so it never draws while
     /// nothing changes.
-    pub(super) fn sync_hover_text(
-        &self,
-        state: &mut State,
-        event: Option<&Event>,
-        now: Instant,
-        shell: &mut Shell<'_, Message>,
-    ) {
+    pub(super) fn sync_hover_text(&self, state: &mut State, event: Option<&Event>, now: Instant, out: &mut Reaction) {
         let redrawing = matches!(event, Some(Event::Redraw));
         let target = self.hover_target(state);
         let mut changed = state.hover_text.rest(target, now);
         // This frame is being drawn already, so text due now needs no other.
         changed |= state.hover_text.tick(now) && !redrawing;
         if changed {
-            shell.request_redraw();
+            out.redraw();
         }
         if let Some(due) = state.hover_text.due() {
-            shell.request_redraw_at(due);
+            out.redraw_at(due);
         }
     }
 
@@ -111,9 +105,9 @@ impl<Message> PatchCanvas<'_, Message> {
     /// The ring of a modulated knob reaches a little past the knob's cell,
     /// so it is checked first, as `press` does: there a press drags depth,
     /// and the cursor says so (modulation.md, Arc drag).
-    pub(super) fn hover_interaction(&self, state: &State) -> mouse::Interaction {
+    pub(super) fn hover_interaction(&self, state: &State) -> CursorShape {
         if state.cursor.is_some_and(|point| self.resize_at(point).is_some()) {
-            return mouse::Interaction::ResizingDiagonallyDown;
+            return CursorShape::ResizeDiagonal;
         }
         let on_range = state
             .hover
@@ -133,15 +127,15 @@ impl<Message> PatchCanvas<'_, Message> {
             return drag_cursor(&self.value_drag(module, widget, state.camera.zoom));
         }
         match state.hover {
-            Some(Hit::Port(_) | Hit::Badge(_)) => mouse::Interaction::Pointer,
+            Some(Hit::Port(_) | Hit::Badge(_)) => CursorShape::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                Some(WidgetViewKind::XyPad { .. }) => mouse::Interaction::Crosshair,
+                Some(WidgetViewKind::XyPad { .. }) => CursorShape::Crosshair,
                 Some(WidgetViewKind::Range { .. }) => drag_cursor(&self.value_drag(module, widget, state.camera.zoom)),
                 Some(kind) if kind.is_one_number() => drag_cursor(&self.value_drag(module, widget, state.camera.zoom)),
-                _ => mouse::Interaction::Pointer,
+                _ => CursorShape::Pointer,
             },
-            Some(Hit::Module(_)) => mouse::Interaction::Grab,
-            _ => mouse::Interaction::default(),
+            Some(Hit::Module(_)) => CursorShape::Grab,
+            _ => CursorShape::default(),
         }
     }
 

@@ -343,3 +343,26 @@ fn other_window_events_have_no_conversion() {
         assert_eq!(event_to_core(&iced::Event::Window(event.clone())), None, "{event:?}");
     }
 }
+
+/// Each cursor shape maps to its own Iced cursor, and the default shape to
+/// Iced's default.
+#[test]
+fn each_cursor_shape_has_its_own_iced_cursor() {
+    use crate::CursorShape;
+    let shapes = [
+        CursorShape::Default,
+        CursorShape::Grab,
+        CursorShape::Grabbing,
+        CursorShape::Pointer,
+        CursorShape::Crosshair,
+        CursorShape::ResizeHorizontal,
+        CursorShape::ResizeVertical,
+        CursorShape::ResizeDiagonal,
+    ];
+    assert_eq!(CursorShape::Default.to_iced(), mouse::Interaction::default());
+    for (i, a) in shapes.iter().enumerate() {
+        for b in &shapes[i + 1..] {
+            assert_ne!(a.to_iced(), b.to_iced(), "{a:?} and {b:?}");
+        }
+    }
+}
