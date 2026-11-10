@@ -106,10 +106,15 @@ The app still runs on `iced::application`. This phase moves our code off Iced's 
 
 ### 1.2 Canvas input as a plain state machine
 
-1. Add our own input events to `loom-ui-core`: `PointerEvent`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`. Define them from what the canvas handlers match on.
-2. Move the event handling in `loom-canvas/src/widget.rs` (drags, hover, double-click, key handling) into a plain struct, for example `CanvasInput`, with `fn handle(&mut self, event: &PointerEvent | &KeyEvent, view: &CanvasView, now: Instant) -> Vec<CanvasEvent>`.
-3. The Iced widget becomes a thin adapter that converts events and calls it.
-4. Move the existing widget tests to test `CanvasInput` directly where they can. Keep the `Ui` harness tests as they are.
+1. Add our own input events to `loom-ui-core`: `Event`, `PointerEvent`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`. Define them from what the canvas handlers match on, not from a toolkit's event list (ADR-0018).
+2. Move the event handling in `loom-canvas/src/widget.rs` (drags, hover, double-click, key handling) into plain code in `loom-canvas/src/input`:
+   - `CanvasInput` is the lasting state. `CanvasProps` is what the app shows this frame.
+   - `CanvasInput::handle(&mut self, props, event, moment) -> Reaction`. The `Moment` carries the pointer's place, the canvas bounds, and the time. The pointer travels beside every event, not inside pointer events, because a key press can depend on it and only the driver knows when something above the canvas covers it.
+   - A `Reaction` holds the `CanvasEvent`s to report, whether the input was used, and the soonest redraw asked for.
+   - `CanvasInput::pass` handles something the driver received that means nothing to the canvas, so the steps that run on every event still run.
+   - No handler reads the clock.
+3. The Iced widget becomes a thin adapter that converts events, calls `CanvasInput`, and applies the `Reaction`.
+4. Move the existing widget tests to test the plain code directly. Keep the `Ui` harness tests as they are. Test the adapter's conversions on their own, since the plain tests no longer pass through them.
 
 ### 1.3 Canvas drawing without Iced's primitive
 

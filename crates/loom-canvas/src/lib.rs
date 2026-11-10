@@ -1,13 +1,24 @@
 //! The LoomDSP patch canvas (ADR-0010).
 //!
-//! An Iced widget that draws modules, ports, and cables with one custom wgpu
-//! primitive. Shapes are instanced quads and cables are triangle strips, so
-//! GPU cost follows the number of things drawn, not the number of pixels.
-//! Text goes through Iced's text system. Zoomed out, where it is too small
-//! to read, faint bars from the instanced buffer stand in for it.
+//! It draws modules, ports, and cables with one custom wgpu primitive.
+//! Shapes are instanced quads and cables are triangle strips, so GPU cost
+//! follows the number of things drawn, not the number of pixels. Text goes
+//! through Iced's text system. Zoomed out, where it is too small to read,
+//! faint bars from the instanced buffer stand in for it.
 //!
-//! Positions, sizes, and colours are `loom-ui-core` values. They become Iced
-//! values only where they cross into an Iced call, through [`iced_convert`].
+//! The crate has two halves:
+//!
+//! - **Input, with no UI toolkit in it.** [`CanvasInput`] keeps the lasting
+//!   state and handles one `loom-ui-core` event at a time, with the
+//!   [`Moment`] it arrived in. [`CanvasProps`] is what the app shows this
+//!   frame. The answer is a [`Reaction`]: the [`CanvasEvent`]s to report,
+//!   whether the input was used, and when to redraw.
+//! - **The Iced widget,** [`PatchCanvas`]. It converts Iced's events through
+//!   [`iced_convert`], calls [`CanvasInput`], applies the [`Reaction`], and
+//!   draws.
+//!
+//! Positions, sizes, colours, and input events are `loom-ui-core` values.
+//! They become Iced values only where they cross into an Iced call.
 //!
 //! The application owns the data. It builds a [`Scene`], passes it to
 //! [`PatchCanvas`], and applies the [`CanvasEvent`]s the canvas reports.

@@ -166,7 +166,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. AI-assisted contribution
 | `crates/loom-test` | The module test harness, for tests only. |
 | `crates/loom-host-desktop` | Audio (cpal) and MIDI (midir) host for desktop. |
 | `crates/loom-cli` | The `loom` command-line tool. |
-| `crates/loom-ui-core` | Plain geometry and colour types for the UI layer, with no toolkit behind them ([ADR-0041](docs/adr/0041-own-ui-layer.md)). |
+| `crates/loom-ui-core` | Plain geometry, colour, and input event types for the UI layer, with no toolkit behind them ([ADR-0041](docs/adr/0041-own-ui-layer.md)). |
 | `crates/loom-canvas` | The patch canvas: a GPU-drawn Iced widget ([ADR-0010](docs/adr/0010-own-patch-canvas.md)). |
 | `crates/loom-app` | The desktop app: canvas, inspector, live audio and MIDI. |
 | `examples/patches` | Example patches. |

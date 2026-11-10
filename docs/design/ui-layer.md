@@ -45,7 +45,7 @@ All three work because one runtime, one set of view models, and one identity sch
 
 | Crate | Holds | May depend on |
 |---|---|---|
-| `loom-ui-core` | Geometry (`Point`, `Size`, `Rect`, `Vector`, `Color`), input events (`PointerEvent`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`), UI IDs | No UI toolkit, no LoomDSP crate |
+| `loom-ui-core` | Geometry (`Point`, `Size`, `Rect`, `Vector`, `Color`), input events (`Event`, `PointerEvent`, `PointerButton`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`, and `Platform` for each platform's shortcut key), UI IDs | No UI toolkit, no LoomDSP crate |
 | `loom-ui` | Runtime, effects, elements, layout, focus, the accessibility tree, the `winit` shell, the widgets, and the drawing of panels | `loom-ui-core`, `winit`, `wgpu`, the text crate, `taffy`, `accesskit`, `accesskit_winit` |
 | `loom-canvas` | The patch canvas, as a custom element | `loom-ui-core`, later `loom-ui`, and `iced` and `iced_wgpu` until phase 2 moves it off them |
 | `loom-app` | The app: messages, `update`, view models, panels | All of the above |
