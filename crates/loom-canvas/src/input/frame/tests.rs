@@ -100,3 +100,88 @@ fn a_second_frame_reuses_what_the_cache_holds() {
         "a new cache builds its own"
     );
 }
+
+/// Each kind of drawing data is rebuilt when what it was built from
+/// changes, and only then: new control values rebuild the controls alone,
+/// and a new scene rebuilds the shapes and the controls.
+#[test]
+fn new_values_rebuild_only_the_controls_and_a_new_scene_rebuilds_both() {
+    let scene = scene();
+    let none = BTreeSet::new();
+    let size = Size::new(800.0, 600.0);
+    let cache = FrameCache::default();
+    let mut values = PanelValues::default();
+
+    let first = {
+        let model = CanvasModel::new(&scene, &none).values(&values);
+        at_zoom(&model, 1.0).frame(&model, size, &cache)
+    };
+    values.set(
+        1,
+        0,
+        crate::WidgetValue {
+            position: 0.75,
+            ..crate::WidgetValue::default()
+        },
+    );
+    let turned = {
+        let model = CanvasModel::new(&scene, &none).values(&values);
+        at_zoom(&model, 1.0).frame(&model, size, &cache)
+    };
+    assert!(
+        Arc::ptr_eq(&first.geometry, &turned.geometry),
+        "a knob turn keeps the shapes"
+    );
+    assert!(!Arc::ptr_eq(
+        first.controls.as_ref().unwrap(),
+        turned.controls.as_ref().unwrap()
+    ));
+
+    let edited = self::scene();
+    let model = CanvasModel::new(&edited, &none).values(&values);
+    let rebuilt = at_zoom(&model, 1.0).frame(&model, size, &cache);
+    assert!(!Arc::ptr_eq(&turned.geometry, &rebuilt.geometry));
+    assert!(!Arc::ptr_eq(
+        turned.controls.as_ref().unwrap(),
+        rebuilt.controls.as_ref().unwrap()
+    ));
+}
+
+/// Scope traces are rebuilt when a trace changes and when the zoom crosses
+/// between the full trace and the flat line, kept otherwise, and not built
+/// far out.
+#[test]
+fn traces_rebuild_on_a_new_trace_and_on_a_change_of_detail() {
+    let scene = scene();
+    let none = BTreeSet::new();
+    let size = Size::new(800.0, 600.0);
+    let cache = FrameCache::default();
+    let mut traces = crate::ScopeTraces::new();
+    let frame = |traces: &crate::ScopeTraces, zoom: f32| {
+        let model = CanvasModel::new(&scene, &none).traces(traces);
+        at_zoom(&model, zoom).frame(&model, size, &cache)
+    };
+
+    let close = frame(&traces, 1.0).traces.expect("drawn close up");
+    let closer = frame(&traces, 1.5).traces.expect("drawn close up");
+    assert!(
+        Arc::ptr_eq(&close, &closer),
+        "a zoom at the same detail keeps the traces"
+    );
+
+    let middle = frame(&traces, 0.7).traces.expect("a flat line at the middle zoom");
+    assert!(!Arc::ptr_eq(&close, &middle), "the flat line is other data");
+    assert!(frame(&traces, 0.2).traces.is_none(), "not drawn far out");
+
+    traces.set(
+        1,
+        0,
+        crate::Trace {
+            points: vec![[0.0, 0.0], [1.0, 0.5]],
+            second: Vec::new(),
+            level: 0.5,
+        },
+    );
+    let moved = frame(&traces, 0.7).traces.expect("still drawn");
+    assert!(!Arc::ptr_eq(&middle, &moved), "a new trace rebuilds");
+}
