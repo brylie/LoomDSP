@@ -4,7 +4,10 @@
 //! renderer.
 
 use super::*;
+use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX};
 use crate::painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
+use crate::scene::BADGE_TEXT_SIZE;
+use crate::tile_text::Align;
 
 /// The style of one line of plain interface text.
 fn plain(size: f32, line_height: f32) -> TextStyle {
@@ -36,7 +39,7 @@ impl CanvasModel<'_> {
     /// then the open choice list, the open typed field, and hover text,
     /// each in its own layer. `bounds` is the canvas's place in the host's
     /// logical pixels.
-    pub(super) fn paint(
+    pub(crate) fn paint(
         &self,
         state: &CanvasInput,
         values: &PanelValues,

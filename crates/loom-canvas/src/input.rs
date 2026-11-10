@@ -41,6 +41,7 @@ mod focus;
 mod handle;
 mod hover_text;
 mod overlay;
+mod paint;
 mod panel_input;
 mod select_popup;
 mod typed_field;
