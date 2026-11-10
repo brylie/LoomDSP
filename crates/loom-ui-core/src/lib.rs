@@ -1,10 +1,10 @@
-//! Plain geometry and colour types for a UI layer.
+//! Plain geometry, colour, and input event types for a UI layer.
 //!
 //! This crate is the bottom of LoomDSP's own UI layer (ADR-0041,
 //! `docs/design/ui-layer.md`). It holds the values every other part passes
-//! around: where something is, how big it is, and what colour it has. It
-//! depends on no UI toolkit and on no LoomDSP crate, so a tool that has
-//! nothing to do with patches can use it.
+//! around: where something is, how big it is, what colour it has, and what
+//! the pointer and the keys did. It depends on no UI toolkit and on no
+//! LoomDSP crate, so a tool that has nothing to do with patches can use it.
 //!
 //! # Units
 //!
@@ -38,6 +38,8 @@
 
 mod color;
 mod geometry;
+mod input;
 
 pub use color::Color;
 pub use geometry::{Point, Rect, Size, Vector};
+pub use input::{Event, Key, KeyEvent, Modifiers, Platform, PointerButton, PointerEvent, ScrollDelta};
