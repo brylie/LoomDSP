@@ -2,15 +2,12 @@
 
 use crate::camera::Camera;
 use crate::controls::ControlGeometry;
-use crate::iced_convert::ToIced as _;
 use crate::scene::{CLOCK_MARK_RADIUS, ModuleView, PORT_RADIUS, PortShape, Scene};
 use crate::stats::{self, Counter};
 use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
 use crate::trace::{Segment, TraceGeometry};
 use bytemuck::{Pod, Zeroable};
-use iced::advanced::graphics::color::pack;
-use iced::wgpu;
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
 use loom_ui_core::{Color, Point, Rect, Size};
 
@@ -20,6 +17,13 @@ const TILE_RADIUS: f32 = 5.0;
 const CABLE_WIDTH: f32 = 2.4;
 /// Thinnest a cable is drawn, in physical pixels.
 const CABLE_MIN_PX: f32 = 1.2;
+
+/// A colour as the shaders read it: red, green, blue, and alpha, each
+/// unchanged. The channels stay sRGB-encoded, and the shaders blend in that
+/// space, which is how the rest of the window blends its colours.
+pub(crate) fn packed(colour: Color) -> [f32; 4] {
+    [colour.r, colour.g, colour.b, colour.a]
+}
 
 /// One rounded rectangle.
 #[repr(C)]
@@ -36,8 +40,8 @@ impl Shape {
     pub fn new(rect: Rect, radius: f32, fill: Color, border: Color, border_width: f32) -> Self {
         Self {
             rect: [rect.x, rect.y, rect.width, rect.height],
-            fill: pack(fill.to_iced()).components(),
-            border: pack(border.to_iced()).components(),
+            fill: packed(fill),
+            border: packed(border),
             params: [radius, border_width, 1.0, 0.0],
         }
     }
@@ -100,7 +104,7 @@ impl Arc {
         Self {
             circle: [centre.x, centre.y, radius, thickness],
             angles: [start, sweep, 0.0, 0.0],
-            colour: pack(colour.to_iced()).components(),
+            colour: packed(colour),
             unused: [0.0; 4],
         }
     }
@@ -133,8 +137,8 @@ impl Cable {
     pub fn new(from: Point, to: Point, colour_from: Color, colour_to: Color, dashed: bool) -> Self {
         Self {
             ends: [from.x, from.y, to.x, to.y],
-            colour_from: pack(colour_from.to_iced()).components(),
-            colour_to: pack(colour_to.to_iced()).components(),
+            colour_from: packed(colour_from),
+            colour_to: packed(colour_to),
             params: [CABLE_WIDTH, if dashed { 1.0 } else { 0.0 }, CABLE_MIN_PX, 0.0],
         }
     }

@@ -181,8 +181,8 @@ fn each_zoom_draws_the_bars_for_the_text_it_hides() {
             .map(|s| s.fill)
             .collect()
     };
-    let label = pack(palette.text_bar.to_iced()).components();
-    let title = pack(palette.title_bar.to_iced()).components();
+    let label = packed(palette.text_bar);
+    let title = packed(palette.title_bar);
     // Close up: all text is drawn, so no bars.
     assert!(geometry.bars(false, false).is_empty());
     // Middle: the caption and both port labels, not the title.
@@ -222,7 +222,7 @@ fn a_clock_mark_shows_close_up_and_as_a_dot_at_middle_zoom() {
     let close = marked.bars(false, false);
     assert_eq!(close.len(), 3);
     let ring = &marked.shapes[close.start as usize];
-    assert_eq!(ring.fill(), pack(Color::TRANSPARENT.to_iced()).components());
+    assert_eq!(ring.fill(), packed(Color::TRANSPARENT));
     assert!(ring.border_width() > 0.0);
     // Middle: the dot, then the same bars as without the mark.
     let middle = marked.bars(true, false);
@@ -282,4 +282,12 @@ fn a_box_text_bar_has_its_own_range() {
         geometry.bars(true, false).end <= middle.start,
         "the other bars come first"
     );
+}
+
+/// A packed colour keeps its four channels as they are, with no change of
+/// colour space.
+#[test]
+fn a_packed_colour_keeps_its_channels() {
+    assert_eq!(packed(Color::rgba(0.25, 0.5, 0.75, 0.4)), [0.25, 0.5, 0.75, 0.4]);
+    assert_eq!(packed(Color::TRANSPARENT), [0.0, 0.0, 0.0, 0.0]);
 }

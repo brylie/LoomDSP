@@ -1,7 +1,6 @@
 use super::*;
-use crate::iced_convert::ToIced as _;
+use crate::gpu::packed;
 use crate::scene::{ModuleView, PanelView, WidgetView};
-use iced::advanced::graphics::color::pack;
 
 fn scene() -> Scene {
     let widget = |kind, x| WidgetView {
@@ -90,11 +89,7 @@ fn a_knob_at_its_minimum_shows_a_start_cap() {
         ControlGeometry::build(&scene, &values, &palette).arcs[1]
     };
     let low = value_arc(0.0);
-    assert_eq!(
-        low.colour(),
-        pack(palette.control_value.to_iced()).components(),
-        "in the value colour"
-    );
+    assert_eq!(low.colour(), packed(palette.control_value), "in the value colour");
     assert!(low.sweep() > 0.0, "a start cap at 0");
     assert!((value_arc(1.0).sweep() - KNOB_SWEEP).abs() < 1e-6, "the whole arc at 1");
 }
@@ -141,8 +136,8 @@ fn a_knob_range_draws_one_arc_and_no_dot() {
 
 #[test]
 fn dots_show_on_knobs_without_a_range_and_on_toggles_and_radios() {
-    let colour = pack(Palette::default().modulation.to_iced()).components();
-    let clear = pack(Color::TRANSPARENT.to_iced()).components();
+    let colour = packed(Palette::default().modulation);
+    let clear = packed(Color::TRANSPARENT);
     let scene = scene();
     let palette = Palette::default();
     let mut values = PanelValues::new();

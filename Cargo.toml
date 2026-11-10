@@ -68,6 +68,11 @@ iced = { version = "0.14", default-features = false, features = [
     "wayland",
 ] }
 iced_wgpu = "0.14"
+# The canvas renderer names wgpu types itself, with no Iced type. This must be
+# the wgpu version Iced builds with, so there is one copy, until phase 2
+# (docs/dev/leaving-iced-plan.md). No features of our own: Iced turns on what
+# the desktop needs.
+wgpu = { version = "27", default-features = false }
 # Builds the app view headlessly in loom-app tests (#189). Same version as Iced.
 iced_runtime = "0.14"
 bytemuck = { version = "1", features = ["derive"] }

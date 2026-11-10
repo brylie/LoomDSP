@@ -15,6 +15,7 @@ categories = ["gui", "multimedia::audio"]
 loom-ui-core.workspace = true
 iced = { workspace = true }
 iced_wgpu.workspace = true
+wgpu.workspace = true
 bytemuck.workspace = true
 
 [lints]
