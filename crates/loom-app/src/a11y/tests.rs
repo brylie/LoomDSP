@@ -252,6 +252,35 @@ fn hidden_widgets_are_left_out() {
     );
 }
 
+/// A widget with no name has no UI ID, so it gets no node, and the other
+/// widgets of its tile keep theirs.
+#[test]
+fn a_widget_with_no_name_is_left_out() {
+    let (mut app, module, knob) = app_with_filter();
+    let snapshot = app.ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|t| t.id == module).unwrap();
+    let named = app.a11y_widget_ids(&snapshot);
+    // The same IDs, but with this tile's knob given no name.
+    let mut ids = named.clone();
+    ids.add_tile(
+        module,
+        true,
+        tile.widgets.iter().enumerate().map(|(index, widget)| {
+            let name = (index != knob).then(|| format!("w{index}"));
+            (widget.kind, name)
+        }),
+    );
+    let all = tree::tree(&snapshot, &named, None, 1.0, &mut app.a11y.ids);
+    let without = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);
+    assert_eq!(without.nodes.len() + 1, all.nodes.len());
+    assert!(
+        without
+            .nodes
+            .iter()
+            .all(|(_, n)| n.label() != Some(tile.widgets[knob].label.as_str()))
+    );
+}
+
 /// Bounds are in the window and in physical pixels: at scale factor 2 they
 /// are twice the logical layout (ui-layer.md, section 7, rule 8).
 #[test]
