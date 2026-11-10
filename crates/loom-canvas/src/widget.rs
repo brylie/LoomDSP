@@ -19,11 +19,11 @@ use crate::tile_text::{self, Align, LABEL_SIZE, TITLE_SIZE, TextKind};
 use crate::trace::{ScopeTraces, TraceGeometry};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
-use iced::advanced::text::{self, Paragraph as _, Text};
+use iced::advanced::text;
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
-use iced::{Element, Font, Length, Pixels};
-use iced::{alignment, mouse, window};
+use iced::{Element, Font, Length};
+use iced::{mouse, window};
 use loom_ui_core::{Color, Point, Rect, Size};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -32,9 +32,11 @@ use std::time::Instant;
 
 mod drag_line;
 mod draw;
+mod painter;
 mod primitive;
 
 pub use drag_line::DragLine;
+use painter::{IcedMeasure, IcedPainter};
 use primitive::CanvasPrimitive;
 
 /// The patch canvas as an Iced widget. Draws a [`Scene`] and reports
@@ -386,10 +388,8 @@ where
                 cable_dim: CABLE_OPACITY,
             }),
         );
-        model.draw_text(input, values, renderer, bounds);
-        model.draw_select_popup(input, renderer, bounds);
-        model.draw_typed_field(input, renderer, bounds);
-        model.draw_hover_text(input, renderer, bounds);
+        let measure = IcedMeasure::new(&*renderer);
+        model.paint(input, values, bounds, &measure, &mut IcedPainter::new(renderer));
     }
 }
 

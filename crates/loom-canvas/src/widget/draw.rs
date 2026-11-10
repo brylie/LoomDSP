@@ -1,19 +1,59 @@
-//! Drawing the canvas's text through Iced: tile text, the choice pop-up, the
-//! typed field, and hover text. Text is measured with Iced here, so none of
-//! this is in `crate::input`.
+//! What the canvas paints above its GPU shapes: tile text, the choice list,
+//! the typed field, and hover text. Each piece goes to a [`Painter`], and
+//! text is sized by a [`TextMeasure`], so nothing here names a text
+//! renderer.
 
 use super::*;
+use crate::painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
+
+/// The style of one line of plain interface text.
+fn plain(size: f32, line_height: f32) -> TextStyle {
+    TextStyle {
+        size,
+        line_height,
+        weight: Weight::Regular,
+        shaping: Shaping::Simple,
+    }
+}
+
+/// One line of tile text, centred top to bottom on its anchor.
+fn one_line(text: &str, size: f32, width: f32, align: Align, anchor: Point, colour: Color, clip: Rect) -> TextRun<'_> {
+    TextRun {
+        text,
+        anchor,
+        bounds: Size::new(width, size * 1.4),
+        align,
+        vertical: Vertical::Center,
+        style: plain(size, 1.2),
+        wrap: false,
+        colour,
+        clip,
+    }
+}
 
 impl CanvasModel<'_> {
-    pub(super) fn draw_text<Renderer>(
+    /// Paints everything above the GPU shapes, back to front: tile text,
+    /// then the open choice list, the open typed field, and hover text,
+    /// each in its own layer. `bounds` is the canvas's place in the host's
+    /// logical pixels.
+    pub(super) fn paint(
         &self,
         state: &CanvasInput,
         values: &PanelValues,
-        renderer: &mut Renderer,
         bounds: Rect,
-    ) where
-        Renderer: text::Renderer<Font = Font>,
-    {
+        measure: &dyn TextMeasure,
+        painter: &mut dyn Painter,
+    ) {
+        self.paint_tile_text(state, values, bounds, painter);
+        self.paint_select_popup(state, bounds, painter);
+        self.paint_typed_field(state, bounds, measure, painter);
+        self.paint_hover_text(state, bounds, measure, painter);
+    }
+
+    /// Paints the text on the tiles and in the badges, at the size the
+    /// zoom gives it. Text too small to read is left out (panels.md, Level
+    /// of detail).
+    fn paint_tile_text(&self, state: &CanvasInput, values: &PanelValues, bounds: Rect, painter: &mut dyn Painter) {
         let zoom = state.camera().zoom;
         // Quantise sizes so zooming does not create a new text layout every
         // frame for every label.
@@ -25,21 +65,9 @@ impl CanvasModel<'_> {
         let label_px = quantise(LABEL_SIZE * zoom);
         let show_labels = label_px >= LABEL_MIN_PX;
         let visible = state.camera().visible(bounds.size());
-        let font = renderer.default_font();
         let to_screen = |world: Point| {
             let s = state.camera().to_screen(world);
             Point::new(bounds.x + s.x, bounds.y + s.y)
-        };
-        let text = |content: &str, size: f32, width: f32, align: text::Alignment| Text {
-            content: content.to_string(),
-            bounds: iced::Size::new(width, size * 1.4),
-            size: Pixels(size),
-            line_height: text::LineHeight::Relative(1.2),
-            font,
-            align_x: align,
-            align_y: alignment::Vertical::Center,
-            shaping: text::Shaping::Basic,
-            wrapping: text::Wrapping::None,
         };
         // The control whose value shows instead of its label.
         let active = state.value_shown();
@@ -62,17 +90,15 @@ impl CanvasModel<'_> {
                     TextKind::Value(widget) => {
                         let shown = self.box_text(values, module, widget);
                         let shown = crate::scene::fit_label(shown, item.width, crate::tile_text::LABEL_SIZE);
-                        let align = match item.align {
-                            Align::Left => text::Alignment::Left,
-                            Align::Center => text::Alignment::Center,
-                            Align::Right => text::Alignment::Right,
-                        };
-                        renderer.fill_text(
-                            text(&shown, label_px, item.width * zoom, align),
-                            to_screen(item.anchor).to_iced(),
-                            self.palette.text.to_iced(),
-                            clip.to_iced(),
-                        );
+                        painter.text(&one_line(
+                            &shown,
+                            label_px,
+                            item.width * zoom,
+                            item.align,
+                            to_screen(item.anchor),
+                            self.palette.text,
+                            clip,
+                        ));
                         return;
                     }
                     // The chosen segment is filled with the value colour,
@@ -119,17 +145,15 @@ impl CanvasModel<'_> {
                         .map(|v| v.text.as_str()),
                     _ => None,
                 };
-                let align = match item.align {
-                    Align::Left => text::Alignment::Left,
-                    Align::Center => text::Alignment::Center,
-                    Align::Right => text::Alignment::Right,
-                };
-                renderer.fill_text(
-                    text(value.unwrap_or(&item.content), size, item.width * zoom, align),
-                    to_screen(item.anchor).to_iced(),
-                    if value.is_some() { self.palette.text } else { colour }.to_iced(),
-                    clip.to_iced(),
-                );
+                painter.text(&one_line(
+                    value.unwrap_or(&item.content),
+                    size,
+                    item.width * zoom,
+                    item.align,
+                    to_screen(item.anchor),
+                    if value.is_some() { self.palette.text } else { colour },
+                    clip,
+                ));
             });
         }
 
@@ -156,12 +180,15 @@ impl CanvasModel<'_> {
                     .filter(|r| r.intersects(visible))
                 {
                     let label = port.badge.to_string();
-                    renderer.fill_text(
-                        text(&label, badge_px, rect.width * zoom, text::Alignment::Center),
-                        to_screen(rect.center()).to_iced(),
-                        self.palette.background.to_iced(),
-                        bounds.to_iced(),
-                    );
+                    painter.text(&one_line(
+                        &label,
+                        badge_px,
+                        rect.width * zoom,
+                        Align::Center,
+                        to_screen(rect.center()),
+                        self.palette.background,
+                        bounds,
+                    ));
                 }
             }
         }
@@ -179,11 +206,8 @@ impl CanvasModel<'_> {
         }
     }
 
-    /// Draws the open choice list above all tile text, at a fixed screen size.
-    pub(super) fn draw_select_popup<Renderer>(&self, state: &CanvasInput, renderer: &mut Renderer, bounds: Rect)
-    where
-        Renderer: text::Renderer<Font = Font>,
-    {
+    /// Paints the open choice list above all tile text, at a fixed screen size.
+    fn paint_select_popup(&self, state: &CanvasInput, bounds: Rect, painter: &mut dyn Painter) {
         let (Some(popup), Some((module, widget))) = (state.popup().copied(), state.focused_control()) else {
             return;
         };
@@ -195,39 +219,27 @@ impl CanvasModel<'_> {
         };
         let at = Point::new(bounds.x + rect.x, bounds.y + rect.y);
         let area = Rect::new(at, rect.size());
-        let font = renderer.default_font();
-        renderer.with_layer(bounds.to_iced(), |renderer| {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: area.to_iced(),
-                    border: iced::Border {
-                        color: self.palette.tile_border.to_iced(),
-                        width: 1.0,
-                        radius: 5.0.into(),
-                    },
-                    ..renderer::Quad::default()
-                },
-                self.palette.control_body.to_iced(),
-            );
+        painter.begin_layer(bounds);
+        {
+            painter.quad(Quad {
+                rect: area,
+                fill: self.palette.control_body,
+                border: self.palette.tile_border,
+                border_width: 1.0,
+                radius: 5.0,
+            });
             let rows = (rect.height / SELECT_ROW_PX).round() as usize;
             for (index, option) in options.iter().enumerate().skip(popup.scroll).take(rows) {
                 let row = (index - popup.scroll) as f32;
                 if index == popup.highlight {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rect::new(
-                                Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * row + 1.0),
-                                Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
-                            )
-                            .to_iced(),
-                            border: iced::Border {
-                                radius: 3.0.into(),
-                                ..iced::Border::default()
-                            },
-                            ..renderer::Quad::default()
-                        },
-                        self.palette.control_track.to_iced(),
-                    );
+                    painter.quad(Quad::filled(
+                        Rect::new(
+                            Point::new(at.x + 2.0, at.y + SELECT_ROW_PX * row + 1.0),
+                            Size::new(rect.width - 4.0, SELECT_ROW_PX - 2.0),
+                        ),
+                        self.palette.control_track,
+                        3.0,
+                    ));
                 }
                 let chosen = self.position(module, widget).round().max(0.0) as usize == index;
                 let label = if chosen {
@@ -235,53 +247,49 @@ impl CanvasModel<'_> {
                 } else {
                     format!("    {option}")
                 };
-                renderer.fill_text(
-                    Text {
-                        content: label,
-                        bounds: iced::Size::new(rect.width - 12.0, 17.0),
-                        size: Pixels(12.0),
-                        line_height: text::LineHeight::Relative(1.2),
-                        font,
-                        align_x: text::Alignment::Left,
-                        align_y: alignment::Vertical::Center,
-                        shaping: text::Shaping::Advanced,
-                        wrapping: text::Wrapping::None,
+                painter.text(&TextRun {
+                    text: &label,
+                    anchor: Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)),
+                    bounds: Size::new(rect.width - 12.0, 17.0),
+                    align: Align::Left,
+                    vertical: Vertical::Center,
+                    // The check mark is not in every interface font.
+                    style: TextStyle {
+                        shaping: Shaping::Full,
+                        ..plain(12.0, 1.2)
                     },
-                    Point::new(at.x + 7.0, at.y + SELECT_ROW_PX * (row + 0.5)).to_iced(),
-                    self.palette.text.to_iced(),
-                    bounds.to_iced(),
-                );
+                    wrap: false,
+                    colour: self.palette.text,
+                    clip: bounds,
+                });
             }
             // A longer list has a bar at its right edge. Its length and place
             // show how much is out of view (rule 8: a shape, not a colour).
             if rows < options.len() {
                 let share = rows as f32 / options.len() as f32;
                 let start = popup.scroll as f32 / options.len() as f32;
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rect::new(
-                            Point::new(at.x + rect.width - 5.0, at.y + 2.0 + (rect.height - 4.0) * start),
-                            Size::new(3.0, (rect.height - 4.0) * share),
-                        )
-                        .to_iced(),
-                        border: iced::Border {
-                            radius: 1.5.into(),
-                            ..iced::Border::default()
-                        },
-                        ..renderer::Quad::default()
-                    },
-                    self.palette.text_dim.to_iced(),
-                );
+                painter.quad(Quad::filled(
+                    Rect::new(
+                        Point::new(at.x + rect.width - 5.0, at.y + 2.0 + (rect.height - 4.0) * start),
+                        Size::new(3.0, (rect.height - 4.0) * share),
+                    ),
+                    self.palette.text_dim,
+                    1.5,
+                ));
             }
-        });
+        }
+        painter.end_layer();
     }
 
-    /// Draws the open field above all tile text. Bad text gets a warning
+    /// Paints the open field above all tile text. Bad text gets a warning
     /// outline, and its reason on a line below (rule 8: not colour alone).
-    pub(super) fn draw_typed_field<Renderer>(&self, state: &CanvasInput, renderer: &mut Renderer, bounds: Rect)
-    where
-        Renderer: text::Renderer<Font = Font>,
-    {
+    fn paint_typed_field(
+        &self,
+        state: &CanvasInput,
+        bounds: Rect,
+        measure: &dyn TextMeasure,
+        painter: &mut dyn Painter,
+    ) {
         let Some(field) = state.typed_field() else {
             return;
         };
@@ -289,115 +297,87 @@ impl CanvasModel<'_> {
             return;
         };
         let area = Rect::new(Point::new(bounds.x + rect.x, bounds.y + rect.y), rect.size());
-        let font = renderer.default_font();
-        let error = field.draft.error().map(str::to_string);
-        let line = |content: String, width: f32| Text {
-            content,
-            bounds: iced::Size::new(width, FIELD_HEIGHT_PX),
-            size: Pixels(FIELD_TEXT_PX),
-            line_height: text::LineHeight::Relative(1.2),
-            font,
-            align_x: text::Alignment::Left,
-            align_y: alignment::Vertical::Center,
-            shaping: text::Shaping::Basic,
-            wrapping: text::Wrapping::None,
+        let error = field.draft.error();
+        let style = plain(FIELD_TEXT_PX, 1.2);
+        // One line of field text, centred top to bottom on its anchor.
+        let line = |text, width: f32, anchor: Point, clip: Rect| TextRun {
+            text,
+            anchor,
+            bounds: Size::new(width, FIELD_HEIGHT_PX),
+            align: Align::Left,
+            vertical: Vertical::Center,
+            style,
+            wrap: false,
+            colour: self.palette.text,
+            clip,
         };
         let inner = FIELD_WIDTH_PX - 2.0 * FIELD_PADDING_PX;
-        let width_of = |content: &str| {
-            Renderer::Paragraph::with_text(Text {
-                content,
-                bounds: iced::Size::new(f32::INFINITY, FIELD_HEIGHT_PX),
-                size: Pixels(FIELD_TEXT_PX),
-                line_height: text::LineHeight::Relative(1.2),
-                font,
-                align_x: text::Alignment::Left,
-                align_y: alignment::Vertical::Center,
-                shaping: text::Shaping::Basic,
-                wrapping: text::Wrapping::None,
-            })
-            .min_bounds()
-            .width
-        };
+        let width_of = |content: &str| measure.measure(content, style, None).width;
         let text_at = Point::new(area.x + FIELD_PADDING_PX, area.center_y());
-        renderer.with_layer(bounds.to_iced(), |renderer| {
+        painter.begin_layer(bounds);
+        {
             let outline = if error.is_some() {
                 (self.palette.warning, 2.0)
             } else {
                 (self.palette.control_value, 1.0)
             };
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: area.to_iced(),
-                    border: iced::Border {
-                        color: outline.0.to_iced(),
-                        width: outline.1,
-                        radius: 4.0.into(),
-                    },
-                    ..renderer::Quad::default()
-                },
-                self.palette.control_body.to_iced(),
-            );
+            painter.quad(Quad {
+                rect: area,
+                fill: self.palette.control_body,
+                border: outline.0,
+                border_width: outline.1,
+                radius: 4.0,
+            });
             if field.selected && !field.draft.text.is_empty() {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rect::new(
-                            Point::new(text_at.x - 1.0, area.y + 3.0),
-                            Size::new(width_of(&field.draft.text).min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
-                        )
-                        .to_iced(),
-                        ..renderer::Quad::default()
-                    },
-                    self.palette.control_track.to_iced(),
-                );
+                painter.quad(Quad::filled(
+                    Rect::new(
+                        Point::new(text_at.x - 1.0, area.y + 3.0),
+                        Size::new(width_of(&field.draft.text).min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
+                    ),
+                    self.palette.control_track,
+                    0.0,
+                ));
             }
-            renderer.fill_text(
-                line(field.draft.text.clone(), inner),
-                text_at.to_iced(),
-                self.palette.text.to_iced(),
-                area.to_iced(),
-            );
+            painter.text(&line(&field.draft.text, inner, text_at, area));
             if !field.selected {
                 let x = text_at.x + width_of(&field.draft.text[..field.caret]).min(inner);
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)).to_iced(),
-                        ..renderer::Quad::default()
-                    },
-                    self.palette.text.to_iced(),
-                );
+                painter.quad(Quad::filled(
+                    Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),
+                    self.palette.text,
+                    0.0,
+                ));
             }
             if let Some(reason) = error {
-                let place = typed_reason_bounds(area, width_of(&reason) + 2.0 * FIELD_PADDING_PX, bounds);
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: place.to_iced(),
-                        border: iced::Border {
-                            color: self.palette.tile_border.to_iced(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..renderer::Quad::default()
-                    },
-                    self.palette.control_body.to_iced(),
-                );
-                renderer.fill_text(
-                    line(reason, place.width),
-                    Point::new(place.x + FIELD_PADDING_PX, place.center_y()).to_iced(),
-                    self.palette.text.to_iced(),
-                    bounds.to_iced(),
-                );
+                let place = typed_reason_bounds(area, width_of(reason) + 2.0 * FIELD_PADDING_PX, bounds);
+                painter.quad(Quad {
+                    rect: place,
+                    fill: self.palette.control_body,
+                    border: self.palette.tile_border,
+                    border_width: 1.0,
+                    radius: 4.0,
+                });
+                painter.text(&line(
+                    reason,
+                    place.width,
+                    Point::new(place.x + FIELD_PADDING_PX, place.center_y()),
+                    bounds,
+                ));
             }
-        });
+        }
+        painter.end_layer();
     }
 
     /// Hover text (panels.md, Labels and hover text): the label, the
     /// description, and the name when it differs, at a fixed screen size in
     /// a layer above the tiles. Drawn at any zoom, because hover text is
     /// what the user needs where tile text is too small to read.
-    pub(super) fn draw_hover_text<Renderer>(&self, state: &CanvasInput, renderer: &mut Renderer, bounds: Rect)
-    where
-        Renderer: text::Renderer<Font = Font>,
-    {
+    fn paint_hover_text(
+        &self,
+        state: &CanvasInput,
+        bounds: Rect,
+        measure: &dyn TextMeasure,
+        painter: &mut dyn Painter,
+    ) {
         if state.has_overlay() {
             return;
         }
@@ -413,38 +393,26 @@ impl CanvasModel<'_> {
             HoverTarget::Port(port) => self.scene.port(port).and_then(|p| p.follows_transport),
             HoverTarget::Control(..) | HoverTarget::Second(..) | HoverTarget::Title(_) => None,
         };
-        let font = renderer.default_font();
         let inner = crate::hover::text_width(bounds.width);
-        // Each line is measured as a paragraph, then drawn as text in that
-        // size, wrapped at word boundaries.
-        let line = |content: &str, size: f32, colour: Color, font: Font| {
-            let text = Text {
-                content: content.to_string(),
-                bounds: iced::Size::new(inner, f32::INFINITY),
-                size: Pixels(size),
-                line_height: text::LineHeight::Relative(1.3),
-                font,
-                align_x: text::Alignment::Left,
-                align_y: alignment::Vertical::Top,
-                shaping: text::Shaping::Basic,
-                wrapping: text::Wrapping::Word,
+        // Each line is measured wrapped at word boundaries, then painted
+        // in that size. The text, its style, its room, and its colour.
+        let line = |content, size: f32, colour: Color, weight: Weight| {
+            let style = TextStyle {
+                weight,
+                ..plain(size, 1.3)
             };
-            let measured = Renderer::Paragraph::with_text(text.as_ref()).min_bounds();
+            let measured = measure.measure(content, style, Some(inner));
             (
-                Text {
-                    bounds: iced::Size::new(measured.width.ceil() + 1.0, measured.height.ceil()),
-                    ..text
-                },
+                content,
+                style,
+                Size::new(measured.width.ceil() + 1.0, measured.height.ceil()),
                 colour,
             )
         };
         // A light's or meter's label is bold, so it stands apart from its
         // value line (port-and-parameter-text.md, Display values).
-        let bold = Font {
-            weight: iced::font::Weight::Bold,
-            ..font
-        };
-        let title = if value.is_some() { bold } else { font };
+        let font = Weight::Regular;
+        let title = if value.is_some() { Weight::Bold } else { font };
         let mut lines = vec![line(label, HOVER_TEXT_PX, self.palette.text, title)];
         if !hover.description.is_empty() {
             lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, font));
@@ -464,8 +432,8 @@ impl CanvasModel<'_> {
             lines.push(line(name, HOVER_TEXT_PX - 1.0, self.palette.text_dim, font));
         }
         const LINE_GAP: f32 = 3.0;
-        let width = lines.iter().map(|(t, _)| t.bounds.width).fold(0.0, f32::max);
-        let height = lines.iter().map(|(t, _)| t.bounds.height).sum::<f32>() + LINE_GAP * (lines.len() - 1) as f32;
+        let width = lines.iter().map(|line| line.2.width).fold(0.0, f32::max);
+        let height = lines.iter().map(|line| line.2.height).sum::<f32>() + LINE_GAP * (lines.len() - 1) as f32;
         let size = Size::new(width + 2.0 * HOVER_PADDING, height + 2.0 * HOVER_PADDING);
 
         let zoom = state.camera().zoom;
@@ -475,30 +443,29 @@ impl CanvasModel<'_> {
             world.size() * zoom,
         );
         let at = crate::hover::place(size, anchor, bounds);
-        renderer.with_layer(bounds.to_iced(), |renderer| {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rect::new(at, size).to_iced(),
-                    border: iced::Border {
-                        color: self.palette.tile_border.to_iced(),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..renderer::Quad::default()
-                },
-                self.palette.tile.to_iced(),
-            );
-            let mut y = at.y + HOVER_PADDING;
-            for (text, colour) in lines {
-                let height = text.bounds.height;
-                renderer.fill_text(
-                    text,
-                    Point::new(at.x + HOVER_PADDING, y).to_iced(),
-                    colour.to_iced(),
-                    bounds.to_iced(),
-                );
-                y += height + LINE_GAP;
-            }
+        painter.begin_layer(bounds);
+        painter.quad(Quad {
+            rect: Rect::new(at, size),
+            fill: self.palette.tile,
+            border: self.palette.tile_border,
+            border_width: 1.0,
+            radius: 4.0,
         });
+        let mut y = at.y + HOVER_PADDING;
+        for (text, style, room, colour) in lines {
+            painter.text(&TextRun {
+                text,
+                anchor: Point::new(at.x + HOVER_PADDING, y),
+                bounds: room,
+                align: Align::Left,
+                vertical: Vertical::Top,
+                style,
+                wrap: true,
+                colour,
+                clip: bounds,
+            });
+            y += room.height + LINE_GAP;
+        }
+        painter.end_layer();
     }
 }

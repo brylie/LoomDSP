@@ -31,6 +31,7 @@ mod gpu;
 mod hover;
 pub mod iced_convert;
 mod input;
+mod painter;
 mod reaction;
 mod scene;
 pub mod stats;
@@ -50,6 +51,7 @@ pub use input::{
     ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
     ControlPart, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
+pub use painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
 pub use reaction::{CursorShape, Reaction};
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
