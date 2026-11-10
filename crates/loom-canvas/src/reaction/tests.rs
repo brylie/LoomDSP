@@ -1,7 +1,6 @@
 //! Tests for the three rules a reaction keeps.
 
 use super::*;
-use std::time::Duration;
 
 /// Events stay in the order they were reported.
 #[test]
@@ -26,10 +25,10 @@ fn a_new_reaction_is_empty() {
     let reaction = Reaction::default();
     assert!(reaction.events.is_empty());
     assert!(!reaction.taken);
-    assert_eq!(reaction.redraw, Redraw::No);
+    assert!(!reaction.redraw);
 }
 
-/// Once taken, the input stays taken.
+/// Once taken, the input stays taken, whatever else is reported.
 #[test]
 fn taken_stays_true() {
     let mut reaction = Reaction::default();
@@ -40,41 +39,17 @@ fn taken_stays_true() {
     assert!(reaction.taken);
 }
 
-/// A redraw at the next frame wins over any time, whichever came first.
+/// Once asked for, the redraw stays asked for, and taking the input does
+/// not ask for one.
 #[test]
-fn now_wins_over_a_time() {
-    let later = Instant::now() + Duration::from_secs(1);
-    let mut first = Reaction::default();
-    first.redraw();
-    first.redraw_at(later);
-    assert_eq!(first.redraw, Redraw::Now);
-    let mut second = Reaction::default();
-    second.redraw_at(later);
-    second.redraw();
-    assert_eq!(second.redraw, Redraw::Now);
-}
-
-/// Of two times, the earlier wins, whichever came first.
-#[test]
-fn the_earlier_time_wins() {
-    let soon = Instant::now() + Duration::from_millis(100);
-    let late = soon + Duration::from_millis(300);
+fn redraw_stays_true_and_is_its_own_fact() {
     let mut reaction = Reaction::default();
-    reaction.redraw_at(late);
-    reaction.redraw_at(soon);
-    assert_eq!(reaction.redraw, Redraw::At(soon));
-    reaction.redraw_at(late);
-    assert_eq!(reaction.redraw, Redraw::At(soon));
-}
-
-/// Any request is sooner than none.
-#[test]
-fn any_request_is_sooner_than_none() {
-    let time = Instant::now();
-    assert_eq!(Redraw::No.sooner(Redraw::At(time)), Redraw::At(time));
-    assert_eq!(Redraw::At(time).sooner(Redraw::No), Redraw::At(time));
-    assert_eq!(Redraw::No.sooner(Redraw::Now), Redraw::Now);
-    assert_eq!(Redraw::No.sooner(Redraw::No), Redraw::No);
+    reaction.take();
+    assert!(!reaction.redraw);
+    reaction.redraw();
+    reaction.emit(CanvasEvent::PointerDown);
+    reaction.redraw();
+    assert!(reaction.redraw);
 }
 
 /// The default cursor shape is the plain arrow.

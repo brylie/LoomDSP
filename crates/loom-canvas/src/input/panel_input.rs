@@ -54,7 +54,7 @@ pub(super) struct KeyPress<'a> {
     pub(super) repeat: bool,
 }
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     pub(super) fn is_control(&self, module: u32, widget: usize) -> bool {
         self.scene
             .module(module)

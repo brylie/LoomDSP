@@ -113,10 +113,10 @@ pub(crate) fn typed_reason_bounds(field: Rect, width: f32, bounds: Rect) -> Rect
     Rect::new(Point::new(x, y), Size::new(width, FIELD_HEIGHT_PX))
 }
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     /// The check for text typed on `widget` of `module`: why it is not a
     /// value, if it is not. Only the app knows the parameter, so it is the
-    /// app's check (see [`CanvasProps::typed_check`]).
+    /// app's check (see [`CanvasModel::typed_check`]).
     pub(super) fn draft_check(&self, module: u32, widget: usize) -> impl Fn(&str) -> Result<(), String> + '_ {
         move |text| {
             self.typed_check

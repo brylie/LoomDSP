@@ -4,7 +4,7 @@
 
 use super::*;
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     pub(super) fn draw_text<Renderer>(
         &self,
         state: &CanvasInput,

@@ -2,10 +2,9 @@
 //!
 //! The input handlers fill a [`Reaction`] and know nothing of the toolkit
 //! that drives them. The driver reads it afterwards: it passes the events
-//! on to the app, marks the input as used, and schedules the redraw.
+//! on to the app, marks the input as used, and redraws.
 
 use crate::CanvasEvent;
-use std::time::Instant;
 
 /// What one input event led to.
 ///
@@ -13,7 +12,11 @@ use std::time::Instant;
 ///
 /// - `events` keeps the order the canvas reported them in.
 /// - `taken` is true once any handler took the input, and stays true.
-/// - `redraw` is the soonest redraw any handler asked for.
+/// - `redraw` is true once any handler asked for a redraw, and stays true.
+///
+/// A reaction says nothing about waking later. When the canvas next needs
+/// to wake with no input is a fact of its state, not of one event: ask
+/// `CanvasInput::next_deadline`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Reaction {
     /// What the canvas reports to the app, oldest first.
@@ -21,8 +24,8 @@ pub struct Reaction {
     /// True when the canvas used the input, so nothing behind it should
     /// act on it too.
     pub taken: bool,
-    /// When the canvas next needs to be drawn or woken.
-    pub redraw: Redraw,
+    /// True when what the canvas shows changed, so it needs a redraw.
+    pub redraw: bool,
 }
 
 impl Reaction {
@@ -36,42 +39,9 @@ impl Reaction {
         self.taken = true;
     }
 
-    /// Asks for a redraw at the next frame.
+    /// Asks for a redraw.
     pub(crate) fn redraw(&mut self) {
-        self.redraw = Redraw::Now;
-    }
-
-    /// Asks to be woken and redrawn at `time`, unless something sooner is
-    /// already asked for.
-    pub(crate) fn redraw_at(&mut self, time: Instant) {
-        self.redraw = self.redraw.sooner(Redraw::At(time));
-    }
-}
-
-/// When the canvas next needs a redraw.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Redraw {
-    /// Nothing changed: no redraw is needed.
-    #[default]
-    No,
-    /// Wake and redraw at this time, for a deadline such as hover text
-    /// that is due.
-    At(Instant),
-    /// Redraw at the next frame.
-    Now,
-}
-
-impl Redraw {
-    /// The sooner of two requests: `Now` before any time, the earlier of
-    /// two times, and any request before `No`.
-    #[must_use]
-    pub fn sooner(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Now, _) | (_, Self::Now) => Self::Now,
-            (Self::At(a), Self::At(b)) => Self::At(a.min(b)),
-            (Self::At(time), Self::No) | (Self::No, Self::At(time)) => Self::At(time),
-            (Self::No, Self::No) => Self::No,
-        }
+        self.redraw = true;
     }
 }
 

@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     /// The first state for a still image: as if the user had framed the
     /// view, focused a control with Tab, moved the pointer, pinned a badge,
     /// and started a drag, in that order.
@@ -99,8 +99,10 @@ impl CanvasProps<'_> {
             self.end_arrow_group(out, false);
             state.interaction = Interaction::Idle;
             state.focus.close_typing();
-            // Only what the window itself reports goes on from here.
-            if !matches!(event, Some(Event::Redraw | Event::WindowUnfocused)) {
+            // Only what the window itself reports goes on from here. `None`
+            // is most often a window event with no meaning to the canvas,
+            // so it goes on as far as the focus check below.
+            if !matches!(event, Some(Event::Redraw | Event::WindowUnfocused) | None) {
                 return;
             }
         }

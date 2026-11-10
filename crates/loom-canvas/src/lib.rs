@@ -10,12 +10,13 @@
 //!
 //! - **Input, with no UI toolkit in it.** [`CanvasInput`] keeps the lasting
 //!   state and handles one `loom-ui-core` event at a time, with the
-//!   [`Moment`] it arrived in. [`CanvasProps`] is what the app shows this
+//!   [`Moment`] it arrived in. [`CanvasModel`] is what the app shows this
 //!   frame. The answer is a [`Reaction`]: the [`CanvasEvent`]s to report,
-//!   whether the input was used, and when to redraw.
+//!   whether the input was used, and whether to redraw. The canvas also
+//!   says when it next needs to wake (`CanvasInput::next_deadline`).
 //! - **The Iced widget,** [`PatchCanvas`]. It converts Iced's events through
-//!   [`iced_convert`], calls [`CanvasInput`], applies the [`Reaction`], and
-//!   draws.
+//!   [`iced_convert`], calls [`CanvasInput`], applies the [`Reaction`],
+//!   schedules the next deadline, and draws.
 //!
 //! Positions, sizes, colours, and input events are `loom-ui-core` values.
 //! They become Iced values only where they cross into an Iced call.
@@ -48,10 +49,10 @@ pub use controls::{part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
 pub use drag_line::DragLine;
 pub use input::{
-    ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasPointer, CanvasProps, CanvasTyped, CanvasView,
+    ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
     ControlPart, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
-pub use reaction::{CursorShape, Reaction, Redraw};
+pub use reaction::{CursorShape, Reaction};
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
     PORT_HIT_RADIUS, PanelView, PartText, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal,

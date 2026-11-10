@@ -5,7 +5,7 @@
 
 use super::*;
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     /// Screen rectangle of the open list, kept readable at any canvas zoom.
     pub(crate) fn select_popup_bounds(&self, state: &CanvasInput, bounds: Rect) -> Option<Rect> {
         state.focus.popup()?;

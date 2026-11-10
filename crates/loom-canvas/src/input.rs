@@ -1,12 +1,15 @@
 //! The patch canvas's input, as plain code with no UI toolkit in it.
 //!
-//! [`CanvasInput`] is the canvas's lasting state: the camera, what the
-//! pointer is on, the drag in progress, and keyboard focus. [`CanvasProps`]
-//! is what the app shows this frame: the scene, the selection, and the
-//! values. A driver hands `CanvasInput::handle` one event from
-//! `loom-ui-core` at a time, with the [`Moment`] it arrived in, and gets
-//! back a [`Reaction`](crate::Reaction): the canvas events to report,
-//! whether the input was used, and when to redraw.
+//! [`CanvasInput`] is the canvas's widget state, the part that lasts: the
+//! camera, what the pointer is on, the drag in progress, and keyboard
+//! focus. [`CanvasModel`] is its view model, what the app shows this
+//! frame: the scene, the selection, and the values. A driver hands
+//! `CanvasInput::handle` one event from `loom-ui-core` at a time, with the
+//! [`Moment`] it arrived in, and gets back a
+//! [`Reaction`](crate::Reaction): the messages to report as
+//! [`CanvasEvent`]s, whether the input was used, and whether to redraw.
+//! `CanvasInput::next_deadline` says when the canvas next needs to wake
+//! with no input.
 //!
 //! The driver today is the Iced widget in `crate::widget`. It is the only
 //! code that turns Iced's events into ours.
@@ -92,11 +95,12 @@ pub struct LearnView {
 /// Says why typed text is not a value of a control: module, widget, text.
 type TypedCheck<'a> = Box<dyn Fn(u32, usize, &str) -> Result<(), String> + 'a>;
 
-/// What the canvas shows this frame, as the app gives it: the scene, the
-/// selection, the live values, and the settings that change how input is
-/// read. It borrows from the app and lasts one frame. The state that lasts
-/// is [`CanvasInput`].
-pub struct CanvasProps<'a> {
+/// The canvas's view model: what the canvas shows this frame, as the app
+/// gives it. It holds the scene, the selection, the live values, and the
+/// settings that change how input is read. It borrows from the app and
+/// lasts one frame. The state that lasts is [`CanvasInput`], which is the
+/// canvas's widget state.
+pub struct CanvasModel<'a> {
     pub(crate) scene: &'a Scene,
     selection: &'a BTreeSet<u32>,
     pub(crate) values: Option<&'a PanelValues>,
@@ -107,7 +111,7 @@ pub struct CanvasProps<'a> {
     frame_key: u64,
     browser_key: u64,
     /// The level shown, and its camera when the app has one. See
-    /// [`CanvasProps::level`].
+    /// [`CanvasModel::level`].
     level_key: u64,
     level_camera: Option<Camera>,
     animate: bool,
@@ -117,9 +121,9 @@ pub struct CanvasProps<'a> {
     /// Who else in the window has the keys. See [`CanvasFocusPolicy`].
     focus_policy: CanvasFocusPolicy,
     /// The app's arrow-key undo group, as of this view. See
-    /// [`CanvasProps::arrow_group`].
+    /// [`CanvasModel::arrow_group`].
     arrow_group: ArrowGroupView,
-    /// The check for typed values. See [`CanvasProps::typed_check`].
+    /// The check for typed values. See [`CanvasModel::typed_check`].
     typed_check: Option<TypedCheck<'a>>,
     pub(crate) still: Option<Still>,
     window_drag_line: bool,
@@ -127,7 +131,7 @@ pub struct CanvasProps<'a> {
 
 /// How a still image of the canvas starts: its camera, the control with
 /// keyboard focus, the pointer, the pinned badge, and a drag in progress.
-/// See [`CanvasProps::still`].
+/// See [`CanvasModel::still`].
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Still {
     /// The view. It replaces the framing the canvas does when it first
@@ -266,7 +270,7 @@ impl CanvasView {
     }
 }
 
-impl<'a> CanvasProps<'a> {
+impl<'a> CanvasModel<'a> {
     /// What to show for a scene and the current selection, with every other
     /// setting at its default.
     pub fn new(scene: &'a Scene, selection: &'a BTreeSet<u32>) -> Self {
@@ -453,12 +457,6 @@ impl<'a> CanvasProps<'a> {
     ) {
         self.handle(state, event, pointer, bounds, now, out);
         self.sync_hover_text(state, event, now, out);
-        // Asked again on every event, because a later request for the next
-        // frame replaces a pending one for a time, and the group would then
-        // stay open on an idle patch.
-        if let ArrowGroupView::Released { due } = self.arrow_group {
-            out.redraw_at(due);
-        }
     }
 
     fn emit(&self, out: &mut Reaction, event: CanvasEvent) {
@@ -473,7 +471,7 @@ impl<'a> CanvasProps<'a> {
 
     /// Ends the gesture of the current interaction, if it has one. Used when
     /// the interaction is replaced or cut off, so a start always has an end.
-    /// The arrow group ends separately, with [`CanvasProps::end_arrow_group`].
+    /// The arrow group ends separately, with [`CanvasModel::end_arrow_group`].
     fn end_gestures(&self, state: &mut CanvasInput, out: &mut Reaction) {
         if matches!(
             state.interaction,
@@ -803,39 +801,56 @@ pub struct Moment {
 
 impl CanvasInput {
     /// Handles one event and says what it led to.
-    pub fn handle(&mut self, props: &CanvasProps<'_>, event: &Event, moment: Moment) -> Reaction {
-        self.run(props, Some(event), moment)
+    pub fn handle(&mut self, model: &CanvasModel<'_>, event: &Event, moment: Moment) -> Reaction {
+        self.run(model, Some(event), moment)
     }
 
     /// Handles something the driver received that means nothing to the
     /// canvas, such as the window moving. The steps that run on every event
-    /// still run: the hover text check, and the redraw at an arrow group's
-    /// deadline, which would otherwise wait for some later event.
-    pub fn pass(&mut self, props: &CanvasProps<'_>, moment: Moment) -> Reaction {
-        self.run(props, None, moment)
+    /// still run: the canvas notes its size, lets go of what a pop-up took
+    /// over, and checks its hover text.
+    pub fn pass(&mut self, model: &CanvasModel<'_>, moment: Moment) -> Reaction {
+        self.run(model, None, moment)
     }
 
     /// The shared path of [`CanvasInput::handle`] and [`CanvasInput::pass`].
-    fn run(&mut self, props: &CanvasProps<'_>, event: Option<&Event>, moment: Moment) -> Reaction {
+    fn run(&mut self, model: &CanvasModel<'_>, event: Option<&Event>, moment: Moment) -> Reaction {
         let mut out = Reaction::default();
-        props.on_event(self, event, moment.pointer, moment.bounds, moment.now, &mut out);
+        model.on_event(self, event, moment.pointer, moment.bounds, moment.now, &mut out);
         out
+    }
+
+    /// When the canvas next needs to wake with no input, if it does: the
+    /// earlier of an arrow group closing and hover text appearing.
+    ///
+    /// This is a fact of the state, so it can be asked at any time and
+    /// gives the same answer until an event changes it. The driver wakes
+    /// the canvas with an [`Event::Redraw`] at or after that time.
+    pub fn next_deadline(&self, model: &CanvasModel<'_>) -> Option<Instant> {
+        let arrow_group = match model.arrow_group {
+            ArrowGroupView::Released { due } => Some(due),
+            _ => None,
+        };
+        match (arrow_group, self.hover_text.due()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (one, other) => one.or(other),
+        }
     }
 
     /// The pointer shape to show: the one of the gesture in progress, or
     /// else, with the pointer over the canvas, the one for what is under it.
-    pub fn cursor(&self, props: &CanvasProps<'_>, pointer_over: bool) -> CursorShape {
+    pub fn cursor(&self, model: &CanvasModel<'_>, pointer_over: bool) -> CursorShape {
         match self.interaction.cursor() {
             Some(gesture) => gesture,
-            None if pointer_over => props.hover_interaction(self),
+            None if pointer_over => model.hover_interaction(self),
             None => CursorShape::default(),
         }
     }
 
     /// The state for one still image: the camera, focus, pointer, pin, and
     /// drag that `still` describes, as if input had led there.
-    pub fn still(props: &CanvasProps<'_>, still: Still, now: Instant) -> Self {
-        props.still_state(still, now)
+    pub fn still(model: &CanvasModel<'_>, still: Still, now: Instant) -> Self {
+        model.still_state(still, now)
     }
 
     /// Where the canvas is in the window and how it looks at the patch, for
@@ -849,10 +864,10 @@ impl CanvasInput {
 
     /// What the pointer is on, what is pinned, and the drag in progress,
     /// for the control channel.
-    pub fn pointer(&self, props: &CanvasProps<'_>) -> CanvasPointer {
+    pub fn pointer(&self, model: &CanvasModel<'_>) -> CanvasPointer {
         CanvasPointer {
             hover: self.hover.filter(|hit| *hit != Hit::Nothing),
-            pinned: props.pin(self),
+            pinned: model.pin(self),
             drag: PointerDrag::of(&self.interaction),
         }
     }

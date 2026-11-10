@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     /// Updates hover text after an event (panels.md, Labels and hover
     /// text). It asks for a frame only when the text appears or hides, and
     /// for a single timed frame while it waits, so it never draws while
@@ -21,9 +21,6 @@ impl CanvasProps<'_> {
         changed |= state.hover_text.tick(now) && !redrawing;
         if changed {
             out.redraw();
-        }
-        if let Some(due) = state.hover_text.due() {
-            out.redraw_at(due);
         }
     }
 

@@ -13,7 +13,7 @@ pub(crate) fn learned_label(learn: Option<&LearnView>, module: u32, kind: TextKi
     }
 }
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     /// The overlay for a view whose visible world area is `visible`. Learn
     /// mode outlines only the controls there, so its cost follows what is on
     /// screen, not the size of the patch.

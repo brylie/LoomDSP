@@ -9,7 +9,7 @@
 //!
 //! The scene and the selection come from the app, so a focused control can
 //! still vanish, be hidden by a mode, or lose its selection between two
-//! events. [`CanvasProps::reconcile_focus`] brings a mode that no longer
+//! events. [`CanvasModel::reconcile_focus`] brings a mode that no longer
 //! fits back to browsing, on every event. Plain focus is checked only when a
 //! key arrives, in `focus_keys`, so reselecting a module before any key
 //! press keeps its focus.
@@ -233,7 +233,7 @@ impl FocusState {
     }
 }
 
-impl CanvasProps<'_> {
+impl CanvasModel<'_> {
     /// Brings a mode that no longer fits its control back to browsing. This
     /// runs on every event, redraws too, so a control hidden and shown again
     /// between two key presses does not keep its list, field, or grab.
