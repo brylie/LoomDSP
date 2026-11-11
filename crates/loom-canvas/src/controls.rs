@@ -1395,6 +1395,22 @@ pub(crate) fn segment_rect(rect: Rect, index: usize, count: usize) -> Rect {
     )
 }
 
+/// Where option `index` of a radio or a segmented control is drawn: the
+/// option's row, or its segment. `None` for any other widget, and for an
+/// index past the last option. A screen reader's cursor goes here.
+pub fn option_bounds(kind: &WidgetViewKind, rect: Rect, index: usize) -> Option<Rect> {
+    match kind {
+        WidgetViewKind::Radio { options } if index < options.len() => Some(Rect::new(
+            Point::new(rect.x, rect.y + GRID * (index as f32 + 1.0)),
+            Size::new(rect.width, GRID),
+        )),
+        WidgetViewKind::Segmented { options, .. } if index < options.len() => {
+            Some(segment_rect(rect, index, options.len()))
+        }
+        _ => None,
+    }
+}
+
 /// The centre of segment `index`, for tests and scripts that click it.
 pub fn segment_centre(rect: Rect, index: usize, count: usize) -> Point {
     segment_rect(rect, index, count).center()

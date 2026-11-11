@@ -813,3 +813,24 @@ fn no_arrow_step_on_a_button_or_a_display() {
         assert_eq!(arrow_step(&kind, ControlPart::Main, 0.5, 0.0, true, false), None);
     }
 }
+
+/// An option's bounds hold the point a click on that option lands on.
+#[test]
+fn an_option_is_where_a_click_finds_it() {
+    let rect = Rect::new(Point::new(10.0, 20.0), Size::new(6.0 * GRID, 4.0 * GRID));
+    let options: Vec<String> = vec!["a".into(), "b".into(), "c".into()];
+    let radio = WidgetViewKind::Radio {
+        options: options.clone(),
+    };
+    for index in 0..3 {
+        let bounds = option_bounds(&radio, rect, index).unwrap();
+        assert_eq!(radio_option(rect, 3, bounds.center()), Some(index));
+    }
+    assert_eq!(option_bounds(&radio, rect, 3), None);
+    let segmented = WidgetViewKind::Segmented { options, width: 6 };
+    for index in 0..3 {
+        let bounds = option_bounds(&segmented, rect, index).unwrap();
+        assert_eq!(segment_at(rect, 3, bounds.center()), Some(index));
+    }
+    assert_eq!(option_bounds(&WidgetViewKind::Toggle, rect, 0), None);
+}

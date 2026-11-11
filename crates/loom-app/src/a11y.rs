@@ -201,6 +201,32 @@ impl crate::App {
                 (kind, crate::surface::widget_name(graph, hierarchy, tile.id, index))
             });
             ids.add_tile(tile.id, &under, widgets);
+            // What each widget is: its kind from the scene the canvas
+            // draws, and its range from the parameter the control moves.
+            let views = self
+                .session
+                .scene
+                .module(tile.id)
+                .map(|view| view.panel.widgets.as_slice());
+            for (index, view) in views.unwrap_or_default().iter().enumerate() {
+                let name = if view.label.is_empty() {
+                    crate::surface::widget_name(graph, hierarchy, tile.id, index).unwrap_or_default()
+                } else {
+                    view.label.clone()
+                };
+                let spec =
+                    |part| crate::surface::control_target(graph, hierarchy, tile.id, index, part).map(|t| t.spec);
+                ids.set_detail(
+                    tile.id,
+                    index,
+                    tree::Detail {
+                        kind: view.kind.clone(),
+                        name,
+                        main: spec(loom_canvas::ControlPart::Main),
+                        second: spec(loom_canvas::ControlPart::Second),
+                    },
+                );
+            }
         }
         ids
     }

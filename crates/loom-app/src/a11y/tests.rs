@@ -1,7 +1,7 @@
 //! Tests for the accessibility tree: UI IDs and node IDs, the tree, and
 //! actions. None needs a window or a screen reader, so they run on every OS.
 
-use super::tree::{STEP, WidgetIds, WidgetKey, canvas_id, status_id, tile_id, window_id};
+use super::tree::{WidgetIds, WidgetKey, canvas_id, status_id, tile_id, window_id};
 use super::*;
 use crate::{App, Message};
 use accesskit::{Action, ActionData, Node, NodeId, Role, TreeId};
@@ -229,7 +229,14 @@ fn tree_shows_tiles_and_controls() {
     let cutoff = node(&update, cutoff_node);
     assert_eq!(cutoff.role(), Role::Slider);
     assert_eq!(cutoff.label(), Some(shown.label.as_str()));
-    assert_eq!(cutoff.numeric_value(), Some(f64::from(shown.position)));
+    // The value is the parameter's own number, in its own range.
+    let spec = app.control_target(module, knob, ControlPart::Main).unwrap().spec;
+    assert_eq!(
+        cutoff.numeric_value(),
+        Some(f64::from(spec.denormalize(shown.position)))
+    );
+    assert_eq!(cutoff.min_numeric_value(), Some(f64::from(spec.min)));
+    assert_eq!(cutoff.max_numeric_value(), Some(f64::from(spec.max)));
     assert_eq!(cutoff.value(), None, "the value is a number, so it can be stepped");
     assert!(!shown.text.is_empty());
     assert_eq!(cutoff.description(), Some(shown.text.as_str()));
@@ -258,51 +265,179 @@ fn node_ids_are_unique_and_children_exist() {
     }
 }
 
-/// Each widget kind gets the role the tree gives it so far: a toggle is a
-/// switch that says whether it is on, a button a button, a meter a meter,
-/// and the kinds the next slice covers a read-only label.
-#[test]
-fn each_widget_kind_has_its_role() {
-    let mut app = crate::tests::app();
-    let id = app.session.controller.add_module("loom.filter.svf").unwrap().0;
-    app.commit();
-    let mut snapshot = app.ui_snapshot();
+/// The app with the patch that shows every panel widget kind.
+fn app_with_every_widget() -> App {
+    let patch = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/test-widgets.ron");
+    App::new(crate::Args {
+        patch: Some(patch),
+        test_modules: true,
+        ..crate::tests::app_args()
+    })
+}
+
+/// The first visible widget drawn as `kind` that has a node: its tile and
+/// its panel index.
+fn first_of(app: &App, kind: &str) -> (u32, usize) {
+    let snapshot = app.ui_snapshot();
     let ids = app.a11y_widget_ids(&snapshot);
-    let at_tile = snapshot.tiles.iter().position(|t| t.id == id).unwrap();
-    let index = (0..snapshot.tiles[at_tile].widgets.len())
-        .find(|i| ids.get(id, *i).is_some())
-        .expect("the tile has a named widget");
-    let kinds = [
-        ("toggle", 1.0, Role::Switch),
-        ("toggle", 0.0, Role::Switch),
-        ("button", 0.0, Role::Button),
-        ("meter", 0.25, Role::Meter),
-        ("radio", 0.0, Role::Label),
-        ("fader", 0.5, Role::Slider),
+    snapshot
+        .tiles
+        .iter()
+        .find_map(|tile| {
+            let index = tile
+                .widgets
+                .iter()
+                .enumerate()
+                .position(|(i, w)| w.kind == kind && !w.hidden && ids.get(tile.id, i).is_some())?;
+            Some((tile.id, index))
+        })
+        .unwrap_or_else(|| panic!("the patch shows a {kind}"))
+}
+
+/// The node ID of one piece of a widget.
+fn piece_node(app: &mut App, module: u32, widget: usize, piece: tree::Piece) -> NodeId {
+    let snapshot = app.ui_snapshot();
+    let ids = app.a11y_widget_ids(&snapshot);
+    let id = tree::piece_id(
+        ids.get(module, widget).unwrap(),
+        &ids.detail(module, widget).unwrap().kind,
+        piece,
+    );
+    node_of(app, &id)
+}
+
+/// Every kind of widget a tile draws has the role the specification's
+/// table gives it, a name, and a value or state. A control can be operated,
+/// and a control that holds a number says its unit in the description
+/// (ui-layer.md, section 7, rule 2).
+#[test]
+fn every_widget_kind_has_its_role_a_name_and_a_value() {
+    let mut app = app_with_every_widget();
+    let update = app.a11y_tree(None);
+    let roles = [
+        ("knob", Role::Slider),
+        ("fader", Role::Slider),
+        ("number", Role::Slider),
+        ("toggle", Role::Switch),
+        ("button", Role::Button),
+        ("radio", Role::RadioGroup),
+        ("select", Role::ComboBox),
+        ("xy_pad", Role::Group),
+        ("range", Role::Group),
+        ("meter", Role::Meter),
+        ("light", Role::Image),
+        ("readout", Role::Label),
+        ("scope", Role::Image),
     ];
-    for (kind, at, role) in kinds {
-        let widget = &mut snapshot.tiles[at_tile].widgets[index];
-        widget.kind = kind;
-        widget.position = at;
-        widget.hidden = false;
-        let update = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);
-        let found = node(&update, NodeId(app.a11y.ids.number(ids.get(id, index).unwrap())));
+    for (kind, role) in roles {
+        let (module, index) = first_of(&app, kind);
+        let found = node(&update, widget_node(&mut app, module, index));
         assert_eq!(found.role(), role, "{kind}");
+        assert!(found.label().is_some_and(|name| !name.is_empty()), "{kind} has a name");
         match kind {
+            "knob" | "fader" | "number" => {
+                assert!(found.numeric_value().is_some(), "{kind}");
+                assert!(found.min_numeric_value() < found.max_numeric_value(), "{kind}");
+                assert!(found.description().is_some_and(|text| !text.is_empty()), "{kind}");
+                for action in [Action::Increment, Action::Decrement, Action::SetValue] {
+                    assert!(found.supports_action(action), "{kind}");
+                }
+            }
             "toggle" => {
-                let on = if at >= 0.5 {
-                    accesskit::Toggled::True
-                } else {
-                    accesskit::Toggled::False
-                };
-                assert_eq!(found.toggled(), Some(on));
+                assert!(found.toggled().is_some());
                 assert!(found.supports_action(Action::Click));
             }
             "button" => assert!(found.supports_action(Action::Click)),
-            "meter" => assert_eq!(found.numeric_value(), Some(f64::from(at))),
+            "select" => {
+                assert!(found.value().is_some_and(|option| !option.is_empty()));
+                assert!(found.supports_action(Action::Increment));
+                assert!(found.supports_action(Action::Decrement));
+                assert!(!found.supports_action(Action::Expand), "it does not open until phase 3");
+            }
+            "radio" => {
+                let options = found.children();
+                assert!(options.len() > 1);
+                let chosen = options
+                    .iter()
+                    .filter(|option| node(&update, **option).toggled() == Some(accesskit::Toggled::True))
+                    .count();
+                assert_eq!(chosen, 1, "one option is chosen");
+                for option in options {
+                    let option = node(&update, *option);
+                    assert_eq!(option.role(), Role::RadioButton);
+                    assert!(option.label().is_some_and(|name| !name.is_empty()));
+                    assert!(option.supports_action(Action::Click));
+                }
+            }
+            "xy_pad" | "range" => {
+                let values = found.children();
+                assert_eq!(values.len(), 2, "{kind}: one slider per value");
+                for value in values {
+                    let value = node(&update, *value);
+                    assert_eq!(value.role(), Role::Slider, "{kind}");
+                    assert!(value.label().is_some_and(|name| !name.is_empty()), "{kind}");
+                    assert!(value.numeric_value().is_some(), "{kind}");
+                    assert!(value.description().is_some_and(|text| !text.is_empty()), "{kind}");
+                    assert!(value.supports_action(Action::Increment), "{kind}");
+                }
+            }
+            "meter" => assert!(found.numeric_value().is_some()),
+            "readout" => assert!(found.value().is_some_and(|text| !text.is_empty())),
+            "light" => assert!(found.description().is_some_and(|text| !text.is_empty())),
             _ => {}
         }
     }
+}
+
+/// A scope is an image that says its trace's lowest and highest points in
+/// words, once it has a trace.
+#[test]
+fn a_scope_says_its_trace_in_words() {
+    let mut app = app_with_every_widget();
+    let (module, index) = first_of(&app, "scope");
+    let mut snapshot = app.ui_snapshot();
+    let ids = app.a11y_widget_ids(&snapshot);
+    let scope = &mut snapshot.tiles.iter_mut().find(|t| t.id == module).unwrap().widgets[index];
+    scope.trace = Some(crate::snapshot::TraceShown {
+        points: 100,
+        low: -0.5,
+        high: 0.25,
+        level: 0.5,
+    });
+    let update = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);
+    let found = node(&update, widget_node(&mut app, module, index));
+    assert_eq!(found.role(), Role::Image);
+    assert_eq!(found.description(), Some("Lowest -0.50, highest 0.25"));
+}
+
+/// A slider on a linear parameter declares the step an arrow key takes, in
+/// the parameter's own units. One on a logarithmic parameter declares none:
+/// an arrow key moves it by a different amount at each place.
+#[test]
+fn a_step_is_declared_only_where_it_is_one_number() {
+    let (mut app, module, knob) = app_with_filter();
+    let update = app.a11y_tree(None);
+    let spec = |app: &App, widget| app.control_target(module, widget, ControlPart::Main).unwrap().spec;
+    assert_eq!(spec(&app, knob).options.mapping, loom_core::ParamMapping::Logarithmic);
+    assert_eq!(
+        node(&update, widget_node(&mut app, module, knob)).numeric_value_step(),
+        None
+    );
+    let snapshot = app.ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|t| t.id == module).unwrap();
+    let linear = (0..tile.widgets.len())
+        .find(|i| {
+            tile.widgets[*i].kind == "knob"
+                && app.control_target(module, *i, ControlPart::Main).is_some_and(|t| {
+                    t.spec.options.mapping == loom_core::ParamMapping::Linear && !t.spec.options.integer
+                })
+        })
+        .expect("the filter has a linear knob");
+    let s = spec(&app, linear);
+    let step = node(&update, widget_node(&mut app, module, linear))
+        .numeric_value_step()
+        .unwrap();
+    assert!((step - f64::from(0.01 * (s.max - s.min))).abs() < 1e-6);
 }
 
 /// A hidden widget is not in the tree, and its tile does not name it.
@@ -471,7 +606,7 @@ fn increment_turns_the_knob_as_one_undo_step() {
     let _ = app.update(Message::A11y(Event::Action(request(Action::Increment, cutoff, None))));
 
     let after = position(&app, module, knob);
-    assert!((after - (before + STEP).min(1.0)).abs() < 1e-4, "{before} -> {after}");
+    assert!((after - (before + 0.01).min(1.0)).abs() < 1e-4, "{before} -> {after}");
     assert!(app.ui_snapshot().undo.is_some(), "the turn can be undone");
 
     let _ = app.update(Message::A11y(Event::Action(request(Action::Decrement, cutoff, None))));
@@ -501,73 +636,166 @@ fn a_set_becomes_a_change_and_a_release() {
     assert!(none.is_empty(), "a knob cannot be clicked");
 }
 
-/// SetValue moves the knob to the position asked for, kept within 0 to 1.
+/// SetValue takes a number in the parameter's own range and moves the
+/// knob to it, kept within the range.
 #[test]
-fn set_value_is_clamped() {
+fn set_value_is_in_the_parameters_range_and_clamped() {
     let (mut app, module, knob) = app_with_filter();
     let _ = app.a11y_tree(None);
     let cutoff = widget_node(&mut app, module, knob);
+    let spec = app.control_target(module, knob, ControlPart::Main).unwrap().spec;
     let set = |app: &App, value| events(app, &request(Action::SetValue, cutoff, Some(value)));
-    assert_eq!(
-        set(&app, ActionData::NumericValue(3.0)),
-        vec![CanvasEvent::SetControl {
-            module,
-            widget: knob,
-            position: 1.0,
-            part: ControlPart::Main,
-        }]
-    );
+    let at = |events: Vec<CanvasEvent>| match events.as_slice() {
+        [
+            CanvasEvent::SetControl {
+                module: m,
+                widget,
+                position,
+                part: ControlPart::Main,
+            },
+        ] if *m == module && *widget == knob => *position,
+        other => panic!("expected one set, got {other:?}"),
+    };
+    let middle = spec.denormalize(0.5);
+    assert!((at(set(&app, ActionData::NumericValue(f64::from(middle)))) - 0.5).abs() < 1e-4);
+    assert_eq!(at(set(&app, ActionData::NumericValue(f64::from(spec.max) * 4.0))), 1.0);
+    assert_eq!(at(set(&app, ActionData::NumericValue(f64::INFINITY))), 1.0);
+    assert_eq!(at(set(&app, ActionData::NumericValue(f64::NEG_INFINITY))), 0.0);
+    assert_eq!(at(set(&app, ActionData::NumericValue(-2.0))), 0.0);
     assert!(
         set(&app, ActionData::Value("loud".into())).is_empty(),
         "a knob takes a number"
     );
     assert!(
         set(&app, ActionData::NumericValue(f64::NAN)).is_empty(),
-        "NaN is not a position"
+        "NaN is not a value"
     );
-    let at = |events: Vec<CanvasEvent>| match events.as_slice() {
-        [CanvasEvent::SetControl { position, .. }] => *position,
-        other => panic!("expected one set, got {other:?}"),
-    };
-    assert_eq!(at(set(&app, ActionData::NumericValue(f64::INFINITY))), 1.0);
-    assert_eq!(at(set(&app, ActionData::NumericValue(f64::NEG_INFINITY))), 0.0);
-    assert_eq!(at(set(&app, ActionData::NumericValue(-2.0))), 0.0);
 }
 
 /// A click turns a toggle over, and presses a button.
 #[test]
 fn click_works_a_toggle_and_a_button() {
-    let (mut app, module, knob) = app_with_filter();
+    let mut app = app_with_every_widget();
     let _ = app.a11y_tree(None);
-    let target = widget_node(&mut app, module, knob);
-    let mut snapshot = app.ui_snapshot();
-    let ids = app.a11y_widget_ids(&snapshot);
-    let click = |snapshot: &crate::snapshot::UiSnapshot, app: &App| {
-        actions::canvas_events(snapshot, &ids, &app.a11y.ids, &request(Action::Click, target, None))
-    };
-    let set = |position| {
+    let (module, toggle) = first_of(&app, "toggle");
+    let target = widget_node(&mut app, module, toggle);
+    let before = position(&app, module, toggle);
+    assert_eq!(
+        events(&app, &request(Action::Click, target, None)),
         vec![CanvasEvent::SetControl {
             module,
-            widget: knob,
-            position,
+            widget: toggle,
+            position: if before >= 0.5 { 0.0 } else { 1.0 },
             part: ControlPart::Main,
         }]
+    );
+    let (module, button) = first_of(&app, "button");
+    let target = widget_node(&mut app, module, button);
+    assert_eq!(
+        events(&app, &request(Action::Click, target, None)),
+        vec![CanvasEvent::ButtonPressed { module, widget: button }]
+    );
+    assert!(
+        events(&app, &request(Action::Increment, target, None)).is_empty(),
+        "a button has no value to step"
+    );
+}
+
+/// Increment and Decrement move a control by what an arrow key moves it,
+/// from the one function the keyboard uses (ui-layer.md, section 7, rule
+/// 5): a knob by its step, a select by one option.
+#[test]
+fn increment_and_decrement_take_the_arrow_keys_step() {
+    let mut app = app_with_every_widget();
+    let _ = app.a11y_tree(None);
+    for kind in ["knob", "fader", "number", "select"] {
+        let (module, index) = first_of(&app, kind);
+        let target = widget_node(&mut app, module, index);
+        let snapshot = app.ui_snapshot();
+        let ids = app.a11y_widget_ids(&snapshot);
+        let drawn = &ids.detail(module, index).unwrap().kind;
+        let before = position(&app, module, index);
+        for (action, up) in [(Action::Increment, true), (Action::Decrement, false)] {
+            let (next, _) = loom_canvas::arrow_step(drawn, ControlPart::Main, before, 0.0, up, false).unwrap();
+            let expected = if next == before {
+                Vec::new()
+            } else {
+                vec![CanvasEvent::SetControl {
+                    module,
+                    widget: index,
+                    position: next,
+                    part: ControlPart::Main,
+                }]
+            };
+            assert_eq!(events(&app, &request(action, target, None)), expected, "{kind}");
+        }
+    }
+}
+
+/// A click on a radio option chooses it, and a click on the chosen one
+/// does nothing.
+#[test]
+fn click_on_an_option_chooses_it() {
+    let mut app = app_with_every_widget();
+    let _ = app.a11y_tree(None);
+    let (module, radio) = first_of(&app, "radio");
+    let chosen = position(&app, module, radio).round() as usize;
+    let other = if chosen == 0 { 1 } else { 0 };
+    let option = piece_node(&mut app, module, radio, tree::Piece::Option(other));
+    assert_eq!(
+        events(&app, &request(Action::Click, option, None)),
+        vec![CanvasEvent::SetControl {
+            module,
+            widget: radio,
+            position: other as f32,
+            part: ControlPart::Main,
+        }]
+    );
+    let same = piece_node(&mut app, module, radio, tree::Piece::Option(chosen));
+    assert!(events(&app, &request(Action::Click, same, None)).is_empty());
+    let whole = widget_node(&mut app, module, radio);
+    assert!(events(&app, &request(Action::Click, whole, None)).is_empty());
+}
+
+/// Each value of an XY pad and of a range is its own slider. Increment
+/// moves that value alone, and a range's handle set past the other handle
+/// stops at it.
+#[test]
+fn each_value_of_a_two_value_control_is_its_own_slider() {
+    let mut app = app_with_every_widget();
+    let _ = app.a11y_tree(None);
+    let second_at = |app: &App, module: u32, index: usize| {
+        let snapshot = app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == module).unwrap();
+        tile.widgets[index].second.as_ref().unwrap().position
     };
-    let widget = |snapshot: &mut crate::snapshot::UiSnapshot, kind, position| {
-        let tile = snapshot.tiles.iter_mut().find(|t| t.id == module).unwrap();
-        tile.widgets[knob].kind = kind;
-        tile.widgets[knob].position = position;
+    let part_of = |events: Vec<CanvasEvent>| match events.as_slice() {
+        [CanvasEvent::SetControl { part, position, .. }] => (*part, *position),
+        other => panic!("expected one set, got {other:?}"),
     };
 
-    widget(&mut snapshot, "toggle", 0.0);
-    assert_eq!(click(&snapshot, &app), set(1.0));
-    widget(&mut snapshot, "toggle", 1.0);
-    assert_eq!(click(&snapshot, &app), set(0.0));
-    widget(&mut snapshot, "button", 0.0);
-    assert_eq!(
-        click(&snapshot, &app),
-        vec![CanvasEvent::ButtonPressed { module, widget: knob }]
-    );
+    let (module, pad) = first_of(&app, "xy_pad");
+    let y = piece_node(&mut app, module, pad, tree::Piece::Second);
+    let before = second_at(&app, module, pad);
+    let (part, at) = part_of(events(&app, &request(Action::Decrement, y, None)));
+    assert_eq!(part, ControlPart::Second);
+    assert!((at - (before - 0.01)).abs() < 1e-6);
+
+    let (module, range) = first_of(&app, "range");
+    let low = piece_node(&mut app, module, range, tree::Piece::Main);
+    let high_at = second_at(&app, module, range);
+    let low_at = position(&app, module, range);
+    assert!(low_at < high_at, "the test patch's range is open");
+    let spec = app.control_target(module, range, ControlPart::Main).unwrap().spec;
+    let top = Some(ActionData::NumericValue(f64::from(spec.max) * 2.0));
+    let (part, at) = part_of(events(&app, &request(Action::SetValue, low, top)));
+    assert_eq!(part, ControlPart::Main);
+    assert_eq!(at, high_at, "low stops at high");
+    let high = piece_node(&mut app, module, range, tree::Piece::Second);
+    let bottom = Some(ActionData::NumericValue(f64::NEG_INFINITY));
+    let (part, at) = part_of(events(&app, &request(Action::SetValue, high, bottom)));
+    assert_eq!(part, ControlPart::Second);
+    assert_eq!(at, low_at, "high stops at low");
 }
 
 /// Focus on a node never changes the patch: focusing a tile or a control

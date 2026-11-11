@@ -4,11 +4,11 @@
 //! the pointer and the keyboard send, so undo, autosave, MIDI feedback, and
 //! the unsaved mark need nothing extra (ui-layer.md, section 7, rule 6).
 
-use super::tree::{STEP, WidgetIds, tile_of};
+use super::tree::{Piece, WidgetIds, tile_of};
 use crate::Message;
 use crate::snapshot::UiSnapshot;
 use accesskit::{Action, ActionData, ActionRequest};
-use loom_canvas::{CanvasEvent, ControlPart};
+use loom_canvas::{CanvasEvent, ControlPart, WidgetViewKind, arrow_step};
 use loom_ui_core::IdTable;
 
 /// The canvas events for a screen reader's request, in order. Empty when
@@ -36,7 +36,7 @@ pub(super) fn canvas_events(
             _ => Vec::new(),
         };
     }
-    let Some((module, index)) = ids.find(id) else {
+    let Some((module, index, piece)) = ids.find_piece(id) else {
         return Vec::new();
     };
     let Some(widget) = snapshot
@@ -48,24 +48,79 @@ pub(super) fn canvas_events(
     else {
         return Vec::new();
     };
-    let set = |position: f32| {
+    let Some(detail) = ids.detail(module, index) else {
+        return Vec::new();
+    };
+    let main = widget.position;
+    let second = widget.second.as_ref().map_or(0.0, |second| second.position);
+    let set = |part: ControlPart, position: f32| {
         vec![CanvasEvent::SetControl {
             module,
             widget: index,
-            position: position.clamp(0.0, 1.0),
-            part: ControlPart::Main,
+            position,
+            part,
         }]
     };
-    match (request.action, widget.kind) {
-        (Action::Increment, "knob" | "fader" | "number") => set(widget.position + STEP),
-        (Action::Decrement, "knob" | "fader" | "number") => set(widget.position - STEP),
-        (Action::SetValue, "knob" | "fader" | "number") => match request.data {
-            // NaN has no place on a control, and clamping would pass it on.
-            Some(ActionData::NumericValue(v)) if !v.is_nan() => set(v as f32),
+    // One arrow key press on `part`, as the keyboard takes it.
+    let step = |part: ControlPart, up: bool| match arrow_step(&detail.kind, part, main, second, up, false) {
+        Some((next, _)) if part == ControlPart::Main && next != main => set(part, next),
+        Some((_, next)) if part == ControlPart::Second && next != second => set(part, next),
+        _ => Vec::new(),
+    };
+    // The number a screen reader sent, as a position on the control. NaN
+    // has no place on a control, and clamping would pass it on.
+    let sent = |spec: Option<&loom_core::ParamSpec>| match request.data {
+        Some(ActionData::NumericValue(v)) if !v.is_nan() => Some(match spec {
+            Some(spec) => spec.normalize(v as f32),
+            None => (v as f32).clamp(0.0, 1.0),
+        }),
+        _ => None,
+    };
+    let one_number = matches!(
+        detail.kind,
+        WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. }
+    );
+    let two_numbers = matches!(detail.kind, WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. });
+    let range = matches!(detail.kind, WidgetViewKind::Range { .. });
+    match (request.action, piece) {
+        (Action::Increment | Action::Decrement, Piece::Whole)
+            if one_number || matches!(detail.kind, WidgetViewKind::Select { .. }) =>
+        {
+            step(ControlPart::Main, request.action == Action::Increment)
+        }
+        (Action::SetValue, Piece::Whole) if one_number => sent(detail.main.as_ref())
+            .map(|position| set(ControlPart::Main, position))
+            .unwrap_or_default(),
+        (Action::Increment | Action::Decrement, Piece::Main | Piece::Second) if two_numbers => {
+            let part = if piece == Piece::Main {
+                ControlPart::Main
+            } else {
+                ControlPart::Second
+            };
+            step(part, request.action == Action::Increment)
+        }
+        // A range's handles do not pass each other: each stops at the other.
+        (Action::SetValue, Piece::Main) if two_numbers => sent(detail.main.as_ref())
+            .map(|position| set(ControlPart::Main, if range { position.min(second) } else { position }))
+            .unwrap_or_default(),
+        (Action::SetValue, Piece::Second) if two_numbers => sent(detail.second.as_ref())
+            .map(|position| set(ControlPart::Second, if range { position.max(main) } else { position }))
+            .unwrap_or_default(),
+        (Action::Click, Piece::Whole) if matches!(detail.kind, WidgetViewKind::Toggle) => {
+            set(ControlPart::Main, if main >= 0.5 { 0.0 } else { 1.0 })
+        }
+        (Action::Click, Piece::Whole) if matches!(detail.kind, WidgetViewKind::Button) => {
+            vec![CanvasEvent::ButtonPressed { module, widget: index }]
+        }
+        // A choice's position is the index of its option.
+        (Action::Click, Piece::Option(option)) => match &detail.kind {
+            WidgetViewKind::Radio { options } | WidgetViewKind::Segmented { options, .. }
+                if option < options.len() && option != main.round() as usize =>
+            {
+                set(ControlPart::Main, option as f32)
+            }
             _ => Vec::new(),
         },
-        (Action::Click, "toggle") => set(if widget.position >= 0.5 { 0.0 } else { 1.0 }),
-        (Action::Click, "button") => vec![CanvasEvent::ButtonPressed { module, widget: index }],
         _ => Vec::new(),
     }
 }

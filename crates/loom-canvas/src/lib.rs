@@ -53,7 +53,7 @@ pub use controls::{
     ModulationMark, PanelValues, PartValue, WidgetValue, fader_bar_point, knob_range_ring, segment_centre, xy_area,
     xy_edge_point,
 };
-pub use controls::{arrow_share, arrow_step, part_bounds, range_bar_point};
+pub use controls::{arrow_share, arrow_step, option_bounds, part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
 pub use gpu::{CanvasFrame, CanvasRenderer, Target};
 pub use input::{

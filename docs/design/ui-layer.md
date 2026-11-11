@@ -175,6 +175,7 @@ Keys come from what the element shows, not from where it sits:
 | An exposed item on a sub-patch's surface, on its tile or its inspector rows | The instance's flat ID, the kind `exposed`, and the item's name on that surface |
 | A slot and its parts | The slot's flat ID, then the part's module type or library item |
 | A control on a slot's tile, or its inspector row | The slot's flat ID, then its part as above, then the kind and the name: `canvas/7/loom.filter.svf/param/cutoff`. A part that is a sub-patch is `subpatch` and then its key. When the slot swaps its part, the new part's controls are new elements, even where a name repeats |
+| One value of an XY pad or a range, one option of a radio or segmented control | The control's ID, then a name for the piece: `x` or `y`, `low` or `high`, or `option` and the option's index, as `canvas/4/param/mode/option/2`. The index of an option is the parameter's value, so it is what the option shows, not where it is drawn. The piece is a name so that it cannot be taken for the number that counts a second widget on the same value |
 | A breadcrumb entry | The path of instance flat IDs from the top patch to that level |
 | A library item in the module browser | `library` and the item's path in the library folder |
 | A toolbar button | A fixed name (`undo`, `open`, `panic`) |
@@ -250,15 +251,18 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 
 | Element drawn | Role | Value | Actions |
 |---|---|---|---|
-| Knob, fader, number | Slider | The number, in the parameter's range | Increment, Decrement, SetValue, Focus |
+| Knob, fader, number | Slider | The number, in the parameter's range (rule 14) | Increment, Decrement, SetValue, Focus |
 | Stepped parameter drawn as a knob (octave, note value) | Slider, stepping one option at a time | The option's index, with its name in the description | Increment, Decrement, SetValue, Focus |
 | Stepped parameter drawn as radio or segmented buttons | Radio group, with one radio button per option | The chosen option | Click on an option, Focus |
 | Toggle | Switch | On or off | Click, Focus |
 | Button | Button | None | Click, Focus |
-| Select (pick list) | Combo box | The chosen option | Expand, Collapse, Focus |
+| Select (pick list) | Combo box | The chosen option | Increment, Decrement, Focus. Expand and Collapse from phase 3 (rule 15) |
+| XY pad, range | Group, named, with one slider per value inside | Each slider: its number, in its parameter's range | On each slider: Increment, Decrement, SetValue, Focus |
+| Readout | Label, named | The text shown | None |
 | Text field | Text input | Its text, as text runs with caret and selection (rule 10) | SetValue, SetTextSelection, ReplaceSelectedText, Focus |
 | Meter | Meter | Number, with its unit in the description | None |
 | Light | Image, named, with its state in words in the description | None | None |
+| Scope | Image, named, with a description in words from its trace's lowest and highest points | None | None |
 | A drawing whose text alternative is another element (the patch map) | Image, named ("Patch map"), with a description that says where its text alternative is | None | None |
 | An app-driven tree (the patch outline) | Tree, named | None | Focus |
 | A row of that tree | Tree item, with its level, position in set, size of set, and expanded state | None | Focus, and Click where a click does something |
@@ -293,6 +297,12 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 11. **The adapter attaches before the window first shows.** The shell creates the window hidden, attaches `accesskit_winit`, then shows it. *Why:* AccessKit documents this order. The spike worked without it by luck.
 12. **A tree is driven by the app.** The app handles Up, Down, Right, Left, Home, End, and type-ahead in a tree, and keeps which rows are expanded. The tree's visible rows are sent as direct children of the Tree node, in the order shown, and each still carries its level, its position in set, its size of set, and its expanded state. *Why:* `accesskit_macos` 0.27.2 has no expand or collapse action, reports no level, position, or size of set, and lists only a tree's direct items as its rows (`node.rs`, `accessibilityRows`). Rows nested as children of rows would not be listed there. The Windows adapter maps level, position, size, and expand state †, and the Linux adapter position and size †, so sending them costs nothing and helps where they are read. Keys the app handles work the same everywhere, with or without a screen reader.
 13. **Elements may set `controls` relations to other nodes by UI ID,** inside or outside their own panel or custom element, and no other relation. The runtime turns each UI ID into its node ID when the tree is sent, and drops a relation whose target is gone. *Why:* `controls` is the only AccessKit relation the three platform adapters map: on macOS to linked UI elements (`node.rs`, `accessibilityLinkedUIElements`), on Windows and Linux to "controller for" †. `flow_to`, `described_by`, and `details` are mapped by none †, so a relation of those kinds would reach no screen reader. The canvas uses it from each output port to the inputs its cables feed ([canvas accessibility](canvas-accessibility.md), rule 21).
+14. **A slider's number is the parameter's own value, with the parameter's minimum and maximum,** not the control's travel from 0 to 1. A step size is declared only where equal steps of the control are equal steps of the value: a linear parameter, or a stepped one. A slider on a logarithmic or decibel parameter declares no step. Increment and Decrement still move it by what an arrow key moves it (rule 5). *Why:* "1000" on a control that reads "1000 Hz" is true, and "0.57" is not. One arrow key press on a logarithmic control is 1% of its travel, which is a different number of hertz at each place, so no one step would be true.
+15. **A select says its chosen option and steps one option at a time,** with Increment and Decrement, on a tile and in the inspector. It offers no Expand or Collapse until phase 3, when our own select can give its open list as nodes. Nothing outside the canvas can open a tile's choice list. *Why:* a combo box that says it can expand, and then shows a screen reader nothing to walk, is worse than one that steps.
+16. **An XY pad and a range are a named group holding one slider per value.** Each slider is named by its parameter and steps as an arrow key steps that value. A range's handles do not pass each other: a value set past the other handle stops at it, as a drag does. *Why:* AccessKit has no role for one control with two numbers, and two sliders are what the two values are.
+17. **A readout is a label whose value is the text it shows. A scope is an image** whose description says its trace's lowest and highest points in words, updated at most 4 times a second (rule 7). A light, and the other drawings a tile shows, are images named by what they are bound to, with the text the screen gives for them as the description. *Why:* a screen reader user should learn that a signal is there and roughly how large it is. A stream of numbers at the frame rate would be noise.
+18. **A widget with no caption is named by what it is bound to,** the name its hover text shows. *Why:* most meters and scopes have no caption on the tile, and rule 2 needs every node to have a name.
+19. **A tile gives no port nodes in phase 1.** Ports come with the canvas accessibility work ([canvas accessibility](canvas-accessibility.md)). *Why:* that spec designs how ports and cables are read, and nodes added before it would have to be redone.
 
 ## 8. Text input and IME
 
@@ -358,11 +368,11 @@ Phase 1:
 - [x] `loom-canvas` names Iced only on its widget side: `widget.rs`, the files under `widget/` (the primitive wrapper and the Iced painter among them), and `iced_convert.rs`. `crates/loom-canvas/tests/purity.rs` checks it.
 - [ ] A test checks that every interactive element kind on a tile and in the inspector has an operable role from the table, a non-empty name, and a value, with the unit in the description.
 - [ ] A test checks that screen reader SetValues on one control, each within 500 ms of the last, make one undo step; that an action on another control, a key press, or Undo closes the group; and that Undo is enabled while the group is open.
-- [ ] A test checks that Increment on a knob moves it by the same step as an arrow key.
+- [x] A test checks that Increment on a knob moves it by the same step as an arrow key. Both take it from one function, `loom_canvas::arrow_step`.
 - [ ] A test checks that the tree changes when a view model, focus, or a scroll offset changes, and does not change on a message that changes none of what it reports.
 - [ ] A test checks that, while a screen reader is active, a moving meter's node reports changing values both with and without focus, and its final value after the meter stops; that it is sent at most every 250 ms; that it is not sent while the meter is off screen or below a panel that owns the input; and that nothing is sent after `deactivate_accessibility`.
-- [ ] A test checks that the Focus action on a tile does not change the selection.
-- [ ] A tree built at scale factor 2 has bounds twice the logical layout.
+- [x] A test checks that the Focus action on a tile does not change the selection.
+- [x] A tree built at scale factor 2 has bounds twice the logical layout.
 - [ ] Accessibility node IDs for inspector rows survive adding and removing a module, and the table drops the entries of removed elements.
 - [ ] An exposed parameter on a sub-patch tile and the inner module's own row for it have different UI IDs, and both are found by `locate`.
 - [ ] A VoiceOver check is recorded in the pull request: which controls were read, which could be changed by keyboard, how a held arrow key felt (section 7, rule 5), whether a meter under the VoiceOver cursor reads its current value, and whether VoiceOver announces meters it is not on (section 7, rule 7).
@@ -422,6 +432,11 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
 | How a UI ID is written as text (2026-11-10) | A path: keys joined by `/`, digits as numbers, `/` and `%` escaped inside a name, and a name of digits escaped so it reads back as a name. The control channel's short names stay | Section 4, rule 5 |
 | Whether a slot's controls stay the same elements when its part is swapped (2026-11-11) | No. They are keyed under the part, so a swap makes new elements with new node IDs. The new part's controls can differ completely, and a screen reader must not read the new filter's cutoff as the old one's | Section 4, the key table |
+| What an XY pad and a range are to a screen reader (2026-11-10) | A named group holding one slider per value, each stepping as an arrow key does | Section 7, the role table and rule 16 |
+| What a readout and a scope are (2026-11-10) | A readout is a label whose value is its text. A scope is an image with a short description in words, updated at most 4 times a second | Section 7, rule 17 |
+| What number a non-linear knob reports (2026-11-10) | The parameter's own value in its own range, with no step size declared; Increment and Decrement move what an arrow key moves | Section 7, rule 14 |
+| What a select offers before phase 3 (2026-11-10) | Its chosen option, and Increment and Decrement, one option per step. No Expand or Collapse, on a tile or in the inspector | Section 7, rule 15 |
+| Whether tiles give port nodes in step 1.4 (2026-11-10) | No. They come with the canvas accessibility work | Section 7, rule 19 |
 | Whether a tile's node offers Click (2026-11-10) | Yes. Click selects the tile's module; Focus alone still changes nothing | Section 7, the role table and rule 9 |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.

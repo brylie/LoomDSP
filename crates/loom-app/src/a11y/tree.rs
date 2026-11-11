@@ -5,20 +5,17 @@
 //! cannot say something the screen does not show (ui-layer.md, section 7,
 //! rule 1).
 //!
-//! What it covers so far is what the spike covered: the status line, each
-//! tile, and each tile's panel widgets. The toolbar, the inspector, and the
-//! overlays come with the later slices of plan step 1.4.
+//! What it covers so far: the status line, each tile, and each tile's panel
+//! widgets, each with the role the specification's table gives its kind.
+//! The toolbar, the inspector, and the overlays come with the later slices
+//! of plan step 1.4.
 
 use crate::snapshot::{Rect, UiSnapshot, Widget};
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
-use loom_canvas::CanvasView;
+use loom_canvas::{CanvasView, ControlPart, WidgetViewKind, arrow_share, option_bounds, part_bounds};
+use loom_core::{ParamMapping, ParamSpec};
 use loom_ui_core::{IdKey, IdTable, UiId};
 use std::collections::BTreeMap;
-
-/// How far one Increment or Decrement moves a continuous control, as a
-/// share of its travel. Kept from the spike; the step of an arrow key
-/// replaces it in the next slice (ui-layer.md, section 7, rule 5).
-pub(super) const STEP: f32 = 0.05;
 
 /// The UI ID of the window, the root of the tree.
 pub(crate) fn window_id() -> UiId {
@@ -99,8 +96,79 @@ impl WidgetKey {
 ///
 /// A widget's key is its kind and the name it is bound to, not its place in
 /// the panel. A widget with no name has no ID and no node.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct WidgetIds(BTreeMap<u32, Vec<Option<UiId>>>);
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WidgetIds {
+    /// Each tile's widget IDs, in panel order.
+    ids: BTreeMap<u32, Vec<Option<UiId>>>,
+    /// What each widget is, by tile and panel index.
+    details: BTreeMap<(u32, usize), Detail>,
+}
+
+/// What a panel widget is, beyond what the snapshot says of it: enough to
+/// give it a role, a name, and a value in its parameter's own range. It
+/// comes from the scene the canvas draws and from the parameter the control
+/// moves, so the tree and the screen have one source (ui-layer.md, section
+/// 7, rule 1).
+#[derive(Debug, Clone)]
+pub(crate) struct Detail {
+    /// The widget as the canvas draws it, with its options and steps.
+    pub kind: WidgetViewKind,
+    /// Its name: the caption, or the name it is bound to when the panel
+    /// gives it no caption, as for most meters and scopes.
+    pub name: String,
+    /// The parameter it moves, as the control maps it. `None` for a widget
+    /// that only shows a value.
+    pub main: Option<ParamSpec>,
+    /// The second parameter of an XY pad or a range.
+    pub second: Option<ParamSpec>,
+}
+
+/// Which node of a widget an ID names. Most widgets are one node. An XY
+/// pad and a range hold one slider per value, and a radio or segmented
+/// control holds one radio button per option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Piece {
+    /// The widget's own node.
+    Whole,
+    /// The slider of the first value: `x`, or `low`.
+    Main,
+    /// The slider of the second value: `y`, or `high`.
+    Second,
+    /// The radio button of the option with this index.
+    Option(usize),
+}
+
+/// The keys a piece adds to its widget's ID. They are names, so they never
+/// collide with the number that counts a second widget on the same value.
+fn piece_keys(kind: &WidgetViewKind, piece: Piece) -> Option<(&'static str, Option<u64>)> {
+    let range = matches!(kind, WidgetViewKind::Range { .. });
+    match piece {
+        Piece::Whole => None,
+        Piece::Main => Some((if range { "low" } else { "x" }, None)),
+        Piece::Second => Some((if range { "high" } else { "y" }, None)),
+        Piece::Option(index) => Some(("option", Some(index as u64))),
+    }
+}
+
+/// The ID of one piece of a widget.
+pub(crate) fn piece_id(widget: &UiId, kind: &WidgetViewKind, piece: Piece) -> UiId {
+    match piece_keys(kind, piece) {
+        None => widget.clone(),
+        Some((word, None)) => widget.clone().with(word),
+        Some((word, Some(index))) => widget.clone().with(word).with(index),
+    }
+}
+
+/// The pieces a widget of this kind has inside its own node, in order.
+fn pieces(kind: &WidgetViewKind) -> Vec<Piece> {
+    match kind {
+        WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. } => vec![Piece::Main, Piece::Second],
+        WidgetViewKind::Radio { options } | WidgetViewKind::Segmented { options, .. } => {
+            (0..options.len()).map(Piece::Option).collect()
+        }
+        _ => Vec::new(),
+    }
+}
 
 impl WidgetIds {
     /// Adds a tile's widgets. `under` is the ID they sit in: the tile's, or
@@ -124,19 +192,44 @@ impl WidgetIds {
             });
             ids.push(id);
         }
-        self.0.insert(module, ids);
+        self.ids.insert(module, ids);
     }
 
     /// The ID of one widget, if it has one.
     pub(crate) fn get(&self, module: u32, widget: usize) -> Option<&UiId> {
-        self.0.get(&module)?.get(widget)?.as_ref()
+        self.ids.get(&module)?.get(widget)?.as_ref()
+    }
+
+    /// Says what one widget is. Without this the widget is a plain label.
+    pub(crate) fn set_detail(&mut self, module: u32, widget: usize, detail: Detail) {
+        self.details.insert((module, widget), detail);
+    }
+
+    /// What one widget is, if the app said.
+    pub(crate) fn detail(&self, module: u32, widget: usize) -> Option<&Detail> {
+        self.details.get(&(module, widget))
     }
 
     /// The module and panel index of the widget with this ID.
     pub(crate) fn find(&self, id: &UiId) -> Option<(u32, usize)> {
-        self.0.iter().find_map(|(module, ids)| {
+        self.ids.iter().find_map(|(module, ids)| {
             let widget = ids.iter().position(|other| other.as_ref() == Some(id))?;
             Some((*module, widget))
+        })
+    }
+
+    /// The widget an ID names, and which of its nodes: the widget itself,
+    /// or a piece inside it.
+    pub(crate) fn find_piece(&self, id: &UiId) -> Option<(u32, usize, Piece)> {
+        if let Some((module, widget)) = self.find(id) {
+            return Some((module, widget, Piece::Whole));
+        }
+        self.details.iter().find_map(|(&(module, widget), detail)| {
+            let own = self.get(module, widget)?;
+            let piece = pieces(&detail.kind)
+                .into_iter()
+                .find(|piece| &piece_id(own, &detail.kind, *piece) == id)?;
+            Some((module, widget, piece))
         })
     }
 }
@@ -203,9 +296,24 @@ pub(crate) fn tree(
                 continue;
             };
             let child = node_id(table, widget_id);
-            let mut w = widget_node(widget);
+            let mut w = widget_node(widget, ids.detail(tile.id, index));
             if let Some(bounds) = widget.bounds {
                 place(&mut w, bounds);
+            }
+            if let Some(detail) = ids.detail(tile.id, index) {
+                let mut inside = Vec::new();
+                for piece in pieces(&detail.kind) {
+                    let piece_node = node_id(table, &piece_id(widget_id, &detail.kind, piece));
+                    let mut p = piece_node_of(widget, detail, piece);
+                    if let Some(bounds) = widget.bounds.and_then(|rect| piece_bounds(widget, detail, piece, rect)) {
+                        place(&mut p, bounds);
+                    }
+                    inside.push(piece_node);
+                    nodes.push((piece_node, p));
+                }
+                if !inside.is_empty() {
+                    w.set_children(inside);
+                }
             }
             kids.push(child);
             nodes.push((child, w));
@@ -232,26 +340,67 @@ pub(crate) fn tree(
     }
 }
 
-/// The node for one panel widget: its role, name, value, and actions.
+/// Sets a slider's value, range, and step from the parameter it moves.
+///
+/// The value is the parameter's own number, in its own range (ui-layer.md,
+/// section 7, rule 4). A step is declared only where equal steps of the
+/// control are equal steps of the value. On a logarithmic or decibel
+/// parameter one arrow key press is a different amount at each place, so
+/// no one number would be true, and none is given. Increment and Decrement
+/// still move what an arrow key moves.
+fn slider(kind: &WidgetViewKind, spec: Option<&ParamSpec>, position: f32) -> Node {
+    let mut node = Node::new(Role::Slider);
+    match spec {
+        Some(spec) => {
+            node.set_numeric_value(f64::from(spec.denormalize(position)));
+            node.set_min_numeric_value(f64::from(spec.min));
+            node.set_max_numeric_value(f64::from(spec.max));
+            if let (Some(share), ParamMapping::Linear) = (arrow_share(kind), spec.options.mapping) {
+                node.set_numeric_value_step(f64::from(share * (spec.max - spec.min)));
+            }
+        }
+        // No parameter to ask: the control's travel, from 0 to 1.
+        None => {
+            node.set_numeric_value(f64::from(position));
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(1.0);
+        }
+    }
+    node.add_action(Action::Increment);
+    node.add_action(Action::Decrement);
+    node.add_action(Action::SetValue);
+    node
+}
+
+/// What a scope's trace shows, in words: its lowest and highest points,
+/// from -1 at the bottom of the frame to 1 at the top.
+fn trace_words(widget: &Widget) -> Option<String> {
+    let trace = widget.trace.filter(|trace| trace.points > 0)?;
+    Some(format!("Lowest {:.2}, highest {:.2}", trace.low, trace.high))
+}
+
+/// The node for one panel widget: its role, name, value, and actions, by
+/// the kind of widget drawn (ui-layer.md, section 7, the role table).
 ///
 /// The name goes in the label. A control's value is a number, and the text
 /// the screen shows for it, with its unit, goes in the description
-/// (ui-layer.md, section 7, rules 3 and 4).
-fn widget_node(widget: &Widget) -> Node {
-    let continuous = |role| {
-        let mut node = Node::new(role);
-        node.set_numeric_value(f64::from(widget.position));
-        node.set_min_numeric_value(0.0);
-        node.set_max_numeric_value(1.0);
-        node.set_numeric_value_step(f64::from(STEP));
-        node.add_action(Action::Increment);
-        node.add_action(Action::Decrement);
-        node.add_action(Action::SetValue);
-        node
+/// (ui-layer.md, section 7, rules 3 and 4). Without a `detail` the widget
+/// is a plain label that says its text.
+fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
+    let Some(detail) = detail else {
+        let mut node = Node::new(Role::Label);
+        node.set_label(widget.label.clone());
+        if !widget.text.is_empty() {
+            node.set_description(widget.text.clone());
+        }
+        return node;
     };
-    let mut node = match widget.kind {
-        "knob" | "fader" | "number" => continuous(Role::Slider),
-        "toggle" => {
+    let mut description = (!widget.text.is_empty()).then(|| widget.text.clone());
+    let mut node = match &detail.kind {
+        WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. } => {
+            slider(&detail.kind, detail.main.as_ref(), widget.position)
+        }
+        WidgetViewKind::Toggle => {
             let mut node = Node::new(Role::Switch);
             node.set_toggled(if widget.position >= 0.5 {
                 Toggled::True
@@ -261,23 +410,110 @@ fn widget_node(widget: &Widget) -> Node {
             node.add_action(Action::Click);
             node
         }
-        "button" => {
+        WidgetViewKind::Button => {
             let mut node = Node::new(Role::Button);
             node.add_action(Action::Click);
             node
         }
-        "meter" => {
+        // One radio button per option, inside.
+        WidgetViewKind::Radio { .. } | WidgetViewKind::Segmented { .. } => Node::new(Role::RadioGroup),
+        // It says its chosen option and steps one option at a time. It
+        // does not open: a list a screen reader can walk comes with our
+        // own select, in phase 3.
+        WidgetViewKind::Select { .. } => {
+            let mut node = Node::new(Role::ComboBox);
+            node.set_value(widget.text.clone());
+            node.add_action(Action::Increment);
+            node.add_action(Action::Decrement);
+            description = None;
+            node
+        }
+        // One slider per value, inside.
+        WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. } => Node::new(Role::Group),
+        WidgetViewKind::Meter { .. } => {
             let mut node = Node::new(Role::Meter);
             node.set_numeric_value(f64::from(widget.position));
             node
         }
-        // Radio, segmented, select, light, readout, scope: read only until
-        // the next slice gives each its role from the specification's table.
-        _ => Node::new(Role::Label),
+        WidgetViewKind::Readout { .. } => {
+            let mut node = Node::new(Role::Label);
+            node.set_value(widget.text.clone());
+            description = None;
+            node
+        }
+        WidgetViewKind::Scope => {
+            description = trace_words(widget);
+            Node::new(Role::Image)
+        }
+        // A light, and the other drawings: named, with what the screen
+        // says of them in words.
+        _ => Node::new(Role::Image),
     };
-    node.set_label(widget.label.clone());
-    if !widget.text.is_empty() {
-        node.set_description(widget.text.clone());
+    node.set_label(detail.name.clone());
+    if let Some(description) = description {
+        node.set_description(description);
     }
     node
+}
+
+/// The node of one piece inside a widget: a slider for one value of an XY
+/// pad or a range, or a radio button for one option.
+fn piece_node_of(widget: &Widget, detail: &Detail, piece: Piece) -> Node {
+    match piece {
+        Piece::Option(index) => {
+            let mut node = Node::new(Role::RadioButton);
+            let options = match &detail.kind {
+                WidgetViewKind::Radio { options } | WidgetViewKind::Segmented { options, .. } => options.as_slice(),
+                _ => &[],
+            };
+            node.set_label(options.get(index).cloned().unwrap_or_default());
+            let chosen = widget.position.round() as usize == index;
+            node.set_toggled(if chosen { Toggled::True } else { Toggled::False });
+            node.add_action(Action::Click);
+            node
+        }
+        Piece::Main | Piece::Whole => {
+            let mut node = slider(&detail.kind, detail.main.as_ref(), widget.position);
+            if let Some(spec) = &detail.main {
+                node.set_label(spec.label.to_string());
+                node.set_description(spec.value_text(spec.denormalize(widget.position)));
+            }
+            node
+        }
+        Piece::Second => {
+            let second = widget.second.as_ref();
+            let position = second.map_or(0.0, |second| second.position);
+            let mut node = slider(&detail.kind, detail.second.as_ref(), position);
+            if let Some(spec) = &detail.second {
+                node.set_label(spec.label.to_string());
+            }
+            if let Some(second) = second {
+                node.set_description(second.text.clone());
+            }
+            node
+        }
+    }
+}
+
+/// Where one piece of a widget is drawn, in the world.
+fn piece_bounds(widget: &Widget, detail: &Detail, piece: Piece, rect: Rect) -> Option<Rect> {
+    let core = loom_ui_core::Rect::new(
+        loom_ui_core::Point::new(rect.x, rect.y),
+        loom_ui_core::Size::new(rect.width, rect.height),
+    );
+    let found = match piece {
+        Piece::Whole => None,
+        Piece::Option(index) => option_bounds(&detail.kind, core, index),
+        Piece::Main => part_bounds(&detail.kind, core, widget.position, ControlPart::Main),
+        Piece::Second => {
+            let position = widget.second.as_ref().map_or(0.0, |second| second.position);
+            part_bounds(&detail.kind, core, position, ControlPart::Second)
+        }
+    }?;
+    Some(Rect {
+        x: found.x,
+        y: found.y,
+        width: found.width,
+        height: found.height,
+    })
 }
