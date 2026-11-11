@@ -3479,3 +3479,195 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     );
     assert_ne!(cutoff(&ui.app), before, "the arrow stepped the knob");
 }
+
+/// The inspector is reported in every state it can show, not only for a
+/// plain module: an unknown module, several modules, a mapped parameter,
+/// the sources offered while adding a modulation, a module inside a
+/// sub-patch (with its expose buttons), a Patch port tile, a slot, and a
+/// stack with copies and spreads. In each, the panel's items exist, every
+/// part but text has a name, and every part that acts sends something.
+#[test]
+fn every_inspector_state_is_reported_with_named_parts() {
+    use super::items::{Kind, messages};
+    use crate::inspector::Inspector;
+    // Every item of the panel shown now, after a redraw.
+    let check = |ui: &mut crate::ui_test::Ui, name: &str, want: fn(&Inspector) -> bool| {
+        let _ = ui.redraw();
+        assert!(want(&ui.app.inspector_model()), "{name}: the inspector shows the state");
+        let items = ui.app.a11y_frames().panel;
+        assert!(!items.is_empty(), "{name}: the panel is reported");
+        let mut acting = 0;
+        for item in items.iter().flat_map(super::items::Item::walk) {
+            if item.kind != Kind::Text {
+                assert!(
+                    item.label.as_deref().is_some_and(|label| !label.is_empty()),
+                    "{name}: {} has a name",
+                    item.id
+                );
+            }
+            let sends = [Action::Click, Action::Increment, Action::Decrement]
+                .into_iter()
+                .any(|action| !messages(item, action, None).is_empty())
+                || !messages(item, Action::SetValue, Some(&ActionData::NumericValue(0.5))).is_empty()
+                || !messages(item, Action::SetValue, Some(&ActionData::Value("1".into()))).is_empty();
+            if item.click.is_some() || item.set_number.is_some() || item.set_text.is_some() {
+                assert!(sends || !item.enabled, "{name}: {} sends something", item.id);
+                acting += 1;
+            }
+        }
+        assert!(
+            acting > 0 || matches!(name, "several" | "port"),
+            "{name}: something acts"
+        );
+    };
+
+    // An unknown module.
+    let (mut app, filter, _) = app_with_filter();
+    let missing = ModuleId(100);
+    app.session
+        .controller
+        .add_unknown_with_id(
+            missing,
+            loom_core::UnknownModule {
+                kind: "future.effect@1".into(),
+                params: std::collections::BTreeMap::from([("amount".into(), 0.5)]),
+                ranges: std::collections::BTreeMap::new(),
+                inputs: vec!["in".into()],
+                outputs: vec!["out".into()],
+                parameters: vec!["amount".into()],
+            },
+        )
+        .unwrap();
+    app.commit();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![missing.0])));
+    check(&mut ui, "unknown", |m| matches!(m, Inspector::Unknown(_)));
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![missing.0, filter])));
+    check(&mut ui, "several", |m| matches!(m, Inspector::Several(_)));
+
+    // A mapped parameter, and the sources offered while adding a modulation.
+    let mut ui = crate::ui_test::Ui::open("modulation.ron");
+    let cutoff = {
+        let node = ui.app.session.controller.graph().node(ModuleId(4)).unwrap();
+        node.parameter_index("cutoff").unwrap()
+    };
+    ui.app
+        .session
+        .controller
+        .map_midi_named(
+            loom_core::MidiControl {
+                channel: 0,
+                controller: 74,
+            },
+            ModuleId(4),
+            "cutoff",
+        )
+        .unwrap();
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    check(&mut ui, "mapped", |m| matches!(m, Inspector::Module(_)));
+    // Its options rows, then the Relative mode's, reached by stepping the
+    // mode choice as a screen reader would.
+    ui.send(Message::Learn(crate::learn::Message::MidiOptionsRows {
+        module: 4,
+        index: cutoff,
+    }));
+    check(&mut ui, "options", |m| matches!(m, Inspector::Module(_)));
+    for _ in 0..2 {
+        let mode = ui
+            .app
+            .a11y_frames()
+            .panel
+            .iter()
+            .flat_map(super::items::Item::walk)
+            .find(|item| item.id.to_string().ends_with("midi/mode"))
+            .cloned()
+            .expect("the mapping's mode");
+        for message in messages(&mode, Action::Increment, None) {
+            ui.send(message);
+        }
+    }
+    check(&mut ui, "relative", |m| matches!(m, Inspector::Module(_)));
+    assert!(
+        ui.app
+            .a11y_frames()
+            .panel
+            .iter()
+            .flat_map(super::items::Item::walk)
+            .any(|item| item.id.to_string().ends_with("midi/encoding")),
+        "the Relative mode shows its encoding"
+    );
+    ui.send(Message::Modulation(crate::modulation::Message::AddModulation {
+        module: 4,
+        index: cutoff,
+    }));
+    check(&mut ui, "adding", |m| matches!(m, Inspector::Module(_)));
+
+    // Inside a sub-patch: a module with its expose buttons, a port tile,
+    // and a slot.
+    let mut ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    let svf = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == "loom.filter.svf")
+        .map(|(id, _)| id)
+        .expect("a filter inside the sub-patches");
+    let level = ui.app.session.hierarchy.level_of(svf);
+    let svf = svf.0;
+    ui.app.show_level(&level);
+    let _ = ui.redraw();
+    let tiles: Vec<u32> = ui.app.ui_snapshot().tiles.iter().map(|tile| tile.id).collect();
+    assert!(tiles.contains(&svf), "the filter's level is shown");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![svf])));
+    check(&mut ui, "inside", |m| matches!(m, Inspector::Module(_)));
+    let port = tiles
+        .iter()
+        .copied()
+        .find(|&tile| {
+            ui.app.session.selection = std::collections::BTreeSet::from([tile]);
+            matches!(ui.app.inspector_model(), Inspector::Port(_))
+        })
+        .expect("a Patch port tile inside the Voice");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![port])));
+    check(&mut ui, "port", |m| matches!(m, Inspector::Port(_)));
+    let _ = ui.app.update(Message::MakeSlot {
+        module: svf,
+        role: "loom.role.filter".to_string(),
+    });
+    let slot = ui
+        .app
+        .session
+        .hierarchy
+        .slot_of_part(ModuleId(svf))
+        .expect("the filter is a part now")
+        .0;
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![slot])));
+    check(&mut ui, "slot", |m| matches!(m, Inspector::Slot(_)));
+
+    // A stack with copies, members, and spreads.
+    let mut ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    ui.send(Message::Mode(crate::modes::Message::SetMode {
+        tile: 2,
+        mode: loom_patch::modes::Mode::Stack,
+    }));
+    ui.send(Message::Mode(crate::modes::Message::SetCopies { tile: 2, copies: 3 }));
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![2])));
+    check(&mut ui, "stack", |m| matches!(m, Inspector::SubPatch(_)));
+    // A layer, which lists its members.
+    ui.send(Message::Mode(crate::modes::Message::SetMode {
+        tile: 2,
+        mode: loom_patch::modes::Mode::Layer,
+    }));
+    check(&mut ui, "layer", |m| matches!(m, Inspector::SubPatch(_)));
+    assert!(
+        ui.app
+            .a11y_frames()
+            .panel
+            .iter()
+            .flat_map(super::items::Item::walk)
+            .any(|item| item.id.to_string().contains("/member/")),
+        "the layer's members are reported"
+    );
+}
