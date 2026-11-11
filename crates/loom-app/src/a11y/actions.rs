@@ -107,7 +107,7 @@ pub(super) fn canvas_events(
                 set(
                     ControlPart::Main,
                     if range {
-                        stop_at(position, main, second)
+                        stop_at(position, main, second, false)
                     } else {
                         position
                     },
@@ -119,7 +119,7 @@ pub(super) fn canvas_events(
                 set(
                     ControlPart::Second,
                     if range {
-                        stop_at(position, second, main)
+                        stop_at(position, second, main, true)
                     } else {
                         position
                     },
@@ -169,8 +169,11 @@ pub(crate) fn focus_target(
 
 /// A range handle's new position: `sent`, stopped at the other handle. The
 /// handle stays on the side of the other that it is on now, at `own`.
-pub(super) fn stop_at(sent: f32, own: f32, other: f32) -> f32 {
-    if own <= other { sent.min(other) } else { sent.max(other) }
+/// Where the two are together, low is the one below and high the one
+/// above, as the canvas takes them, so each can still move away.
+pub(super) fn stop_at(sent: f32, own: f32, other: f32, high: bool) -> f32 {
+    let below = if high { own < other } else { own <= other };
+    if below { sent.min(other) } else { sent.max(other) }
 }
 
 /// True when the request names a tile, a widget, or a piece of one that

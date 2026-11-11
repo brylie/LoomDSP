@@ -4198,3 +4198,45 @@ fn a_focus_request_waits_while_the_canvas_has_no_input() {
     assert!(applied.contains(&CanvasEvent::FocusChanged(Some((2, 0)))));
     assert!(applied.contains(&CanvasEvent::Select(vec![2])));
 }
+
+/// An arrow key on a focused control is the canvas's: the reaction says
+/// the input was taken and asks for a redraw, for a button as for a knob.
+/// A key the canvas does not use is left for what is behind it.
+#[test]
+fn an_arrow_on_a_focused_control_is_taken() {
+    let mut tile = module(2, 0.0);
+    tile.panel = PanelView {
+        width: 9,
+        height: 3,
+        widgets: vec![
+            widget(WidgetViewKind::Knob { steps: 0 }, 0),
+            widget(WidgetViewKind::Button, 3),
+        ],
+    };
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([2]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    for (control, expected) in [(0, "knob"), (1, "button")] {
+        let mut state = CanvasInput::default();
+        state.focus.set(2, control, true);
+        let mut out = Reaction::default();
+        canvas.handle(
+            &mut state,
+            Some(&key_event(Key::Up, true)),
+            None,
+            bounds,
+            Instant::now(),
+            &mut out,
+        );
+        assert!(out.taken, "an arrow on a focused {expected} is taken");
+        assert!(out.redraw, "{expected}");
+        if control == 1 {
+            assert!(out.events.contains(&CanvasEvent::ButtonArrow {
+                module: 2,
+                widget: 1,
+                high: true
+            }));
+        }
+    }
+}

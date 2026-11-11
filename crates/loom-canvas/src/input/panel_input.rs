@@ -697,6 +697,11 @@ impl CanvasModel<'_> {
                             high: up,
                         },
                     );
+                    // The key is the canvas's, as on every other control:
+                    // this early return must do what the end of this
+                    // function does for a key that was used.
+                    out.redraw();
+                    out.take();
                     return true;
                 }
                 // Left and Right change an XY pad's `x`, Up and Down its `y`

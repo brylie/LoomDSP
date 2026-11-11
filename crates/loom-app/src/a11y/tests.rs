@@ -1696,16 +1696,21 @@ fn a_label_node_never_hides_its_value() {
 #[test]
 fn a_range_handle_stops_on_its_own_side() {
     use actions::stop_at;
-    // Low below high, the usual way round.
-    assert_eq!(stop_at(0.9, 0.2, 0.8), 0.8);
-    assert_eq!(stop_at(0.5, 0.2, 0.8), 0.5);
-    assert_eq!(stop_at(0.1, 0.8, 0.2), 0.2, "high stops at low");
+    // Low below high, the usual way round. The last argument says which
+    // handle moves: false for low, true for high.
+    assert_eq!(stop_at(0.9, 0.2, 0.8, false), 0.8, "low stops at high");
+    assert_eq!(stop_at(0.5, 0.2, 0.8, false), 0.5);
+    assert_eq!(stop_at(0.1, 0.8, 0.2, true), 0.2, "high stops at low");
     // Low above high.
-    assert_eq!(stop_at(0.9, 0.8, 0.2), 0.9, "low moves away from high");
-    assert_eq!(stop_at(0.1, 0.8, 0.2), 0.2);
-    assert_eq!(stop_at(0.1, 0.2, 0.8), 0.1, "high moves away from low");
-    // Together: the handle may go either way.
-    assert_eq!(stop_at(0.3, 0.5, 0.5), 0.3);
+    assert_eq!(stop_at(0.9, 0.8, 0.2, false), 0.9, "low moves away from high");
+    assert_eq!(stop_at(0.1, 0.8, 0.2, false), 0.2);
+    assert_eq!(stop_at(0.1, 0.2, 0.8, true), 0.1, "high moves away from low");
+    // Together: low is the one below and high the one above, so low can
+    // go down and high can go up, and neither crosses.
+    assert_eq!(stop_at(0.3, 0.5, 0.5, false), 0.3);
+    assert_eq!(stop_at(0.8, 0.5, 0.5, false), 0.5);
+    assert_eq!(stop_at(0.8, 0.5, 0.5, true), 0.8);
+    assert_eq!(stop_at(0.3, 0.5, 0.5, true), 0.5);
 }
 
 /// A Click that changes nothing, such as one on the option already
