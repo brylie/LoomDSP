@@ -250,6 +250,7 @@ impl App {
             &self.session.patch_info.authors,
             self.session.gestures.drop_row(),
             self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on(),
+            self.a11y.is_active(),
         )
     }
 

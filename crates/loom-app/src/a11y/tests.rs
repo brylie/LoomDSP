@@ -2676,3 +2676,85 @@ fn an_exposed_row_and_the_inner_row_differ_and_are_both_found() {
     let at = crate::control::locate(&ui.app, &own.to_string(), &found).expect("found");
     assert!(at.width > 0.0);
 }
+
+/// A module whose inspector is taller than its panel, so it scrolls, and
+/// the harness with it selected and drawn.
+fn scrolling_inspector() -> (crate::ui_test::Ui, u32) {
+    let app = app_with_every_widget();
+    let modules: Vec<u32> = app.ui_snapshot().tiles.iter().map(|tile| tile.id).collect();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    for module in modules {
+        ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+        let _ = ui.redraw();
+        let places = ui.places();
+        let panel = places.of(&crate::inspector::ids::panel(module));
+        if panel.is_some_and(|place| place.clip.is_some_and(|clip| place.rect.height > clip.height + 40.0)) {
+            return (ui, module);
+        }
+    }
+    panic!("no module's inspector is taller than its panel");
+}
+
+/// Scrolls the inspector down by a few lines, with the pointer over it.
+fn scroll_inspector(ui: &mut crate::ui_test::Ui, module: u32) -> Vec<Message> {
+    let panel = ui.places().of(&crate::inspector::ids::panel(module)).unwrap();
+    let over = panel.clip.unwrap().center();
+    let _ = ui.move_to(over);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -6.0 },
+    })])
+}
+
+/// With no screen reader, a scroll of the inspector sends no message, as
+/// before. With one, it sends one that changes nothing but asks for a
+/// rebuild, and the rows' nodes move with the rows (section 7, rule 7).
+#[test]
+fn a_scroll_moves_the_rows_and_is_a_message_only_while_listening() {
+    let (mut ui, module) = scrolling_inspector();
+    let before = ui.scroll_translation(crate::inspector::SCROLL_ID).unwrap();
+    let messages = scroll_inspector(&mut ui, module);
+    assert_ne!(
+        ui.scroll_translation(crate::inspector::SCROLL_ID).unwrap(),
+        before,
+        "it scrolled"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, Message::Inspector(crate::inspector::Message::Scrolled))),
+        "no message with no screen reader"
+    );
+
+    let _ = ui.app.a11y_event(Event::Activated);
+    let _ = ui.redraw();
+    let places = ui.places();
+    let row = super::items::find(&ui.app.a11y_frames().panel, &crate::inspector::ids::panel(module))
+        .and_then(|panel| {
+            panel
+                .children
+                .iter()
+                .find(|item| item.kind == super::items::Kind::Group)
+        })
+        .map(|item| item.id.clone())
+        .expect("a row");
+    let row_node = node_of(&mut ui.app, &row);
+    let y = |update: &TreeUpdate| node(update, row_node).bounds().unwrap().y0;
+    let first = ui.app.a11y_tree(&places);
+    ui.app.a11y.locating = false;
+    let messages = scroll_inspector(&mut ui, module);
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, Message::Inspector(crate::inspector::Message::Scrolled)))
+    );
+    // The harness runs the rebuild it asked for at once.
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, Message::A11y(Event::Located(_)))),
+        "the scroll asked for a rebuild"
+    );
+    let places = ui.places();
+    let moved = ui.app.a11y_tree(&places);
+    assert!(y(&moved) < y(&first), "the row's node moved up with the row");
+}

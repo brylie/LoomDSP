@@ -63,7 +63,13 @@ pub(crate) enum Message {
     SubPatchNameDraft { module: u32, value: String },
     /// Apply the sub-patch's name as one undo step.
     SubPatchNameApply { module: u32 },
+    /// The inspector scrolled. It changes nothing; it is sent only while a
+    /// screen reader listens, so the tree moves its nodes with the rows.
+    Scrolled,
 }
+
+/// The widget ID of the inspector's scrolling area.
+pub(crate) const SCROLL_ID: &str = "inspector-scroll";
 
 /// Width of a parameter's value field, in pixels.
 const VALUE_FIELD_WIDTH: f32 = 84.0;
@@ -550,6 +556,7 @@ impl App {
             Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
             Message::ValueDraftClear => self.clear_value_draft(),
             Message::Range { module, index, range } => self.set_range(module, index, range),
+            Message::Scrolled => {}
             Message::SelectModule(id) => {
                 if self.session.controller.graph().node(ModuleId(id)).is_some() {
                     self.session.selection = std::collections::BTreeSet::from([id]);
@@ -1127,6 +1134,7 @@ pub fn view<'a>(
     authors: &'a iced::widget::text_editor::Content,
     drop_row: Option<(u32, usize)>,
     dragging: bool,
+    listening: bool,
 ) -> Element<'a, AppMessage> {
     // The content's container is named by what it shows, so the window
     // says where the panel is (`places.rs`).
@@ -1309,11 +1317,17 @@ pub fn view<'a>(
         Some(panel) => container(content).id(crate::places::widget_id(panel)),
         None => container(content),
     };
-    // The scrollbar takes its own space, so it never covers a value.
-    container(scrollable(content.padding(12)).spacing(4))
-        .width(280)
-        .height(Length::Fill)
-        .into()
+    // The scrollbar takes its own space, so it never covers a value. A
+    // scroll is a message only while a screen reader listens: with none, a
+    // scroll costs what it did before, since every message rebuilds the
+    // view (ui-layer.md, section 7, rule 7).
+    let area = scrollable(content.padding(12)).id(SCROLL_ID).spacing(4);
+    let area = if listening {
+        area.on_scroll(|_| AppMessage::Inspector(Message::Scrolled))
+    } else {
+        area
+    };
+    container(area).width(280).height(Length::Fill).into()
 }
 
 fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, AppMessage> {
