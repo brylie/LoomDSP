@@ -661,20 +661,31 @@ fn meter_reading(
     right: Option<(f32, f32)>,
 ) -> Option<Reading> {
     if let Some(display) = d.meter_display(w) {
+        // The text says the value even past the end of the range, so the
+        // bounds reach out to it: a number outside its own bounds would be
+        // an invalid reading.
+        let value = shown_number(stored);
         return Some(Reading {
-            value: stored,
-            min: display.range.min,
-            max: display.range.max,
+            value,
+            min: display.range.min.min(value),
+            max: display.range.max.max(value),
         });
     }
     if w.kind != WidgetKind::Meter || right.is_some() || stored <= 0.0 {
         return None;
     }
     Some(Reading {
-        value: crate::live::position_db(stored),
+        value: shown_number(crate::live::position_db(stored)),
         min: crate::live::position_db(0.0),
         max: crate::live::position_db(1.0),
     })
+}
+
+/// A meter's value as its text writes it, with one decimal: the number
+/// read back from that text, so the two agree in every digit. A value
+/// that is not a number is passed on as it is.
+fn shown_number(value: f32) -> f32 {
+    format!("{value:.1}").parse().unwrap_or(value)
 }
 
 /// The value line of a light's or meter's hover text: the label and the

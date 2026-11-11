@@ -813,6 +813,9 @@ pub struct CanvasInput {
     browser_key: Option<u64>,
     /// The focus request key last seen.
     focus_key: Option<u64>,
+    /// The selection as of the last redraw, to notice one that changed
+    /// from outside the canvas.
+    selection_seen: Option<Vec<u32>>,
     /// Buttons held from the keyboard, one slot for Space and one for Enter.
     ///
     /// Each key is its own hold. Releasing one leaves a button high while the

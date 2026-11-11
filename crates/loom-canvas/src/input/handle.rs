@@ -146,8 +146,35 @@ impl CanvasModel<'_> {
                     let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     self.open_browser(state.camera.to_world(centre), centre, bounds, out);
                 }
+                // The selection can change from outside the canvas: a
+                // screen reader's Click on another tile, say. Focus lives
+                // only on the one selected tile, so focus left on another
+                // is dropped now, and what the canvas reports as focused
+                // stays true. An open list stays with its control, as on a
+                // key press.
+                let same = state
+                    .selection_seen
+                    .as_ref()
+                    .is_some_and(|seen| seen.iter().eq(self.selection.iter()));
+                if !same {
+                    let first = state.selection_seen.is_none();
+                    state.selection_seen = Some(self.selection.iter().copied().collect());
+                    let elsewhere = state
+                        .focus
+                        .control()
+                        .is_some_and(|(module, _)| self.selection.len() != 1 || !self.selection.contains(&module));
+                    if !first && elsewhere && state.focus.popup().is_none() {
+                        state.focus.clear();
+                        out.redraw();
+                    }
+                }
+                // A focus request waits while something else has the
+                // input: the app would drop the events it makes, and the
+                // request would be used up. It is applied on the first
+                // redraw after the canvas has the input again.
                 let (focus_key, focus_control) = self.focus_request;
-                if state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
+                if self.focus_policy.interactive
+                    && state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
                     && let Some((module, widget)) = focus_control
                 {
                     let can_focus = self

@@ -776,7 +776,22 @@ fn a_meters_number_is_the_one_its_text_says() {
         .find(|widget| dynamics.meter_display(widget).is_some())
         .unwrap();
     let reading = meter_reading(dynamics, reduction, -40.0, None).unwrap();
-    assert_eq!((reading.value, reading.min, reading.max), (-40.0, -36.0, 0.0));
+    // Past the end of the range the bounds reach out to the value, so the
+    // number is never outside its own bounds.
+    assert_eq!((reading.value, reading.min, reading.max), (-40.0, -40.0, 0.0));
+    let inside = meter_reading(dynamics, reduction, -12.04, None).unwrap();
+    assert_eq!((inside.min, inside.max), (-36.0, 0.0));
+    // The number is the one the text writes, digit for digit.
+    assert_eq!(display_text(dynamics, reduction, -12.04, None), "Reduction: -12.0 dB");
+    assert_eq!(inside.value, -12.0);
+    assert_eq!(meter_reading(dynamics, reduction, 3.26, None).unwrap().value, 3.3);
+    assert_eq!(meter_reading(dynamics, reduction, 3.26, None).unwrap().max, 3.3);
+    let level = meter_reading(meter, out, 0.7993, None).unwrap();
+    assert_eq!(
+        display_text(meter, out, 0.7993, None),
+        format!("Out: {:.1} dB", level.value)
+    );
+    assert_eq!(level.value, format!("{:.1}", level.value).parse::<f32>().unwrap());
     assert_eq!(display_text(dynamics, reduction, -40.0, None), "Reduction: -40.0 dB");
 
     // Nothing else has one.

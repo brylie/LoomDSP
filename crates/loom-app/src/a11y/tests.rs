@@ -1813,3 +1813,43 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
     assert!(rebuilds <= 2, "{rebuilds} rebuilds for one message");
     assert!(asked <= 1, "focus was asked {asked} times");
 }
+
+/// A screen reader focuses a control on one tile and then clicks another
+/// tile. The focus does not stay on the first tile: the tree reports it on
+/// the window again, and an arrow key then moves the selected tile, not a
+/// control the tree still claimed was focused.
+#[test]
+fn a_click_on_another_tile_drops_focus_from_the_first() {
+    let (mut app, module, knob) = app_with_filter();
+    let other = app.session.controller.add_module("loom.filter.svf").unwrap().0;
+    app.commit();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    let _ = ui.app.a11y_tree(None);
+    let cutoff = widget_node(&mut ui.app, module, knob);
+    let other_tile = node_of(&mut ui.app, &tile_id(other));
+    let window = node_of(&mut ui.app, &window_id());
+
+    ui.send(Message::A11y(Event::Action(request(Action::Focus, cutoff, None))));
+    let _ = ui.redraw();
+    assert_eq!(ui.app.a11y_tree(None).focus, cutoff);
+
+    ui.send(Message::A11y(Event::Action(request(Action::Click, other_tile, None))));
+    let drawn = ui.redraw();
+    assert!(
+        drawn
+            .iter()
+            .any(|message| matches!(message, Message::Canvas(CanvasEvent::FocusChanged(None))))
+    );
+    assert_eq!(ui.app.ui_snapshot().selection, vec![other]);
+    assert_eq!(ui.app.a11y_tree(None).focus, window);
+
+    let before = position(&ui.app, module, knob);
+    let _ = ui.key_down(iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp), false);
+    let _ = ui.key_up(iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp));
+    assert_eq!(
+        position(&ui.app, module, knob),
+        before,
+        "the first tile's knob is left alone"
+    );
+}

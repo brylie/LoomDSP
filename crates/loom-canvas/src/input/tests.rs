@@ -4134,3 +4134,67 @@ fn a_focus_request_moves_focus_when_its_key_changes() {
         assert_eq!(state.focused_control(), None, "{control:?}");
     }
 }
+
+/// A selection that changes from outside the canvas drops focus left on a
+/// tile that is no longer the one selected, and reports it. Focus on the
+/// tile that is selected stays, and so does focus while the selection has
+/// not changed.
+#[test]
+fn focus_is_dropped_when_the_selection_moves_elsewhere() {
+    let mut first = module(2, 0.0);
+    first.panel = panel();
+    let mut second = module(3, 200.0);
+    second.panel = panel();
+    let scene = Scene::new(vec![first, second], Vec::new());
+    let on_first = BTreeSet::from([2]);
+    let on_second = BTreeSet::from([3]);
+    let both = BTreeSet::from([2, 3]);
+    let mut state = CanvasInput::default();
+
+    let _ = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &Event::Redraw);
+    state.focus.set(2, 0, true);
+    // The same selection again: nothing to reconcile.
+    let same = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &Event::Redraw);
+    assert!(!same.iter().any(|event| matches!(event, CanvasEvent::FocusChanged(_))));
+    assert_eq!(state.focused_control(), Some((2, 0)));
+
+    let moved = host_event(&CanvasModel::new(&scene, &on_second), &mut state, &Event::Redraw);
+    assert!(moved.contains(&CanvasEvent::FocusChanged(None)));
+    assert_eq!(state.focused_control(), None);
+
+    // Back on the first tile, then a second tile joins the selection.
+    let _ = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &Event::Redraw);
+    state.focus.set(2, 0, true);
+    let _ = host_event(&CanvasModel::new(&scene, &both), &mut state, &Event::Redraw);
+    assert_eq!(state.focused_control(), None, "focus lives on the one selected tile");
+}
+
+/// A focus request waits while something else has the input, and is
+/// applied on the first redraw after the canvas has it again.
+#[test]
+fn a_focus_request_waits_while_the_canvas_has_no_input() {
+    let mut tile = module(2, 0.0);
+    tile.panel = panel();
+    let scene = Scene::new(vec![tile], Vec::new());
+    let none = BTreeSet::new();
+    let mut state = CanvasInput::default();
+    let busy = CanvasFocusPolicy {
+        interactive: false,
+        ..CanvasFocusPolicy::default()
+    };
+    let at = |key| CanvasModel::new(&scene, &none).focus_request(key, Some((2, 0)));
+
+    let _ = host_event(&at(5), &mut state, &Event::Redraw);
+    let waiting = host_event(&at(6).focus_policy(busy), &mut state, &Event::Redraw);
+    assert!(
+        !waiting
+            .iter()
+            .any(|event| matches!(event, CanvasEvent::FocusChanged(_)))
+    );
+    assert!(!waiting.iter().any(|event| matches!(event, CanvasEvent::Select(_))));
+    assert_eq!(state.focused_control(), None);
+
+    let applied = host_event(&at(6), &mut state, &Event::Redraw);
+    assert!(applied.contains(&CanvasEvent::FocusChanged(Some((2, 0)))));
+    assert!(applied.contains(&CanvasEvent::Select(vec![2])));
+}
