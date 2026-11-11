@@ -71,11 +71,11 @@ impl App {
             .graph()
             .node(ModuleId(module))
             .and_then(|node| node.descriptor.params.get(index))
-            .is_some_and(|spec| spec.is_transient());
+            .is_some_and(|spec| spec.is_transient() || spec.options.shapes_graph);
         if transient {
             // A live gesture cannot be mapped (transient-params.md).
             self.alerts.warn(format!(
-                "MIDI learn: {} is a live control and cannot be mapped",
+                "MIDI learn: {} cannot take MIDI mappings",
                 learn::param_name(&self.session.controller, param)
             ));
             return;
@@ -496,6 +496,7 @@ impl App {
         let value = self.exposure_clamp(module, index, value);
         if let Err(e) = self.session.controller.set_param(ModuleId(module), index, value) {
             self.alerts.warn(e.to_string());
+            return;
         }
         // Every copy of a stack takes the value at once (ADR-0040).
         self.fan_out_param(module, index, value);

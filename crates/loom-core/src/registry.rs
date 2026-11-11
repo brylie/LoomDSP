@@ -109,6 +109,11 @@ impl Registry {
             return Err(invalid("only a phase input can default to the module's own phase"));
         }
         for param in descriptor.params {
+            if param.options.shapes_graph && (!param.options.integer || param.is_transient()) {
+                return Err(invalid(
+                    "a graph-shaping parameter must be a non-transient whole number",
+                ));
+            }
             // Transient parameters (transient-params.md, rules 1 and 2): a
             // hold or a press, which starts in the safe "nothing" state.
             if param.is_transient() && !param.options.integer {
@@ -148,6 +153,28 @@ impl Registry {
         // so a `PerChannel` input on it would never be honoured.
         if descriptor.outputs.iter().any(|port| port.channels == Channels::Downmix) {
             return Err(invalid("an output cannot be Downmix"));
+        }
+        if !matches!(descriptor.role, ModuleRole::Dsp(_))
+            && descriptor
+                .inputs
+                .iter()
+                .chain(descriptor.outputs)
+                .any(|port| port.channels == Channels::Voices)
+        {
+            return Err(invalid("only DSP modules can own Voices ports"));
+        }
+        if descriptor.outputs.iter().any(|port| port.channels == Channels::Voices)
+            && !descriptor.params.iter().any(|param| {
+                param.name == "voices"
+                    && param.options.integer
+                    && param.options.shapes_graph
+                    && param.min == 1.0
+                    && param.max == 16.0
+            })
+        {
+            return Err(invalid(
+                "a Voices output needs a graph-shaping integer voices parameter from 1 to 16",
+            ));
         }
         let has_stereo_port = descriptor
             .inputs

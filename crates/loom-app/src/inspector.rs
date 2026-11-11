@@ -603,7 +603,7 @@ impl App {
                 options: m.options,
             }
         });
-        let mode = if self.session.learn.is_on() {
+        let mode = if self.session.learn.is_on() && !spec.options.shapes_graph {
             // In learn mode a row arms its parameter, and its value
             // does not change (midi-learn.md).
             let armed = self.session.learn.is_armed((id, index));
@@ -619,7 +619,8 @@ impl App {
                 step: param::slider_step(spec),
                 control: ParamControl::of(spec, value),
                 assignments: self.assignment_rows(id, index),
-                adding: (self.session.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
+                adding: (!spec.options.shapes_graph && self.session.gestures.adding() == Some((id, index)))
+                    .then(|| self.sources(id, index)),
             }
         };
         let unused = (!d.is_shown(index, &node.params)).then(|| {
@@ -669,7 +670,8 @@ impl App {
             mode,
             accepts_drop: {
                 let bound = d.panel.widgets.iter().filter(|w| w.binds(spec.name));
-                bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
+                !spec.options.shapes_graph
+                    && (bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation()))
             },
             exposure,
         })
@@ -1398,9 +1400,12 @@ fn param_row_view<'a>(
             } else {
                 editor
             };
-            column![editor, modulation_view(id, index, assignments, adding)]
-                .spacing(2)
-                .into()
+            let modulation: Element<'a, AppMessage> = if accepts_drop {
+                modulation_view(id, index, assignments, adding)
+            } else {
+                space::vertical().height(0).into()
+            };
+            column![editor, modulation].spacing(2).into()
         }
     };
     line

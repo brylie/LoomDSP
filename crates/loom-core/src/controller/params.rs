@@ -4,8 +4,9 @@ use super::*;
 
 /// # Parameters
 ///
-/// Setting parameter values and ranges. These take effect at the next
-/// buffer, without a recompile.
+/// Ordinary parameter values take effect at the next buffer without a
+/// recompile. Graph-shaping values prepare and publish a new schedule on
+/// the control thread, so its buffers and copies agree with the new value.
 impl Controller {
     /// Sets several parameters of one module, or none of them.
     ///
@@ -23,6 +24,12 @@ impl Controller {
                 param: index.to_string(),
             })?;
             clamped.push((index, spec.clamp(value)));
+        }
+        if clamped
+            .iter()
+            .any(|&(index, _)| node.descriptor.params[index].options.shapes_graph)
+        {
+            return self.set_structural_params(module, &clamped);
         }
         // Mapped parameters carry an edit token, as in `set_param`.
         let mappings: Vec<_> = clamped
@@ -75,6 +82,14 @@ impl Controller {
     /// Sets a parameter by index. Takes effect at the next buffer.
     /// The value is clamped to the parameter's range.
     pub fn set_param(&mut self, module: ModuleId, index: usize, value: f32) -> Result<f32, LoomError> {
+        if self
+            .node(module)?
+            .spec(index)
+            .is_some_and(|spec| spec.options.shapes_graph)
+        {
+            self.set_params(module, &[(index, value)])?;
+            return Ok(self.node(module)?.params[index]);
+        }
         // On a mapped parameter, the edit carries a token, so `sync_midi`
         // can tell whether a control change came before or after it in the
         // engine (MIDI learn, rule 2).
@@ -118,6 +133,78 @@ impl Controller {
             self.midi.record_edit(id);
         }
         Ok(value)
+    }
+
+    /// Stages a structural edit, reserving all command space before compilation.
+    /// A failed preparation restores graph values and the prior dirty state.
+    fn set_structural_params(&mut self, module: ModuleId, changes: &[(usize, f32)]) -> Result<(), LoomError> {
+        let before = self.node(module)?.params.clone();
+        let was_dirty = self.dirty;
+        let ordinary: Vec<_> = changes
+            .iter()
+            .copied()
+            .filter(|&(index, _)| {
+                !self.node(module).expect("validated module").descriptor.params[index]
+                    .options
+                    .shapes_graph
+            })
+            .collect();
+        for &(index, value) in changes {
+            self.graph.nodes.get_mut(&module).expect("validated module").params[index] = value;
+        }
+        let widths = width::infer(&self.graph);
+        let mut starting = 0;
+        let mut stopping = 0;
+        for (&id, node) in &self.graph.nodes {
+            if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+                continue;
+            }
+            let sides = if widths.per_channel.contains(&id) { 2 } else { 1 };
+            starting += (0..widths.voices[&id])
+                .flat_map(|voice| (0..sides).map(move |side| (voice, side)))
+                .filter(|&key| key != (0, 0) && !node.copy_slots.contains_key(&key))
+                .count();
+            stopping += node
+                .copy_slots
+                .keys()
+                .filter(|&&(voice, side)| voice >= widths.voices[&id] || side >= sides)
+                .count();
+        }
+        let needed = self.slots.waiting() + starting + stopping + self.slots.retiring().len() + 1 + ordinary.len();
+        let error = if self.slots.free_count() < starting {
+            Some(LoomError::TooManyModules(self.config.max_modules))
+        } else if self.commands.slots() < needed {
+            Some(LoomError::QueueFull)
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            self.graph.nodes.get_mut(&module).expect("validated module").params = before;
+            return Err(error);
+        }
+        // New instances must receive their first ordinary values before
+        // commit resets them. Existing instances still receive commands.
+        let slot = self.node(module)?.slot;
+        if let Some(fresh) = slot.and_then(|slot| self.slots.fresh_mut(slot)) {
+            for &(index, value) in &ordinary {
+                fresh.module.set_param(index, value);
+            }
+        }
+        self.dirty = true;
+        if let Err(error) = self.commit() {
+            if let Some(fresh) = slot.and_then(|slot| self.slots.fresh_mut(slot)) {
+                for &(index, _) in &ordinary {
+                    fresh.module.set_param(index, before[index]);
+                }
+            }
+            self.graph.nodes.get_mut(&module).expect("validated module").params = before;
+            self.dirty = was_dirty;
+            return Err(error);
+        }
+        self.revision = self.revision.wrapping_add(1);
+        // Structural values travel with the schedule and compiled widths. Ordinary
+        // values still use the normal command path, whose room was reserved.
+        self.set_params(module, &ordinary)
     }
 
     /// Sets a parameter by name.

@@ -95,7 +95,7 @@ fn followers(count: u32) -> Graph {
                 slot: Some(i as usize),
                 ranges: Vec::new(),
                 limits: Vec::new(),
-                copy_slot: None,
+                copy_slots: BTreeMap::new(),
             },
         );
     }
@@ -329,7 +329,7 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static crate::ModuleDescriptor)
         label: None,
         params: descriptor.default_params(),
         slot: Some(id as usize),
-        copy_slot: None,
+        copy_slots: BTreeMap::new(),
         ranges: vec![None; descriptor.params.len()],
         limits: vec![None; descriptor.params.len()],
     };
@@ -606,4 +606,38 @@ fn smooth_state_carries_over_by_key_across_many_shuffled_fills() {
     }
     assert_eq!(calls.get(), expected_new);
     assert!(expected_new > 0 && expected_new < new.fills.len());
+}
+
+/// A new right side inherits its own voice's delay; new voices never inherit voice 1.
+#[test]
+fn delay_state_keys_keep_voices_and_sides_separate() {
+    let mut old = Schedule::empty();
+    for voice in 0..4 {
+        old.taps.push(Tap {
+            key: AUTO_TAP | 42 | copy_tap(voice * 2),
+            source: NO_SOURCE,
+            input: std::ptr::null(),
+            output: std::ptr::null_mut(),
+            state: voice as f32 + 0.25,
+        });
+    }
+    let mut next = Schedule::empty();
+    for voice in 0..8 {
+        for side in 0..2 {
+            next.taps.push(Tap {
+                key: AUTO_TAP | 42 | copy_tap(voice * 2 + side),
+                source: NO_SOURCE,
+                input: std::ptr::null(),
+                output: std::ptr::null_mut(),
+                state: 0.0,
+            });
+        }
+    }
+    next.taps.sort_by_key(|tap| tap.key);
+    assert_eq!(next.taps.iter().map(|tap| tap.key).collect::<BTreeSet<_>>().len(), 16);
+    next.take_tap_state_from(&old, 0);
+    for tap in &next.taps {
+        let voice = (tap.key >> 56 & 15) as usize;
+        assert_eq!(tap.state, if voice < 4 { voice as f32 + 0.25 } else { 0.0 });
+    }
 }

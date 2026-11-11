@@ -2463,3 +2463,48 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     let node = ui.app.session.controller.graph().node(id).unwrap();
     assert_eq!(node.params[0], 7.0, "a press edits nothing");
 }
+
+/// A structural number edit changes width in one undo step, including the hover text.
+#[test]
+fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = Ui::open("sine.ron");
+    let source = select_new(&mut ui, "test.voices");
+    let control = ui.control(source.0, "voices");
+    ui.move_to(control);
+    ui.press();
+    ui.release();
+    ui.tap(Key::Named(Named::ArrowUp), Modifiers::default());
+    let width = |ui: &Ui| {
+        let c = &ui.app.session.controller;
+        c.last_report().width(c.output_ref(source, "out").unwrap()).voices
+    };
+    assert_eq!(width(&ui), 2);
+    assert!(
+        ui.app.session.scene.module(source.0).unwrap().outputs[0]
+            .hover
+            .description
+            .contains("2 voices")
+    );
+    let _ = ui.app.update(Message::Undo);
+    assert_eq!(width(&ui), 1);
+    let _ = ui.app.update(Message::Redo);
+    assert_eq!(width(&ui), 2);
+    let _ = ui.app.update(Message::Learn(crate::learn::Message::Toggle));
+    let index = test_modules_voice_index();
+    let _ = ui
+        .app
+        .update(Message::Learn(crate::learn::Message::Arm((source.0, index))));
+    assert!(!ui.app.session.learn.is_armed((source.0, index)));
+    assert!(
+        !crate::matrix::targets(ui.app.session.controller.graph())
+            .iter()
+            .any(|target| target.module == source && target.param == index)
+    );
+    assert!(!ui.app.session.scene.is_live_control(source.0, 0));
+}
+
+/// Descriptor lookup keeps the test independent of parameter ordering.
+fn test_modules_voice_index() -> usize {
+    loom_modules::test_modules::VOICES.param_index("voices").unwrap()
+}

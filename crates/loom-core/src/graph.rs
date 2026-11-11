@@ -157,9 +157,9 @@ pub struct Node {
     /// limits again (in `loom-patch`, `Hierarchy::sync` or `Flat::apply_to`),
     /// or its parameters get none.
     pub(crate) limits: Vec<Option<ParamRange>>,
-    /// Engine slot holding the right copy, while the module runs per
-    /// channel (ADR-0020). Set by the controller before each compile.
-    pub(crate) copy_slot: Option<usize>,
+    /// Extra engine slots keyed by zero-based voice and stereo side.
+    /// The original instance is (0, 0); the controller prepares the rest.
+    pub(crate) copy_slots: BTreeMap<(usize, usize), usize>,
 }
 
 impl crate::ModuleNames for Node {
@@ -181,7 +181,7 @@ impl Node {
             label: None,
             params: descriptor.default_params(),
             slot,
-            copy_slot: None,
+            copy_slots: BTreeMap::new(),
             ranges: descriptor.params.iter().map(ParamSpec::default_range).collect(),
             limits: vec![None; descriptor.params.len()],
         }

@@ -635,7 +635,10 @@ impl CanvasModel<'_> {
             // With nothing focused, Space still toggles Run below: that is
             // the transport, not a parameter.
             Key::Space | Key::Enter if !command && self.learn.is_some() && state.focus.control().is_some() => {
-                if !repeat && let Some((module, widget)) = state.focus.control() {
+                if !repeat
+                    && let Some((module, widget)) = state.focus.control()
+                    && self.scene.is_live_control(module, widget)
+                {
                     self.emit(out, CanvasEvent::Learn { module, widget });
                 }
                 true

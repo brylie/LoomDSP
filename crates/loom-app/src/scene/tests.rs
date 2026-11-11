@@ -208,8 +208,16 @@ fn no_built_in_radio_option_is_cut() {
             hover: loom_canvas::HoverText::default(),
             accent: family_colour(d.family),
             position: Point::ORIGIN,
-            inputs: d.inputs.iter().map(|spec| port_view(spec, false)).collect(),
-            outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),
+            inputs: d
+                .inputs
+                .iter()
+                .map(|spec| port_view(spec, loom_core::Width::MONO))
+                .collect(),
+            outputs: d
+                .outputs
+                .iter()
+                .map(|spec| port_view(spec, loom_core::Width::MONO))
+                .collect(),
             panel: panel_view(d),
         };
         loom_canvas::for_each_tile_text(&module, |item| {
@@ -282,8 +290,16 @@ fn no_built_in_tile_text_is_cut_or_overlaps() {
             hover: loom_canvas::HoverText::default(),
             accent: family_colour(d.family),
             position: Point::ORIGIN,
-            inputs: d.inputs.iter().map(|spec| port_view(spec, false)).collect(),
-            outputs: d.outputs.iter().map(|spec| port_view(spec, false)).collect(),
+            inputs: d
+                .inputs
+                .iter()
+                .map(|spec| port_view(spec, loom_core::Width::MONO))
+                .collect(),
+            outputs: d
+                .outputs
+                .iter()
+                .map(|spec| port_view(spec, loom_core::Width::MONO))
+                .collect(),
             panel: panel_view(d),
         };
         let mut boxes: Vec<(String, loom_ui_core::Rect)> = Vec::new();
@@ -334,7 +350,7 @@ fn tiles_show_labels_not_names() {
     assert_eq!(knob.label, "Division");
     assert_eq!(knob.hover.description, "Fires on every Nth trigger.");
     assert_eq!(knob.hover.name.as_deref(), Some("n"));
-    let reset = port_view(&divide.inputs[1], false);
+    let reset = port_view(&divide.inputs[1], loom_core::Width::MONO);
     assert_eq!(reset.label, "Reset");
     assert_eq!(reset.hover.name, None, "`reset` reads the same as \"Reset\"");
     assert!(reset.hover.description.contains("Usually 0 to 1."));

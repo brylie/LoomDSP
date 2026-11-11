@@ -704,6 +704,7 @@ pub struct Scene {
     badges_inside: HashSet<(u32, usize)>,
     generation: u64,
     overlay_generation: u64,
+    non_live_controls: HashSet<(u32, usize)>,
 }
 
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -731,9 +732,22 @@ impl Scene {
             badges_inside: HashSet::new(),
             generation: next_generation(),
             overlay_generation: next_generation(),
+            non_live_controls: HashSet::new(),
         };
         scene.place_badges();
         scene
+    }
+
+    /// Marks structural controls that take edits but never MIDI learn or modulation.
+    pub fn with_non_live_controls(mut self, controls: impl IntoIterator<Item = (u32, usize)>) -> Self {
+        self.non_live_controls = controls.into_iter().collect();
+        self.generation = next_generation();
+        self
+    }
+
+    /// Whether the host allows this control to take MIDI learn or modulation.
+    pub fn is_live_control(&self, module: u32, widget: usize) -> bool {
+        !self.non_live_controls.contains(&(module, widget))
     }
 
     /// Decides which badges go inside their tile (`docs/design/modulation.md`,

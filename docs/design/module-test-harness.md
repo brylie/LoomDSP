@@ -229,3 +229,24 @@ Modules that smooth parameters, or follow tempo and play state, must sound the s
 ## Open points
 
 - None yet.
+
+### Bundle inputs and outputs (#672)
+
+A `Channels::Voices` input accepts `.bundle_input(name, Vec<Signal>)`, one mono
+signal per voice, or `.stereo_bundle_input(name, Vec<[Signal; 2]>)`. The vector
+contains 1 to 16 voices. `.input` remains the one-voice shorthand. A later call
+for the same input replaces its earlier signal or bundle.
+
+A source's `voices` parameter determines its output capacity. A scheduled change
+in that count ends the current block at the change's frame. The next call gets
+the new capacity, as a new schedule does in the engine. Render storage uses the
+largest count in the script; removed voices are silent after the change.
+`Render::voice_output(name, voice, side)` reads one zero-based voice and side.
+`Render::output` still reads voice 1's left side. The reset, state-copy, and
+block-size checks include the extra channels too.
+
+The low-level isolation helper is `loom_core::testing::run_bundles`, with a
+`ProcessContext` and a `BundleLayout` for each side. It prepares pointer tables
+before calling the module. The layout puts each port's primary channel first,
+then extra voices and sides grouped by port. Mutable output slices prove that
+output channels do not alias each other or the inputs.

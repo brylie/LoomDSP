@@ -179,7 +179,7 @@ impl OwnPhasePorts {
 /// Where a module reads its phase for one call: its own, run from the
 /// pitch and the knobs, or the cable's (oscillators.md, rules 1 and 2).
 pub(crate) struct PhaseIn<'a> {
-    /// True while the phase input has no cable.
+    /// True while this voice reads the phase input's default.
     own: bool,
     pitch: &'a [f32],
     cable: &'a [f32],
@@ -204,7 +204,7 @@ impl PhaseIn<'_> {
 /// phase. Read any other parameter from `io` before calling this.
 #[inline]
 pub(crate) fn split<'a>(io: &'a mut PortIo<'_>, ports: OwnPhasePorts) -> (PhaseIn<'a>, &'a mut [f32]) {
-    let own = !io.is_connected(ports.phase_in);
+    let own = io.uses_default(ports.phase_in);
     let (tune, octave) = (io.param(ports.tune), io.param(ports.octave));
     let ([pitch, cable], [out]) = io.split::<2, 1>();
     (

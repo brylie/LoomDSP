@@ -107,6 +107,9 @@ pub enum Channels {
     /// `Stereo` port is never copied, and its other inputs must be
     /// `Downmix`.
     Stereo,
+    /// Reads all voices itself on an input; writes the structural `voices`
+    /// count on an output. A module with a Voices input is never copied.
+    Voices,
 }
 
 impl PortSpec {

@@ -641,6 +641,12 @@ impl Flat {
                         module: mapping.target.0,
                         param: mapping.target.1.clone(),
                     },
+                    LoomError::StructuralParam { .. } => PatchError::StructuralMidiMapping {
+                        module: mapping.target.0,
+                        param: mapping.target.1.clone(),
+                        controller: mapping.controller,
+                        channel: mapping.channel,
+                    },
                     LoomError::InvalidMidiOptions(reason) => PatchError::InvalidMidiMapping {
                         module: mapping.target.0,
                         param: mapping.target.1.clone(),

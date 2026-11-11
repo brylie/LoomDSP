@@ -6,7 +6,7 @@
 //! `docs/learn/real-time-safety.md` explains why. Telemetry leaves
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
-use crate::compile::{AssignmentRuntime, DownmixOp, ModuleOp, ParamFill, Schedule, Step, partner};
+use crate::compile::{AssignmentRuntime, DownmixOp, ModuleOp, ParamFill, Schedule, Step, partner, partners};
 use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
@@ -622,10 +622,23 @@ impl Engine {
                     self.displays.release(slot);
                 }
                 Command::SwapSchedule(mut schedule) => {
+                    // Structural values arrive with the schedule, never as
+                    // independently ordered SetParam commands. Every copy
+                    // receives them, including instances already in slots.
+                    for &(slot, index, value) in &schedule.structural_params {
+                        set_base(
+                            &mut self.slots,
+                            &mut schedule.fills,
+                            &schedule.copies,
+                            slot as usize,
+                            usize::from(index),
+                            value,
+                        );
+                    }
                     // A newly created right copy takes the running left
                     // instance's state at the swap boundary (ADR-0022).
-                    for &(left, right) in &schedule.copies {
-                        if partner(&self.schedule.copies, left as usize) == Some(right as usize) {
+                    for &(left, right) in &schedule.stereo_copies {
+                        if partner(&self.schedule.stereo_copies, left as usize) == Some(right as usize) {
                             continue;
                         }
                         let (left, right) = (left as usize, right as usize);
@@ -714,8 +727,8 @@ impl Engine {
                     }
                 }
                 Command::ResetModule { slot } => {
-                    // A module that runs per channel resets both copies.
-                    for slot in std::iter::once(slot).chain(partner(&self.schedule.copies, slot)) {
+                    // Reset every voice and side of the module.
+                    for slot in std::iter::once(slot).chain(partners(&self.schedule.copies, slot)) {
                         if let Some(module) = self.slots[slot].as_mut() {
                             module.reset();
                         }
@@ -1002,6 +1015,7 @@ impl Engine {
             downmixes,
             output_downmixes,
             right_ptrs,
+            bundle_ptrs,
             ..
         } = &mut *self.schedule;
 
@@ -1045,6 +1059,8 @@ impl Engine {
                     frames: len,
                     transport: transport.later(offset),
                     channel: op.channel,
+                    voice: op.voice,
+                    voices: op.voices,
                     audio_input: if input_channels == 0 {
                         &[]
                     } else {
@@ -1064,10 +1080,12 @@ impl Engine {
                         &output_ptrs[op.outputs.0 as usize..op.outputs.1 as usize],
                         &param_ptrs[op.params.0 as usize..op.params.1 as usize],
                         &right_ptrs[op.right.0 as usize..op.right.1 as usize],
+                        &bundle_ptrs[op.bundles.0 as usize..op.bundles.1 as usize],
                         op.connected,
                         offset,
                         len,
                     )
+                    .with_defaults(op.defaulted)
                 };
                 module.process(&ctx, &mut io);
             }
@@ -1165,7 +1183,7 @@ fn set_mapped(
 
 /// Sets a parameter's base value: on the module, and on its fill if it is
 /// modulated, where a smoothed base glides to it. A module that runs per
-/// channel gets the value on both copies (stereo spec, rule 14).
+/// voices and sides gets the value on every copy.
 fn set_base(
     slots: &mut [Option<Box<dyn Module>>],
     fills: &mut [ParamFill],
@@ -1174,7 +1192,7 @@ fn set_base(
     index: usize,
     value: f32,
 ) {
-    for slot in std::iter::once(slot).chain(partner(copies, slot)) {
+    for slot in std::iter::once(slot).chain(partners(copies, slot)) {
         if let Some(module) = slots[slot].as_mut() {
             module.set_param(index, value);
         }

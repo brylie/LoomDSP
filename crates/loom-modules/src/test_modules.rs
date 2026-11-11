@@ -22,7 +22,95 @@ use loom_core::{
 use loom_rt::Smoothed;
 
 /// Every test module.
-pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &READOUT, &LINEAR, &LOG, &STEPS, &SMOOTH];
+pub static ALL: &[&ModuleDescriptor] = &[&PANEL, &READOUT, &LINEAR, &LOG, &STEPS, &SMOOTH, &VOICES];
+
+/// A bundle source and consumer for compiler, harness, and UI tests.
+pub static VOICES: ModuleDescriptor = ModuleDescriptor {
+    id: "test.voices",
+    version: 1,
+    name: "Test voices",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "A fixed value plus a different offset for each voice, added to the input.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        description: "Optional values added to each voice.",
+        signal: SignalType::Modulation,
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::Voices,
+    }],
+    outputs: &[PortSpec {
+        name: "out",
+        label: "Out",
+        description: "Value plus 0.01 per voice after the first.",
+        signal: SignalType::Modulation,
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::Voices,
+    }],
+    params: &[
+        ParamSpec {
+            name: "voices",
+            label: "Voices",
+            description: "Number of voices on the output.",
+            min: 1.0,
+            max: 16.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .shapes_graph(),
+        param("value", -1.0, 1.0, 0.01, ""),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(VoiceSource { value: 0.01 })),
+    panel: Panel::new(5, 5, &[Widget::number(0, 0, "voices"), Widget::knob(0, 2, "value")]),
+    displays: &[],
+    roles: &[],
+};
+
+/// Fixed bundle values; capacity comes from the compiled output.
+#[derive(Debug, Clone)]
+struct VoiceSource {
+    value: f32,
+}
+
+impl VoiceSource {
+    const SIGNAL_IN: usize = VOICES.input_index("in").unwrap();
+    const SIGNAL_OUT: usize = VOICES.output_index("out").unwrap();
+    const VALUE: usize = VOICES.param_index("value").unwrap();
+}
+
+impl Module for VoiceSource {
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let value = io.param(Self::VALUE);
+        for voice in 0..io.output_width(Self::SIGNAL_OUT).voices {
+            let width = io.input_width(Self::SIGNAL_IN);
+            let input = if width.voices == 1 {
+                Some(io.voice_input(Self::SIGNAL_IN, 0, 0))
+            } else if voice < width.voices {
+                Some(io.voice_input(Self::SIGNAL_IN, voice, 0))
+            } else {
+                None
+            };
+            for (i, output) in io.voice_output(Self::SIGNAL_OUT, voice, 0).iter_mut().enumerate() {
+                *output = value.at_or(i, self.value) + voice as f32 * 0.01 + input.map_or(0.0, |input| input[i]);
+            }
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == Self::VALUE {
+            self.value = value;
+        }
+    }
+
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+}
 
 // Every test port and parameter has a label and a description, like the
 // built-ins, or this crate does not compile.

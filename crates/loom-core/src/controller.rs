@@ -206,7 +206,8 @@ impl Controller {
     }
 
     /// A count that goes up with every structural or probe edit, committed
-    /// or not, and never with a parameter value. Two equal readings mean
+    /// or not, including graph-shaping parameter edits. Ordinary parameter
+    /// values do not change it. Two equal readings mean
     /// the graph's structure did not change between them, so a caller that
     /// derives something from it (the editor's sync of stack copies,
     /// ADR-0040) can skip the work.
@@ -234,20 +235,28 @@ impl Controller {
         if !self.dirty {
             return Ok(&self.last_report);
         }
-        // Right copies (ADR-0020, stereo spec rule 13). A module that starts
-        // to run per channel needs a copy before the swap; one that stops
-        // has its copy removed after it, like a removed module.
-        let per_channel = width::infer(&self.graph).per_channel;
+        // Prepare voice/side copies before the swap. Removed copies retire
+        // after the new schedule no longer names their slots.
+        let widths = width::infer(&self.graph);
         let mut starting = Vec::new();
         let mut stopping = Vec::new();
         for (&id, node) in &self.graph.nodes {
             if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
                 continue;
             }
-            match (per_channel.contains(&id), node.copy_slot) {
-                (true, None) => starting.push(id),
-                (false, Some(slot)) => stopping.push((id, slot)),
-                _ => {}
+            let sides = if widths.per_channel.contains(&id) { 2 } else { 1 };
+            for voice in 0..widths.voices[&id] {
+                for side in 0..sides {
+                    let key = (voice, side);
+                    if key != (0, 0) && !node.copy_slots.contains_key(&key) {
+                        starting.push((id, key));
+                    }
+                }
+            }
+            for (&key, &slot) in &node.copy_slots {
+                if key.0 >= widths.voices[&id] || key.1 >= sides {
+                    stopping.push((id, key, slot));
+                }
             }
         }
         if self.slots.free_count() < starting.len() {
@@ -276,7 +285,7 @@ impl Controller {
         if waiting > 0 || self.commands.slots() < starting.len() + 1 + self.slots.retiring().len() + stopping.len() {
             return Err(LoomError::QueueFull);
         }
-        for id in starting {
+        for (id, key) in starting {
             let slot = self.slots.take().expect("checked above");
             let node = self.graph.nodes.get_mut(&id).expect("listed above");
             let ModuleRole::Dsp(factory) = node.descriptor.role else {
@@ -301,10 +310,15 @@ impl Controller {
             };
             let pushed = self.commands.push(insert).is_ok();
             debug_assert!(pushed, "capacity was checked above");
-            node.copy_slot = Some(slot);
+            node.copy_slots.insert(key, slot);
         }
-        for (id, slot) in stopping {
-            self.graph.nodes.get_mut(&id).expect("listed above").copy_slot = None;
+        for (id, key, slot) in stopping {
+            self.graph
+                .nodes
+                .get_mut(&id)
+                .expect("listed above")
+                .copy_slots
+                .remove(&key);
             self.slots.retire(slot);
         }
         // What the graph holds per mapping. With a screen edit on its way,
@@ -324,12 +338,12 @@ impl Controller {
         let keys: Vec<u64> = schedule
             .fills
             .iter()
-            .filter(|fill| !fill.is_right_copy())
+            .filter(|fill| !fill.is_extra_copy())
             .map(|fill| fill.key)
             .collect();
         let (released, missing) = self.live.assign(&keys);
         for fill in &mut schedule.fills {
-            fill.live = if fill.is_right_copy() {
+            fill.live = if fill.is_extra_copy() {
                 NO_CELL
             } else {
                 self.live.cell(fill.key).unwrap_or(NO_CELL)
@@ -393,6 +407,12 @@ impl Controller {
             return Ok(());
         }
         let spec = &self.node(module)?.descriptor.params[index];
+        if spec.options.shapes_graph {
+            return Err(LoomError::StructuralParam {
+                module,
+                param: spec.name.to_string(),
+            });
+        }
         if spec.is_transient() {
             return Err(LoomError::TransientParam {
                 module,

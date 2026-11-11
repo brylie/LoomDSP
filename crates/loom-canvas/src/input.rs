@@ -446,7 +446,8 @@ impl<'a> CanvasModel<'a> {
     /// output, a control that takes modulation, and not in MIDI learn mode,
     /// where touching a control arms it instead.
     fn takes_assignment(&self, from: PortRef, module: u32, widget: usize) -> bool {
-        from.output
+        self.scene.is_live_control(module, widget)
+            && from.output
             && self.learn.is_none()
             && self
                 .scene

@@ -42,14 +42,20 @@ pub fn family_colour(family: loom_core::Family) -> Color {
     loom_canvas::Palette::default().families[family.index()]
 }
 
-fn port_view(spec: &PortSpec, stereo: bool) -> PortView {
+fn port_view(spec: &PortSpec, width: loom_core::Width) -> PortView {
     let (min, max) = spec.nominal_range();
     let mut hover = HoverText::new(
         spec.label,
         &format!("{} Usually {min} to {max}.", spec.description),
         spec.name,
     );
-    if stereo {
+    if width.voices > 1 {
+        hover.description.push_str(&format!(
+            " {} voices{}.",
+            width.voices,
+            if width.sides == 2 { ", stereo" } else { "" }
+        ));
+    } else if width.sides == 2 {
         hover.description.push_str(" Stereo.");
     }
     PortView {
@@ -335,7 +341,10 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
     let mut key = Vec::new();
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
-        for p in d.params {
+        for (index, p) in d.params.iter().enumerate() {
+            if p.options.shapes_graph {
+                key.push((id.0, index, node.params[index].round() as i64));
+            }
             if let Some(when) = p.options.shown_when
                 && let Some(mode) = d.param_index(when.param)
             {
@@ -1030,7 +1039,7 @@ pub fn build(
                         spec,
                         graph
                             .source_of(InputRef { module: id, port })
-                            .is_some_and(|source| controller.last_report().width(source) == loom_core::Width::Stereo),
+                            .map_or(loom_core::Width::MONO, |source| controller.last_report().width(source)),
                     )
                 })
                 .collect();
@@ -1040,10 +1049,7 @@ pub fn build(
                 .enumerate()
                 .map(|(port, spec)| PortView {
                     badge: badges.get(&OutputRef { module: id, port }).copied().unwrap_or(0),
-                    ..port_view(
-                        spec,
-                        controller.last_report().width(OutputRef { module: id, port }) == loom_core::Width::Stereo,
-                    )
+                    ..port_view(spec, controller.last_report().width(OutputRef { module: id, port }))
                 })
                 .collect();
             if let Some(unknown) = &node.unknown {
@@ -1412,7 +1418,26 @@ pub fn build(
         })
         .collect();
 
-    Scene::new(modules, cables).with_modulations(modulations)
+    let non_live: Vec<_> = modules
+        .iter()
+        .flat_map(|module| {
+            (0..module.panel.widgets.len())
+                .filter_map(|widget| {
+                    let target = crate::surface::control_target(
+                        graph,
+                        hierarchy,
+                        module.id,
+                        widget,
+                        loom_canvas::ControlPart::Main,
+                    )?;
+                    target.spec.options.shapes_graph.then_some((module.id, widget))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    Scene::new(modules, cables)
+        .with_modulations(modulations)
+        .with_non_live_controls(non_live)
 }
 
 #[cfg(test)]

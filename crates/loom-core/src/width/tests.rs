@@ -109,7 +109,11 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static ModuleDescriptor) -> Mod
             ranges: Vec::new(),
             limits: Vec::new(),
             // Distinct from every left slot, for graphs that compile.
-            copy_slot: matches!(descriptor.role, ModuleRole::Dsp(_)).then_some(id.0 as usize + 100_000),
+            copy_slots: if matches!(descriptor.role, ModuleRole::Dsp(_)) {
+                BTreeMap::from([((0, 1), id.0 as usize + 100_000)])
+            } else {
+                BTreeMap::new()
+            },
         },
     );
     id
@@ -293,8 +297,8 @@ fn the_compile_report_lists_the_widths() {
         64,
     )
     .1;
-    assert_eq!(report.width(out(filter)), Width::Stereo);
-    assert_eq!(report.width(out(lfo)), Width::Mono);
+    assert_eq!(report.width(out(filter)), Width::STEREO);
+    assert_eq!(report.width(out(lfo)), Width::MONO);
     assert!(report.runs_per_channel(filter));
     assert!(!report.runs_per_channel(lfo));
 }

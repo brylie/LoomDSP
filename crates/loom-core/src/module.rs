@@ -136,6 +136,8 @@ pub struct ProcessContext<'a> {
     /// 0 for a module that runs as one, or for its left copy; 1 for its
     /// right copy (ADR-0020).
     pub(crate) channel: u8,
+    pub(crate) voice: u8,
+    pub(crate) voices: u8,
     pub(crate) audio_input: &'a [crate::audio_input::InputFrame],
     pub(crate) input_channels: usize,
 }
@@ -151,6 +153,8 @@ impl<'a> ProcessContext<'a> {
             frames,
             transport: TransportInfo::default(),
             channel: 0,
+            voice: 0,
+            voices: 1,
             audio_input: &[],
             input_channels: 0,
         }
@@ -170,6 +174,23 @@ impl<'a> ProcessContext<'a> {
     /// so its two copies do not give the same values (stereo spec, rule 15).
     pub fn channel(&self) -> usize {
         usize::from(self.channel)
+    }
+
+    /// One-based voice index; the original instance is voice 1.
+    pub fn voice(&self) -> usize {
+        usize::from(self.voice) + 1
+    }
+
+    /// Number of voices processed by this module's copies.
+    pub fn voice_count(&self) -> usize {
+        usize::from(self.voices)
+    }
+
+    /// Sets the one-based voice index and count for isolation tests.
+    pub fn with_voice(mut self, voice: usize, voices: usize) -> Self {
+        self.voices = voices.clamp(1, 16) as u8;
+        self.voice = voice.clamp(1, usize::from(self.voices)) as u8 - 1;
+        self
     }
 
     /// The input frames for this call and the number of device channels.
@@ -226,10 +247,22 @@ pub struct PortIo<'a> {
     /// Right-hand buffers of `Stereo` ports. A `Stereo` input missing here
     /// reads its left buffer on both sides.
     right: &'a [RightPtr],
+    bundles: &'a [BundlePtr],
     connected: u64,
+    defaulted: u64,
     offset: usize,
     frames: usize,
     _marker: PhantomData<&'a mut f32>,
+}
+
+/// One channel of a bundle-aware port. The compiler owns its buffer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BundlePtr {
+    pub port: u16,
+    pub output: bool,
+    pub voice: u8,
+    pub side: u8,
+    pub ptr: *mut f32,
 }
 
 impl<'a> PortIo<'a> {
@@ -240,12 +273,16 @@ impl<'a> PortIo<'a> {
     /// any other output. Each parameter pointer, if any, must be readable for
     /// the same range. Each right-hand pointer must be readable (inputs) or
     /// writable (outputs) for the same range, and a right-hand output must
-    /// not alias any other buffer.
+    /// not alias any other buffer. Bundle entries obey the same bounds and
+    /// read/write rules; different output channels must name distinct buffers.
+    /// Entries may also name their port's ordinary primary/right buffer.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) unsafe fn new(
         inputs: &'a [*const f32],
         outputs: &'a [*mut f32],
         params: &'a [(u16, *const f32)],
         right: &'a [RightPtr],
+        bundles: &'a [BundlePtr],
         connected: u64,
         offset: usize,
         frames: usize,
@@ -255,11 +292,90 @@ impl<'a> PortIo<'a> {
             outputs,
             params,
             right,
+            bundles,
             connected,
+            defaulted: !connected,
             offset,
             frames,
             _marker: PhantomData,
         }
+    }
+
+    /// True when this copy reads the input's default: no cable, or no voice
+    /// on a narrower cable. `is_connected` continues to report the cable itself.
+    /// OwnPhase modules use this to run their own phase for padded voices.
+    pub fn uses_default(&self, index: usize) -> bool {
+        self.defaulted & (1 << index) != 0
+    }
+
+    /// Supplies the compiler's per-copy default mask.
+    pub(crate) fn with_defaults(mut self, defaulted: u64) -> Self {
+        self.defaulted = defaulted;
+        self
+    }
+
+    /// Width of a bundle input. An unconnected input has one mono default voice.
+    pub fn input_width(&self, port: usize) -> crate::Width {
+        self.bundle_width(port, false)
+    }
+
+    /// Authoritative output capacity, including the source's structural voice count.
+    pub fn output_width(&self, port: usize) -> crate::Width {
+        self.bundle_width(port, true)
+    }
+
+    /// Reads one zero-based voice and side from a bundle input.
+    ///
+    /// Indices must be inside [`Self::input_width`]. Mono sides share one buffer.
+    pub fn voice_input(&self, port: usize, voice: usize, side: usize) -> &'a [f32] {
+        let width = self.input_width(port);
+        assert!(voice < width.voices && side < 2, "bundle input index out of range");
+        let ptr = self
+            .bundles
+            .iter()
+            .find(|entry| {
+                !entry.output
+                    && usize::from(entry.port) == port
+                    && usize::from(entry.voice) == voice
+                    && usize::from(entry.side) == side.min(width.sides - 1)
+            })
+            .map_or_else(|| self.inputs[port], |entry| entry.ptr as *const f32);
+        // SAFETY: compiler and isolation callers provide readable bundle buffers
+        // for offset + frames, with the same lifetime as every ordinary input.
+        unsafe { std::slice::from_raw_parts(ptr.add(self.offset), self.frames) }
+    }
+
+    /// Writes one zero-based voice and side. Indices must be inside output width.
+    pub fn voice_output(&mut self, port: usize, voice: usize, side: usize) -> &mut [f32] {
+        let width = self.output_width(port);
+        assert!(
+            voice < width.voices && side < width.sides,
+            "bundle output index out of range"
+        );
+        let ptr = self
+            .bundles
+            .iter()
+            .find(|entry| {
+                entry.output
+                    && usize::from(entry.port) == port
+                    && usize::from(entry.voice) == voice
+                    && usize::from(entry.side) == side
+            })
+            .map_or_else(|| self.outputs[port], |entry| entry.ptr);
+        // SAFETY: outputs are distinct writable buffers. Borrowing self mutably
+        // prevents any other output accessor from aliasing this returned slice.
+        unsafe { std::slice::from_raw_parts_mut(ptr.add(self.offset), self.frames) }
+    }
+
+    /// Derives width from the channel pointers supplied for this port.
+    fn bundle_width(&self, port: usize, output: bool) -> crate::Width {
+        self.bundles
+            .iter()
+            .filter(|entry| entry.output == output && usize::from(entry.port) == port)
+            .fold(crate::Width::MONO, |width, entry| crate::Width {
+                voices: width.voices.max(usize::from(entry.voice) + 1),
+                sides: width.sides.max(usize::from(entry.side) + 1),
+            })
     }
 
     /// Number of frames to process in this call.
@@ -580,6 +696,130 @@ pub mod testing {
         run_with_transport_and_channel(module, sample_rate, transport, inputs, connected, outputs, midi, 0);
     }
 
+    /// A test port layout. Primary channels come first, in descriptor order;
+    /// extra voices and sides follow, grouped by port.
+    #[derive(Debug, Clone)]
+    pub struct BundleLayout {
+        widths: Vec<crate::Width>,
+    }
+
+    impl BundleLayout {
+        /// Validated widths for the ports in descriptor order.
+        pub fn new(widths: Vec<crate::Width>) -> Self {
+            assert!(
+                widths
+                    .iter()
+                    .all(|width| (1..=16).contains(&width.voices) && (1..=2).contains(&width.sides))
+            );
+            Self { widths }
+        }
+
+        /// Number of flattened channel buffers.
+        pub fn channels(&self) -> usize {
+            self.widths.iter().map(|width| width.voices * width.sides).sum()
+        }
+
+        /// Number of ports.
+        pub fn ports(&self) -> usize {
+            self.widths.len()
+        }
+
+        /// Width of one port.
+        pub fn width(&self, port: usize) -> crate::Width {
+            self.widths[port]
+        }
+
+        /// Flattened buffer of a zero-based voice and side.
+        pub fn index(&self, port: usize, voice: usize, side: usize) -> usize {
+            let width = self.widths[port];
+            assert!(voice < width.voices && side < width.sides);
+            let channel = voice * width.sides + side;
+            if channel == 0 {
+                port
+            } else {
+                self.widths.len()
+                    + self.widths[..port]
+                        .iter()
+                        .map(|width| width.voices * width.sides - 1)
+                        .sum::<usize>()
+                    + channel
+                    - 1
+            }
+        }
+    }
+
+    /// Runs bundle-aware IO in isolation. All buffers have `ctx`'s frame count.
+    /// This helper allocates its pointer tables before calling the module.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_bundles(
+        module: &mut dyn Module,
+        ctx: &ProcessContext<'_>,
+        input_layout: &BundleLayout,
+        inputs: &[&[f32]],
+        connected: &[bool],
+        output_layout: &BundleLayout,
+        outputs: &mut [&mut [f32]],
+    ) {
+        assert_eq!(inputs.len(), input_layout.channels());
+        assert_eq!(outputs.len(), output_layout.channels());
+        assert_eq!(connected.len(), input_layout.ports());
+        assert!(inputs.iter().all(|buffer| buffer.len() == ctx.frames));
+        assert!(outputs.iter().all(|buffer| buffer.len() == ctx.frames));
+        let inputs: Vec<_> = inputs.iter().map(|buffer| buffer.as_ptr()).collect();
+        let outputs: Vec<_> = outputs.iter_mut().map(|buffer| buffer.as_mut_ptr()).collect();
+        let mut bundles = Vec::new();
+        let mut right = Vec::new();
+        for (layout, output) in [(input_layout, false), (output_layout, true)] {
+            for port in 0..layout.ports() {
+                let width = layout.width(port);
+                for voice in 0..width.voices {
+                    for side in 0..width.sides {
+                        let index = layout.index(port, voice, side);
+                        let ptr = if output {
+                            outputs[index]
+                        } else {
+                            inputs[index] as *mut f32
+                        };
+                        bundles.push(BundlePtr {
+                            port: port as u16,
+                            output,
+                            voice: voice as u8,
+                            side: side as u8,
+                            ptr,
+                        });
+                        if voice == 0 && side == 1 {
+                            right.push(RightPtr {
+                                port: port as u16,
+                                output,
+                                ptr,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        let mask = connected
+            .iter()
+            .enumerate()
+            .fold(0, |mask, (i, &connected)| mask | if connected { 1 << i } else { 0 });
+        // SAFETY: buffer sizes are checked above. Shared inputs outlive the call;
+        // mutable output slices prove that all outputs are distinct from each
+        // other and the inputs. Metadata only names these same validated buffers.
+        let mut io = unsafe {
+            PortIo::new(
+                &inputs[..input_layout.ports()],
+                &outputs[..output_layout.ports()],
+                &[],
+                &right,
+                &bundles,
+                mask,
+                0,
+                ctx.frames,
+            )
+        };
+        module.process(ctx, &mut io);
+    }
+
     /// Like [`run_with_transport`], with the channel supplied to the module.
     #[allow(clippy::too_many_arguments)]
     pub fn run_with_transport_and_channel(
@@ -624,7 +864,7 @@ pub mod testing {
         // that outlive this call; `&mut [&mut [f32]]` guarantees outputs are
         // unique and cannot alias the shared input slices. The separate
         // right buffers are also distinct and outlive the call.
-        let mut io = unsafe { PortIo::new(&input_ptrs, &output_ptrs, &[], &right_ptrs, mask, 0, frames) };
+        let mut io = unsafe { PortIo::new(&input_ptrs, &output_ptrs, &[], &right_ptrs, &[], mask, 0, frames) };
         module.process(&ctx, &mut io);
     }
 }

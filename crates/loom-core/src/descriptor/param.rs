@@ -62,6 +62,9 @@ pub struct ParamOptions {
     /// True for whole-number parameters, such as a MIDI channel or a seed.
     /// Values are rounded, and editors step by 1.
     pub integer: bool,
+    /// Changes schedule structure. Only integer parameters qualify; modulation
+    /// and MIDI mappings cannot target them. Edits compile on the control thread.
+    pub shapes_graph: bool,
     /// How the value maps to its control's position.
     pub mapping: ParamMapping,
     /// Seconds the engine spends smoothing this parameter's base while it
@@ -141,6 +144,7 @@ impl ParamOptions {
     /// No options: a linear parameter with any value in range.
     pub const DEFAULT: Self = Self {
         integer: false,
+        shapes_graph: false,
         mapping: ParamMapping::Linear,
         smooth_seconds: 0.0,
         choices: &[],
@@ -205,6 +209,11 @@ impl std::fmt::Display for NotANumber {
 }
 
 impl ParamSpec {
+    /// Makes this integer parameter a schedule edit, never a modulation or MIDI target.
+    pub const fn shapes_graph(mut self) -> Self {
+        self.options.shapes_graph = true;
+        self
+    }
     /// How many values a whole-number parameter can take: its names, or the
     /// numbers in its range.
     pub fn value_count(&self) -> usize {

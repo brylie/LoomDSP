@@ -13,7 +13,7 @@ fn with_three_outputs(check: impl FnOnce(&mut PortIo<'_>)) -> [[f32; 3]; 4] {
     }];
     // SAFETY: each buffer holds `offset + frames` = 3 floats and outlives `io`,
     // and all four are distinct.
-    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, 0, 1, 2) };
+    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, &[], 0, 1, 2) };
     check(&mut io);
     buffers
 }
@@ -91,7 +91,7 @@ fn stereo_output_refuses_an_aliased_right_buffer() {
     // SAFETY: the buffer holds `offset + frames` = 2 floats and outlives `io`.
     // The right pointer breaks the aliasing rule on purpose, and the check
     // under test panics before anything reads or writes through it.
-    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, 0, 0, 2) };
+    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, &[], 0, 0, 2) };
     io.stereo_output(0);
 }
 
@@ -105,7 +105,7 @@ fn param_falls_back_to_the_base() {
     let params = [(1u16, modulated.as_ptr())];
     // SAFETY: each buffer holds `offset + frames` = 4 floats and outlives
     // `io`; the one output does not alias the parameter buffer.
-    let mut io = unsafe { PortIo::new(&[], &outputs, &params, &[], 0, 1, 3) };
+    let mut io = unsafe { PortIo::new(&[], &outputs, &params, &[], &[], 0, 1, 3) };
     let (plain, swept) = (io.param(0), io.param(1));
     assert!(!plain.is_modulated());
     assert!(swept.is_modulated());

@@ -321,3 +321,101 @@ fn a_surface_item_exposed_further_out_has_the_mark() {
     assert!(!control.exposed);
     assert_eq!(control.hover.note.as_deref(), Some("Controls Filter › cutoff"));
 }
+
+/// A structural voice count exposed on an otherwise ordinary sub-patch surface.
+fn voices_app() -> App {
+    let patch = Patch::from_ron(
+        r#"Patch(version: 1,
+        subpatches: {"v": SubPatch(
+            modules: [(id: 1, kind: "test.voices@1")],
+            exposed: [(name: "Voices", module: 1, param: "voices")])},
+        modules: [(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"), position: Some((200.0, 0.0)))])"#,
+    )
+    .unwrap();
+    let loaded = crate::Loaded::read(
+        EngineConfig::default(),
+        false,
+        crate::Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    App::assemble(
+        Err("test".to_string()),
+        48_000.0,
+        loaded,
+        1,
+        &crate::tests::app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    )
+}
+
+/// An exposed structural value uses the ordinary surface edit path and recompiles.
+#[test]
+fn an_exposed_voice_count_changes_the_inner_bundle_width() {
+    let mut app = voices_app();
+    let target = app.control_target(1, 0, ControlPart::Main).unwrap();
+    assert!(target.spec.options.shapes_graph);
+    app.edit(|app| {
+        let _ = app.update(crate::Message::Canvas(loom_canvas::CanvasEvent::TypedValue {
+            module: 1,
+            widget: 0,
+            text: "8".to_string(),
+        }));
+    });
+    let c = &app.session.controller;
+    let out = c.output_ref(target.module, "out").unwrap();
+    assert_eq!(c.last_report().width(out).voices, 8);
+    let _ = app.update(crate::Message::Undo);
+    assert_eq!(app.session.controller.last_report().width(out).voices, 1);
+    let _ = app.update(crate::Message::Redo);
+    assert_eq!(app.session.controller.last_report().width(out).voices, 8);
+}
+
+/// A surface cannot make an inner structural parameter eligible for MIDI learn.
+#[test]
+fn an_exposed_voice_count_cannot_be_learned() {
+    let mut ui = crate::ui_test::Ui::with_app(voices_app());
+    ui.send(crate::Message::Learn(crate::learn::Message::Toggle));
+    let at = ui.control(1, "Voices");
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    assert!(ui.app.session.learn.armed().is_none());
+    assert!(!ui.app.session.scene.is_live_control(1, 0));
+    let target = ui.app.control_target(1, 0, ControlPart::Main).unwrap();
+    assert!(
+        ui.app
+            .session
+            .controller
+            .map_midi(
+                loom_core::MidiControl {
+                    channel: 0,
+                    controller: 12
+                },
+                target.module,
+                target.index
+            )
+            .is_err()
+    );
+}
+
+/// An exposed name cannot bypass the inner parameter's modulation restriction.
+#[test]
+fn an_exposed_voice_count_cannot_take_modulation() {
+    let mut app = voices_app();
+    let target = app.control_target(1, 0, ControlPart::Main).unwrap();
+    let source = app.session.controller.output_ref(target.module, "out").unwrap();
+    assert!(
+        app.session
+            .controller
+            .add_assignment(source, target.module, target.index, 0.5)
+            .is_err()
+    );
+    assert!(
+        !crate::matrix::targets(app.session.controller.graph())
+            .iter()
+            .any(|item| item.module == target.module && item.param == target.index)
+    );
+    assert!(!app.session.scene.is_live_control(1, 0));
+}

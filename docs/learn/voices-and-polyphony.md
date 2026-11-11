@@ -4,7 +4,7 @@ What a voice is, why a polysynth has to steal, why LoomDSP infers a bundle inste
 
 - **Specification:** [Polyphony and voice allocation](../design/polyphony.md).
 - **Decision:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md).
-- **Code:** none yet. It will extend the width inference in `crates/loom-core/src/width.rs` and add an allocator to `loom-dsp`.
+- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), and `crates/loom-dsp/src/voice.rs` (allocation).
 
 ## A voice is a chain, not a note
 
@@ -38,6 +38,19 @@ Here is a chain, with the width of each cable:
 Notice that the saw's phase input and the envelope's gate input are declared `Downmix` for stereo, so that a stereo patch does not run them twice for a control signal that is the same on both sides. Voices are the opposite case: a gate differs per voice by definition. So a bundle copies a module whatever its inputs declare, and the stereo declaration keeps its stereo meaning inside each voice. Today's modules become polyphonic without a change.
 
 The mono LFO into a copied module is the common case, and it is free: every copy reads the same cable. That is the fan-out FR-VOICE-03 asks for, and it needs no module, for the same reason a mono cable into a stereo filter needs none.
+
+## When an input has fewer voices
+
+A single voice fans out to every copy. A wider cable supplies its own voices,
+then later copies read that input's default. This lets an 8-voice gate and a
+4-voice pitch reach one oscillator without inventing four more pitches.
+
+A phase input shows why a default is more than a buffer of zeros. If its cable
+has four voices, voices 5 to 8 have no phase value from that cable. Their
+default is the oscillator's own running phase. Giving them a zero phase instead
+would hold them still. The cable still exists; it simply supplies no phase for
+those later voices. The engine tells the shared own-phase helper which inputs
+read their defaults, separately from whether the patch has a cable.
 
 ## Why a polysynth steals
 

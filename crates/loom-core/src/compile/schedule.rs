@@ -7,6 +7,8 @@ pub(crate) struct ModuleOp {
     pub inputs: (u32, u32),
     pub outputs: (u32, u32),
     pub connected: u64,
+    /// Inputs reading defaults on this copy, including missing bundle voices.
+    pub defaulted: u64,
     /// Range into [`Schedule::fills`].
     pub fills: (u32, u32),
     /// Range into [`Schedule::param_ptrs`], one entry per modulated parameter.
@@ -17,6 +19,10 @@ pub(crate) struct ModuleOp {
     pub right: (u32, u32),
     /// 0 for a module that runs as one, or its left copy; 1 for its right.
     pub channel: u8,
+    pub voice: u8,
+    pub voices: u8,
+    /// Bundle channel metadata owned by this operation.
+    pub bundles: (u32, u32),
 }
 
 /// How a downmix makes one channel from two (stereo spec, rule 11).
@@ -75,7 +81,8 @@ pub(crate) struct ModSource {
 
 /// A parameter the engine fills before its module runs.
 pub(crate) struct ParamFill {
-    /// `(module id << 32) | param index`. Matches smoother state across swaps.
+    /// Module in bits 32 up, side in bit 31, voice in bits 24 to 27,
+    /// and parameter in bits 0 to 15. Matches smoother state across swaps.
     pub key: u64,
     pub slot: u32,
     pub param: u16,
@@ -92,10 +99,9 @@ pub(crate) struct ParamFill {
 }
 
 impl ParamFill {
-    /// True for the fill of a module's right copy. Its live value is not
-    /// shown: the knob shows copy 0 (stereo spec, rule 16).
-    pub fn is_right_copy(&self) -> bool {
-        self.key & RIGHT_FILL != 0
+    /// True for an extra voice or side. Live values show voice 1, left side.
+    pub fn is_extra_copy(&self) -> bool {
+        self.key & (RIGHT_FILL | (0xF << 24)) != 0
     }
 }
 
@@ -205,10 +211,14 @@ pub(crate) struct Schedule {
     pub downmixes: Vec<DownmixOp>,
     pub output_downmixes: (u32, u32),
     pub right_ptrs: Vec<RightPtr>,
-    /// `(left slot, right slot)` of every module that runs as two copies,
-    /// sorted by left slot. A parameter change or reset on the left slot
-    /// also goes to the right one.
+    pub bundle_ptrs: Vec<crate::module::BundlePtr>,
+    /// Original slot and each extra voice/side slot, sorted by original.
+    /// Parameter edits and resets go to every follower.
     pub copies: Vec<(u32, u32)>,
+    /// Left/right pairs within each voice, for state transfer only.
+    pub stereo_copies: Vec<(u32, u32)>,
+    /// Structural values applied at the swap, alongside their compiled widths.
+    pub structural_params: Vec<(u32, u16, f32)>,
     /// MIDI mappings, sorted by control.
     pub midi_maps: Vec<MidiMapOp>,
     /// Live value cells the previous schedule used and this one does not.
@@ -245,7 +255,10 @@ impl Schedule {
             downmixes: Vec::new(),
             output_downmixes: (0, 0),
             right_ptrs: Vec::new(),
+            bundle_ptrs: Vec::new(),
             copies: Vec::new(),
+            stereo_copies: Vec::new(),
+            structural_params: Vec::new(),
             midi_maps: Vec::new(),
             live_release: Vec::new(),
         }
