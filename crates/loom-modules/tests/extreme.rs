@@ -6,11 +6,10 @@
 
 mod common;
 
-use common::dsp_modules;
+use common::{choice_options, dsp_modules, failure};
 use loom_core::{ModuleDescriptor, TransportSettings};
 use loom_modules::{ALL, level, math, mix};
 use loom_test::{EXTREME_RENDER, Harness, Signal};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Inputs where a huge value rightly leaves a module different from a clean
 /// render, and why: `(module, input, reason)`. The module must still stay finite
@@ -159,21 +158,6 @@ fn harness(descriptor: &'static ModuleDescriptor, running: bool, busy: bool) -> 
         .fold(harness, |h, port| h.input(port.name, Signal::extreme_busy()))
 }
 
-/// The values to try for parameters with named choices, one parameter at a time:
-/// `(parameter, value)` for each option that is not its default.
-fn choice_options(descriptor: &ModuleDescriptor) -> Vec<(&'static str, f32)> {
-    descriptor
-        .params
-        .iter()
-        .flat_map(|spec| {
-            let values = (0..spec.options.choices.len()).map(|option| spec.min + option as f32);
-            values
-                .filter(|value| *value != spec.default)
-                .map(|value| (spec.name, value))
-        })
-        .collect()
-}
-
 /// `harness` with its continuous parameters at their maximum. Whole-number and
 /// choice parameters keep their defaults: a mute at its maximum would silence the
 /// input under test, and modes have their own run.
@@ -183,23 +167,6 @@ fn turned_up(descriptor: &'static ModuleDescriptor, harness: Harness) -> Harness
         .iter()
         .filter(|spec| !spec.options.integer)
         .fold(harness, |h, spec| h.param(spec.name, spec.max))
-}
-
-/// The panic message of `check` on module `id`, if it fails. A plain assert
-/// panics with a `&str`, and an `unwrap` with no message says nothing about the
-/// module, so the report always names it.
-fn failure(id: &str, check: impl FnOnce()) -> Option<String> {
-    let failed = catch_unwind(AssertUnwindSafe(check)).err()?;
-    let message = failed
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| failed.downcast_ref::<&str>().copied())
-        .unwrap_or("panicked with no message");
-    Some(if message.starts_with(id) {
-        message.to_string()
-    } else {
-        format!("{id}: {message}")
-    })
 }
 
 /// Every input of every DSP module, on `running` and `busy`: one with an
@@ -266,7 +233,7 @@ fn check_all_at_once(running: bool, busy: bool) {
             .map(|message| format!("{what}: {message}"))
         };
         failed.extend(check(&harness(descriptor, running, busy), None, "defaults"));
-        for (name, value) in choice_options(descriptor) {
+        for (name, value) in choice_options(descriptor, |spec| spec.default) {
             let harness = harness(descriptor, running, busy).param(name, value);
             failed.extend(check(&harness, Some((name, value)), &format!("{name} = {value}")));
         }

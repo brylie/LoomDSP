@@ -160,6 +160,8 @@ pub struct Harness {
     transport_changes: Vec<(f64, TransportSettings)>,
     tolerance: f32,
     allow_undocumented: bool,
+    /// First bad frame for the non-finite recovery check.
+    non_finite_start: usize,
 }
 
 /// The transport from one frame of a render until the next change.
@@ -204,6 +206,7 @@ impl Harness {
             transport_changes: Vec::new(),
             tolerance: DEFAULT_TOLERANCE,
             allow_undocumented: false,
+            non_finite_start: BAD_START,
         }
     }
 
@@ -222,6 +225,14 @@ impl Harness {
     /// Length of the render in frames.
     pub fn frames(mut self, frames: usize) -> Self {
         self.length = Length::Frames(frames);
+        self
+    }
+
+    /// First frame of bad input for [`Harness::check_non_finite_recovery`].
+    /// Defaults to [`BAD_START`]. A custom start can cover a transport wrap on
+    /// port defaults. [`Signal::non_finite_busy`] aligns only with the default.
+    pub fn non_finite_start(mut self, frame: usize) -> Self {
+        self.non_finite_start = frame;
         self
     }
 
@@ -720,8 +731,9 @@ impl Harness {
     ///
     /// For each input in turn, and for each of NaN, infinity, and minus
     /// infinity, it renders with that value on the input for
-    /// [`BAD_FRAMES`] frames from frame [`BAD_START`], in blocks of 1 frame
-    /// (as a feedback loop calls the module) and of [`MAX_BLOCK`]. The input
+    /// [`BAD_FRAMES`] frames from frame [`BAD_START`] (or the configured
+    /// [`Harness::non_finite_start`]), in blocks of 1 frame (as a feedback loop
+    /// calls the module) and of [`MAX_BLOCK`]. The input
     /// counts as connected. Every other frame and input reads what the
     /// render reads without the check: its signal, or its port default. It
     /// panics unless every output is finite again from [`RECOVERY_SECONDS`]
@@ -734,14 +746,15 @@ impl Harness {
     /// A module passes when it ignores a non-finite input or recovers from
     /// it. It fails when it keeps the value in its state, because the patch
     /// then stays broken after its input is sane again. The render must be
-    /// long enough to show that: more than [`BAD_START`] + [`BAD_FRAMES`]
+    /// long enough to show that: more than the configured start + [`BAD_FRAMES`]
     /// frames plus [`RECOVERY_SECONDS`] of frames, and longer for a module that holds
     /// samples, such as a delay, so a held bad value would come out again.
     #[track_caller]
     pub fn check_non_finite_recovery(&self) {
         let frames = self.frame_count();
+        let start = self.non_finite_start;
         let recovery_frames = (RECOVERY_SECONDS * f64::from(self.sample_rate)).ceil() as usize;
-        let clean_from = BAD_START + BAD_FRAMES + recovery_frames;
+        let clean_from = start + BAD_FRAMES + recovery_frames;
         assert!(
             frames > clean_from,
             "{}: the render is {frames} frames long, but the non-finite check needs more than {clean_from}",
@@ -751,7 +764,7 @@ impl Harness {
         for (port, spec) in self.descriptor.inputs.iter().enumerate() {
             for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
                 let mut inputs = clean.clone();
-                inputs[port][BAD_START..BAD_START + BAD_FRAMES].fill(bad);
+                inputs[port][start..start + BAD_FRAMES].fill(bad);
                 let mut connected = connected.clone();
                 connected[port] = true;
                 // Block size 1 is how a feedback loop calls the module.
@@ -761,12 +774,12 @@ impl Harness {
                         if let Some(frame) = samples[clean_from..].iter().position(|value| !value.is_finite()) {
                             let frame = clean_from + frame;
                             panic!(
-                                "{}: after {bad} on input `{}` (frames {BAD_START} to {}), output `{}` is still {} at \
+                                "{}: after {bad} on input `{}` (frames {start} to {}), output `{}` is still {} at \
                              frame {frame} (block size {block}). A module must ignore a non-finite input or recover \
                              from it, not keep it in its state.",
                                 self.descriptor.id,
                                 spec.name,
-                                BAD_START + BAD_FRAMES - 1,
+                                start + BAD_FRAMES - 1,
                                 self.descriptor.outputs[output].name,
                                 samples[frame],
                             );

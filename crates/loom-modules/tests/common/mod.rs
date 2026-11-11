@@ -10,6 +10,7 @@ use loom_modules::ALL;
 use loom_patch::Patch;
 use loom_test::{Harness, Signal};
 use std::f32::consts::TAU;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 
 pub const SAMPLE_RATE: f32 = 48_000.0;
@@ -299,4 +300,73 @@ pub fn one_note() -> Vec<Note> {
 pub fn load_patch(path: &std::path::Path) -> Patch {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     Patch::from_ron(&text).unwrap_or_else(|e| panic!("{} parses: {e}", path.display()))
+}
+
+/// The values to try for parameters with named choices, one parameter at a time:
+/// `(parameter, value)` for each option not already set by `baseline`.
+pub fn choice_options(descriptor: &ModuleDescriptor, baseline: impl Fn(&ParamSpec) -> f32) -> Vec<(&'static str, f32)> {
+    descriptor
+        .params
+        .iter()
+        .flat_map(|spec| {
+            let values = (0..spec.options.choices.len()).map(|option| spec.min + option as f32);
+            values
+                .filter(|value| *value != baseline(spec))
+                .map(|value| (spec.name, value))
+        })
+        .collect()
+}
+
+/// The panic message of `check` on module `id`, if it fails. A plain assert
+/// panics with a `&str`, and an `unwrap` with no message says nothing about the
+/// module, so the report always names it.
+pub fn failure(id: &str, check: impl FnOnce()) -> Option<String> {
+    let failed = catch_unwind(AssertUnwindSafe(check)).err()?;
+    let message = failed
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| failed.downcast_ref::<&str>().copied())
+        .unwrap_or("panicked with no message");
+    Some(if message.starts_with(id) {
+        message.to_string()
+    } else {
+        format!("{id}: {message}")
+    })
+}
+
+/// Runs the baseline and each choice separately, preserving the other parameters.
+/// Failures name the option as well as the module; the caller names the scenario.
+pub fn choice_failures(
+    descriptor: &'static ModuleDescriptor,
+    baseline: impl Fn(&ParamSpec) -> f32,
+    build: impl Fn() -> Harness,
+    check: impl Fn(&Harness),
+) -> Vec<String> {
+    std::iter::once(None)
+        .chain(choice_options(descriptor, baseline).into_iter().map(Some))
+        .filter_map(|option| {
+            let mut harness = build();
+            if let Some((name, value)) = option {
+                harness = harness.param(name, value);
+            }
+            failure(descriptor.id, || check(&harness)).map(|message| {
+                let setting =
+                    option.map_or_else(|| "baseline".to_string(), |(name, value)| format!("{name} = {value}"));
+                format!("{setting}: {message}")
+            })
+        })
+        .collect()
+}
+
+/// Busy inputs at their usual frequencies, with reset inputs left on defaults.
+/// A frequent reset can restart a random stream before every draw and hide a
+/// lost stream on copy. Keep the original frequencies when skipping an input.
+pub fn busy_without_reset(harness: Harness, descriptor: &ModuleDescriptor) -> Harness {
+    assert!(descriptor.inputs.len() <= BUSY_HZ.len());
+    descriptor
+        .inputs
+        .iter()
+        .zip(BUSY_HZ)
+        .filter(|(port, _)| port.name != "reset")
+        .fold(harness, |h, (port, hz)| h.input(port.name, busy(hz)))
 }

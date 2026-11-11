@@ -6,11 +6,10 @@
 
 mod common;
 
-use common::{WRAP_FRAME, playing_short_bar};
-use loom_core::{ModuleDescriptor, ModuleRole};
-use loom_modules::{ALL, time};
+use common::{WRAP_FRAME, choice_failures, dsp_modules, playing_short_bar};
+use loom_core::ModuleDescriptor;
+use loom_modules::time;
 use loom_test::{Harness, Signal};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Long enough for the default delay time (0.2 s) to pass after the bad
 /// frames, so a bad value kept in a delay line would come out again.
@@ -35,24 +34,44 @@ fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Ha
     })
 }
 
-/// Runs the check on a harness for every DSP module in [`ALL`] and panics
+/// Runs the check on a harness for every DSP module in `ALL` and panics
 /// with the IDs of all that fail, not only the first.
 ///
 /// Unit delays and audio outputs are left out: the engine runs them, not
 /// `process`. A unit delay holds one sample, and the engine turns NaN into
 /// silence at the final output.
-fn check_all(harness: impl Fn(&'static ModuleDescriptor) -> Harness) {
-    let failed: Vec<&str> = ALL
-        .iter()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
-        .filter(|descriptor| {
-            let harness = harness(descriptor);
-            catch_unwind(AssertUnwindSafe(|| harness.check_non_finite_recovery())).is_err()
+fn check_all(build: impl Fn(&'static ModuleDescriptor) -> Harness) {
+    let failed: Vec<String> = dsp_modules()
+        .flat_map(|descriptor| {
+            choice_failures(
+                descriptor,
+                |spec| spec.default,
+                || build(descriptor),
+                Harness::check_non_finite_recovery,
+            )
         })
-        .map(|descriptor| descriptor.id)
         .collect();
-    assert!(failed.is_empty(), "these modules keep a non-finite input: {failed:?}");
+    assert!(
+        failed.is_empty(),
+        "these modules keep a non-finite input:\n{}",
+        failed.join("\n")
+    );
 }
+
+/// Port defaults keep the bar phase moving while a different input is bad.
+/// Do not use the busy signal here: its edges align only with the default start.
+fn on_wrap(descriptor: &'static ModuleDescriptor) -> Harness {
+    playing(descriptor).non_finite_start(WRAP_FRAME - 4)
+}
+
+/// Every choice on port defaults, with bad values spanning the bar wrap.
+#[test]
+fn every_module_recovers_on_the_bar_wrap() {
+    check_all(on_wrap);
+}
+
+#[path = "non_finite/wrap.rs"]
+mod wrap;
 
 /// Every DSP module, with each input on its port default.
 #[test]
