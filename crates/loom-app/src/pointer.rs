@@ -176,11 +176,24 @@ impl Pointer {
         inner.last_redraw = Some(now);
         let mut events = Vec::new();
         while let Some(Queued { serial, step }) = inner.queue.pop_front() {
-            let at = inner.at;
-            let mut find = |aim: &Aim| match aim {
-                Aim::At(p) => Ok(p.to_iced()),
-                Aim::Target(target) => resolve(target),
+            // A target is found with the pointer let go of: finding one can
+            // build the accessibility tree, whose snapshot reads the pointer.
+            let aim = match &step {
+                Step::MoveTo(aim) | Step::Toward { to: aim, .. } => Some(aim.clone()),
+                _ => None,
             };
+            let found = match aim {
+                Some(Aim::At(p)) => Some(Ok(p.to_iced())),
+                Some(Aim::Target(target)) => {
+                    drop(inner);
+                    let found = resolve(&target);
+                    inner = self.0.borrow_mut();
+                    Some(found)
+                }
+                None => None,
+            };
+            let at = inner.at;
+            let find = |_: &Aim| found.clone().expect("a moving step has a target");
             let event = match step {
                 Step::Modifiers(modifiers) => {
                     // A change of keys needs no frame of its own.
@@ -302,10 +315,13 @@ impl Operation for FindNow<'_> {
         Operation::<crate::places::Places>::scrollable(&mut self.parts, id, bounds, content_bounds, translation, state);
     }
 
-    fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Any) {
+    fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {
         if let Some(view) = state.downcast_ref::<CanvasView>() {
             self.found.canvas = Some(*view);
         }
+        // The places need the canvas too: a canvas UI ID is placed by the
+        // tree, which reads the canvas from them.
+        Operation::<crate::places::Places>::custom(&mut self.parts, id, bounds, state);
         if let Some(pointer) = state.downcast_ref::<CanvasPointer>() {
             self.pointer = Some(pointer.clone());
         }

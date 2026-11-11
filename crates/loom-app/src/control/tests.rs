@@ -2438,3 +2438,23 @@ fn a_part_scrolled_out_of_view_is_not_located() {
     let error = locate(&app, "inspector/4/param/mix", &found).unwrap_err();
     assert!(error.contains("scrolled out of view"), "{error}");
 }
+
+/// A canvas UI ID is found through the commands themselves, not only by
+/// `locate` with a hand-built `Found`: the walk of the window gives the
+/// places the canvas, which the tree needs to place a canvas node. Both
+/// `locate` and a pointer command take one.
+#[test]
+fn a_canvas_ui_id_is_found_by_the_commands() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    for target in ["canvas/4/param/cutoff", "canvas/4"] {
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{target}"}}"#))
+            .unwrap_or_else(|why| panic!("{target}: {why}"));
+        assert!(
+            reply.contains_key("x") && reply.contains_key("y"),
+            "{target}: {reply:?}"
+        );
+    }
+    run_ui(&mut ui, r#"{"cmd": "hover", "target": "canvas/4/param/cutoff"}"#)
+        .unwrap_or_else(|why| panic!("hover: {why}"));
+}
