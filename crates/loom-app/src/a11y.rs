@@ -88,12 +88,20 @@ pub(crate) enum Touch {
 /// What the tree reports that a timer's poll can change, as a key that is
 /// cheap to make and to compare. A poll (the audio device check, the MIDI
 /// port check, autosave, the pickup check, the audio watchers' readings of
-/// load and dropouts) runs several times a second for the whole session, and building the tree for each would be idle work
-/// (NFR-PERF-04).
+/// load and dropouts) runs several times a second for the whole session,
+/// and building the tree for each would be idle work (NFR-PERF-04).
 ///
 /// Every field stands for something the tree reads. When the tree starts
 /// to report something new that a poll can change, add it here, or the
 /// tree goes stale until the next ordinary message.
+///
+/// The inspector's items need no field of their own. They are built from
+/// the selection, the graph, the inspector's drafts, and the panel values.
+/// No poll changes the first three: selecting, editing, and typing are
+/// ordinary messages, classed as a change. A poll changes the panel values
+/// only through their generation, which `values` holds. So before adding
+/// a poll that edits the graph or the selection, or a panel whose items
+/// read something a poll changes, add that here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PollKey {
     /// The scene's generation: the tiles, their names and places, and the
