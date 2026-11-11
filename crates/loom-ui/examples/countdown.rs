@@ -95,18 +95,11 @@ impl App for Countdown {
     }
 }
 
-/// A driver for the terminal. It notes a draw and prints after the turn,
-/// and runs work on real threads.
+/// A driver for the terminal. It runs work on real threads.
 #[derive(Default)]
-struct Terminal {
-    draw: bool,
-}
+struct Terminal;
 
 impl Driver<Message> for Terminal {
-    fn redraw(&mut self) {
-        self.draw = true;
-    }
-
     fn window(&mut self, spec: &WindowSpec) {
         println!("title: {}", spec.title);
     }
@@ -155,13 +148,14 @@ fn main() {
         WindowState::new(Size::new(80.0, 24.0)),
         Arc::new(move || main_thread.unpark()),
     );
-    let mut driver = Terminal::default();
+    let mut driver = Terminal;
     runtime.waker().send(Message::Start);
 
     let mut event = DriverEvent::Woken;
     while !runtime.exited() {
         let next = runtime.handle(event, Instant::now(), &mut driver);
-        if std::mem::take(&mut driver.draw) {
+        // A terminal "draws" at once, so it never needs RedrawRequested.
+        if next.draw {
             let app = runtime.app();
             println!(
                 "{:>5} ms  {} left, {}",

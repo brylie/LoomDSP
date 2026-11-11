@@ -68,9 +68,10 @@ impl View {
     ///
     /// # Panics
     ///
-    /// If another panel in this view already has `key`.
+    /// In a debug build, if another panel in this view already has `key`:
+    /// a key names one panel, and comparing with the last view relies on it.
     pub fn panel<T: PartialEq + Clone + 'static>(&mut self, key: UiId, layer: Layer, model: &T) {
-        assert!(
+        debug_assert!(
             !self.panels.iter().any(|panel| panel.key == key),
             "panel key {key} is used twice in one view"
         );

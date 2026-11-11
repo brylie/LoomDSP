@@ -1,8 +1,9 @@
 //! What a driver does for the runtime.
 //!
-//! A driver feeds the runtime [`DriverEvent`](crate::DriverEvent)s and
-//! carries out the effects that reach outside the app: the clipboard,
-//! dialogs, background work, capturing the window, drawing, and ending.
+//! A driver feeds the runtime [`DriverEvent`](crate::DriverEvent)s,
+//! draws when a turn's [`Next`](crate::Next) says to, and carries out the
+//! effects that reach outside the app: the clipboard, dialogs, background
+//! work, capturing the window, and ending.
 //! The window shell is one driver and the headless driver is another. The
 //! runtime names no window toolkit, so a third, such as a plugin host's
 //! window, needs no change to it (ui-layer.md, section 2, rule 9).
@@ -17,9 +18,6 @@ use std::path::PathBuf;
 
 /// What the runtime asks of the thing that runs it.
 pub trait Driver<M> {
-    /// Draw the window once more.
-    fn redraw(&mut self);
-
     /// Apply the window's title and limits. Called only when they changed.
     fn window(&mut self, spec: &WindowSpec);
 

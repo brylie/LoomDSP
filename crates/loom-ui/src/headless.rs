@@ -107,7 +107,7 @@ impl Headless {
         self.window_changes
     }
 
-    /// How many draws the runtime asked for.
+    /// How many frames it drew: one for each turn that said to draw.
     pub fn redraws(&self) -> usize {
         self.redraws
     }
@@ -130,10 +130,6 @@ fn no_answer(name: &str) -> ! {
 }
 
 impl<M> Driver<M> for Headless {
-    fn redraw(&mut self) {
-        self.redraws += 1;
-    }
-
     fn window(&mut self, spec: &WindowSpec) {
         self.window = Some(spec.clone());
         self.window_changes += 1;
@@ -198,6 +194,7 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
             driver: Headless::new(),
             now: start,
             next: Next {
+                draw: false,
                 again: false,
                 frames: false,
                 deadline: None,
@@ -213,17 +210,26 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
     ///
     /// If messages keep coming for more turns than any test needs.
     pub fn step(&mut self, event: DriverEvent) -> Next {
-        self.next = self.runtime.handle(event, self.now, &mut self.driver);
+        self.turn(event);
         let mut turns = 1;
         while self.next.again {
             assert!(
                 turns < MOST_TURNS,
                 "the queue never empties: each turn queues another message"
             );
-            self.next = self.runtime.handle(DriverEvent::Woken, self.now, &mut self.driver);
+            self.turn(DriverEvent::Woken);
             turns += 1;
         }
         self.next
+    }
+
+    /// Runs one turn, and draws its frame at once when it says to. The
+    /// frame is shown only when the test sends [`DriverEvent::Presented`].
+    fn turn(&mut self, event: DriverEvent) {
+        self.next = self.runtime.handle(event, self.now, &mut self.driver);
+        if self.next.draw {
+            self.driver.redraws += 1;
+        }
     }
 
     /// Sends `message` through the runtime's waker, as a watcher thread

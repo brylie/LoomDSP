@@ -14,11 +14,11 @@
 //! 4. After a turn that ran an update, the runtime builds the view and
 //!    compares each panel's model with the last, reads the window spec, and
 //!    asks the app for its next deadline.
-//! 5. It asks the driver to draw when a panel changed, the target asks for
-//!    it, an effect asked for it, or the event was a redraw request or a
-//!    frame. Otherwise nothing is drawn (section 3, rule 6).
-//! 6. It returns [`Next`]: run again at once, send frames, wake at a time,
-//!    or sleep.
+//! 5. It says to draw when a panel changed, the target asks for it, an
+//!    effect asked for it, or the event was a redraw request or a frame.
+//!    Otherwise nothing is drawn (section 3, rule 6).
+//! 6. It returns [`Next`]: whether to draw, and then whether to run again
+//!    at once, send frames, wake at a time, or sleep.
 //!
 //! The runtime never reads the clock: the driver passes the moment in.
 
@@ -35,8 +35,22 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
 
 /// What the driver should do after a turn.
+///
+/// # Drawing
+///
+/// When `draw` is true, the driver draws one frame before it next waits.
+/// It draws at once when the turn was for its own
+/// [`DriverEvent::RedrawRequested`] or [`DriverEvent::Frame`]. Otherwise it
+/// may ask its window system for a frame, and when that frame comes it
+/// draws it without sending `RedrawRequested` for it: `RedrawRequested` is
+/// only for a frame the system wants that the runtime did not ask for.
+/// Several turns that say `draw` before the frame is drawn make one frame.
+/// The runtime returns this rather than calling the driver, so a shell
+/// cannot turn its own redraw request into a loop of draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Next {
+    /// Draw one frame before waiting.
+    pub draw: bool,
     /// Messages wait: run another turn at once, with [`DriverEvent::Woken`].
     pub again: bool,
     /// Send a [`DriverEvent::Frame`] each display refresh.
@@ -46,7 +60,8 @@ pub struct Next {
 }
 
 impl Next {
-    /// True when nothing is due: the driver may sleep until an event comes.
+    /// True when nothing is due after any draw: the driver may sleep until an
+    /// event comes.
     pub fn sleeps(&self) -> bool {
         !self.again && !self.frames && self.deadline.is_none()
     }
@@ -66,7 +81,7 @@ pub struct Counts {
     pub panels_changed: u64,
     /// Animation frames received.
     pub frames: u64,
-    /// Draws asked of the driver.
+    /// Turns that said to draw.
     pub redraws: u64,
 }
 
@@ -155,6 +170,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     pub fn handle(&mut self, event: DriverEvent, now: Instant, driver: &mut impl Driver<A::Message>) -> Next {
         if self.exited {
             return Next {
+                draw: false,
                 again: false,
                 frames: false,
                 deadline: None,
@@ -203,15 +219,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         redraw |= self.target.needs_redraw(updates);
 
         // 5. Draw only when something visible changed.
-        if redraw && !self.exited {
+        let draw = redraw && !self.exited;
+        if draw {
             self.counts.redraws += 1;
             self.waiting_for_draw.append(&mut self.after_draw);
-            driver.redraw();
         }
 
         // 6. What comes next.
         self.drain_queue();
         Next {
+            draw,
             again: !self.exited && !self.pending.is_empty(),
             frames: !self.exited && self.app.animating(),
             deadline: if self.exited {

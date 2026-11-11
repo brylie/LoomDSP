@@ -443,13 +443,14 @@ fn a_target_can_ask_for_a_draw_after_updates() {
     );
     let mut driver = Headless::new();
     let now = Instant::now();
-    runtime.handle(DriverEvent::Woken, now, &mut driver);
-    let first = driver.redraws();
+    assert!(runtime.handle(DriverEvent::Woken, now, &mut driver).draw);
     runtime.waker().send(Msg::Noop);
-    runtime.handle(DriverEvent::Woken, now, &mut driver);
-    assert_eq!(driver.redraws(), first + 1);
-    runtime.handle(DriverEvent::DeadlineReached, now, &mut driver);
-    assert_eq!(driver.redraws(), first + 1, "no update ran, so no draw");
+    assert!(runtime.handle(DriverEvent::Woken, now, &mut driver).draw);
+    assert!(
+        !runtime.handle(DriverEvent::DeadlineReached, now, &mut driver).draw,
+        "no update ran, so no draw"
+    );
+    assert_eq!(runtime.counts().redraws, 2);
 }
 
 /// `AfterDraw`: the message waits until the next frame has been shown, and
@@ -563,4 +564,36 @@ fn a_scroll_effect_reaches_the_target() {
     assert_eq!(runtime.target().scrolled, [search()]);
     runtime.target_mut().scrolled.clear();
     assert!(runtime.target().scrolled.is_empty());
+}
+
+/// `Presented`: a frame shown before the turn that asks for the after-draw
+/// message does not deliver it; the next one shown after that turn does.
+#[test]
+fn a_frame_shown_before_the_request_does_not_deliver_the_message() {
+    let mut harness = harness();
+    harness.step(DriverEvent::Presented);
+    assert!(harness.app().seen.is_empty(), "nothing waits yet");
+
+    let next = harness.send(Msg::Note);
+    assert!(next.draw, "asking for the message draws a frame");
+    assert!(!harness.app().seen.contains(&Msg::Drawn), "that frame is not shown yet");
+    harness.step(DriverEvent::Presented);
+    assert_eq!(harness.app().seen, [Msg::Note, Msg::Drawn]);
+}
+
+/// A system redraw request and a frame each say to draw at once, and run
+/// no update; a turn that changes nothing says not to draw.
+#[test]
+fn next_says_when_to_draw() {
+    let mut harness = harness();
+    assert!(!harness.send(Msg::Noop).draw);
+    assert!(harness.send(Msg::Add(1)).draw);
+    assert!(harness.step(DriverEvent::RedrawRequested).draw);
+    assert!(harness.step(DriverEvent::Frame).draw);
+    assert!(
+        !harness
+            .step(DriverEvent::Window(WindowEvent::Resized(Size::new(5.0, 5.0))))
+            .draw,
+        "a resize draws through the system's redraw request"
+    );
 }

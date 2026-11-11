@@ -25,13 +25,20 @@ pub enum DriverEvent {
     },
     /// Something happened to the window as a whole.
     Window(WindowEvent),
-    /// The system asks for the window to be drawn: it was uncovered or
-    /// resized. Runs no update.
+    /// The system wants a frame the runtime did not ask for: the window was
+    /// uncovered or resized. The turn runs no update and says to draw, and
+    /// the driver draws that frame at once, asking for no other. A frame
+    /// the driver asked for because a turn said to draw is drawn when it
+    /// comes, with no `RedrawRequested` (see [`crate::Next`]).
     RedrawRequested,
     /// One animation frame. A driver sends one per display refresh, only
     /// while the runtime asks for frames. Draws, and runs no update.
     Frame,
-    /// The frame the runtime last asked for has been drawn and shown.
+    /// A frame has been drawn and shown. Sent once for each frame drawn,
+    /// after it is on screen, and only for a frame that began after the
+    /// latest turn that said to draw. A message waiting for the next frame
+    /// to be shown arrives on this event, so a `Presented` for an older
+    /// frame would deliver it before its frame is on screen.
     Presented,
     /// A waker sent a message, which is already in the queue.
     Woken,
@@ -42,10 +49,16 @@ pub enum DriverEvent {
 /// Something that happened to the window as a whole.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowEvent {
-    /// The window's inside has this size, in logical pixels.
+    /// The window's inside has this size, in logical pixels. It updates the
+    /// runtime's window state and does not draw: the drawing comes from the
+    /// `RedrawRequested` the window system sends after a resize, as macOS,
+    /// Windows, and Linux window systems do through `winit`. A driver whose
+    /// system sends none, such as a host's window, sends `RedrawRequested`
+    /// itself after the resize.
     Resized(Size),
     /// The display's scale factor changed: the window moved to another
-    /// display, or its settings changed.
+    /// display, or its settings changed. Like a resize, it does not draw by
+    /// itself.
     ScaleChanged(f32),
     /// The window became the one that takes the keys (`true`), or stopped
     /// being it (`false`).

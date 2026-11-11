@@ -63,8 +63,10 @@ fn a_view_lists_its_panels() {
     assert!(format!("{built:?}").contains("inspector"));
 }
 
-/// Two panels with one key in one view is a mistake.
+/// Two panels with one key in one view is a mistake, caught in debug
+/// builds.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "panel key toolbar is used twice in one view")]
 fn a_key_used_twice_panics() {
     view(&[("toolbar", 1), ("toolbar", 2)]);
