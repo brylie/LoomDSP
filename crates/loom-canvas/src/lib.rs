@@ -22,8 +22,8 @@
 //!   [`Painter`], and sizes text with a [`TextMeasure`].
 //! - **The Iced widget,** [`PatchCanvas`]. It converts Iced's events through
 //!   [`iced_convert`], calls [`CanvasInput`], applies the [`Reaction`],
-//!   schedules the next deadline, wraps the renderer as an Iced shader
-//!   primitive, and paints through Iced's text renderer. Iced is named
+//!   schedules the next deadline, wraps the renderer as Iced shader
+//!   primitives, and paints through Iced's text renderer. Iced is named
 //!   only here and in [`iced_convert`].
 //!
 //! Positions, sizes, colours, and input events are `loom-ui-core` values.
