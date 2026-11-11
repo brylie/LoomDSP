@@ -6,9 +6,10 @@
 //!    then names the one module that may use it.
 //! 2. **No source file names a window toolkit,** `winit` or Iced, test
 //!    files included.
-//! 3. **No source file reads the clock.** Every call takes the moment from
-//!    its driver, so a test chooses the time. Examples may read the clock;
-//!    they are drivers.
+//! 3. **No source file reads the clock,** test files aside. Every call
+//!    takes the moment from its driver, so a test chooses the time. Tests
+//!    read it once to have a starting moment, and examples may read it,
+//!    since they are drivers.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -82,13 +83,25 @@ fn collect(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// The violations of `names` in every file under `src/`, as
-/// `path:line: name`, and how many files were read.
-fn scan(names: &[&'static str]) -> (usize, Vec<String>) {
+/// True for a file that holds tests: `tests.rs`, a name ending in
+/// `_tests.rs`, or any file under a `tests` folder.
+fn is_test_file(path: &Path) -> bool {
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    name == "tests.rs"
+        || name.ends_with("_tests.rs")
+        || path
+            .parent()
+            .is_some_and(|parent| parent.iter().any(|part| part == "tests"))
+}
+
+/// The violations of `names` in the files under `src/` that `applies`
+/// picks, as `path:line: name`, and how many files were read.
+fn scan(names: &[&'static str], applies: impl Fn(&Path) -> bool) -> (usize, Vec<String>) {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect(&src, &src, &mut files);
     files.sort();
+    files.retain(|path| applies(path));
     let mut found = Vec::new();
     for path in &files {
         let source = fs::read_to_string(src.join(path)).expect("a source file can be read");
@@ -108,15 +121,15 @@ fn the_only_dependency_is_loom_ui_core() {
 /// No source file names a window toolkit.
 #[test]
 fn no_source_file_names_a_window_toolkit() {
-    let (scanned, found) = scan(&TOOLKITS);
+    let (scanned, found) = scan(&TOOLKITS, |_| true);
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
 }
 
-/// No source file reads the clock.
+/// No source file reads the clock, test files aside.
 #[test]
 fn no_source_file_reads_the_clock() {
-    let (scanned, found) = scan(&CLOCK);
+    let (scanned, found) = scan(&CLOCK, |path| !is_test_file(path));
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
 }
@@ -146,4 +159,14 @@ let due = now + delay;
         user_dependencies(manifest),
         ["dependencies.loom-ui-core.workspace", "dependencies.winit"]
     );
+
+    for (path, test) in [
+        ("runtime.rs", false),
+        ("runtime/tests.rs", true),
+        ("effect/more_tests.rs", true),
+        ("headless/tests/apps.rs", true),
+        ("headless.rs", false),
+    ] {
+        assert_eq!(is_test_file(Path::new(path)), test, "{path}");
+    }
 }
