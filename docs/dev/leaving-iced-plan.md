@@ -231,7 +231,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
 1. **2.4a, done:** the text crate is Parley ([research note](../research/2026-11-text-crate-choice.md); spec section 8, rule 8). No `glyphon` release builds with our `wgpu` 27, and nothing like it takes Parley's glyph runs, so step 2.4b builds a glyph atlas of our own: rasterise with `swash`, pack with `etagere`, and draw instanced quads, about 680 lines in the parts the research note costs. Ask the maintainer if it grows well past that (stop points).
 2. **2.4b:** draw tile text with Parley and that atlas, behind a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Ask Parley for `system-ui`. Keep one Parley layout per label, keyed by its text, size, and weight, beside the canvas's frame cache, since a layout is rebuilt for any change. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
-3. The canvas has its own Parley font context beside Iced's font system until phase 3 moves the panels. Tile text changes width once here (spec section 8, rule 6): record the `--screenshot` before and after, and check it by eye; the other parity gates are unchanged.
+3. The canvas has its own Parley font context beside Iced's font system until phase 3 moves the panels. Ask for `system-ui` with the optical size axis at its default. Tile text changes width here (spec section 8, rule 6), so this step's gate is: the `--screenshot-window` pixel diff is identical outside the bounds of the moved text (masked from the text rectangles the scene or the view lays out), every `locate` answer is unchanged, the pixels inside those bounds may differ, and the pull request records the change in width per label (least, greatest, and median). That screenshot is then the new baseline, and the pixel-identical gate resumes from 2.4b on. The other parity gates are unchanged.
 
 ### 2.5 The agent tools on the new shell
 
@@ -281,6 +281,8 @@ Move the simplest views first. One pull request per row, each passing the parity
 3. The multi-line editor (patch info authors) comes last. If it costs too much, keep it on Iced's `text_editor` and finish phase 3 without it. Phase 4 then waits until it is done.
 4. Clipboard: use a permissive clipboard crate such as `arboard` †, behind the effect from 2.1, so the harness keeps its in-memory clipboard.
 
+Each view's move changes its text widths once (spec section 8, rule 6). The view's step uses the gate of step 2.4b, item 3, masked to that view's text, and its screenshot becomes the new baseline.
+
 ### Phase 3 done
 
 No view uses an Iced widget. The parity gates pass. The VoiceOver check covers the toolbar, inspector, browser, and every overlay, with keyboard focus that the screen reader follows.
@@ -308,7 +310,7 @@ Each phase is worth keeping on its own. The maintainer can stop after any of the
 Stop and ask the maintainer if any of these happen:
 
 - a parity gate fails and the fix is not clear;
-- IME or text editing needs more than a few hundred lines on top of Parley, or the glyph atlas grows well past the research note's estimate of about 680 lines;
+- IME or text editing needs more than a few hundred lines on top of Parley, or the glyph atlas grows past 1,000 lines (the research note estimates about 680);
 - an AccessKit gap blocks a phase and upstream has not answered;
 - the idle CPU or frame rate gets worse and cannot be recovered in the same phase.
 

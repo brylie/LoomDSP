@@ -12,6 +12,8 @@
 //!    family, its default.
 //! 5. `parley system-ui`: Parley 0.12 with the generic `system-ui` family,
 //!    which CSS defines as the platform's interface font.
+//! 6. `parley ui + opsz`: the same, with the optical size axis set to the
+//!    font size, as macOS sets it for its own system font.
 //!
 //! Run it with `cargo run --release` in this folder. It prints the machine's
 //! OS, then one line per path, size, and label. With `--bench` it times
@@ -125,13 +127,20 @@ fn parley(
     fonts: &mut parley::FontContext,
     layouts: &mut parley::LayoutContext<[u8; 4]>,
     family: parley::FontFamily<'static>,
+    optical: bool,
     label: &str,
     size: f32,
 ) -> Measured {
+    // CSS syntax for the optical size axis, set to the font size, as the
+    // platform sets it for its own system font.
+    let opsz = format!("\"opsz\" {size}");
     let mut builder = layouts.ranged_builder(fonts, label, 1.0, true);
     // The brush (a colour) does not change the layout.
     builder.push_default(parley::StyleProperty::FontSize(size));
     builder.push_default(parley::StyleProperty::FontFamily(family));
+    if optical {
+        builder.push_default(parley::StyleProperty::FontVariations(opsz.as_str().into()));
+    }
     let mut layout: parley::Layout<[u8; 4]> = builder.build(label);
     layout.break_all_lines(None);
     let mut faces = BTreeSet::new();
@@ -171,6 +180,7 @@ fn main() {
                         &mut fonts,
                         &mut layouts,
                         parley::GenericFamily::SansSerif.into(),
+                        false,
                         label,
                         size,
                     ),
@@ -181,6 +191,18 @@ fn main() {
                         &mut fonts,
                         &mut layouts,
                         parley::GenericFamily::SystemUi.into(),
+                        false,
+                        label,
+                        size,
+                    ),
+                ),
+                (
+                    "parley ui + opsz",
+                    parley(
+                        &mut fonts,
+                        &mut layouts,
+                        parley::GenericFamily::SystemUi.into(),
+                        true,
                         label,
                         size,
                     ),

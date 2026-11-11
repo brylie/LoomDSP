@@ -15,6 +15,7 @@ This folder is temporary. It is outside the LoomDSP workspace (the root `Cargo.t
 | `cosmic-text 0.19` | Its newest release |
 | `parley sans-serif` | Parley 0.12 with its default family, the generic sans-serif |
 | `parley system-ui` | Parley 0.12 with the generic system UI family |
+| `parley ui + opsz` | The same, with the optical size axis set to the font size, as macOS sets it for its own system font |
 
 ## Run
 
@@ -28,6 +29,14 @@ Each line gives the path, the size in pixels, the label, its width in logical pi
 ```sh
 cargo run --release -- --bench
 ``` It runs on any platform; the research note records what it printed on macOS and what is expected, from source, on Windows and Linux.
+
+## macOS's own text
+
+`coretext.swift` measures the same labels with CoreText in AppKit's system font, as a native macOS control sets them, to show which widths are the platform's:
+
+```sh
+swift coretext.swift
+```
 
 ## Checks
 

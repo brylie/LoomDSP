@@ -29,7 +29,7 @@ The choice is for the long run. So each criterion is answered twice where versio
 | 2. AccessKit text | Not built in: we write it | Not built in since 0.12: we write it |
 | 3. One font system | Yes, now: the canvas can use Iced's own font system | No, until the panels leave Iced |
 | 4. Glyph drawing | Now: `cryoglyph`, already in our tree, maintained by Iced's authors (`iced-rs/cryoglyph`), so text drawing moves at Iced's pace until phase 4. After phase 4: `glyphon`, or our own atlas | Our own atlas, now and later. Vello needs `wgpu` 30 |
-| 5. Same font as today | Yes on macOS: same face, same widths. Same code path elsewhere | No on macOS: Helvetica by default; with `system-ui` the same face, but widths differ by up to 4% |
+| 5. Same font as today | Yes on macOS: same face, same widths. Same code path elsewhere | No on macOS: Helvetica by default; with `system-ui` the same face, but widths differ by up to 4%. With the optical size set, it matches CoreText exactly |
 | 6. Licences and versions | Passes. Adds no crate now | Passes. Adds 35 crates |
 
 1. **No `glyphon` release builds with our `wgpu` 27.** The plan's step 2.4 named `glyphon` as "the usual choice". Its releases target `wgpu` 25, 28, 29, and 30, not 27.
@@ -113,7 +113,21 @@ All 18 measurements agree to the third decimal for the three `cosmic-text` paths
 
 **Parley's default is Helvetica on macOS.** `fontique` 0.12.0 maps the generic `sans-serif` to Helvetica (`src/backend/coretext.rs`, line 28), Arial on Windows (`dwrite.rs`, line 33), and fontconfig's `sans-serif` on Linux (`fontconfig.rs`, line 837). It maps `system-ui` to "System Font" and `.SF NS` on macOS (`coretext.rs`, line 32), Segoe UI on Windows (`dwrite.rs`, line 37), and fontconfig's `system-ui` on Linux (`fontconfig.rs`, line 841).
 
-**With `system-ui`, Parley finds the same face but sets it differently:** from 2% narrower to 4% wider than today, varying by label and size. A likely cause, not proven: Parley passes the font size to its shaper (`parley_engine` 0.12.0, `src/shape/shaper.rs`, line 360), which lets `harfrust` 0.12 apply the size-dependent tracking in Apple's fonts (it handles the `trak` table, `src/hb/ot_shape.rs`). `cosmic-text`'s simple shaping does not. Turning off pixel rounding (`quantize: false`) changed nothing. Whatever the cause, these widths move layout, hit tests, and `locate` answers, so the `--screenshot-window` parity gate would fail.
+**With `system-ui`, Parley finds the same face but sets it differently:** from 2% narrower to 4% wider than today, varying by label and size. The likely cause (see the next paragraph for the check): Parley passes the font size to its shaper (`parley_engine` 0.12.0, `src/shape/shaper.rs`, line 360), which lets `harfrust` 0.12 apply the size-dependent tracking in Apple's fonts (it handles the `trak` table, `src/hb/ot_shape.rs`). `cosmic-text`'s simple shaping does not. Turning off pixel rounding (`quantize: false`) changed nothing. Whatever the cause, these widths move layout, hit tests, and `locate` answers, so the `--screenshot-window` parity gate would fail.
+
+**Which widths are right: macOS's own text.** `examples/text-font-probe/coretext.swift` measures the same labels with CoreText in AppKit's system font (`NSFont.systemFont`), as a native control sets them. A sixth probe path gives Parley the optical size axis set to the font size (`"opsz" 9` and so on), which CoreText applies to its system font.
+
+| Label, size | Today (Iced 0.14) | Parley `system-ui` | Parley `system-ui` + optical size | CoreText system font |
+|---|---|---|---|---|
+| "Cutoff", 9 px | 23.871 | 24.741 | 27.729 | 27.729 |
+| "Resonance", 11 px | 51.439 | 52.019 | 57.492 | 57.492 |
+| "Attack 12 ms", 13 px | 70.383 | 69.024 | 77.721 | 77.721 |
+
+- **Parley with the optical size matches CoreText exactly,** in all 18 measurements, to the third decimal.
+- So Parley applies the same size-dependent tracking as macOS. With the face, the size, and the tracking all the same, only the optical size was missing. That nearly settles the cause of the -2% to +4% difference: tracking, which Iced's text does not apply. It is not proven at the level of the `trak` table, since the check compares results, not code paths.
+- **Today's text is 7% to 15% narrower than native macOS text,** because it applies neither tracking nor optical size. Without the optical size, Parley is 8% to 13% narrower than native.
+- Matching native text exactly would widen tile labels by 7% to 17% against today. That is a visual change, so the choice keeps the optical size at its default for the move, and leaves native widths as a later visual decision.
+- Asking CoreText for `.SFNS-Regular` by name gives Times New Roman; the system font must come through `NSFont.systemFont`.
 
 **Windows and Linux, from source, not run:**
 
@@ -223,9 +237,11 @@ Weighed for the long run, as the review asked:
 
 ### Costs accepted
 
-- **A glyph atlas of our own,** about 680 lines (criterion 4), rasterising with `swash`. Rule 1 counts this against Parley. When our `wgpu` reaches 30 or later, after phase 4, Vello can be weighed against it.
-- **A visible change to tile text, once, at step 2.4b.** The canvas uses `system-ui`, which finds the same face as today on macOS. Its widths differ by about -2% to +4%, probably from Apple's size-dependent tracking, which Parley applies and Iced's simple shaping does not. Step 2.4b records the change and checks it by eye. The parity gate's pixel diff of tile text is expected to differ at that one step, and nowhere else.
-- **Two font systems until phase 3 moves the panels.** The canvas and the panels may set the same face slightly differently in that time.
+- **A glyph atlas of our own,** about 680 lines (criterion 4), rasterising with `swash`. The plan stops to ask if it passes 1,000 lines. Rule 1 counts this against Parley. When our `wgpu` reaches 30 or later, after phase 4, Vello can be weighed against it.
+- **A change to text widths once for tile text at step 2.4b, and once for each view as phase 3 moves it.** The canvas uses `system-ui` with the optical size at its default: today's face on macOS, at widths from about -2% to +4%, from the size-dependent tracking that macOS applies too. Each such step's gate: the `--screenshot-window` diff is identical outside the moved text's bounds, every `locate` answer is unchanged, and the pull request records the width change per label (least, greatest, median). That screenshot is then the baseline.
+- **Two font systems until phase 3 moves the panels,** so the canvas and the panels set the same face two ways in that time.
+- **Two face changes.** Where Open Sans is installed, it becomes the system font. Today's pick there comes from a default, not a choice. On Linux, fontconfig's `system-ui` may name another face than today's Noto Sans or DejaVu Sans.
+- **Not matching native macOS widths yet.** Parley with the optical size set matches CoreText exactly, but that widens labels by 7% to 17% against today, so it waits for a visual decision of its own.
 - **35 new crates**, all passing `cargo deny`.
 - **Churn.** Parley releases breaking versions about every two months. We pin a version and upgrade on purpose. Our `TextMeasure` and `Painter` traits, and a field type of our own over `PlainEditor`, keep Parley's types out of the rest of the code.
 - **Lines of our own for fields:** about 80 for an undo stack inside a field, and 200 to 300 for the AccessKit text glue, which was owed under either choice.
@@ -241,7 +257,7 @@ Cleared (the plan's † marks for these go in this change):
 Still open:
 
 - What VoiceOver, Narrator, and Orca read from text fields built either way. That is a phase 3 check.
-- Whether Parley's width differences come from `trak` tracking. A test that shapes with and without the point size would settle it.
+- Whether Parley's width difference comes from the `trak` table itself, rather than another size-dependent setting. The CoreText comparison makes tracking all but certain.
 - The probe on Windows and Linux.
 - Composition with a real input method, for either crate.
 - The line estimates. They come from reading, not from building.
@@ -252,4 +268,4 @@ Still open:
 - `parley` 0.12.0 release notes: <https://github.com/linebender/parley/releases/tag/v0.12.0>.
 - `cosmic-text` 0.19.0 `CHANGELOG.md`, entries 0.15.0 to 0.19.0.
 - Source, at the versions above, from the Cargo registry: `cosmic-text` (`src/font/system.rs`, `src/font/fallback/`, `src/buffer.rs`, `src/layout.rs`, `src/edit/mod.rs`, `src/shape_run_cache.rs`); `cryoglyph` (`Cargo.toml`, line counts); `iced_graphics` 0.14.0 (`src/text.rs`); `fontique` 0.12.0 (`src/backend/`); `parley` 0.12.0 (`src/editing/editor.rs`, `src/layout/cluster.rs`, `src/lib.rs`); `parley_engine` 0.12.0 (`src/shape/shaper.rs`); `harfrust` 0.12.0 (`src/hb/ot_shape.rs`); `accesskit` 0.25.2 (`src/lib.rs`).
-- `examples/text-font-probe`, run on macOS 27.0.1 with `cargo run --release`.
+- `examples/text-font-probe`, run on macOS 27.0.1 with `cargo run --release` and `cargo run --release -- --bench`, and its `coretext.swift`, run with `swift coretext.swift`.
