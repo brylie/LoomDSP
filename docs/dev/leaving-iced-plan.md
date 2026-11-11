@@ -151,7 +151,7 @@ The spike found two gaps in `accesskit_macos` 0.27.2:
 - it never sets the accessibility label from the node's name, so VoiceOver does not read a slider's name;
 - it has no spoken value description beside a numeric value, so a slider can either be stepped or say its unit, not both.
 
-1. Write each gap as a minimal reproduction: a small example program that shows the problem with VoiceOver, with no LoomDSP code.
+1. Write each gap as a minimal reproduction: a small example program that shows the problem with VoiceOver, with no LoomDSP code. **Done:** `examples/accesskit-macos-repro/`, a crate outside the workspace on `winit` and `accesskit_winit`, with two programs, a script that reads the accessibility attributes, and the two issue reports as drafts. Both gaps were confirmed in the source of 0.27.2 and of AccessKit's `main` ([research note](../research/2026-11-accesskit-macos-gaps.md)). What VoiceOver says still needs a listening check with the reproduction.
 2. Ask the maintainer before filing anything upstream. Filing an issue or a pull request with AccessKit is an outward action.
 3. Once approved, propose the fix upstream. AccessKit is a dependency accepted under ADR-0006, so reading and patching its source is allowed.
 4. If LoomDSP needs the fix before a release, use a `[patch.crates-io]` entry that points at a fork on a pinned commit. Allow that source in `deny.toml` with a comment linking the upstream pull request. Remove the patch as soon as a release contains the fix.
@@ -182,6 +182,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 1. Replace `iced::application` in `lib.rs::run` with a `winit` 0.30 `ApplicationHandler` that:
    - creates the window hidden;
    - creates the AccessKit adapter through `accesskit_winit` (all three platforms), then shows the window. This fixes the spike's attach order;
+   - decides first how the Linux adapter comes in. With its default features, `accesskit_winit` brings `accesskit_unix` and a D-Bus stack that fails `cargo deny check` on three "unmaintained" advisories; without that feature the check passes, and Linux has no screen reader support ([research note](../research/2026-11-accesskit-macos-gaps.md#what-accesskit_winit-brings)). Either add ignore entries to `deny.toml` with reasons, or leave the Linux adapter out at first and say so;
    - creates the `wgpu` surface;
    - sends winit events to the runtime and redraws only when the runtime asks.
 2. Draw each frame in this order:
