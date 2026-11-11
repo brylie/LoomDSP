@@ -718,6 +718,7 @@ impl crate::App {
                 module,
                 at: loom_ui_core::Point::new(view.bounds.x + corner.x, view.bounds.y + corner.y),
                 area: view.bounds,
+                by_key: true,
             };
             self.reader_event(ReaderEvent::Close);
             return vec![self.update(crate::Message::Canvas(event))];

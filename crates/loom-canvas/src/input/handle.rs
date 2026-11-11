@@ -1087,6 +1087,7 @@ impl CanvasModel<'_> {
                 module: tile.id,
                 at: Point::new(bounds.x + corner.x, bounds.y + corner.y),
                 area: bounds,
+                by_key: true,
             },
         );
     }
@@ -1137,6 +1138,7 @@ impl CanvasModel<'_> {
                         module,
                         at: Point::new(bounds.x + screen.x, bounds.y + screen.y),
                         area: bounds,
+                        by_key: false,
                     },
                 );
                 return;

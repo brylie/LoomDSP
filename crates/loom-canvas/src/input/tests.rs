@@ -3540,7 +3540,11 @@ fn right_click_elsewhere_opens_no_menu() {
     let tile = scene.module(1).unwrap().bounds().center();
     assert!(matches!(
         right_click(&canvas, &mut CanvasInput::default(), tile).as_slice(),
-        [CanvasEvent::TileMenu { module: 1, .. }]
+        [CanvasEvent::TileMenu {
+            module: 1,
+            by_key: false,
+            ..
+        }]
     ));
     for at in [input, Point::new(300.0, 500.0)] {
         let events = right_click(&canvas, &mut CanvasInput::default(), at);
@@ -4268,7 +4272,10 @@ fn the_menu_key_and_shift_f10_open_the_tile_menu() {
         events
             .iter()
             .filter_map(|event| match event {
-                CanvasEvent::TileMenu { module, at, .. } => Some((*module, *at)),
+                CanvasEvent::TileMenu { module, at, by_key, .. } => {
+                    assert!(*by_key, "a key asked for it");
+                    Some((*module, *at))
+                }
                 _ => None,
             })
             .collect()

@@ -3666,3 +3666,46 @@ fn show_context_menu_on_a_tile_opens_its_menu() {
     ))));
     assert!(ui.app.overlays.tile_menu().is_none(), "nothing opens under a panel");
 }
+
+/// A tile menu opened from the keyboard, or by ShowContextMenu, starts on
+/// its first item, so Enter picks at once and focus is on that item. One
+/// opened by the pointer starts on none, with focus on the menu.
+#[test]
+fn a_menu_opened_by_key_starts_on_its_first_item() {
+    let opened = |by_key: bool| {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        ui.send(Message::Canvas(CanvasEvent::TileMenu {
+            module: 4,
+            at: Point::new(100.0, 100.0),
+            area: Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0)),
+            by_key,
+        }));
+        let _ = ui.redraw();
+        let places = ui.places();
+        let update = ui.app.a11y_tree(&places);
+        let focus = ui.app.a11y.ids.id(update.focus.0).cloned();
+        (ui.app.overlays.menu_highlight(), focus, ui.app.menu_model().unwrap())
+    };
+    let (highlight, focus, menu) = opened(true);
+    assert_eq!(highlight, Some(0));
+    assert_eq!(focus.as_ref(), Some(&menu.items[0].id), "focus on the first item");
+    let (highlight, focus, menu) = opened(false);
+    assert_eq!(highlight, None);
+    assert_eq!(focus, Some(menu.id), "focus on the menu");
+
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let places = ui.places();
+    let _ = ui.app.a11y_changes(&places);
+    let tile = node_of(&mut ui.app, &tile_id(4));
+    ui.send(Message::A11y(Event::Action(request(
+        Action::ShowContextMenu,
+        tile,
+        None,
+    ))));
+    assert_eq!(
+        ui.app.overlays.menu_highlight(),
+        Some(0),
+        "ShowContextMenu opens it by key"
+    );
+}

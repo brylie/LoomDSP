@@ -204,14 +204,18 @@ pub enum CanvasEvent {
     /// pointer move, so the app can keep one camera per level without a
     /// message for every frame of a drag.
     Camera(Camera),
-    /// A tile was right-clicked without moving.
+    /// A tile was right-clicked without moving, or its menu was asked for
+    /// with the menu key or Shift+F10.
     TileMenu {
-        /// The module under the pointer.
+        /// The module whose menu opens.
         module: u32,
         /// Menu position in window coordinates.
         at: Point,
         /// Canvas area for positioning the menu.
         area: Rect,
+        /// True when a key asked for it: the menu then opens on its first
+        /// item, as a menu opened from the keyboard does.
+        by_key: bool,
     },
     /// Ctrl+V or Cmd+V: paste the clipboard (`docs/design/clipboard.md`).
     /// `world` is the pointer when it is over the canvas, and the centre of

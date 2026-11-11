@@ -847,3 +847,57 @@ fn a_sub_patch_part_keys_the_slots_controls_under_its_key() {
         .expect("the comb's cutoff is a slider");
     assert_eq!(cutoff.1.label(), Some(tile.widgets[0].label.as_str()));
 }
+
+/// Every item of a tile menu is keyed by what it does, never by what it
+/// says: on a module, a slot, and a sub-patch tile, each item has an ID of
+/// its own, and none falls back to the unnamed key (ui-layer.md, section 4).
+#[test]
+fn tile_menu_items_are_keyed_by_what_they_do() {
+    use crate::overlays::{ContextMenu, Overlay};
+    let (mut app, slot, svf) = with_slot();
+    let check = |app: &mut App, module: u32| {
+        app.overlays.open(Overlay::Menu(ContextMenu::Tile {
+            module,
+            at: loom_ui_core::Point::new(10.0, 10.0),
+        }));
+        let menu = app.menu_model().expect("the menu is open");
+        let ids: Vec<String> = menu.items.iter().map(|item| item.id.to_string()).collect();
+        assert!(!ids.is_empty(), "{module}: items");
+        assert!(ids.iter().all(|id| !id.ends_with("/unnamed")), "{module}: {ids:?}");
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "{module}: {ids:?}");
+        app.overlays.close_tile_menu();
+    };
+    check(&mut app, slot);
+    app.overlays
+        .open(crate::overlays::Overlay::Menu(crate::overlays::ContextMenu::Tile {
+            module: slot,
+            at: loom_ui_core::Point::new(10.0, 10.0),
+        }));
+    let ids: Vec<String> = app
+        .menu_model()
+        .unwrap()
+        .items
+        .iter()
+        .map(|item| item.id.to_string())
+        .collect();
+    assert!(ids.contains(&format!("menu/tile/{slot}/dissolve-slot")), "{ids:?}");
+    assert!(
+        ids.iter()
+            .any(|id| id.starts_with(&format!("menu/tile/{slot}/swap/{slot}/"))),
+        "{ids:?}"
+    );
+    app.overlays.close_tile_menu();
+    let other = app
+        .ui_snapshot()
+        .tiles
+        .iter()
+        .map(|tile| tile.id)
+        .find(|id| *id != slot && *id != svf)
+        .expect("another tile inside the Voice");
+    check(&mut app, other);
+    app.show_level(&ModulePath::root());
+    check(&mut app, 2);
+}

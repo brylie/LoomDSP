@@ -263,7 +263,12 @@ impl App {
                         output, world, at, area,
                     ))));
             }
-            CanvasEvent::TileMenu { module, at, area } => {
+            CanvasEvent::TileMenu {
+                module,
+                at,
+                area,
+                by_key,
+            } => {
                 self.overlays.open(Overlay::Menu(ContextMenu::Tile {
                     module,
                     at: Point::new(
@@ -271,6 +276,12 @@ impl App {
                         at.y.min(area.y + area.height - 36.0).max(area.y),
                     ),
                 }));
+                // Opened from the keyboard, it starts on its first item, so
+                // Enter picks at once; opened by the pointer, on none
+                // (ui-layer.md, section 6, rule 8).
+                if by_key {
+                    self.overlays.set_menu_highlight(Some(0));
+                }
             }
             CanvasEvent::OpenBrowser { world, at, area } => {
                 self.close_slider_gesture();

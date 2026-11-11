@@ -75,6 +75,35 @@ pub(crate) fn recent_id() -> UiId {
     UiId::panel("recent")
 }
 
+/// The UI ID of a tile menu's item, under the menu's `menu`, from what the
+/// item does, not from what it says: rewording an item, or a name in it,
+/// keeps its node (section 4).
+fn tile_item_id(menu: &UiId, message: &Message) -> UiId {
+    use crate::slots::SwapTarget;
+    let id = menu.clone();
+    match message {
+        Message::OpenTile(_) => id.with("open"),
+        Message::DissolveSubPatch(_) => id.with("dissolve"),
+        Message::SaveToLibrary(_) => id.with("save-to-library"),
+        Message::Unlink(_) => id.with("unlink"),
+        Message::ShowModuleHelp(_) => id.with("help"),
+        Message::MakeSubPatch(_) => id.with("make-sub-patch"),
+        Message::MakeSlot { role, .. } => id.with("make-slot").with(role.as_str()),
+        Message::DissolveSlot(_) => id.with("dissolve-slot"),
+        Message::SwapSlot { slot, to } => {
+            let (kind, name) = match to {
+                SwapTarget::Module(name) => ("module", name),
+                SwapTarget::Library(name) => ("library", name),
+                SwapTarget::Held(name) => ("held", name),
+            };
+            id.with("swap").with(*slot).with(kind).with(name.as_str())
+        }
+        // An item this list does not name yet still gets a node of its own;
+        // a test checks that every item a tile can show is named here.
+        _ => id.with("unnamed"),
+    }
+}
+
 /// Where a key moves the highlight in a menu of `len` items, from `at`. Up
 /// and Down wrap; from no highlight, Down goes to the first item and Up to
 /// the last. `None` for a key that moves nothing.
@@ -117,7 +146,7 @@ impl App {
                 .tile_menu_items(module)
                 .into_iter()
                 .map(|(label, message)| MenuItem {
-                    id: id.clone().with(label.as_str()),
+                    id: tile_item_id(&id, &message),
                     label,
                     description: None,
                     message,
