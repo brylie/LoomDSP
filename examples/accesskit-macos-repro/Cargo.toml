@@ -1,0 +1,19 @@
+# A reproduction of two gaps in AccessKit's macOS adapter, for upstream
+# (docs/research/2026-11-accesskit-macos-gaps.md). It is outside the LoomDSP
+# workspace on purpose: it uses no LoomDSP crate, CI does not build it, and
+# its own Cargo.lock pins the versions the reports name. Delete this folder,
+# and its `exclude` line in the root Cargo.toml, once upstream has the fix.
+[package]
+name = "accesskit-macos-repro"
+description = "One window and slider nodes that show two gaps in AccessKit's macOS adapter with VoiceOver."
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+accesskit = "=0.25.2"
+accesskit_winit = "=0.34.2"
+winit = "0.30.13"
+
+[workspace]

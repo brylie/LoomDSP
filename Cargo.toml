@@ -15,7 +15,9 @@ members = [
     "crates/loom-app",
 ]
 # Fuzz targets need nightly; they have their own workspace (#44).
-exclude = ["fuzz"]
+# `examples/accesskit-macos-repro` is a reproduction for AccessKit upstream.
+# It stays out so its dependencies never reach the workspace tree.
+exclude = ["fuzz", "examples/accesskit-macos-repro"]
 
 [workspace.package]
 version = "0.1.0"
