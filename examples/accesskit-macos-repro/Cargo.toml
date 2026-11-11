@@ -17,6 +17,7 @@ accesskit = "=0.25.2"
 # the lockfile, which this macOS-only program never builds. `rwh_06` is the
 # window handle version winit 0.30 uses.
 accesskit_winit = { version = "=0.34.2", default-features = false, features = ["rwh_06"] }
-winit = "0.30.13"
+# No default features here either: winit's are its X11 and Wayland backends.
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 
 [workspace]

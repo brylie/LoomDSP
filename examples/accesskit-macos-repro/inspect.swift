@@ -18,17 +18,70 @@ let names = [
     "AXValue", "AXValueDescription", "AXMinValue", "AXMaxValue",
 ]
 
-/// The value of one attribute, or nil when the element does not have it.
-func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+/// What reading one attribute gave. A failed read is kept apart from an
+/// absent attribute: "the element has no such attribute" is a finding, and
+/// "the read did not work" is not.
+enum Read {
+    /// The attribute's value.
+    case value(CFTypeRef)
+    /// The element does not have the attribute, or it has no value.
+    case absent
+    /// The read failed for another reason, such as the other program not
+    /// answering. The code is the `AXError` raw value.
+    case failed(Int32)
+}
+
+/// Reads one attribute of an element.
+func read(_ element: AXUIElement, _ name: String) -> Read {
     var value: CFTypeRef?
-    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+    let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
+    switch result {
+    case .success:
+        if let value = value { return .value(value) }
+        return .absent
+    case .attributeUnsupported, .noValue:
+        return .absent
+    default:
+        return .failed(result.rawValue)
+    }
+}
+
+/// How many reads failed while walking the tree. A failed read there can
+/// hide a slider, so the count is reported at the end.
+var failedReads = 0
+
+/// The value of one attribute, or nil when the element does not have it
+/// or the read failed. A failed read is counted and named on standard
+/// error.
+func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    switch read(element, name) {
+    case .value(let value):
+        return value
+    case .absent:
+        return nil
+    case .failed(let code):
+        failedReads += 1
+        FileHandle.standardError.write("read of \(name) failed (AXError \(code))\n".data(using: .utf8)!)
+        return nil
+    }
+}
+
+/// What a read gave, as text.
+func describe(_ read: Read) -> String {
+    switch read {
+    case .value(let value):
+        return describe(value)
+    case .absent:
+        return "(absent)"
+    case .failed(let code):
+        return "(read failed, AXError \(code): not evidence that it is absent)"
+    }
 }
 
 /// An attribute value as text, with its type, so a number and a string
 /// that look alike can be told apart. The type is read from Core
 /// Foundation, because these values do not all bridge to Swift types.
-func describe(_ value: CFTypeRef?) -> String {
-    guard let value = value else { return "(absent)" }
+func describe(_ value: CFTypeRef) -> String {
     let type = CFGetTypeID(value)
     if type == CFStringGetTypeID() {
         let text = unsafeBitCast(value, to: CFString.self) as String
@@ -74,13 +127,13 @@ func visit(_ element: AXUIElement, _ found: inout Int, _ depth: Int = 0) {
     if depth > maxDepth { return }
     if showTree {
         let indent = String(repeating: "  ", count: depth)
-        print("\(indent)\(string(element, "AXRole") ?? "(no role)") \(describe(attribute(element, "AXTitle")))")
+        print("\(indent)\(string(element, "AXRole") ?? "(no role)") \(describe(read(element, "AXTitle")))")
     }
     if string(element, "AXRole") == "AXSlider" {
         found += 1
         print("slider \(found)")
         for name in names {
-            print("  \(name.padding(toLength: 20, withPad: " ", startingAt: 0))\(describe(attribute(element, name)))")
+            print("  \(name.padding(toLength: 20, withPad: " ", startingAt: 0))\(describe(read(element, name)))")
         }
         var actions: CFArray?
         if AXUIElementCopyActionNames(element, &actions) == .success, let actions = actions {
@@ -122,6 +175,9 @@ print("macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVers
 var found = 0
 for window in elements(AXUIElementCreateApplication(pid), "AXWindows") {
     visit(window, &found)
+}
+if failedReads > 0 {
+    print("\(failedReads) reads failed while walking the tree, so the list above may be incomplete. Run it again.")
 }
 if found == 0 {
     print("No slider found. Is the window open, and has assistive technology asked for its tree?")
