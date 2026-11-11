@@ -118,3 +118,31 @@ fn the_canvas_is_found_and_unnamed_containers_are_not_parts() {
     assert_eq!(places.len(), 0);
     assert_eq!(Places::of_canvas(None).len(), 0);
 }
+
+/// An area scrolled wholly out of the area around it shows nothing: its
+/// clip is empty, so a part inside it is not shown, though the part lies
+/// inside the inner area's own bounds. Where the two overlap, the clip is
+/// the overlap.
+#[test]
+fn an_area_scrolled_out_of_the_outer_one_shows_nothing() {
+    let mut collect = Collect::default();
+    scrolling(&mut collect, rectangle(0.0, 0.0, 300.0, 300.0), 0.0, &mut |outer| {
+        // Below the outer area: none of it can be seen.
+        scrolling(outer, rectangle(0.0, 400.0, 300.0, 100.0), 0.0, &mut |inner| {
+            part(inner, "matrix/7", rectangle(0.0, 420.0, 300.0, 20.0));
+        });
+        // Half inside it: only the half that shows can be seen.
+        scrolling(outer, rectangle(0.0, 250.0, 300.0, 100.0), 0.0, &mut |inner| {
+            part(inner, "matrix/8", rectangle(0.0, 260.0, 300.0, 20.0));
+        });
+    });
+    let Outcome::Some(places) = collect.finish() else {
+        panic!("the collector always has a result");
+    };
+    let id = |text: &str| text.parse::<UiId>().unwrap();
+    let hidden = places.of(&id("matrix/7")).unwrap();
+    assert!(!hidden.is_shown(), "{hidden:?}");
+    let half = places.of(&id("matrix/8")).unwrap();
+    assert_eq!(half.clip, Some(rect(0.0, 250.0, 300.0, 50.0)));
+    assert!(half.is_shown());
+}
