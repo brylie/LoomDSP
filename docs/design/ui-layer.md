@@ -9,7 +9,7 @@ How LoomDSP's own UI layer turns events into messages, decides what to rebuild, 
 - **Background:** [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md). An explainer in `docs/learn/` follows in phase 4. The [canvas accessibility spec](canvas-accessibility.md) builds on sections 6, 7, and 9 for the patch outline, the patch map, and following cables.
 - **Prior art:** the Elm architecture (one message type, one update), and the rebuild-and-compare approach that Levien describes for Xilem. Named only to explain ideas.
 - **Issues:** [#683](https://github.com/brylie/LoomDSP/issues/683). The step-by-step work is in [the plan](../dev/leaving-iced-plan.md).
-- **Code:** `crates/loom-ui-core` and `crates/loom-ui`, once they exist. Until then, `crates/loom-app` and `crates/loom-canvas`.
+- **Code:** `crates/loom-ui-core`, and `crates/loom-ui` for the runtime of section 2 (plan step 2.1). The rest is still in `crates/loom-app` and `crates/loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -28,7 +28,7 @@ All three work because one runtime, one set of view models, and one identity sch
 | **Runtime** | The code that takes events, calls the app, runs effects, rebuilds what changed, and asks for redraws. The same code in the window and in the harness. |
 | **Driver** | What feeds the runtime events and shows its output: the `winit` shell, or the headless `Ui` harness. |
 | **Message** | The app's own type for "something happened that may change state". The only way app state changes. |
-| **Effect** | A plain value the app returns from `update` asking the shell to do something outside the app: focus a field, use the clipboard, open a dialog, run work off the UI thread, set a timer, quit. |
+| **Effect** | A plain value the app returns from `update` asking the shell to do something outside the app: focus a field, use the clipboard, open a dialog, run work off the UI thread, quit. |
 | **View model** | A plain-data struct the app builds from its state, describing what one panel shows (ADR-0021). |
 | **Panel** | A part of the window with its own view model and its own place in a layer: the toolbar, the stats bar, the inspector, the module browser, an overlay. The unit of rebuild. |
 | **Element** | One node of the tree a panel builds from its view model: a row, a button, a slider, a text. Elements are rebuilt when their panel is rebuilt. |
@@ -68,59 +68,72 @@ Rules:
 
 One turn of the runtime:
 
-1. An **event** arrives from the driver: a pointer or key event, IME, a file dropped on the window, a resize, a scale factor change (the window moved to another display), window focus gained or lost, a close request, a redraw request, an animation frame (section 3, rule 7), a wake-up from another thread, or a deadline that has passed.
+1. An **event** arrives from the driver: a pointer or key event, IME, a file dropped on the window, a resize, a scale factor change (the window moved to another display), window focus gained or lost, a close request, a redraw request, an animation frame (section 3, rule 8), word that the last frame was shown, a wake-up from another thread (a watcher, background work, or a screen reader's action), or a deadline that has passed. The driver passes the moment with it; the runtime never reads the clock.
 2. The runtime **routes** it (sections 5 and 6). The element that takes it either handles it as widget state, or turns it into a **message**. Window events with no element (a file drop, a close request) become messages directly.
 3. For each message, the runtime calls **`update`** once. `update` changes app state and returns **effects**.
-4. The runtime **runs the effects** after `update` returns. An effect that produces a message (a dialog closed, a clipboard read, a timer fired, background work finished) queues it for a later turn.
+4. The runtime **runs the effects** after `update` returns, before the next message's `update`: each message's effects run right after its own update. An effect that produces a message (a dialog closed, a clipboard read, background work finished, a frame shown) queues it for a later turn.
 5. The runtime asks each panel whether its view model changed, and **rebuilds** only the panels that did (section 3).
 6. It redoes **layout** for rebuilt panels, updates the **accessibility tree** for changed nodes, and asks the driver for a **redraw** only if something visible changed.
 7. With nothing queued, no animation frame asked for, and nothing visible to change, the loop **sleeps** until the next event or deadline.
 
-A sketch of the contract the app implements. It is here to make the rules concrete. The names are not binding; the rules are. The exact shape is settled in phase 2, when the runtime is built, and first used by a `loom-ui` panel in phase 3, the stats bar (the plan's order of views).
+The contract the app implements, as built in plan step 2.1 (`crates/loom-ui/src/app.rs`). It is designed from what LoomDSP and the tools beside it need, not from Iced's `Task`, `Subscription`, or widget operations. Phase 3 adds the builder that makes a panel's elements, and `View` then gains the message type.
 
 ```rust
-/// The app, as the runtime sees it.
 pub trait App {
-    /// The app's message type: the only way its state changes.
-    type Message;
+    /// The only way app state changes. `Send`, since watchers send it.
+    type Message: Send + 'static;
 
-    /// Applies one message and returns what the shell should do next.
-    fn update(&mut self, message: Self::Message) -> Effects<Self::Message>;
+    /// Applies one message and returns its effects.
+    fn update(&mut self, message: Self::Message, cx: &Context<'_, Self::Message>) -> Effects<Self::Message>;
 
-    /// Describes the window, one panel at a time. The runtime skips the
-    /// build of any panel whose model equals the last one.
-    fn view(&self, ui: &mut View<Self::Message>);
+    /// Describes the window, one panel at a time: a key, a layer, a model.
+    fn view(&self, view: &mut View);
 
-    /// The next moment the app needs to wake with no event, if any.
-    fn next_deadline(&self) -> Option<Instant>;
+    /// The title and limits, compared after each update like a panel model.
+    fn window(&self) -> WindowSpec;
+
+    /// When to wake with no event, and the message to get then.
+    fn next_deadline(&self) -> Option<Deadline<Self::Message>> { None }
+
+    /// The message for a close request or a dropped file, if any.
+    fn window_event(&self, event: &WindowEvent) -> Option<Self::Message> { None }
+
+    /// True while something moves: a frame each display refresh, no update.
+    fn animating(&self) -> bool { false }
 }
 
-// Inside `view`: a panel is a key, a layer, a model, and a builder.
-ui.panel(PanelKey::INSPECTOR, Layer::Panels, &inspector_model, |model, el| {
-    // build elements from `model` only
-});
+// Inside `view`. Phase 3 adds a builder after the model.
+view.panel(UiId::panel("inspector"), Layer::Panels, &inspector_model);
 ```
+
+`Context` gives `update` the moment (`now`), a `Waker` for watcher threads, the element with focus, and the window's size, scale, and focus, all read only. `update` reads focus there in the same turn, instead of asking for it with an effect and waiting for the answer.
 
 ### Effects
 
-The table covers every use of Iced's `Task`, its widget operations, and `rfd` in `crates/loom-app/src` at commit `a781de4` (`Task::none` and `Task::batch` become an empty and a combined `Effects`, and `Task::done` a message queued for the next turn). A new kind of effect is added here first.
+The table covers every use of Iced's `Task`, its widget operations, and `rfd` in `crates/loom-app/src` at commit `a781de4`, and what replaces each (`Task::none` and `Task::batch` become an empty and a combined `Effects`). A new kind of effect is added here first. Each is a variant of `loom_ui::Effect`, and each has a stable name that a driver's panic text uses.
 
 | Effect | Used today by | What the shell does | What the headless harness does |
 |---|---|---|---|
-| Focus an element, by UI ID, or the next or previous one. The UI ID may name an inner part of a custom element (section 9, rule 6) | Focusing a field, Tab between fields (`editing.rs`, `StepFocus`); later, Enter on an outline row focusing a tile control | Moves keyboard focus | The same |
-| Ask which text field has focus, then queue a message with the answer | `Message::TextFocus` (`editing.rs`) | Answers from the focus state | The same |
-| Select all text in a field | Opening a field for typing (`editing.rs`) | Sets the field's selection | The same |
+| Focus an element, by UI ID, or the next or previous one, optionally selecting all of a text field. The UI ID may name an inner part of a custom element (section 9, rule 6) | Focusing a field, Tab between fields (`editing.rs`, `StepFocus`); opening a field for typing selects all; later, Enter on an outline row focusing a tile control | Moves keyboard focus | The same |
 | Scroll an element into view | The module browser and patches lists, a matrix row (`matrix.rs`) | Changes its scroll offset | The same |
 | Write the clipboard | Copy, Cut | Writes the system clipboard | Writes its in-memory clipboard |
 | Read the clipboard | Paste (`Message::Pasted`) | Reads the system clipboard, then queues a message with the text for the next turn | Reads its in-memory clipboard, and queues the same message |
 | Open or save file dialog | Open, Save As | Shows the dialog, then queues a message with the result | Panics, unless the test gave an answer first |
-| Ask a question in a native dialog | Unsaved changes, crash recovery, the author name (`rfd::MessageDialog`) | Shows the dialog, then queues a message with the button pressed | Panics, unless the test gave an answer first |
-| Run work off the UI thread, then queue one message with its result | Loading the module library (`browser.rs`) | Runs it on a worker thread | Runs it inline, to its end, before the next turn |
-| Run work off the UI thread that sends messages as it goes | Reading the patches folder in batches (`patches.rs`) | Runs it on a worker thread; each message wakes the loop through the proxy | Runs it inline, to its end, and queues every message it sends, in order |
-| Capture the window as an image | The control channel's `screenshot` | Draws the next frame offscreen, then queues a message with the image | Draws offscreen when a GPU adapter exists, else answers `NO_GPU` |
-| Window command (size, minimum size, cursor) | None yet; the title is read from the app each turn, as Iced's `title` does today | Applies it | Records it, for the test to read |
-| Timer | None yet; today's periodic checks are deadlines (rule 8) | Adds a deadline | Adds a deadline the test can advance |
+| Ask a question in a native dialog | Unsaved changes, crash recovery, the author name (`rfd::MessageDialog`) | Shows the dialog, then queues a message with the index of the button pressed | Panics, unless the test gave an answer first |
+| Run work off the UI thread. It gets a waker and sends one message or many | Loading the module library (`browser.rs`); reading the patches folder in batches (`patches.rs`) | Runs it on a worker thread; each message wakes the loop | Runs it inline, to its end, and queues every message it sends, in order |
+| Capture the window as an image | The control channel's `screenshot` | Draws the next frame offscreen, then queues a message with the image | `loom-ui`'s headless driver panics unless the test gave an answer; the app's `Ui` harness draws offscreen when a GPU adapter exists, else answers `NO_GPU` |
+| A message once the next frame is shown | The control channel's two-frame wait (`ControlFrame`) | Draws, and queues the message when the frame has been shown | The same, when the test reports the frame shown |
+| Draw again although no panel model changed | A request handed to a custom element that it applies when it draws, such as a screen reader's Focus action on the canvas | Draws | Counts the draw |
 | Quit | Quitting (`iced::exit` in `lib.rs`) | Ends the loop | Marks the app as exited |
+
+Not effects, because nothing needs them as effects:
+
+- **Which field has focus.** `update` reads it from its `Context`. Iced needed a round trip (`Message::TextFocus`) because it keeps focus inside its widgets.
+- **The window's title and limits.** The app describes them in `App::window`, and the runtime passes them on only when they change, as with panel models.
+- **Timers.** Nothing uses a one-shot timer; every periodic check is a deadline from state (rule 8). A timer effect can be added when something needs one.
+- **A message queued for the next turn** (`Task::done`). It makes a chain of updates, which rule 6 rules out. Inline results come from work, and "after this turn is drawn" is the after-draw effect.
+
+**Dialogs take two turns.** Today `files.rs` and `recovery.rs` call `rfd`'s dialogs inside `update` and block until they close. As effects, the question is one turn and its answer is the next, so the app holds what waits on the answer (the unsaved changes on close, the crash recovery at start). The loop keeps running while a dialog is open, so meters, telemetry, and the accessibility tree do not stall.
 
 ### Rules
 
@@ -130,9 +143,11 @@ The table covers every use of Iced's `Task`, its widget operations, and `rfd` in
 4. **The harness runs background work inline and in order.** *Why:* tests stay deterministic, and a test never waits on a thread. The patches browser already reads its folder this way under test.
 5. **One message gives one `update`.** Effects run after it returns. An effect never calls `update` again in the same turn, and a message produced by an effect waits for the next turn. *Why:* chains of updates in one turn are hard to predict and hard to test.
 6. **Derived values are computed in view model builders,** not through chains of messages or effects. *Why:* the same reason. A value that follows from state is a function of state.
-7. **Threads wake the loop through a waker the driver gives.** The control channel listener, the MIDI learn watcher (`learn.rs`), the audio input watcher (`input_watch`), the audio stream watcher (`audio_watch`), the telemetry monitor, and background work send messages through it. In the `winit` shell the waker wraps an `EventLoopProxy`; in the harness it queues the message. *Why:* the loop then sleeps until something happens, rather than polling for it.
+7. **Threads wake the loop through a waker.** The control channel listener, the MIDI learn watcher (`learn.rs`), the audio input watcher (`input_watch`), the audio stream watcher (`audio_watch`), the telemetry monitor, and background work send messages through it. The waker queues the message and calls the driver's wake function: in the `winit` shell that nudges the `EventLoopProxy`; in the harness it does nothing, since the harness drains the queue itself. A watcher takes its waker from `update`'s `Context`, and the app keeps the watcher's handle in its state: the watcher lives as long as the handle, and dropping the handle stops it. Dropping a handle never blocks the UI thread. It signals the thread and detaches, or joins only a thread known to end at once. *Why:* the loop then sleeps until something happens, rather than polling for it. Holding watchers as state, not as a list of subscriptions restarted by key, makes their lifetime the lifetime of what they watch (an engine, a stream, a listener). A watcher stuck in a MIDI or audio call must not freeze the window on New or Open.
 8. **Periodic checks become deadlines, and a deadline that changes nothing costs nothing.** These stay periodic: the device poll (`AudioPoll`, every 250 ms), the MIDI port poll (`MidiPoll`), the MIDI ghost check (`MidiGhosts`), the 500 ms `Tick`, the autosave check (`Autosave`), and the drop-out check (`DropsDone`). Each wakes the loop and runs `update`. When its message changes no view model, it causes no panel rebuild, no accessibility update, and no redraw. *Why:* these checks poll the operating system, which has no event for them. NFR-PERF-04 asks for no redraw while nothing visible changes, which holds even while the loop wakes.
 9. **The driver is a trait, and the runtime and the `App` trait use no `winit` type.** No `EventLoop`, `EventLoopProxy`, `ControlFlow`, `Window`, or `winit` event reaches them. The runtime takes events as `loom-ui-core` types, returns the next deadline, and asks the driver to redraw or to apply window commands. Two drivers exist after phase 2: the `winit` shell and the headless harness. *Why:* a plugin's window belongs to the host, and the host runs the event loop. `winit` owns the process's one event loop (on the main thread on macOS), so it is not expected to serve inside a plugin; plugin GUIs use host-window backends instead. The OQ-13 spike confirms which. A third driver for a host window must then be possible without changing the runtime. Otherwise the contract carries the kind of cost section 3, rule 5 warns about.
+10. **A turn draws only when something visible changed.** The turn's result tells the driver to draw (`Next::draw`; the runtime never calls the driver to draw, so a shell cannot turn its own redraw request into a loop) when a panel's model differs from the last (section 3, rule 2), when the routing target says it needs a draw, when an effect asks (draw again, a message after the next frame, a capture), or when the system asks. An animation frame draws and runs no update. Nothing else draws. A frame the driver asked its window system for is drawn when it comes, with no redraw request sent for it, and several turns that say to draw before then make one frame. A resize or a scale change draws through the redraw request the window system sends after it; a driver whose system sends none sends one itself. After each frame is on screen the driver says so once, and only for a frame that began after the latest turn that said to draw, since a message waiting for the next frame arrives then. During phases 2 and 3 the routing target for the views Iced still draws is the bridge, and it says it needs a draw after any turn that ran an update. That is Iced's own habit, kept inside the bridge and deleted with it. Measured on `main` at `085f217a`, `--measure-idle` on `subtractive.ron` drew 266 frames in 10 s, 263 of them for meter messages and none for polls, so this keeps today's cost exactly. *Why:* the runtime must not hard-code one toolkit's habit, and no `update` path may write its own "did this change?" guard (section 3, rule 2). The saving comes in phase 3, when each view is a compared panel and meters are live values.
+11. **The runtime never reads the clock.** Every turn takes the moment from the driver, and `update` reads it from its `Context`. *Why:* a test then decides what time it is, and a deadline test runs in no time at all.
 
 ## 3. Change and cost model
 
@@ -149,7 +164,7 @@ This section answers "what changed, and who depends on it?" The background is in
 5. **The contract has a boundary below the window from the start.** `view` builds panels by key, never one undivided tree. The first version may still rebuild more than it must. *Why:* a cost built into the API cannot be fixed later behind it. Faster code inside the runtime can remove work; it cannot remove a call the contract requires.
 6. **Nothing redraws while nothing visible changes.** A blinking caret redraws only its own element, only while a text field has focus and the window is focused. *Why:* NFR-PERF-04, and the control channel's rule that the app sleeps when idle.
 7. **Live values are not part of panel models.** Meter readings, lights, live modulated positions, scope traces, and the audio load live in a live value table that the app updates from the engine. An element that shows one reads the table when it draws, and is redrawn, not rebuilt, when it changes. The canvas already works this way: panel control values have their own GPU buffer (`PanelValues`), so a moving meter never rebuilds tiles. *Why:* these values change at display rate while audio plays. In a panel model, they would rebuild that panel 60 times a second, and an "equal message rebuilds nothing" check would pass while the real cost went unmeasured.
-8. **Animation frames are asked for, not constant.** An element that shows moving live values asks the runtime for animation frames while they move, and stops asking when the engine is idle or the element is off screen. The runtime delivers one frame event per display refresh, only while some element asks. This replaces Iced's `window::frames()` subscriptions (`Frame`, `LiveFrame`, `ControlFrame`). *Why:* frame-rate drawing costs nothing when nothing moves (NFR-PERF-04, "a display redraws only while it is on screen").
+8. **Animation frames are asked for, not constant.** An element that shows moving live values asks the runtime for animation frames while they move, and stops asking when the engine is idle or the element is off screen. The runtime delivers one frame event per display refresh, only while some element asks. This replaces Iced's `window::frames()` subscriptions `Frame` and `LiveFrame`. `ControlFrame` is replaced by section 2's message once the next frame is shown. *Why:* frame-rate drawing costs nothing when nothing moves (NFR-PERF-04, "a display redraws only while it is on screen").
 
 ### Measuring it
 
@@ -322,7 +337,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 17. **A readout is a label whose value is its name and the text it shows,** as "Cents: 12.5 cents", and it has no label of its own. An adapter gives a label node's label in place of its value (`accesskit_macos` 0.27.2, `label_is_exposed_in_value`), so a name set as the label would hide the reading. No label node has both. **A scope is an image** whose description says its trace's lowest and highest points in words, updated at most 4 times a second (rule 7). A light, and the other drawings a tile shows, are images named by what they are bound to, with the text the screen gives for them as the description. *Why:* a screen reader user should learn that a signal is there and roughly how large it is. A stream of numbers at the frame rate would be noise.
 18. **A widget with no caption is named by what it is bound to,** the name its hover text shows. *Why:* most meters and scopes have no caption on the tile, and rule 2 needs every node to have a name.
 19. **A tile gives no port nodes in phase 1.** Ports come with the canvas accessibility work ([canvas accessibility](canvas-accessibility.md)). *Why:* that spec designs how ports and cables are read, and nodes added before it would have to be redone.
-20. **The Focus action on a control moves keyboard focus there,** and the tree reports focus on the control that has it, or on the window when none has. In phase 1 the app asks the canvas with a request that names the module and the widget, and the canvas reports each focus change once, whatever caused it. Focus on one value of an XY pad or a range, or on one option, focuses the control that holds it. Focus on a control also selects its tile, through the path a press or Tab on the control already takes, so arrow keys then act on it and the inspector follows. Focus on a tile does nothing, and no Focus action changes the patch (rule 9). A widget that only shows a value offers no Focus. A request waits while something else has the input, and is applied on the first redraw after the canvas has it again, so its events are never dropped. When the selection moves to another tile from outside the canvas, as on a screen reader's Click on that tile, focus left on the first tile is dropped and the tree reports focus on the window. The request is applied when the canvas next draws, and the runtime draws the window after every message, so an action that arrives alone still moves the focus. *Why:* VoiceOver can be set to move keyboard focus with its cursor, and a user who then presses an arrow key expects it to act on the control they hear. The request names a module and a widget, nothing of the toolkit, because the focus effect of phase 2 will carry the same.
+20. **The Focus action on a control moves keyboard focus there,** and the tree reports focus on the control that has it, or on the window when none has. In phase 1 the app asks the canvas with a request that names the module and the widget, and the canvas reports each focus change once, whatever caused it. Focus on one value of an XY pad or a range, or on one option, focuses the control that holds it. Focus on a control also selects its tile, through the path a press or Tab on the control already takes, so arrow keys then act on it and the inspector follows. Focus on a tile does nothing, and no Focus action changes the patch (rule 9). A widget that only shows a value offers no Focus. A request waits while something else has the input, and is applied on the first redraw after the canvas has it again, so its events are never dropped. It is applied after a new level or patch is framed, which clears the focus, and waits while that framing waits for the canvas to have a width; a request made during that wait still lands once the width comes. The keys go with the focus, by the path a press on the canvas takes: the matrix lets go of them, and a text field that has them closes, its draft dropped as a press drops it. When the selection moves to another tile from outside the canvas, as on a screen reader's Click on that tile, focus left on the first tile is dropped and the tree reports focus on the window. While a choice's list is open, focus stays with it, and is dropped on the first redraw after the list closes. The request is applied when the canvas next draws, and the runtime draws the window after every message, so an action that arrives alone still moves the focus. *Why:* VoiceOver can be set to move keyboard focus with its cursor, and a user who then presses an arrow key expects it to act on the control they hear. The request names a module and a widget, nothing of the toolkit, because the focus effect of phase 2 will carry the same.
 21. **A meter reports the number its text shows,** not the level as stored. A level meter that reads "-6.0 dB" reports -6, from -60 to 0. A meter on a display value reports that value, with the display's range. The number is the one the text writes, digit for digit: it is read back from the text's one decimal, so "-12.0 dB" is -12 and never -12.04. Where the text says a value past the end of the range, the bounds reach out to it, so the number is never outside its own bounds. The code that writes the text makes the number, and the tree reads it from there (`Reading` in `loom-canvas`, `meter_reading` in `scene.rs`). When the text names no single number, the node has no number and says the text only: a stereo meter says two levels, and a level under the floor reads "below -60 dB". *Why:* a stored level of 0.9 means nothing to a listener, and working out decibels a second time in the tree would let the two drift apart. Decided 2026-11-11, the same answer as rule 14 gives for a knob.
 22. **Outside the canvas, only a text field offers the Focus action until phase 3.** A toolbar button, a tab, a switch, and a slider offer what they do (Click, Increment, SetValue) and no Focus. *Why:* the toolkit's buttons and sliders cannot take keyboard focus, and an action that does nothing is worse than none. Our own widgets take focus from phase 3, and offer it then. A phase 1 limit.
 23. **Hover text is the node's description,** on a toolbar button, a stats bar item, and the status line. For a disabled button the hover text says why it is disabled, so the description does too. *Why:* the hover text is what a sighted user gets by pointing, and a screen reader user cannot point.
@@ -379,7 +394,7 @@ A custom element is the layer's supported escape hatch. The patch canvas is the 
 2. **The harness's event and query methods keep their meaning:** `headless`, `press`, `release`, `drag`, `move_to`, `hold`, `tap`, `tap_key`, `key_down`, `key_up`, `typewrite`, `click_text`, `control`, `control_bounds`, `field`, `value_field`, `text`, `focus`, `focused_field`, `output`, `input`, and the rest. Their call sites do not change. `run_task(Task<Message>)` becomes `run_effects(Effects<Message>) -> Vec<Message>`, with the same meaning: run until no messages are left, and return them all. Its call sites change mechanically in phase 2, in one commit with no other change. *Why:* every `loom-app` test (1,004 at commit `a781de4`) depends on the harness. Keeping the meaning fixed shows whether behaviour changed; renaming the one method tied to Iced is the only way to leave Iced.
 3. **Event tests need no GPU.** Drawing tests render to an offscreen `wgpu` texture, and skip with `NO_GPU` where there is no adapter. *Why:* CI machines often have no GPU.
 4. **The harness can read and act on the accessibility tree:** `Ui::a11y_tree()` returns it, and `Ui::a11y_action(name, action)` performs an action on a node found by name. *Why:* a test can check the window the way a screen reader meets it.
-5. **A control channel command always gets its reply.** While a command waits for its reply, the control channel asks for animation frames (section 3, rule 8), as `ControlFrame` does today, so the two-frame wait of [control channel rule 5](control-channel.md#rules) completes even when the command changes nothing visible. *Why:* without a frame to wait for, a command that changes nothing would never be answered, and a script would hang.
+5. **A control channel command always gets its reply.** A command that waits for the window to be drawn asks for a message once the next frame is shown (section 2, the effects table), which also makes the runtime draw. So the two-frame wait of [control channel rule 5](control-channel.md#rules) completes even when the command changes nothing visible, with no animation frames and no update per frame. This replaces `ControlFrame`. *Why:* without a frame to wait for, a command that changes nothing would never be answered, and a script would hang.
 6. **The control channel's protocol does not change.** `locate` finds targets from layout data and UI IDs, not from a toolkit's widget tree, and answers in logical pixels. Its replies are the same for every example in the [control channel spec](control-channel.md). *Why:* agents and scripts built on it keep working.
 
 ## Acceptance criteria
@@ -474,5 +489,16 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | What a select offers before phase 3 (2026-11-10) | Its chosen option, and Increment and Decrement, one option per step. No Expand or Collapse, on a tile or in the inspector | Section 7, rule 15 |
 | Whether tiles give port nodes in step 1.4 (2026-11-10) | No. They come with the canvas accessibility work | Section 7, rule 19 |
 | Whether a tile's node offers Click (2026-11-10) | Yes. Click selects the tile's module; Focus alone still changes nothing | Section 7, the role table and rule 9 |
+
+| What the runtime's contract is shaped by (2026-11-11) | LoomDSP's own needs, not Iced's `Task`, `Subscription`, widget operations, or application builder. Brylie: "let's use our own design as needed, so we're not bound by the original decision to use Iced" | Section 2 |
+| How a deadline becomes a message (2026-11-11) | `next_deadline` returns the time and the message together, built from state after each update | Section 2, the sketch |
+| Whose effects run first in one batch (2026-11-11) | Each message's effects run right after its own update | Section 2, Behaviour 4 |
+| Whether `update` gets the time (2026-11-11) | Yes, from its `Context`, with a waker, the focus, and the window | Section 2, the sketch; rule 11 |
+| Whether paste reads the clipboard in the same turn (2026-11-11) | No, one step later: reading is an effect and the text arrives on the next turn. Brylie chose it, so `update` never waits on the system and the same shape serves a plugin and the web target | Section 2, the effects table |
+| Who asks for animation frames before phase 3 (2026-11-11) | The app, with `animating`. A frame draws and runs no update. Section 3, rule 8 moves the asking to elements in phase 3 | Section 2, the sketch |
+| What replaces `ControlFrame` (2026-11-11) | A message once the next frame is shown | Section 2, the effects table; section 10, rule 5 |
+| How watchers live (2026-11-11) | As handles in app state, taking their waker from the context; dropping the handle stops the watcher and never blocks | Section 2, rule 7 |
+| What decides a redraw in phases 2 and 3 (2026-11-11) | A changed panel model, the routing target, an effect, or the system. The bridge's target says "an update ran", which keeps today's cost | Section 2, rule 10 |
+| Effects dropped (2026-11-11) | The focus query, select all as its own effect, timers, window commands, and a message queued for the next turn | Section 2, the effects table |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.

@@ -3,14 +3,14 @@
 How a cable carries one value per voice, how notes are given to voices, which modules make, merge, and spread voices, and what a module author has to do to become polyphonic (nothing, in most cases).
 
 - **Kind:** living specification.
-- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. Nothing is built yet.
+- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator is implemented in `loom-dsp`; bundles and source modules are not built yet.
 - **Decision behind it:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md) (per-voice signals, bundle as inferred width), refining [ADR-0020](../adr/0020-inferred-channel-count.md) (inferred channel count) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (every cable is `f32`). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of a new copy. [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md) for the allocator's panel.
 - **Use case and requirements:** UC10 (sequence chords and note clips), UC2 (live play). FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-MIDI-03 (MPE), FR-LIB-13, FR-LIB-20, NFR-RT-01, NFR-PERF-01, NFR-PERF-03.
 - **Builds on:** [Stereo cables](stereo.md) (widths, copies, downmix), [Changing a running patch](live-patching.md) (schedule swaps), [Sub-patches](sub-patches.md) (stack mode is not voices), [Module data](module-data.md) (stored notes and chords), [Scale and tuning](scale-and-tuning.md) (chords as scale steps), [Arrangement](arrangement.md) (the note cycle).
 - **Background:** [Voices and polyphony](../learn/voices-and-polyphony.md): what a voice is, why stealing exists, why a bundle is inferred, and why a gate carries the timing.
 - **Prior art:** per-voice signals are how a modular grid such as Bitwig's Grid carries polyphony. Hardware polysynths settled oldest-note and quietest-note stealing decades ago. Named only to explain the ideas; the rules and modules below are our own.
 - **Issues:** [#665](https://github.com/brylie/LoomDSP/issues/665) (this spec), [#666](https://github.com/brylie/LoomDSP/issues/666) (the note model). Users: [#510](https://github.com/brylie/LoomDSP/issues/510) (MIDI out), [#307](https://github.com/brylie/LoomDSP/issues/307) (multi-lane sequencer), [#50](https://github.com/brylie/LoomDSP/issues/50) (stored notes).
-- **Code:** none yet. It will extend `crates/loom-core/src/width.rs` and `compile.rs` (widths and copies), `crates/loom-modules/src/midi.rs` (Note input), and add a voice allocator to `loom-dsp` (ADR-0035).
+- **Code:** `crates/loom-dsp/src/voice.rs` (shared allocator). Bundle and module work will extend `crates/loom-core/src/width.rs` and `compile.rs` (widths and copies), `crates/loom-modules/src/midi.rs` (Note input), using the allocator in `loom-dsp` (ADR-0035).
 
 ## Goal
 
@@ -269,16 +269,21 @@ Bundles and copies:
 
 Allocation, at block sizes 1, 77, and 512 with scripted events:
 
+Checked **Algorithm** items below are covered by `loom-dsp` tests. MIDI routing,
+level cables, and source-module processing at these block sizes remain pending
+with the source modules. Reference-render and Voice assigner criteria stay open.
+
+
 - [ ] Given 8 voices and a ninth note-on, then in Oldest mode the voice whose note started first has its gate low on the note's frame and high on the next frame with the new pitch (reference test).
-- [ ] Given Quietest mode with `level` patched, then the voice with the lowest level is stolen; with `level` unconnected, the oldest (test).
+- [x] **Algorithm:** Given Quietest mode with `level` patched, then the voice with the lowest level is stolen; with `level` unconnected, the oldest (test).
 - [ ] Given one voice, then Legato keeps the gate high while any note is held and Retrigger drops it for one sample on each note (reference test).
-- [ ] Given a note-on for a note already sounding, then its voices retrigger and no other voice changes; given the same pitch on two MPE member channels, then it takes two voices (test).
+- [x] **Algorithm:** Given a note-on for a note already sounding, then its voices retrigger and no other voice changes; given the same pitch on two MPE member channels, then it takes two voices (test).
 - [ ] Given Voice assigner with `unison` 2, then a note takes two voices together and its note-off releases both; given a pressure change on the input voice, then both output voices' `pressure` follow it (test).
-- [ ] Given note-offs and note-ons for a chord change with one shared pitch, then the shared pitch's voice keeps its gate high across the change (test).
+- [x] **Algorithm:** Given note-offs and note-ons for a chord change with one shared pitch, then the shared pitch's voice keeps its gate high across the change (test).
 - [ ] Given a note-on at frame `i`, then the gate rises at frame `i` at every block size (reference test).
-- [ ] Given a note-off, then the voice holds its pitch and velocity until its next note (test).
-- [ ] Given a note-on and a note-off on one frame, then the gate is high for exactly that frame (test).
-- [ ] Given the same events in the same order, then the same voices are chosen on every run (test).
+- [x] **Algorithm:** Given a note-off, then the voice holds its pitch and velocity until its next note (test).
+- [x] **Algorithm:** Given a note-on and a note-off on one frame, then a fresh voice has a one-sample gate on that frame; a stolen or retriggered voice has its low sample first, a one-sample gate on the next frame, then goes low (test).
+- [x] **Algorithm:** Given the same events in the same order, then the same voices are chosen on every run (test).
 
 Voice modules:
 
@@ -305,8 +310,47 @@ Cost:
 - **A playable keyboard** (MT-UI-04): a source like Note input, specified with its widget.
 - **A voice's MIDI channel as a signal.** Note input does not output it; MT-NOTE-07's routing by channel is specified with that module (M3).
 
+## Allocator interface (implemented, #673)
+
+- `voice::Allocator` owns 16 fixed slots and a 16-note mono held list. Call
+  `begin_frame` once per sample, apply events in arrival order, then read `voices`.
+  There is no block clock or MIDI dependency. `NoteId` is an opaque caller key.
+- `voices_for` finds the held voices of a note; `update_note` changes their pitch
+  and expression without changing gates or order. A Voice assigner can call it
+  every sample. Released voices hold their last values.
+- `configure` changes capacity, mode, and unison. Capacity is clamped to 1 to 16;
+  unison is clamped to 1 to capacity. New voices start silent; removed voices
+  forget their notes. Reducing to one voice remembers only its surviving note.
+- Invalid modes have a runtime fallback, without rewriting the stored mode:
+  Oldest and Quietest at one voice act as Legato; Legato and Retrigger above one
+  act as Oldest. A later capacity change resolves the stored mode again.
+- A return to a held mono key does not retrigger: it is caused by a note-off, not
+  a new note-on. Its pitch returns and its gate carries on. Velocity holds the
+  last note-on's value, preserving the original mono Note input behavior.
+- Unison takes whole groups. If capacity is not divisible by group size, stealing
+  releases whole note groups until a new group fits. Any remainder stays free.
+  Quietest compares the maximum level of each group's held voices. Ties use
+  oldest start order, then lowest voice index. Non-finite levels read as zero;
+  a short level slice is padded with zero. Without levels, Quietest is Oldest.
+- A different note taking a voice freed on this same frame retriggers it:
+  its gate is low on frame f and high from f+1. A gate that was high on the
+  previous frame also needs a low output sample before the voice can restart.
+  Otherwise an off followed by an on can leave the emitted gate high throughout,
+  so the envelope never sees a rising edge. Shared chord notes keep their gates.
+- A stolen or retriggered note that also ends on frame f keeps its required
+  low sample on f, gives a one-sample high gate on f+1, then stays low from f+2.
+  A fresh voice still gives its on/off pulse on f itself. A later note-on on a
+  different voice does not cancel either pulse. These timing cases are explicit
+  exceptions to rule 24's immediate gate drop, as the fresh pulse in rule 26 is.
+- Notes begun or released on one frame are ordered by a serial number; free
+  voices use release order, then voice index. Timing and order counters saturate
+  instead of wrapping. At 48 kHz the frame counter lasts over 12 million years.
+- The keyboard, chord-change, and scripted note-cycle cases are covered by
+  algorithm tests. Replays in chunks of 1, 77, and 512 check deterministic event
+  order; the allocator has no block API. Block-size invariance and reference
+  renders are tested in the source modules when those modules exist.
+
 ## Open points
 
-- **The allocator's API** in `loom-dsp`: whether sources push events and pull per-voice state, or hand it a frame at a time. Decided in implementation, with the three sources above as its test cases.
 - **Lockstep copies for SIMD.** Whether the schedule format needs a per-voice stride for NFR-PERF-03, or the optimisation can stay inside the engine. Not before M2's exit criterion is measured.
 - **MPE zones.** How the lower and upper zones map onto Note input's `channel` setting, with FR-MIDI-03.

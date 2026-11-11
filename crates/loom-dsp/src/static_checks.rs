@@ -4,7 +4,7 @@
 //! the build here.
 
 use crate::{
-    blend, delay, dynamics, envelope, euclid, filter, limiter, loudness, noise, oscillator, phase, random, slew,
+    blend, delay, dynamics, envelope, euclid, filter, limiter, loudness, noise, oscillator, phase, random, slew, voice,
 };
 
 const fn is_send<T: Send>() {}
@@ -33,6 +33,7 @@ const _: () = {
     is_send::<phase::Phasor>();
     is_send::<random::Rng>();
     is_send::<slew::Slew>();
+    is_send::<voice::Allocator>();
 
     is_copy::<dynamics::Coefficients>();
     is_copy::<envelope::Settings>();
@@ -44,4 +45,6 @@ const _: () = {
     is_copy::<filter::one_pole::Coefficients>();
     is_copy::<filter::svf::Coefficients>();
     is_copy::<random::Rng>();
+    is_copy::<voice::Note>();
+    is_copy::<voice::Voice>();
 };

@@ -2219,6 +2219,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-ui"
+version = "0.1.0"
+dependencies = [
+ "loom-ui-core",
+]
+
+[[package]]
 name = "loom-ui-core"
 version = "0.1.0"
 

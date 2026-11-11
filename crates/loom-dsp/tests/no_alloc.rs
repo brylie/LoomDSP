@@ -21,6 +21,7 @@ use loom_dsp::noise::{Colour, Noise};
 use loom_dsp::oscillator::{Pulse, Saw, SlowWave, Triangle};
 use loom_dsp::random::Rng;
 use loom_dsp::slew::Slew;
+use loom_dsp::voice::{Allocator, Mode as VoiceMode, Note, NoteId};
 
 #[global_allocator]
 static ALLOCATOR: AllocDisabler = AllocDisabler;
@@ -28,6 +29,43 @@ static ALLOCATOR: AllocDisabler = AllocDisabler;
 const RATE: f32 = 48_000.0;
 /// Enough frames to fill every queue and wrap every buffer in this file.
 const FRAMES: usize = 1_000;
+
+/// Every allocator operation, including whole-group stealing and live resizing.
+#[test]
+fn voices_never_allocate() {
+    let mut allocator = Allocator::new(16);
+    assert_no_alloc(|| {
+        for mode in [
+            VoiceMode::Oldest,
+            VoiceMode::Quietest,
+            VoiceMode::Legato,
+            VoiceMode::Retrigger,
+        ] {
+            for capacity in [16, 4, 1, 8] {
+                allocator.configure(capacity, mode, 2);
+                for i in 0..FRAMES {
+                    allocator.begin_frame(Some(&[0.5; 16]));
+                    let note = Note {
+                        id: NoteId((i % 20) as u64),
+                        pitch: i as f32,
+                        velocity: 1.0,
+                        pressure: 0.5,
+                        timbre: 0.2,
+                    };
+                    allocator.note_on(note);
+                    allocator.update_note(Note { pressure: 0.9, ..note });
+                    for voice in allocator.voices_for(note.id) {
+                        assert!(allocator.voices()[voice].held);
+                    }
+                    if i % 3 == 0 {
+                        allocator.note_off(note.id);
+                    }
+                }
+                allocator.reset();
+            }
+        }
+    });
+}
 
 /// A test signal with falling peaks well over 1.
 fn falling_peaks(i: usize) -> f32 {
