@@ -24,14 +24,11 @@
 //! are sent. Nodes that show a live value are sent at most every 250 ms.
 //! Nothing runs on a timer at rest (ui-layer.md, section 7, rule 7).
 
+use crate::places::Places;
 use accesskit::{ActionRequest, TreeUpdate};
-use iced::advanced::widget::operation::Outcome;
-use iced::advanced::widget::{Id, Operation};
-use iced::{Rectangle, Subscription, Task};
-use loom_canvas::CanvasView;
+use iced::{Subscription, Task};
 use loom_core::ModuleId;
 use loom_ui_core::IdTable;
-use std::any::Any;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -105,14 +102,16 @@ pub(crate) struct PollKey {
     /// meter's reading. It also changes for things the tree does not say,
     /// such as a pickup mark, which costs one build that sends nothing.
     values: u64,
-    /// The status line's text and severity, hashed. A poll that finds a
-    /// device gone, or a failed autosave, says so there.
-    status: u64,
+    /// The toolbar, the right panel's open tab, and the bar at the bottom
+    /// without its live readings, hashed. A poll that finds a device gone
+    /// says so in the status line, turns Hold note off, and changes the
+    /// audio label; a MIDI port that comes or goes changes the MIDI count.
+    frame: u64,
     /// True while a panel owns the input, which hides the tiles.
     covered: bool,
-    // The audio load and the dropout count are not here: the tree does not
-    // report the stats bar yet. They join when it does (step 1.4, slice 3),
-    // as live values (ui-layer.md, section 3, rule 7).
+    // The audio load and the dropout count are not here. They are live
+    // values (ui-layer.md, section 3, rule 7): the message that brings
+    // them is classed as live, and the live timer sends them.
     /// The control the tree reports focus on.
     focus: Option<(u32, usize)>,
 }
@@ -142,8 +141,8 @@ pub(crate) enum Event {
     Deactivated,
     /// Live values changed a while ago: time to send them.
     LiveTick,
-    /// Where the canvas is in the window, for a rebuild.
-    Located(Option<CanvasView>),
+    /// Where the canvas and the window's named parts are, for a rebuild.
+    Located(Places),
     /// A screen reader asked for an action.
     Action(ActionRequest),
 }
@@ -290,9 +289,9 @@ pub(crate) fn attach() -> Task<Event> {
     platform::attach()
 }
 
-/// Asks the window where the canvas is.
+/// Asks the window where the canvas and its named parts are.
 fn locate() -> Task<Event> {
-    iced_runtime::task::widget(FindCanvas(None)).map(Event::Located)
+    iced_runtime::task::widget(crate::places::Collect::default()).map(Event::Located)
 }
 
 /// The window's new scale factor, from a window event.
@@ -300,25 +299,6 @@ fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::win
     match event {
         iced::Event::Window(iced::window::Event::Rescaled(scale)) => Some(Event::ScaleFactor(scale)),
         _ => None,
-    }
-}
-
-/// A widget operation that finds the patch canvas and its camera.
-struct FindCanvas(Option<CanvasView>);
-
-impl Operation<Option<CanvasView>> for FindCanvas {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<CanvasView>>)) {
-        operate(self);
-    }
-
-    fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Any) {
-        if let Some(view) = state.downcast_ref::<CanvasView>() {
-            self.0 = Some(*view);
-        }
-    }
-
-    fn finish(&self) -> Outcome<Option<CanvasView>> {
-        Outcome::Some(self.0)
     }
 }
 
@@ -362,13 +342,29 @@ impl crate::App {
     /// The key a poll is compared by, before and after it runs.
     pub(crate) fn a11y_poll_key(&self) -> PollKey {
         use std::hash::{Hash, Hasher};
-        let mut status = std::collections::hash_map::DefaultHasher::new();
-        self.alerts.status().hash(&mut status);
-        std::mem::discriminant(&self.alerts.severity()).hash(&mut status);
+        let mut frame = std::collections::hash_map::DefaultHasher::new();
+        let bars = self.bars_model();
+        for button in self.toolbar_model().buttons {
+            (button.name, button.label, button.enabled, button.hover, button.on).hash(&mut frame);
+        }
+        (self.right_tab == crate::matrix::Tab::Matrix).hash(&mut frame);
+        bars.dev.map(|dev| (dev.measuring, dev.animating)).hash(&mut frame);
+        for item in bars.items.iter().filter(|item| item.kind != crate::bars::Kind::Live) {
+            (item.name, &item.text, &item.hover).hash(&mut frame);
+        }
+        for field in bars.kept.iter().chain(std::iter::once(&bars.status)) {
+            (
+                &field.shown,
+                &field.hover,
+                field.severity as u8,
+                field.dismiss.is_some(),
+            )
+                .hash(&mut frame);
+        }
         PollKey {
             scene: self.session.scene.generation(),
             values: self.session.values.generation(),
-            status: status.finish(),
+            frame: frame.finish(),
             covered: !self.no_overlay(),
             focus: self.a11y.focus,
         }
@@ -387,10 +383,12 @@ impl crate::App {
     /// Builds the tree and gives what the screen reader must be sent: the
     /// whole tree, and the nodes that changed since the last send, if any.
     /// Live values go only when `flush_live` was set.
-    pub(crate) fn a11y_changes(&mut self, view: Option<&CanvasView>) -> (TreeUpdate, Option<TreeUpdate>) {
+    pub(crate) fn a11y_changes(&mut self, places: &Places) -> (TreeUpdate, Option<TreeUpdate>) {
+        let view = places.canvas.as_ref();
         let snapshot = self.ui_snapshot();
+        let bars = self.bars_model();
         let ids = self.a11y_widget_ids(&snapshot);
-        let whole = tree::tree(&snapshot, &ids, view, self.a11y.scale, &mut self.a11y.ids);
+        let whole = tree::tree(&snapshot, &bars, &ids, places, self.a11y.scale, &mut self.a11y.ids);
         let flush = std::mem::take(&mut self.a11y.flush_live);
         if flush {
             self.a11y.live_dirty = false;
@@ -417,6 +415,10 @@ impl crate::App {
             if ids.is_covered() && id.is_under(&canvas) && tree::tile_of(id).is_none() && *id != canvas {
                 return tree::Hold::Skip;
             }
+            // The bar's readings are always on screen.
+            if tree::is_live_bar_item(id) {
+                return if flush { tree::Hold::Send } else { tree::Hold::Wait };
+            }
             if !ids.is_live(id) {
                 return tree::Hold::Send;
             }
@@ -440,6 +442,27 @@ impl crate::App {
             self.a11y.live_dirty = true;
         }
         (whole, changes)
+    }
+
+    /// Where the accessibility tree says the element named `id` is, in the
+    /// window, in logical pixels. `None` when the tree has no such node, or
+    /// the node has no bounds. The control channel's `locate` reads it, so
+    /// a script and a screen reader find one element in one place.
+    ///
+    /// The tree is built at scale 1 with a table of its own, so asking
+    /// changes nothing a screen reader was told.
+    pub(crate) fn a11y_bounds(&self, id: &loom_ui_core::UiId, places: &Places) -> Option<loom_ui_core::Rect> {
+        let snapshot = self.ui_snapshot();
+        let bars = self.bars_model();
+        let ids = self.a11y_widget_ids(&snapshot);
+        let mut table = IdTable::new();
+        let whole = tree::tree(&snapshot, &bars, &ids, places, 1.0, &mut table);
+        let node = accesskit::NodeId(table.number(id));
+        let bounds = whole.nodes.iter().find(|(found, _)| *found == node)?.1.bounds()?;
+        Some(loom_ui_core::Rect::new(
+            loom_ui_core::Point::new(bounds.x0 as f32, bounds.y0 as f32),
+            loom_ui_core::Size::new((bounds.x1 - bounds.x0) as f32, (bounds.y1 - bounds.y0) as f32),
+        ))
     }
 
     /// The UI IDs of every tile's panel widgets, from the names that find
@@ -517,10 +540,38 @@ impl crate::App {
 
     /// The tree as it is now, with the canvas placed by `view`.
     #[cfg(test)]
-    pub(crate) fn a11y_tree(&mut self, view: Option<&CanvasView>) -> TreeUpdate {
+    pub(crate) fn a11y_tree(&mut self, places: &Places) -> TreeUpdate {
         let snapshot = self.ui_snapshot();
+        let bars = self.bars_model();
         let ids = self.a11y_widget_ids(&snapshot);
-        tree::tree(&snapshot, &ids, view, self.a11y.scale, &mut self.a11y.ids)
+        tree::tree(&snapshot, &bars, &ids, places, self.a11y.scale, &mut self.a11y.ids)
+    }
+
+    /// The message for a Click on a part of the window outside the canvas:
+    /// a toolbar button that is enabled, one of the right panel's tabs, a
+    /// × in the status line, or a developer switch. `None` for any other
+    /// node or action, and for a button that is disabled now.
+    pub(crate) fn a11y_frame_message(&self, request: &ActionRequest) -> Option<crate::Message> {
+        use crate::Message;
+        if request.action != accesskit::Action::Click {
+            return None;
+        }
+        let id = self.a11y.ids.id(request.target_node.0)?;
+        match tree::frame_part(id)? {
+            tree::FramePart::Button(name) => {
+                let model = self.toolbar_model();
+                let button = model.buttons.iter().find(|button| button.name == name)?;
+                button.enabled.then(|| crate::toolbar::message(name)).flatten()
+            }
+            tree::FramePart::Tab(tab) => Some(Message::Matrix(crate::matrix::Event::Tab(tab))),
+            tree::FramePart::Dismiss { kept } => {
+                let bars = self.bars_model();
+                let field = if kept { bars.kept? } else { bars.status };
+                field.dismiss.map(Message::DismissError)
+            }
+            tree::FramePart::Measure => self.dev_tools.then_some(Message::Measure(!self.measuring)),
+            tree::FramePart::MoveCamera => self.dev_tools.then_some(Message::Animate(!self.animating)),
+        }
     }
 
     /// Applies a screen reader's request that arrived at `at`, and gives
@@ -554,7 +605,12 @@ impl crate::App {
             }
             return Vec::new();
         }
-        let messages = actions::messages(&snapshot, &ids, &self.a11y.ids, request);
+        // A button, a tab, or a switch outside the canvas sends the message
+        // its press sends. Anything else is on the canvas.
+        let messages = match self.a11y_frame_message(request) {
+            Some(message) => vec![message],
+            None => actions::messages(&snapshot, &ids, &self.a11y.ids, request),
+        };
         if messages.is_empty() {
             // A Click that changes nothing, such as one on the option
             // already chosen, still ends an open group, as a pointer
@@ -615,11 +671,11 @@ impl crate::App {
                 self.a11y.flush_live = true;
                 self.a11y_rebuild().map(Message::A11y)
             }
-            Event::Located(view) => {
+            Event::Located(places) => {
                 self.a11y.locating = false;
                 if self.a11y.active {
                     let start = self.a11y.timed.then(std::time::Instant::now);
-                    let (whole, changes) = self.a11y_changes(view.as_ref());
+                    let (whole, changes) = self.a11y_changes(&places);
                     if let Some(start) = start {
                         BuildTimes::record(start.elapsed());
                     }

@@ -38,6 +38,9 @@ pub struct UiSnapshot {
     pub errors: Vec<crate::alerts::KeptError>,
     /// True while MIDI learn mode is on and the status bar says so.
     pub learning: bool,
+    /// The toolbar's buttons: what each says, whether it works, and its
+    /// hover text.
+    pub toolbar: crate::toolbar::Model,
     /// The step Undo would take back, by name.
     pub undo: Option<String>,
     /// The step Redo would replay, by name.
@@ -655,6 +658,7 @@ impl App {
             status_severity: self.alerts.severity(),
             errors: self.alerts.kept().to_vec(),
             learning: self.session.learn.is_on(),
+            toolbar: self.toolbar_model(),
             undo: self.session.edits.history.undo_step().map(|s| s.name().to_string()),
             redo: self.session.edits.history.redo_step().map(|s| s.name().to_string()),
             selection: self.session.selection.iter().copied().collect(),

@@ -54,6 +54,7 @@ pub(super) fn search(call: Call, target: String, then: AfterSearch) -> Task<Mess
     let operation = Find {
         text: target.clone(),
         found: Found::default(),
+        parts: crate::places::Collect::default(),
     };
     iced_runtime::task::widget(operation).map(move |found| Message::Located {
         call: call.clone(),

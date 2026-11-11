@@ -5,16 +5,11 @@
 use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
-use crate::{
-    App, DIM, FileAction, Message, alerts, browser, inspector, learn, matrix, pointer, probe_menu, recent, settings,
-    style,
-};
+use crate::{App, DIM, Message, alerts, browser, inspector, matrix, pointer, probe_menu, recent, style};
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
 use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
-use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 impl App {
     pub(crate) fn view(&self) -> Element<'_, Message> {
@@ -176,7 +171,8 @@ impl App {
     /// play, edit, setup), with wider space between groups than inside them
     /// (visual-system.md, Toolbar).
     pub(crate) fn toolbar(&self) -> Element<'_, Message> {
-        let tip = |button: iced::widget::Button<'static, Message>, hint: &'static str| -> Element<'static, Message> {
+        use crate::toolbar::Group;
+        let tip = |button: Element<'static, Message>, hint: String| -> Element<'static, Message> {
             tooltip(
                 button,
                 container(text(hint).size(style::BODY))
@@ -186,96 +182,51 @@ impl App {
             )
             .into()
         };
-        let label = |s: &'static str| text(s).size(style::CONTROL);
-        let mut file = row![
-            button(label("New")).on_press(Message::File(FileAction::New)),
-            button(label("Open")).on_press(Message::File(FileAction::Open)),
-            button(label("Save")).on_press(Message::File(FileAction::Save)),
-            button(label("Save As")).on_press(Message::File(FileAction::SaveAs)),
-        ];
-        // Inside a sub-patch, the file commands also save that sub-patch to
-        // the library (sub-patches.md, Library).
-        if !self.session.level.is_root() {
-            file = file.push(button(label("Save to library")).on_press(Message::File(FileAction::SaveToLibrary)));
-        }
-        file = file.extend([
-            tip(
-                button(label("Browse")).on_press(Message::File(FileAction::Browse)),
-                if cfg!(target_os = "macos") {
-                    "Your patches: Cmd+Shift+O"
-                } else {
-                    "Your patches: Ctrl+Shift+O"
-                },
-            ),
-            tip(
-                button(label("Recent"))
-                    .on_press_maybe((!self.rig.recent.files().is_empty()).then_some(Message::OpenRecent)),
-                self.recent_hover(),
-            ),
-        ]);
-        let add = tip(
-            button(label("Add module")).on_press(Message::OpenBrowser),
-            "Or press A over the canvas, or double-click empty canvas",
-        );
-        let hold = button(label(if self.session.engine.holding {
-            "Release note"
-        } else {
-            "Hold note"
-        }))
-        .on_press_maybe(self.session.engine.midi.as_ref().map(|_| Message::HoldNote));
-        // Disabled controls say why (visual-system.md, Status messages).
-        let hold: Element<'static, Message> = match self.hold_hover() {
-            Some(reason) => tip(hold, reason),
-            None => hold.into(),
+        // Drawn from the model the accessibility tree reads too. Each
+        // button sits in a container named by its UI ID, so the window
+        // can say where it is (`places.rs`).
+        let model = self.toolbar_model();
+        let group = |which: Group| {
+            let items = model.buttons.iter().filter(|b| b.group == which).map(|b| {
+                let press = b.enabled.then(|| crate::toolbar::message(b.name)).flatten();
+                let face = button(text(b.label).size(style::CONTROL)).on_press_maybe(press);
+                let face = match (b.name, b.on) {
+                    ("panic", _) => face.style(style::danger),
+                    // Primary only while learning: a mode that is on.
+                    (_, Some(true)) => face.style(style::primary),
+                    (_, Some(false)) => face.style(style::secondary),
+                    _ => face,
+                };
+                let named: Element<'static, Message> = container(face).id(b.id).into();
+                match &b.hover {
+                    Some(hint) => tip(named, hint.clone()),
+                    None => named,
+                }
+            });
+            iced::widget::Row::with_children(items)
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
         };
-        let play = row![
-            hold,
-            tip(
-                button(label("Panic")).on_press(Message::Panic).style(style::danger),
-                if cfg!(target_os = "macos") {
-                    "Silence everything: Cmd+."
-                } else {
-                    "Silence everything: Ctrl+."
-                },
-            ),
-        ];
-        let (undo_hint, redo_hint) = (self.undo_hint(), self.redo_hint());
-        let edit = row![
-            history_button("Undo", undo_hint, Message::Undo),
-            history_button("Redo", redo_hint, Message::Redo),
-        ];
-        let setup = row![
-            // Primary only while learning: a mode that is on.
-            button(label("MIDI learn"))
-                .on_press(Message::Learn(learn::Message::Toggle))
-                .style(if self.session.learn.is_on() {
-                    style::primary
-                } else {
-                    style::secondary
-                }),
-            tip(
-                button(label("Preferences")).on_press(Message::Preferences(settings::Message::Open)),
-                if cfg!(target_os = "macos") { "Cmd+," } else { "Ctrl+," },
-            ),
-        ];
-        let group = |items: iced::widget::Row<'static, Message>| items.spacing(6).align_y(iced::Alignment::Center);
-        row![
-            text(format!(
-                "{}{}",
-                if self.unsaved() { "* " } else { "" },
-                self.patch_name()
-            ))
-            .size(style::HEADING),
-            group(file),
-            space::horizontal(),
-            add,
-            group(play),
-            group(edit),
-            group(setup),
-        ]
-        .spacing(20)
-        .padding([6, 10])
-        .align_y(iced::Alignment::Center)
+        container(
+            row![
+                text(format!(
+                    "{}{}",
+                    if self.unsaved() { "* " } else { "" },
+                    self.patch_name()
+                ))
+                .size(style::HEADING),
+                group(Group::File),
+                space::horizontal(),
+                group(Group::Add),
+                group(Group::Play),
+                group(Group::Edit),
+                group(Group::Setup),
+            ]
+            .spacing(20)
+            .padding([6, 10])
+            .align_y(iced::Alignment::Center),
+        )
+        .id("toolbar")
         .into()
     }
 
@@ -311,9 +262,17 @@ impl App {
                 .style(style::tab(self.right_tab == which))
                 .on_press(Message::Matrix(MatrixEvent::Tab(which)))
         };
-        let tabs = row![tab("Inspector", RightTab::Inspector), tab("Matrix", RightTab::Matrix)]
+        // Each tab, and the row of them, is named for the window
+        // (`places.rs`).
+        let tabs = container(
+            row![
+                container(tab("Inspector", RightTab::Inspector)).id("panel/inspector"),
+                container(tab("Matrix", RightTab::Matrix)).id("panel/matrix"),
+            ]
             .spacing(4)
-            .padding([6, 8]);
+            .padding([6, 8]),
+        )
+        .id("panel");
         let panel = match self.right_tab {
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
@@ -328,129 +287,92 @@ impl App {
     }
 
     pub(crate) fn stats_bar(&self) -> Element<'_, Message> {
-        let graph = self.session.controller.graph();
-        let frames = if self.measuring {
-            self.meter.stats().summary()
-        } else {
-            "redraws on change".to_string()
-        };
-        // Load and dropouts are always shown, and turn amber or red before
-        // a problem is audible (FR-PERF-04).
-        // The snapshot reads the same model, so the two cannot disagree.
-        let stats = self.stats_model();
-        let audio: Element<'_, Message> = if stats.playing {
-            let load = bar_text(stats.load_text()).color(severity_colour(alerts::load_severity(
-                self.session.engine.stream.load().0,
-            )));
-            let dropouts = bar_text(format!("dropouts {}", stats.dropouts))
-                .color(severity_colour(self.alerts.dropout_severity(Instant::now())));
-            let mut items = row![bar_text(stats.label).color(DIM), load, dropouts].spacing(10);
-            if let Some((underruns, overruns)) = stats.input_alert {
-                items = items.push(
-                    bar_text(format!("input underruns {underruns}, overruns {overruns}"))
-                        .color(severity_colour(alerts::Severity::Warning)),
-                );
-            }
-            let engine = self.session.controller.stats();
-            if stats.output_silenced {
-                items = items.push(output_warning(
-                    "Output: bad samples silenced",
-                    alerts::Severity::Alarm,
-                    format!(
-                        "{} samples since the engine started",
-                        engine.output_silenced.load(Ordering::Relaxed)
-                    ),
-                ));
-            }
-            if stats.output_clipped {
-                items = items.push(output_warning(
-                    "Output clipped",
-                    alerts::Severity::Warning,
-                    format!(
-                        "{} samples since the engine started",
-                        engine.output_clipped.load(Ordering::Relaxed)
-                    ),
-                ));
-            }
-            if stats.telemetry_dropped > 0 {
-                items = items.push(bar_text(format!("telemetry dropped {}", stats.telemetry_dropped)).color(DIM));
-            }
-            items.into()
-        } else {
-            bar_text(stats.label).color(DIM).into()
-        };
-        // A count, with the names in hover text, so a long list never
-        // pushes the other items off the window (visual-system.md, rule 7).
-        let midi: Element<'_, Message> = match self.rig.ports.as_slice() {
-            [] => bar_text("MIDI: no inputs").color(DIM).into(),
-            ports => tooltip(
-                bar_text(match ports.len() {
-                    1 => "MIDI: 1 input".to_string(),
-                    n => format!("MIDI: {n} inputs"),
-                })
-                .color(DIM),
-                container(text(ports.iter().map(|port| port.name()).collect::<Vec<_>>().join("\n")).size(style::BODY))
-                    .padding(6)
-                    .style(container::rounded_box),
-                tooltip::Position::Top,
-            )
-            .into(),
-        };
-        // A word, so it reads without colour, and it stays whatever the
-        // status says: in learn mode screen controls do not change values.
-        let learning = self.session.learn.is_on().then(|| bar_text("Learning"));
+        // Drawn from the model the accessibility tree reads too. Each item
+        // sits in a container named by its UI ID (`places.rs`).
+        let model = self.bars_model();
         let mut bar = row![].spacing(16).align_y(iced::Alignment::Center);
-        if self.dev_tools {
+        if let Some(dev) = &model.dev {
             bar = bar
                 .push(
-                    toggler(self.measuring)
-                        .label("Measure")
-                        .on_toggle(Message::Measure)
-                        .size(style::SWITCH)
-                        .text_size(style::BODY),
+                    container(
+                        toggler(dev.measuring)
+                            .label("Measure")
+                            .on_toggle(Message::Measure)
+                            .size(style::SWITCH)
+                            .text_size(style::BODY),
+                    )
+                    .id(crate::bars::MEASURE_ID),
                 )
                 .push(
-                    toggler(self.animating)
-                        .label("Move camera")
-                        .on_toggle(Message::Animate)
-                        .size(style::SWITCH)
-                        .text_size(style::BODY),
+                    container(
+                        toggler(dev.animating)
+                            .label("Move camera")
+                            .on_toggle(Message::Animate)
+                            .size(style::SWITCH)
+                            .text_size(style::BODY),
+                    )
+                    .id(crate::bars::MOVE_CAMERA_ID),
                 )
-                .push(bar_text(frames));
+                .push(bar_text(dev.frames.clone()));
         }
-        bar.push(bar_text(format!(
-            "{} modules, {} cables",
-            graph.len(),
-            graph.cables().count()
-        )))
-        .push(audio)
-        .push(midi)
-        .extend(learning.map(Element::from))
+        // The audio items sit closer together than the rest of the bar.
+        let shown = |item: &crate::bars::Item| -> Element<'static, Message> {
+            let words = bar_text(item.text.clone());
+            let words = match item.tone {
+                Some(severity) => words.color(severity_colour(severity)),
+                None => words,
+            };
+            let named = container(words).id(item.id);
+            match &item.hover {
+                Some(hover) => tooltip(
+                    named,
+                    container(text(hover.clone()).size(style::BODY))
+                        .padding(6)
+                        .style(container::rounded_box),
+                    tooltip::Position::Top,
+                )
+                .into(),
+                None => named.into(),
+            }
+        };
+        let audio_names = ["audio", "load", "dropouts", "input", "silenced", "clipped", "telemetry"];
+        let audio = iced::widget::Row::with_children(
+            model
+                .items
+                .iter()
+                .filter(|item| audio_names.contains(&item.name))
+                .map(shown),
+        )
+        .spacing(10);
+        for item in model.items.iter().filter(|item| item.name == "patch") {
+            bar = bar.push(shown(item));
+        }
+        bar = bar.push(audio);
+        for item in model
+            .items
+            .iter()
+            .filter(|item| item.name == "midi" || item.name == "learning")
+        {
+            bar = bar.push(shown(item));
+        }
         // The fixed items come first. The kept error and the status share
         // the remaining width, and are cut off rather than wrapped, so the
         // bar stays one line high. Hover shows all of it.
-        .extend(self.alerts.kept_field().map(|kept| {
-            status_field(
-                alerts::labelled(kept.severity, &kept.text),
-                self.alerts.kept_hover(),
-                kept.severity,
-                kept.dismissible.then_some(kept.cause),
+        container(
+            bar.extend(
+                model
+                    .kept
+                    .as_ref()
+                    .map(|kept| status_field(kept, crate::bars::KEPT_ID, crate::bars::KEPT_DISMISS_ID)),
             )
-        }))
-        .push(status_field(
-            alerts::labelled(self.alerts.severity(), self.alerts.status()),
-            if self.alerts.status_is_kept() {
-                self.alerts.kept_hover()
-            } else {
-                alerts::labelled(self.alerts.severity(), self.alerts.status())
-            },
-            self.alerts.severity(),
-            self.alerts
-                .top_kept()
-                .filter(|kept| kept.dismissible && self.alerts.kept_field().is_none())
-                .map(|kept| kept.cause),
-        ))
-        .padding([4, 10])
+            .push(status_field(
+                &model.status,
+                crate::bars::STATUS_ID,
+                crate::bars::STATUS_DISMISS_ID,
+            ))
+            .padding([4, 10]),
+        )
+        .id("stats")
         .into()
     }
 }
@@ -462,44 +384,26 @@ pub(crate) const HOLD_DISABLED: &str = "Hold note is disabled: no audio is playi
 /// Recent's hover text while it is disabled.
 const RECENT_DISABLED: &str = "Recent is disabled: no patches opened or saved yet";
 
-/// A stats bar warning about the output, with its counts in hover text.
-fn output_warning<'a>(label: &'a str, severity: alerts::Severity, hover: String) -> Element<'a, Message> {
-    tooltip(
-        bar_text(label).color(severity_colour(severity)),
-        container(text(hover).size(style::BODY))
-            .padding(6)
-            .style(container::rounded_box),
-        tooltip::Position::Top,
-    )
-    .into()
-}
-
 /// One message in the status bar: cut to its share of the width, all of it in
-/// hover text, with a × if the player may dismiss it.
-fn status_field<'a>(
-    shown: String,
-    hover: String,
-    severity: alerts::Severity,
-    dismiss: Option<alerts::Cause>,
-) -> Element<'a, Message> {
+/// hover text, with a × if the player may dismiss it. `id` and `dismiss_id`
+/// name the text and the × for the window (`places.rs`).
+fn status_field<'a>(field: &crate::bars::Field, id: &'static str, dismiss_id: &'static str) -> Element<'a, Message> {
     row![tooltip(
-        container(bar_text(shown).color(severity_colour(severity)))
+        container(bar_text(field.shown.clone()).color(severity_colour(field.severity)))
+            .id(id)
             .width(Length::Fill)
             .align_x(iced::Alignment::End)
             .clip(true),
-        container(text(hover).size(style::BODY))
+        container(text(field.hover.clone()).size(style::BODY))
             .padding(6)
             .max_width(480)
             .style(container::rounded_box),
         tooltip::Position::Top,
     )]
-    .extend(dismiss.map(|cause| {
-        let hover = if severity == alerts::Severity::Warning {
-            "Dismiss this warning"
-        } else {
-            "Dismiss this error"
-        };
-        remove_button(hover, Message::DismissError(cause))
+    .extend(field.dismiss.map(|cause| {
+        container(remove_button(field.dismiss_hover(), Message::DismissError(cause)))
+            .id(dismiss_id)
+            .into()
     }))
     .width(Length::Fill)
     .spacing(4)
@@ -536,23 +440,4 @@ pub(crate) fn severity_colour(severity: alerts::Severity) -> Color {
         alerts::Severity::Warning => style::WARNING_TEXT,
         alerts::Severity::Alarm => style::ERROR_TEXT,
     }
-}
-
-/// A toolbar Undo or Redo button. `hint` names what it would do, and the
-/// button works only then; otherwise the hover text says why not.
-fn history_button<'a>(
-    label: &'a str,
-    hint: Result<String, crate::editing::HistoryBlock>,
-    message: Message,
-) -> Element<'a, Message> {
-    let enabled = hint.is_ok();
-    let hint = hint.unwrap_or_else(|block| block.hover(label == "Redo").to_string());
-    tooltip(
-        button(text(label).size(style::CONTROL)).on_press_maybe(enabled.then_some(message)),
-        container(text(hint).size(style::BODY))
-            .padding(6)
-            .style(container::rounded_box),
-        tooltip::Position::Bottom,
-    )
-    .into()
 }

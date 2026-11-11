@@ -276,11 +276,30 @@ struct FindNow<'a> {
     found: Found,
     pointer: Option<CanvasPointer>,
     typed: Option<CanvasTyped>,
+    /// Collects the window's named parts on the same walk.
+    parts: crate::places::Collect,
 }
 
 impl Operation for FindNow<'_> {
     fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        let outside = self.parts.enter();
         operate(self);
+        self.parts.leave(outside);
+    }
+
+    fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
+        Operation::<crate::places::Places>::container(&mut self.parts, id, bounds);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&Id>,
+        bounds: Rectangle,
+        content_bounds: Rectangle,
+        translation: iced::Vector,
+        state: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        Operation::<crate::places::Places>::scrollable(&mut self.parts, id, bounds, content_bounds, translation, state);
     }
 
     fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Any) {
@@ -339,8 +358,10 @@ impl<'a, Message> Injector<'a, Message> {
             found: Found::default(),
             pointer: None,
             typed: None,
+            parts: crate::places::Collect::default(),
         };
         self.content.as_widget_mut().operate(tree, layout, renderer, &mut op);
+        op.found.places = op.parts.places();
         (op.found, op.pointer, op.typed)
     }
 

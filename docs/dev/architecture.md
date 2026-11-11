@@ -208,6 +208,8 @@ A screen reader reads the window through an accessibility tree, built with Acces
 
 - **`a11y/tree.rs`** builds an AccessKit `TreeUpdate` from `UiSnapshot`. It has no platform code, so it builds and is tested on every OS.
 - **`a11y/actions.rs`** turns a screen reader's request into ordinary messages, the same ones the pointer sends. Undo, autosave, and MIDI feedback then need nothing extra.
+- **`places.rs`** says where the window drew each named part outside the canvas. The toolbar, the tabs, and the bars are drawn by the toolkit, each inside a container whose widget ID is its UI ID's text; one walk over the laid-out window collects their bounds, with the offset of any scrolling area around them. The tree and the control channel's `locate` read the same result.
+- **`toolbar.rs`** and **`bars.rs`** are the toolbar and the stats bar as plain data. The window draws from them, and the tree and the UI snapshot read them.
 - **`a11y/macos.rs`** attaches AccessKit's adapter to the window Iced made. It is the only platform so far. Our own shell replaces it on every platform ([plan](leaving-iced-plan.md), phase 2).
 
 Every node is named by a UI ID (`loom_ui_core::UiId`): a path of keys taken from what the element shows, such as the canvas, a module ID, the kind `param`, and a parameter name, written `canvas/4/param/cutoff`. A table (`loom_ui_core::IdTable`) gives each UI ID its AccessKit node ID. An ID keeps its number while its element exists, and a number is never used for another element, because a screen reader keeps its place by it.

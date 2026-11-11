@@ -1,7 +1,9 @@
 //! Turning names in commands into what the app shows: ports, controls on screen, keys, and buttons.
 
 use super::*;
+use crate::places::{Collect, Places};
 use loom_core::ModuleNames;
+use loom_ui_core::{IdKey, UiId};
 
 /// The most moves a `drag` takes.
 pub(super) const MAX_DRAG_STEPS: u32 = 1000;
@@ -48,17 +50,38 @@ pub(super) fn with_modifiers(modifiers: keyboard::Modifiers, steps: Vec<PointerS
 pub struct Found {
     pub canvas: Option<CanvasView>,
     pub text: Option<Rect>,
+    /// The window's named parts, for a target given as UI ID text.
+    pub(crate) places: Places,
 }
 
 /// Finds the canvas, and the first text widget that reads `text`.
 pub(super) struct Find {
     pub(super) text: String,
     pub(super) found: Found,
+    /// Collects the window's named parts on the same walk.
+    pub(super) parts: Collect,
 }
 
 impl Operation<Found> for Find {
     fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Found>)) {
+        let outside = self.parts.enter();
         operate(self);
+        self.parts.leave(outside);
+    }
+
+    fn container(&mut self, id: Option<&Id>, bounds: iced::Rectangle) {
+        Operation::<Places>::container(&mut self.parts, id, bounds);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&Id>,
+        bounds: iced::Rectangle,
+        content_bounds: iced::Rectangle,
+        translation: iced::Vector,
+        state: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        Operation::<Places>::scrollable(&mut self.parts, id, bounds, content_bounds, translation, state);
     }
 
     fn custom(&mut self, _id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Any) {
@@ -74,7 +97,10 @@ impl Operation<Found> for Find {
     }
 
     fn finish(&self) -> Outcome<Found> {
-        Outcome::Some(self.found.clone())
+        Outcome::Some(Found {
+            places: self.parts.places(),
+            ..self.found.clone()
+        })
     }
 }
 
@@ -116,9 +142,72 @@ pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
     Rect::new(a, loom_ui_core::Size::new(b.x - a.x, b.y - a.y))
 }
 
-/// Where a target is in the window: a module, a control, port, light, or
-/// meter by name (rule 10), or any text the window shows.
+/// The first keys a UI ID's text can start with: the window's panels
+/// (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
+/// with another word is not taken for a UI ID.
+const PANELS: [&str; 8] = [
+    "window",
+    "canvas",
+    "toolbar",
+    "panel",
+    "inspector",
+    "matrix",
+    "status",
+    "stats",
+];
+
+/// `target` as a UI ID, when it is the text of one: its first key is a
+/// panel's name.
+fn ui_id(target: &str) -> Option<UiId> {
+    let id: UiId = target.parse().ok()?;
+    match id.keys().first()? {
+        IdKey::Name(panel) if PANELS.contains(&&**panel) => Some(id),
+        _ => None,
+    }
+}
+
+/// Where the part a UI ID names is in the window, or `None` when the
+/// window shows no such part. An error when it is there but scrolled out
+/// of view.
+///
+/// A port or a badge on a tile is found through its short name, since the
+/// accessibility tree has no port nodes yet. Anything else on the canvas
+/// is where the accessibility tree says its node is, built here at scale
+/// 1, so `locate` and a screen reader agree (section 4, rule 1). A part
+/// outside the canvas is where the window drew its container.
+fn locate_id(app: &App, id: &UiId, found: &Found) -> Result<Option<Rect>, String> {
+    let on_canvas = id.is_under(&crate::a11y::tree::canvas_id());
+    if let [_, IdKey::Number(module), IdKey::Name(kind), IdKey::Name(name)] = id.keys()
+        && on_canvas
+        && matches!(&**kind, "input" | "output" | "badge")
+    {
+        let short = format!("{module}:{kind}:{name}");
+        return locate(app, &short, found).map(Some);
+    }
+    if on_canvas {
+        return Ok(app.a11y_bounds(id, &found.places));
+    }
+    match found.places.of(id) {
+        Some(place) if place.is_shown() => Ok(Some(place.rect)),
+        Some(_) => Err(format!("`{id}` is scrolled out of view")),
+        None => Ok(None),
+    }
+}
+
+/// Where a target is in the window: a UI ID as text (`toolbar/undo`,
+/// `canvas/4/param/cutoff`), a module, a control, port, light, or meter by
+/// name (rule 10), or any text the window shows.
 pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rect, String> {
+    // A UI ID first. Text that reads as one but names nothing the window
+    // shows may still be text in the window.
+    if let Some(id) = ui_id(target) {
+        return match locate_id(app, &id, found)? {
+            Some(rect) => Ok(rect),
+            None => found
+                .text
+                .ok_or_else(|| format!("nothing in the window has the UI ID `{target}`")),
+        };
+    }
     let Some((module, name)) = split_target(target) else {
         return found
             .text

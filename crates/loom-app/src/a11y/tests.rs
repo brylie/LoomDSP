@@ -1,11 +1,12 @@
 //! Tests for the accessibility tree: UI IDs and node IDs, the tree, and
 //! actions. None needs a window or a screen reader, so they run on every OS.
 
-use super::tree::{WidgetIds, WidgetKey, canvas_id, status_id, tile_id, window_id};
+use super::tree::{WidgetIds, WidgetKey, canvas_id, tile_id, window_id};
 use super::*;
+use crate::places::Places;
 use crate::{App, Message};
 use accesskit::{Action, ActionData, Node, NodeId, Role, TreeId};
-use loom_canvas::{Camera, CanvasEvent, ControlPart};
+use loom_canvas::{Camera, CanvasEvent, CanvasView, ControlPart};
 use loom_ui_core::{Point, Rect, Size, UiId};
 
 /// An app with one filter, its module ID, and the panel index of its Cutoff knob.
@@ -209,18 +210,21 @@ fn widgets_bound_to_the_same_name_get_different_ids() {
 fn tree_shows_tiles_and_controls() {
     let (mut app, module, knob) = app_with_filter();
     let snapshot = app.ui_snapshot();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let tile = snapshot.tiles.iter().find(|t| t.id == module).unwrap();
     let shown = &tile.widgets[knob];
 
     let root = node_of(&mut app, &window_id());
     let tile_node = node_of(&mut app, &tile_id(module));
-    let status = node_of(&mut app, &status_id());
+    let status = node_of(&mut app, &tree::fixed_id(crate::bars::STATUS_ID));
     assert_eq!(update.tree.as_ref().unwrap().root, root);
     assert_eq!(update.focus, root);
     assert_eq!(node(&update, root).role(), Role::Window);
     assert!(node(&update, root).children().contains(&tile_node));
-    assert!(node(&update, root).children().contains(&status));
+    // The status line is the last item of the bar at the bottom.
+    let bar = node_of(&mut app, &tree::stats_id());
+    assert!(node(&update, root).children().contains(&bar));
+    assert_eq!(node(&update, bar).children().last(), Some(&status));
     assert_eq!(node(&update, status).value(), Some(snapshot.status.as_str()));
     assert_eq!(node(&update, tile_node).label(), Some(tile.title.as_str()));
 
@@ -252,7 +256,7 @@ fn tree_shows_tiles_and_controls() {
 #[test]
 fn node_ids_are_unique_and_children_exist() {
     let (mut app, _, _) = app_with_filter();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let mut ids: Vec<u64> = update.nodes.iter().map(|(id, _)| id.0).collect();
     let count = ids.len();
     ids.sort_unstable();
@@ -313,7 +317,7 @@ fn piece_node(app: &mut App, module: u32, widget: usize, piece: tree::Piece) -> 
 #[test]
 fn every_widget_kind_has_its_role_a_name_and_a_value() {
     let mut app = app_with_every_widget();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let roles = [
         ("knob", Role::Slider),
         ("fader", Role::Slider),
@@ -421,7 +425,14 @@ fn a_widget_without_a_detail_or_a_parameter() {
     let mut bare = WidgetIds::default();
     named(&mut bare);
     let id = bare.get(module, knob).unwrap().clone();
-    let update = tree::tree(&snapshot, &bare, None, 1.0, &mut app.a11y.ids);
+    let update = tree::tree(
+        &snapshot,
+        &app.bars_model(),
+        &bare,
+        &Places::of_canvas(None),
+        1.0,
+        &mut app.a11y.ids,
+    );
     let target = node_of(&mut app, &id);
     let found = node(&update, target);
     assert_eq!(found.role(), Role::Label);
@@ -444,7 +455,14 @@ fn a_widget_without_a_detail_or_a_parameter() {
         },
     );
     assert_eq!(tree::piece_id(&id, &kind, tree::Piece::Whole), id);
-    let update = tree::tree(&snapshot, &travel, None, 1.0, &mut app.a11y.ids);
+    let update = tree::tree(
+        &snapshot,
+        &app.bars_model(),
+        &travel,
+        &Places::of_canvas(None),
+        1.0,
+        &mut app.a11y.ids,
+    );
     let found = node(&update, target);
     assert_eq!(found.role(), Role::Slider);
     assert_eq!(found.min_numeric_value(), Some(0.0));
@@ -476,7 +494,14 @@ fn a_scope_says_its_trace_in_words() {
         high: 0.25,
         level: 0.5,
     });
-    let update = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);
+    let update = tree::tree(
+        &snapshot,
+        &app.bars_model(),
+        &ids,
+        &Places::of_canvas(None),
+        1.0,
+        &mut app.a11y.ids,
+    );
     let found = node(&update, widget_node(&mut app, module, index));
     assert_eq!(found.role(), Role::Image);
     assert_eq!(found.description(), Some("Lowest -0.50, highest 0.25"));
@@ -488,7 +513,7 @@ fn a_scope_says_its_trace_in_words() {
 #[test]
 fn a_step_is_declared_only_where_it_is_one_number() {
     let (mut app, module, knob) = app_with_filter();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let spec = |app: &App, widget| app.control_target(module, widget, ControlPart::Main).unwrap().spec;
     assert_eq!(spec(&app, knob).options.mapping, loom_core::ParamMapping::Logarithmic);
     assert_eq!(
@@ -519,7 +544,14 @@ fn hidden_widgets_are_left_out() {
     let mut snapshot = app.ui_snapshot();
     let ids = app.a11y_widget_ids(&snapshot);
     snapshot.tiles.iter_mut().find(|t| t.id == module).unwrap().widgets[knob].hidden = true;
-    let update = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);
+    let update = tree::tree(
+        &snapshot,
+        &app.bars_model(),
+        &ids,
+        &Places::of_canvas(None),
+        1.0,
+        &mut app.a11y.ids,
+    );
     assert!(
         update
             .nodes
@@ -543,8 +575,22 @@ fn a_widget_with_no_name_is_left_out() {
         &tile_id(module),
         (0..tile.widgets.len()).map(|index| (WidgetKey::Param, (index != knob).then(|| format!("w{index}")))),
     );
-    let all = tree::tree(&snapshot, &named, None, 1.0, &mut app.a11y.ids);
-    let without = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);
+    let all = tree::tree(
+        &snapshot,
+        &app.bars_model(),
+        &named,
+        &Places::of_canvas(None),
+        1.0,
+        &mut app.a11y.ids,
+    );
+    let without = tree::tree(
+        &snapshot,
+        &app.bars_model(),
+        &ids,
+        &Places::of_canvas(None),
+        1.0,
+        &mut app.a11y.ids,
+    );
     assert_eq!(without.nodes.len() + 1, all.nodes.len());
     assert!(
         without
@@ -570,7 +616,7 @@ fn bounds_are_in_physical_pixels() {
     let bottom_right = view.to_window(Point::new(world.x + world.width, world.y + world.height));
 
     app.a11y.scale = 1.0;
-    let once = app.a11y_tree(Some(&view));
+    let once = app.a11y_tree(&Places::of_canvas(Some(view)));
     let cutoff = widget_node(&mut app, module, knob);
     let logical = node(&once, cutoff).bounds().unwrap();
     assert!((logical.x0 - f64::from(top_left.x)).abs() < 1e-3);
@@ -580,7 +626,7 @@ fn bounds_are_in_physical_pixels() {
     assert!(logical.x1 > logical.x0 && logical.y1 > logical.y0);
 
     let _ = app.a11y_event(Event::ScaleFactor(2.0));
-    let twice = app.a11y_tree(Some(&view));
+    let twice = app.a11y_tree(&Places::of_canvas(Some(view)));
     let physical = node(&twice, cutoff).bounds().unwrap();
     assert!((physical.x0 - logical.x0 * 2.0).abs() < 1e-3);
     assert!((physical.y0 - logical.y0 * 2.0).abs() < 1e-3);
@@ -595,13 +641,13 @@ fn bounds_are_in_physical_pixels() {
 #[test]
 fn node_ids_are_stable_across_builds() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let root = node_of(&mut app, &window_id());
     let cutoff = widget_node(&mut app, module, knob);
 
     app.session.controller.add_module("loom.filter.svf").unwrap();
     app.commit();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
 
     assert_eq!(node_of(&mut app, &window_id()), root);
     assert_eq!(widget_node(&mut app, module, knob), cutoff);
@@ -612,9 +658,9 @@ fn node_ids_are_stable_across_builds() {
 #[test]
 fn a_removed_module_leaves_the_table() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let before = app.a11y.ids.len();
 
     app.session
@@ -622,7 +668,7 @@ fn a_removed_module_leaves_the_table() {
         .remove_module(loom_core::ModuleId(module))
         .unwrap();
     app.commit();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
 
     assert!(app.a11y.ids.len() < before);
     assert_eq!(app.a11y.ids.id(cutoff.0), None);
@@ -635,13 +681,13 @@ fn a_removed_module_leaves_the_table() {
 #[test]
 fn a_replaced_patch_gets_new_node_ids() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let root = node_of(&mut app, &window_id());
     let tile = node_of(&mut app, &tile_id(module));
     let cutoff = widget_node(&mut app, module, knob);
 
     app.a11y.patch_replaced();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
 
     assert_eq!(node_of(&mut app, &window_id()), root);
     assert_ne!(node_of(&mut app, &tile_id(module)), tile);
@@ -655,10 +701,10 @@ fn a_replaced_patch_gets_new_node_ids() {
 fn replacing_the_patch_through_the_app_drops_tile_ids() {
     let (mut app, module, _) = app_with_filter();
     let _ = app.a11y_event(Event::Activated);
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let root = node_of(&mut app, &window_id());
     let tile = node_of(&mut app, &tile_id(module));
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
 
     assert!(app.replace(crate::Source::Empty));
 
@@ -672,7 +718,7 @@ fn replacing_the_patch_through_the_app_drops_tile_ids() {
 #[test]
 fn increment_turns_the_knob_and_can_be_undone() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let before = position(&app, module, knob);
 
@@ -693,7 +739,7 @@ fn increment_turns_the_knob_and_can_be_undone() {
 #[test]
 fn a_set_is_a_change_and_a_click_is_a_change_and_a_release() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let snapshot = app.ui_snapshot();
     let ids = app.a11y_widget_ids(&snapshot);
@@ -711,7 +757,7 @@ fn a_set_is_a_change_and_a_click_is_a_change_and_a_release() {
     assert!(none.is_empty(), "a knob cannot be clicked");
 
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let (module, toggle) = first_of(&app, "toggle");
     let target = widget_node(&mut app, module, toggle);
     let snapshot = app.ui_snapshot();
@@ -730,7 +776,7 @@ fn a_set_is_a_change_and_a_click_is_a_change_and_a_release() {
 fn quick_sets_on_one_control_are_one_undo_step() {
     use std::time::{Duration, Instant};
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let before = position(&app, module, knob);
     let steps = app.session.edits.history.len();
@@ -756,7 +802,7 @@ fn a_screen_reader_group_ends_as_the_rule_says() {
     use crate::edits::ReaderGroup;
     use std::time::{Duration, Instant};
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let other_knob = {
         let snapshot = app.ui_snapshot();
@@ -809,7 +855,7 @@ fn a_screen_reader_group_ends_as_the_rule_says() {
 fn the_canvas_wakes_once_for_an_open_group() {
     use std::time::Instant;
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     assert_eq!(app.session.edits.reader_group().due(), None);
     let cutoff = widget_node(&mut app, module, knob);
     let t = Instant::now();
@@ -825,7 +871,7 @@ fn the_canvas_wakes_once_for_an_open_group() {
 #[test]
 fn set_value_is_in_the_parameters_range_and_clamped() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let spec = app.control_target(module, knob, ControlPart::Main).unwrap().spec;
     let set = |app: &App, value| events(app, &request(Action::SetValue, cutoff, Some(value)));
@@ -860,7 +906,7 @@ fn set_value_is_in_the_parameters_range_and_clamped() {
 #[test]
 fn click_works_a_toggle_and_a_button() {
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let (module, toggle) = first_of(&app, "toggle");
     let target = widget_node(&mut app, module, toggle);
     let before = position(&app, module, toggle);
@@ -891,7 +937,7 @@ fn click_works_a_toggle_and_a_button() {
 #[test]
 fn increment_and_decrement_take_the_arrow_keys_step() {
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     for kind in ["knob", "fader", "number", "select"] {
         let (module, index) = first_of(&app, kind);
         let target = widget_node(&mut app, module, index);
@@ -921,7 +967,7 @@ fn increment_and_decrement_take_the_arrow_keys_step() {
 #[test]
 fn click_on_an_option_chooses_it() {
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let (module, radio) = first_of(&app, "radio");
     let chosen = position(&app, module, radio).round() as usize;
     let other = if chosen == 0 { 1 } else { 0 };
@@ -947,7 +993,7 @@ fn click_on_an_option_chooses_it() {
 #[test]
 fn each_value_of_a_two_value_control_is_its_own_slider() {
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let second_at = |app: &App, module: u32, index: usize| {
         let snapshot = app.ui_snapshot();
         let tile = snapshot.tiles.iter().find(|t| t.id == module).unwrap();
@@ -993,7 +1039,7 @@ fn each_value_of_a_two_value_control_is_its_own_slider() {
 #[test]
 fn focus_does_not_change_the_selection() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let tile = node_of(&mut app, &tile_id(module));
     let cutoff = widget_node(&mut app, module, knob);
     let before = app.ui_snapshot().selection;
@@ -1013,7 +1059,7 @@ fn click_on_a_tile_selects_it() {
     let (mut app, module, knob) = app_with_filter();
     let other = app.session.controller.add_module("loom.filter.svf").unwrap().0;
     app.commit();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let tile = node_of(&mut app, &tile_id(module));
     assert!(node(&update, tile).supports_action(Action::Click));
     assert!(node(&update, tile).supports_action(Action::Focus));
@@ -1049,7 +1095,7 @@ fn click_on_a_tile_selects_it() {
 #[test]
 fn click_on_a_removed_tile_does_nothing() {
     let (mut app, module, _) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let tile = node_of(&mut app, &tile_id(module));
     let mut snapshot = app.ui_snapshot();
     let ids = app.a11y_widget_ids(&snapshot);
@@ -1062,7 +1108,7 @@ fn click_on_a_removed_tile_does_nothing() {
 #[test]
 fn unknown_targets_do_nothing() {
     let (mut app, module, _) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let root = node_of(&mut app, &window_id());
     let tile = node_of(&mut app, &tile_id(module));
     assert!(events(&app, &request(Action::Increment, root, None)).is_empty());
@@ -1074,7 +1120,7 @@ fn unknown_targets_do_nothing() {
 #[test]
 fn hidden_widgets_ignore_actions() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let mut snapshot = app.ui_snapshot();
     let ids = app.a11y_widget_ids(&snapshot);
@@ -1093,7 +1139,7 @@ fn hidden_widgets_ignore_actions() {
 #[test]
 fn actions_wait_while_a_panel_owns_input() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
     assert!(!app.no_overlay(), "the recent list owns input");
@@ -1113,7 +1159,7 @@ fn a_screen_reader_turns_the_layer_on() {
     let _ = app.a11y_event(Event::Attached(Ok(())));
     let _ = app.a11y_event(Event::Attached(Err("no window".into())));
     assert!(!app.a11y.active, "attaching is not listening");
-    let _ = app.a11y_event(Event::Located(None));
+    let _ = app.a11y_event(Event::Located(Places::default()));
     assert!(app.a11y.ids.is_empty(), "no tree without a screen reader");
     let _ = app.a11y_after(Touch::Changed);
     assert!(!app.a11y.locating, "and no rebuild is asked for");
@@ -1122,7 +1168,7 @@ fn a_screen_reader_turns_the_layer_on() {
     assert!(app.a11y.active);
     assert!(app.a11y.locating, "the first tree is on its way");
     let _ = app.a11y_subscription();
-    let _ = app.a11y_event(Event::Located(None));
+    let _ = app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating);
     assert!(!app.a11y.ids.is_empty(), "locating the canvas built the tree");
     assert!(!app.unsaved(), "no edit was made");
@@ -1131,7 +1177,7 @@ fn a_screen_reader_turns_the_layer_on() {
 /// Makes a screen reader listen, and takes the first whole tree.
 fn listen(app: &mut App) {
     let _ = app.a11y_event(Event::Activated);
-    let _ = app.a11y_event(Event::Located(None));
+    let _ = app.a11y_event(Event::Located(Places::default()));
 }
 
 /// The node IDs in an update, sorted.
@@ -1148,12 +1194,12 @@ fn sent_ids(update: &TreeUpdate) -> Vec<NodeId> {
 fn only_changed_nodes_are_sent() {
     let (mut app, module, knob) = app_with_filter();
     let _ = app.a11y_event(Event::Activated);
-    let (whole, first) = app.a11y_changes(None);
+    let (whole, first) = app.a11y_changes(&Places::default());
     let first = first.expect("the first update is sent");
     assert!(first.tree.is_some(), "it names the root");
     assert_eq!(sent_ids(&first), sent_ids(&whole));
 
-    let (_, again) = app.a11y_changes(None);
+    let (_, again) = app.a11y_changes(&Places::default());
     assert!(again.is_none(), "nothing changed, so nothing is sent");
 
     let cutoff = widget_node(&mut app, module, knob);
@@ -1164,13 +1210,16 @@ fn only_changed_nodes_are_sent() {
         part: ControlPart::Main,
     }));
     let _ = app.update(Message::SliderReleased);
-    let (_, changes) = app.a11y_changes(None);
+    let (_, changes) = app.a11y_changes(&Places::default());
     let changes = changes.expect("the knob changed");
     assert!(changes.tree.is_none(), "the root is named once");
     let changed = sent_ids(&changes);
     assert!(changed.contains(&cutoff));
-    // The knob, and at most what shows the same value beside it.
-    assert!(changed.len() <= 2, "{changed:?}");
+    // The knob, at most what shows the same value beside it, and the
+    // toolbar's Undo and Redo, which now have a step to name.
+    let undo = node_of(&mut app, &tree::toolbar_id().with("undo"));
+    assert!(changed.contains(&undo));
+    assert!(changed.len() <= 4, "{changed:?}");
     assert!(changed.len() < whole.nodes.len());
 }
 
@@ -1183,7 +1232,7 @@ fn a_message_that_changes_nothing_sends_nothing() {
     let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
     assert!(app.a11y.locating, "the message asked for a rebuild");
     app.a11y.locating = false;
-    let (_, changes) = app.a11y_changes(None);
+    let (_, changes) = app.a11y_changes(&Places::default());
     assert!(changes.is_none());
 }
 
@@ -1199,7 +1248,7 @@ fn one_rebuild_at_a_time() {
     let _ = app.a11y_after(Touch::Changed);
     let _ = app.a11y_after(Touch::Own);
     assert!(app.a11y.locating);
-    let _ = app.a11y_event(Event::Located(None));
+    let _ = app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating);
 }
 
@@ -1239,7 +1288,7 @@ fn live_values_wait_for_the_timer() {
 
     // A rebuild for another reason holds the live nodes back.
     app.a11y.locating = false;
-    let (_, changes) = app.a11y_changes(None);
+    let (_, changes) = app.a11y_changes(&Places::default());
     let sent = changes.map(|update| sent_ids(&update)).unwrap_or_default();
     assert_eq!(live_among(&app, &sent), Vec::new(), "live nodes wait");
     assert!(app.a11y.live_waits());
@@ -1248,13 +1297,13 @@ fn live_values_wait_for_the_timer() {
     let _ = app.a11y_event(Event::LiveTick);
     assert!(app.a11y.locating, "the timer asks for a rebuild");
     app.a11y.locating = false;
-    let (_, changes) = app.a11y_changes(None);
+    let (_, changes) = app.a11y_changes(&Places::default());
     let sent = sent_ids(&changes.expect("the lights moved"));
     assert!(!live_among(&app, &sent).is_empty(), "the moved values are sent");
     assert!(!app.a11y.live_waits(), "nothing waits, so the timer stops");
 
     // The values have stopped, and the last ones were sent.
-    let (_, none) = app.a11y_changes(None);
+    let (_, none) = app.a11y_changes(&Places::default());
     assert!(none.is_none());
 }
 
@@ -1268,14 +1317,14 @@ fn a_new_scale_factor_resends_bounds() {
         camera: Camera::default(),
     };
     let _ = app.a11y_event(Event::Activated);
-    let _ = app.a11y_changes(Some(&view));
+    let _ = app.a11y_changes(&Places::of_canvas(Some(view)));
     app.a11y.locating = false;
 
     let _ = app.a11y_event(Event::ScaleFactor(1.0));
     assert!(!app.a11y.locating, "the same scale factor asks for nothing");
     let _ = app.a11y_event(Event::ScaleFactor(2.0));
     assert!(app.a11y.locating, "a new one asks for a rebuild");
-    let (_, changes) = app.a11y_changes(Some(&view));
+    let (_, changes) = app.a11y_changes(&Places::of_canvas(Some(view)));
     let changed = sent_ids(&changes.expect("bounds changed"));
     assert!(changed.contains(&node_of(&mut app, &tile_id(module))));
     assert!(changed.contains(&widget_node(&mut app, module, knob)));
@@ -1294,7 +1343,7 @@ fn a_screen_reader_that_leaves_stops_the_tree() {
     assert!(!app.a11y.locating && !app.a11y.live_waits());
 
     let _ = app.a11y_event(Event::Activated);
-    let (whole, first) = app.a11y_changes(None);
+    let (whole, first) = app.a11y_changes(&Places::default());
     assert_eq!(sent_ids(&first.expect("the whole tree again")), sent_ids(&whole));
 }
 
@@ -1316,21 +1365,21 @@ fn a_rescaled_window_reports_its_scale_factor() {
 fn focus_is_reported_on_the_focused_control() {
     let (mut app, module, knob) = app_with_filter();
     let _ = app.a11y_event(Event::Activated);
-    let (whole, _) = app.a11y_changes(None);
+    let (whole, _) = app.a11y_changes(&Places::default());
     let root = node_of(&mut app, &window_id());
     assert_eq!(whole.focus, root);
 
     let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     let cutoff = widget_node(&mut app, module, knob);
-    let (whole, changes) = app.a11y_changes(None);
+    let (whole, changes) = app.a11y_changes(&Places::default());
     assert_eq!(whole.focus, cutoff);
     assert_eq!(changes.expect("the focus moved, so an update goes").focus, cutoff);
 
-    let (_, again) = app.a11y_changes(None);
+    let (_, again) = app.a11y_changes(&Places::default());
     assert!(again.is_none(), "the same focus sends nothing");
 
     let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(None)));
-    let (whole, changes) = app.a11y_changes(None);
+    let (whole, changes) = app.a11y_changes(&Places::default());
     assert_eq!(whole.focus, root);
     assert!(changes.is_some());
 }
@@ -1340,7 +1389,7 @@ fn focus_is_reported_on_the_focused_control() {
 #[test]
 fn controls_offer_focus_and_displays_do_not() {
     let mut app = app_with_every_widget();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     for kind in ["knob", "toggle", "button", "select", "radio", "xy_pad"] {
         let (module, index) = first_of(&app, kind);
         let found = node(&update, widget_node(&mut app, module, index));
@@ -1363,7 +1412,7 @@ fn controls_offer_focus_and_displays_do_not() {
 #[test]
 fn the_focus_action_asks_the_canvas_for_focus() {
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let t = std::time::Instant::now();
     let (module, knob) = first_of(&app, "knob");
     let selection = app.session.selection.clone();
@@ -1395,7 +1444,7 @@ fn the_focus_action_asks_the_canvas_for_focus() {
 #[test]
 fn focus_ends_the_group_and_a_new_patch_forgets_it() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let steps = app.session.edits.history.len();
     let _ = app.a11y_action(&request(Action::Increment, cutoff, None), std::time::Instant::now());
@@ -1407,7 +1456,7 @@ fn focus_ends_the_group_and_a_new_patch_forgets_it() {
     assert!(app.a11y.focus_request().1.is_some());
     app.a11y.patch_replaced();
     assert_eq!(app.a11y.focus_request().1, None);
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     assert_eq!(update.focus, node_of(&mut app, &window_id()));
 }
 
@@ -1419,12 +1468,12 @@ fn focus_ends_the_group_and_a_new_patch_forgets_it() {
 fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
     let (mut app, module, knob) = app_with_filter();
     let _ = app.a11y_event(Event::Activated);
-    let (whole, _) = app.a11y_changes(None);
+    let (whole, _) = app.a11y_changes(&Places::default());
     let tile = node_of(&mut app, &tile_id(module));
     let cutoff = widget_node(&mut app, module, knob);
     assert!(!node(&whole, tile).is_hidden());
     let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
-    let _ = app.a11y_changes(None);
+    let _ = app.a11y_changes(&Places::default());
 
     app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
     // The patch changes behind the panel, as MIDI or a script can do.
@@ -1436,7 +1485,7 @@ fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
         part: ControlPart::Main,
     }));
     let _ = app.update(Message::SliderReleased);
-    let (whole, changes) = app.a11y_changes(None);
+    let (whole, changes) = app.a11y_changes(&Places::default());
     assert!(node(&whole, tile).is_hidden());
     assert_eq!(
         whole.focus,
@@ -1448,7 +1497,7 @@ fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
     assert!(!sent.contains(&cutoff), "the knob keeps the value last sent");
 
     app.overlays = crate::overlays::Overlays::default();
-    let (whole, changes) = app.a11y_changes(None);
+    let (whole, changes) = app.a11y_changes(&Places::default());
     assert!(!node(&whole, tile).is_hidden());
     let sent = sent_ids(&changes.expect("the tiles show again"));
     assert!(sent.contains(&tile) && sent.contains(&cutoff));
@@ -1470,47 +1519,23 @@ fn live_values_off_screen_are_not_sent() {
         camera: Camera::default(),
     };
     let _ = app.a11y_event(Event::Activated);
-    let _ = app.a11y_changes(Some(&away));
+    let _ = app.a11y_changes(&Places::of_canvas(Some(away)));
     move_live_values(&mut app);
     assert!(app.a11y.live_waits());
 
     app.a11y.flush_live = true;
-    let (_, changes) = app.a11y_changes(Some(&away));
+    let (_, changes) = app.a11y_changes(&Places::of_canvas(Some(away)));
     let sent = changes.map(|update| sent_ids(&update)).unwrap_or_default();
     assert_eq!(live_among(&app, &sent), Vec::new(), "off screen, nothing is sent");
     assert!(!app.a11y.live_waits(), "and the timer stops");
 
     // On screen now: the bounds changed, so the live nodes wait, then go.
-    let _ = app.a11y_changes(Some(&on_screen));
+    let _ = app.a11y_changes(&Places::of_canvas(Some(on_screen)));
     assert!(app.a11y.live_waits());
     app.a11y.flush_live = true;
-    let (_, changes) = app.a11y_changes(Some(&on_screen));
+    let (_, changes) = app.a11y_changes(&Places::of_canvas(Some(on_screen)));
     let sent = sent_ids(&changes.expect("on screen, the values are sent"));
     assert!(!live_among(&app, &sent).is_empty());
-}
-
-/// The widget operation that finds the canvas reports the view the canvas
-/// gave it, and nothing when no canvas answered.
-#[test]
-fn the_canvas_is_found_by_its_view() {
-    use iced::advanced::widget::operation::Outcome;
-    let mut find = FindCanvas(None);
-    assert!(matches!(find.finish(), Outcome::Some(None)));
-
-    let mut other = 7u32;
-    find.custom(None, Rectangle::default(), &mut other);
-    assert!(matches!(find.finish(), Outcome::Some(None)), "not a canvas view");
-
-    let mut view = CanvasView {
-        bounds: Rect::new(Point::new(1.0, 2.0), Size::new(3.0, 4.0)),
-        camera: Camera::default(),
-    };
-    find.custom(None, Rectangle::default(), &mut view);
-    assert!(matches!(find.finish(), Outcome::Some(Some(found)) if found == view));
-
-    let mut visited = false;
-    find.traverse(&mut |_| visited = true);
-    assert!(visited);
 }
 
 /// A meter reports the number its text shows, in dB, with the range the
@@ -1522,7 +1547,7 @@ fn a_meter_reports_the_number_its_text_shows() {
     move_live_values(&mut app);
     let snapshot = app.ui_snapshot();
     let ids = app.a11y_widget_ids(&snapshot);
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let mut numbered = 0;
     for tile in &snapshot.tiles {
         for (index, widget) in tile.widgets.iter().enumerate() {
@@ -1567,7 +1592,7 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
     let mut ui = crate::ui_test::Ui::with_app(app);
     // The first frame only notes the request's key.
     let _ = ui.redraw();
-    let _ = ui.app.a11y_tree(None);
+    let _ = ui.app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut ui.app, module, knob);
     let steps = ui.app.session.edits.history.len();
 
@@ -1584,7 +1609,7 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
         "selecting is not an undo step"
     );
     assert!(!ui.app.unsaved(), "nor an edit");
-    assert_eq!(ui.app.a11y_tree(None).focus, cutoff);
+    assert_eq!(ui.app.a11y_tree(&Places::default()).focus, cutoff);
 
     let before = ui
         .app
@@ -1607,7 +1632,11 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
         .widgets[knob]
         .position;
     assert!(after > before, "the arrow key moved the focused control");
-    assert_eq!(ui.app.a11y_tree(None).focus, cutoff, "and the focus stayed");
+    assert_eq!(
+        ui.app.a11y_tree(&Places::default()).focus,
+        cutoff,
+        "and the focus stayed"
+    );
 }
 
 /// `--measure-tree` runs the layer as if a screen reader listened from the
@@ -1620,7 +1649,7 @@ fn a_measured_layer_builds_and_times_the_tree() {
     assert!(app.a11y.is_active());
 
     let before = BuildTimes::process();
-    let _ = app.a11y_event(Event::Located(None));
+    let _ = app.a11y_event(Event::Located(Places::default()));
     let after = BuildTimes::process();
     // Other tests build trees too, but only a measured layer counts them.
     assert!(after.count > before.count);
@@ -1674,7 +1703,7 @@ fn a_poll_that_changes_nothing_builds_no_tree() {
 #[test]
 fn a_label_node_never_hides_its_value() {
     let mut app = app_with_every_widget();
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&Places::default());
     let mut labels = 0;
     for (_, found) in &update.nodes {
         if found.role() == Role::Label {
@@ -1720,7 +1749,7 @@ fn a_range_handle_stops_on_its_own_side() {
 fn a_click_that_changes_nothing_ends_the_group() {
     use crate::edits::ReaderGroup;
     let mut app = app_with_every_widget();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let (module, knob) = first_of(&app, "knob");
     let (radio_module, radio) = first_of(&app, "radio");
     let now = std::time::Instant::now();
@@ -1761,7 +1790,7 @@ fn a_click_that_changes_nothing_ends_the_group() {
 fn an_action_waits_while_an_arrow_key_is_held() {
     use crate::edits::{ArrowEvent, ArrowGroup, ReaderGroup};
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_tree(None);
+    let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let now = std::time::Instant::now();
     app.arrow_event(ArrowEvent::Step(now));
@@ -1830,14 +1859,14 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
     app.commit();
     let mut ui = crate::ui_test::Ui::with_app(app);
     let _ = ui.redraw();
-    let _ = ui.app.a11y_tree(None);
+    let _ = ui.app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut ui.app, module, knob);
     let other_tile = node_of(&mut ui.app, &tile_id(other));
     let window = node_of(&mut ui.app, &window_id());
 
     ui.send(Message::A11y(Event::Action(request(Action::Focus, cutoff, None))));
     let _ = ui.redraw();
-    assert_eq!(ui.app.a11y_tree(None).focus, cutoff);
+    assert_eq!(ui.app.a11y_tree(&Places::default()).focus, cutoff);
 
     ui.send(Message::A11y(Event::Action(request(Action::Click, other_tile, None))));
     let drawn = ui.redraw();
@@ -1847,7 +1876,7 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
             .any(|message| matches!(message, Message::Canvas(CanvasEvent::FocusChanged(None))))
     );
     assert_eq!(ui.app.ui_snapshot().selection, vec![other]);
-    assert_eq!(ui.app.a11y_tree(None).focus, window);
+    assert_eq!(ui.app.a11y_tree(&Places::default()).focus, window);
 
     let before = position(&ui.app, module, knob);
     let _ = ui.key_down(iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp), false);
@@ -1857,4 +1886,307 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
         before,
         "the first tile's knob is left alone"
     );
+}
+
+/// The toolbar is a named group of buttons. Each button has its label, its
+/// hover text as the description, and Click only while it works. A mode
+/// button says whether its mode is on. No button offers Focus: outside
+/// the canvas only text fields take it until phase 3 (ui-layer.md, section
+/// 7, rule 22).
+#[test]
+fn the_toolbar_is_a_group_of_buttons() {
+    let (mut app, _, _) = app_with_filter();
+    let update = app.a11y_tree(&Places::default());
+    let root = node_of(&mut app, &window_id());
+    let toolbar = node_of(&mut app, &tree::toolbar_id());
+    assert_eq!(node(&update, root).children().first(), Some(&toolbar));
+    assert_eq!(node(&update, toolbar).role(), Role::Group);
+    assert_eq!(node(&update, toolbar).label(), Some("Toolbar"));
+
+    let model = app.toolbar_model();
+    assert_eq!(node(&update, toolbar).children().len(), model.buttons.len());
+    for button in &model.buttons {
+        let found = node(&update, node_of(&mut app, &tree::toolbar_id().with(button.name)));
+        assert_eq!(found.role(), Role::Button, "{}", button.name);
+        assert_eq!(found.label(), Some(button.label));
+        assert_eq!(found.description(), button.hover.as_deref());
+        assert_eq!(found.supports_action(Action::Click), button.enabled, "{}", button.name);
+        assert_eq!(found.is_disabled(), !button.enabled, "{}", button.name);
+        assert!(!found.supports_action(Action::Focus), "{}", button.name);
+        assert_eq!(found.toggled().is_some(), button.on.is_some(), "{}", button.name);
+    }
+}
+
+/// A Click on a toolbar button sends the message its press sends. A
+/// disabled button, another action, and a node that is no button send
+/// nothing.
+#[test]
+fn a_click_on_a_toolbar_button_presses_it() {
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_tree(&Places::default());
+    let undo = node_of(&mut app, &tree::toolbar_id().with("undo"));
+    assert!(
+        app.a11y_frame_message(&request(Action::Click, undo, None)).is_none(),
+        "nothing to undo yet"
+    );
+
+    let before = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
+    let cutoff = widget_node(&mut app, module, knob);
+    let now = std::time::Instant::now();
+    let _ = app.a11y_action(&request(Action::Increment, cutoff, None), now);
+    let moved = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
+    assert!(moved > before);
+
+    assert!(matches!(
+        app.a11y_frame_message(&request(Action::Click, undo, None)),
+        Some(Message::Undo)
+    ));
+    assert!(app.a11y_frame_message(&request(Action::Focus, undo, None)).is_none());
+    assert!(app.a11y_frame_message(&request(Action::Click, cutoff, None)).is_none());
+    let _ = app.a11y_action(&request(Action::Click, undo, None), now);
+    let back = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
+    assert!((back - before).abs() < 1e-6, "Undo took the screen reader's edit back");
+
+    let learn = node_of(&mut app, &tree::toolbar_id().with("midi_learn"));
+    let _ = app.a11y_action(&request(Action::Click, learn, None), now);
+    assert!(app.ui_snapshot().learning);
+    let update = app.a11y_tree(&Places::default());
+    assert_eq!(node(&update, learn).toggled(), Some(accesskit::Toggled::True));
+}
+
+/// The right panel's tabs are a tab list with the open tab selected, and a
+/// Click on a tab opens it.
+#[test]
+fn the_right_panel_has_tabs() {
+    let (mut app, _, _) = app_with_filter();
+    let update = app.a11y_tree(&Places::default());
+    let list = node_of(&mut app, &tree::tabs_id());
+    let inspector = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Inspector));
+    let matrix = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Matrix));
+    assert_eq!(node(&update, list).role(), Role::TabList);
+    assert_eq!(node(&update, list).children(), [inspector, matrix]);
+    assert_eq!(node(&update, inspector).role(), Role::Tab);
+    assert_eq!(node(&update, inspector).label(), Some("Inspector"));
+    assert_eq!(node(&update, inspector).is_selected(), Some(true));
+    assert_eq!(node(&update, matrix).is_selected(), Some(false));
+
+    let _ = app.a11y_action(&request(Action::Click, matrix, None), std::time::Instant::now());
+    let update = app.a11y_tree(&Places::default());
+    assert_eq!(node(&update, matrix).is_selected(), Some(true));
+    assert_eq!(node(&update, inspector).is_selected(), Some(false));
+}
+
+/// The bar at the bottom is a named group. Its plain items are labels with
+/// the text shown, hover text is the description, and ordinary status text
+/// is a label. A warning in the status line is a status, so it is
+/// announced (ui-layer.md, section 7, the role table).
+#[test]
+fn the_bar_reports_its_items_and_the_status() {
+    let (mut app, _, _) = app_with_filter();
+    app.alerts.say("Saved");
+    let update = app.a11y_tree(&Places::default());
+    let bar = node_of(&mut app, &tree::stats_id());
+    assert_eq!(node(&update, bar).role(), Role::Group);
+    assert_eq!(node(&update, bar).label(), Some("Status bar"));
+    let model = app.bars_model();
+    for item in &model.items {
+        let found = node(&update, node_of(&mut app, &tree::stats_id().with(item.name)));
+        assert_eq!(found.value(), Some(item.text.as_str()), "{}", item.name);
+        assert_eq!(found.description(), item.hover.as_deref(), "{}", item.name);
+        let alert = item.kind == crate::bars::Kind::Alert;
+        assert_eq!(
+            found.role(),
+            if alert { Role::Status } else { Role::Label },
+            "{}",
+            item.name
+        );
+    }
+    let status = node_of(&mut app, &tree::fixed_id(crate::bars::STATUS_ID));
+    assert_eq!(node(&update, status).role(), Role::Label);
+    assert_eq!(node(&update, status).value(), Some(model.status.shown.as_str()));
+
+    app.alerts.warn("The audio device is gone");
+    let update = app.a11y_tree(&Places::default());
+    assert_eq!(node(&update, status).role(), Role::Status);
+    assert!(node(&update, status).value().is_some_and(|text| text.contains("gone")));
+
+    assert!(tree::is_live_bar_item(&tree::stats_id().with("load")));
+    assert!(tree::is_live_bar_item(&tree::stats_id().with("dropouts")));
+    assert!(!tree::is_live_bar_item(&tree::stats_id().with("midi")));
+}
+
+/// The developer switches are switches, and a Click turns one.
+#[test]
+fn the_developer_switches_are_switches() {
+    let (mut app, _, _) = app_with_filter();
+    app.dev_tools = true;
+    let was = app.measuring;
+    let update = app.a11y_tree(&Places::default());
+    let measure = node_of(&mut app, &tree::fixed_id(crate::bars::MEASURE_ID));
+    let camera = node_of(&mut app, &tree::fixed_id(crate::bars::MOVE_CAMERA_ID));
+    assert_eq!(node(&update, measure).role(), Role::Switch);
+    assert_eq!(node(&update, measure).label(), Some("Measure"));
+    assert_eq!(node(&update, camera).label(), Some("Move camera"));
+    let _ = app.a11y_action(&request(Action::Click, measure, None), std::time::Instant::now());
+    assert_eq!(app.measuring, !was);
+    assert!(matches!(
+        app.a11y_frame_message(&request(Action::Click, camera, None)),
+        Some(Message::Animate(on)) if on != app.animating
+    ));
+    // Without the tools the switches are not drawn, and do nothing.
+    app.dev_tools = false;
+    assert!(app.a11y_frame_message(&request(Action::Click, measure, None)).is_none());
+}
+
+/// What a UI ID names outside the canvas: a button, a tab, a ×, a switch,
+/// or nothing that acts.
+#[test]
+fn frame_parts_are_told_by_their_ids() {
+    use tree::{FramePart, frame_part};
+    let id = |text: &str| tree::fixed_id(text);
+    assert_eq!(frame_part(&id("toolbar/undo")), Some(FramePart::Button("undo")));
+    assert_eq!(
+        frame_part(&id("panel/matrix")),
+        Some(FramePart::Tab(crate::matrix::Tab::Matrix))
+    );
+    assert_eq!(
+        frame_part(&id("panel/inspector")),
+        Some(FramePart::Tab(crate::matrix::Tab::Inspector))
+    );
+    assert_eq!(
+        frame_part(&id("status/dismiss")),
+        Some(FramePart::Dismiss { kept: false })
+    );
+    assert_eq!(
+        frame_part(&id("status/kept/dismiss")),
+        Some(FramePart::Dismiss { kept: true })
+    );
+    assert_eq!(frame_part(&id("stats/measure")), Some(FramePart::Measure));
+    assert_eq!(frame_part(&id("stats/move_camera")), Some(FramePart::MoveCamera));
+    for nothing in [
+        "stats/load",
+        "status",
+        "status/kept",
+        "toolbar",
+        "panel",
+        "canvas/4",
+        "panel/other",
+    ] {
+        assert_eq!(frame_part(&id(nothing)), None, "{nothing}");
+    }
+}
+
+/// The window says where it drew each named part, and the tree gives that
+/// place to the part's node, in physical pixels. Every button, tab, and bar
+/// item the tree reports was found in the window, inside it, and not on top
+/// of another.
+#[test]
+fn frame_nodes_have_the_bounds_the_window_drew() {
+    let (app, _, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    let places = ui.places();
+    assert!(places.canvas.is_some());
+    ui.app.a11y.scale = 2.0;
+    let update = ui.app.a11y_tree(&places);
+
+    let mut ids: Vec<UiId> = ui
+        .app
+        .toolbar_model()
+        .buttons
+        .iter()
+        .map(|button| tree::toolbar_id().with(button.name))
+        .collect();
+    ids.extend(
+        ui.app
+            .bars_model()
+            .items
+            .iter()
+            .map(|item| tree::stats_id().with(item.name)),
+    );
+    ids.push(tree::fixed_id(crate::bars::STATUS_ID));
+    ids.push(tree::tab_id(crate::matrix::Tab::Inspector));
+    ids.push(tree::tab_id(crate::matrix::Tab::Matrix));
+    // The groups hold their parts, so only the parts are compared for
+    // overlap below.
+    for group in [tree::toolbar_id(), tree::tabs_id(), tree::stats_id()] {
+        let place = places
+            .of(&group)
+            .unwrap_or_else(|| panic!("the window drew no `{group}`"));
+        assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{group}");
+        assert!(
+            node(&update, node_of(&mut ui.app, &group)).bounds().is_some(),
+            "{group}"
+        );
+    }
+    let mut seen: Vec<accesskit::Rect> = Vec::new();
+    for id in &ids {
+        let place = places.of(id).unwrap_or_else(|| panic!("the window drew no `{id}`"));
+        assert!(place.is_shown());
+        let bounds = node(&update, node_of(&mut ui.app, id))
+            .bounds()
+            .unwrap_or_else(|| panic!("`{id}` has no bounds"));
+        assert!((bounds.x0 - f64::from(place.rect.x) * 2.0).abs() < 1e-3, "{id}");
+        assert!((bounds.y0 - f64::from(place.rect.y) * 2.0).abs() < 1e-3, "{id}");
+        assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0, "{id} has a size");
+        assert!(bounds.x0 >= 0.0 && bounds.y0 >= 0.0, "{id} is inside the window");
+        for other in &seen {
+            let apart =
+                bounds.x1 <= other.x0 || other.x1 <= bounds.x0 || bounds.y1 <= other.y0 || other.y1 <= bounds.y0;
+            assert!(apart, "{id} lies on another part");
+        }
+        seen.push(bounds);
+    }
+}
+
+/// While a panel owns the input, the toolbar, the tabs, and the bar are
+/// hidden with the tiles, and a Click on a button behind the panel does
+/// nothing.
+#[test]
+fn frame_nodes_are_hidden_below_a_panel() {
+    let (mut app, _, _) = app_with_filter();
+    let _ = app.a11y_tree(&Places::default());
+    let add = node_of(&mut app, &tree::toolbar_id().with("add_module"));
+    app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
+    assert!(!app.no_overlay());
+    let update = app.a11y_tree(&Places::default());
+    for id in [
+        tree::toolbar_id(),
+        tree::tabs_id(),
+        tree::stats_id(),
+        tree::toolbar_id().with("undo"),
+    ] {
+        assert!(node(&update, node_of(&mut app, &id)).is_hidden(), "{id}");
+    }
+    assert!(
+        app.a11y_action(&request(Action::Click, add, None), std::time::Instant::now())
+            .is_empty()
+    );
+}
+
+/// The audio watcher's reading is a live value: it asks for no build, and
+/// waits for the live timer. A change of the toolbar changes the key a
+/// poll is compared by.
+#[test]
+fn bar_readings_are_live_and_the_frame_is_in_the_poll_key() {
+    let (mut app, _, _) = app_with_filter();
+    app.a11y = Access::measured();
+    app.a11y.locating = false;
+    let _ = app.update(Message::Audio(crate::audio_watch::Event::Stats {
+        dropouts: 0,
+        at: std::time::Instant::now(),
+        peak: 0.1,
+        max: 0.2,
+        silenced: false,
+        clipped: false,
+    }));
+    assert!(!app.a11y.locating, "a reading asks for no build");
+    assert!(app.a11y.live_waits(), "it waits for the live timer");
+
+    let key = app.a11y_poll_key();
+    let _ = app.update(Message::Learn(crate::learn::Message::Toggle));
+    assert_ne!(app.a11y_poll_key(), key, "the toolbar and the bar changed");
+    let key = app.a11y_poll_key();
+    let _ = app.update(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
+    assert_ne!(app.a11y_poll_key(), key, "the open tab changed");
 }

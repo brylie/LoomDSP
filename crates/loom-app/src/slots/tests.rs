@@ -762,7 +762,7 @@ fn swapping_a_part_makes_its_controls_new_elements() {
     let look = |app: &mut App| {
         let snapshot = app.ui_snapshot();
         let ids = app.a11y_widget_ids(&snapshot);
-        let update = app.a11y_tree(None);
+        let update = app.a11y_tree(&crate::places::Places::default());
         let tile = snapshot.tiles.iter().find(|t| t.id == slot).expect("the slot tile");
         let (tile_node, tile_built) = update
             .nodes
@@ -839,7 +839,7 @@ fn a_sub_patch_part_keys_the_slots_controls_under_its_key() {
         found,
         [&part_id(slot, SlotPart::SubPatch("comb")).with("exposed").with("cutoff")]
     );
-    let update = app.a11y_tree(None);
+    let update = app.a11y_tree(&crate::places::Places::default());
     let cutoff = update
         .nodes
         .iter()

@@ -12,7 +12,9 @@
 //! `badge:OUTPUT` names an output's assignment count badge, such as
 //! `5:badge:out`. Displays that show the same thing are counted: the Level
 //! Meter's `11:display:out` is its meter, and `11:display:out:2` its level
-//! history.
+//! history. `param:NAME` names a module's own parameter only, and
+//! `exposed:NAME` an item a sub-patch exposes on its tile, as the kinds
+//! of a UI ID name them (`docs/design/ui-layer.md`, section 4, rule 2).
 
 use loom_canvas::{ControlPart, PORT_HIT_RADIUS, PanelValues, PortRef, Scene};
 use loom_core::ModuleNames;
@@ -27,6 +29,12 @@ pub const BADGE_PREFIX: &str = "badge:";
 pub const INPUT_PREFIX: &str = "input:";
 /// The prefix that names an output only.
 pub const OUTPUT_PREFIX: &str = "output:";
+/// The prefix that names a module's own parameter only: a control on a
+/// module tile.
+pub const PARAM_PREFIX: &str = "param:";
+/// The prefix that names an exposed item only: a control on a sub-patch
+/// tile's surface.
+pub const EXPOSED_PREFIX: &str = "exposed:";
 
 /// What a `MODULE:NAME` names on a tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,14 +111,31 @@ pub fn find(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str) -> Re
                 .ok_or_else(|| format!("module {module} ({}) has no {kind} `{name}`", descriptor.name));
         }
     }
-    widgets
-        .iter()
-        .position(|w| w.is_control() && w.bind() == name)
-        .map(|index| Part::Control(module, index))
-        .or_else(|| {
-            let second = widgets.iter().position(|w| w.second() == Some(name))?;
-            Some(Part::Second(module, second))
-        })
+    let param = |name: &str| {
+        widgets
+            .iter()
+            .position(|w| w.is_control() && w.bind() == name)
+            .map(|index| Part::Control(module, index))
+            .or_else(|| {
+                let second = widgets.iter().position(|w| w.second() == Some(name))?;
+                Some(Part::Second(module, second))
+            })
+    };
+    if let Some(name) = name.strip_prefix(PARAM_PREFIX) {
+        return param(name).ok_or_else(|| {
+            format!(
+                "module {module} ({}) has no control for a parameter `{name}`",
+                descriptor.name
+            )
+        });
+    }
+    if let Some(name) = name.strip_prefix(EXPOSED_PREFIX) {
+        return Err(format!(
+            "module {module} ({}) is a module, so it exposes nothing: use `{PARAM_PREFIX}{name}`",
+            descriptor.name
+        ));
+    }
+    param(name)
         .or_else(|| port(name, true))
         .or_else(|| port(name, false))
         .or_else(|| display(name))
@@ -141,13 +166,23 @@ fn find_on_tile(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str) -
             "module {module} ({tile_name}) has no light, meter, or badge `{name}`"
         ));
     }
-    let control = match tile {
+    let control = |name: &str| match tile {
         Tile::Instance(_) | Tile::Slot(_) => {
             crate::surface::find_control(graph, hierarchy, module, name).map(|i| Part::Control(module, i))
         }
         _ => None,
     };
-    control
+    // A sub-patch tile's controls are what its inside exposes, never a
+    // parameter of its own.
+    if let Some(name) = name.strip_prefix(EXPOSED_PREFIX) {
+        return control(name).ok_or_else(|| format!("module {module} ({tile_name}) exposes no `{name}`"));
+    }
+    if let Some(name) = name.strip_prefix(PARAM_PREFIX) {
+        return Err(format!(
+            "module {module} ({tile_name}) has no parameters of its own: use `{EXPOSED_PREFIX}{name}`"
+        ));
+    }
+    control(name)
         .or_else(|| port(name, true))
         .or_else(|| port(name, false))
         .ok_or_else(|| format!("module {module} ({tile_name}) has no control or port `{name}`"))
