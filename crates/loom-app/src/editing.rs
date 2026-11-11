@@ -288,6 +288,26 @@ impl App {
             self.end_gesture();
         }
         self.close_pending_arrow_group();
+        self.reader_event(crate::edits::ReaderEvent::Close);
+    }
+
+    /// Applies an event to the screen reader's undo group: ends or opens
+    /// the gesture as the group says, then keeps the group's new state
+    /// (ui-layer.md, section 7, rule 6).
+    pub(crate) fn reader_event(&mut self, event: crate::edits::ReaderEvent) {
+        let (next, effect) = self.session.edits.reader_group().on(event);
+        if effect.ends() {
+            self.end_gesture();
+        }
+        if effect.starts() {
+            // Closed first, so closing what else is open does not end this
+            // group a second time.
+            self.session.edits.set_reader_group(crate::edits::ReaderGroup::Closed);
+            self.close_slider_gesture();
+            self.session.edits.start_gesture();
+            self.begin_edit();
+        }
+        self.session.edits.set_reader_group(next);
     }
 
     /// Records a released arrow edit before an action outside the canvas.
@@ -350,6 +370,9 @@ impl App {
             Some("the slider edit")
         } else if matches!(edits.arrow_group(), crate::edits::ArrowGroup::Released { .. }) {
             Some("the arrow key edit")
+        } else if edits.reader_group() != crate::edits::ReaderGroup::Closed {
+            // No key is held, so Undo never waits for this group.
+            Some("the screen reader edit")
         } else {
             None
         }

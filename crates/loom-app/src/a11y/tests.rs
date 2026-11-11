@@ -595,9 +595,10 @@ fn replacing_the_patch_through_the_app_drops_tile_ids() {
     assert_eq!(app.a11y.ids.id(root.0), Some(&window_id()));
 }
 
-/// Increment turns the knob one step, through the canvas, as one undo step.
+/// Increment turns the knob one step, through the canvas, and Undo can
+/// take it back at once.
 #[test]
-fn increment_turns_the_knob_as_one_undo_step() {
+fn increment_turns_the_knob_and_can_be_undone() {
     let (mut app, module, knob) = app_with_filter();
     let _ = app.a11y_tree(None);
     let cutoff = widget_node(&mut app, module, knob);
@@ -607,16 +608,18 @@ fn increment_turns_the_knob_as_one_undo_step() {
 
     let after = position(&app, module, knob);
     assert!((after - (before + 0.01).min(1.0)).abs() < 1e-4, "{before} -> {after}");
-    assert!(app.ui_snapshot().undo.is_some(), "the turn can be undone");
+    // The turn is in an open group, and Undo closes the group and takes it.
+    assert_eq!(app.undo_hint().unwrap(), "Undo: the screen reader edit");
 
     let _ = app.update(Message::A11y(Event::Action(request(Action::Decrement, cutoff, None))));
     assert!((position(&app, module, knob) - before).abs() < 1e-4);
 }
 
-/// A request becomes the messages the pointer would send: the change, then
-/// the release that ends its undo step.
+/// A SetValue gives only its change, since the app groups it with the
+/// ones that follow. A Click is one step of its own: its change, then the
+/// release that ends the step.
 #[test]
-fn a_set_becomes_a_change_and_a_release() {
+fn a_set_is_a_change_and_a_click_is_a_change_and_a_release() {
     let (mut app, module, knob) = app_with_filter();
     let _ = app.a11y_tree(None);
     let cutoff = widget_node(&mut app, module, knob);
@@ -626,14 +629,123 @@ fn a_set_becomes_a_change_and_a_release() {
         &snapshot,
         &ids,
         &app.a11y.ids,
-        &request(Action::SetValue, cutoff, Some(ActionData::NumericValue(0.5))),
+        &request(Action::SetValue, cutoff, Some(ActionData::NumericValue(500.0))),
     );
+    assert!(matches!(
+        messages.as_slice(),
+        [Message::Canvas(CanvasEvent::SetControl { .. })]
+    ));
+    let none = actions::messages(&snapshot, &ids, &app.a11y.ids, &request(Action::Click, cutoff, None));
+    assert!(none.is_empty(), "a knob cannot be clicked");
+
+    let mut app = app_with_every_widget();
+    let _ = app.a11y_tree(None);
+    let (module, toggle) = first_of(&app, "toggle");
+    let target = widget_node(&mut app, module, toggle);
+    let snapshot = app.ui_snapshot();
+    let ids = app.a11y_widget_ids(&snapshot);
+    let messages = actions::messages(&snapshot, &ids, &app.a11y.ids, &request(Action::Click, target, None));
     assert!(matches!(
         messages.as_slice(),
         [Message::Canvas(CanvasEvent::SetControl { .. }), Message::SliderReleased]
     ));
-    let none = actions::messages(&snapshot, &ids, &app.a11y.ids, &request(Action::Click, cutoff, None));
-    assert!(none.is_empty(), "a knob cannot be clicked");
+}
+
+/// Screen reader SetValues on one control, each within 500 ms of the last,
+/// make one undo step, and Undo is enabled while the group is open
+/// (ui-layer.md, section 7, rule 6).
+#[test]
+fn quick_sets_on_one_control_are_one_undo_step() {
+    use std::time::{Duration, Instant};
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_tree(None);
+    let cutoff = widget_node(&mut app, module, knob);
+    let before = position(&app, module, knob);
+    let steps = app.session.edits.history.len();
+    let t = Instant::now();
+    for (i, hz) in [200.0, 400.0, 800.0].into_iter().enumerate() {
+        let set = request(Action::SetValue, cutoff, Some(ActionData::NumericValue(hz)));
+        let _ = app.a11y_action(&set, t + Duration::from_millis(300 * i as u64));
+        assert!(app.undo_hint().is_ok(), "Undo is enabled while the group is open");
+    }
+    assert_eq!(app.session.edits.history.len(), steps, "the group is still open");
+    assert_eq!(app.undo_hint().unwrap(), "Undo: the screen reader edit");
+
+    // Undo closes the group first, then takes it back as one step.
+    let _ = app.update(Message::Undo);
+    assert!((position(&app, module, knob) - before).abs() < 1e-6);
+    assert_eq!(app.session.edits.reader_group(), crate::edits::ReaderGroup::Closed);
+}
+
+/// The group ends at its deadline, on an action on another control, on a
+/// Click, and on a key press, and each end is one undo step.
+#[test]
+fn a_screen_reader_group_ends_as_the_rule_says() {
+    use crate::edits::ReaderGroup;
+    use std::time::{Duration, Instant};
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_tree(None);
+    let cutoff = widget_node(&mut app, module, knob);
+    let other_knob = {
+        let snapshot = app.ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == module).unwrap();
+        (0..tile.widgets.len())
+            .find(|i| *i != knob && tile.widgets[*i].kind == "knob")
+            .expect("the filter has a second knob")
+    };
+    let other = widget_node(&mut app, module, other_knob);
+    let t = Instant::now();
+    let ms = Duration::from_millis;
+    let up = |node| request(Action::Increment, node, None);
+    let steps = |app: &App| app.session.edits.history.len();
+    let start = steps(&app);
+
+    // The deadline: the canvas wakes once and reports it.
+    let _ = app.a11y_action(&up(cutoff), t);
+    let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupDue { at: t + ms(499) }));
+    assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed, "not yet due");
+    let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupDue { at: t + ms(500) }));
+    assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
+    assert_eq!(steps(&app), start + 1);
+
+    // Another control: the first group ends, and a new one opens.
+    let _ = app.a11y_action(&up(cutoff), t + ms(1000));
+    let _ = app.a11y_action(&up(other), t + ms(1100));
+    assert_eq!(steps(&app), start + 2);
+    assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed);
+
+    // A late action on the same control is a new group too.
+    let _ = app.a11y_action(&up(other), t + ms(1700));
+    assert_eq!(steps(&app), start + 3);
+
+    // A key press or a pointer press on the canvas ends it.
+    let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+    assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
+    assert_eq!(steps(&app), start + 4);
+
+    // An arrow key press does too, before its own group opens.
+    let _ = app.a11y_action(&up(cutoff), t + ms(3000));
+    let _ = app.update(Message::Canvas(CanvasEvent::ArrowPressed { at: t + ms(3100) }));
+    assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
+    assert_eq!(steps(&app), start + 5);
+}
+
+/// While a screen reader's group is open, the canvas is shown a released
+/// arrow group with the same deadline, so it wakes once then. With no
+/// group open it is shown none, so nothing wakes at rest.
+#[test]
+fn the_canvas_wakes_once_for_an_open_group() {
+    use std::time::Instant;
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_tree(None);
+    assert_eq!(app.session.edits.reader_group().due(), None);
+    let cutoff = widget_node(&mut app, module, knob);
+    let t = Instant::now();
+    let _ = app.a11y_action(&request(Action::Increment, cutoff, None), t);
+    assert_eq!(
+        app.session.edits.reader_group().due(),
+        Some(t + crate::edits::ARROW_GROUP)
+    );
 }
 
 /// SetValue takes a number in the parameter's own range and moves the

@@ -74,10 +74,21 @@ impl App {
                 self.end_gesture();
             }
             CanvasEvent::ArrowStep { at } => self.arrow_event(ArrowEvent::Step(at)),
-            CanvasEvent::ArrowPressed { at } => self.arrow_event(ArrowEvent::Pressed(at)),
+            CanvasEvent::ArrowPressed { at } => {
+                // A key press ends a screen reader's group, which the
+                // canvas was shown as a released arrow group.
+                self.reader_event(crate::edits::ReaderEvent::Close);
+                self.arrow_event(ArrowEvent::Pressed(at));
+            }
             CanvasEvent::ArrowReleased { at } => self.arrow_event(ArrowEvent::Released(at)),
-            CanvasEvent::ArrowGroupEnd => self.arrow_event(ArrowEvent::End),
-            CanvasEvent::ArrowGroupDue { at } => self.arrow_event(ArrowEvent::Due(at)),
+            CanvasEvent::ArrowGroupEnd => {
+                self.reader_event(crate::edits::ReaderEvent::Close);
+                self.arrow_event(ArrowEvent::End);
+            }
+            CanvasEvent::ArrowGroupDue { at } => {
+                self.reader_event(crate::edits::ReaderEvent::Due(at));
+                self.arrow_event(ArrowEvent::Due(at));
+            }
             CanvasEvent::Select(ids) => self.session.selection = ids.into_iter().collect(),
             CanvasEvent::Move { ids, delta } => {
                 for id in &ids {

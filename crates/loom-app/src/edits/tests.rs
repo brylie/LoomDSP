@@ -264,3 +264,71 @@ fn arrow_effects_end_and_start() {
     assert!(!ArrowEffect::Start.ends() && ArrowEffect::Start.starts());
     assert!(ArrowEffect::EndAndStart.ends() && ArrowEffect::EndAndStart.starts());
 }
+
+/// A screen reader's action on `node` at `at`, and its release.
+fn reader_step(group: ReaderGroup, node: u64, at: Instant) -> (ReaderGroup, ArrowEffect) {
+    let (group, effect) = group.on(ReaderEvent::Action { node, at });
+    assert!(matches!(group, ReaderGroup::Stepping { .. }));
+    // While the step is applied, the edit it makes does not close it.
+    assert_eq!(group.on(ReaderEvent::Close), (group, ArrowEffect::Nothing));
+    assert_eq!(group.due(), None);
+    let (group, released) = group.on(ReaderEvent::Applied);
+    assert_eq!(released, ArrowEffect::Nothing);
+    (group, effect)
+}
+
+/// A screen reader's actions on one control, each within 500 ms of the
+/// last, stay in one group, and each one moves the deadline.
+#[test]
+fn reader_actions_on_one_control_join_a_group() {
+    let t = Instant::now();
+    let ms = Duration::from_millis;
+    let (group, effect) = reader_step(ReaderGroup::Closed, 7, t);
+    assert_eq!(effect, ArrowEffect::Start);
+    assert_eq!(group.due(), Some(t + ARROW_GROUP));
+    let (group, effect) = reader_step(group, 7, t + ms(400));
+    assert_eq!(effect, ArrowEffect::Nothing);
+    assert_eq!(group.due(), Some(t + ms(900)));
+    // A wake before the new deadline leaves the group open.
+    let (group, effect) = group.on(ReaderEvent::Due(t + ms(600)));
+    assert_eq!(effect, ArrowEffect::Nothing);
+    let (group, effect) = group.on(ReaderEvent::Due(t + ms(900)));
+    assert_eq!((group, effect), (ReaderGroup::Closed, ArrowEffect::End));
+}
+
+/// An action on another control, or one that comes too late, ends the
+/// group and opens a new one.
+#[test]
+fn a_reader_group_ends_on_another_control_or_a_late_action() {
+    let t = Instant::now();
+    let ms = Duration::from_millis;
+    let (open, _) = reader_step(ReaderGroup::Closed, 7, t);
+    let (group, effect) = reader_step(open, 8, t + ms(100));
+    assert_eq!(effect, ArrowEffect::EndAndStart);
+    assert_eq!(
+        group,
+        ReaderGroup::Open {
+            node: 8,
+            due: t + ms(600)
+        }
+    );
+    let (_, effect) = reader_step(open, 7, t + ARROW_GROUP);
+    assert_eq!(effect, ArrowEffect::EndAndStart);
+}
+
+/// Close ends an open group, and nothing happens to a closed one, which
+/// asks for no wake.
+#[test]
+fn a_reader_group_closes_and_a_closed_one_is_quiet() {
+    let t = Instant::now();
+    let (open, _) = reader_step(ReaderGroup::Closed, 7, t);
+    assert_eq!(open.on(ReaderEvent::Close), (ReaderGroup::Closed, ArrowEffect::End));
+    assert_eq!(open.on(ReaderEvent::Applied), (open, ArrowEffect::Nothing));
+    for event in [ReaderEvent::Close, ReaderEvent::Due(t), ReaderEvent::Applied] {
+        assert_eq!(
+            ReaderGroup::Closed.on(event),
+            (ReaderGroup::Closed, ArrowEffect::Nothing)
+        );
+    }
+    assert_eq!(ReaderGroup::Closed.due(), None);
+}

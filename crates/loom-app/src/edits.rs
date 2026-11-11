@@ -105,6 +105,94 @@ impl ArrowGroup {
     }
 }
 
+/// The undo group of a screen reader's edits on one control
+/// (ui-layer.md, section 7, rule 6). A screen reader sends no key down or
+/// key up, so each SetValue, Increment, or Decrement counts as one arrow
+/// step let go at once. The app owns the group, with the gesture it opens,
+/// beside [`ArrowGroup`]: an open group always has an open gesture.
+///
+/// It names the control only by the number of its node, so it knows
+/// nothing of the patch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ReaderGroup {
+    /// No group is open.
+    #[default]
+    Closed,
+    /// An action on `node` is being applied: the step, before its release.
+    /// As with a held arrow key, the edit it makes does not close the
+    /// group.
+    Stepping {
+        /// The node of the control the group's edits are on.
+        node: u64,
+        /// When the action arrived.
+        at: Instant,
+    },
+    /// The last action was on `node`. Another on the same node before `due`
+    /// joins the group; the group ends at `due`.
+    Open {
+        /// The node of the control the group's edits are on.
+        node: u64,
+        /// When the group ends if no action comes.
+        due: Instant,
+    },
+}
+
+/// What happens to a screen reader's undo group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReaderEvent {
+    /// A SetValue, Increment, or Decrement on `node` is about to edit.
+    Action {
+        /// The node of the control.
+        node: u64,
+        /// When the action arrived.
+        at: Instant,
+    },
+    /// The action's edit was applied: its release, at once.
+    Applied,
+    /// A wake at this time passed the deadline the group gave.
+    Due(Instant),
+    /// Something else happens first: an action that is not a step, a key
+    /// or pointer press, focus moving, an inspector edit, Undo, or Redo.
+    Close,
+}
+
+impl ReaderGroup {
+    /// The group after `event`, and what the app does with the gesture.
+    /// A pure function, so every transition is tested without a clock.
+    pub(crate) fn on(self, event: ReaderEvent) -> (Self, ArrowEffect) {
+        use ArrowEffect as Do;
+        use ReaderEvent as E;
+        match (self, event) {
+            (Self::Closed, E::Action { node, at }) => (Self::Stepping { node, at }, Do::Start),
+            (Self::Closed, _) => (Self::Closed, Do::Nothing),
+            (Self::Stepping { node, at }, E::Applied) => (
+                Self::Open {
+                    node,
+                    due: at + ARROW_GROUP,
+                },
+                Do::Nothing,
+            ),
+            (Self::Stepping { .. }, _) => (self, Do::Nothing),
+            (Self::Open { node: last, due }, E::Action { node, at }) if node == last && at < due => {
+                (Self::Stepping { node, at }, Do::Nothing)
+            }
+            (Self::Open { .. }, E::Action { node, at }) => (Self::Stepping { node, at }, Do::EndAndStart),
+            (Self::Open { due, .. }, E::Due(at)) if at >= due => (Self::Closed, Do::End),
+            (Self::Open { .. }, E::Due(_) | E::Applied) => (self, Do::Nothing),
+            (Self::Open { .. }, E::Close) => (Self::Closed, Do::End),
+        }
+    }
+
+    /// When the group next needs a wake to end itself. `None` while no
+    /// group is open, so nothing wakes the app for it at rest.
+    pub(crate) fn due(self) -> Option<Instant> {
+        match self {
+            Self::Closed | Self::Stepping { .. } => None,
+            Self::Open { due, .. } => Some(due),
+        }
+    }
+}
+
 /// Records edits as undo steps.
 #[derive(Default)]
 pub(crate) struct Edits {
@@ -127,6 +215,8 @@ pub(crate) struct Edits {
     touched: BTreeSet<(u32, usize)>,
     /// The undo group of arrow-key edits.
     arrow: ArrowGroup,
+    /// The undo group of a screen reader's edits.
+    reader: ReaderGroup,
 }
 
 impl Edits {
@@ -143,6 +233,17 @@ impl Edits {
     /// The undo group of arrow-key edits.
     pub(crate) fn arrow_group(&self) -> ArrowGroup {
         self.arrow
+    }
+
+    /// The undo group of a screen reader's edits.
+    pub(crate) fn reader_group(&self) -> ReaderGroup {
+        self.reader
+    }
+
+    /// Sets the screen reader's group, after the app has applied the effect
+    /// of an event. See [`ReaderGroup::on`].
+    pub(crate) fn set_reader_group(&mut self, group: ReaderGroup) {
+        self.reader = group;
     }
 
     /// Sets the arrow group, after the app has applied the effect of an
@@ -223,6 +324,7 @@ impl Edits {
         // An open group always has an open gesture, so a later end cannot
         // close a gesture that is not the group's.
         self.arrow = ArrowGroup::Closed;
+        self.reader = ReaderGroup::Closed;
         self.record(name, now);
         self.back_on(uncommitted);
     }

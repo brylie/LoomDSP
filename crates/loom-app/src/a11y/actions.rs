@@ -125,10 +125,19 @@ pub(super) fn canvas_events(
     }
 }
 
+/// True for an action that steps or sets a number: SetValue, Increment,
+/// or Decrement. These join the screen reader's undo group
+/// (ui-layer.md, section 7, rule 6). A Click does not: it is one step of
+/// its own.
+pub(crate) fn joins_group(action: Action) -> bool {
+    matches!(action, Action::SetValue | Action::Increment | Action::Decrement)
+}
+
 /// The messages for a screen reader's request, in order.
 ///
-/// A set is one turn of a knob: one change, then let go, so it is one undo
-/// step, as the control channel's `set` is.
+/// An action that joins the undo group gives only its change: the app
+/// opens and ends the group around it. Any other change is followed by a
+/// release, so it is one undo step, as the control channel's `set` is.
 pub(crate) fn messages(
     snapshot: &UiSnapshot,
     ids: &WidgetIds,
@@ -136,7 +145,7 @@ pub(crate) fn messages(
     request: &ActionRequest,
 ) -> Vec<Message> {
     let events = canvas_events(snapshot, ids, table, request);
-    let turned = events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. }));
+    let turned = !joins_group(request.action) && events.iter().any(|e| matches!(e, CanvasEvent::SetControl { .. }));
     events
         .into_iter()
         .map(Message::Canvas)

@@ -36,7 +36,14 @@ impl App {
             .browser_key(self.browser_key)
             .focus_policy(self.canvas_focus_policy())
             .arrow_group(match self.session.edits.arrow_group() {
-                ArrowGroup::Closed => ArrowGroupView::Closed,
+                // A screen reader's group ends as a released arrow group
+                // does, so the canvas is shown one: it wakes once at the
+                // deadline, and reports the key or pointer press that ends
+                // the group sooner. Nothing wakes while no group is open.
+                ArrowGroup::Closed => match self.session.edits.reader_group().due() {
+                    Some(due) => ArrowGroupView::Released { due },
+                    None => ArrowGroupView::Closed,
+                },
                 ArrowGroup::Held => ArrowGroupView::Held,
                 ArrowGroup::Released { due } => ArrowGroupView::Released { due },
             })

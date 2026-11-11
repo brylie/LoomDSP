@@ -238,6 +238,39 @@ impl crate::App {
         tree::tree(&snapshot, &ids, view, self.a11y.scale, &mut self.a11y.ids)
     }
 
+    /// Applies a screen reader's request that arrived at `at`, and gives
+    /// the tasks its messages made.
+    ///
+    /// A SetValue, Increment, or Decrement joins the screen reader's undo
+    /// group, or opens one. Any other action that changes something ends
+    /// the group first and is a step of its own.
+    pub(crate) fn a11y_action(&mut self, request: &ActionRequest, at: std::time::Instant) -> Vec<Task<crate::Message>> {
+        use crate::edits::ReaderEvent;
+        // An open panel owns input, as it does for the pointer: the
+        // canvas behind it does not change.
+        if !self.no_overlay() {
+            return Vec::new();
+        }
+        let snapshot = self.ui_snapshot();
+        let ids = self.a11y_widget_ids(&snapshot);
+        let messages = actions::messages(&snapshot, &ids, &self.a11y.ids, request);
+        if messages.is_empty() {
+            return Vec::new();
+        }
+        self.reader_event(if actions::joins_group(request.action) {
+            ReaderEvent::Action {
+                node: request.target_node.0,
+                at,
+            }
+        } else {
+            ReaderEvent::Close
+        });
+        let tasks = messages.into_iter().map(|message| self.update(message)).collect();
+        // The step's release, at once: the group now waits for the next.
+        self.reader_event(ReaderEvent::Applied);
+        tasks
+    }
+
     /// Handles the accessibility layer's events. Actions go through the same
     /// messages as the pointer, so undo, MIDI feedback, and autosave see
     /// them as ordinary edits.
@@ -264,15 +297,7 @@ impl crate::App {
                 Task::none()
             }
             Event::Action(request) => {
-                // An open panel owns input, as it does for the pointer: the
-                // canvas behind it does not change.
-                if !self.no_overlay() {
-                    return Task::none();
-                }
-                let snapshot = self.ui_snapshot();
-                let ids = self.a11y_widget_ids(&snapshot);
-                let messages = actions::messages(&snapshot, &ids, &self.a11y.ids, &request);
-                let mut tasks: Vec<_> = messages.into_iter().map(|message| self.update(message)).collect();
+                let mut tasks = self.a11y_action(&request, std::time::Instant::now());
                 // Show the new value at once, not at the next refresh.
                 tasks.push(locate().map(Message::A11y));
                 Task::batch(tasks)
