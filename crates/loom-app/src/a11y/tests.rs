@@ -333,7 +333,10 @@ fn every_widget_kind_has_its_role_a_name_and_a_value() {
         let (module, index) = first_of(&app, kind);
         let found = node(&update, widget_node(&mut app, module, index));
         assert_eq!(found.role(), role, "{kind}");
-        assert!(found.label().is_some_and(|name| !name.is_empty()), "{kind} has a name");
+        // A label's text is its value, name and all, and it has no label.
+        if kind != "readout" {
+            assert!(found.label().is_some_and(|name| !name.is_empty()), "{kind} has a name");
+        }
         match kind {
             "knob" | "fader" | "number" => {
                 assert!(found.numeric_value().is_some(), "{kind}");
@@ -386,7 +389,14 @@ fn every_widget_kind_has_its_role_a_name_and_a_value() {
                 assert_eq!(found.numeric_value(), None);
                 assert!(found.description().is_some_and(|text| text.contains("below")));
             }
-            "readout" => assert!(found.value().is_some_and(|text| !text.is_empty())),
+            "readout" => {
+                let snapshot = app.ui_snapshot();
+                let shown = &snapshot.tiles.iter().find(|t| t.id == module).unwrap().widgets[index];
+                let said = found.value().expect("a readout says its reading");
+                assert!(said.ends_with(shown.text.as_str()), "{said}");
+                assert!(said.len() > shown.text.len() + 2, "{said} names what it reads");
+                assert_eq!(found.label(), None);
+            }
             "light" => assert!(found.description().is_some_and(|text| !text.is_empty())),
             _ => {}
         }
@@ -1656,4 +1666,150 @@ fn a_poll_that_changes_nothing_builds_no_tree() {
     let key = app.a11y_poll_key();
     app.a11y.set_focus(Some((1, 0)));
     assert_ne!(app.a11y_poll_key(), key);
+}
+
+/// A label node never has both a label and a value. An adapter gives a
+/// label node's label in place of its value (`accesskit_macos` 0.27.2,
+/// `label_is_exposed_in_value`), so the value would not be read.
+#[test]
+fn a_label_node_never_hides_its_value() {
+    let mut app = app_with_every_widget();
+    let update = app.a11y_tree(None);
+    let mut labels = 0;
+    for (_, found) in &update.nodes {
+        if found.role() == Role::Label {
+            labels += 1;
+            assert!(
+                found.label().is_none() || found.value().is_none(),
+                "{:?} would hide {:?}",
+                found.label(),
+                found.value()
+            );
+        }
+    }
+    assert!(labels > 1, "the status line and a readout");
+}
+
+/// A range handle set by a screen reader stops at the other handle from
+/// the side it is on. A typed value can leave low above high, and then low
+/// moves freely above and stops when it comes down to high.
+#[test]
+fn a_range_handle_stops_on_its_own_side() {
+    use actions::stop_at;
+    // Low below high, the usual way round.
+    assert_eq!(stop_at(0.9, 0.2, 0.8), 0.8);
+    assert_eq!(stop_at(0.5, 0.2, 0.8), 0.5);
+    assert_eq!(stop_at(0.1, 0.8, 0.2), 0.2, "high stops at low");
+    // Low above high.
+    assert_eq!(stop_at(0.9, 0.8, 0.2), 0.9, "low moves away from high");
+    assert_eq!(stop_at(0.1, 0.8, 0.2), 0.2);
+    assert_eq!(stop_at(0.1, 0.2, 0.8), 0.1, "high moves away from low");
+    // Together: the handle may go either way.
+    assert_eq!(stop_at(0.3, 0.5, 0.5), 0.3);
+}
+
+/// A Click that changes nothing, such as one on the option already
+/// chosen, still ends an open undo group, as a pointer press does. A
+/// request for a node that is gone ends nothing.
+#[test]
+fn a_click_that_changes_nothing_ends_the_group() {
+    use crate::edits::ReaderGroup;
+    let mut app = app_with_every_widget();
+    let _ = app.a11y_tree(None);
+    let (module, knob) = first_of(&app, "knob");
+    let (radio_module, radio) = first_of(&app, "radio");
+    let now = std::time::Instant::now();
+    let knob_node = widget_node(&mut app, module, knob);
+    let steps = app.session.edits.history.len();
+
+    // Whichever way the knob can still move.
+    let step = [Action::Increment, Action::Decrement]
+        .into_iter()
+        .find(|action| !events(&app, &request(*action, knob_node, None)).is_empty())
+        .expect("the knob can move one way");
+    let _ = app.a11y_action(&request(step, knob_node, None), now);
+    assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed);
+    // A node the window does not show leaves the group open.
+    let gone = request(Action::Click, NodeId(u64::MAX), None);
+    assert!(app.a11y_action(&gone, now).is_empty());
+    assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed);
+
+    let chosen = position(&app, radio_module, radio).round() as usize;
+    let option = piece_node(&mut app, radio_module, radio, tree::Piece::Option(chosen));
+    assert!(app.a11y_action(&request(Action::Click, option, None), now).is_empty());
+    assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
+    assert_eq!(
+        app.session.edits.history.len(),
+        steps + 1,
+        "the knob's step is recorded"
+    );
+
+    // The next edit on the knob is a step of its own, though it is in time.
+    let _ = app.a11y_action(&request(step, knob_node, None), now);
+    app.reader_event(crate::edits::ReaderEvent::Close);
+    assert_eq!(app.session.edits.history.len(), steps + 2);
+}
+
+/// While an arrow key is held, its group owns the edit in progress, so a
+/// screen reader's action does nothing, as Undo does nothing then.
+#[test]
+fn an_action_waits_while_an_arrow_key_is_held() {
+    use crate::edits::{ArrowEvent, ArrowGroup, ReaderGroup};
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_tree(None);
+    let cutoff = widget_node(&mut app, module, knob);
+    let now = std::time::Instant::now();
+    app.arrow_event(ArrowEvent::Step(now));
+    assert_eq!(app.session.edits.arrow_group(), ArrowGroup::Held);
+    let before = position(&app, module, knob);
+
+    assert!(
+        app.a11y_action(&request(Action::Increment, cutoff, None), now)
+            .is_empty()
+    );
+    assert_eq!(position(&app, module, knob), before);
+    assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
+    assert_eq!(
+        app.session.edits.arrow_group(),
+        ArrowGroup::Held,
+        "the key still owns the edit"
+    );
+
+    // The key comes up: the action works again.
+    app.arrow_event(ArrowEvent::Released(now));
+    assert!(
+        !app.a11y_action(&request(Action::Increment, cutoff, None), now)
+            .is_empty()
+    );
+    assert!(position(&app, module, knob) > before);
+}
+
+/// With a text field in focus and a screen reader listening, one message
+/// asks which field has focus once. The layer's own messages do not ask
+/// again, so the tree is not rebuilt in a loop.
+#[test]
+fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
+    let (app, _, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    // A real field with real focus, so each time the app asks, the
+    // answer is that a field has it.
+    ui.focus(crate::patch_info::TAG_INPUT);
+    assert!(ui.text_field_focused(), "the tag field took focus");
+    let _ = ui.app.a11y_event(Event::Activated);
+    ui.app.a11y.locating = false;
+    ui.app.text_focus.any = true;
+
+    let task = ui.app.update(Message::Canvas(CanvasEvent::Select(Vec::new())));
+    let log = ui.run_task(task);
+    let rebuilds = log
+        .iter()
+        .filter(|message| matches!(message, Message::A11y(Event::Located(_))))
+        .count();
+    let asked = log
+        .iter()
+        .filter(|message| matches!(message, Message::TextFocus(_)))
+        .count();
+    assert!(rebuilds <= 2, "{rebuilds} rebuilds for one message");
+    assert!(asked <= 1, "focus was asked {asked} times");
 }

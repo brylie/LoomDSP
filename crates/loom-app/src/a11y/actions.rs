@@ -99,12 +99,32 @@ pub(super) fn canvas_events(
             };
             step(part, request.action == Action::Increment)
         }
-        // A range's handles do not pass each other: each stops at the other.
+        // A range's handles do not pass each other: each stops at the
+        // other, from the side it is on now. A typed value can leave low
+        // above high, and then low stays above.
         (Action::SetValue, Piece::Main) if two_numbers => sent(detail.main.as_ref())
-            .map(|position| set(ControlPart::Main, if range { position.min(second) } else { position }))
+            .map(|position| {
+                set(
+                    ControlPart::Main,
+                    if range {
+                        stop_at(position, main, second)
+                    } else {
+                        position
+                    },
+                )
+            })
             .unwrap_or_default(),
         (Action::SetValue, Piece::Second) if two_numbers => sent(detail.second.as_ref())
-            .map(|position| set(ControlPart::Second, if range { position.max(main) } else { position }))
+            .map(|position| {
+                set(
+                    ControlPart::Second,
+                    if range {
+                        stop_at(position, second, main)
+                    } else {
+                        position
+                    },
+                )
+            })
             .unwrap_or_default(),
         (Action::Click, Piece::Whole) if matches!(detail.kind, WidgetViewKind::Toggle) => {
             set(ControlPart::Main, if main >= 0.5 { 0.0 } else { 1.0 })
@@ -145,6 +165,20 @@ pub(crate) fn focus_target(
         .is_some_and(|w| !w.hidden);
     let control = ids.get(module, index).is_some_and(|own| !ids.is_live(own));
     (shown && control).then_some((module, index))
+}
+
+/// A range handle's new position: `sent`, stopped at the other handle. The
+/// handle stays on the side of the other that it is on now, at `own`.
+pub(super) fn stop_at(sent: f32, own: f32, other: f32) -> f32 {
+    if own <= other { sent.min(other) } else { sent.max(other) }
+}
+
+/// True when the request names a tile, a widget, or a piece of one that
+/// the window shows now.
+pub(crate) fn names_a_part(ids: &WidgetIds, table: &IdTable, request: &ActionRequest) -> bool {
+    table
+        .id(request.target_node.0)
+        .is_some_and(|id| tile_of(id).is_some() || ids.find_piece(id).is_some())
 }
 
 /// True for an action that steps or sets a number: SetValue, Increment,

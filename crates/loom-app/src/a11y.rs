@@ -536,6 +536,12 @@ impl crate::App {
         if !self.no_overlay() {
             return Vec::new();
         }
+        // A held arrow key owns the edit in progress, and may step again.
+        // A second owner would share its undo step, so the action waits:
+        // it does nothing, as Undo does nothing while a key is held.
+        if self.session.edits.arrow_group() == crate::edits::ArrowGroup::Held {
+            return Vec::new();
+        }
         let snapshot = self.ui_snapshot();
         let ids = self.a11y_widget_ids(&snapshot);
         if request.action == accesskit::Action::Focus {
@@ -550,6 +556,12 @@ impl crate::App {
         }
         let messages = actions::messages(&snapshot, &ids, &self.a11y.ids, request);
         if messages.is_empty() {
+            // A Click that changes nothing, such as one on the option
+            // already chosen, still ends an open group, as a pointer
+            // press does. A node that is gone ends nothing.
+            if !actions::joins_group(request.action) && actions::names_a_part(&ids, &self.a11y.ids, request) {
+                self.reader_event(ReaderEvent::Close);
+            }
             return Vec::new();
         }
         self.reader_event(if actions::joins_group(request.action) {

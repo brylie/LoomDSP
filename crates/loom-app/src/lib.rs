@@ -1280,9 +1280,12 @@ impl App {
         };
         // A field can go with the view, so any input while one has focus asks
         // again. Live readings and frames do not change what the view holds.
+        // The accessibility layer's own messages change no view either. If
+        // they asked, the answer would ask for a rebuild, and the rebuild's
+        // answer would ask again, for as long as a field has focus.
         let ask_focus = matches!(message, Message::TextFocusCheck)
             || (self.text_focus.any
-                && !matches!(message, Message::TextFocus(_))
+                && !matches!(message, Message::TextFocus(_) | Message::A11y(_))
                 && !matches!(
                     cause,
                     FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced
