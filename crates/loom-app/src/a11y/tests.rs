@@ -1,7 +1,7 @@
 //! Tests for the accessibility tree: UI IDs and node IDs, the tree, and
 //! actions. None needs a window or a screen reader, so they run on every OS.
 
-use super::tree::{STEP, WidgetIds, canvas_id, status_id, tile_id, window_id};
+use super::tree::{STEP, WidgetIds, WidgetKey, canvas_id, status_id, tile_id, window_id};
 use super::*;
 use crate::{App, Message};
 use accesskit::{Action, ActionData, Node, NodeId, Role, TreeId};
@@ -91,14 +91,13 @@ fn widget_kinds_and_missing_names() {
     let mut ids = WidgetIds::default();
     ids.add_tile(
         3,
-        true,
         [
-            ("knob", Some("gain".to_string())),
-            ("meter", Some("out".to_string())),
-            ("knob", None),
+            (WidgetKey::Param, Some("gain".to_string())),
+            (WidgetKey::Display, Some("out".to_string())),
+            (WidgetKey::Param, None),
         ],
     );
-    ids.add_tile(9, false, [("knob", Some("Cutoff".to_string()))]);
+    ids.add_tile(9, [(WidgetKey::Exposed, Some("Cutoff".to_string()))]);
 
     assert_eq!(ids.get(3, 0), Some(&tile_id(3).with("param").with("gain")));
     assert_eq!(ids.get(3, 1), Some(&tile_id(3).with("display").with("out")));
@@ -109,6 +108,74 @@ fn widget_kinds_and_missing_names() {
     assert_eq!(ids.find(&tile_id(3)), None, "a tile is not a widget");
 }
 
+/// On every tile of the patch that shows every panel widget, a widget's kind
+/// word is `display` exactly when the panel's description says it is not a
+/// control, whatever it is drawn as, and its ID agrees with the name the
+/// control channel's `locate` takes for it (ui-layer.md, section 4, rule 1).
+#[test]
+fn kinds_come_from_the_panel_and_agree_with_locate() {
+    use crate::targets::{self, Part};
+    use loom_ui_core::IdKey;
+    let patch = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/test-widgets.ron");
+    let app = App::new(crate::Args {
+        patch: Some(patch),
+        test_modules: true,
+        ..crate::tests::app_args()
+    });
+    let snapshot = app.ui_snapshot();
+    let ids = app.a11y_widget_ids(&snapshot);
+    let graph = app.session.controller.graph();
+    let hierarchy = &app.session.hierarchy;
+    let name = |key: &IdKey| match key {
+        IdKey::Name(name) => name.to_string(),
+        IdKey::Number(number) => number.to_string(),
+    };
+    let (mut displays, mut counted, mut drawn) = (0, 0, std::collections::BTreeSet::new());
+    for tile in &snapshot.tiles {
+        for (index, widget) in tile.widgets.iter().enumerate() {
+            let Some(id) = ids.get(tile.id, index) else { continue };
+            drawn.insert(widget.kind);
+            let control = crate::surface::is_control(graph, hierarchy, tile.id, index);
+            let keys = id.keys();
+            assert_eq!(
+                keys[2] == IdKey::from("display"),
+                !control,
+                "{} on tile {}: {id}",
+                widget.kind,
+                tile.id
+            );
+            if control {
+                continue;
+            }
+            displays += 1;
+            // `11:display:out` or `11:display:out:2` for a display, however
+            // `locate` would write it: the name and the count must match.
+            let located = targets::name(graph, hierarchy, Part::Display(tile.id, index)).unwrap();
+            let bound = name(&keys[3]);
+            match keys.get(4) {
+                Some(count) => {
+                    counted += 1;
+                    assert_eq!(located, format!("{}:display:{bound}:{}", tile.id, name(count)));
+                }
+                None => assert!(
+                    located == format!("{}:{bound}", tile.id) || located == format!("{}:display:{bound}", tile.id),
+                    "{located} for {id}"
+                ),
+            }
+        }
+    }
+    assert!(displays > 0, "the patch has displays");
+    // The kinds a list of drawn kinds once missed: a display that is not a
+    // light, a readout, a meter, or a scope.
+    for kind in ["level_history", "meter", "light"] {
+        assert!(drawn.contains(kind), "the patch shows a {kind}: {drawn:?}");
+    }
+    assert!(
+        counted > 0,
+        "a tile shows the same value twice, as a meter and its history do"
+    );
+}
+
 /// Two widgets that show the same value get different IDs: the later ones
 /// are counted from 2. A parameter and a display of the same name differ by
 /// kind.
@@ -117,12 +184,11 @@ fn widgets_bound_to_the_same_name_get_different_ids() {
     let mut ids = WidgetIds::default();
     ids.add_tile(
         11,
-        true,
         [
-            ("meter", Some("out".to_string())),
-            ("scope", Some("out".to_string())),
-            ("readout", Some("out".to_string())),
-            ("knob", Some("out".to_string())),
+            (WidgetKey::Display, Some("out".to_string())),
+            (WidgetKey::Display, Some("out".to_string())),
+            (WidgetKey::Display, Some("out".to_string())),
+            (WidgetKey::Param, Some("out".to_string())),
         ],
     );
     let display = tile_id(11).with("display").with("out");
@@ -264,11 +330,7 @@ fn a_widget_with_no_name_is_left_out() {
     let mut ids = named.clone();
     ids.add_tile(
         module,
-        true,
-        tile.widgets.iter().enumerate().map(|(index, widget)| {
-            let name = (index != knob).then(|| format!("w{index}"));
-            (widget.kind, name)
-        }),
+        (0..tile.widgets.len()).map(|index| (WidgetKey::Param, (index != knob).then(|| format!("w{index}")))),
     );
     let all = tree::tree(&snapshot, &named, None, 1.0, &mut app.a11y.ids);
     let without = tree::tree(&snapshot, &ids, None, 1.0, &mut app.a11y.ids);

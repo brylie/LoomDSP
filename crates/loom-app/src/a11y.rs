@@ -177,13 +177,19 @@ impl crate::App {
         for tile in &snapshot.tiles {
             let part = crate::surface::part_tile(hierarchy, tile.id);
             let on_module = graph.node(ModuleId(part)).is_some();
-            let widgets = tile.widgets.iter().enumerate().map(|(index, widget)| {
-                (
-                    widget.kind,
-                    crate::surface::widget_name(graph, hierarchy, tile.id, index),
-                )
+            let widgets = (0..tile.widgets.len()).map(|index| {
+                // From the panel's description, not from how the widget is
+                // drawn, so the kind agrees with the names `locate` takes.
+                let kind = if !crate::surface::is_control(graph, hierarchy, tile.id, index) {
+                    tree::WidgetKey::Display
+                } else if on_module {
+                    tree::WidgetKey::Param
+                } else {
+                    tree::WidgetKey::Exposed
+                };
+                (kind, crate::surface::widget_name(graph, hierarchy, tile.id, index))
             });
-            ids.add_tile(tile.id, on_module, widgets);
+            ids.add_tile(tile.id, widgets);
         }
         ids
     }

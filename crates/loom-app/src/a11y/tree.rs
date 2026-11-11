@@ -50,14 +50,27 @@ pub(crate) fn tile_of(id: &UiId) -> Option<u32> {
     }
 }
 
-/// The kind word in a panel widget's UI ID (ui-layer.md, section 4, rule 2):
-/// `display` for what only shows a value, `exposed` for a control on a
-/// sub-patch's surface, and `param` for a module's own control.
-fn kind_key(kind: &str, on_module: bool) -> &'static str {
-    match kind {
-        "light" | "readout" | "meter" | "scope" => "display",
-        _ if on_module => "param",
-        _ => "exposed",
+/// What kind of item a panel widget is, which is the kind word in its UI
+/// ID (ui-layer.md, section 4, rule 2). The app decides it from the panel's
+/// description, as `targets.rs` does, never from how the widget is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WidgetKey {
+    /// A module's own control, bound to a parameter.
+    Param,
+    /// A control on a sub-patch's surface.
+    Exposed,
+    /// A widget that only shows a value: a light, a meter, a scope.
+    Display,
+}
+
+impl WidgetKey {
+    /// The kind word, as the control channel's prefixes name it.
+    fn word(self) -> &'static str {
+        match self {
+            Self::Param => "param",
+            Self::Exposed => "exposed",
+            Self::Display => "display",
+        }
     }
 }
 
@@ -70,19 +83,12 @@ pub(crate) struct WidgetIds(BTreeMap<u32, Vec<Option<UiId>>>);
 
 impl WidgetIds {
     /// Adds a tile's widgets. `widgets` gives, for each widget in panel
-    /// order, its snapshot kind and the name that finds it again.
-    /// `on_module` is false for a sub-patch tile, whose controls are exposed
-    /// ones.
-    pub(crate) fn add_tile<'a>(
-        &mut self,
-        module: u32,
-        on_module: bool,
-        widgets: impl IntoIterator<Item = (&'a str, Option<String>)>,
-    ) {
+    /// order, its kind and the name that finds it again.
+    pub(crate) fn add_tile(&mut self, module: u32, widgets: impl IntoIterator<Item = (WidgetKey, Option<String>)>) {
         let mut ids: Vec<Option<UiId>> = Vec::new();
         for (kind, name) in widgets {
             let id = name.map(|name| {
-                let id = tile_id(module).with(kind_key(kind, on_module)).with(name);
+                let id = tile_id(module).with(kind.word()).with(name);
                 // Two widgets can show the same value, as a meter and its
                 // level history do. The later ones are counted, from 2.
                 let earlier = ids.iter().flatten().filter(|other| other.is_under(&id)).count();
