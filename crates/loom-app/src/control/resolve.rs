@@ -84,10 +84,13 @@ impl Operation<Found> for Find {
         Operation::<Places>::scrollable(&mut self.parts, id, bounds, content_bounds, translation, state);
     }
 
-    fn custom(&mut self, _id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Any) {
+    fn custom(&mut self, id: Option<&Id>, bounds: iced::Rectangle, state: &mut dyn Any) {
         if let Some(view) = state.downcast_ref::<CanvasView>() {
             self.found.canvas = Some(*view);
         }
+        // The places need the canvas too: a canvas UI ID is placed by the
+        // tree, which reads the canvas from them.
+        Operation::<Places>::custom(&mut self.parts, id, bounds, state);
     }
 
     fn text(&mut self, _id: Option<&Id>, bounds: iced::Rectangle, text: &str) {
