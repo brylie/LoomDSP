@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::Context;
 use crate::effect::{Effects, FileAction};
-use crate::target::NoTarget;
+use crate::routing::NoTarget;
 use crate::view::View;
 use loom_ui_core::Size;
 

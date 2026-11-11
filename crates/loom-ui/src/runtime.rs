@@ -26,7 +26,7 @@ use crate::app::{App, Context, Deadline, WindowSpec};
 use crate::driver::Driver;
 use crate::effect::Effect;
 use crate::event::{DriverEvent, WindowEvent, WindowState};
-use crate::target::Target;
+use crate::routing::Target;
 use crate::view::View;
 use crate::waker::{Wake, Waker};
 use loom_ui_core::Event;

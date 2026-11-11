@@ -1,5 +1,8 @@
 //! Where input and focus go: the routing target.
 //!
+//! (The module is `routing`, not `target`, because the repository ignores
+//! every folder named `target`, Cargo's build folder.)
+//!
 //! The runtime hands element events, focus, and scrolling to a [`Target`],
 //! and asks it whether the window needs drawing. During phases 2 and 3 of
 //! the move off Iced, the target is the bridge that holds Iced's views. In

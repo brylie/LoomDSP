@@ -1,7 +1,7 @@
 use super::*;
 use crate::event::DriverEvent;
 use crate::headless::Harness;
-use crate::target::NoTarget;
+use crate::routing::NoTarget;
 use std::time::Duration;
 
 /// The minimal app's messages.

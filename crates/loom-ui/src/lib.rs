@@ -35,8 +35,8 @@ mod driver;
 pub mod effect;
 mod event;
 pub mod headless;
+mod routing;
 mod runtime;
-mod target;
 mod view;
 mod waker;
 
@@ -44,7 +44,7 @@ pub use app::{App, Context, Deadline, WindowSpec};
 pub use driver::Driver;
 pub use effect::{Effect, Effects};
 pub use event::{DriverEvent, WindowEvent, WindowState};
+pub use routing::{NO_ELEMENTS, NoTarget, Target};
 pub use runtime::{Counts, Next, Runtime};
-pub use target::{NO_ELEMENTS, NoTarget, Target};
 pub use view::{Layer, View};
 pub use waker::{Wake, Waker};

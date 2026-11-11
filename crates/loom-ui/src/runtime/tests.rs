@@ -4,7 +4,7 @@
 use super::*;
 use crate::effect::{Choice, Effects, FocusTarget, Selection};
 use crate::headless::{Harness, Headless};
-use crate::target::NoTarget;
+use crate::routing::NoTarget;
 use crate::view::Layer;
 use loom_ui_core::{Key, KeyEvent, Modifiers, Point, Size, UiId};
 use std::path::PathBuf;
