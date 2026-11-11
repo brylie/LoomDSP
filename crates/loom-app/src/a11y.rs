@@ -474,6 +474,9 @@ impl crate::App {
         if !self.no_overlay() {
             ids.set_covered();
         }
+        if !self.frame_reachable() {
+            ids.set_frame_covered();
+        }
         for tile in &snapshot.tiles {
             let part = crate::surface::part_tile(hierarchy, tile.id);
             let node = graph.node(ModuleId(part));
@@ -553,7 +556,9 @@ impl crate::App {
     /// node or action, and for a button that is disabled now.
     pub(crate) fn a11y_frame_message(&self, request: &ActionRequest) -> Option<crate::Message> {
         use crate::Message;
-        if request.action != accesskit::Action::Click {
+        // What a pointer press could not reach, a screen reader's Click
+        // does not reach either.
+        if request.action != accesskit::Action::Click || !self.frame_reachable() {
             return None;
         }
         let id = self.a11y.ids.id(request.target_node.0)?;

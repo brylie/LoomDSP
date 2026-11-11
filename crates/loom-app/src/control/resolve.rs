@@ -145,16 +145,7 @@ pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
 /// The first keys a UI ID's text can start with: the window's panels
 /// (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
 /// with another word is not taken for a UI ID.
-const PANELS: [&str; 8] = [
-    "window",
-    "canvas",
-    "toolbar",
-    "panel",
-    "inspector",
-    "matrix",
-    "status",
-    "stats",
-];
+const PANELS: [&str; 7] = ["canvas", "toolbar", "panel", "inspector", "matrix", "status", "stats"];
 
 /// `target` as a UI ID, when it is the text of one: its first key is a
 /// panel's name.

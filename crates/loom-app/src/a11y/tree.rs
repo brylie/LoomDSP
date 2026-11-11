@@ -106,6 +106,9 @@ pub(crate) struct WidgetIds {
     focus: Option<(u32, usize)>,
     /// True while a panel over the canvas owns the input.
     covered: bool,
+    /// True while a pointer press cannot reach the toolbar, the tabs, and
+    /// the bar: a panel or a menu lies over the window.
+    frame_covered: bool,
 }
 
 /// What a panel widget is, beyond what the snapshot says of it: enough to
@@ -228,6 +231,13 @@ impl WidgetIds {
     /// True while a panel over the canvas owns the input.
     pub(crate) fn is_covered(&self) -> bool {
         self.covered
+    }
+
+    /// Says that a pointer press cannot reach the toolbar, the tabs, and
+    /// the bar now, because a panel or a menu lies over the window. They
+    /// are then hidden from a screen reader too.
+    pub(crate) fn set_frame_covered(&mut self) {
+        self.frame_covered = true;
     }
 
     /// Says which control has keyboard focus on the canvas.
@@ -394,7 +404,7 @@ pub(crate) fn tree(
     let mut frame = Frame {
         places,
         scale,
-        covered: ids.covered,
+        covered: ids.frame_covered,
         table,
         nodes: &mut nodes,
     };
@@ -560,8 +570,9 @@ struct Frame<'a> {
     places: &'a Places,
     /// The window's scale factor.
     scale: f32,
-    /// True while a panel owns the input: these nodes are then hidden, as
-    /// the tiles are (ui-layer.md, section 5, rule 3).
+    /// True while a pointer press cannot reach these parts, because a
+    /// panel or a menu lies over the window: the nodes are then hidden
+    /// (ui-layer.md, section 5, rule 3).
     covered: bool,
     table: &'a mut IdTable,
     nodes: &'a mut Vec<(NodeId, Node)>,

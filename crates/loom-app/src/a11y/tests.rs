@@ -2190,3 +2190,115 @@ fn bar_readings_are_live_and_the_frame_is_in_the_poll_key() {
     let _ = app.update(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     assert_ne!(app.a11y_poll_key(), key, "the open tab changed");
 }
+
+/// Each state of the window that can have a panel open, by who has the
+/// input then.
+fn with_each_panel() -> Vec<(crate::input_owner::InputOwner, crate::ui_test::Ui)> {
+    use crate::input_owner::InputOwner;
+    use crate::overlays::{ContextMenu, Overlay};
+    let open = |change: &dyn Fn(&mut App, u32)| {
+        let (mut app, module, _) = app_with_filter();
+        change(&mut app, module);
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        let _ = ui.redraw();
+        ui
+    };
+    let at = Point::new(300.0, 300.0);
+    let mut all = vec![
+        open(&|_, _| {}),
+        open(&|app, module| app.overlays.open(Overlay::Menu(ContextMenu::Tile { module, at }))),
+        open(&|app, module| {
+            let output = loom_canvas::PortRef {
+                module,
+                output: true,
+                index: 0,
+            };
+            let area = Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0));
+            let menu = crate::probe_menu::ProbeMenu::open(output, at, at, area);
+            app.overlays.open(Overlay::Menu(ContextMenu::Probe(menu)));
+        }),
+        open(&|app, _| app.overlays.open(Overlay::RecentList(Vec::new()))),
+        open(&|app, _| {
+            let _ = app.update(Message::Preferences(crate::settings::Message::Open));
+        }),
+        open(&|app, _| {
+            let browser = crate::patches::PatchBrowser::new(1, std::path::PathBuf::from("unread"));
+            app.overlays.open(Overlay::Patches(browser));
+        }),
+        open(&|app, _| app.overlays.help = Some(crate::help::Help::shortcuts())),
+        open(&|app, _| {
+            let target = crate::licence_chooser::Target::Patch;
+            app.overlays.chooser = Some(crate::licence_chooser::Chooser::open(target, None));
+        }),
+        open(&|app, _| app.overlays.question = Some(crate::question::Question::error("No".to_string()))),
+    ];
+    // The module browser opens from the canvas, on the redraw after the
+    // request.
+    let (app, _, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    ui.send(Message::OpenBrowser);
+    let _ = ui.redraw();
+    all.push(ui);
+    let all: Vec<_> = all.into_iter().map(|ui| (ui.app.input_owner(), ui)).collect();
+    for owner in [
+        InputOwner::Canvas,
+        InputOwner::TileMenu,
+        InputOwner::ProbeMenu,
+        InputOwner::RecentList,
+        InputOwner::Preferences,
+        InputOwner::Patches,
+        InputOwner::Help,
+        InputOwner::Chooser,
+        InputOwner::Question,
+        InputOwner::Browser,
+    ] {
+        assert!(all.iter().any(|(found, _)| *found == owner), "{owner:?} did not open");
+    }
+    all
+}
+
+/// The toolbar, the tabs, and the bar follow the pointer. With nothing
+/// open, a pointer press on Panic presses it, and so does a screen reader's
+/// Click. With any panel or menu open, the press does not reach Panic, so
+/// its node is hidden and a Click on it does nothing: the panic shortcut
+/// is what works then (ui-layer.md, section 6, rule 6, and section 7,
+/// rule 24). The pointer and the tree are checked against each other for
+/// every panel, so they cannot drift.
+#[test]
+fn the_frame_follows_the_pointer_under_every_panel() {
+    use crate::input_owner::InputOwner;
+    for (owner, mut ui) in with_each_panel() {
+        let places = ui.places();
+        let panic_id = tree::toolbar_id().with("panic");
+        let panic = places.of(&panic_id).expect("Panic is drawn");
+        let update = ui.app.a11y_tree(&places);
+        let node_id = node_of(&mut ui.app, &panic_id);
+        let click = ui.app.a11y_frame_message(&request(Action::Click, node_id, None));
+
+        let mut messages = ui.move_to(panic.rect.center());
+        messages.extend(ui.press());
+        messages.extend(ui.release());
+        let reached = messages.iter().any(|message| matches!(message, Message::Panic));
+
+        assert_eq!(
+            reached,
+            owner == InputOwner::Canvas,
+            "{owner:?}: what the pointer reaches"
+        );
+        assert_eq!(
+            node(&update, node_id).is_hidden(),
+            !reached,
+            "{owner:?}: hidden when out of reach"
+        );
+        assert_eq!(
+            matches!(click, Some(Message::Panic)),
+            reached,
+            "{owner:?}: a Click follows the press"
+        );
+        for group in [tree::toolbar_id(), tree::tabs_id(), tree::stats_id()] {
+            let group_node = node_of(&mut ui.app, &group);
+            assert_eq!(node(&update, group_node).is_hidden(), !reached, "{owner:?}: {group}");
+        }
+    }
+}

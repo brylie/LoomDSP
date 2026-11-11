@@ -183,6 +183,19 @@ impl App {
         )
     }
 
+    /// True while a pointer press on the toolbar, the right panel's tabs,
+    /// or the stats bar reaches them: only while nothing is open. Every
+    /// panel and menu the view draws puts a layer over the whole window
+    /// (`view.rs`), either to close itself on a press outside or to hold
+    /// the press, so the press never reaches what is below. A screen
+    /// reader's actions on those parts follow this, and the parts are
+    /// hidden from it when a press could not reach them. A test presses
+    /// under every panel and checks that the two agree
+    /// (`a11y::tests::the_frame_follows_the_pointer_under_every_panel`).
+    pub(crate) fn frame_reachable(&self) -> bool {
+        self.input_owner() == InputOwner::Canvas
+    }
+
     /// Who else has the keyboard, for the canvas: the overlays, the matrix,
     /// and the app's text fields. One place decides it, so the canvas never
     /// infers it from loose flags.

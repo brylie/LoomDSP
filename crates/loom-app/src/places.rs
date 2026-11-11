@@ -42,12 +42,7 @@ impl Place {
     /// True when some of the part can be seen: it is in no scrolling area,
     /// or it overlaps the one it is in.
     pub(crate) fn is_shown(&self) -> bool {
-        self.clip.is_none_or(|clip| {
-            self.rect.x < clip.x + clip.width
-                && clip.x < self.rect.x + self.rect.width
-                && self.rect.y < clip.y + clip.height
-                && clip.y < self.rect.y + self.rect.height
-        })
+        self.clip.is_none_or(|clip| self.rect.intersects(clip))
     }
 }
 
