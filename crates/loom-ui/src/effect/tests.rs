@@ -7,6 +7,7 @@ enum Msg {
     Picked(Option<PathBuf>),
     Pressed(Choice),
     Captured(bool),
+    Pasted(Option<String>),
     Done(u32),
     Drawn,
 }
@@ -52,6 +53,7 @@ fn effects_are_plain_values_a_test_can_read() {
         .and(Effects::focus_step(true))
         .and(Effects::scroll_into_view(field.clone()))
         .and(Effects::clipboard_write("osc"))
+        .and(Effects::clipboard_read(Msg::Pasted))
         .and(Effects::file_dialog(save_request(), Msg::Picked))
         .and(Effects::ask(question(), Msg::Pressed))
         .and(Effects::work(|| Msg::Done(1)))
@@ -60,7 +62,7 @@ fn effects_are_plain_values_a_test_can_read() {
         .and(Effects::redraw())
         .and(Effects::quit());
     let list: Vec<_> = effects.into_iter().collect();
-    assert_eq!(list.len(), 13);
+    assert_eq!(list.len(), 14);
     assert!(
         matches!(&list[0], Effect::Focus { target: FocusTarget::Element(id), select: Selection::Keep } if *id == field)
     );
@@ -87,13 +89,14 @@ fn effects_are_plain_values_a_test_can_read() {
     ));
     assert!(matches!(&list[4], Effect::ScrollIntoView(id) if *id == field));
     assert!(matches!(&list[5], Effect::ClipboardWrite(text) if text == "osc"));
-    assert!(matches!(&list[6], Effect::FileDialog { request, .. } if *request == save_request()));
-    assert!(matches!(&list[7], Effect::Ask { question: asked, .. } if *asked == question()));
-    assert!(matches!(&list[8], Effect::Work(_)));
-    assert!(matches!(&list[9], Effect::Capture(_)));
-    assert!(matches!(&list[10], Effect::AfterDraw(Msg::Drawn)));
-    assert!(matches!(&list[11], Effect::Redraw));
-    assert!(matches!(&list[12], Effect::Quit));
+    assert!(matches!(&list[6], Effect::ClipboardRead(_)));
+    assert!(matches!(&list[7], Effect::FileDialog { request, .. } if *request == save_request()));
+    assert!(matches!(&list[8], Effect::Ask { question: asked, .. } if *asked == question()));
+    assert!(matches!(&list[9], Effect::Work(_)));
+    assert!(matches!(&list[10], Effect::Capture(_)));
+    assert!(matches!(&list[11], Effect::AfterDraw(Msg::Drawn)));
+    assert!(matches!(&list[12], Effect::Redraw));
+    assert!(matches!(&list[13], Effect::Quit));
 }
 
 /// Each effect has its stable name, which is also its panic text in a
@@ -103,6 +106,7 @@ fn every_effect_has_its_stable_name() {
     let effects = Effects::focus(UiId::panel("a"))
         .and(Effects::scroll_into_view(UiId::panel("a")))
         .and(Effects::clipboard_write(""))
+        .and(Effects::clipboard_read(Msg::Pasted))
         .and(Effects::file_dialog(save_request(), Msg::Picked))
         .and(Effects::ask(question(), Msg::Pressed))
         .and(Effects::work(|| Msg::Drawn))
@@ -117,6 +121,7 @@ fn every_effect_has_its_stable_name() {
             names::FOCUS,
             names::SCROLL_INTO_VIEW,
             names::CLIPBOARD_WRITE,
+            names::CLIPBOARD_READ,
             names::FILE_DIALOG,
             names::ASK,
             names::WORK,
@@ -132,6 +137,7 @@ fn every_effect_has_its_stable_name() {
             "focus",
             "scroll into view",
             "clipboard write",
+            "clipboard read",
             "file dialog",
             "question",
             "background work",
@@ -150,6 +156,7 @@ fn a_reply_makes_the_message_for_its_answer() {
     let mut effects = Effects::file_dialog(save_request(), Msg::Picked)
         .and(Effects::ask(question(), Msg::Pressed))
         .and(Effects::capture(|image| Msg::Captured(image.is_ok())))
+        .and(Effects::clipboard_read(Msg::Pasted))
         .into_iter();
     let Some(Effect::FileDialog { reply, .. }) = effects.next() else {
         panic!("a file dialog comes first");
@@ -163,6 +170,10 @@ fn a_reply_makes_the_message_for_its_answer() {
         panic!("a capture comes third");
     };
     assert_eq!(reply.give(Err(NoGpu)), Msg::Captured(false));
+    let Some(Effect::ClipboardRead(reply)) = effects.next() else {
+        panic!("a clipboard read comes fourth");
+    };
+    assert_eq!(reply.give(Some("osc".into())), Msg::Pasted(Some("osc".into())));
 }
 
 /// Section 2, rule 4's shape: work sends its result through the waker,
@@ -222,6 +233,7 @@ fn debug_output_names_each_effect() {
     let effects = Effects::focus(UiId::panel("a"))
         .and(Effects::scroll_into_view(UiId::panel("b")))
         .and(Effects::clipboard_write("x"))
+        .and(Effects::clipboard_read(Msg::Pasted))
         .and(Effects::file_dialog(save_request(), Msg::Picked))
         .and(Effects::ask(question(), Msg::Pressed))
         .and(Effects::work(|| Msg::Drawn))
@@ -234,6 +246,7 @@ fn debug_output_names_each_effect() {
         "Focus",
         "ScrollIntoView",
         "ClipboardWrite(\"x\")",
+        "ClipboardRead",
         "FileDialog",
         "Save patch",
         "Ask",

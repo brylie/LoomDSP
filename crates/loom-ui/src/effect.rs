@@ -33,6 +33,8 @@ pub mod names {
     pub const SCROLL_INTO_VIEW: &str = "scroll into view";
     /// [`super::Effect::ClipboardWrite`].
     pub const CLIPBOARD_WRITE: &str = "clipboard write";
+    /// [`super::Effect::ClipboardRead`].
+    pub const CLIPBOARD_READ: &str = "clipboard read";
     /// [`super::Effect::FileDialog`].
     pub const FILE_DIALOG: &str = "file dialog";
     /// [`super::Effect::Ask`].
@@ -229,6 +231,11 @@ pub enum Effect<M> {
     ScrollIntoView(UiId),
     /// Put this text on the clipboard.
     ClipboardWrite(String),
+    /// Read the clipboard. The reply gets its text, or `None` when it holds
+    /// no text, and its message arrives on the next turn. Reading is an
+    /// effect, not a call inside `update`, so `update` never waits on the
+    /// system, and it works the same where a read cannot answer at once.
+    ClipboardRead(Reply<Option<String>, M>),
     /// Show a file dialog. The reply gets the path chosen, or `None`.
     FileDialog {
         /// What the dialog shows.
@@ -263,6 +270,7 @@ impl<M> Effect<M> {
             Self::Focus { .. } => names::FOCUS,
             Self::ScrollIntoView(_) => names::SCROLL_INTO_VIEW,
             Self::ClipboardWrite(_) => names::CLIPBOARD_WRITE,
+            Self::ClipboardRead(_) => names::CLIPBOARD_READ,
             Self::FileDialog { .. } => names::FILE_DIALOG,
             Self::Ask { .. } => names::ASK,
             Self::Work(_) => names::WORK,
@@ -284,6 +292,7 @@ impl<M> fmt::Debug for Effect<M> {
                 .finish(),
             Self::ScrollIntoView(id) => f.debug_tuple("ScrollIntoView").field(id).finish(),
             Self::ClipboardWrite(text) => f.debug_tuple("ClipboardWrite").field(text).finish(),
+            Self::ClipboardRead(_) => f.write_str("ClipboardRead"),
             Self::FileDialog { request, .. } => f.debug_struct("FileDialog").field("request", request).finish(),
             Self::Ask { question, .. } => f.debug_struct("Ask").field("question", question).finish(),
             Self::Work(_) => f.write_str("Work"),
@@ -372,6 +381,11 @@ impl<M> Effects<M> {
     /// Put `text` on the clipboard.
     pub fn clipboard_write(text: impl Into<String>) -> Self {
         Self::one(Effect::ClipboardWrite(text.into()))
+    }
+
+    /// Read the clipboard, and make a message from its text.
+    pub fn clipboard_read(reply: impl FnOnce(Option<String>) -> M + Send + 'static) -> Self {
+        Self::one(Effect::ClipboardRead(Reply::new(reply)))
     }
 
     /// Show a file dialog, and make a message from the path chosen.
