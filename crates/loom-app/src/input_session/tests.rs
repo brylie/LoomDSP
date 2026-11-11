@@ -371,8 +371,9 @@ fn a_stopped_output_reopens_quietly() {
 }
 
 /// With the command queue full the stream cannot reach the engine, so it is
-/// closed and tried again. There is no latch on this message: it repeats on
-/// each retry until the queue drains, and then the input opens.
+/// closed and tried again. A queue drains by itself, so the alert is a warning
+/// that is not kept, and it is said once so retries do not overwrite a newer
+/// status message.
 #[test]
 fn a_full_queue_closes_the_new_stream_and_retries() {
     let mut bench = Bench::new(&["Mic"]);
@@ -382,10 +383,16 @@ fn a_full_queue_closes_the_new_stream_and_retries() {
     assert_eq!(bench.fake.input_opens.get(), 1);
     assert_eq!(bench.fake.input_closes.get(), 1, "the stream did not leak");
     assert!(bench.status().contains("queue is full"), "{}", bench.status());
+    assert_eq!(bench.alerts.severity(), crate::alerts::Severity::Warning);
+    assert!(bench.alerts.kept().is_empty());
 
     bench.alerts.say("newer");
     bench.sync();
-    assert!(bench.status().contains("queue is full"), "the message repeats");
+    assert_eq!(
+        bench.status(),
+        "newer",
+        "a latched full-queue alert must not overwrite a newer status"
+    );
 
     bench.drain_queue();
     bench.alerts.say("newer");
