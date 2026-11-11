@@ -46,6 +46,7 @@ mod licence_chooser;
 mod lights;
 mod live;
 mod matrix;
+mod menus;
 mod modes;
 mod modulation;
 mod monitor;
@@ -522,9 +523,10 @@ impl Message {
     /// No wildcard, on purpose: a new message must choose a side.
     fn allowed_during_question(&self) -> bool {
         match self {
-            // Screen reader actions wait like clicks; the rest keeps the tree current.
-            Self::A11y(event) => !matches!(event, a11y::Event::Action(_)),
-            Self::Question(_)
+            // A screen reader action becomes ordinary messages, each checked on
+            // its own, so a Click on one of the question's answers is heard and
+            // one on anything below it waits, as a press would.
+            Self::A11y(_) | Self::Question(_)
             // Never asked: `update` routes it before this check, and each
             // message it becomes is checked on its own.
             | Self::Input { .. }
@@ -1306,6 +1308,20 @@ impl App {
                 Task::none()
             }
             Message::File(FileAction::Browse) => self.open_patches(),
+            // An open menu has its own keys (`menus.rs`): Enter sends what its
+            // item sends, which may return work of its own. Any other key goes
+            // where it went before, so a shortcut still works over a menu.
+            Message::Key(event)
+                if menus::is_menu_key(&event)
+                    && matches!(
+                        self.input_owner(),
+                        input_owner::InputOwner::RecentList
+                            | input_owner::InputOwner::ProbeMenu
+                            | input_owner::InputOwner::TileMenu
+                    ) =>
+            {
+                self.menu_key(&event)
+            }
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. })
                 if modifiers.command()
                     && modifiers.shift()

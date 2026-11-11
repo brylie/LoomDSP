@@ -204,6 +204,8 @@ impl ToCore for &keyboard::Key {
                 Named::Delete => Key::Delete,
                 Named::Home => Key::Home,
                 Named::End => Key::End,
+                Named::ContextMenu => Key::ContextMenu,
+                Named::F10 => Key::F10,
                 Named::Shift | Named::Control | Named::Alt | Named::AltGraph | Named::Meta | Named::Super => {
                     Key::Modifier
                 }

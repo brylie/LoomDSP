@@ -187,6 +187,9 @@ pub(crate) struct Access {
     focus_request: (u64, Option<(u32, usize)>),
     /// True with `--measure-tree`: each build is timed.
     timed: bool,
+    /// Where the canvas was, with its camera, when the tree was last built:
+    /// where a tile's menu opens when a screen reader asks for it.
+    canvas: Option<loom_canvas::CanvasView>,
 }
 
 /// How many times this process built the tree while `--measure-tree` timed
@@ -245,6 +248,7 @@ impl Default for Access {
             flush_live: false,
             focus: None,
             focus_request: (0, None),
+            canvas: None,
             timed: false,
         }
     }
@@ -396,6 +400,7 @@ impl crate::App {
     /// Live values go only when `flush_live` was set.
     pub(crate) fn a11y_changes(&mut self, places: &Places) -> (TreeUpdate, Option<TreeUpdate>) {
         let view = places.canvas.as_ref();
+        self.a11y.canvas = places.canvas;
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
@@ -566,11 +571,14 @@ impl crate::App {
             crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
             crate::matrix::Tab::Matrix => self.matrix_items(),
         };
+        let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
             bars: self.bars_model(),
             panel,
             focused_field: self.text_focus.field.clone(),
             focused_item: self.matrix_focus(),
+            overlay,
+            overlay_focus,
         }
     }
 
@@ -588,12 +596,21 @@ impl crate::App {
     ) -> Option<Vec<Task<crate::Message>>> {
         use crate::edits::ReaderEvent;
         let id = self.a11y.ids.id(request.target_node.0)?.clone();
-        let matrix = id.is_under(&crate::matrix::access::panel());
-        if !matrix && !id.is_under(&loom_ui_core::UiId::panel("inspector")) {
+        let frames = self.a11y_frames();
+        // A part of the overlay that owns the input acts; nothing below it
+        // does (section 7, rules 24 and 27).
+        let in_overlay = items::find(&frames.overlay, &id).cloned();
+        if in_overlay.is_none() && !self.pointer_reaches_window() {
             return None;
         }
-        let frames = self.a11y_frames();
-        let item = items::find(&frames.panel, &id)?.clone();
+        let matrix = id.is_under(&crate::matrix::access::panel());
+        let item = match in_overlay {
+            Some(item) => item,
+            None if matrix || id.is_under(&loom_ui_core::UiId::panel("inspector")) => {
+                items::find(&frames.panel, &id)?.clone()
+            }
+            None => return None,
+        };
         if request.action == accesskit::Action::Focus {
             let Some(field) = item.focus else {
                 return Some(Vec::new());
@@ -667,22 +684,43 @@ impl crate::App {
     /// the group first and is a step of its own.
     pub(crate) fn a11y_action(&mut self, request: &ActionRequest, at: std::time::Instant) -> Vec<Task<crate::Message>> {
         use crate::edits::ReaderEvent;
-        // An open panel owns input, as it does for the pointer: the
-        // canvas behind it does not change.
-        if !self.pointer_reaches_window() {
-            return Vec::new();
-        }
         // A held arrow key owns the edit in progress, and may step again.
         // A second owner would share its undo step, so the action waits:
         // it does nothing, as Undo does nothing while a key is held.
         if self.session.edits.arrow_group() == crate::edits::ArrowGroup::Held {
             return Vec::new();
         }
-        let snapshot = self.ui_snapshot();
-        let ids = self.a11y_widget_ids(&snapshot);
-        // A part of the open panel acts as its item says.
+        // A part of the open panel, or of the overlay that owns the input,
+        // acts as its item says.
         if let Some(tasks) = self.a11y_panel_action(request, at) {
             return tasks;
+        }
+        // An open panel owns input, as it does for the pointer: the
+        // canvas behind it does not change.
+        if !self.pointer_reaches_window() {
+            return Vec::new();
+        }
+        let snapshot = self.ui_snapshot();
+        let ids = self.a11y_widget_ids(&snapshot);
+        // ShowContextMenu on a tile opens its menu at the tile's top-left
+        // corner, as the menu key does (section 6, rule 8).
+        if request.action == accesskit::Action::ShowContextMenu {
+            let Some(module) = self.a11y.ids.id(request.target_node.0).and_then(tree::tile_of) else {
+                return Vec::new();
+            };
+            let Some((tile, view)) = snapshot.tiles.iter().find(|t| t.id == module).zip(self.a11y.canvas) else {
+                return Vec::new();
+            };
+            let corner = view
+                .camera
+                .to_screen(loom_ui_core::Point::new(tile.bounds.x, tile.bounds.y));
+            let event = loom_canvas::CanvasEvent::TileMenu {
+                module,
+                at: loom_ui_core::Point::new(view.bounds.x + corner.x, view.bounds.y + corner.y),
+                area: view.bounds,
+            };
+            self.reader_event(ReaderEvent::Close);
+            return vec![self.update(crate::Message::Canvas(event))];
         }
         if request.action == accesskit::Action::Focus {
             // Focus on a control moves the canvas's keyboard focus there.

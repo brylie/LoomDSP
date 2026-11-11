@@ -243,11 +243,15 @@ impl App {
         };
         let escape = *key == Key::Named(Named::Escape);
         match self.input_owner() {
-            // These have listeners or widgets of their own.
+            // These have listeners or widgets of their own, and the menus
+            // their own keys (`menus.rs`), which `update` gives them first.
             InputOwner::Question
             | InputOwner::Help
             | InputOwner::Patches
             | InputOwner::Browser
+            | InputOwner::RecentList
+            | InputOwner::ProbeMenu
+            | InputOwner::TileMenu
             | InputOwner::Canvas => {}
             InputOwner::Chooser if escape => self.overlays.chooser = None,
             InputOwner::Chooser => {}
@@ -256,10 +260,6 @@ impl App {
                 Key::Character(",") if modifiers.command() => self.toggle_preferences(),
                 _ => {}
             },
-            InputOwner::RecentList if escape => self.overlays.close_recent_list(),
-            InputOwner::ProbeMenu if escape => self.overlays.close_probe_menu(),
-            InputOwner::TileMenu if escape => self.overlays.close_tile_menu(),
-            InputOwner::RecentList | InputOwner::ProbeMenu | InputOwner::TileMenu => {}
         }
     }
 }

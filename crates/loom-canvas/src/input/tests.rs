@@ -4240,3 +4240,75 @@ fn an_arrow_on_a_focused_control_is_taken() {
         }
     }
 }
+
+/// The menu key and Shift+F10 open the menu of the selected tile at its
+/// top-left corner, also while one of its controls has focus, which does
+/// not take the key. With no tile to open it for, and on F10 without
+/// Shift, nothing opens.
+#[test]
+fn the_menu_key_and_shift_f10_open_the_tile_menu() {
+    let mut first = module(2, 0.0);
+    first.panel = panel();
+    let second = module(3, 200.0);
+    let corner = second.position;
+    let scene = Scene::new(vec![first, second], Vec::new());
+    let press = |key: Key, modifiers: Modifiers| {
+        Event::Key(KeyEvent::Pressed {
+            key,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    };
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    };
+    let menus = |events: &[CanvasEvent]| -> Vec<(u32, Point)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                CanvasEvent::TileMenu { module, at, .. } => Some((*module, *at)),
+                _ => None,
+            })
+            .collect()
+    };
+    let on_second = BTreeSet::from([3]);
+    let none = BTreeSet::new();
+    for (key, modifiers) in [(Key::ContextMenu, Modifiers::NONE), (Key::F10, shift)] {
+        let mut state = CanvasInput::default();
+        let opened = host_event(
+            &CanvasModel::new(&scene, &on_second),
+            &mut state,
+            &press(key, modifiers),
+        );
+        let at = state.camera.to_screen(corner);
+        assert_eq!(
+            menus(&opened),
+            [(3, at)],
+            "{key:?}: the selected tile's menu, at its corner"
+        );
+
+        let on_first = BTreeSet::from([2]);
+        let mut state = CanvasInput::default();
+        let _ = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &Event::Redraw);
+        state.focus.set(2, 0, true);
+        let opened = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &press(key, modifiers));
+        assert_eq!(
+            menus(&opened).first().map(|(module, _)| *module),
+            Some(2),
+            "{key:?}: a focused control does not take the key"
+        );
+
+        let mut state = CanvasInput::default();
+        let nothing = host_event(&CanvasModel::new(&scene, &none), &mut state, &press(key, modifiers));
+        assert!(menus(&nothing).is_empty(), "no tile to open it for");
+    }
+    let mut state = CanvasInput::default();
+    let plain = host_event(
+        &CanvasModel::new(&scene, &on_second),
+        &mut state,
+        &press(Key::F10, Modifiers::NONE),
+    );
+    assert!(menus(&plain).is_empty(), "F10 alone opens nothing");
+}

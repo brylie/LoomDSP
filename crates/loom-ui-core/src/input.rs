@@ -154,6 +154,10 @@ pub enum Key {
     Home,
     /// End.
     End,
+    /// The menu key, which opens the menu of what has focus.
+    ContextMenu,
+    /// F10. With Shift, it opens a menu as the menu key does.
+    F10,
     /// Shift, Control, Alt, or the system key, on either side. One variant
     /// covers them all because nothing yet asks which one it was. Which
     /// ones are held is in [`Modifiers`].

@@ -1496,8 +1496,8 @@ fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
     assert!(node(&whole, tile).is_hidden());
     assert_eq!(
         whole.focus,
-        node_of(&mut app, &window_id()),
-        "no focus inside a hidden tile"
+        node_of(&mut app, &crate::menus::recent_id()),
+        "no focus inside a hidden tile: it is on the open list"
     );
     let sent = sent_ids(&changes.expect("the tile is sent, hidden"));
     assert!(sent.contains(&tile));
@@ -3395,4 +3395,274 @@ fn an_inspector_depth_steps_onto_the_percent_grid() {
     assert!((depth(&ui.app) - 0.50).abs() < 1e-6, "no drift: {}", depth(&ui.app));
     let (_, update, _) = inspector_of(&mut ui, &[filter]);
     assert_eq!(node(&update, slider).numeric_value(), Some(50.0));
+}
+
+/// `subtractive.ron` with one of slice 4a's overlays open, drawn, and its
+/// tree built: the tile menu, the probe menu, the Recent list with two
+/// files, module help, the shortcuts page, and a question.
+fn with_each_small_overlay() -> Vec<(&'static str, crate::ui_test::Ui)> {
+    use crate::overlays::{ContextMenu, Overlay};
+    let at = Point::new(300.0, 300.0);
+    let open = |change: &dyn Fn(&mut App)| {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        change(&mut ui.app);
+        let _ = ui.redraw();
+        ui
+    };
+    let rows = |app: &App| {
+        let _ = app;
+        ["one.ron", "two.ron"]
+            .into_iter()
+            .map(|name| crate::recent::Row {
+                path: std::path::PathBuf::from("/patches").join(name),
+                name: name.to_string(),
+                folder: "/patches".to_string(),
+                missing: false,
+            })
+            .collect::<Vec<_>>()
+    };
+    vec![
+        (
+            "tile menu",
+            open(&|app| app.overlays.open(Overlay::Menu(ContextMenu::Tile { module: 4, at }))),
+        ),
+        (
+            "probe menu",
+            open(&|app| {
+                let output = loom_canvas::PortRef {
+                    module: 4,
+                    output: true,
+                    index: 0,
+                };
+                let area = Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0));
+                let menu = crate::probe_menu::ProbeMenu::open(output, at, at, area);
+                app.overlays.open(Overlay::Menu(ContextMenu::Probe(menu)));
+            }),
+        ),
+        (
+            "recent",
+            open(&|app| {
+                let rows = rows(app);
+                app.overlays.open(Overlay::RecentList(rows));
+            }),
+        ),
+        (
+            "help",
+            open(&|app| {
+                let _ = app.update(Message::ShowModuleHelp(4));
+            }),
+        ),
+        (
+            "shortcuts",
+            open(&|app| app.overlays.help = Some(crate::help::Help::shortcuts())),
+        ),
+        (
+            "question",
+            open(&|app| app.overlays.question = Some(crate::question::Question::error("No room".to_string()))),
+        ),
+    ]
+}
+
+/// Each small overlay is reported while it owns the input: a modal root
+/// with its role and name, and inside it, every part but text has a name,
+/// and every part that acts is where the window drew it, except a link in
+/// help's text, which the toolkit draws inside one widget (a phase 1 gap).
+/// What the overlay covers stays hidden.
+#[test]
+fn every_small_overlay_part_is_named_and_placed() {
+    use super::items::Kind;
+    for (name, mut ui) in with_each_small_overlay() {
+        let places = ui.places();
+        let update = ui.app.a11y_tree(&places);
+        let frames = ui.app.a11y_frames();
+        assert_eq!(frames.overlay.len(), 1, "{name}: one overlay is reported");
+        let root = &frames.overlay[0];
+        let root_node = node(&update, node_of(&mut ui.app, &root.id));
+        assert!(!root_node.is_hidden(), "{name}: the overlay is not hidden");
+        assert!(root_node.is_modal(), "{name}: it owns the input");
+        assert!(root.label.as_deref().is_some_and(|label| !label.is_empty()), "{name}");
+        let role = root_node.role();
+        assert!(
+            matches!(role, Role::Menu | Role::Dialog | Role::AlertDialog),
+            "{name}: {role:?}"
+        );
+        assert!(places.of(&root.id).is_some(), "{name}: the window drew {}", root.id);
+        let mut acting = 0;
+        for item in root.walk() {
+            let found = node(&update, node_of(&mut ui.app, &item.id));
+            assert!(!found.is_hidden(), "{name}: {} is not hidden", item.id);
+            if item.kind == Kind::Text {
+                assert!(found.value().is_some_and(|text| !text.is_empty()), "{}", item.id);
+                continue;
+            }
+            assert!(
+                item.label.as_deref().is_some_and(|label| !label.is_empty()),
+                "{name}: {} has a name",
+                item.id
+            );
+            if item.click.is_none() || item.kind == Kind::Link {
+                continue;
+            }
+            acting += 1;
+            let place = places
+                .of(&item.id)
+                .unwrap_or_else(|| panic!("{name}: the window drew no `{}`", item.id));
+            assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{}", item.id);
+            assert!(found.bounds().is_some(), "{} has bounds", item.id);
+        }
+        assert!(acting > 0, "{name}: something acts");
+        let panic = node(&update, node_of(&mut ui.app, &tree::toolbar_id().with("panic")));
+        assert!(panic.is_hidden(), "{name}: what it covers stays hidden");
+    }
+}
+
+/// A menu's keys move its highlight, and the tree reports the highlighted
+/// item as focus. With no highlight, focus is on the menu. Enter picks the
+/// highlighted item and Escape closes the menu.
+#[test]
+fn a_menu_highlight_is_moved_by_keys_and_reported_as_focus() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let (_, mut ui) = with_each_small_overlay()
+        .into_iter()
+        .find(|(name, _)| *name == "probe menu")
+        .unwrap();
+    let focus = |ui: &mut crate::ui_test::Ui| {
+        let _ = ui.redraw();
+        let places = ui.places();
+        let update = ui.app.a11y_tree(&places);
+        ui.app.a11y.ids.id(update.focus.0).cloned()
+    };
+    assert_eq!(focus(&mut ui), Some(crate::menus::probe_id()), "on the menu");
+    let _ = ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    assert_eq!(focus(&mut ui), Some(crate::menus::probe_id().with("scope")));
+    let _ = ui.tap(Key::Named(Named::End), Modifiers::empty());
+    assert_eq!(focus(&mut ui), Some(crate::menus::probe_id().with("meter")));
+    let _ = ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    assert_eq!(focus(&mut ui), Some(crate::menus::probe_id().with("scope")), "it wraps");
+    let modules = ui.app.session.controller.graph().nodes().count();
+    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    assert!(
+        ui.app.overlays.probe_menu().is_none(),
+        "Enter picked, and the menu closed"
+    );
+    assert_eq!(
+        ui.app.session.controller.graph().nodes().count(),
+        modules + 1,
+        "a scope was added"
+    );
+
+    let (_, mut ui) = with_each_small_overlay()
+        .into_iter()
+        .find(|(name, _)| *name == "tile menu")
+        .unwrap();
+    let _ = ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert!(ui.app.overlays.tile_menu().is_none(), "Escape closed it");
+}
+
+/// A screen reader's Click on a menu item picks it, as a press does, while
+/// the menu owns the input.
+#[test]
+fn a_menu_item_is_picked_by_a_screen_reader() {
+    let (_, mut ui) = with_each_small_overlay()
+        .into_iter()
+        .find(|(name, _)| *name == "probe menu")
+        .unwrap();
+    let places = ui.places();
+    let _ = ui.app.a11y_tree(&places);
+    let meter = node_of(&mut ui.app, &crate::menus::probe_id().with("meter"));
+    let modules = ui.app.session.controller.graph().nodes().count();
+    ui.send(Message::A11y(Event::Action(request(Action::Click, meter, None))));
+    assert!(ui.app.overlays.probe_menu().is_none());
+    assert_eq!(ui.app.session.controller.graph().nodes().count(), modules + 1);
+}
+
+/// The question reports its highlighted answer as focus, and a screen
+/// reader's Click on an answer gives it, as a press does, though most
+/// messages wait while a question is open.
+#[test]
+fn the_question_reports_its_highlight_and_takes_a_screen_reader_answer() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app.overlays.question = Some(crate::question::Question::discard(
+        "Patch".to_string(),
+        crate::question::AfterDiscard::New,
+    ));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    let model = ui.app.overlays.question.as_ref().unwrap().model();
+    assert_eq!(
+        ui.app.a11y.ids.id(update.focus.0),
+        Some(&crate::overlays::access::answer_id(model.highlight)),
+        "focus is on the highlighted answer"
+    );
+    let root = node(&update, node_of(&mut ui.app, &crate::overlays::access::question_id()));
+    assert_eq!(root.role(), Role::AlertDialog);
+    assert_eq!(root.description(), Some(model.text.as_str()));
+    let cancel = node_of(&mut ui.app, &crate::overlays::access::answer_id("cancel"));
+    ui.send(Message::A11y(Event::Action(request(Action::Click, cancel, None))));
+    assert!(ui.app.overlays.question.is_none(), "Cancel answered it");
+}
+
+/// While help is open over a menu's level, only help is reported: an
+/// overlay under the one that owns the input is not.
+#[test]
+fn only_the_overlay_that_owns_the_input_is_reported() {
+    use crate::overlays::{ContextMenu, Overlay};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app.overlays.open(Overlay::Menu(ContextMenu::Tile {
+        module: 4,
+        at: Point::new(300.0, 300.0),
+    }));
+    ui.app.overlays.help = Some(crate::help::Help::shortcuts());
+    let _ = ui.redraw();
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay.len(), 1);
+    assert_eq!(frames.overlay[0].id, crate::overlays::access::help_id());
+}
+
+/// A tile's node offers ShowContextMenu, which opens the tile's menu at the
+/// tile's top-left corner, as the menu key does. Under an open panel it
+/// does nothing, as a right-click there does nothing.
+#[test]
+fn show_context_menu_on_a_tile_opens_its_menu() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let places = ui.places();
+    let (whole, _) = ui.app.a11y_changes(&places);
+    let tile = node_of(&mut ui.app, &tile_id(4));
+    assert!(node(&whole, tile).supports_action(Action::ShowContextMenu));
+    ui.send(Message::A11y(Event::Action(request(
+        Action::ShowContextMenu,
+        tile,
+        None,
+    ))));
+    let (module, at) = ui.app.overlays.tile_menu().expect("the tile's menu opened");
+    assert_eq!(module, 4);
+    let view = places.canvas.unwrap();
+    let corner = ui
+        .app
+        .ui_snapshot()
+        .tiles
+        .iter()
+        .find(|t| t.id == 4)
+        .map(|t| (t.bounds.x, t.bounds.y))
+        .unwrap();
+    // At the corner, kept inside the canvas as every tile menu is.
+    let screen = view.camera.to_screen(Point::new(corner.0, corner.1));
+    let b = view.bounds;
+    let x = (b.x + screen.x).min(b.x + b.width - 140.0).max(b.x);
+    let y = (b.y + screen.y).min(b.y + b.height - 36.0).max(b.y);
+    assert!(
+        (at.x - x).abs() < 0.01 && (at.y - y).abs() < 0.01,
+        "{at:?} against ({x}, {y})"
+    );
+
+    ui.app.overlays.close_tile_menu();
+    ui.app.overlays.help = Some(crate::help::Help::shortcuts());
+    ui.send(Message::A11y(Event::Action(request(
+        Action::ShowContextMenu,
+        tile,
+        None,
+    ))));
+    assert!(ui.app.overlays.tile_menu().is_none(), "nothing opens under a panel");
 }

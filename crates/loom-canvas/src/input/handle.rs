@@ -306,6 +306,23 @@ impl CanvasModel<'_> {
                         }
                         out.take();
                     }
+                    // The menu key, or Shift+F10, opens the tile menu, as a
+                    // right-click on the tile does (ui-layer.md, section 6,
+                    // rule 8).
+                    Key::ContextMenu if modifiers.none() => {
+                        self.open_tile_menu_by_key(state, bounds, out);
+                        out.take();
+                    }
+                    Key::F10
+                        if *modifiers
+                            == (Modifiers {
+                                shift: true,
+                                ..Modifiers::NONE
+                            }) =>
+                    {
+                        self.open_tile_menu_by_key(state, bounds, out);
+                        out.take();
+                    }
                     _ => {}
                 }
             }
@@ -1049,6 +1066,29 @@ impl CanvasModel<'_> {
         if let Some(world) = self.scene.bounds() {
             state.camera.frame_readable(world, size, READABLE_ZOOM);
         }
+    }
+
+    /// Opens the menu of the tile the keys are on, at the tile's top-left
+    /// corner: the tile of the focused control, or else the one selected
+    /// tile. With no such tile it does nothing.
+    pub(super) fn open_tile_menu_by_key(&self, state: &CanvasInput, bounds: Rect, out: &mut Reaction) {
+        let module = state.focus.control().map(|(module, _)| module).or_else(|| {
+            (self.selection.len() == 1)
+                .then(|| self.selection.iter().next().copied())
+                .flatten()
+        });
+        let Some(tile) = module.and_then(|module| self.scene.module(module)) else {
+            return;
+        };
+        let corner = state.camera.to_screen(tile.position);
+        self.emit(
+            out,
+            CanvasEvent::TileMenu {
+                module: tile.id,
+                at: Point::new(bounds.x + corner.x, bounds.y + corner.y),
+                area: bounds,
+            },
+        );
     }
 
     /// Sends [`CanvasEvent::OpenBrowser`] for a point given in world and

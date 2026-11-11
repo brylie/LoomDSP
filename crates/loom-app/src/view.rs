@@ -88,17 +88,32 @@ impl App {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::ProbeMenu(probe_menu::Message::Close))
                 .on_right_press(Message::ProbeMenu(probe_menu::Message::Close));
-            layers = layers.push(outside).push(menu.view().map(Message::ProbeMenu));
+            layers = layers
+                .push(outside)
+                .push(menu.view(self.overlays.menu_highlight()).map(Message::ProbeMenu));
         }
         if let Some((module, at)) = self.overlays.tile_menu() {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::CloseTileMenu)
                 .on_right_press(Message::CloseTileMenu);
+            // Drawn from the menu's model, which its keys and the tree read
+            // too (`menus.rs`); each item is named by its UI ID.
             let mut items = column![].spacing(2);
-            for (label, message) in self.tile_menu_items(module) {
-                items = items.push(button(iced::widget::text(label)).on_press(message).width(200));
+            let model = self.menu_model();
+            let highlight = model.as_ref().and_then(|menu| menu.highlight);
+            for (at, item) in model.iter().flat_map(|menu| menu.items.iter()).enumerate() {
+                items = items.push(crate::inspector::ids::named(
+                    &item.id,
+                    button(iced::widget::text(item.label.clone()))
+                        .on_press(item.message.clone())
+                        .width(200)
+                        .style(style::outlined(style::secondary, highlight == Some(at))),
+                ));
             }
-            let menu = container(items).padding(4).style(container::rounded_box);
+            let menu = crate::inspector::ids::named(
+                &crate::menus::tile_id(module),
+                container(items).padding(4).style(container::rounded_box),
+            );
             layers = layers
                 .push(outside)
                 .push(iced::widget::pin(iced::widget::opaque(menu)).position(at.to_iced()));
@@ -108,8 +123,10 @@ impl App {
                 .on_press(Message::Recent(recent::Message::Close))
                 .on_right_press(Message::Recent(recent::Message::Close));
             layers = layers.push(outside).push(
-                iced::widget::pin(iced::widget::opaque(recent::view(rows).map(Message::Recent)))
-                    .position(recent::LIST_AT),
+                iced::widget::pin(iced::widget::opaque(
+                    recent::view(rows, self.overlays.menu_highlight()).map(Message::Recent),
+                ))
+                .position(recent::LIST_AT),
             );
         }
         if let Some(window) = self.preferences_view() {

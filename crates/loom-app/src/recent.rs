@@ -141,8 +141,9 @@ pub enum Message {
     Close,
 }
 
-/// The open list.
-pub fn view(rows: &[Row]) -> Element<'_, Message> {
+/// The open list, with the row its keys are on outlined. Each row, and the
+/// list, sit in a container named by its UI ID (`menus.rs`).
+pub fn view(rows: &[Row], highlight: Option<usize>) -> Element<'_, Message> {
     let mut list = column![].spacing(2);
     for (i, row_data) in rows.iter().enumerate() {
         let name = text(&row_data.name).size(style::CONTROL);
@@ -155,19 +156,22 @@ pub fn view(rows: &[Row]) -> Element<'_, Message> {
         };
         let line = row![name, space::horizontal()];
         let entry = button(line)
-            .style(style::plain)
+            .style(style::outlined(style::plain, highlight == Some(i)))
             .width(Length::Fill)
             .on_press(Message::Pick(i));
+        let entry = crate::inspector::ids::named(
+            &crate::menus::recent_id().with(row_data.path.display().to_string().as_str()),
+            entry,
+        );
         let hover = container(text(&row_data.folder).size(style::BODY))
             .padding(6)
             .style(container::rounded_box);
         list = list.push(tooltip(entry, hover, tooltip::Position::Right));
     }
-    container(list)
-        .padding(6)
-        .width(280)
-        .style(container::rounded_box)
-        .into()
+    crate::inspector::ids::named(
+        &crate::menus::recent_id(),
+        container(list).padding(6).width(280).style(container::rounded_box),
+    )
 }
 
 /// What a drop of `dropped` files comes to.

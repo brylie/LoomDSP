@@ -114,6 +114,8 @@ fn each_named_key_the_canvas_uses_has_its_own_key() {
         (Named::Delete, Key::Delete),
         (Named::Home, Key::Home),
         (Named::End, Key::End),
+        (Named::ContextMenu, Key::ContextMenu),
+        (Named::F10, Key::F10),
     ];
     for (named, key) in pairs {
         assert_eq!((&keyboard::Key::Named(named)).to_core(), key, "{named:?}");

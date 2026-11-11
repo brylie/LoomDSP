@@ -6,8 +6,8 @@
 //! screen reader can ask for does, as the messages a pointer or the keys
 //! would send. The tree turns items into nodes, and the layer turns an
 //! action on a node back into those messages, so a panel has no
-//! accessibility code of its own beyond building its items. The inspector
-//! and the matrix are built this way; the overlays follow.
+//! accessibility code of its own beyond building its items. The inspector,
+//! the matrix, and the overlays over the canvas are built this way.
 //!
 //! An item's UI ID is the same one the view names the part's container
 //! with, so the window says where the part is (`places.rs`).
@@ -45,6 +45,19 @@ pub(crate) enum Kind {
     List,
     /// One row of a list, holding that row's parts.
     ListItem,
+    /// A window over the rest that owns the input: help, Your patches,
+    /// Preferences. Its label is its title.
+    Dialog,
+    /// A dialog that asks before going on: the question. Its description is
+    /// the sentence under its title.
+    AlertDialog,
+    /// A menu over the rest that owns the input: the tile menu, the probe
+    /// menu, the Recent list.
+    Menu,
+    /// One item of a menu. Click picks it.
+    MenuItem,
+    /// A link in text. Click follows it.
+    Link,
 }
 
 /// A slider's number and range, in the units the user sees.

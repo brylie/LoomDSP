@@ -407,7 +407,17 @@ pub(crate) fn tree(
     // The open panel, drawn beside the canvas: each of its parts, and the
     // panel itself marked as cutting off what it scrolls out of view.
     let panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
+    // The overlay that owns the input is not below anything: it is reported
+    // and acts, while what it covers is hidden.
+    let covered = std::mem::replace(&mut frame.covered, false);
+    let overlay: Vec<NodeId> = frames.overlay.iter().map(|item| frame.item(item)).collect();
+    frame.covered = covered;
     let field_focus = frame.focused;
+    let overlay_focus = frames
+        .overlay_focus
+        .as_ref()
+        .filter(|id| items::find(&frames.overlay, id).is_some())
+        .map(|id| node_id(table, id));
     // Only a part the panel reports now can have focus.
     let item_focus = frames
         .focused_item
@@ -429,6 +439,9 @@ pub(crate) fn tree(
         node.add_action(Action::Focus);
         // Click selects the tile's module, so the inspector follows.
         node.add_action(Action::Click);
+        // ShowContextMenu opens the tile's menu, as a right-click does.
+        // AccessKit's macOS adapter (0.27.2) does not pass it on.
+        node.add_action(Action::ShowContextMenu);
         let mut kids = Vec::new();
         for (index, widget) in tile.widgets.iter().enumerate() {
             if widget.hidden {
@@ -479,11 +492,13 @@ pub(crate) fn tree(
 
     children.extend(panel);
     children.push(bar);
+    // Last, as it is drawn on top.
+    children.extend(overlay);
     // A text field that has keyboard focus has it, whatever the canvas
     // last said (section 6, rule 5). Then a panel part the keys act on,
     // such as the matrix's chosen cell, since the panel hears the keys
     // before the canvas does (section 6, rule 6).
-    let focus = field_focus.or(item_focus).or(focus);
+    let focus = field_focus.or(overlay_focus).or(item_focus).or(focus);
     let root_node = node_id(table, &window_id());
     let mut root = Node::new(Role::Window);
     root.set_label(snapshot.title.clone());
@@ -515,6 +530,14 @@ pub(crate) struct Frames {
     /// The panel part the keys act on while no text field has them: the
     /// matrix's chosen cell while the matrix has the keys.
     pub focused_item: Option<UiId>,
+    /// The overlay that owns the input, if one is reported: its root item,
+    /// with its parts inside. Everything else is hidden below it
+    /// (section 7, rules 24 and 27).
+    pub overlay: Vec<items::Item>,
+    /// Where the overlay's keys act while no text field has them: a menu's
+    /// highlighted item, the question's highlighted answer, or else the
+    /// overlay itself.
+    pub overlay_focus: Option<UiId>,
 }
 
 /// The UI ID a fixed text names. The texts are this app's own constants,
@@ -666,7 +689,17 @@ impl Frame<'_> {
             Kind::Field => Role::TextInput,
             Kind::List => Role::List,
             Kind::ListItem => Role::ListItem,
+            Kind::Dialog => Role::Dialog,
+            Kind::AlertDialog => Role::AlertDialog,
+            Kind::Menu => Role::Menu,
+            Kind::MenuItem => Role::MenuItem,
+            Kind::Link => Role::Link,
         });
+        // A dialog or a menu owns the input while it is open, as the pointer
+        // finds: nothing outside it can be reached (section 7, rule 27).
+        if matches!(item.kind, Kind::Dialog | Kind::AlertDialog | Kind::Menu) {
+            node.set_modal();
+        }
         // A list says how many rows it has, and each row its place, so a
         // screen reader can say "3 of 7". AccessKit puts the size on the
         // list and counts places from zero.
@@ -704,7 +737,10 @@ impl Frame<'_> {
             node.set_toggled(if on { Toggled::True } else { Toggled::False });
         }
         if item.enabled {
-            if matches!(item.kind, Kind::Button | Kind::Check | Kind::Option) {
+            if matches!(
+                item.kind,
+                Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem | Kind::Link
+            ) {
                 node.add_action(Action::Click);
             }
             if matches!(item.kind, Kind::Slider | Kind::Choice) {

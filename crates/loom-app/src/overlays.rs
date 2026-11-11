@@ -7,6 +7,8 @@
 //! (files.md, Asking before losing work). Who has the input follows from the
 //! same order ([`Overlays::owner`]).
 
+pub(crate) mod access;
+
 use crate::input_owner::InputOwner;
 use crate::{browser, help, licence_chooser, patches, probe_menu, question, recent, settings};
 use loom_ui_core::Point;
@@ -37,6 +39,9 @@ pub(crate) enum ContextMenu {
 #[derive(Default)]
 pub(crate) struct Overlays {
     panel: Option<Overlay>,
+    /// While a menu is open, the item its keys are on (`menus.rs`). A menu
+    /// opens with none, and opening any panel clears it.
+    menu_highlight: Option<usize>,
     /// The licence chooser, while it is open.
     pub chooser: Option<licence_chooser::Chooser>,
     /// Open module help.
@@ -71,6 +76,23 @@ impl Overlays {
     /// Opens a panel in place of the one that is open.
     pub fn open(&mut self, panel: Overlay) {
         self.panel = Some(panel);
+        self.menu_highlight = None;
+    }
+
+    /// True while a menu is open: the tile menu, the probe menu, or the
+    /// Recent list.
+    pub fn menu_open(&self) -> bool {
+        matches!(self.panel, Some(Overlay::Menu(_) | Overlay::RecentList(_)))
+    }
+
+    /// The open menu's highlighted item, if a key has moved there.
+    pub fn menu_highlight(&self) -> Option<usize> {
+        self.menu_highlight.filter(|_| self.menu_open())
+    }
+
+    /// Moves the open menu's highlight.
+    pub fn set_menu_highlight(&mut self, at: Option<usize>) {
+        self.menu_highlight = at;
     }
 
     /// What a new patch leaves open: only the Preferences window, which is

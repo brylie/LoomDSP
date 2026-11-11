@@ -83,18 +83,24 @@ impl ProbeMenu {
     }
 
     /// The menu, placed at its corner. The app lays it over the window.
-    pub fn view(&self) -> Element<'_, Message> {
-        let item = |label: &'static str, probe: Probe| {
-            button(text(label).size(style::CONTROL))
-                .on_press(Message::Pick(probe))
-                .width(Length::Fill)
-                .height(ITEM_HEIGHT)
-                .style(style::plain)
+    pub fn view(&self, highlight: Option<usize>) -> Element<'_, Message> {
+        let item = |at: usize, key: &'static str, label: &'static str, probe: Probe| {
+            crate::inspector::ids::named(
+                &crate::menus::probe_id().with(key),
+                button(text(label).size(style::CONTROL))
+                    .on_press(Message::Pick(probe))
+                    .width(Length::Fill)
+                    .height(ITEM_HEIGHT)
+                    .style(style::outlined(style::plain, highlight == Some(at))),
+            )
         };
-        let menu = column![item("Add scope", Probe::Scope), item("Add meter", Probe::Meter)]
-            .padding(PADDING)
-            .width(WIDTH);
-        let menu = container(menu).style(menu_style);
+        let menu = column![
+            item(0, "scope", "Add scope", Probe::Scope),
+            item(1, "meter", "Add meter", Probe::Meter)
+        ]
+        .padding(PADDING)
+        .width(WIDTH);
+        let menu = crate::inspector::ids::named(&crate::menus::probe_id(), container(menu).style(menu_style));
         iced::widget::pin(iced::widget::opaque(menu))
             .position(self.at.to_iced())
             .into()
