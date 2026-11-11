@@ -715,3 +715,101 @@ fn a_clip_light_shortens_the_bar() {
     assert!(with_light.y > plain.y);
     assert!(with_light.y + with_light.height < meter_hold_centre(rect).y);
 }
+
+/// The text of an XY pad's or a range's two values, for a test.
+fn two_parts() -> Box<[crate::scene::PartText; 2]> {
+    Box::default()
+}
+
+/// One arrow key press moves a continuous knob by 1%, a stepped one by one
+/// step, and a number with its own step by that step.
+#[test]
+fn an_arrow_step_follows_the_kind_of_value() {
+    let main = |kind: &WidgetViewKind, at: f32, up: bool, fine: bool| {
+        arrow_step(kind, ControlPart::Main, at, 0.0, up, fine).unwrap().0
+    };
+    let knob = WidgetViewKind::Knob { steps: 0 };
+    assert!((main(&knob, 0.5, true, false) - 0.51).abs() < 1e-6);
+    assert!((main(&knob, 0.5, false, true) - 0.499).abs() < 1e-6);
+    assert_eq!(main(&knob, 1.0, true, false), 1.0);
+    let stepped = WidgetViewKind::Fader {
+        vertical: true,
+        steps: 4,
+    };
+    assert_eq!(main(&stepped, 0.5, true, false), 0.75);
+    let number = WidgetViewKind::Number {
+        steps: 0,
+        key_step: 0.125,
+    };
+    assert_eq!(main(&number, 0.5, false, false), 0.375);
+    assert_eq!(main(&number, 0.5, true, true), 0.5125);
+}
+
+/// The step a slider declares is the step an arrow key takes.
+#[test]
+fn the_declared_share_is_the_step_taken() {
+    let kinds = [
+        WidgetViewKind::Knob { steps: 0 },
+        WidgetViewKind::Knob { steps: 16 },
+        WidgetViewKind::Fader {
+            vertical: false,
+            steps: 0,
+        },
+        WidgetViewKind::Number {
+            steps: 0,
+            key_step: 0.25,
+        },
+        WidgetViewKind::XyPad { parts: two_parts() },
+    ];
+    for kind in kinds {
+        let share = arrow_share(&kind).unwrap();
+        let (next, _) = arrow_step(&kind, ControlPart::Main, 0.25, 0.5, true, false).unwrap();
+        assert!((next - 0.25 - share).abs() < 1e-6, "{kind:?}");
+    }
+    assert_eq!(arrow_share(&WidgetViewKind::Toggle), None);
+    assert_eq!(arrow_share(&WidgetViewKind::Button), None);
+}
+
+/// A toggle goes on with Up and off with Down, and a choice moves one
+/// option and stops at its ends.
+#[test]
+fn an_arrow_step_on_a_toggle_and_a_choice() {
+    let step =
+        |kind: &WidgetViewKind, at: f32, up: bool| arrow_step(kind, ControlPart::Main, at, 0.0, up, false).unwrap().0;
+    assert_eq!(step(&WidgetViewKind::Toggle, 0.0, true), 1.0);
+    assert_eq!(step(&WidgetViewKind::Toggle, 1.0, false), 0.0);
+    let select = WidgetViewKind::Select {
+        options: vec!["a".into(), "b".into(), "c".into()],
+    };
+    assert_eq!(step(&select, 1.0, true), 2.0);
+    assert_eq!(step(&select, 2.0, true), 2.0);
+    assert_eq!(step(&select, 0.0, false), 0.0);
+}
+
+/// An XY pad moves one value at a time, and a range's handle stops at the
+/// other handle. Its band moves both and keeps the width.
+#[test]
+fn an_arrow_step_on_a_control_with_two_values() {
+    let pad = WidgetViewKind::XyPad { parts: two_parts() };
+    let (x, y) = arrow_step(&pad, ControlPart::Second, 0.2, 0.4, true, false).unwrap();
+    assert_eq!(x, 0.2);
+    assert!((y - 0.41).abs() < 1e-6);
+    assert_eq!(arrow_step(&pad, ControlPart::Both, 0.2, 0.4, true, false), None);
+
+    let range = WidgetViewKind::Range {
+        vertical: false,
+        parts: two_parts(),
+    };
+    let (low, high) = arrow_step(&range, ControlPart::Main, 0.395, 0.4, true, false).unwrap();
+    assert_eq!((low, high), (0.4, 0.4));
+    let (low, high) = arrow_step(&range, ControlPart::Both, 0.2, 0.4, false, false).unwrap();
+    assert!((low - 0.19).abs() < 1e-6 && (high - 0.39).abs() < 1e-6);
+}
+
+/// A button and a widget that only shows a value have no arrow step.
+#[test]
+fn no_arrow_step_on_a_button_or_a_display() {
+    for kind in [WidgetViewKind::Button, WidgetViewKind::Light, WidgetViewKind::Scope] {
+        assert_eq!(arrow_step(&kind, ControlPart::Main, 0.5, 0.0, true, false), None);
+    }
+}

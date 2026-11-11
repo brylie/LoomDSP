@@ -1504,15 +1504,107 @@ impl ValueDrag {
     }
 }
 
+/// What one arrow key press adds to a continuous control, as a share of its
+/// travel.
+const ARROW_SHARE: f32 = 0.01;
+/// The same with Shift held.
+const ARROW_SHARE_FINE: f32 = 0.001;
+
+/// How far one arrow key press, without Shift, moves a control that holds a
+/// number, as a share of its travel: 1% for a continuous value, one step
+/// for a whole-number parameter, or the step the parameter declares.
+/// `None` for a control with no travel, such as a toggle or a choice.
+///
+/// A screen reader's slider declares this as its step, so what it says and
+/// what [`arrow_step`] does cannot differ.
+pub fn arrow_share(kind: &WidgetViewKind) -> Option<f32> {
+    match kind {
+        WidgetViewKind::Number { key_step, .. } if *key_step > 0.0 => Some(*key_step),
+        WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } | WidgetViewKind::Number { steps, .. }
+            if *steps > 0 =>
+        {
+            Some(1.0 / *steps as f32)
+        }
+        WidgetViewKind::Knob { .. }
+        | WidgetViewKind::Fader { .. }
+        | WidgetViewKind::Number { .. }
+        | WidgetViewKind::XyPad { .. }
+        | WidgetViewKind::Range { .. } => Some(ARROW_SHARE),
+        _ => None,
+    }
+}
+
+/// Where one arrow key press moves a control: the new positions of its
+/// first and second value, from the ones it has now. `part` is the value
+/// the key moves: `Main` or `Second` for one value of an XY pad or one
+/// handle of a range, `Both` for a range's band. `up` is Up or Right.
+/// `fine` is Shift, 10 times finer on a continuous value. A control with
+/// one value gets `second` back as it was.
+///
+/// `None` for a widget an arrow key does not move this way: a button, or
+/// one that only shows a value.
+///
+/// This is the one place that says what an arrow key does to a control.
+/// The keyboard uses it, and so does a screen reader's Increment and
+/// Decrement (ui-layer.md, section 7, rule 5).
+pub fn arrow_step(
+    kind: &WidgetViewKind,
+    part: ControlPart,
+    main: f32,
+    second: f32,
+    up: bool,
+    fine: bool,
+) -> Option<(f32, f32)> {
+    let sign = if up { 1.0 } else { -1.0 };
+    match kind {
+        // A parameter can declare its own step (panel-widgets.md, Number).
+        WidgetViewKind::Number { key_step, .. } if *key_step > 0.0 => {
+            let step = key_step * if fine { 0.1 } else { 1.0 };
+            Some(((main + sign * step).clamp(0.0, 1.0), second))
+        }
+        WidgetViewKind::Knob { steps } | WidgetViewKind::Fader { steps, .. } | WidgetViewKind::Number { steps, .. } => {
+            Some((knob_step(main, up, fine, *steps), second))
+        }
+        WidgetViewKind::Toggle => Some((if up { 1.0 } else { 0.0 }, second)),
+        // A choice's position is the index of its option.
+        WidgetViewKind::Radio { options }
+        | WidgetViewKind::Select { options }
+        | WidgetViewKind::Segmented { options, .. } => {
+            let last = options.len().saturating_sub(1) as f32;
+            Some(((main.round() + sign).clamp(0.0, last), second))
+        }
+        WidgetViewKind::XyPad { .. } => match part {
+            ControlPart::Main => Some((knob_step(main, up, fine, 0), second)),
+            ControlPart::Second => Some((main, knob_step(second, up, fine, 0))),
+            ControlPart::Both => None,
+        },
+        WidgetViewKind::Range { .. } => {
+            let grab = match part {
+                ControlPart::Both => RangeGrab::Band,
+                part => RangeGrab::handle(part, main, second),
+            };
+            Some(range_step(grab, main, second, up, fine))
+        }
+        _ => None,
+    }
+}
+
+/// A range's positions after one arrow key press on what `grab` holds.
+pub(crate) fn range_step(grab: RangeGrab, low: f32, high: f32, up: bool, fine: bool) -> (f32, f32) {
+    let step = if fine { ARROW_SHARE_FINE } else { ARROW_SHARE };
+    let (_, low, high) = grab.moved(low, high, if up { step } else { -step });
+    (low, high)
+}
+
 /// A knob's new position after one arrow key press: 1% of the range, 0.1%
 /// with Shift, or one step for a whole-number parameter.
 pub(crate) fn knob_step(position: f32, up: bool, fine: bool, steps: u32) -> f32 {
     let step = if steps > 0 {
         1.0 / steps as f32
     } else if fine {
-        0.001
+        ARROW_SHARE_FINE
     } else {
-        0.01
+        ARROW_SHARE
     };
     let next = if up { position + step } else { position - step };
     next.clamp(0.0, 1.0)

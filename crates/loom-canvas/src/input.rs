@@ -16,7 +16,7 @@
 
 use crate::camera::Camera;
 use crate::controls::{
-    PanelValues, RangeGrab, ValueDrag, focus_ring, knob_step, radio_option, range_bar_at, range_handle, range_nearest,
+    PanelValues, RangeGrab, ValueDrag, arrow_step, focus_ring, radio_option, range_bar_at, range_handle, range_nearest,
     range_track, select_box, xy_area, xy_bar_at, xy_edge_ring, xy_nearest_edge, xy_position, xy_throw,
 };
 use crate::draft::{DraftSubmit, TypedDraft};

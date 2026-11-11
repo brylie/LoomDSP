@@ -235,8 +235,7 @@ impl CanvasModel<'_> {
                     state.focus.set_range_part(Some(RangePart { part, ..inside }));
                     return true;
                 };
-                let step = if modifiers.shift { 0.001 } else { 0.01 };
-                let (_, next_low, next_high) = grab.moved(low, high, if up { step } else { -step });
+                let (next_low, next_high) = crate::controls::range_step(grab, low, high, up, modifiers.shift);
                 self.arrow_step(now, out);
                 self.set_pad(out, module, widget, (low, high), (next_low, next_high));
                 true
@@ -688,21 +687,8 @@ impl CanvasModel<'_> {
                     return true;
                 };
                 let up = matches!(named, Key::Up | Key::Right);
-                if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::XyPad { .. })) {
-                    // Left and Right change `x`, Up and Down change `y`
-                    // (panel-widgets.md, XY pad).
-                    let part = if matches!(named, Key::Left | Key::Right) {
-                        ControlPart::Main
-                    } else {
-                        ControlPart::Second
-                    };
-                    let position = self.part_position(module, widget, part);
-                    let next = knob_step(position, up, modifiers.shift, 0);
-                    self.arrow_step(now, out);
-                    if next != position {
-                        self.set_part(out, module, widget, part, next);
-                    }
-                } else if matches!(self.widget_kind(module, widget), Some(WidgetViewKind::Button)) {
+                let kind = self.widget_kind(module, widget);
+                if matches!(kind, Some(WidgetViewKind::Button)) {
                     self.emit(
                         out,
                         CanvasEvent::ButtonArrow {
@@ -711,41 +697,34 @@ impl CanvasModel<'_> {
                             high: up,
                         },
                     );
-                } else {
-                    let position = self.position(module, widget);
-                    let next = match self.widget_kind(module, widget) {
-                        // A parameter can declare its own step (panel-widgets.md,
-                        // Number).
-                        Some(WidgetViewKind::Number { key_step, .. }) if *key_step > 0.0 => {
-                            let step = key_step * if modifiers.shift { 0.1 } else { 1.0 };
-                            (position + if up { step } else { -step }).clamp(0.0, 1.0)
+                    return true;
+                }
+                // Left and Right change an XY pad's `x`, Up and Down its `y`
+                // (panel-widgets.md, XY pad).
+                let part = match kind {
+                    Some(WidgetViewKind::XyPad { .. }) if matches!(named, Key::Up | Key::Down) => ControlPart::Second,
+                    _ => ControlPart::Main,
+                };
+                let main = self.part_position(module, widget, ControlPart::Main);
+                let second = self.part_position(module, widget, ControlPart::Second);
+                // A range is handled before this, by its own keys.
+                let Some(next) = kind
+                    .filter(|kind| !matches!(kind, WidgetViewKind::Range { .. }))
+                    .and_then(|kind| arrow_step(kind, part, main, second, up, modifiers.shift))
+                else {
+                    return false;
+                };
+                self.arrow_step(now, out);
+                match part {
+                    ControlPart::Second if next.1 != second => self.set_part(out, module, widget, part, next.1),
+                    ControlPart::Main if next.0 != main => {
+                        if matches!(kind, Some(WidgetViewKind::XyPad { .. })) {
+                            self.set_part(out, module, widget, part, next.0);
+                        } else {
+                            self.set_control(out, module, widget, next.0);
                         }
-                        Some(
-                            WidgetViewKind::Knob { steps }
-                            | WidgetViewKind::Fader { steps, .. }
-                            | WidgetViewKind::Number { steps, .. },
-                        ) => knob_step(position, up, modifiers.shift, *steps),
-                        Some(WidgetViewKind::Toggle) => {
-                            if up {
-                                1.0
-                            } else {
-                                0.0
-                            }
-                        }
-                        Some(
-                            WidgetViewKind::Radio { options }
-                            | WidgetViewKind::Select { options }
-                            | WidgetViewKind::Segmented { options, .. },
-                        ) => {
-                            let last = options.len().saturating_sub(1) as f32;
-                            (position.round() + if up { 1.0 } else { -1.0 }).clamp(0.0, last)
-                        }
-                        _ => return false,
-                    };
-                    self.arrow_step(now, out);
-                    if next != position {
-                        self.set_control(out, module, widget, next);
                     }
+                    _ => {}
                 }
                 true
             }
