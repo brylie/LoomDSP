@@ -2813,3 +2813,43 @@ fn the_inspector_slider_steps_a_tenth_of_the_tile_knob_until_phase_3() {
     assert!((moved[0] - 0.001).abs() < 1e-4, "the inspector slider: {moved:?}");
     assert!((moved[1] - 0.01).abs() < 1e-4, "the tile knob: {moved:?}");
 }
+
+/// A modulation card's depth a drag left between two percents steps onto
+/// the percent grid: the first step is shorter, and every step after lands
+/// on a whole percent, so what is heard and what is set never drift apart.
+#[test]
+fn an_inspector_depth_steps_onto_the_percent_grid() {
+    let mut ui = crate::ui_test::Ui::open("modulation.ron");
+    let filter = 4;
+    let (id, _) = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignments()
+        .find(|(_, a)| a.target.0 == filter)
+        .expect("an assignment on the filter");
+    ui.send(Message::Modulation(crate::modulation::Message::Depth {
+        id,
+        depth: 0.304,
+    }));
+    ui.send(Message::SliderReleased);
+    let row = crate::inspector::ids::row(filter, crate::inspector::ids::Kind::Param, "cutoff");
+    let depth_id = crate::inspector::ids::part(&crate::inspector::ids::assignment(&row, id.0), "depth");
+    let (_, _, items) = inspector_of(&mut ui, &[filter]);
+    assert!(
+        super::items::find(&items, &depth_id).is_some(),
+        "the card's depth is reported"
+    );
+    let slider = node_of(&mut ui.app, &depth_id);
+    let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
+    let at = std::time::Instant::now();
+    let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    assert!((depth(&ui.app) - 0.31).abs() < 1e-6, "{}", depth(&ui.app));
+    for _ in 0..19 {
+        let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    }
+    assert!((depth(&ui.app) - 0.50).abs() < 1e-6, "no drift: {}", depth(&ui.app));
+    let (_, update, _) = inspector_of(&mut ui, &[filter]);
+    assert_eq!(node(&update, slider).numeric_value(), Some(50.0));
+}

@@ -738,6 +738,10 @@ fn modulation(
                 .map(|choice| AppMessage::Modulation(Modulation::Polarity { id, choice: *choice }))
         };
         let depth = |depth: f32| AppMessage::Modulation(Modulation::Depth { id, depth });
+        // One step lands on the percent grid, so from a depth a drag left
+        // between two percents the first step is shorter, and steps never
+        // drift from what is heard.
+        let percent = (a.depth * 100.0).round();
         parts.push(Item::group(
             key.clone(),
             format!("Modulation from {}", a.source),
@@ -762,14 +766,14 @@ fn modulation(
                 Item {
                     label: Some("Depth".to_string()),
                     number: Some(Number {
-                        value: f64::from((a.depth * 100.0).round()),
+                        value: f64::from(percent),
                         min: -100.0,
                         max: 100.0,
                         step: Some(1.0),
                     }),
                     step: (
-                        (a.depth < 1.0).then(|| depth((a.depth + 0.01).min(1.0))),
-                        (a.depth > -1.0).then(|| depth((a.depth - 0.01).max(-1.0))),
+                        (a.depth < 1.0).then(|| depth(((percent + 1.0) / 100.0).min(1.0))),
+                        (a.depth > -1.0).then(|| depth(((percent - 1.0) / 100.0).max(-1.0))),
                     ),
                     set_number: Some(SetNumber::Depth(id)),
                     groups: true,
