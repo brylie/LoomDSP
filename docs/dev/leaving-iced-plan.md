@@ -50,9 +50,9 @@ Measured at commit `6091e52`.
 1. **The view models are the seam.** `App::ui_snapshot`, `inspector.rs`, and the other plain-data models (ADR-0021) describe what the user sees. The accessibility tree, the control channel, `--dump-ui`, and the tests all read them. New code reads them too. Nothing reads a toolkit widget tree to find out what is on screen.
 2. **One runtime, two drivers.** The window and the headless harness must run the same code for events, layout, and messages. Only the event source and the drawing target differ. This is what keeps the tests honest.
 3. **No hidden skips.** A harness that cannot run an effect (a file dialog, a window command, a timer) panics with a message, as the `Ui` harness does today.
-4. **Do not invent text.** Shaping, font fallback, line breaking, glyph drawing, and the editing model come from the text crate and its glyph renderer. Which crate is chosen at step 2.4 ([spec](../design/ui-layer.md), section 8, rule 8). The steps below name `cosmic-text` and `glyphon`, today's stack under Iced; if Parley is chosen, steps 2.4, 3.3, and phase 4 change to name it and its glyph drawing.
+4. **Do not invent text.** Shaping, font fallback, line breaking, glyph rasterising, and the editing model come from Parley and `swash`, chosen at step 2.4 ([spec](../design/ui-layer.md), section 8, rules 1 and 8). The glyph atlas that draws them is ours, because no atlas crate takes Parley's glyph runs at our `wgpu`; it stays small and behind the `Painter` boundary.
 5. **Licences.** Every new crate goes through `cargo deny check` before it is used. Only permissive licences (ADR-0006).
-6. **Clean room.** The agent may read the source of dependencies accepted under ADR-0006, which includes Iced, `winit`, `wgpu`, `cosmic-text`, and AccessKit. It must not read the source of other audio applications or other UI frameworks that are not dependencies.
+6. **Clean room.** The agent may read the source of dependencies accepted under ADR-0006, which includes Iced, `winit`, `wgpu`, `cosmic-text`, and AccessKit, and from step 2.4b Parley, its crates, and `swash`. It must not read the source of other audio applications or other UI frameworks that are not dependencies.
 7. **Same versions during the move.** Use the `winit` and `wgpu` versions Iced 0.14 already pulls in, so the lock file never holds two of either.
 8. **Parity gates** at the end of every phase (below). A phase is done only when they pass.
 9. **Build the layer for reuse.** The new UI crates are candidates for publishing later (FR-SDK-06), and could serve other audio tools beside LoomDSP. So:
@@ -223,15 +223,15 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 ### 2.3 The headless harness on the same runtime
 
 1. Rewrite `ui_test.rs` internals so `Ui` drives the phase 2.1 runtime, not Iced's runtime. Its public API (`Ui::new`, pointer and key methods, `output`, `input`, `control`, `text`, `exited`, the in-memory clipboard) does not change. The 15 files that use it should not need edits.
-2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text measurement needs only `cosmic-text`'s font system, which runs on the CPU.
+2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text measurement needs only Parley's font and layout contexts, which run on the CPU.
 3. Drawing tests (`screenshot.rs`, its smoke test) render to an offscreen `wgpu` texture. Without a GPU adapter they skip with `NO_GPU`, as today. Iced's `tiny-skia` fallback goes away; nothing should depend on it once events need no renderer. If CI has no GPU, try a software `wgpu` adapter (such as llvmpipe through Vulkan, or WARP on Windows) and record whether it works.
 4. Add an accessibility test driver to the harness: `Ui::a11y_tree()` returns the current tree, and `Ui::a11y_action(name, action)` performs an action by node name. Agents and tests can then check the tree the way a screen reader sees it.
 
 ### 2.4 Text drawing for the canvas
 
-1. Replace Iced's text renderer for tile text with a glyph atlas renderer on the crate chosen by spec section 8, rule 8. **2.4a, the comparison, is done:** [research note](../research/2026-11-text-crate-choice.md), with a recommendation for Brylie to decide. It found that no `glyphon` release builds with our `wgpu` 27 (its releases target 25, 28, 29, and 30), so while Iced fixes our `wgpu`, a `cosmic-text` canvas draws with `cryoglyph` 0.1, already in our tree, and a Parley canvas needs an atlas of our own. Step 2.4b draws the canvas text once the crate is chosen.
-2. Give it a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
-3. Share one `cosmic-text` `FontSystem` between the canvas and the Iced panels if Iced allows it; otherwise accept two for now and note it.
+1. **2.4a, done:** the text crate is Parley ([research note](../research/2026-11-text-crate-choice.md); spec section 8, rule 8). No `glyphon` release builds with our `wgpu` 27, and nothing like it takes Parley's glyph runs, so step 2.4b builds a glyph atlas of our own: rasterise with `swash`, pack with `etagere`, and draw instanced quads, about 680 lines in the parts the research note costs. Ask the maintainer if it grows well past that (stop points).
+2. **2.4b:** draw tile text with Parley and that atlas, behind a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Ask Parley for `system-ui`. Keep one Parley layout per label, keyed by its text, size, and weight, beside the canvas's frame cache, since a layout is rebuilt for any change. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
+3. The canvas has its own Parley font context beside Iced's font system until phase 3 moves the panels. Tile text changes width once here (spec section 8, rule 6): record the `--screenshot` before and after, and check it by eye; the other parity gates are unchanged.
 
 ### 2.5 The agent tools on the new shell
 
@@ -276,8 +276,8 @@ Move the simplest views first. One pull request per row, each passing the parity
 
 ### 3.3 Text input and editing
 
-1. Single-line input (browser search, number entry, names) builds on `cosmic-text`'s `Editor`: cursor, selection, word movement, clipboard, undo inside the field.
-2. IME: send `winit` IME events (preedit and commit) to the focused field, and report the cursor area to the window so the candidate window appears in the right place. Test with a Japanese or Chinese input method on macOS and record the result.
+1. Single-line input (browser search, number entry, names) builds on Parley's `PlainEditor`, behind a field type of our own: cursor, selection, word movement, and clipboard come from it, and undo inside the field is ours, by snapshots of text and selection (about 80 lines).
+2. IME: send `winit` IME events (preedit and commit) to the focused field, through `PlainEditor`'s `set_compose`, `finish_compose`, and `clear_compose`, and report `ime_cursor_area` to the window so the candidate window appears in the right place. Test with a Japanese or Chinese input method on macOS and record the result.
 3. The multi-line editor (patch info authors) comes last. If it costs too much, keep it on Iced's `text_editor` and finish phase 3 without it. Phase 4 then waits until it is done.
 4. Clipboard: use a permissive clipboard crate such as `arboard` †, behind the effect from 2.1, so the harness keeps its in-memory clipboard.
 
@@ -287,7 +287,7 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
 
 ## Phase 4: Remove Iced
 
-1. Remove `iced`, `iced_wgpu`, and `iced_runtime` from `Cargo.toml` files. Depend on `winit`, `wgpu`, `cosmic-text`, the glyph renderer, `accesskit`, and `accesskit_winit` directly.
+1. Remove `iced`, `iced_wgpu`, and `iced_runtime` from `Cargo.toml` files. Depend on `winit`, `wgpu`, Parley, `swash`, `accesskit`, and `accesskit_winit` directly. With Iced gone, `cosmic-text` and `cryoglyph` leave the tree, and the canvas and the panels share one Parley font context. Once our `wgpu` is free to move, weigh Vello against our glyph atlas.
 2. Run `cargo deny check` and `cargo tree -d`, and remove duplicates.
 3. Update the documents:
    - `AGENTS.md` (App and Canvas paragraphs, commands);
@@ -308,7 +308,7 @@ Each phase is worth keeping on its own. The maintainer can stop after any of the
 Stop and ask the maintainer if any of these happen:
 
 - a parity gate fails and the fix is not clear;
-- IME or text editing needs more than a few hundred lines on top of `cosmic-text`;
+- IME or text editing needs more than a few hundred lines on top of Parley, or the glyph atlas grows well past the research note's estimate of about 680 lines;
 - an AccessKit gap blocks a phase and upstream has not answered;
 - the idle CPU or frame rate gets worse and cannot be recovered in the same phase.
 

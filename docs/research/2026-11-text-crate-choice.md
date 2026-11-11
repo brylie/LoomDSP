@@ -36,7 +36,8 @@ The choice is for the long run. So each criterion is answered twice where versio
 2. **Parley 0.12 removed its AccessKit integration.** It moved into Parley's `editor` example "to be copied and adapted". Copying it would be porting framework code, which this project does not do. With either crate we write that part.
 3. **Parley's IME support is real and built in.** `cosmic-text` has none.
 4. **On macOS, `cosmic-text` matches today exactly, and Parley does not.** Widths decide layout, hit tests, and `locate` answers, so a mismatch fails the parity gate.
-5. **Recommendation:** `cosmic-text`. It is cheaper now and no worse after phase 4. Its one real loss is criterion 1, and we pay for that with our own preedit handling, about 150 lines. See [the question](#the-question-for-brylie).
+5. **Parley shapes labels faster, but not by a margin that matters.** With the system font named for both, Parley takes about 4.6 µs per tile label and `cosmic-text` 0.19 about 5.4 to 7 µs. Most of `cosmic-text`'s slower default time is a fallback search for the missing "Open Sans".
+6. **Decision: Parley,** chosen for the long run. Brylie left the choice to the driver. The first draft of this note recommended `cosmic-text`, weighted by facts that last only while Iced is in the app. See [the choice](#the-choice).
 
 ## 1. IME composition in a single-line field
 
@@ -167,28 +168,67 @@ Both give the movement and selection rule 2 asks for. Both leave the undo stack 
 - **Level of detail (panels spec: text close up, bars further out):** not affected by either. It decides whether text is drawn at all.
 - **Shaping cost with many tile labels:** `cosmic-text` keeps the shaping in each `Buffer` until its text or attributes change, and has an optional `shape-run-cache` feature that shares shaped runs between buffers (`src/shape_run_cache.rs`, in 0.15 and 0.19). A Parley `Layout` must be rebuilt for any change to its text or style (crate docs, `src/lib.rs`), with no shared cache. We would keep one layout per label, keyed by text, size, and weight, beside the canvas's frame cache. Either way, labels are shaped once and redrawn from the cache; with Parley the cache is ours.
 
+### Shaping speed
+
+Measured with `cargo run --release -- --bench` in the probe, on the machine above: 2,000 different labels such as "Resonance 17 Hz" at 9 px. "First" builds and shapes each label; "again" gives every label new text and shapes it again. Medians of five runs, after one warm-up run. Three runs of the whole benchmark agreed to within about 20%, and kept the same order.
+
+| Case | First, per label | Again, per label |
+|---|---|---|
+| `cosmic-text` 0.15, basic shaping (today) | 15.3 µs | 15.3 µs |
+| `cosmic-text` 0.15, advanced shaping | 13.2 µs | 13.1 µs |
+| `cosmic-text` 0.19, basic | 23.7 µs | 20.0 µs |
+| `cosmic-text` 0.19, advanced | 21.1 µs | 17.4 µs |
+| `cosmic-text` 0.19, basic, system font named | 10.5 µs | 8.5 µs |
+| `cosmic-text` 0.19, advanced, system font named | 7.0 µs | 5.4 µs |
+| Parley 0.12, `system-ui` | 4.5 µs | 4.7 µs |
+
+- The default `cosmic-text` setup asks for "Open Sans", which is not installed, so shaping searches the fallback list. Naming the system font (`set_sans_serif_family(".SF NS")`) removes most of that time.
+- The fair comparison is the last two rows: Parley is about 1.2 to 1.5 times as fast.
+- Either way, 2,000 labels shape in 10 to 15 ms, once. The canvas then draws them from its cache, so shaping speed does not decide the choice.
+- Not measured: drawing, line breaking of long text, and other platforms.
+
+### Project activity
+
+From GitHub, read 2026-11-11:
+
+- **Parley** (`linebender/parley`, an organisation that also maintains Vello, Xilem, and Masonry): 100 or more commits since 2026-05-11 from 7 authors (the API page holds 100), last push 2026-11-10. Of 50 listed contributors, the top three made 57% of the commits.
+- **`cosmic-text`** (`pop-os/cosmic-text`, System76's organisation, built for its COSMIC desktop): 28 commits since 2026-05-11 from 12 authors, last push 2026-10-27, last release 2026-04-22. Of 76 listed contributors, the top three made 68%.
+- **`glyphon`** (`grovesNL/glyphon`, a personal repository): last push 2026-07-09. **`cryoglyph`** (`iced-rs/cryoglyph`): 6 stars, last push 2026-10-13.
+
+Parley is moving faster, which is also why it breaks more often. Neither project shows signs of being abandoned. Governance beyond this (funding, decision process) was not checked.
+
 ### Against the plan's stop point
 
 The plan stops the work if "IME or text editing needs more than a few hundred lines on top of `cosmic-text`" (Stop points). On the `cosmic-text` path we owe about 150 lines for the preedit and about 60 for the undo stack: about 210 lines that only `cosmic-text` needs. The AccessKit text glue, 200 to 300 lines, is owed under either choice, so it is not a cost of `cosmic-text`. All of it together is 410 to 510 lines, before step 3.3 maps keys to the editor. The `cosmic-text` part is within "a few hundred". The total is near the line's edge, and step 3.3 should count its lines against it as it goes. On the Parley path the same count is about 80 lines (undo), plus the same AccessKit glue.
 
-## The question for Brylie
+## The choice
 
-**Which text crate should LoomDSP's UI layer use: `cosmic-text` or Parley?**
+**Parley, decided 2026-11-11.** Brylie asked for the shaping benchmark, then left the choice to the driver: "I'll defer to your judgement, since I don't have a strong opinion here. A minor intuition towards Parley since it's a bit more general purpose", "you can be the final arbiter".
 
-- **`cosmic-text` (recommended).**
-  - *Gives:* today's font and widths exactly, so the parity gates hold. One font system with Iced's panels now. Glyph drawing from a crate already in our tree (`cryoglyph`) now and `glyphon` later. No new crates now. A slower release pace.
-  - *Costs:* our own IME preedit handling, about 150 lines, and our undo stack inside a field, about 60, with the changes `cosmic-text` tracks. Our AccessKit text glue, 200 to 300 lines, owed under either choice. A version bump with small API changes after phase 4. A dependency on `cryoglyph`, maintained by Iced's authors, until then. Together about 410 to 510 lines of ours, near the plan's stop point of "a few hundred lines on top of `cosmic-text`", of which about 210 are owed to `cosmic-text` alone.
-- **Parley.**
-  - *Gives:* IME composition and the candidate area built in. Grapheme clusters that fit AccessKit's character lists. A design that its authors build for editors.
-  - *Costs:*
-    - our own glyph atlas, about 680 lines, needed in every case short of Vello at `wgpu` 30;
-    - a second font system until phase 3 ends;
-    - 35 new crates;
-    - a different font on macOS by default, and different widths even with `system-ui`, so the parity gates fail until that is understood;
-    - our AccessKit text glue all the same, 200 to 300 lines, and our undo stack inside a field, about 80 lines;
-    - a faster release pace with large breaking releases.
+The first draft of this note recommended `cosmic-text`. Its lead came from criteria 3, 4, and 5, and most of that lead lasts only while Iced is in the app:
 
-Rule 8 puts IME first. Parley wins that criterion outright, but `cosmic-text` meets it with about 150 lines of our own, and 3, 4, 5, and 6 then favour `cosmic-text`. That is the reasoning behind the recommendation. If you weigh built-in composition above the rest, Parley is the choice, and the font question in criterion 5 must be solved before step 2.4b can pass its parity gate.
+- **Criterion 3:** one font system with Iced's panels exists only because the panels are Iced's.
+- **Criterion 4:** `cryoglyph` fits only because Iced fixes our `wgpu` at 27, and it is maintained by Iced's authors.
+- **Criterion 5:** today's exact widths matter because the parity gate compares with Iced's text.
+
+Weighed for the long run, as the review asked:
+
+- **Criterion 1, which rule 8 puts first, goes to Parley.** Composition and the candidate area are part of its editor. `cosmic-text` has none.
+- **Its editor fits what we build.** `PlainEditor` is a plain-text editor with the movements, selection, and word operations rule 2 asks for. `cosmic-text`'s `Editor` is built for multi-line rich text.
+- **Word boundaries follow ICU.** Parley's tree has `icu_segmenter`, and 0.12 fixed word movement in Chinese, Japanese, and Korean text. Names in patches may be in any language.
+- **Grapheme clusters** (0.12) match AccessKit's character lists, which we fill ourselves under either choice.
+- **It is not tied to one desktop.** Parley is general-purpose text layout, which suits a UI layer meant for a family of audio tools and plugins. That was also Brylie's intuition.
+- **It is the more active project,** and slightly faster at shaping.
+- **After phase 4, the font system and the font match are no different between the two.** One font system either way, and the face is chosen by our UI layer.
+
+### Costs accepted
+
+- **A glyph atlas of our own,** about 680 lines (criterion 4), rasterising with `swash`. Rule 1 counts this against Parley. When our `wgpu` reaches 30 or later, after phase 4, Vello can be weighed against it.
+- **A visible change to tile text, once, at step 2.4b.** The canvas uses `system-ui`, which finds the same face as today on macOS. Its widths differ by about -2% to +4%, probably from Apple's size-dependent tracking, which Parley applies and Iced's simple shaping does not. Step 2.4b records the change and checks it by eye. The parity gate's pixel diff of tile text is expected to differ at that one step, and nowhere else.
+- **Two font systems until phase 3 moves the panels.** The canvas and the panels may set the same face slightly differently in that time.
+- **35 new crates**, all passing `cargo deny`.
+- **Churn.** Parley releases breaking versions about every two months. We pin a version and upgrade on purpose. Our `TextMeasure` and `Painter` traits, and a field type of our own over `PlainEditor`, keep Parley's types out of the rest of the code.
+- **Lines of our own for fields:** about 80 for an undo stack inside a field, and 200 to 300 for the AccessKit text glue, which was owed under either choice.
 
 ## Unverified facts cleared, and still open
 
