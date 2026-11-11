@@ -7,7 +7,7 @@
 //! would send. The tree turns items into nodes, and the layer turns an
 //! action on a node back into those messages, so a panel has no
 //! accessibility code of its own beyond building its items. The inspector
-//! is the first panel built this way; the matrix and the overlays follow.
+//! and the matrix are built this way; the overlays follow.
 //!
 //! An item's UI ID is the same one the view names the part's container
 //! with, so the window says where the part is (`places.rs`).
@@ -39,6 +39,12 @@ pub(crate) enum Kind {
     Choice,
     /// A field to type text in.
     Field,
+    /// A list of rows, such as the matrix's assignments. Its children are
+    /// list items, each told its position and the list's size, so a screen
+    /// reader can say "3 of 7".
+    List,
+    /// One row of a list, holding that row's parts.
+    ListItem,
 }
 
 /// A slider's number and range, in the units the user sees.
@@ -141,6 +147,9 @@ pub(crate) enum SetText {
     UnknownLabel(u32),
     /// A new tag for the patch.
     Tag,
+    /// The matrix's filter. It filters as it is typed in and has no Enter
+    /// of its own, so the text is the one message.
+    MatrixFilter,
 }
 
 impl SetText {
@@ -203,6 +212,7 @@ impl SetText {
                 Message::PatchInfo(crate::patch_info::Message::TagDraft(text)),
                 Message::PatchInfo(crate::patch_info::Message::TagSubmit),
             ],
+            Self::MatrixFilter => vec![Message::Matrix(crate::matrix::Event::Filter(text))],
         }
     }
 }

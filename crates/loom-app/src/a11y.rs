@@ -95,13 +95,15 @@ pub(crate) enum Touch {
 /// to report something new that a poll can change, add it here, or the
 /// tree goes stale until the next ordinary message.
 ///
-/// The inspector's items need no field of their own. They are built from
-/// the selection, the graph, the inspector's drafts, and the panel values.
-/// No poll changes the first three: selecting, editing, and typing are
-/// ordinary messages, classed as a change. A poll changes the panel values
-/// only through their generation, which `values` holds. So before adding
-/// a poll that edits the graph or the selection, or a panel whose items
-/// read something a poll changes, add that here.
+/// The inspector's and the matrix's items need no field of their own. They
+/// are built from the selection, the graph, the panel's own state (the
+/// inspector's drafts, the matrix's sort, filter, chosen cell, and Add
+/// form), and the panel values. No poll changes the first three:
+/// selecting, editing, and typing are ordinary messages, classed as a
+/// change. A poll changes the panel values only through their generation,
+/// which `values` holds. So before adding a poll that edits the graph or
+/// the selection, or a panel whose items read something a poll changes,
+/// add that here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PollKey {
     /// The scene's generation: the tiles, their names and places, and the
@@ -557,18 +559,18 @@ impl crate::App {
     }
 
     /// What the tree reports of the parts around the canvas: the bar, the
-    /// open panel's parts, and the text field with keyboard focus. The
-    /// inspector's parts come from the same model its view draws.
+    /// open panel's parts, and what has keyboard focus. The inspector's and
+    /// the matrix's parts come from the same models their views draw.
     pub(crate) fn a11y_frames(&self) -> tree::Frames {
-        let panel = if self.right_tab == crate::matrix::Tab::Inspector {
-            crate::inspector::access::items(&self.inspector_model())
-        } else {
-            Vec::new()
+        let panel = match self.right_tab {
+            crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
+            crate::matrix::Tab::Matrix => self.matrix_items(),
         };
         tree::Frames {
             bars: self.bars_model(),
             panel,
             focused_field: self.text_focus.field.clone(),
+            focused_item: self.matrix_focus(),
         }
     }
 
@@ -586,7 +588,8 @@ impl crate::App {
     ) -> Option<Vec<Task<crate::Message>>> {
         use crate::edits::ReaderEvent;
         let id = self.a11y.ids.id(request.target_node.0)?.clone();
-        if !id.is_under(&loom_ui_core::UiId::panel("inspector")) {
+        let matrix = id.is_under(&crate::matrix::access::panel());
+        if !matrix && !id.is_under(&loom_ui_core::UiId::panel("inspector")) {
             return None;
         }
         let frames = self.a11y_frames();
@@ -616,6 +619,12 @@ impl crate::App {
         } else {
             ReaderEvent::Close
         });
+        // A matrix cell is chosen first, as a click on it would choose it,
+        // so the keys and the reported focus stay where the screen reader
+        // is, also when a retarget gives the row a new ID.
+        if matrix {
+            self.matrix_reader_select(&id);
+        }
         let tasks = messages.into_iter().map(|message| self.update(message)).collect();
         self.reader_event(ReaderEvent::Applied);
         Some(tasks)

@@ -490,9 +490,23 @@ impl App {
     /// of the source's level exposes it (rule 4; sub-patches.md, Editor
     /// model). Through an exposed parameter the assignment reaches inside.
     pub(crate) fn refuses_assignment(&mut self, source: OutputRef, target: ModuleId, index: usize) -> bool {
+        let allowed = self.allows_assignment(source, target, index);
+        if !allowed {
+            self.alerts.warn(NO_MODULATION_ACROSS.to_string());
+        }
+        !allowed
+    }
+
+    /// True when an assignment from `source` onto parameter `index` of
+    /// `target` would be allowed, by the rule [`refuses_assignment`]
+    /// gives, and with nothing said. A screen reader's step through the
+    /// matrix's sources and targets skips those it would refuse.
+    ///
+    /// [`refuses_assignment`]: Self::refuses_assignment
+    pub(crate) fn allows_assignment(&self, source: OutputRef, target: ModuleId, index: usize) -> bool {
         let session = &self.session;
         let graph = session.controller.graph();
-        let allowed = graph.node(source.module).is_some()
+        graph.node(source.module).is_some()
             && graph.node(target).is_some_and(|node| {
                 let source_level = session.hierarchy.level_of(source.module);
                 source_level == session.hierarchy.level_of(target)
@@ -502,11 +516,7 @@ impl App {
                             .surface_for(&source_level, &(target, spec.name.to_string()))
                             .is_some()
                     })
-            });
-        if !allowed {
-            self.alerts.warn(NO_MODULATION_ACROSS.to_string());
-        }
-        !allowed
+            })
     }
 
     /// After an assignment is added or retargeted in a nested patch: puts

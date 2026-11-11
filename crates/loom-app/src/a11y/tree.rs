@@ -408,6 +408,12 @@ pub(crate) fn tree(
     // panel itself marked as cutting off what it scrolls out of view.
     let panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
     let field_focus = frame.focused;
+    // Only a part the panel reports now can have focus.
+    let item_focus = frames
+        .focused_item
+        .as_ref()
+        .filter(|id| items::find(&frames.panel, id).is_some())
+        .map(|id| node_id(table, id));
     // Focus is on the window unless a control on the canvas has it.
     let mut focus = None;
     for tile in &snapshot.tiles {
@@ -474,8 +480,10 @@ pub(crate) fn tree(
     children.extend(panel);
     children.push(bar);
     // A text field that has keyboard focus has it, whatever the canvas
-    // last said (section 6, rule 5).
-    let focus = field_focus.or(focus);
+    // last said (section 6, rule 5). Then a panel part the keys act on,
+    // such as the matrix's chosen cell, since the panel hears the keys
+    // before the canvas does (section 6, rule 6).
+    let focus = field_focus.or(item_focus).or(focus);
     let root_node = node_id(table, &window_id());
     let mut root = Node::new(Role::Window);
     root.set_label(snapshot.title.clone());
@@ -499,10 +507,14 @@ pub(crate) fn tree(
 pub(crate) struct Frames {
     /// The stats bar and the status line.
     pub bars: bars::Model,
-    /// The open panel's parts: the inspector, while its tab is open.
+    /// The open panel's parts: the inspector's or the matrix's, by the tab
+    /// that is open.
     pub panel: Vec<items::Item>,
     /// The text field with keyboard focus, as the window last said.
     pub focused_field: Option<iced::advanced::widget::Id>,
+    /// The panel part the keys act on while no text field has them: the
+    /// matrix's chosen cell while the matrix has the keys.
+    pub focused_item: Option<UiId>,
 }
 
 /// The UI ID a fixed text names. The texts are this app's own constants,
@@ -645,7 +657,27 @@ impl Frame<'_> {
             Kind::Option => Role::RadioButton,
             Kind::Choice => Role::ComboBox,
             Kind::Field => Role::TextInput,
+            Kind::List => Role::List,
+            Kind::ListItem => Role::ListItem,
         });
+        // A list says how many rows it has, and each row its place, so a
+        // screen reader can say "3 of 7". AccessKit puts the size on the
+        // list and counts places from zero.
+        if item.kind == Kind::List {
+            let rows: Vec<NodeId> = item
+                .children
+                .iter()
+                .zip(&children)
+                .filter(|(child, _)| child.kind == Kind::ListItem)
+                .map(|(_, id)| *id)
+                .collect();
+            node.set_size_of_set(rows.len());
+            for (at, row) in rows.iter().enumerate() {
+                if let Some((_, built)) = self.nodes.iter_mut().rev().find(|(id, _)| id == row) {
+                    built.set_position_in_set(at);
+                }
+            }
+        }
         if let Some(label) = &item.label {
             node.set_label(label.clone());
         }
