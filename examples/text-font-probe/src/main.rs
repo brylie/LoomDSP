@@ -14,7 +14,10 @@
 //!    which CSS defines as the platform's interface font.
 //!
 //! Run it with `cargo run --release` in this folder. It prints the machine's
-//! OS, then one line per path, size, and label.
+//! OS, then one line per path, size, and label. With `--bench` it times
+//! shaping many labels instead (`bench.rs`).
+
+mod bench;
 
 use iced_core::text::Paragraph as _;
 use std::collections::BTreeSet;
@@ -147,6 +150,10 @@ fn parley(
 
 fn main() {
     println!("os: {} {}", std::env::consts::OS, std::env::consts::ARCH);
+    if std::env::args().any(|arg| arg == "--bench") {
+        bench::run();
+        return;
+    }
     let mut ct15 = cosmic_text_15::FontSystem::new();
     let mut ct19 = cosmic_text_19::FontSystem::new();
     let mut fonts = parley::FontContext::new();

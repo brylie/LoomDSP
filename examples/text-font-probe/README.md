@@ -23,7 +23,11 @@ cd examples/text-font-probe
 cargo run --release
 ```
 
-Each line gives the path, the size in pixels, the label, its width in logical pixels, and the PostScript names of the faces its glyphs came from. It runs on any platform; the research note records what it printed on macOS and what is expected, from source, on Windows and Linux.
+Each line gives the path, the size in pixels, the label, its width in logical pixels, and the PostScript names of the faces its glyphs came from. With `--bench`, it instead times shaping 2,000 short labels with each candidate, the first time and again after every label changed (`src/bench.rs`):
+
+```sh
+cargo run --release -- --bench
+``` It runs on any platform; the research note records what it printed on macOS and what is expected, from source, on Windows and Linux.
 
 ## Checks
 
