@@ -111,6 +111,9 @@ pub struct CanvasModel<'a> {
     pub(crate) palette: Palette,
     frame_key: u64,
     browser_key: u64,
+    /// A request to move keyboard focus: a key that changes with each
+    /// request, and the control to focus.
+    focus_request: (u64, Option<(u32, usize)>),
     /// The level shown, and its camera when the app has one. See
     /// [`CanvasModel::level`].
     level_key: u64,
@@ -293,6 +296,7 @@ impl<'a> CanvasModel<'a> {
             palette: Palette::default(),
             frame_key: 0,
             browser_key: 0,
+            focus_request: (0, None),
             level_key: 0,
             level_camera: None,
             animate: false,
@@ -410,6 +414,20 @@ impl<'a> CanvasModel<'a> {
     /// camera.
     pub fn browser_key(mut self, key: u64) -> Self {
         self.browser_key = key;
+        self
+    }
+
+    /// Moves keyboard focus to a control whenever this key changes, but
+    /// not when the canvas first appears: `control` is the module ID and
+    /// the widget's index in its panel. The focus shows as after a Tab
+    /// press. Nothing happens when the widget is gone, hidden, or not a
+    /// control. The selection does not change.
+    ///
+    /// This is how something outside the canvas asks for focus on one of
+    /// its parts: a screen reader's Focus action now, the UI layer's focus
+    /// effect later (ui-layer.md, section 7 and section 9).
+    pub fn focus_request(mut self, key: u64, control: Option<(u32, usize)>) -> Self {
+        self.focus_request = (key, control);
         self
     }
 
@@ -785,6 +803,8 @@ pub struct CanvasInput {
     last_meter_click: Option<(Instant, u32, usize, Point)>,
     /// The browser key last seen.
     browser_key: Option<u64>,
+    /// The focus request key last seen.
+    focus_key: Option<u64>,
     /// Buttons held from the keyboard, one slot for Space and one for Enter.
     ///
     /// Each key is its own hold. Releasing one leaves a button high while the
@@ -827,8 +847,20 @@ impl CanvasInput {
     /// The shared path of [`CanvasInput::handle`] and [`CanvasInput::pass`].
     fn run(&mut self, model: &CanvasModel<'_>, event: Option<&Event>, moment: Moment) -> Reaction {
         let mut out = Reaction::default();
+        let before = self.focus.control();
         model.on_event(self, event, moment.pointer, moment.bounds, moment.now, &mut out);
+        // Whatever moved the focus, the app hears of it once, here.
+        let after = self.focus.control();
+        if after != before {
+            out.emit(CanvasEvent::FocusChanged(after));
+        }
         out
+    }
+
+    /// The control with keyboard focus: its module ID and the widget's
+    /// index in the module's panel.
+    pub fn focused_control(&self) -> Option<(u32, usize)> {
+        self.focus.control()
     }
 
     /// When the canvas next needs to wake with no input, if it does: the

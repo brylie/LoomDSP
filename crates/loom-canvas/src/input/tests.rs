@@ -4046,3 +4046,83 @@ fn a_world_rect_in_the_window() {
     assert!((found.x + found.width - far.x).abs() < 1e-4);
     assert!((found.y + found.height - far.y).abs() < 1e-4);
 }
+
+/// Sends one event through the canvas's public entry, as a host does, and
+/// gives what it reported.
+fn host_event(canvas: &CanvasModel<'_>, state: &mut CanvasInput, event: &Event) -> Vec<CanvasEvent> {
+    let moment = Moment {
+        pointer: Some(Point::new(700.0, 500.0)),
+        bounds: Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+        now: Instant::now(),
+    };
+    state.handle(canvas, event, moment).events
+}
+
+/// The canvas reports a focus change once, when focus lands on a control,
+/// moves to another, and leaves. An event that keeps the focus where it is
+/// reports none.
+#[test]
+fn a_focus_change_is_reported_once() {
+    let mut tile = module(2, 0.0);
+    tile.panel = panel();
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([2]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput::default();
+    assert_eq!(state.focused_control(), None);
+
+    let enter = host_event(&canvas, &mut state, &key_event(Key::Enter, true));
+    assert_eq!(enter, vec![CanvasEvent::FocusChanged(Some((2, 0)))]);
+    assert_eq!(state.focused_control(), Some((2, 0)));
+
+    let tab = host_event(&canvas, &mut state, &key_event(Key::Tab, true));
+    assert_eq!(tab, vec![CanvasEvent::FocusChanged(Some((2, 2)))]);
+
+    let up = host_event(&canvas, &mut state, &key_event(Key::Enter, false));
+    assert!(
+        !up.iter().any(|event| matches!(event, CanvasEvent::FocusChanged(_))),
+        "the focus stayed"
+    );
+
+    let escape = host_event(&canvas, &mut state, &key_event(Key::Escape, true));
+    assert!(escape.contains(&CanvasEvent::FocusChanged(None)));
+    assert_eq!(state.focused_control(), None);
+}
+
+/// A focus request moves keyboard focus when its key changes, and the
+/// change is reported. It does nothing when the canvas first appears, for
+/// a light, a hidden control, or a module that is gone, and it never
+/// changes the selection.
+#[test]
+fn a_focus_request_moves_focus_when_its_key_changes() {
+    let mut tile = module(2, 0.0);
+    tile.panel = panel();
+    tile.panel.widgets[2].hidden = true;
+    let scene = Scene::new(vec![tile], Vec::new());
+    let none = BTreeSet::new();
+    let mut state = CanvasInput::default();
+    let at = |key, control| CanvasModel::new(&scene, &none).focus_request(key, control);
+
+    // The first redraw only notes the key.
+    let first = host_event(&at(5, Some((2, 0))), &mut state, &Event::Redraw);
+    assert!(!first.iter().any(|event| matches!(event, CanvasEvent::FocusChanged(_))));
+    assert_eq!(state.focused_control(), None);
+
+    let moved = host_event(&at(6, Some((2, 0))), &mut state, &Event::Redraw);
+    assert!(moved.contains(&CanvasEvent::FocusChanged(Some((2, 0)))));
+    assert!(
+        !moved.iter().any(|event| matches!(event, CanvasEvent::Select(_))),
+        "focus does not select"
+    );
+
+    // The same key again asks for nothing.
+    state.focus.clear();
+    let same = host_event(&at(6, Some((2, 0))), &mut state, &Event::Redraw);
+    assert!(!same.iter().any(|event| matches!(event, CanvasEvent::FocusChanged(_))));
+
+    // A light, a hidden control, a missing module, and no control at all.
+    for (key, control) in [(7, Some((2, 1))), (8, Some((2, 2))), (9, Some((4, 0))), (10, None)] {
+        let _ = host_event(&at(key, control), &mut state, &Event::Redraw);
+        assert_eq!(state.focused_control(), None, "{control:?}");
+    }
+}

@@ -35,6 +35,7 @@ impl App {
             )
             .browser_key(self.browser_key)
             .focus_policy(self.canvas_focus_policy())
+            .focus_request(self.a11y.focus_request().0, self.a11y.focus_request().1)
             .arrow_group(match self.session.edits.arrow_group() {
                 // A screen reader's group ends as a released arrow group
                 // does, so the canvas is shown one: it wakes once at the

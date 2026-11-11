@@ -243,6 +243,11 @@ pub enum CanvasEvent {
     /// (`docs/design/undo.md`, Gestures). Arrow edits group differently: see
     /// [`CanvasEvent::ArrowStep`].
     GestureStart,
+    /// Keyboard focus moved to this control (module ID and widget index),
+    /// or left every control. Sent once per change, whatever caused it: a
+    /// key, a click, a request, or the control going away. It is not an
+    /// edit.
+    FocusChanged(Option<(u32, usize)>),
     /// The gesture ended. It is always sent after a start, also when the
     /// pointer is released outside the window or the window loses focus.
     GestureEnd,

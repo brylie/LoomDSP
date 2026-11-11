@@ -146,6 +146,19 @@ impl CanvasModel<'_> {
                     let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
                     self.open_browser(state.camera.to_world(centre), centre, bounds, out);
                 }
+                let (focus_key, focus_control) = self.focus_request;
+                if state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
+                    && let Some((module, widget)) = focus_control
+                {
+                    let can_focus = self
+                        .scene
+                        .module(module)
+                        .is_some_and(|tile| super::panel_input::focusable(&tile.panel).contains(&widget));
+                    if can_focus {
+                        state.focus.set(module, widget, true);
+                        out.redraw();
+                    }
+                }
                 let new_level = state.level_key != Some(self.level_key);
                 if (new_frame || new_level) && bounds.width > 0.0 {
                     // A new patch frames as always. A new level takes the

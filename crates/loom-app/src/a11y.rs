@@ -133,6 +133,13 @@ pub(crate) struct Access {
     live_dirty: bool,
     /// True when the next rebuild sends live values too.
     flush_live: bool,
+    /// The control with keyboard focus on the canvas, as the canvas last
+    /// reported it: module ID and panel index.
+    focus: Option<(u32, usize)>,
+    /// A screen reader's request to focus a control: a key that changes
+    /// with each request, and the control. The canvas acts when the key
+    /// changes.
+    focus_request: (u64, Option<(u32, usize)>),
 }
 
 impl Default for Access {
@@ -145,6 +152,8 @@ impl Default for Access {
             locating: false,
             live_dirty: false,
             flush_live: false,
+            focus: None,
+            focus_request: (0, None),
         }
     }
 }
@@ -156,6 +165,19 @@ impl Access {
     /// (ui-layer.md, section 4, rule 4).
     pub(crate) fn patch_replaced(&mut self) {
         self.ids.forget(&tree::canvas_id());
+        // The old patch's module IDs mean nothing in the new one.
+        self.focus = None;
+        self.focus_request.1 = None;
+    }
+
+    /// Notes which control has keyboard focus on the canvas.
+    pub(crate) fn set_focus(&mut self, control: Option<(u32, usize)>) {
+        self.focus = control;
+    }
+
+    /// The focus request the canvas is shown: its key and its control.
+    pub(crate) fn focus_request(&self) -> (u64, Option<(u32, usize)>) {
+        self.focus_request
     }
 
     /// True while a screen reader listens.
@@ -305,6 +327,9 @@ impl crate::App {
                 (kind, crate::surface::widget_name(graph, hierarchy, tile.id, index))
             });
             ids.add_tile(tile.id, &under, widgets);
+            if let Some((module, widget)) = self.a11y.focus.filter(|(module, _)| *module == tile.id) {
+                ids.set_focus(module, widget);
+            }
             // What each widget is: its kind from the scene the canvas
             // draws, and its range from the parameter the control moves.
             let views = self
@@ -358,6 +383,15 @@ impl crate::App {
         }
         let snapshot = self.ui_snapshot();
         let ids = self.a11y_widget_ids(&snapshot);
+        if request.action == accesskit::Action::Focus {
+            // Focus on a control moves the canvas's keyboard focus there.
+            // It changes nothing in the patch, and it does not select the
+            // tile (ui-layer.md, section 7, rule 9).
+            if let Some(control) = actions::focus_target(&snapshot, &ids, &self.a11y.ids, request) {
+                self.a11y.focus_request = (self.a11y.focus_request.0 + 1, Some(control));
+            }
+            return Vec::new();
+        }
         let messages = actions::messages(&snapshot, &ids, &self.a11y.ids, request);
         if messages.is_empty() {
             return Vec::new();

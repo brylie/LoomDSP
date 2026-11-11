@@ -1294,6 +1294,107 @@ fn a_rescaled_window_reports_its_scale_factor() {
     assert!(super::rescaled(focused, status, window).is_none());
 }
 
+/// The tree reports focus on the control the canvas says has it, and on
+/// the window when no control has it (ui-layer.md, section 7, rule 7).
+#[test]
+fn focus_is_reported_on_the_focused_control() {
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_event(Event::Activated);
+    let (whole, _) = app.a11y_changes(None);
+    let root = node_of(&mut app, &window_id());
+    assert_eq!(whole.focus, root);
+
+    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let cutoff = widget_node(&mut app, module, knob);
+    let (whole, changes) = app.a11y_changes(None);
+    assert_eq!(whole.focus, cutoff);
+    assert_eq!(changes.expect("the focus moved, so an update goes").focus, cutoff);
+
+    let (_, again) = app.a11y_changes(None);
+    assert!(again.is_none(), "the same focus sends nothing");
+
+    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(None)));
+    let (whole, changes) = app.a11y_changes(None);
+    assert_eq!(whole.focus, root);
+    assert!(changes.is_some());
+}
+
+/// A control and its pieces offer Focus, and a widget that only shows a
+/// value does not.
+#[test]
+fn controls_offer_focus_and_displays_do_not() {
+    let mut app = app_with_every_widget();
+    let update = app.a11y_tree(None);
+    for kind in ["knob", "toggle", "button", "select", "radio", "xy_pad"] {
+        let (module, index) = first_of(&app, kind);
+        let found = node(&update, widget_node(&mut app, module, index));
+        assert!(found.supports_action(Action::Focus), "{kind}");
+        for piece in found.children() {
+            assert!(node(&update, *piece).supports_action(Action::Focus), "{kind} piece");
+        }
+    }
+    for kind in ["meter", "light", "readout", "scope"] {
+        let (module, index) = first_of(&app, kind);
+        let found = node(&update, widget_node(&mut app, module, index));
+        assert!(!found.supports_action(Action::Focus), "{kind}");
+    }
+}
+
+/// The Focus action on a control asks the canvas to move keyboard focus
+/// there, with a new key each time. It changes nothing in the patch and
+/// does not select the tile. Focus on a piece asks for its control. Focus
+/// on a display, or on a hidden control, asks for nothing.
+#[test]
+fn the_focus_action_asks_the_canvas_for_focus() {
+    let mut app = app_with_every_widget();
+    let _ = app.a11y_tree(None);
+    let t = std::time::Instant::now();
+    let (module, knob) = first_of(&app, "knob");
+    let selection = app.session.selection.clone();
+    let (key, _) = app.a11y.focus_request();
+
+    let target = widget_node(&mut app, module, knob);
+    let _ = app.a11y_action(&request(Action::Focus, target, None), t);
+    assert_eq!(app.a11y.focus_request(), (key + 1, Some((module, knob))));
+    assert_eq!(app.session.selection, selection, "focus does not select");
+    assert!(!app.unsaved(), "focus is not an edit");
+
+    let (pad_module, pad) = first_of(&app, "xy_pad");
+    let y = piece_node(&mut app, pad_module, pad, tree::Piece::Second);
+    let _ = app.a11y_action(&request(Action::Focus, y, None), t);
+    assert_eq!(app.a11y.focus_request(), (key + 2, Some((pad_module, pad))));
+
+    let (light_module, light) = first_of(&app, "light");
+    let display = widget_node(&mut app, light_module, light);
+    let _ = app.a11y_action(&request(Action::Focus, display, None), t);
+    assert_eq!(app.a11y.focus_request().0, key + 2, "a display takes no focus");
+    let tile = node_of(&mut app, &tile_id(module));
+    let _ = app.a11y_action(&request(Action::Focus, tile, None), t);
+    assert_eq!(app.a11y.focus_request().0, key + 2, "a tile takes no focus");
+}
+
+/// Focus moving to another control ends a screen reader's undo group, and
+/// a replaced patch forgets the focus, since its module IDs mean nothing
+/// in the new one.
+#[test]
+fn focus_ends_the_group_and_a_new_patch_forgets_it() {
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_tree(None);
+    let cutoff = widget_node(&mut app, module, knob);
+    let steps = app.session.edits.history.len();
+    let _ = app.a11y_action(&request(Action::Increment, cutoff, None), std::time::Instant::now());
+    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    assert_eq!(app.session.edits.reader_group(), crate::edits::ReaderGroup::Closed);
+    assert_eq!(app.session.edits.history.len(), steps + 1);
+
+    let _ = app.a11y_action(&request(Action::Focus, cutoff, None), std::time::Instant::now());
+    assert!(app.a11y.focus_request().1.is_some());
+    app.a11y.patch_replaced();
+    assert_eq!(app.a11y.focus_request().1, None);
+    let update = app.a11y_tree(None);
+    assert_eq!(update.focus, node_of(&mut app, &window_id()));
+}
+
 /// The widget operation that finds the canvas reports the view the canvas
 /// gave it, and nothing when no canvas answered.
 #[test]

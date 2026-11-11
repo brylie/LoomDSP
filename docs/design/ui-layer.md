@@ -308,6 +308,9 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
 17. **A readout is a label whose value is the text it shows. A scope is an image** whose description says its trace's lowest and highest points in words, updated at most 4 times a second (rule 7). A light, and the other drawings a tile shows, are images named by what they are bound to, with the text the screen gives for them as the description. *Why:* a screen reader user should learn that a signal is there and roughly how large it is. A stream of numbers at the frame rate would be noise.
 18. **A widget with no caption is named by what it is bound to,** the name its hover text shows. *Why:* most meters and scopes have no caption on the tile, and rule 2 needs every node to have a name.
 19. **A tile gives no port nodes in phase 1.** Ports come with the canvas accessibility work ([canvas accessibility](canvas-accessibility.md)). *Why:* that spec designs how ports and cables are read, and nodes added before it would have to be redone.
+20. **The Focus action on a control moves keyboard focus there,** and the tree reports focus on the control that has it, or on the window when none has. In phase 1 the app asks the canvas with a request that names the module and the widget, and the canvas reports each focus change once, whatever caused it. Focus on one value of an XY pad or a range, or on one option, focuses the control that holds it. Focus on a tile does nothing, and no Focus action selects a tile or changes the patch (rule 9). A widget that only shows a value offers no Focus. *Why:* VoiceOver can be set to move keyboard focus with its cursor, and a user who then presses an arrow key expects it to act on the control they hear. The request names a module and a widget, nothing of the toolkit, because the focus effect of phase 2 will carry the same.
+
+   Known limit in phase 1: the canvas's arrow keys act on a focused control only while its tile is the one selected tile, as they do after a click. Focus from a screen reader does not select, so a key press after it can drop the focus. Click on the tile first, or use Increment and Decrement, which need no selection.
 
 ## 8. Text input and IME
 
@@ -374,7 +377,7 @@ Phase 1:
 - [ ] A test checks that every interactive element kind on a tile and in the inspector has an operable role from the table, a non-empty name, and a value, with the unit in the description.
 - [x] A test checks that screen reader SetValues on one control, each within 500 ms of the last, make one undo step; that an action on another control, a key press, or Undo closes the group; and that Undo is enabled while the group is open.
 - [x] A test checks that Increment on a knob moves it by the same step as an arrow key. Both take it from one function, `loom_canvas::arrow_step`.
-- [ ] A test checks that the tree changes when a view model, focus, or a scroll offset changes, and does not change on a message that changes none of what it reports.
+- [ ] A test checks that the tree changes when a view model, focus, or a scroll offset changes, and does not change on a message that changes none of what it reports. Done for a view model and for focus (`a11y/tests.rs`). A scroll offset comes with the inspector's nodes.
 - [ ] A test checks that, while a screen reader is active, a moving meter's node reports changing values both with and without focus, and its final value after the meter stops; that it is sent at most every 250 ms; that it is not sent while the meter is off screen or below a panel that owns the input; and that nothing is sent after `deactivate_accessibility`.
 - [x] A test checks that the Focus action on a tile does not change the selection.
 - [x] A tree built at scale factor 2 has bounds twice the logical layout.
@@ -440,6 +443,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | What an XY pad and a range are to a screen reader (2026-11-10) | A named group holding one slider per value, each stepping as an arrow key does | Section 7, the role table and rule 16 |
 | What a readout and a scope are (2026-11-10) | A readout is a label whose value is its text. A scope is an image with a short description in words, updated at most 4 times a second | Section 7, rule 17 |
 | What number a non-linear knob reports (2026-11-10) | The parameter's own value in its own range, with no step size declared; Increment and Decrement move what an arrow key moves | Section 7, rule 14 |
+| What the Focus action does on a control (2026-11-10) | It moves the canvas's keyboard focus there, in phase 1. On a tile it does nothing. The request names a module and a widget | Section 7, rule 20 |
 | What a select offers before phase 3 (2026-11-10) | Its chosen option, and Increment and Decrement, one option per step. No Expand or Collapse, on a tile or in the inspector | Section 7, rule 15 |
 | Whether tiles give port nodes in step 1.4 (2026-11-10) | No. They come with the canvas accessibility work | Section 7, rule 19 |
 | Whether a tile's node offers Click (2026-11-10) | Yes. Click selects the tile's module; Focus alone still changes nothing | Section 7, the role table and rule 9 |

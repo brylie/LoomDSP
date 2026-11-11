@@ -62,6 +62,13 @@ impl App {
                 }
             }
             CanvasEvent::AssignCancel => self.session.gestures.cancel_drag(),
+            CanvasEvent::FocusChanged(control) => {
+                // Focus on another control ends a screen reader's undo
+                // group (ui-layer.md, section 7, rule 6), and the tree
+                // reports the new focus.
+                self.reader_event(crate::edits::ReaderEvent::Close);
+                self.a11y.set_focus(control);
+            }
             CanvasEvent::GestureStart => {
                 self.close_slider_gesture();
                 self.session.edits.start_gesture();

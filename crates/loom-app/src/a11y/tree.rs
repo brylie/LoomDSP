@@ -104,6 +104,8 @@ pub(crate) struct WidgetIds {
     details: BTreeMap<(u32, usize), Detail>,
     /// The widgets that only show a value, which can move on its own.
     live: std::collections::BTreeSet<UiId>,
+    /// The control with keyboard focus on the canvas, if one has it.
+    focus: Option<(u32, usize)>,
 }
 
 /// What a panel widget is, beyond what the snapshot says of it: enough to
@@ -211,6 +213,11 @@ impl WidgetIds {
     /// (ui-layer.md, section 7, rule 7).
     pub(crate) fn is_live(&self, id: &UiId) -> bool {
         self.live.contains(id)
+    }
+
+    /// Says which control has keyboard focus on the canvas.
+    pub(crate) fn set_focus(&mut self, module: u32, widget: usize) {
+        self.focus = Some((module, widget));
     }
 
     /// Says what one widget is. Without this the widget is a plain label.
@@ -351,6 +358,8 @@ pub(crate) fn tree(
     nodes.push((status_node, status));
 
     let mut children = vec![status_node];
+    // Focus is on the window unless a control on the canvas has it.
+    let mut focus = None;
     for tile in &snapshot.tiles {
         let id = node_id(table, &tile_id(tile.id));
         let mut node = Node::new(Role::Group);
@@ -369,6 +378,15 @@ pub(crate) fn tree(
             };
             let child = node_id(table, widget_id);
             let mut w = widget_node(widget, ids.detail(tile.id, index));
+            // A control can take keyboard focus, and so can each of its
+            // pieces, which focus the control.
+            let control = !ids.is_live(widget_id);
+            if control {
+                w.add_action(Action::Focus);
+            }
+            if ids.focus == Some((tile.id, index)) {
+                focus = Some(child);
+            }
             if let Some(bounds) = widget.bounds {
                 place(&mut w, bounds);
             }
@@ -377,6 +395,9 @@ pub(crate) fn tree(
                 for piece in pieces(&detail.kind) {
                     let piece_node = node_id(table, &piece_id(widget_id, &detail.kind, piece));
                     let mut p = piece_node_of(widget, detail, piece);
+                    if control {
+                        p.add_action(Action::Focus);
+                    }
                     if let Some(bounds) = widget.bounds.and_then(|rect| piece_bounds(widget, detail, piece, rect)) {
                         place(&mut p, bounds);
                     }
@@ -408,7 +429,7 @@ pub(crate) fn tree(
         nodes,
         tree: Some(info),
         tree_id: TreeId::ROOT,
-        focus: root_node,
+        focus: focus.unwrap_or(root_node),
     }
 }
 

@@ -143,6 +143,13 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
+    /// Moves keyboard focus to a control whenever this key changes. See
+    /// [`CanvasModel::focus_request`].
+    pub fn focus_request(mut self, key: u64, control: Option<(u32, usize)>) -> Self {
+        self.model = self.model.focus_request(key, control);
+        self
+    }
+
     /// Moves the camera continuously in a slow loop, for measuring.
     /// See [`CanvasModel::animate`].
     pub fn animate(mut self, animate: bool) -> Self {

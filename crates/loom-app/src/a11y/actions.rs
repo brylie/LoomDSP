@@ -125,6 +125,28 @@ pub(super) fn canvas_events(
     }
 }
 
+/// The control a screen reader's Focus request names: its module and panel
+/// index. `None` for a tile, for a widget that only shows a value, for one
+/// that is hidden, and for a node that is gone. Focus on one value of an XY
+/// pad or a range, or on one option, focuses the control that holds it.
+pub(crate) fn focus_target(
+    snapshot: &UiSnapshot,
+    ids: &WidgetIds,
+    table: &IdTable,
+    request: &ActionRequest,
+) -> Option<(u32, usize)> {
+    let id = table.id(request.target_node.0)?;
+    let (module, index, _) = ids.find_piece(id)?;
+    let shown = snapshot
+        .tiles
+        .iter()
+        .find(|t| t.id == module)
+        .and_then(|t| t.widgets.get(index))
+        .is_some_and(|w| !w.hidden);
+    let control = ids.get(module, index).is_some_and(|own| !ids.is_live(own));
+    (shown && control).then_some((module, index))
+}
+
 /// True for an action that steps or sets a number: SetValue, Increment,
 /// or Decrement. These join the screen reader's undo group
 /// (ui-layer.md, section 7, rule 6). A Click does not: it is one step of
