@@ -646,7 +646,14 @@ impl Frame<'_> {
     /// that is disabled offers none (rule 22 for Focus).
     fn item(&mut self, item: &items::Item) -> NodeId {
         use items::Kind;
-        let children: Vec<NodeId> = item.children.iter().map(|child| self.item(child)).collect();
+        // Each child's node, and where it was pushed: a child's own node is
+        // the last one its build pushes.
+        let built: Vec<(NodeId, usize)> = item
+            .children
+            .iter()
+            .map(|child| (self.item(child), self.nodes.len() - 1))
+            .collect();
+        let children: Vec<NodeId> = built.iter().map(|(id, _)| *id).collect();
         let mut node = Node::new(match item.kind {
             Kind::Group => Role::Group,
             Kind::Text => Role::Label,
@@ -664,18 +671,16 @@ impl Frame<'_> {
         // screen reader can say "3 of 7". AccessKit puts the size on the
         // list and counts places from zero.
         if item.kind == Kind::List {
-            let rows: Vec<NodeId> = item
+            let rows: Vec<usize> = item
                 .children
                 .iter()
-                .zip(&children)
+                .zip(&built)
                 .filter(|(child, _)| child.kind == Kind::ListItem)
-                .map(|(_, id)| *id)
+                .map(|(_, (_, pushed))| *pushed)
                 .collect();
             node.set_size_of_set(rows.len());
-            for (at, row) in rows.iter().enumerate() {
-                if let Some((_, built)) = self.nodes.iter_mut().rev().find(|(id, _)| id == row) {
-                    built.set_position_in_set(at);
-                }
+            for (at, pushed) in rows.into_iter().enumerate() {
+                self.nodes[pushed].1.set_position_in_set(at);
             }
         }
         if let Some(label) = &item.label {

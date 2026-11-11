@@ -12,7 +12,7 @@
 //! Each row is keyed by its `AssignmentId`, as in the inspector, under the
 //! panel `matrix`, so the two places never share a node.
 
-use super::{Add, Column, Event, MatrixModel, SortPick, sources, targets};
+use super::{Add, Column, Event, MatrixModel, SortPick, SourcePick, TargetPick, sources, targets};
 use crate::a11y::items::{Item, Kind, Number, SetNumber, SetText};
 use crate::modulation::{self, PolarityChoice};
 use crate::{App, Message};
@@ -72,6 +72,14 @@ fn next_at(at: Option<usize>, len: usize, forward: bool) -> Option<usize> {
     }
 }
 
+/// The matrix's sources and targets, made once for one build of its items.
+struct Picks {
+    /// Every source, in the order the pick list shows them.
+    sources: Vec<SourcePick>,
+    /// Every target, in the order the pick list shows them.
+    targets: Vec<TargetPick>,
+}
+
 /// True when another assignment than `id` already joins this pair, which
 /// a retarget refuses.
 fn taken(graph: &Graph, id: AssignmentId, source: OutputRef, target: ModuleId, param: usize) -> bool {
@@ -87,6 +95,12 @@ impl App {
         let graph = self.session.controller.graph();
         let state = &self.session.matrix;
         let model = state.model(graph, &self.session.selection, self.right_tab);
+        // Each pick list once per build, not once per row and direction:
+        // each pick carries a name made for it.
+        let picks = Picks {
+            sources: sources(graph),
+            targets: targets(graph),
+        };
         let mut parts = vec![
             Item {
                 label: Some("Filter modules or parameters".to_string()),
@@ -115,12 +129,12 @@ impl App {
             });
         }
         if let Some(add) = &state.add {
-            parts.push(new_assignment(graph, add));
+            parts.push(new_assignment(&picks, add));
         }
         if model.rows.is_empty() {
             parts.push(Item::text(part("empty"), "No modulation assignments"));
         }
-        let rows = model.rows.iter().map(|r| self.matrix_row(graph, r)).collect();
+        let rows = model.rows.iter().map(|r| self.matrix_row(graph, &picks, r)).collect();
         parts.push(Item {
             label: Some("Modulation assignments".to_string()),
             children: rows,
@@ -164,7 +178,7 @@ impl App {
 
     /// One assignment's row: its switch, its source, target, and polarity
     /// as choices, its depth as a slider in percent, and its remove button.
-    fn matrix_row(&self, graph: &Graph, r: &super::MatrixRow) -> Item {
+    fn matrix_row(&self, graph: &Graph, picks: &Picks, r: &super::MatrixRow) -> Item {
         use crate::modulation::Message as Modulation;
         let id = AssignmentId(r.id);
         let assignment = graph.assignment(id);
@@ -178,13 +192,19 @@ impl App {
         cells.push(Item {
             label: Some("Source".to_string()),
             value: Some(r.source.clone()),
-            step: (self.matrix_source_step(id, true), self.matrix_source_step(id, false)),
+            step: (
+                self.matrix_source_step(id, true, &picks.sources),
+                self.matrix_source_step(id, false, &picks.sources),
+            ),
             ..Item::new(cell(id, Column::Source), Kind::Choice)
         });
         cells.push(Item {
             label: Some("Target".to_string()),
             value: Some(r.target.clone()),
-            step: (self.matrix_target_step(id, true), self.matrix_target_step(id, false)),
+            step: (
+                self.matrix_target_step(id, true, &picks.targets),
+                self.matrix_target_step(id, false, &picks.targets),
+            ),
             ..Item::new(cell(id, Column::Target), Kind::Choice)
         });
         let polarity = assignment.map(|a| {
@@ -203,17 +223,23 @@ impl App {
         });
         // In percent, as the card says it, so the number is what is heard.
         // One step is the card slider's own step of 1%.
+        // One step lands on the percent grid, as the inspector's slider
+        // lands on its own grid, so from a depth a drag left between two
+        // percents the first step is shorter, and steps never drift.
+        let percent = (r.depth * 100.0).round();
+        let up = ((percent + 1.0) / 100.0).min(1.0);
+        let down = ((percent - 1.0) / 100.0).max(-1.0);
         cells.push(Item {
             label: Some("Depth".to_string()),
             number: Some(Number {
-                value: f64::from((r.depth * 100.0).round()),
+                value: f64::from(percent),
                 min: -100.0,
                 max: 100.0,
                 step: Some(1.0),
             }),
             step: (
-                (r.depth < 1.0).then(|| depth((r.depth + 0.01).min(1.0))),
-                (r.depth > -1.0).then(|| depth((r.depth - 0.01).max(-1.0))),
+                (r.depth < 1.0).then(|| depth(up)),
+                (r.depth > -1.0).then(|| depth(down)),
             ),
             set_number: Some(SetNumber::Depth(id)),
             groups: true,
@@ -237,10 +263,15 @@ impl App {
     /// surface between) or that would repeat another assignment's pair is
     /// skipped, so a step never edits nothing and never warns. `None` when
     /// no such source is left that way.
-    pub(crate) fn matrix_source_step(&self, id: AssignmentId, forward: bool) -> Option<Message> {
+    /// `options` is [`sources`] for the graph now.
+    pub(crate) fn matrix_source_step(
+        &self,
+        id: AssignmentId,
+        forward: bool,
+        options: &[SourcePick],
+    ) -> Option<Message> {
         let graph = self.session.controller.graph();
         let a = graph.assignment(id)?;
-        let options = sources(graph);
         let mut at = options.iter().position(|s| s.output == a.source);
         while let Some(next) = next_at(at, options.len(), forward) {
             let pick = &options[next];
@@ -257,10 +288,15 @@ impl App {
     /// The message for one step of assignment `id`'s target, forward or
     /// back through the matrix's targets, skipping those it may not take,
     /// as [`matrix_source_step`](Self::matrix_source_step) does.
-    pub(crate) fn matrix_target_step(&self, id: AssignmentId, forward: bool) -> Option<Message> {
+    /// `options` is [`targets`] for the graph now.
+    pub(crate) fn matrix_target_step(
+        &self,
+        id: AssignmentId,
+        forward: bool,
+        options: &[TargetPick],
+    ) -> Option<Message> {
         let graph = self.session.controller.graph();
         let a = graph.assignment(id)?;
-        let options = targets(graph);
         let mut at = options.iter().position(|t| (t.module, t.param) == (a.target, a.param));
         while let Some(next) = next_at(at, options.len(), forward) {
             let pick = &options[next];
@@ -290,9 +326,8 @@ fn sort(model: &MatrixModel) -> Item {
 }
 
 /// The Add form, while it is open: its two picks and its two buttons.
-fn new_assignment(graph: &Graph, add: &Add) -> Item {
-    let sources = sources(graph);
-    let targets = targets(graph);
+fn new_assignment(picks: &Picks, add: &Add) -> Item {
+    let (sources, targets) = (&picks.sources, &picks.targets);
     let source_at = add.source.as_ref().and_then(|s| sources.iter().position(|o| o == s));
     let target_at = add.target.as_ref().and_then(|t| targets.iter().position(|o| o == t));
     let source = |forward| {

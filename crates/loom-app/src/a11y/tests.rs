@@ -2982,7 +2982,8 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let other = graph.assignments().nth(1).map(|(_, a)| a.source).unwrap();
     let options = crate::matrix::sources(graph);
     // The step lands on a source no other row joins to this target.
-    let Some(Message::Matrix(crate::matrix::Event::Source(_, pick))) = ui.app.matrix_source_step(id, true) else {
+    let Some(Message::Matrix(crate::matrix::Event::Source(_, pick))) = ui.app.matrix_source_step(id, true, &options)
+    else {
         panic!("a source step");
     };
     assert_ne!(pick.output, other, "the taken pair is skipped");
@@ -3044,13 +3045,20 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let id = first_assignment(&ui.app);
     // Step back until no source is left that way.
     for _ in 0..64 {
-        let Some(message) = ui.app.matrix_source_step(id, false) else {
+        let Some(message) =
+            ui.app
+                .matrix_source_step(id, false, &crate::matrix::sources(ui.app.session.controller.graph()))
+        else {
             break;
         };
         ui.send(message);
     }
     let id = ui.app.session.matrix.selected.unwrap_or(id);
-    assert!(ui.app.matrix_source_step(id, false).is_none());
+    assert!(
+        ui.app
+            .matrix_source_step(id, false, &crate::matrix::sources(ui.app.session.controller.graph()))
+            .is_none()
+    );
     let steps = ui.app.session.edits.history.len();
     let status = ui.app.alerts.status().to_string();
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
@@ -3318,6 +3326,35 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
         ui.app.a11y.ids.id(update.focus.0) == Some(&cell),
         "the focused node is the new row's"
     );
+}
+
+/// A depth a drag left between two percents steps onto the percent grid:
+/// the first step is shorter, and every step after lands on a whole
+/// percent, so what is heard and what is set never drift apart.
+#[test]
+fn a_matrix_depth_steps_onto_the_percent_grid() {
+    let mut ui = matrix_ui();
+    let id = first_assignment(&ui.app);
+    ui.send(Message::Modulation(crate::modulation::Message::Depth {
+        id,
+        depth: 0.304,
+    }));
+    ui.send(Message::SliderReleased);
+    let depth_id = crate::matrix::access::cell(id, crate::matrix::Column::Depth);
+    let _ = matrix_tree(&mut ui);
+    let slider = node_of(&mut ui.app, &depth_id);
+    let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
+    let at = std::time::Instant::now();
+    let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    assert!((depth(&ui.app) - 0.31).abs() < 1e-6, "{}", depth(&ui.app));
+    for _ in 0..19 {
+        let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    }
+    assert!((depth(&ui.app) - 0.50).abs() < 1e-6, "no drift: {}", depth(&ui.app));
+    let (_, update) = matrix_tree(&mut ui);
+    assert_eq!(node(&update, slider).numeric_value(), Some(50.0));
+    let _ = ui.app.a11y_action(&request(Action::Decrement, slider, None), at);
+    assert!((depth(&ui.app) - 0.49).abs() < 1e-6);
 }
 
 /// A modulation card's depth a drag left between two percents steps onto
