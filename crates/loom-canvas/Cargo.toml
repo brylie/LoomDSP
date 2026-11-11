@@ -1,6 +1,6 @@
 [package]
 name = "loom-canvas"
-description = "The LoomDSP patch canvas: a GPU-drawn Iced widget for modules, ports, and cables."
+description = "The LoomDSP patch canvas: input and wgpu drawing as plain code, with an Iced widget around them."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,7 @@ categories = ["gui", "multimedia::audio"]
 loom-ui-core.workspace = true
 iced = { workspace = true }
 iced_wgpu.workspace = true
+wgpu.workspace = true
 bytemuck.workspace = true
 
 [lints]

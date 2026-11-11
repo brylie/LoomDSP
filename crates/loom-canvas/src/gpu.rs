@@ -2,16 +2,12 @@
 
 use crate::camera::Camera;
 use crate::controls::ControlGeometry;
-use crate::iced_convert::ToIced as _;
 use crate::scene::{CLOCK_MARK_RADIUS, ModuleView, PORT_RADIUS, PortShape, Scene};
 use crate::stats::{self, Counter};
 use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
 use crate::trace::{Segment, TraceGeometry};
 use bytemuck::{Pod, Zeroable};
-use iced::advanced::graphics::color::pack;
-use iced::wgpu;
-use iced::widget::shader::{Pipeline, Primitive, Viewport};
 use loom_ui_core::{Color, Point, Rect, Size};
 
 /// Corner radius of tiles, in world units.
@@ -20,6 +16,13 @@ const TILE_RADIUS: f32 = 5.0;
 const CABLE_WIDTH: f32 = 2.4;
 /// Thinnest a cable is drawn, in physical pixels.
 const CABLE_MIN_PX: f32 = 1.2;
+
+/// A colour as the shaders read it: red, green, blue, and alpha, each
+/// unchanged. The channels stay sRGB-encoded, and the shaders blend in that
+/// space, which is how the rest of the window blends its colours.
+pub(crate) fn packed(colour: Color) -> [f32; 4] {
+    [colour.r, colour.g, colour.b, colour.a]
+}
 
 /// One rounded rectangle.
 #[repr(C)]
@@ -36,8 +39,8 @@ impl Shape {
     pub fn new(rect: Rect, radius: f32, fill: Color, border: Color, border_width: f32) -> Self {
         Self {
             rect: [rect.x, rect.y, rect.width, rect.height],
-            fill: pack(fill.to_iced()).components(),
-            border: pack(border.to_iced()).components(),
+            fill: packed(fill),
+            border: packed(border),
             params: [radius, border_width, 1.0, 0.0],
         }
     }
@@ -100,7 +103,7 @@ impl Arc {
         Self {
             circle: [centre.x, centre.y, radius, thickness],
             angles: [start, sweep, 0.0, 0.0],
-            colour: pack(colour.to_iced()).components(),
+            colour: packed(colour),
             unused: [0.0; 4],
         }
     }
@@ -133,8 +136,8 @@ impl Cable {
     pub fn new(from: Point, to: Point, colour_from: Color, colour_to: Color, dashed: bool) -> Self {
         Self {
             ends: [from.x, from.y, to.x, to.y],
-            colour_from: pack(colour_from.to_iced()).components(),
-            colour_to: pack(colour_to.to_iced()).components(),
+            colour_from: packed(colour_from),
+            colour_to: packed(colour_to),
             params: [CABLE_WIDTH, if dashed { 1.0 } else { 0.0 }, CABLE_MIN_PX, 0.0],
         }
     }
@@ -451,9 +454,20 @@ pub struct Overlay {
     pub shapes: Vec<Shape>,
 }
 
-/// What one frame of the canvas draws.
+/// Where the canvas draws: the size of its viewport and how dense the
+/// pixels are. The host that owns the window gives it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Target {
+    /// The viewport's size in logical pixels.
+    pub size: Size,
+    /// Physical pixels per logical pixel.
+    pub scale: f32,
+}
+
+/// What one frame of the canvas draws: plain data, built by the canvas and
+/// given to [`CanvasRenderer::prepare`].
 #[derive(Debug)]
-pub struct CanvasPrimitive {
+pub struct CanvasFrame {
     pub(crate) geometry: std::sync::Arc<Geometry>,
     /// Panel controls. `None` when zoomed out too far to draw them.
     pub(crate) controls: Option<std::sync::Arc<ControlGeometry>>,
@@ -525,11 +539,32 @@ impl InstanceBuffer {
     }
 }
 
-/// GPU state shared by all canvas primitives.
+/// What [`CanvasRenderer::draw`] draws, kept from the frame last prepared.
+#[derive(Debug, Default)]
+struct DrawPlan {
+    /// The range of scene shapes that holds the text bars to draw.
+    bars: std::ops::Range<u32>,
+    /// The range of scene shapes that holds the bars drawn over boxes.
+    value_bars: std::ops::Range<u32>,
+    /// Whether panel controls are drawn at this zoom.
+    controls: bool,
+    /// Whether scope traces are drawn at this zoom.
+    traces: bool,
+}
+
+/// Draws the patch canvas with `wgpu`: the pipelines for `canvas.wgsl` and
+/// the instance buffers they read.
 ///
-/// Note: there is one set of buffers, so the app shows one canvas at a time.
-/// A second canvas needs per-widget buffers.
-pub struct CanvasPipeline {
+/// It names no UI toolkit. A host gives it a device, a queue, and a render
+/// pass whose viewport is the canvas's place, and calls
+/// [`prepare`](Self::prepare) then [`draw`](Self::draw) for each frame it
+/// draws. One renderer owns its buffers, so two canvases need two
+/// renderers.
+///
+/// It assumes a colour target with one sample per pixel, and blends with
+/// premultiplied alpha. A host that draws into a multisampled pass would
+/// need a sample count here; nothing asks for one yet.
+pub struct CanvasRenderer {
     shapes: wgpu::RenderPipeline,
     cables: wgpu::RenderPipeline,
     arcs: wgpu::RenderPipeline,
@@ -558,13 +593,16 @@ pub struct CanvasPipeline {
     overlay_uploaded: (Vec<u8>, Vec<u8>),
     tiles: u32,
     markers: u32,
+    plan: DrawPlan,
 }
 
 const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
 
-impl Pipeline for CanvasPipeline {
-    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+impl CanvasRenderer {
+    /// Builds the pipelines and empty buffers for a colour target of
+    /// `format`.
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("loom-canvas shaders"),
             source: wgpu::ShaderSource::Wgsl(include_str!("canvas.wgsl").into()),
@@ -686,6 +724,7 @@ impl Pipeline for CanvasPipeline {
             overlay_uploaded: (Vec::new(), Vec::new()),
             tiles: 0,
             markers: 0,
+            plan: DrawPlan::default(),
         }
     }
 }
@@ -693,78 +732,90 @@ impl Pipeline for CanvasPipeline {
 /// Vertices per cable strip. Must match `SEGMENTS` in the shader.
 const CABLE_VERTICES: u32 = (crate::scene::CABLE_SEGMENTS + 1) * 2;
 
-impl Primitive for CanvasPrimitive {
-    type Pipeline = CanvasPipeline;
-
-    fn prepare(
-        &self,
-        pipeline: &mut CanvasPipeline,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        bounds: &iced::Rectangle,
-        viewport: &Viewport,
-    ) {
+impl CanvasRenderer {
+    /// Uploads what `frame` changed since the last frame, and remembers
+    /// what [`draw`](Self::draw) is to draw. Call it once per drawn frame,
+    /// before the pass begins.
+    ///
+    /// Each kind of data uploads only when its own key changes: the scene
+    /// by its generation, the controls and the traces by theirs, and the
+    /// overlay when its bytes differ. Pan and zoom write only the globals
+    /// (ADR-0010).
+    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &CanvasFrame, target: Target) {
         let globals = Globals {
-            origin: [self.camera.origin.x, self.camera.origin.y],
-            size: [bounds.width.max(1.0), bounds.height.max(1.0)],
-            zoom: self.camera.zoom,
-            scale: viewport.scale_factor(),
-            cable_dim: self.cable_dim,
+            origin: [frame.camera.origin.x, frame.camera.origin.y],
+            size: [target.size.width.max(1.0), target.size.height.max(1.0)],
+            zoom: frame.camera.zoom,
+            scale: target.scale,
+            cable_dim: frame.cable_dim,
             pad: 0.0,
         };
-        queue.write_buffer(&pipeline.globals, 0, bytemuck::bytes_of(&globals));
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         stats::frame();
 
-        if pipeline.uploaded != self.geometry.generation {
-            pipeline.scene_cables.upload(device, queue, &self.geometry.cables);
-            pipeline.scene_shapes.upload(device, queue, &self.geometry.shapes);
+        if self.uploaded != frame.geometry.generation {
+            self.scene_cables.upload(device, queue, &frame.geometry.cables);
+            self.scene_shapes.upload(device, queue, &frame.geometry.shapes);
             stats::count(Counter::SceneUploads);
-            pipeline.uploaded = self.geometry.generation;
-            pipeline.tiles = self.geometry.tiles;
-            pipeline.markers = self.geometry.markers();
+            self.uploaded = frame.geometry.generation;
+            self.tiles = frame.geometry.tiles;
+            self.markers = frame.geometry.markers();
         }
         // Control values have their own buffers: a knob turn uploads only
         // these, never the tiles, ports, or cables.
-        if let Some(controls) = &self.controls
-            && pipeline.controls_uploaded != controls.key
+        if let Some(controls) = &frame.controls
+            && self.controls_uploaded != controls.key
         {
-            pipeline.control_arcs.upload(device, queue, &controls.arcs);
-            pipeline.control_shapes.upload(device, queue, &controls.shapes);
-            pipeline.control_lines.upload(device, queue, &controls.lines);
+            self.control_arcs.upload(device, queue, &controls.arcs);
+            self.control_shapes.upload(device, queue, &controls.shapes);
+            self.control_lines.upload(device, queue, &controls.lines);
             stats::count(Counter::ControlUploads);
-            pipeline.controls_uploaded = controls.key;
+            self.controls_uploaded = controls.key;
         }
         // A new trace uploads its own buffer and nothing else.
-        if let Some(traces) = &self.traces
-            && pipeline.traces_uploaded != traces.key
+        if let Some(traces) = &frame.traces
+            && self.traces_uploaded != traces.key
         {
-            pipeline.trace_segments.upload(device, queue, &traces.segments);
-            pipeline.trace_fills.upload(device, queue, &traces.fills);
+            self.trace_segments.upload(device, queue, &traces.segments);
+            self.trace_fills.upload(device, queue, &traces.fills);
             stats::count(Counter::TraceUploads);
-            pipeline.traces_uploaded = traces.key;
+            self.traces_uploaded = traces.key;
         }
         // The overlay is built every frame, but often does not change: a
         // live dot moving under still modulation lines changes only the
         // controls.
-        let cables: &[u8] = bytemuck::cast_slice(&self.overlay.cables);
-        let shapes: &[u8] = bytemuck::cast_slice(&self.overlay.shapes);
-        if pipeline.overlay_uploaded.0 != cables || pipeline.overlay_uploaded.1 != shapes {
+        let cables: &[u8] = bytemuck::cast_slice(&frame.overlay.cables);
+        let shapes: &[u8] = bytemuck::cast_slice(&frame.overlay.shapes);
+        if self.overlay_uploaded.0 != cables || self.overlay_uploaded.1 != shapes {
             stats::count(Counter::OverlayUploads);
         }
-        if pipeline.overlay_uploaded.0 != cables {
-            pipeline.overlay_cables.upload(device, queue, &self.overlay.cables);
-            pipeline.overlay_uploaded.0 = cables.to_vec();
+        if self.overlay_uploaded.0 != cables {
+            self.overlay_cables.upload(device, queue, &frame.overlay.cables);
+            self.overlay_uploaded.0 = cables.to_vec();
         }
-        if pipeline.overlay_uploaded.1 != shapes {
-            pipeline.overlay_shapes.upload(device, queue, &self.overlay.shapes);
-            pipeline.overlay_uploaded.1 = shapes.to_vec();
+        if self.overlay_uploaded.1 != shapes {
+            self.overlay_shapes.upload(device, queue, &frame.overlay.shapes);
+            self.overlay_uploaded.1 = shapes.to_vec();
         }
+        self.plan = DrawPlan {
+            bars: frame.bars.clone(),
+            value_bars: frame.value_bars.clone(),
+            controls: frame.controls.is_some(),
+            traces: frame.traces.is_some(),
+        };
     }
 
-    fn draw(&self, pipeline: &CanvasPipeline, pass: &mut wgpu::RenderPass<'_>) -> bool {
-        pass.set_bind_group(0, &pipeline.bind_group, &[]);
+    /// Draws the frame last prepared into `pass`.
+    ///
+    /// The host sets the pass's viewport and scissor to the canvas's place
+    /// in its target before the call. The renderer never sets them, never
+    /// begins or ends a pass, and never presents: it does not own the
+    /// window, the surface, or the frame.
+    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let plan = &self.plan;
+        pass.set_bind_group(0, &self.bind_group, &[]);
 
-        pass.set_pipeline(&pipeline.grid);
+        pass.set_pipeline(&self.grid);
         pass.draw(0..4, 0..1);
 
         // Cables behind the tiles, so modules read as solid objects. Then
@@ -772,57 +823,43 @@ impl Primitive for CanvasPrimitive {
         // ports over every cable end, then panel controls and the preview
         // curves in their frames, then scope traces in theirs, then the
         // selection, hover, and focus outlines.
-        let tiles = pipeline.tiles.min(pipeline.scene_shapes.len);
-        let markers = pipeline.markers.min(pipeline.scene_shapes.len);
-        let bars = self.bars.start.min(markers)..self.bars.end.min(markers);
-        let value_bars = self.value_bars.start.min(markers)..self.value_bars.end.min(markers);
-        let (arcs, controls, lines) = if self.controls.is_some() {
-            (
-                pipeline.control_arcs.len,
-                pipeline.control_shapes.len,
-                pipeline.control_lines.len,
-            )
+        let tiles = self.tiles.min(self.scene_shapes.len);
+        let markers = self.markers.min(self.scene_shapes.len);
+        let bars = plan.bars.start.min(markers)..plan.bars.end.min(markers);
+        let value_bars = plan.value_bars.start.min(markers)..plan.value_bars.end.min(markers);
+        let (arcs, controls, lines) = if plan.controls {
+            (self.control_arcs.len, self.control_shapes.len, self.control_lines.len)
         } else {
             (0, 0, 0)
         };
-        let (traces, fills) = if self.traces.is_some() {
-            (pipeline.trace_segments.len, pipeline.trace_fills.len)
+        let (traces, fills) = if plan.traces {
+            (self.trace_segments.len, self.trace_fills.len)
         } else {
             (0, 0)
         };
         let layers = [
             (
-                &pipeline.cables,
-                &pipeline.scene_cables,
+                &self.cables,
+                &self.scene_cables,
                 CABLE_VERTICES,
-                0..pipeline.scene_cables.len,
+                0..self.scene_cables.len,
             ),
-            (&pipeline.shapes, &pipeline.scene_shapes, 4, 0..tiles),
-            (&pipeline.shapes, &pipeline.scene_shapes, 4, bars),
+            (&self.shapes, &self.scene_shapes, 4, 0..tiles),
+            (&self.shapes, &self.scene_shapes, 4, bars),
             (
-                &pipeline.cables,
-                &pipeline.overlay_cables,
+                &self.cables,
+                &self.overlay_cables,
                 CABLE_VERTICES,
-                0..pipeline.overlay_cables.len,
+                0..self.overlay_cables.len,
             ),
-            (
-                &pipeline.shapes,
-                &pipeline.scene_shapes,
-                4,
-                markers..pipeline.scene_shapes.len,
-            ),
-            (&pipeline.arcs, &pipeline.control_arcs, 4, 0..arcs),
-            (&pipeline.shapes, &pipeline.control_shapes, 4, 0..controls),
-            (&pipeline.shapes, &pipeline.scene_shapes, 4, value_bars),
-            (&pipeline.traces, &pipeline.control_lines, 4, 0..lines),
-            (&pipeline.shapes, &pipeline.trace_fills, 4, 0..fills),
-            (&pipeline.traces, &pipeline.trace_segments, 4, 0..traces),
-            (
-                &pipeline.shapes,
-                &pipeline.overlay_shapes,
-                4,
-                0..pipeline.overlay_shapes.len,
-            ),
+            (&self.shapes, &self.scene_shapes, 4, markers..self.scene_shapes.len),
+            (&self.arcs, &self.control_arcs, 4, 0..arcs),
+            (&self.shapes, &self.control_shapes, 4, 0..controls),
+            (&self.shapes, &self.scene_shapes, 4, value_bars),
+            (&self.traces, &self.control_lines, 4, 0..lines),
+            (&self.shapes, &self.trace_fills, 4, 0..fills),
+            (&self.traces, &self.trace_segments, 4, 0..traces),
+            (&self.shapes, &self.overlay_shapes, 4, 0..self.overlay_shapes.len),
         ];
         for (render, buffer, vertices, instances) in layers {
             if !instances.is_empty() {
@@ -831,62 +868,42 @@ impl Primitive for CanvasPrimitive {
                 pass.draw(0..vertices, instances);
             }
         }
-        true
     }
-}
 
-/// The window-wide output drag. Its pipeline has separate buffers from the
-/// patch canvas, so preparing two primitives cannot overwrite either one.
-#[derive(Debug, Clone, Copy)]
-pub struct DragPrimitive {
-    pub cable: Cable,
-    pub zoom: f32,
-}
-
-/// Separate GPU state for the window-wide drag, using the canvas shader.
-pub struct DragPipeline(CanvasPipeline);
-
-impl Pipeline for DragPipeline {
-    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
-        Self(CanvasPipeline::new(device, queue, format))
-    }
-}
-
-impl Primitive for DragPrimitive {
-    type Pipeline = DragPipeline;
-
-    fn prepare(
-        &self,
-        pipeline: &mut DragPipeline,
+    /// Uploads one cable in the target's own coordinates, for a renderer
+    /// that draws nothing else: the cable dragged across the window. `zoom`
+    /// is the canvas's zoom, so the cable is as thick as on the canvas.
+    pub fn prepare_cable(
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bounds: &iced::Rectangle,
-        viewport: &Viewport,
+        cable: Cable,
+        zoom: f32,
+        target: Target,
     ) {
-        let state = &mut pipeline.0;
         let globals = Globals {
             origin: [0.0, 0.0],
-            size: [bounds.width.max(1.0), bounds.height.max(1.0)],
-            zoom: self.zoom,
-            scale: viewport.scale_factor(),
+            size: [target.size.width.max(1.0), target.size.height.max(1.0)],
+            zoom,
+            scale: target.scale,
             cable_dim: 1.0,
             pad: 0.0,
         };
-        queue.write_buffer(&state.globals, 0, bytemuck::bytes_of(&globals));
-        let bytes = bytemuck::bytes_of(&self.cable);
-        if state.overlay_uploaded.0 != bytes {
-            state.overlay_cables.upload(device, queue, &[self.cable]);
-            state.overlay_uploaded.0 = bytes.to_vec();
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        let bytes = bytemuck::bytes_of(&cable);
+        if self.overlay_uploaded.0 != bytes {
+            self.overlay_cables.upload(device, queue, &[cable]);
+            self.overlay_uploaded.0 = bytes.to_vec();
         }
     }
 
-    fn draw(&self, pipeline: &DragPipeline, pass: &mut wgpu::RenderPass<'_>) -> bool {
-        let state = &pipeline.0;
-        pass.set_bind_group(0, &state.bind_group, &[]);
-        pass.set_pipeline(&state.cables);
-        pass.set_vertex_buffer(0, state.overlay_cables.slice());
+    /// Draws the cable last given to [`prepare_cable`](Self::prepare_cable)
+    /// into `pass`, under the same rules as [`draw`](Self::draw).
+    pub fn draw_cable(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_pipeline(&self.cables);
+        pass.set_vertex_buffer(0, self.overlay_cables.slice());
         pass.draw(0..CABLE_VERTICES, 0..1);
-        true
     }
 }
 

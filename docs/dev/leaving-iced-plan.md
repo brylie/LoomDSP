@@ -119,9 +119,12 @@ The app still runs on `iced::application`. This phase moves our code off Iced's 
 
 ### 1.3 Canvas drawing without Iced's primitive
 
-1. Give `gpu.rs` an API that takes `&wgpu::Device`, `&wgpu::Queue`, a `&wgpu::TextureView`, a viewport, and the scene, with no Iced types.
-2. The Iced shader `Primitive` wraps it.
-3. Tile text still goes through Iced's text renderer in this phase. Leave a `TextSink` trait at the boundary (a list of `(text, anchor, size, align, colour)` runs), so phase 2 can feed it to another text renderer.
+1. Give `gpu.rs` a plain API with no Iced types. `CanvasRenderer::new` takes a `wgpu` device and the target's format. `prepare` takes the device, the queue, a `CanvasFrame` of plain data, and a `Target` (the viewport's logical size and the pixel scale). `draw` takes a render pass. The host owns the pass and sets its viewport and scissor; the renderer never begins a pass and never presents. *Why a pass, not a texture view:* a custom element "draws into a `wgpu` render pass with a viewport the runtime gives it" ([spec](../design/ui-layer.md), section 9, rule 1), and a host that is not our window, such as a plugin's, also hands over a pass.
+2. `loom-canvas` depends on `wgpu` itself, at the version Iced builds with, so the plain files name `wgpu` types with no Iced path. There is one copy of `wgpu` in the tree.
+3. The Iced shader `Primitive` and `Pipeline` wrap the renderer, in `widget/primitive.rs`.
+4. `CanvasInput::frame` builds the `CanvasFrame`, with a `FrameCache` the host keeps beside it, so the widget reads none of the canvas's state.
+5. Tile text still goes through Iced's text renderer in this phase, behind a boundary in `painter.rs`. The canvas hands each piece to a `Painter` and asks a `TextMeasure` how large a piece of text is. A `Painter` takes text runs (`TextRun`: text, anchor, room, alignment, style, colour, clip), boxes (`Quad`), and layers. *Why more than text runs:* the choice list, the typed field, and hover text paint boxes in layers above the tile text, and two of them measure text to place a caret and size a box. The text is borrowed and no list is built. `CanvasInput::paint` is the entry point. `widget/painter.rs` is the Iced side.
+6. `tests/purity.rs` holds the line: Iced is named only in `widget.rs`, files under `widget/`, `iced_convert.rs`, and files under `iced_convert/`.
 
 ### 1.4 The accessibility tree as a real module
 
@@ -164,7 +167,7 @@ The spike found two gaps in `accesskit_macos` 0.27.2:
 
 ### Phase 1 done
 
-The parity gates pass. VoiceOver reads names and values for every control on a tile and in the inspector, and changes them by keyboard. `loom-canvas` has no Iced types outside `widget.rs` and the primitive wrapper.
+The parity gates pass. VoiceOver reads names and values for every control on a tile and in the inspector, and changes them by keyboard. `loom-canvas` has no Iced types outside `widget.rs`, the files under `widget/` (the primitive wrapper and the Iced painter among them), and `iced_convert.rs`. `crates/loom-canvas/tests/purity.rs` checks it.
 
 ## Phase 2: Own the window and the event loop
 
@@ -210,7 +213,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 ### 2.4 Text drawing for the canvas
 
 1. Replace Iced's text renderer for tile text with a glyph atlas renderer on `cosmic-text`. `glyphon` † is the usual choice; Iced's `cryoglyph` is a fork of it. Check its licence with `cargo deny`.
-2. Feed it from the phase 1.3 `TextSink`. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
+2. Give it a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
 3. Share one `cosmic-text` `FontSystem` between the canvas and the Iced panels if Iced allows it; otherwise accept two for now and note it.
 
 ### 2.5 The agent tools on the new shell

@@ -7,12 +7,10 @@
 //! (ADR-0010). The frame around the trace is drawn with the controls, so a
 //! still scope costs nothing per frame.
 
-use crate::gpu::Shape;
-use crate::iced_convert::ToIced as _;
+use crate::gpu::{Shape, packed};
 use crate::scene::{Scene, WidgetViewKind};
 use crate::theme::Palette;
 use bytemuck::{Pod, Zeroable};
-use iced::advanced::graphics::color::pack;
 use loom_ui_core::{Color, Point, Rect, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -132,7 +130,7 @@ impl Segment {
     pub(crate) fn with_width(from: Point, to: Point, colour: Color, clip: Rect, width: f32) -> Self {
         Self {
             ends: [from.x, from.y, to.x, to.y],
-            colour: pack(colour.to_iced()).components(),
+            colour: packed(colour),
             clip: [clip.x, clip.y, clip.width, clip.height],
             params: [width, TRACE_MIN_PX, 0.0, 0.0],
         }

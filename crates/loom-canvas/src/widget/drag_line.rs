@@ -1,6 +1,7 @@
 //! A pointer-transparent window layer for a cable dragged to the inspector.
 
-use crate::gpu::{Cable, DragPrimitive};
+use super::primitive::DragPrimitive;
+use crate::gpu::Cable;
 use iced::widget::shader::{self, Program};
 use iced::{Length, Rectangle, mouse};
 use loom_ui_core::{Color, Point};

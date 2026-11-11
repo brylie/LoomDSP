@@ -38,19 +38,20 @@ use std::time::{Duration, Instant};
 
 mod event;
 mod focus;
+mod frame;
 mod handle;
 mod hover_text;
 mod overlay;
+mod paint;
 mod panel_input;
 mod select_popup;
 mod typed_field;
 
 pub use event::{CanvasEvent, ControlPart};
+pub use frame::FrameCache;
 // What the widget's text drawing needs from the files below.
 pub(crate) use overlay::learned_label;
-pub(crate) use typed_field::{
-    FIELD_HEIGHT_PX, FIELD_PADDING_PX, FIELD_TEXT_PX, FIELD_WIDTH_PX, TypedField, typed_reason_bounds,
-};
+pub(crate) use typed_field::{FIELD_HEIGHT_PX, FIELD_PADDING_PX, FIELD_TEXT_PX, FIELD_WIDTH_PX, typed_reason_bounds};
 
 /// Two presses on the same control within this time reset it.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -885,39 +886,9 @@ impl CanvasInput {
         })
     }
 
-    /// The view: where the canvas looks and how far it is zoomed.
-    pub(crate) fn camera(&self) -> Camera {
-        self.camera
-    }
-
-    /// The control with keyboard focus, as a module and a widget.
-    pub(crate) fn focused_control(&self) -> Option<(u32, usize)> {
-        self.focus.control()
-    }
-
-    /// The open choice list, if one is open.
-    pub(crate) fn popup(&self) -> Option<&SelectPopup> {
-        self.focus.popup()
-    }
-
-    /// The open field for typing a value, if one is open.
-    pub(crate) fn typed_field(&self) -> Option<&TypedField> {
-        self.focus.typed()
-    }
-
-    /// True while a choice list or a typed field is open over the canvas.
-    pub(crate) fn has_overlay(&self) -> bool {
-        self.focus.has_overlay()
-    }
-
-    /// When hover text shows, and for what.
-    pub(crate) fn hover_text(&self) -> &HoverTimer {
-        &self.hover_text
-    }
-
     /// The control whose value shows in place of its label: the one being
     /// turned, or else the one with keyboard focus.
-    pub(crate) fn value_shown(&self) -> Option<(u32, usize)> {
+    fn value_shown(&self) -> Option<(u32, usize)> {
         match self.interaction {
             Interaction::Turning { module, widget, .. } => Some((module, widget)),
             _ => self.focus.control(),
