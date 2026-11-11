@@ -29,3 +29,9 @@
 //!   for one, or an effect does.
 //! - **The loop sleeps** when nothing is queued, nothing animates, and no
 //!   deadline is near.
+
+pub mod effect;
+mod waker;
+
+pub use effect::{Effect, Effects};
+pub use waker::{Wake, Waker};
