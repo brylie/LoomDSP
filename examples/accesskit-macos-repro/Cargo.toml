@@ -13,7 +13,10 @@ publish = false
 
 [dependencies]
 accesskit = "=0.25.2"
-accesskit_winit = "=0.34.2"
+# No default features: they bring the Linux adapter and its D-Bus crates into
+# the lockfile, which this macOS-only program never builds. `rwh_06` is the
+# window handle version winit 0.30 uses.
+accesskit_winit = { version = "=0.34.2", default-features = false, features = ["rwh_06"] }
 winit = "0.30.13"
 
 [workspace]

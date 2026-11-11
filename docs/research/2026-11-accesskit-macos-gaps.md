@@ -78,7 +78,7 @@ Plan step 2.2 puts `accesskit_winit` into the workspace. The reproduction uses i
 
 Each advisory says the crate is no longer maintained as a standalone crate. They arrive through `accesskit_winit` → `accesskit_unix` 0.24.1 → `atspi` 0.29.0 and `accesskit_atspi_common` 0.21.1 → `atspi-common` 0.13.0 → `zbus` 5.19.0 and its companions. The lockfile also gains `async-io` or `tokio`. The workspace has no `zbus` today, and its `Cargo.toml` already turns off an Iced feature to keep `zbus` 5 out.
 
-**With `default-features = false, features = ["rwh_06"]`:** `advisories ok, bans ok, licenses ok, sources ok`, and no `zbus`, `zvariant`, or `atspi` crate in the lockfile. `accesskit_unix` is an optional dependency behind a default feature. The `tokio` feature swaps the async runtime; it does not remove `zbus`.
+**With `default-features = false, features = ["rwh_06"]`:** `advisories ok, bans ok, licenses ok, sources ok`, and no `zbus`, `zvariant`, or `atspi` crate in the lockfile. `accesskit_unix` is an optional dependency behind a default feature. The `tokio` feature swaps the async runtime; it does not remove `zbus`. The reproduction itself builds with this reduced feature set: it runs on macOS only, so its committed lockfile should not hold the Linux adapter's crates and their advisories.
 
 **What this means for step 2.2.** Linux screen reader support through AccessKit needs `accesskit_unix`, and with it these advisories. The choices are to add ignore entries to `deny.toml` with reasons, as the file already does for three crates in the UI stack, or to leave the Linux adapter out at first. That is a decision for step 2.2, not made here. `deny.toml` is unchanged.
 
