@@ -130,10 +130,12 @@ The app still runs on `iced::application`. This phase moves our code off Iced's 
 
 This turns the spike into supported code. It needs the phase 0 spec. UI IDs ([spec](../design/ui-layer.md), section 4) join `loom-ui-core` in this step, with the table of accessibility node IDs as their first user.
 
-The step lands as four pull requests:
+The step lands in four parts, the second as two pull requests:
 
 1. UI IDs and the node ID table in `loom-ui-core`; `a11y.rs` split into the three files of task 1; the feature and the environment switches of task 2 removed. The tree covers what the spike covered, and is still rebuilt on a timer while a screen reader listens.
-2. The canvas tree made correct: each tile widget's role and real range, the arrow-key step, the undo group of task 4, canvas focus, task 5, and new bounds for every node when the window's scale factor changes.
+2. The canvas tree made correct, in two pull requests, because together they pass the size a review can hold:
+   - each tile widget's role and real range, the arrow-key step, the undo group of task 4, task 5, and new bounds for every node when the window's scale factor changes;
+   - canvas focus, tiles hidden below a panel that owns the input, and live values off screen.
 3. The toolbar, the status and stats bars, the inspector, and the matrix tab.
 4. The module browser and every overlay, and the tests of task 6 that cover every view.
 
