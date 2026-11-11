@@ -461,7 +461,6 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
         ParamMode::Edit {
             position,
             step,
-            fine: _,
             control,
             assignments,
             adding,
