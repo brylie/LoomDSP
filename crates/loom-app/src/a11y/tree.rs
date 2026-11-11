@@ -12,7 +12,7 @@
 
 use crate::snapshot::{Rect, UiSnapshot, Widget};
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
-use loom_canvas::{CanvasView, ControlPart, WidgetViewKind, arrow_share, option_bounds, part_bounds};
+use loom_canvas::{CanvasView, ControlPart, Reading, WidgetViewKind, arrow_share, option_bounds, part_bounds};
 use loom_core::{ParamMapping, ParamSpec};
 use loom_ui_core::{IdKey, IdTable, UiId};
 use std::collections::BTreeMap;
@@ -127,6 +127,9 @@ pub(crate) struct Detail {
     pub main: Option<ParamSpec>,
     /// The second parameter of an XY pad or a range.
     pub second: Option<ParamSpec>,
+    /// A meter's number, from the code that wrote its text. `None` when
+    /// the text names no single number, and for other widgets.
+    pub reading: Option<Reading>,
 }
 
 /// Which node of a widget an ID names. Most widgets are one node. An XY
@@ -563,8 +566,15 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
         // One slider per value, inside.
         WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. } => Node::new(Role::Group),
         WidgetViewKind::Meter { .. } => {
+            // The number its text says, never the stored level: the
+            // tree does not work the mapping out a second time. Text with
+            // no single number in it is said as words only.
             let mut node = Node::new(Role::Meter);
-            node.set_numeric_value(f64::from(widget.position));
+            if let Some(reading) = detail.reading.filter(|reading| reading.value.is_finite()) {
+                node.set_numeric_value(f64::from(reading.value));
+                node.set_min_numeric_value(f64::from(reading.min));
+                node.set_max_numeric_value(f64::from(reading.max));
+            }
             node
         }
         WidgetViewKind::Readout { .. } => {

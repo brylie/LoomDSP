@@ -12,7 +12,7 @@ use crate::{
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
 use iced::{Color, Element, Length};
 use loom_canvas::iced_convert::ToIced as _;
-use loom_canvas::{ArrowGroupView, DragLine, PatchCanvas};
+use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
@@ -36,17 +36,18 @@ impl App {
             .browser_key(self.browser_key)
             .focus_policy(self.canvas_focus_policy())
             .focus_request(self.a11y.focus_request().0, self.a11y.focus_request().1)
-            .arrow_group(match self.session.edits.arrow_group() {
-                // A screen reader's group ends as a released arrow group
-                // does, so the canvas is shown one: it wakes once at the
-                // deadline, and reports the key or pointer press that ends
-                // the group sooner. Nothing wakes while no group is open.
+            .edit_group(match self.session.edits.arrow_group() {
+                // A screen reader's group waits as a released arrow group
+                // does, so the canvas is shown both as an open group: it
+                // wakes once at the deadline, and reports the key or
+                // pointer press that ends the group sooner. Nothing wakes
+                // while no group is open.
                 ArrowGroup::Closed => match self.session.edits.reader_group().due() {
-                    Some(due) => ArrowGroupView::Released { due },
-                    None => ArrowGroupView::Closed,
+                    Some(due) => EditGroupView::Open { due },
+                    None => EditGroupView::Closed,
                 },
-                ArrowGroup::Held => ArrowGroupView::Held,
-                ArrowGroup::Released { due } => ArrowGroupView::Released { due },
+                ArrowGroup::Held => EditGroupView::Held,
+                ArrowGroup::Released { due } => EditGroupView::Open { due },
             })
             .matrix_line(self.matrix_line())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))

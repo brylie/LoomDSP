@@ -88,9 +88,9 @@ impl<'a, Message> PatchCanvas<'a, Message> {
     }
 
     /// Says where the app's arrow-key undo group is (`docs/design/undo.md`).
-    /// See [`CanvasModel::arrow_group`].
-    pub fn arrow_group(mut self, group: ArrowGroupView) -> Self {
-        self.model = self.model.arrow_group(group);
+    /// See [`CanvasModel::edit_group`].
+    pub fn edit_group(mut self, group: EditGroupView) -> Self {
+        self.model = self.model.edit_group(group);
         self
     }
 

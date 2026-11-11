@@ -83,16 +83,16 @@ impl App {
             CanvasEvent::ArrowStep { at } => self.arrow_event(ArrowEvent::Step(at)),
             CanvasEvent::ArrowPressed { at } => {
                 // A key press ends a screen reader's group, which the
-                // canvas was shown as a released arrow group.
+                // canvas was shown as an open edit group.
                 self.reader_event(crate::edits::ReaderEvent::Close);
                 self.arrow_event(ArrowEvent::Pressed(at));
             }
             CanvasEvent::ArrowReleased { at } => self.arrow_event(ArrowEvent::Released(at)),
-            CanvasEvent::ArrowGroupEnd => {
+            CanvasEvent::EditGroupEnd => {
                 self.reader_event(crate::edits::ReaderEvent::Close);
                 self.arrow_event(ArrowEvent::End);
             }
-            CanvasEvent::ArrowGroupDue { at } => {
+            CanvasEvent::EditGroupDue { at } => {
                 self.reader_event(crate::edits::ReaderEvent::Due(at));
                 self.arrow_event(ArrowEvent::Due(at));
             }

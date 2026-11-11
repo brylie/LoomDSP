@@ -16,8 +16,8 @@ use loom_ui_core::IdTable;
 /// cannot do.
 ///
 /// Click on a tile selects its module, as a pointer click on the tile does.
-/// Focus gives no events: focus on a node never changes the patch, so it
-/// does not select a tile (ui-layer.md, section 7, rule 9).
+/// Focus gives no events here: the app asks the canvas for it, and the
+/// canvas selects the control's tile (ui-layer.md, section 7, rule 20).
 pub(super) fn canvas_events(
     snapshot: &UiSnapshot,
     ids: &WidgetIds,

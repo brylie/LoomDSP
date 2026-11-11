@@ -60,6 +60,8 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 
 **Idle.** `--measure` and `--bench` redraw every frame, so they measure drawing cost. `--measure-idle` prints the same lines without forcing a redraw: it counts only the frames the app draws by itself. The report runs on its own thread and sends the app no messages, so it adds no frames. With nothing changing on screen, the app draws no frames ([panels spec, Redraw](../design/panels.md#redraw)). Until [#90](https://github.com/brylie/LoomDSP/issues/90) it drew 4 to 7 frames a second, from the stats bar timer and the device polls.
 
+**With a screen reader.** `--measure-tree`, with any of the three flags, runs the accessibility layer as if a screen reader were listening from the start, and ends each line with `tree_builds`, `tree_avg_ms`, and `tree_worst_ms`: how many times the tree was built, and the average and longest build. Compare a run with it against the same run without it. A normal run never sets it.
+
 Each line also prints `causes=tick:N,live:N,meters:N,control:N,input:N,redraw:N,forced:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
 
 A patch that plays is not idle, even with the camera still. A scope on screen changes every frame, so it draws every frame. Lights and signal activity on ports change a few times a second, and so do live values on modulated controls. These frames are counted under `meters` and are by design. To measure a truly idle app, run without audio or MIDI:

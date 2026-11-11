@@ -70,6 +70,18 @@ const FADER_ACROSS: f32 = 3.0;
 /// of the handle.
 const FADER_BAR_AWAY: f32 = 8.0;
 
+/// The one number a widget's text says, with the range its drawing spans.
+/// It is made where the text is made, so the two cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Reading {
+    /// The number, in the unit the text names.
+    pub value: f32,
+    /// The value at the bottom of the drawing.
+    pub min: f32,
+    /// The value at the top of the drawing.
+    pub max: f32,
+}
+
 /// The live value of one widget.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WidgetValue {
@@ -87,6 +99,10 @@ pub struct WidgetValue {
     /// The value as text, with its unit, shown while a knob is dragged or
     /// focused.
     pub text: String,
+    /// Meter: the number `text` says, when it says exactly one. `None` for
+    /// other widgets. The canvas draws nothing from it: it is for what
+    /// reports the value as a number, such as a screen reader.
+    pub reading: Option<Reading>,
     /// What the control shows of its modulation assignments.
     pub modulation: ModulationMark,
     /// Knob: the live modulated value as a position from 0 to 1, drawn as

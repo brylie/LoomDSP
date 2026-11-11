@@ -246,7 +246,11 @@ impl App {
             dev_tools: args.dev || args.bench.reporter().is_some(),
             still: None,
             history_key: None,
-            a11y: crate::a11y::Access::default(),
+            a11y: if args.bench.measure_tree {
+                crate::a11y::Access::measured()
+            } else {
+                crate::a11y::Access::default()
+            },
         };
         app.settle_session(first_midi, connect_midi, recording_stopped, fresh);
         app

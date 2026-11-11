@@ -37,6 +37,11 @@ pub struct Options {
     /// seconds, with a final summary line.
     #[arg(long, value_name = "N", requires = "measuring", value_parser = seconds)]
     pub bench_seconds: Option<f64>,
+    /// With --bench, --measure, or --measure-idle: build the accessibility
+    /// tree as if a screen reader were listening, and add how often it was
+    /// built and how long a build took to each line.
+    #[arg(long, requires = "measuring")]
+    pub measure_tree: bool,
 }
 
 /// The longest run `--bench-seconds` takes: a day. Longer is surely a typo,
@@ -66,6 +71,7 @@ impl Options {
             seconds: self
                 .bench_seconds
                 .map(|s| Duration::from_secs_f64(s.clamp(0.0, MAX_SECONDS))),
+            tree: self.measure_tree,
         })
     }
 }
@@ -137,6 +143,8 @@ impl FrameMeter {
 #[derive(Debug, Clone)]
 pub struct Reporter {
     seconds: Option<Duration>,
+    /// True with `--measure-tree`: each line ends with the tree's counts.
+    tree: bool,
 }
 
 impl Hash for Reporter {
@@ -150,6 +158,7 @@ impl Hash for Reporter {
 pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
     let (mut tx, rx) = mpsc::channel(1);
     let seconds = reporter.seconds;
+    let tree = reporter.tree;
     std::thread::spawn(move || {
         let start = Instant::now();
         let first = RenderCounts::process();
@@ -176,20 +185,36 @@ pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
                 let mut window = Window::new(first, at, counts, now - from);
                 window.causes = causes;
                 window.cpu = cpu_percent(cpu_from, cpu, now - from);
-                println!("final {}", line(&window));
+                println!("final {}{}", line(&window), tree_part(tree));
                 let _ = tx.try_send(());
                 return;
             }
             let mut window = Window::new(first, last.1, counts, now - last.0);
             window.causes = causes;
             window.cpu = cpu_percent(last.2, cpu, now - last.0);
-            println!("{}", line(&window));
+            println!("{}{}", line(&window), tree_part(tree));
             settled.get_or_insert((now, counts, cpu));
             last = (now, counts, cpu);
             next += Duration::from_secs(1);
         }
     });
     rx
+}
+
+/// The end of a line with `--measure-tree`: how many times the
+/// accessibility tree was built since the start, and the average and the
+/// longest build. Empty without the flag.
+fn tree_part(tree: bool) -> String {
+    if !tree {
+        return String::new();
+    }
+    let builds = crate::a11y::BuildTimes::process();
+    format!(
+        " tree_builds={} tree_avg_ms={:.3} tree_worst_ms={:.3}",
+        builds.count,
+        builds.average().as_secs_f64() * 1000.0,
+        builds.worst.as_secs_f64() * 1000.0
+    )
 }
 
 /// What a report line describes: frames over a stretch of time, and the

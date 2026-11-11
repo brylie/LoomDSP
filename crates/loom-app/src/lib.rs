@@ -554,7 +554,7 @@ impl Message {
                 event,
                 CanvasEvent::ButtonReleased { .. }
                     | CanvasEvent::GestureEnd
-                    | CanvasEvent::ArrowGroupEnd
+                    | CanvasEvent::EditGroupEnd
                     | CanvasEvent::AssignCancel
             ),
             // A close asks over the browser, and Cancel returns to it: rows

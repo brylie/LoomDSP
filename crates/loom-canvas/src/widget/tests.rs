@@ -81,7 +81,7 @@ fn the_widget_asks_iced_to_wake_at_the_next_deadline() {
     let scene = Scene::new(Vec::new(), Vec::new());
     let none = BTreeSet::new();
     let due = Instant::now() + Duration::from_millis(400);
-    let canvas = PatchCanvas::new(&scene, &none, |e| e).arrow_group(ArrowGroupView::Released { due });
+    let canvas = PatchCanvas::new(&scene, &none, |e| e).edit_group(EditGroupView::Open { due });
     let input = CanvasInput::default();
     let mut messages: Vec<CanvasEvent> = Vec::new();
     let mut shell = iced::advanced::Shell::new(&mut messages);

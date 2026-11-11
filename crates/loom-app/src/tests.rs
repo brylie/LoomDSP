@@ -2302,14 +2302,14 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
     let _ = app.update(Message::Redo);
     assert_ne!(value(&app), original, "Redo must also act before the timer");
     let _ = app.update(Message::Undo);
-    let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupEnd));
     assert!(!app.session.edits.gesture_open());
 
     set(&mut app, 0.7);
     let arrow_value = value(&app);
     slide(&mut app, module, cutoff, &[800.0, 900.0]);
     assert!(app.session.edits.slider_gesture_open());
-    let _ = app.update(Message::Canvas(CanvasEvent::ArrowGroupEnd));
+    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupEnd));
     assert!(
         app.session.edits.slider_gesture_open(),
         "late arrow end must leave the slider open"
@@ -2367,7 +2367,7 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
             part: loom_canvas::ControlPart::Main,
         },
         CanvasEvent::ArrowReleased { at },
-        CanvasEvent::ArrowGroupEnd,
+        CanvasEvent::EditGroupEnd,
     ] {
         let _ = app.update(Message::Canvas(event));
     }

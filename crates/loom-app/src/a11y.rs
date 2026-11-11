@@ -32,6 +32,7 @@ use loom_canvas::CanvasView;
 use loom_core::ModuleId;
 use loom_ui_core::IdTable;
 use std::any::Any;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 pub(crate) mod actions;
@@ -140,6 +141,52 @@ pub(crate) struct Access {
     /// with each request, and the control. The canvas acts when the key
     /// changes.
     focus_request: (u64, Option<(u32, usize)>),
+    /// True with `--measure-tree`: each build is timed.
+    timed: bool,
+}
+
+/// How many times this process built the tree while `--measure-tree` timed
+/// it, and how long that took. Process-wide, as the canvas counters are,
+/// because the report runs on its own thread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct BuildTimes {
+    /// The builds so far.
+    pub count: u64,
+    /// The time of all of them.
+    pub total: Duration,
+    /// The longest one.
+    pub worst: Duration,
+}
+
+static BUILD_COUNT: AtomicU64 = AtomicU64::new(0);
+static BUILD_NANOS: AtomicU64 = AtomicU64::new(0);
+static BUILD_WORST_NANOS: AtomicU64 = AtomicU64::new(0);
+
+impl BuildTimes {
+    /// The counts of this process so far.
+    pub(crate) fn process() -> Self {
+        Self {
+            count: BUILD_COUNT.load(Ordering::Relaxed),
+            total: Duration::from_nanos(BUILD_NANOS.load(Ordering::Relaxed)),
+            worst: Duration::from_nanos(BUILD_WORST_NANOS.load(Ordering::Relaxed)),
+        }
+    }
+
+    /// The time of one build, on average. Zero before the first.
+    pub(crate) fn average(self) -> Duration {
+        match u32::try_from(self.count) {
+            Ok(count) if count > 0 => self.total / count,
+            _ => Duration::ZERO,
+        }
+    }
+
+    /// Adds one build that took `time`.
+    fn record(time: Duration) {
+        let nanos = u64::try_from(time.as_nanos()).unwrap_or(u64::MAX);
+        BUILD_COUNT.fetch_add(1, Ordering::Relaxed);
+        BUILD_NANOS.fetch_add(nanos, Ordering::Relaxed);
+        BUILD_WORST_NANOS.fetch_max(nanos, Ordering::Relaxed);
+    }
 }
 
 impl Default for Access {
@@ -154,6 +201,7 @@ impl Default for Access {
             flush_live: false,
             focus: None,
             focus_request: (0, None),
+            timed: false,
         }
     }
 }
@@ -183,6 +231,17 @@ impl Access {
     /// True while a screen reader listens.
     pub(crate) fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// The layer as `--measure-tree` runs it: building the tree as if a
+    /// screen reader were listening from the start, and timing each build.
+    /// For measuring only. A normal run starts with [`Access::default`].
+    pub(crate) fn measured() -> Self {
+        Self {
+            active: true,
+            timed: true,
+            ..Self::default()
+        }
     }
 
     /// True while live values wait to be sent.
@@ -397,6 +456,7 @@ impl crate::App {
                         name,
                         main: spec(loom_canvas::ControlPart::Main),
                         second: spec(loom_canvas::ControlPart::Second),
+                        reading: self.session.values.get(tile.id, index).and_then(|value| value.reading),
                     },
                 );
             }
@@ -429,8 +489,9 @@ impl crate::App {
         let ids = self.a11y_widget_ids(&snapshot);
         if request.action == accesskit::Action::Focus {
             // Focus on a control moves the canvas's keyboard focus there.
-            // It changes nothing in the patch, and it does not select the
-            // tile (ui-layer.md, section 7, rule 9).
+            // The canvas selects the control's tile as a press on it does.
+            // It changes nothing in the patch, and Focus on a tile does
+            // nothing (ui-layer.md, section 7, rules 9 and 20).
             if let Some(control) = actions::focus_target(&snapshot, &ids, &self.a11y.ids, request) {
                 self.a11y.focus_request = (self.a11y.focus_request.0 + 1, Some(control));
             }
@@ -494,7 +555,11 @@ impl crate::App {
             Event::Located(view) => {
                 self.a11y.locating = false;
                 if self.a11y.active {
+                    let start = self.a11y.timed.then(std::time::Instant::now);
                     let (whole, changes) = self.a11y_changes(view.as_ref());
+                    if let Some(start) = start {
+                        BuildTimes::record(start.elapsed());
+                    }
                     platform::push(whole, changes);
                 }
                 Task::none()

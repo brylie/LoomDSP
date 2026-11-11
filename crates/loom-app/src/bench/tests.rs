@@ -66,6 +66,7 @@ fn measured_run_reports_and_finishes() {
     use iced::futures::StreamExt;
     let reporter = Reporter {
         seconds: Some(Duration::from_millis(2_100)),
+        tree: true,
     };
     let started = Instant::now();
     let mut updates = stream(&reporter);
@@ -89,4 +90,21 @@ fn cpu_percent_uses_the_report_interval() {
         ),
         50.0
     );
+}
+
+/// `--measure-tree` adds the tree's build counts to a line, and without it
+/// a line is unchanged, so scripts that read the report keep working.
+#[test]
+fn the_tree_counts_come_only_with_their_flag() {
+    assert_eq!(tree_part(false), "");
+    let part = tree_part(true);
+    for key in [" tree_builds=", " tree_avg_ms=", " tree_worst_ms="] {
+        assert!(part.contains(key), "{part}");
+    }
+    let options = Options {
+        measure_idle: true,
+        measure_tree: true,
+        ..Options::default()
+    };
+    assert!(options.reporter().is_some_and(|reporter| reporter.tree));
 }

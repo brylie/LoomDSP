@@ -339,7 +339,7 @@ impl CanvasModel<'_> {
     /// takes them: no button stays held, and an arrow-key edit closes.
     pub(super) fn leave_keys(&self, state: &mut CanvasInput, out: &mut Reaction) {
         self.release_every_key_hold(state, out);
-        self.end_arrow_group(out, false);
+        self.end_edit_group(out, false);
     }
 
     /// Space or Enter, the keys that hold a button.
@@ -490,11 +490,11 @@ impl CanvasModel<'_> {
         // Within the release window, an arrow keeps the group open and any
         // other key ends it. A modifier alone does not: Shift pressed before
         // the next arrow is part of that arrow.
-        if let ArrowGroupView::Released { .. } = self.arrow_group {
+        if let EditGroupView::Open { .. } = self.edit_group {
             if is_arrow(key) {
                 self.emit(out, CanvasEvent::ArrowPressed { at: now });
             } else if !is_modifier(key) {
-                self.end_arrow_group(out, false);
+                self.end_edit_group(out, false);
             }
         }
         // Focus is only valid on a control of the one selected module.

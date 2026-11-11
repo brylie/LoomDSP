@@ -3,7 +3,7 @@
 use crate::clip::ClipHolds;
 use loom_canvas::{
     CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue, PortShape, PortView,
-    Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
+    Reading, Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
 use loom_core::ModuleNames;
 use loom_core::{
@@ -591,6 +591,7 @@ pub fn update_panel_values_dragging(
                         let position = d
                             .meter_display(w)
                             .map_or(stored, |display| display.range.position(stored));
+                        let reading = meter_reading(d, w, stored, right);
                         let mut text = display_text(d, w, stored, right);
                         let clips = w.kind == WidgetKind::Meter && d.meter_display(w).is_none();
                         let hold = holds.get((id.0, index));
@@ -602,6 +603,7 @@ pub fn update_panel_values_dragging(
                             peak,
                             right,
                             text,
+                            reading,
                             clip: clips && hold.lit,
                             hold: if clips { hold.text() } else { String::new() },
                             ..WidgetValue::default()
@@ -647,11 +649,41 @@ fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> O
     Some(if running >= 0.5 { 1.0 } else { 0.0 })
 }
 
+/// The one number a meter's text says, with the range the meter draws, or
+/// `None` for any other widget and for a meter whose text names no single
+/// number: a stereo meter says two, and a level under the meter's floor is
+/// "below -60 dB". [`display_text`] writes its number from this, so the
+/// text and the number a screen reader is given come from one place.
+fn meter_reading(
+    d: &ModuleDescriptor,
+    w: &loom_core::Widget,
+    stored: f32,
+    right: Option<(f32, f32)>,
+) -> Option<Reading> {
+    if let Some(display) = d.meter_display(w) {
+        return Some(Reading {
+            value: stored,
+            min: display.range.min,
+            max: display.range.max,
+        });
+    }
+    if w.kind != WidgetKind::Meter || right.is_some() || stored <= 0.0 {
+        return None;
+    }
+    Some(Reading {
+        value: crate::live::position_db(stored),
+        min: crate::live::position_db(0.0),
+        max: crate::live::position_db(1.0),
+    })
+}
+
 /// The value line of a light's or meter's hover text: the label and the
 /// value. A light shows its brightness as a number, or "lit" and "dark" for
 /// a trigger. A meter shows its RMS level in dB, and a meter on a display value
-/// shows that value. `position` is the value as stored.
+/// shows that value. `position` is the value as stored. A meter's number
+/// is the one [`meter_reading`] gives.
 fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, right: Option<(f32, f32)>) -> String {
+    let reading = meter_reading(d, w, position, right);
     if let WidgetKind::Readout { .. } = w.kind {
         // A readout's text is what it shows. The registry checked its binding.
         return d
@@ -678,7 +710,8 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
         return String::new();
     }
     if let Some(display) = d.meter_display(w) {
-        return format!("{}: {position:.1} {}", display.label, display.range.unit)
+        let value = reading.map_or(position, |reading| reading.value);
+        return format!("{}: {value:.1} {}", display.label, display.range.unit)
             .trim_end()
             .to_string();
     }
@@ -695,9 +728,10 @@ fn display_text(d: &ModuleDescriptor, w: &loom_core::Widget, position: f32, righ
                 "below -60 dB".to_string()
             }
         };
-        return match right {
-            Some((rms, _)) => format!("{label}: L {}, R {}", level(position), level(rms)),
-            None => format!("{label}: {}", level(position)),
+        return match (right, reading) {
+            (Some((rms, _)), _) => format!("{label}: L {}, R {}", level(position), level(rms)),
+            (None, Some(reading)) => format!("{label}: {:.1} dB", reading.value),
+            (None, None) => format!("{label}: {}", level(position)),
         };
     }
     let Some(display) = d.displays.iter().find(|v| v.name == w.bind()) else {

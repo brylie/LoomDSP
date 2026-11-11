@@ -50,15 +50,15 @@ mod widget;
 
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM};
 pub use controls::{
-    ModulationMark, PanelValues, PartValue, WidgetValue, fader_bar_point, knob_range_ring, segment_centre, xy_area,
-    xy_edge_point,
+    ModulationMark, PanelValues, PartValue, Reading, WidgetValue, fader_bar_point, knob_range_ring, segment_centre,
+    xy_area, xy_edge_point,
 };
 pub use controls::{arrow_share, arrow_step, option_bounds, part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
 pub use gpu::{CanvasFrame, CanvasRenderer, Target};
 pub use input::{
-    ArrowGroupView, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
-    ControlPart, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
+    CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView, ControlPart,
+    EditGroupView, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
 pub use painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
 pub use reaction::{CursorShape, Reaction};
