@@ -151,42 +151,22 @@ impl CanvasModel<'_> {
                 // only on the one selected tile, so focus left on another
                 // is dropped now, and what the canvas reports as focused
                 // stays true. An open list stays with its control, as on a
-                // key press.
+                // key press, and the new selection is not taken as seen
+                // until the list closes, so the first redraw after that
+                // drops the focus.
                 let same = state
                     .selection_seen
                     .as_ref()
                     .is_some_and(|seen| seen.iter().eq(self.selection.iter()));
-                if !same {
+                if !same && state.focus.popup().is_none() {
                     let first = state.selection_seen.is_none();
                     state.selection_seen = Some(self.selection.iter().copied().collect());
                     let elsewhere = state
                         .focus
                         .control()
                         .is_some_and(|(module, _)| self.selection.len() != 1 || !self.selection.contains(&module));
-                    if !first && elsewhere && state.focus.popup().is_none() {
+                    if !first && elsewhere {
                         state.focus.clear();
-                        out.redraw();
-                    }
-                }
-                // A focus request waits while something else has the
-                // input: the app would drop the events it makes, and the
-                // request would be used up. It is applied on the first
-                // redraw after the canvas has the input again.
-                let (focus_key, focus_control) = self.focus_request;
-                if self.focus_policy.interactive
-                    && state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
-                    && let Some((module, widget)) = focus_control
-                {
-                    let can_focus = self
-                        .scene
-                        .module(module)
-                        .is_some_and(|tile| super::panel_input::focusable(&tile.panel).contains(&widget));
-                    if can_focus {
-                        // As a press on the control does: its tile is the
-                        // one selected, so the keys reach it and the
-                        // inspector follows.
-                        self.select_for_edit(module, out);
-                        state.focus.set(module, widget, true);
                         out.redraw();
                     }
                 }
@@ -210,6 +190,33 @@ impl CanvasModel<'_> {
                     state.pinned = None;
                     out.redraw();
                     self.emit(out, CanvasEvent::Camera(state.camera));
+                }
+                // A focus request waits while something else has the
+                // input: the app would drop the events it makes, and the
+                // request would be used up. It is applied on the first
+                // redraw after the canvas has the input again. It comes
+                // after a new level or patch is framed, since that clears
+                // the focus, and waits while that framing waits for the
+                // canvas to have a width.
+                let reset_waits = (new_frame || new_level) && bounds.width <= 0.0;
+                let (focus_key, focus_control) = self.focus_request;
+                if self.focus_policy.interactive
+                    && !reset_waits
+                    && state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
+                    && let Some((module, widget)) = focus_control
+                {
+                    let can_focus = self
+                        .scene
+                        .module(module)
+                        .is_some_and(|tile| super::panel_input::focusable(&tile.panel).contains(&widget));
+                    if can_focus {
+                        // As a press on the control does: its tile is the
+                        // one selected, so the keys reach it and the
+                        // inspector follows.
+                        self.select_for_edit(module, out);
+                        state.focus.set(module, widget, true);
+                        out.redraw();
+                    }
                 }
                 if self.animate {
                     let (start, base) = *state.animation.get_or_insert((now, state.camera));

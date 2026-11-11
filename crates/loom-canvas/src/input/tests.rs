@@ -4240,3 +4240,104 @@ fn an_arrow_on_a_focused_control_is_taken() {
         }
     }
 }
+
+/// A selection that moves while a choice's list is open keeps the focus
+/// with its list. Once the list closes, the next redraw drops the focus
+/// left on the tile that is no longer selected, and reports it, so the
+/// tree never says focus is on a tile the selection has left.
+#[test]
+fn focus_left_by_the_selection_is_dropped_once_an_open_list_closes() {
+    let choice = || PanelView {
+        width: 6,
+        height: 2,
+        widgets: vec![widget(
+            WidgetViewKind::Select {
+                options: vec!["ADSR".into(), "AD".into()],
+            },
+            0,
+        )],
+    };
+    let mut first = module(2, 0.0);
+    first.panel = choice();
+    let mut second = module(3, 200.0);
+    second.panel = choice();
+    let scene = Scene::new(vec![first, second], Vec::new());
+    let on_first = BTreeSet::from([2]);
+    let on_second = BTreeSet::from([3]);
+    let mut state = CanvasInput::default();
+    let _ = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &Event::Redraw);
+    state.focus.open_popup(
+        2,
+        0,
+        SelectPopup {
+            highlight: 0,
+            scroll: 0,
+            wheel: 0.0,
+        },
+    );
+
+    // The selection moves while the list is open: the list keeps it.
+    let _ = host_event(&CanvasModel::new(&scene, &on_second), &mut state, &Event::Redraw);
+    assert_eq!(state.focused_control(), Some((2, 0)), "the open list keeps its control");
+
+    state.focus.close_popup();
+    let after = host_event(&CanvasModel::new(&scene, &on_second), &mut state, &Event::Redraw);
+    assert_eq!(
+        state.focused_control(),
+        None,
+        "focus is not left on the tile the selection left"
+    );
+    assert!(after.contains(&CanvasEvent::FocusChanged(None)));
+}
+
+/// A focus request that comes with a new level or a new patch in the same
+/// redraw lands after the reset, which would clear it. While the canvas has
+/// no width, the reset waits, and so does the request.
+#[test]
+fn a_focus_request_lands_after_a_level_or_frame_change() {
+    let mut tile = module(2, 0.0);
+    tile.panel = panel();
+    let scene = Scene::new(vec![tile], Vec::new());
+    let none = BTreeSet::new();
+    let redraw = |canvas: &CanvasModel<'_>, state: &mut CanvasInput, width: f32| {
+        let moment = Moment {
+            pointer: None,
+            bounds: Rect::new(Point::ORIGIN, Size::new(width, 600.0)),
+            now: Instant::now(),
+        };
+        state.handle(canvas, &Event::Redraw, moment).events
+    };
+    for change in ["level", "frame"] {
+        let mut state = CanvasInput::default();
+        let model = |key, level| {
+            let canvas = CanvasModel::new(&scene, &none).focus_request(key, Some((2, 0)));
+            if change == "level" {
+                canvas.level(level, None)
+            } else {
+                canvas.frame_key(level)
+            }
+        };
+        let _ = redraw(&model(5, 1), &mut state, 800.0);
+        let moved = redraw(&model(6, 2), &mut state, 800.0);
+        assert_eq!(state.focused_control(), Some((2, 0)), "{change}: the request lands");
+        assert!(moved.contains(&CanvasEvent::FocusChanged(Some((2, 0)))), "{change}");
+
+        // With no width, the reset waits, and the request waits with it.
+        let mut state = CanvasInput::default();
+        let _ = redraw(&model(5, 1), &mut state, 800.0);
+        let waiting = redraw(&model(6, 2), &mut state, 0.0);
+        assert!(
+            !waiting
+                .iter()
+                .any(|event| matches!(event, CanvasEvent::FocusChanged(_))),
+            "{change}"
+        );
+        let landed = redraw(&model(6, 2), &mut state, 800.0);
+        assert_eq!(
+            state.focused_control(),
+            Some((2, 0)),
+            "{change}: it lands once there is room"
+        );
+        assert!(landed.contains(&CanvasEvent::FocusChanged(Some((2, 0)))), "{change}");
+    }
+}

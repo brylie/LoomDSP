@@ -1858,3 +1858,86 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
         "the first tile's knob is left alone"
     );
 }
+
+/// With the matrix holding the keys, a screen reader's Focus on a knob
+/// gives the keys to the canvas, as a press on the canvas does: the next
+/// arrow key steps the knob, and the matrix's chosen row stays where it was.
+#[test]
+fn focus_on_a_knob_takes_the_keys_from_the_matrix() {
+    let mut ui = crate::ui_test::Ui::open("modulation.ron");
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
+    let first = ui.app.session.controller.graph().assignments().next().unwrap().0;
+    ui.send(Message::Matrix(crate::matrix::Event::Select(
+        first,
+        crate::matrix::Column::On,
+    )));
+    assert!(ui.app.matrix_has_keys());
+    let _ = ui.app.a11y_tree(None);
+    let filter = 4;
+    let knob = ui
+        .app
+        .ui_snapshot()
+        .tiles
+        .iter()
+        .find(|tile| tile.id == filter)
+        .and_then(|tile| tile.widgets.iter().position(|w| w.label.eq_ignore_ascii_case("cutoff")))
+        .expect("the filter's Cutoff knob");
+    let target = widget_node(&mut ui.app, filter, knob);
+    let index = {
+        let node = ui.app.session.controller.graph().node(ModuleId(filter)).unwrap();
+        loom_core::ModuleNames::parameter_index(node, "cutoff").unwrap()
+    };
+    let cutoff = |app: &App| app.session.controller.graph().node(ModuleId(filter)).unwrap().params[index];
+    let before = cutoff(&ui.app);
+
+    ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
+    let _ = ui.redraw();
+    assert!(!ui.app.matrix_has_keys(), "the canvas has the keys now");
+    let _ = ui.tap(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+        iced::keyboard::Modifiers::empty(),
+    );
+    assert_ne!(cutoff(&ui.app), before, "the arrow stepped the knob");
+    assert_eq!(
+        ui.app.session.matrix.selected,
+        Some(first),
+        "the matrix's row is left as it was"
+    );
+}
+
+/// With an inspector value field open, a screen reader's Focus on a knob
+/// closes the field as a press on the canvas does: its draft is dropped,
+/// not submitted, and the next arrow key steps the knob.
+#[test]
+fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
+    let (app, module, knob) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = ui.redraw();
+    let index = {
+        let node = ui.app.session.controller.graph().node(ModuleId(module)).unwrap();
+        loom_core::ModuleNames::parameter_index(node, "cutoff").unwrap()
+    };
+    let field = ui.value_field(module, index);
+    let _ = ui.move_to(field);
+    let _ = ui.press();
+    let _ = ui.release();
+    let _ = ui.typewrite("1234");
+    assert!(ui.app.session.value_draft.is_some(), "a draft is typed");
+    assert!(ui.app.text_focus.any);
+    let cutoff = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[index];
+    let before = cutoff(&ui.app);
+
+    let _ = ui.app.a11y_tree(None);
+    let target = widget_node(&mut ui.app, module, knob);
+    ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
+    let _ = ui.redraw();
+    assert!(!ui.app.text_focus.any, "the field is closed");
+    assert!(ui.app.session.value_draft.is_none(), "its draft is dropped");
+    assert_eq!(cutoff(&ui.app), before, "and not submitted");
+    let _ = ui.tap(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
+        iced::keyboard::Modifiers::empty(),
+    );
+    assert_ne!(cutoff(&ui.app), before, "the arrow stepped the knob");
+}
