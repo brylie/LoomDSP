@@ -7,6 +7,7 @@ use crate::places::Places;
 use crate::{App, Message};
 use accesskit::{Action, ActionData, Node, NodeId, Role, TreeId};
 use loom_canvas::{Camera, CanvasEvent, CanvasView, ControlPart};
+use loom_core::ModuleNames as _;
 use loom_ui_core::{Point, Rect, Size, UiId};
 
 /// An app with one filter, its module ID, and the panel index of its Cutoff knob.
@@ -427,7 +428,7 @@ fn a_widget_without_a_detail_or_a_parameter() {
     let id = bare.get(module, knob).unwrap().clone();
     let update = tree::tree(
         &snapshot,
-        &app.bars_model(),
+        &app.a11y_frames(),
         &bare,
         &Places::of_canvas(None),
         1.0,
@@ -457,7 +458,7 @@ fn a_widget_without_a_detail_or_a_parameter() {
     assert_eq!(tree::piece_id(&id, &kind, tree::Piece::Whole), id);
     let update = tree::tree(
         &snapshot,
-        &app.bars_model(),
+        &app.a11y_frames(),
         &travel,
         &Places::of_canvas(None),
         1.0,
@@ -496,7 +497,7 @@ fn a_scope_says_its_trace_in_words() {
     });
     let update = tree::tree(
         &snapshot,
-        &app.bars_model(),
+        &app.a11y_frames(),
         &ids,
         &Places::of_canvas(None),
         1.0,
@@ -546,7 +547,7 @@ fn hidden_widgets_are_left_out() {
     snapshot.tiles.iter_mut().find(|t| t.id == module).unwrap().widgets[knob].hidden = true;
     let update = tree::tree(
         &snapshot,
-        &app.bars_model(),
+        &app.a11y_frames(),
         &ids,
         &Places::of_canvas(None),
         1.0,
@@ -577,7 +578,7 @@ fn a_widget_with_no_name_is_left_out() {
     );
     let all = tree::tree(
         &snapshot,
-        &app.bars_model(),
+        &app.a11y_frames(),
         &named,
         &Places::of_canvas(None),
         1.0,
@@ -585,7 +586,7 @@ fn a_widget_with_no_name_is_left_out() {
     );
     let without = tree::tree(
         &snapshot,
-        &app.bars_model(),
+        &app.a11y_frames(),
         &ids,
         &Places::of_canvas(None),
         1.0,
@@ -1223,12 +1224,18 @@ fn only_changed_nodes_are_sent() {
     assert!(changed.len() < whole.nodes.len());
 }
 
-/// A message that changes nothing the tree reports sends nothing, and a
-/// change of selection, which the tree does not report, sends nothing.
+/// A message that changes nothing the tree reports sends nothing. A new
+/// selection changes the inspector, which the tree reports; the same
+/// selection again changes nothing.
 #[test]
 fn a_message_that_changes_nothing_sends_nothing() {
     let (mut app, module, _) = app_with_filter();
     listen(&mut app);
+    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+    app.a11y.locating = false;
+    let (_, changes) = app.a11y_changes(&Places::default());
+    assert!(changes.is_some(), "the inspector now shows the module");
+
     let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
     assert!(app.a11y.locating, "the message asked for a rebuild");
     app.a11y.locating = false;
@@ -2317,6 +2324,25 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             "{owner:?}: the knob after Increment"
         );
 
+        // The inspector follows the same rule (rule 24): its Keyboard
+        // shortcuts button, shown while nothing is selected.
+        let shortcuts = crate::inspector::ids::part(&crate::inspector::ids::patch(), "shortcuts");
+        let shortcuts_node = node_of(&mut ui.app, &shortcuts);
+        assert_eq!(
+            node(&update, shortcuts_node).is_hidden(),
+            !open,
+            "{owner:?}: the inspector"
+        );
+        let clicked = ui
+            .app
+            .a11y_action(&request(Action::Click, shortcuts_node, None), std::time::Instant::now());
+        assert_eq!(!clicked.is_empty(), open, "{owner:?}: a Click in the inspector");
+        if open {
+            // The overlay it opened is closed again, so the knob below is
+            // pressed with nothing open.
+            ui.app.overlays.help = None;
+        }
+
         // What the pointer reaches, in the same state. The knob first: a
         // press outside a menu closes it, which would change the state.
         let before = cutoff(&ui);
@@ -2340,4 +2366,313 @@ fn the_tree_follows_the_pointer_under_every_panel() {
         let reached = messages.iter().any(|message| matches!(message, Message::Panic));
         assert_eq!(reached, open, "{owner:?}: a press on Panic");
     }
+    for (owner, mut ui) in with_each_panel() {
+        let open = owner == InputOwner::Canvas;
+        let shortcuts = crate::inspector::ids::part(&crate::inspector::ids::patch(), "shortcuts");
+        let place = ui.places().of(&shortcuts).expect("the inspector's button is drawn");
+        let mut messages = ui.move_to(place.rect.center());
+        messages.extend(ui.press());
+        messages.extend(ui.release());
+        let reached = messages.iter().any(|message| matches!(message, Message::ShowShortcuts));
+        assert_eq!(reached, open, "{owner:?}: a press in the inspector");
+    }
+}
+
+/// The inspector's parts, after the window has drawn the app with
+/// `select` selected: the places the window gives, the tree, and the items.
+fn inspector_of(ui: &mut crate::ui_test::Ui, select: &[u32]) -> (Places, TreeUpdate, Vec<super::items::Item>) {
+    ui.send(Message::Canvas(CanvasEvent::Select(select.to_vec())));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    let items = ui.app.a11y_frames().panel;
+    (places, update, items)
+}
+
+/// Every part the inspector reports has a role, every part but text has a
+/// name, and every part that acts is where the window drew it, inside the
+/// panel. Checked for a module, a sub-patch tile, and the patch itself, so
+/// the items and the view cannot drift apart.
+#[test]
+fn every_inspector_part_is_named_and_placed() {
+    use super::items::Kind;
+    let cases = [
+        ("subtractive.ron", vec![4]),
+        ("subtractive.ron", vec![]),
+        ("nested-subtractive.ron", vec![2]),
+    ];
+    for (patch, select) in cases {
+        let mut ui = crate::ui_test::Ui::open(patch);
+        let (places, update, items) = inspector_of(&mut ui, &select);
+        assert_eq!(items.len(), 1, "{patch} {select:?}: one panel");
+        let panel = &items[0];
+        let panel_place = places
+            .of(&panel.id)
+            .unwrap_or_else(|| panic!("{}: the panel is drawn", panel.id));
+        let panel_node = node(&update, node_of(&mut ui.app, &panel.id));
+        assert!(panel_node.clips_children(), "the panel cuts off what it scrolls away");
+        let mut acting = 0;
+        for item in panel.walk() {
+            let found = node(&update, node_of(&mut ui.app, &item.id));
+            if item.kind == Kind::Text {
+                assert_eq!(found.label(), None, "{}: text says its words as its value", item.id);
+                assert!(found.value().is_some_and(|text| !text.is_empty()), "{}", item.id);
+                continue;
+            }
+            assert!(
+                item.label.as_deref().is_some_and(|name| !name.is_empty()),
+                "{} has a name",
+                item.id
+            );
+            let acts = item.click.is_some()
+                || item.step.0.is_some()
+                || item.step.1.is_some()
+                || item.set_number.is_some()
+                || item.set_text.is_some()
+                || item.focus.is_some();
+            if !acts {
+                continue;
+            }
+            acting += 1;
+            let place = places
+                .of(&item.id)
+                .unwrap_or_else(|| panic!("the window drew no `{}`", item.id));
+            assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{}", item.id);
+            assert!(found.bounds().is_some(), "{} has bounds", item.id);
+            assert!(
+                place.rect.x >= panel_place.rect.x - 0.5
+                    && place.rect.x + place.rect.width <= panel_place.rect.x + panel_place.rect.width + 0.5,
+                "{} lies in the panel",
+                item.id
+            );
+        }
+        assert!(acting > 0, "{patch} {select:?}: something acts");
+    }
+}
+
+/// A slider in the inspector reports the parameter's own value and range,
+/// with the value and unit the row shows as its description. Increment
+/// moves one of its own arrow-key steps, and screen reader steps on it in
+/// quick turn are one undo step.
+#[test]
+fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
+    use super::items::Kind;
+    let (app, module, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let (_, update, items) = inspector_of(&mut ui, &[module]);
+    let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+    let slider_id = crate::inspector::ids::part(&row, "value");
+    let slider = super::items::find(&items, &slider_id).expect("the cutoff row has a slider");
+    assert_eq!(slider.kind, Kind::Slider);
+    let found = node(&update, node_of(&mut ui.app, &slider_id));
+    assert_eq!(found.role(), Role::Slider);
+    let spec = ui.app.control_target(module, 0, ControlPart::Main).unwrap().spec;
+    assert_eq!(found.min_numeric_value(), Some(f64::from(spec.min)));
+    assert_eq!(found.max_numeric_value(), Some(f64::from(spec.max)));
+    assert!(
+        found.description().is_some_and(|text| text.contains("Hz")),
+        "{:?}",
+        found.description()
+    );
+    assert!(found.supports_action(Action::Increment) && found.supports_action(Action::SetValue));
+    assert!(
+        !found.supports_action(Action::Focus),
+        "only text fields take focus (rule 22)"
+    );
+
+    let index = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(ModuleId(module))
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    let position = |app: &App| {
+        let node = app.session.controller.graph().node(ModuleId(module)).unwrap();
+        spec.normalize(node.params[index])
+    };
+    let steps = ui.app.session.edits.history.len();
+    let before = position(&ui.app);
+    let node_id = node_of(&mut ui.app, &slider_id);
+    let at = std::time::Instant::now();
+    let _ = ui.app.a11y_action(&request(Action::Increment, node_id, None), at);
+    let _ = ui.app.a11y_action(&request(Action::Increment, node_id, None), at);
+    let step = crate::param::slider_step(&spec);
+    assert!(
+        (position(&ui.app) - (before + 2.0 * step)).abs() < 1e-5,
+        "two of the slider's own steps"
+    );
+    ui.app.reader_event(crate::edits::ReaderEvent::Close);
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
+
+    // SetValue in the parameter's own units.
+    let _ = ui.app.a11y_action(
+        &request(Action::SetValue, node_id, Some(ActionData::NumericValue(1000.0))),
+        at,
+    );
+    let value = ui.app.session.controller.graph().node(ModuleId(module)).unwrap().params[index];
+    assert!((value - 1000.0).abs() < 1.0, "{value}");
+}
+
+/// A row's value field takes text as typing and Enter would, offers Focus,
+/// and is reported as focused while it has keyboard focus.
+#[test]
+fn an_inspector_field_takes_text_and_focus() {
+    let (app, module, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let (_, update, _) = inspector_of(&mut ui, &[module]);
+    let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+    let field_id = crate::inspector::ids::part(&row, "field");
+    let field = node_of(&mut ui.app, &field_id);
+    let found = node(&update, field);
+    assert_eq!(found.role(), Role::TextInput);
+    assert!(found.label().is_some_and(|name| name.contains("value")));
+    assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
+
+    let at = std::time::Instant::now();
+    let tasks = ui.app.a11y_action(
+        &request(Action::SetValue, field, Some(ActionData::Value("640".into()))),
+        at,
+    );
+    for task in tasks {
+        let _ = ui.run_task(task);
+    }
+    let index = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(ModuleId(module))
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    let value = ui.app.session.controller.graph().node(ModuleId(module)).unwrap().params[index];
+    assert!((value - 640.0).abs() < 0.5, "{value}");
+
+    // Focus moves keyboard focus to the field, and the tree says so.
+    let tasks = ui.app.a11y_action(&request(Action::Focus, field, None), at);
+    assert_eq!(tasks.len(), 1, "one focus request");
+    for task in tasks {
+        let _ = ui.run_task(task);
+    }
+    assert_eq!(ui.focused_field(), Some(crate::controls::value_field_id(module, index)));
+    let places = ui.places();
+    assert_eq!(ui.app.a11y_tree(&places).focus, field);
+}
+
+/// A row whose choices are shown at once is a set of options, one chosen,
+/// and a Click on another option chooses it.
+#[test]
+fn an_inspector_option_click_chooses_it() {
+    use super::items::Kind;
+    let app = app_with_every_widget();
+    let modules: Vec<u32> = app.ui_snapshot().tiles.iter().map(|tile| tile.id).collect();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    // The first module whose inspector shows a choice as options.
+    let (module, options) = modules
+        .into_iter()
+        .find_map(|module| {
+            let (_, _, items) = inspector_of(&mut ui, &[module]);
+            let options = items
+                .first()?
+                .walk()
+                .into_iter()
+                .find(|item| item.kind == Kind::Options)?
+                .clone();
+            Some((module, options))
+        })
+        .expect("a module shows a choice as options");
+    let (_, update, _) = inspector_of(&mut ui, &[module]);
+    assert_eq!(
+        node(&update, node_of(&mut ui.app, &options.id)).role(),
+        Role::RadioGroup
+    );
+    let chosen = options.children.iter().filter(|o| o.on == Some(true)).count();
+    assert_eq!(chosen, 1);
+    let other = options
+        .children
+        .iter()
+        .find(|o| o.on == Some(false))
+        .expect("another option")
+        .clone();
+    let target = node_of(&mut ui.app, &other.id);
+    assert_eq!(node(&update, target).role(), Role::RadioButton);
+    let _ = ui
+        .app
+        .a11y_action(&request(Action::Click, target, None), std::time::Instant::now());
+    let (_, update, _) = inspector_of(&mut ui, &[module]);
+    assert_eq!(node(&update, target).toggled(), Some(accesskit::Toggled::True));
+}
+
+/// An inspector row keeps its node ID while other modules come and go, and
+/// the table forgets the rows of a module no longer shown (ui-layer.md,
+/// section 4, rule 4).
+#[test]
+fn inspector_node_ids_survive_other_modules_and_are_dropped_when_gone() {
+    let (app, module, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+    let _ = inspector_of(&mut ui, &[module]);
+    let number = ui.app.a11y.ids.number(&row);
+
+    let other = ui.app.session.controller.add_module("loom.filter.svf").unwrap().0;
+    ui.app.commit();
+    let _ = inspector_of(&mut ui, &[module]);
+    assert_eq!(ui.app.a11y.ids.number(&row), number, "another module came");
+    let _ = ui.app.session.controller.remove_module(ModuleId(other));
+    ui.app.commit();
+    let _ = inspector_of(&mut ui, &[module]);
+    assert_eq!(ui.app.a11y.ids.number(&row), number, "and went");
+
+    // Nothing selected: the rows are gone from the table. Asking for the
+    // row's number above marked it as seen once more, so the first build
+    // keeps it and the next drops it.
+    let _ = inspector_of(&mut ui, &[]);
+    let _ = inspector_of(&mut ui, &[]);
+    assert_eq!(ui.app.a11y.ids.id(number), None);
+}
+
+/// An exposed parameter on a sub-patch tile and the inner module's own row
+/// for it have different UI IDs, and `locate` finds each where the window
+/// drew it.
+#[test]
+fn an_exposed_row_and_the_inner_row_differ_and_are_both_found() {
+    let mut ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    let (places, _, items) = inspector_of(&mut ui, &[2]);
+    let exposed = crate::inspector::ids::row(2, crate::inspector::ids::Kind::Exposed, "cutoff");
+    assert!(
+        super::items::find(&items, &exposed).is_some(),
+        "the tile shows its exposed Cutoff"
+    );
+    let found = crate::control::Found {
+        canvas: places.canvas,
+        text: None,
+        places: places.clone(),
+    };
+    let at = crate::control::locate(&ui.app, &exposed.to_string(), &found).expect("found");
+    assert!(at.width > 0.0);
+
+    // Inside the sub-patch, the inner filter's own row.
+    let inner = items[0]
+        .walk()
+        .into_iter()
+        .find_map(|item| match &item.set_number {
+            Some(super::items::SetNumber::Param { module, .. }) if item.id.is_under(&exposed) => Some(*module),
+            _ => None,
+        })
+        .expect("the exposed row edits an inner module");
+    ui.send(Message::OpenTile(2));
+    let (places, _, items) = inspector_of(&mut ui, &[inner]);
+    let own = crate::inspector::ids::row(inner, crate::inspector::ids::Kind::Param, "cutoff");
+    assert_ne!(own, exposed);
+    assert!(super::items::find(&items, &own).is_some(), "the inner module's own row");
+    let found = crate::control::Found {
+        canvas: places.canvas,
+        text: None,
+        places,
+    };
+    let at = crate::control::locate(&ui.app, &own.to_string(), &found).expect("found");
+    assert!(at.width > 0.0);
 }

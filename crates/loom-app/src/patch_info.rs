@@ -19,7 +19,7 @@ use serde::Serialize;
 /// The tag field's widget ID, so a test or a script can find it.
 pub const TAG_INPUT: &str = "patch-info-tag";
 /// The Authors box.
-const AUTHORS_INPUT: &str = "patch-info-authors";
+pub(crate) const AUTHORS_INPUT: &str = "patch-info-authors";
 /// The form's text fields, in the order Tab moves between them.
 pub(crate) const TEXT_FIELDS: [&str; 2] = [AUTHORS_INPUT, TAG_INPUT];
 
@@ -175,11 +175,17 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'
     let msg = crate::Message::PatchInfo;
     let label = |s: &'static str| text(s).size(style::BODY).color(DIM);
     let mut chips: Vec<Element<'a, crate::Message>> = Vec::new();
+    let panel = crate::inspector::ids::patch();
+    let part = |name| crate::inspector::ids::part(&panel, name);
     for (index, tag) in rows.tags.into_iter().enumerate() {
+        let key = part("tag").with(tag.as_str());
         let chip = container(
             row![
                 text(tag.clone()).size(style::SMALL),
-                remove_button(format!("Remove tag {tag}"), msg(Message::RemoveTag(index)))
+                crate::inspector::ids::named(
+                    &crate::inspector::ids::part(&key, "remove"),
+                    remove_button(format!("Remove tag {tag}"), msg(Message::RemoveTag(index)))
+                )
             ]
             .spacing(2)
             .align_y(iced::Alignment::Center),
@@ -197,19 +203,25 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'
     let mut column = column![
         text(rows.name).size(style::HEADING),
         label("Authors, one per line"),
-        text_editor(authors)
-            .id(AUTHORS_INPUT)
-            .placeholder("Your name")
-            .on_action(move |action| msg(Message::Authors(action)))
-            .size(style::CONTROL)
-            .height(Length::Shrink),
+        crate::inspector::ids::named(
+            &part("authors"),
+            text_editor(authors)
+                .id(AUTHORS_INPUT)
+                .placeholder("Your name")
+                .on_action(move |action| msg(Message::Authors(action)))
+                .size(style::CONTROL)
+                .height(Length::Shrink)
+        ),
         label("Tags"),
         tags,
-        text_input("Type a tag, then Enter or comma", &rows.tag_draft)
-            .id(TAG_INPUT)
-            .on_input(move |value| msg(Message::TagDraft(value)))
-            .on_submit(msg(Message::TagSubmit))
-            .size(style::CONTROL),
+        crate::inspector::ids::named(
+            &part("tags"),
+            text_input("Type a tag, then Enter or comma", &rows.tag_draft)
+                .id(TAG_INPUT)
+                .on_input(move |value| msg(Message::TagDraft(value)))
+                .on_submit(msg(Message::TagSubmit))
+                .size(style::CONTROL)
+        ),
     ]
     .spacing(6);
     if let Some(note) = rows.tag_note {
@@ -218,7 +230,10 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'
     column = column.push(label("Licence")).push(
         row![
             text(rows.licence).size(style::CONTROL).width(Length::Fill),
-            button(text("Choose").size(style::CONTROL)).on_press(msg(Message::ChooseLicence)),
+            crate::inspector::ids::named(
+                &part("choose_licence"),
+                button(text("Choose").size(style::CONTROL)).on_press(msg(Message::ChooseLicence))
+            ),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center),

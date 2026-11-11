@@ -18,6 +18,7 @@ use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, Module
 use loom_ui_core::UiId;
 use serde::Serialize;
 
+pub(crate) mod access;
 pub(crate) mod ids;
 
 /// What the inspector's controls send. The control channel sends the two that
@@ -298,6 +299,10 @@ pub struct ParamRow {
     /// `None` at the top level, which has no surface.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exposure: Option<ExposureRow>,
+    /// The parameter as this row's control maps it: the module's selected
+    /// range, or the range an enclosing surface exposes.
+    #[serde(skip)]
+    pub spec: ParamSpec,
     /// The row's UI ID, from what it shows: the tile, the kind of item,
     /// and its name (`ids.rs`). The view names the row's parts by it, and
     /// the accessibility tree gives the same ID to its nodes.
@@ -680,6 +685,7 @@ impl App {
                 bound.clone().next().is_none() || bound.into_iter().any(|w| w.kind.takes_modulation())
             },
             exposure,
+            spec: *spec,
             ui: ids::row(id, ids::Kind::Param, spec.name),
         })
     }
@@ -1122,6 +1128,18 @@ pub fn view<'a>(
     drop_row: Option<(u32, usize)>,
     dragging: bool,
 ) -> Element<'a, AppMessage> {
+    // The content's container is named by what it shows, so the window
+    // says where the panel is (`places.rs`).
+    let panel = match &model {
+        Inspector::Patch(_) => Some(ids::patch()),
+        Inspector::Several(_) => Some(UiId::panel("inspector").with("several")),
+        Inspector::Empty => None,
+        Inspector::Unknown(m) => Some(ids::panel(m.id)),
+        Inspector::Module(m) => Some(ids::panel(m.id)),
+        Inspector::SubPatch(s) => Some(ids::panel(s.id)),
+        Inspector::Slot(s) => Some(ids::panel(s.id)),
+        Inspector::Port(p) => Some(ids::panel(p.id)),
+    };
     let content: Element<'a, AppMessage> = match model {
         // Short, with the full list one click away (visual-system.md).
         Inspector::Patch(rows) => column![
@@ -1129,7 +1147,10 @@ pub fn view<'a>(
             iced::widget::rule::horizontal(1),
             text("Select a module to edit it.").size(style::BODY).color(DIM),
             text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
-            button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(AppMessage::ShowShortcuts),
+            ids::named(
+                &ids::part(&ids::patch(), "shortcuts"),
+                button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(AppMessage::ShowShortcuts)
+            ),
         ]
         .spacing(8)
         .into(),
@@ -1142,22 +1163,31 @@ pub fn view<'a>(
                 text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(style::BODY),
                 text("Label").size(style::BODY),
                 row![
-                    text_input("Label", &m.label)
-                        .on_input(move |value| AppMessage::Inspector(Message::UnknownLabelDraft { module: id, value }))
-                        .on_submit(AppMessage::Inspector(Message::UnknownLabelApply { module: id })),
-                    button("Apply").on_press(AppMessage::Inspector(Message::UnknownLabelApply { module: id })),
+                    ids::named(
+                        &ids::part(&ids::panel(id), "label"),
+                        text_input("Label", &m.label)
+                            .id(ids::field(&ids::part(&ids::panel(id), "label")))
+                            .on_input(move |value| AppMessage::Inspector(Message::UnknownLabelDraft { module: id, value }))
+                            .on_submit(AppMessage::Inspector(Message::UnknownLabelApply { module: id }))
+                    ),
+                    ids::named(
+                        &ids::part(&ids::panel(id), "apply"),
+                        button("Apply").on_press(AppMessage::Inspector(Message::UnknownLabelApply { module: id }))
+                    ),
                 ].spacing(6),
             ].spacing(6);
             for (name, value) in m.params {
                 rows = rows.push(text(format!("{name}: {value}")).size(style::BODY));
             }
             for link in m.links {
-                let (label, message) = match link {
-                    UnknownLink::Assignment { id, text } => (
+                let (key, label, message) = match link {
+                    UnknownLink::Assignment { id: link, text } => (
+                        ids::part(&ids::panel(id), "link/assignment").with(link),
                         text,
-                        AppMessage::Modulation(crate::modulation::Message::Unassign(AssignmentId(id))),
+                        AppMessage::Modulation(crate::modulation::Message::Unassign(AssignmentId(link))),
                     ),
                     UnknownLink::Midi { index, text } => (
+                        ids::part(&ids::panel(id), "link/midi").with(index as u32),
                         text,
                         AppMessage::Learn(crate::learn::Message::Unmap { module: m.id, index }),
                     ),
@@ -1166,7 +1196,7 @@ pub fn view<'a>(
                     row![
                         text(label).size(style::SMALL),
                         space::horizontal(),
-                        remove_button("Remove link", message)
+                        ids::named(&ids::part(&key, "remove"), remove_button("Remove link", message))
                     ]
                     .align_y(iced::Alignment::Center),
                 );
@@ -1178,10 +1208,15 @@ pub fn view<'a>(
             let id = s.id;
             // The name is edited in place, as a placeholder's label is, and
             // applied with Enter (sub-patches.md, Editor model).
+            let name = ids::part(&ids::panel(id), "name");
             let mut rows = column![
-                text_input("Sub-patch name", &s.name)
-                    .on_input(move |value| AppMessage::Inspector(Message::SubPatchNameDraft { module: id, value }))
-                    .on_submit(AppMessage::Inspector(Message::SubPatchNameApply { module: id })),
+                ids::named(
+                    &name,
+                    text_input("Sub-patch name", &s.name)
+                        .id(ids::field(&name))
+                        .on_input(move |value| AppMessage::Inspector(Message::SubPatchNameDraft { module: id, value }))
+                        .on_submit(AppMessage::Inspector(Message::SubPatchNameApply { module: id }))
+                ),
                 text("Sub-patch").size(style::BODY).color(DIM),
             ]
             .spacing(6);
@@ -1190,7 +1225,10 @@ pub fn view<'a>(
                     rows = rows.push(text(format!("{label}: {}", ports.join(", "))).size(style::BODY));
                 }
             }
-            rows = rows.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(id)));
+            rows = rows.push(ids::named(
+                &ids::part(&ids::panel(id), "open"),
+                button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(id)),
+            ));
             rows = mode_rows(rows, &s);
             if s.params.is_empty() {
                 rows = rows.push(
@@ -1225,14 +1263,17 @@ pub fn view<'a>(
             rows = rows.push(
                 row![
                     text("Part").size(style::BODY),
-                    pick_list(choices, current, move |choice: crate::slots::SwapChoice| {
-                        AppMessage::SwapSlot {
-                            slot: id,
-                            to: choice.to,
-                        }
-                    })
-                    .placeholder(crate::slots::NO_PART)
-                    .text_size(style::CONTROL),
+                    ids::named(
+                        &ids::part(&ids::panel(id), "part"),
+                        pick_list(choices, current, move |choice: crate::slots::SwapChoice| {
+                            AppMessage::SwapSlot {
+                                slot: id,
+                                to: choice.to,
+                            }
+                        })
+                        .placeholder(crate::slots::NO_PART)
+                        .text_size(style::CONTROL)
+                    ),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
@@ -1250,7 +1291,10 @@ pub fn view<'a>(
                     rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
                 }
             }
-            rows = rows.push(button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)));
+            rows = rows.push(ids::named(
+                &ids::part(&ids::panel(id), "dissolve"),
+                button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)),
+            ));
             rows.into()
         }
         Inspector::Port(p) => column![
@@ -1261,8 +1305,12 @@ pub fn view<'a>(
         .spacing(6)
         .into(),
     };
+    let content = match &panel {
+        Some(panel) => container(content).id(crate::places::widget_id(panel)),
+        None => container(content),
+    };
     // The scrollbar takes its own space, so it never covers a value.
-    container(scrollable(container(content).padding(12)).spacing(4))
+    container(scrollable(content.padding(12)).spacing(4))
         .width(280)
         .height(Length::Fill)
         .into()
@@ -1298,7 +1346,7 @@ fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool
         items = items.push(param_row_view(id, label, p, None, drop_row, dragging));
     }
     if !m.drives.is_empty() {
-        items = items.push(drives_view(m.drives));
+        items = items.push(drives_view(m.drives, &panel));
     }
     // One line per port, its description in hover text.
     let mut direction = "";
@@ -1576,8 +1624,9 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
     } else {
         let (low, high) = (row_data.low, row_data.high);
         let bad = row_data.range_error.is_some();
-        let field = |shown: &str| {
+        let field = |shown: &str, part: &'static str| {
             text_input("", shown)
+                .id(ids::field(&ids::part(ui, part)))
                 .on_submit(AppMessage::Learn(crate::learn::Message::MidiRangeSubmit {
                     module,
                     index,
@@ -1595,7 +1644,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
                 })
         };
         let high_text = high.clone();
-        let low_field = field(&low).on_input(move |text| {
+        let low_field = field(&low, "midi/low").on_input(move |text| {
             AppMessage::Learn(crate::learn::Message::MidiRangeText {
                 module,
                 index,
@@ -1604,7 +1653,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
             })
         });
         let low_text = low.clone();
-        let high_field = field(&high).on_input(move |text| {
+        let high_field = field(&high, "midi/high").on_input(move |text| {
             AppMessage::Learn(crate::learn::Message::MidiRangeText {
                 module,
                 index,
@@ -1985,22 +2034,30 @@ fn modulation_view<'a>(
 }
 
 /// **Drives**: one group per output. A line selects its target.
-fn drives_view<'a>(drives: Vec<DrivesGroup>) -> Element<'a, AppMessage> {
+fn drives_view<'a>(drives: Vec<DrivesGroup>, panel: &UiId) -> Element<'a, AppMessage> {
     let mut list = column![text("Drives").size(style::CONTROL)].spacing(4);
     for group in drives {
         list = list.push(text(group.output).size(style::SMALL).color(DIM));
-        for line in group.lines {
+        for (n, line) in group.lines.into_iter().enumerate() {
             let label = text(line.text).size(style::SMALL);
+            // Keyed by the output and the line's place under it.
+            let id = ids::part(panel, "drives").with(group.output).with(n as u32);
             list = list.push(
-                button(if line.enabled { label } else { label.color(DIM) })
-                    .width(Length::Fill)
-                    .padding([2, 8])
-                    .style(style::plain)
-                    .on_press(AppMessage::Inspector(Message::SelectModule(line.target))),
+                container(
+                    button(if line.enabled { label } else { label.color(DIM) })
+                        .width(Length::Fill)
+                        .padding([2, 8])
+                        .style(style::plain)
+                        .on_press(AppMessage::Inspector(Message::SelectModule(line.target))),
+                )
+                .id(crate::places::widget_id(&id))
+                .width(Length::Fill),
             );
         }
     }
-    list.into()
+    container(list)
+        .id(crate::places::widget_id(&ids::part(panel, "drives")))
+        .into()
 }
 
 /// The value of parameter `index` of `module`, or 0 when it is gone.
@@ -2061,17 +2118,21 @@ fn mode_rows<'a>(
 ) -> iced::widget::Column<'a, AppMessage> {
     use crate::modes::Message as ModeMessage;
     let id = s.id;
+    let panel = ids::panel(id);
     let choices: Vec<ModeChoice> = loom_patch::Mode::ALL.into_iter().map(ModeChoice).collect();
     rows = rows.push(
         row![
             text("Mode").size(style::BODY),
-            pick_list(choices, Some(ModeChoice(s.mode)), move |choice: ModeChoice| {
-                AppMessage::Mode(ModeMessage::SetMode {
-                    tile: id,
-                    mode: choice.0,
+            ids::named(
+                &ids::part(&panel, "mode"),
+                pick_list(choices, Some(ModeChoice(s.mode)), move |choice: ModeChoice| {
+                    AppMessage::Mode(ModeMessage::SetMode {
+                        tile: id,
+                        mode: choice.0,
+                    })
                 })
-            })
-            .text_size(style::CONTROL),
+                .text_size(style::CONTROL)
+            ),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center),
@@ -2081,50 +2142,66 @@ fn mode_rows<'a>(
         let last = s.members.len().saturating_sub(1);
         for (n, member) in s.members.iter().enumerate() {
             let m = member.id;
+            let key = ids::part(&panel, "member").with(m);
             let mut line = row![text(format!("{}. {}", n + 1, member.name)).size(style::BODY)]
                 .spacing(6)
                 .align_y(iced::Alignment::Center);
-            line = line.push(button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(m)));
+            line = line.push(ids::named(
+                &ids::part(&key, "open"),
+                button(text("Open").size(style::CONTROL)).on_press(AppMessage::OpenTile(m)),
+            ));
             let up = button(text("Up").size(style::CONTROL));
-            line = line.push(if n > 0 {
-                up.on_press(AppMessage::Mode(ModeMessage::MoveMember { member: m, up: true }))
-            } else {
-                up
-            });
+            line = line.push(ids::named(
+                &ids::part(&key, "up"),
+                if n > 0 {
+                    up.on_press(AppMessage::Mode(ModeMessage::MoveMember { member: m, up: true }))
+                } else {
+                    up
+                },
+            ));
             let down = button(text("Down").size(style::CONTROL));
-            line = line.push(if n < last {
-                down.on_press(AppMessage::Mode(ModeMessage::MoveMember { member: m, up: false }))
-            } else {
-                down
-            });
-            line = line.push(
+            line = line.push(ids::named(
+                &ids::part(&key, "down"),
+                if n < last {
+                    down.on_press(AppMessage::Mode(ModeMessage::MoveMember { member: m, up: false }))
+                } else {
+                    down
+                },
+            ));
+            line = line.push(ids::named(
+                &ids::part(&key, "remove"),
                 button(text("Remove").size(style::CONTROL)).on_press(AppMessage::Mode(ModeMessage::RemoveMember(m))),
-            );
-            rows = rows.push(line);
+            ));
+            rows = rows.push(ids::named(&key, line));
         }
-        rows = rows.push(
+        rows = rows.push(ids::named(
+            &ids::part(&panel, "add_member"),
             button(text("Add member").size(style::CONTROL)).on_press(AppMessage::Mode(ModeMessage::AddMember(id))),
-        );
+        ));
     }
     if s.mode == loom_patch::Mode::Stack {
         let counts: Vec<u32> = (1..=loom_patch::MOST_MEMBERS as u32).collect();
         rows = rows.push(
             row![
                 text("Copies").size(style::BODY),
-                pick_list(counts, Some(s.copies), move |copies| {
-                    AppMessage::Mode(ModeMessage::SetCopies { tile: id, copies })
-                })
-                .text_size(style::CONTROL),
+                ids::named(
+                    &ids::part(&panel, "copies"),
+                    pick_list(counts, Some(s.copies), move |copies| {
+                        AppMessage::Mode(ModeMessage::SetCopies { tile: id, copies })
+                    })
+                    .text_size(style::CONTROL)
+                ),
             ]
             .spacing(8)
             .align_y(iced::Alignment::Center),
         );
-        rows = rows.push(
+        rows = rows.push(ids::named(
+            &ids::part(&panel, "stereo_spread"),
             checkbox(s.stereo_spread)
                 .label("Stereo spread")
                 .on_toggle(move |on| AppMessage::Mode(ModeMessage::SetStereoSpread { tile: id, on }))
                 .text_size(style::BODY),
-        );
+        ));
         if !s.spread.is_empty() {
             rows = rows.push(text("Spread").size(style::BODY).color(DIM));
         }
@@ -2133,15 +2210,21 @@ fn mode_rows<'a>(
             rows = rows.push(
                 row![
                     text(spread.name.clone()).size(style::BODY),
-                    slider(0.0..=1.0, spread.amount, move |amount| {
-                        AppMessage::Mode(ModeMessage::SetSpread {
-                            tile: id,
-                            name: name.clone(),
-                            amount,
+                    container(
+                        slider(0.0..=1.0, spread.amount, move |amount| {
+                            AppMessage::Mode(ModeMessage::SetSpread {
+                                tile: id,
+                                name: name.clone(),
+                                amount,
+                            })
                         })
-                    })
-                    .step(0.01_f32)
-                    .on_release(AppMessage::SliderReleased),
+                        .step(0.01_f32)
+                        .on_release(AppMessage::SliderReleased)
+                    )
+                    .id(crate::places::widget_id(
+                        &ids::part(&panel, "spread").with(spread.name.as_str())
+                    ))
+                    .width(Length::Fill),
                     text(format!("{:.0}%", spread.amount * 100.0)).size(style::BODY),
                 ]
                 .spacing(8)

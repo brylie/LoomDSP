@@ -59,6 +59,19 @@ pub(crate) fn assignment(row: &UiId, id: u32) -> UiId {
     row.clone().with("assignment").with(id)
 }
 
+/// The UI ID of the patch's own inspector, shown while nothing is
+/// selected.
+pub(crate) fn patch() -> UiId {
+    UiId::panel("inspector").with("patch")
+}
+
+/// The widget ID of a text field whose part is named `id`. It differs from
+/// the container's, so a focus request finds the field and the window's
+/// walk finds the container.
+pub(crate) fn field(id: &UiId) -> iced::advanced::widget::Id {
+    iced::advanced::widget::Id::from(format!("{id}/text"))
+}
+
 /// `content` in a container named `id`, so the window can say where it is.
 /// The container adds no padding and takes its content's size, so it
 /// moves nothing.
