@@ -730,6 +730,18 @@ impl crate::App {
             // nothing (ui-layer.md, section 7, rules 9 and 20).
             if let Some(control) = actions::focus_target(&snapshot, &ids, &self.a11y.ids, request) {
                 self.a11y.focus_request = (self.a11y.focus_request.0 + 1, Some(control));
+                // The keys go with the focus, by the path a press on the
+                // canvas takes: the matrix lets go of them, and a text
+                // field that has them closes, leaving its draft as a press
+                // leaves it (dropped, unsubmitted). A press closes the
+                // field itself; with no press, the app closes it, then
+                // reads focus back as after a press.
+                self.canvas_event(loom_canvas::CanvasEvent::PointerDown);
+                if self.text_focus.any {
+                    return vec![
+                        crate::editing::unfocus_text_fields().chain(Task::done(crate::Message::TextFocusCheck)),
+                    ];
+                }
             }
             return Vec::new();
         }

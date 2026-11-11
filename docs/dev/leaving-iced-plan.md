@@ -164,7 +164,7 @@ The spike found two gaps in `accesskit_macos` 0.27.2:
 - it never sets the accessibility label from the node's name, so VoiceOver does not read a slider's name;
 - it has no spoken value description beside a numeric value, so a slider can either be stepped or say its unit, not both.
 
-1. Write each gap as a minimal reproduction: a small example program that shows the problem with VoiceOver, with no LoomDSP code.
+1. Write each gap as a minimal reproduction: a small example program that shows the problem with VoiceOver, with no LoomDSP code. **Done:** `examples/accesskit-macos-repro/`, a crate outside the workspace on `winit` and `accesskit_winit`, with two programs, a script that reads the accessibility attributes, and the two issue reports as drafts. Both gaps were confirmed in the source of 0.27.2 and of AccessKit's `main` ([research note](../research/2026-11-accesskit-macos-gaps.md)). What VoiceOver says still needs a listening check with the reproduction.
 2. Ask the maintainer before filing anything upstream. Filing an issue or a pull request with AccessKit is an outward action.
 3. Once approved, propose the fix upstream. AccessKit is a dependency accepted under ADR-0006, so reading and patching its source is allowed.
 4. If LoomDSP needs the fix before a release, use a `[patch.crates-io]` entry that points at a fork on a pinned commit. Allow that source in `deny.toml` with a comment linking the upstream pull request. Remove the patch as soon as a release contains the fix.
@@ -179,23 +179,35 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
 ### 2.1 Our own runtime
 
-1. Create the runtime in `crates/loom-ui`, generic over the app and the driver ([UI layer spec](../design/ui-layer.md), section 2, rule 9). The code that links it to Iced during phases 2 and 3 goes in `crates/loom-app/src/iced_bridge/` (spec section 1, rule 6). The runtime owns:
-   - the message queue;
-   - `fn handle(&mut self, event: Event) -> ...`: our own event enum covering window, pointer, keyboard, IME, redraw, and wake-ups;
-   - a redraw after every batch of messages, or another way to apply a request that arrives with no other event. A screen reader's Focus action reaches the canvas as a request that the canvas applies when it next draws ([UI layer spec](../design/ui-layer.md), section 7, rule 20). Phase 1 relies on Iced drawing the window after each batch, and our runtime must give the same guarantee;
-   - effects, which replace `Task`: widget operations (focus a field, scroll to), clipboard read and write, exit, file dialogs, timers, window commands. Each is an enum variant, not a future, so the headless harness can see and run each one or panic on it.
-2. Port `App::update` to return `Effects` instead of `Task<Message>`. Do it file by file, behind an adapter that turns effects into Iced tasks, so the app keeps running on `iced::application` until 2.2 lands.
+1. **Done (2.1a):** the runtime in `crates/loom-ui`, generic over the app and the routing target, with the driver as a trait ([UI layer spec](../design/ui-layer.md), section 2, rule 9). Built from LoomDSP's own needs, not from Iced's shapes (section 2's decisions). It has:
+   - `DriverEvent`: an element event with the pointer beside it, a window event (resize, scale factor, focus, close request, dropped file), a system redraw request, an animation frame, a frame shown, a wake-up, and a deadline reached. Element events stay `loom-ui-core`'s `Event`;
+   - `Runtime::handle(event, now, driver) -> Next`: the message queue, one `update` per message with its effects right after it, messages from effects on the next turn, and `Next` (run again, frames, a deadline, or sleep);
+   - `Effects` as plain values, each named, carried out by the runtime, the routing `Target`, or the `Driver` (section 2's effects table), and `Context` for `update` (the time, a waker, the focus, the window);
+   - the redraw guarantee: a turn draws when a panel model changed, the target asks, an effect asks, or the system asks (section 2, rule 10). A request with no model change, such as a screen reader's Focus action on the canvas, asks with the draw-again effect. Not "a redraw after every batch": the bridge's target gives that for the Iced views until they move;
+   - `Waker` and deadlines from state (`App::next_deadline`), so the loop sleeps until something is due;
+   - `headless::Headless` and `headless::Harness`: a driver that keeps everything in memory, runs work inline and in order, and panics naming any dialog, question, or capture the test did not answer. Step 2.3's `Ui` stands on it;
+   - `examples/countdown.rs`, a terminal driver with no window, and `tests/purity.rs` (only `loom-ui-core`, no window toolkit named, no clock read).
+   The phase 2 acceptance criteria on effects are ticked at step 2.3, when the app's `Ui` harness runs on this driver. The tests that already hold them: `headless/tests.rs` (`a_file_dialog_with_no_answer_panics_naming_it` and the two beside it), `runtime/tests.rs` (`one_message_gives_one_update_and_effect_messages_wait`, `work_runs_inline_and_its_messages_arrive_in_order`).
+2. Port `App::update` to return `Effects` instead of `Task<Message>`. Do it file by file, behind an adapter in `crates/loom-app/src/iced_bridge/` that turns effects into Iced tasks, so the app keeps running on `iced::application` until 2.2 lands. Waits for step 1.4, which changes the same files. Work in it:
+   - **Dialogs take two turns.** `files.rs` and `recovery.rs` block inside `update` today. The app must now hold what waits on the answer: the unsaved changes when the window closes, and the crash recovery choice at start.
+   - **The four `Task::done` call sites** go, each by its own reason. None queues on purpose to run after a commit or after the view changed: `browser.rs` 525 and `patches.rs` 237 are the test-only inline readers, which become work effects that the headless driver runs inline; `a11y/macos.rs` 98 answers "no window" and goes with that file at step 2.2; `control/run.rs` 72 answers "no window" for a screenshot and becomes the capture effect.
+   - **The focus query** (`Message::TextFocus`) becomes a read of `cx.focused()` in the same turn. **Paste** becomes the clipboard read effect, still one turn later.
+   - **Frames stop running `update`.** `LiveFrame` today calls `scene::update_live_values` (`lib.rs` 1750), which copies live modulated values into the canvas's values, and checks the audio input. With frames that run no update, that copy moves to a draw-time read of the live value table (section 3, rule 7). Until then, a deadline at display rate that runs only while the app is `animating` keeps the meters and live positions moving. Decide which with the step, and write it in the spec.
 3. Port subscriptions to event sources that wake the loop:
-   - the control channel listener, the MIDI learn watcher, the input watcher, and audio watch send messages through a waker the driver gives (an `EventLoopProxy` in the `winit` shell);
-   - timers (frame meter, alerts, autosave) become deadlines the runtime returns, which the `winit` shell waits on with `ControlFlow::WaitUntil`.
+   - the control channel listener, the MIDI learn watcher, the input watcher, audio watch, and the telemetry monitor become watchers that take a `Waker` from `update`'s context. The app holds each watcher's handle in its state, and dropping the handle stops it without blocking (section 2, rule 7). **Done in the runtime:** the `Waker` and its wake function. The app side waits for item 2;
+   - timers (frame meter, alerts, autosave) become deadlines the app returns from `next_deadline`, which the `winit` shell waits on with `ControlFlow::WaitUntil`. **Done in the runtime;** the app side waits for item 2;
+   - `ControlFrame` becomes the after-draw effect, and `Frame` (measuring) and `LiveFrame` become `animating`.
 
    While nothing is due, the loop sleeps (NFR-PERF-04, control channel rule 7).
+
+   **Not met at today's baseline:** phase 2's idle criterion asks for no redraws in 10 idle seconds. On `main` at `085f217a`, `--measure-idle` on `subtractive.ron` draws 266 frames, 263 of them for meter messages that arrive while nothing plays. That is section 3, rule 7's work (live values outside `update`), not this step's.
 
 ### 2.2 The winit shell
 
 1. Replace `iced::application` in `lib.rs::run` with a `winit` 0.30 `ApplicationHandler` that:
    - creates the window hidden;
    - creates the AccessKit adapter through `accesskit_winit` (all three platforms), then shows the window. This fixes the spike's attach order;
+   - decides first how the Linux adapter comes in. With its default features, `accesskit_winit` brings `accesskit_unix` and a D-Bus stack that fails `cargo deny check` on three "unmaintained" advisories; without that feature the check passes, and Linux has no screen reader support ([research note](../research/2026-11-accesskit-macos-gaps.md#what-accesskit_winit-brings)). Either add ignore entries to `deny.toml` with reasons, or leave the Linux adapter out at first and say so;
    - creates the `wgpu` surface;
    - sends winit events to the runtime and redraws only when the runtime asks.
 2. Draw each frame in this order:
