@@ -2,6 +2,12 @@
 
 Pure DSP algorithms from [LoomDSP](https://github.com/brylie/LoomDSP): filters, oscillator shapes, a phase generator, noise, a seeded random stream, Euclidean rhythms, an envelope, a slew limiter, a delay line, an all-pass, and a limiter. There are no ports, no graph, and no real-time host, and the crate has no dependencies. Not published yet, and the API can change until it is.
 
+`voice::Allocator` gives notes to up to 16 voices. It uses caller-defined
+identities, so MIDI, chord sources, and signal-driven sources share the same
+allocation rules. Begin a frame, apply its events, then read the voice states.
+`voices_for` and `update_note` let a signal-driven source keep expression moving
+without retriggering. Its fixed tables allocate no memory, including in `new`.
+
 An algorithm is a plain struct that holds state. Usually `tick` processes one sample and `reset` clears it. Coefficients are a separate small `Copy` type, so you decide how often to compute them. Audio-rate modulation computes them each sample, and a fixed filter computes them once.
 
 ```rust
