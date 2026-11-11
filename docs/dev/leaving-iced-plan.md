@@ -137,7 +137,7 @@ The step lands in four parts, the second as two pull requests:
    - each tile widget's role and real range, the arrow-key step, the undo group of task 4, task 5, and new bounds for every node when the window's scale factor changes;
    - canvas focus, tiles hidden below a panel that owns the input, and live values off screen.
 3. The toolbar, the status and stats bars, the inspector, and the matrix tab, as three pull requests: the bars with the toolbar and the right panel's tabs, where the bounds of toolkit-drawn parts and `locate` by UI ID also land; the inspector; the matrix.
-4. The module browser and every overlay, and the tests of task 6 that cover every view.
+4. The module browser and every overlay, and the tests of task 6 that cover every view. Until this part lands, a screen reader finds nothing in the window while a panel or a menu is open: what is below is hidden, as a pointer cannot reach it, and the panel itself has no nodes yet. This part closes that gap.
 
 The tasks:
 

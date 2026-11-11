@@ -183,16 +183,19 @@ impl App {
         )
     }
 
-    /// True while a pointer press on the toolbar, the right panel's tabs,
-    /// or the stats bar reaches them: only while nothing is open. Every
-    /// panel and menu the view draws puts a layer over the whole window
-    /// (`view.rs`), either to close itself on a press outside or to hold
-    /// the press, so the press never reaches what is below. A screen
-    /// reader's actions on those parts follow this, and the parts are
-    /// hidden from it when a press could not reach them. A test presses
-    /// under every panel and checks that the two agree
-    /// (`a11y::tests::the_frame_follows_the_pointer_under_every_panel`).
-    pub(crate) fn frame_reachable(&self) -> bool {
+    /// True while a pointer press reaches the window's own parts: a tile
+    /// and its controls, the toolbar, the right panel's tabs, and the stats
+    /// bar. That is only while nothing is open. Every panel and menu the
+    /// view draws puts a layer over the whole window (`view.rs`), either
+    /// to close itself on a press outside or to hold the press, so the
+    /// press never reaches what is below. The small menus on the canvas do
+    /// this too.
+    ///
+    /// A screen reader follows the pointer: what a press cannot reach is
+    /// hidden from it and refuses its actions (ui-layer.md, section 7,
+    /// rule 24). A test presses under every panel and checks that the tree
+    /// agrees (`a11y::tests::the_tree_follows_the_pointer_under_every_panel`).
+    pub(crate) fn pointer_reaches_window(&self) -> bool {
         self.input_owner() == InputOwner::Canvas
     }
 

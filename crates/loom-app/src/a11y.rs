@@ -365,7 +365,7 @@ impl crate::App {
             scene: self.session.scene.generation(),
             values: self.session.values.generation(),
             frame: frame.finish(),
-            covered: !self.no_overlay(),
+            covered: !self.pointer_reaches_window(),
             focus: self.a11y.focus,
         }
     }
@@ -471,11 +471,8 @@ impl crate::App {
         let graph = self.session.controller.graph();
         let hierarchy = &self.session.hierarchy;
         let mut ids = tree::WidgetIds::default();
-        if !self.no_overlay() {
+        if !self.pointer_reaches_window() {
             ids.set_covered();
-        }
-        if !self.frame_reachable() {
-            ids.set_frame_covered();
         }
         for tile in &snapshot.tiles {
             let part = crate::surface::part_tile(hierarchy, tile.id);
@@ -558,7 +555,7 @@ impl crate::App {
         use crate::Message;
         // What a pointer press could not reach, a screen reader's Click
         // does not reach either.
-        if request.action != accesskit::Action::Click || !self.frame_reachable() {
+        if request.action != accesskit::Action::Click || !self.pointer_reaches_window() {
             return None;
         }
         let id = self.a11y.ids.id(request.target_node.0)?;
@@ -589,7 +586,7 @@ impl crate::App {
         use crate::edits::ReaderEvent;
         // An open panel owns input, as it does for the pointer: the
         // canvas behind it does not change.
-        if !self.no_overlay() {
+        if !self.pointer_reaches_window() {
             return Vec::new();
         }
         // A held arrow key owns the edit in progress, and may step again.

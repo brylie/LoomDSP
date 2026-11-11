@@ -2258,47 +2258,86 @@ fn with_each_panel() -> Vec<(crate::input_owner::InputOwner, crate::ui_test::Ui)
     all
 }
 
-/// The toolbar, the tabs, and the bar follow the pointer. With nothing
-/// open, a pointer press on Panic presses it, and so does a screen reader's
-/// Click. With any panel or menu open, the press does not reach Panic, so
-/// its node is hidden and a Click on it does nothing: the panic shortcut
-/// is what works then (ui-layer.md, section 6, rule 6, and section 7,
-/// rule 24). The pointer and the tree are checked against each other for
-/// every panel, so they cannot drift.
+/// The tree follows the pointer. With nothing open, a pointer press on
+/// Panic presses it and a drag on a tile's knob turns it, and a screen
+/// reader's Click and Increment do the same. With any panel or menu open,
+/// the press reaches neither, so the nodes are hidden and the actions do
+/// nothing: the panic shortcut is what works then (ui-layer.md, section 6,
+/// rule 6, and section 7, rule 24). The pointer and the tree are checked
+/// against each other for every panel, so they cannot drift.
 #[test]
-fn the_frame_follows_the_pointer_under_every_panel() {
+fn the_tree_follows_the_pointer_under_every_panel() {
     use crate::input_owner::InputOwner;
     for (owner, mut ui) in with_each_panel() {
+        let open = owner == InputOwner::Canvas;
+        assert_eq!(ui.app.pointer_reaches_window(), open, "{owner:?}");
+        let snapshot = ui.app.ui_snapshot();
+        let (module, knob) = snapshot
+            .tiles
+            .iter()
+            .find_map(|tile| {
+                let knob = tile
+                    .widgets
+                    .iter()
+                    .position(|w| w.label.eq_ignore_ascii_case("cutoff"))?;
+                Some((tile.id, knob))
+            })
+            .expect("the patch has a filter");
+        let cutoff = |ui: &crate::ui_test::Ui| {
+            let tile = ui.app.ui_snapshot().tiles.into_iter().find(|t| t.id == module).unwrap();
+            tile.widgets[knob].position
+        };
+
+        // What a screen reader is told, and what its actions would do.
         let places = ui.places();
         let panic_id = tree::toolbar_id().with("panic");
-        let panic = places.of(&panic_id).expect("Panic is drawn");
+        assert!(places.of(&panic_id).is_some(), "Panic is drawn");
         let update = ui.app.a11y_tree(&places);
-        let node_id = node_of(&mut ui.app, &panic_id);
-        let click = ui.app.a11y_frame_message(&request(Action::Click, node_id, None));
+        let panic_node = node_of(&mut ui.app, &panic_id);
+        let click = ui.app.a11y_frame_message(&request(Action::Click, panic_node, None));
+        assert_eq!(
+            matches!(click, Some(Message::Panic)),
+            open,
+            "{owner:?}: a Click on Panic"
+        );
+        assert_eq!(node(&update, panic_node).is_hidden(), !open, "{owner:?}: Panic's node");
+        for group in [tree::toolbar_id(), tree::tabs_id(), tree::stats_id(), tile_id(module)] {
+            let group_node = node_of(&mut ui.app, &group);
+            assert_eq!(node(&update, group_node).is_hidden(), !open, "{owner:?}: {group}");
+        }
+        let knob_node = widget_node(&mut ui.app, module, knob);
+        let before = cutoff(&ui);
+        let tasks = ui
+            .app
+            .a11y_action(&request(Action::Increment, knob_node, None), std::time::Instant::now());
+        assert_eq!(!tasks.is_empty(), open, "{owner:?}: Increment on a tile's knob");
+        assert_eq!(
+            (cutoff(&ui) - before).abs() > 1e-6,
+            open,
+            "{owner:?}: the knob after Increment"
+        );
 
+        // What the pointer reaches, in the same state. The knob first: a
+        // press outside a menu closes it, which would change the state.
+        let before = cutoff(&ui);
+        let at = ui.control(module, "cutoff");
+        let _ = ui.drag(at, Point::new(at.x, at.y - 40.0), 5);
+        assert_eq!(
+            (cutoff(&ui) - before).abs() > 1e-6,
+            open,
+            "{owner:?}: a drag on the knob"
+        );
+    }
+    for (owner, mut ui) in with_each_panel() {
+        let open = owner == InputOwner::Canvas;
+        let panic = ui
+            .places()
+            .of(&tree::toolbar_id().with("panic"))
+            .expect("Panic is drawn");
         let mut messages = ui.move_to(panic.rect.center());
         messages.extend(ui.press());
         messages.extend(ui.release());
         let reached = messages.iter().any(|message| matches!(message, Message::Panic));
-
-        assert_eq!(
-            reached,
-            owner == InputOwner::Canvas,
-            "{owner:?}: what the pointer reaches"
-        );
-        assert_eq!(
-            node(&update, node_id).is_hidden(),
-            !reached,
-            "{owner:?}: hidden when out of reach"
-        );
-        assert_eq!(
-            matches!(click, Some(Message::Panic)),
-            reached,
-            "{owner:?}: a Click follows the press"
-        );
-        for group in [tree::toolbar_id(), tree::tabs_id(), tree::stats_id()] {
-            let group_node = node_of(&mut ui.app, &group);
-            assert_eq!(node(&update, group_node).is_hidden(), !reached, "{owner:?}: {group}");
-        }
+        assert_eq!(reached, open, "{owner:?}: a press on Panic");
     }
 }

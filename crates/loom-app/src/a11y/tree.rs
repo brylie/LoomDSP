@@ -104,11 +104,9 @@ pub(crate) struct WidgetIds {
     live: std::collections::BTreeSet<UiId>,
     /// The control with keyboard focus on the canvas, if one has it.
     focus: Option<(u32, usize)>,
-    /// True while a panel over the canvas owns the input.
+    /// True while a panel or a menu lies over the window, so a pointer
+    /// press reaches nothing below it.
     covered: bool,
-    /// True while a pointer press cannot reach the toolbar, the tabs, and
-    /// the bar: a panel or a menu lies over the window.
-    frame_covered: bool,
 }
 
 /// What a panel widget is, beyond what the snapshot says of it: enough to
@@ -231,13 +229,6 @@ impl WidgetIds {
     /// True while a panel over the canvas owns the input.
     pub(crate) fn is_covered(&self) -> bool {
         self.covered
-    }
-
-    /// Says that a pointer press cannot reach the toolbar, the tabs, and
-    /// the bar now, because a panel or a menu lies over the window. They
-    /// are then hidden from a screen reader too.
-    pub(crate) fn set_frame_covered(&mut self) {
-        self.frame_covered = true;
     }
 
     /// Says which control has keyboard focus on the canvas.
@@ -404,7 +395,7 @@ pub(crate) fn tree(
     let mut frame = Frame {
         places,
         scale,
-        covered: ids.frame_covered,
+        covered: ids.covered,
         table,
         nodes: &mut nodes,
     };
