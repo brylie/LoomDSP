@@ -81,6 +81,40 @@ pub(crate) enum Touch {
     Live,
     /// Anything else: a view model may have changed.
     Changed,
+    /// A timer's poll, with the key from before it ran, or `None` while no
+    /// screen reader listens. Most polls change nothing, so the tree is
+    /// built only when the key differs afterwards.
+    Poll(Option<PollKey>),
+}
+
+/// What the tree reports that a timer's poll can change, as a key that is
+/// cheap to make and to compare. A poll (the audio device check, the MIDI
+/// port check, autosave, the pickup check, the audio watchers' readings of
+/// load and dropouts) runs several times a second for the whole session, and building the tree for each would be idle work
+/// (NFR-PERF-04).
+///
+/// Every field stands for something the tree reads. When the tree starts
+/// to report something new that a poll can change, add it here, or the
+/// tree goes stale until the next ordinary message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PollKey {
+    /// The scene's generation: the tiles, their names and places, and the
+    /// widgets on them. A device change that rebuilds tiles changes it.
+    scene: u64,
+    /// The panel values' generation: every control's value and text, and a
+    /// meter's reading. It also changes for things the tree does not say,
+    /// such as a pickup mark, which costs one build that sends nothing.
+    values: u64,
+    /// The status line's text and severity, hashed. A poll that finds a
+    /// device gone, or a failed autosave, says so there.
+    status: u64,
+    /// True while a panel owns the input, which hides the tiles.
+    covered: bool,
+    // The audio load and the dropout count are not here: the tree does not
+    // report the stats bar yet. They join when it does (step 1.4, slice 3),
+    // as live values (ui-layer.md, section 3, rule 7).
+    /// The control the tree reports focus on.
+    focus: Option<(u32, usize)>,
 }
 
 /// What the accessibility layer tells the app.
@@ -320,6 +354,23 @@ impl crate::App {
                 Task::none()
             }
             Touch::Changed => self.a11y_rebuild(),
+            Touch::Poll(before) if before == Some(self.a11y_poll_key()) => Task::none(),
+            Touch::Poll(_) => self.a11y_rebuild(),
+        }
+    }
+
+    /// The key a poll is compared by, before and after it runs.
+    pub(crate) fn a11y_poll_key(&self) -> PollKey {
+        use std::hash::{Hash, Hasher};
+        let mut status = std::collections::hash_map::DefaultHasher::new();
+        self.alerts.status().hash(&mut status);
+        std::mem::discriminant(&self.alerts.severity()).hash(&mut status);
+        PollKey {
+            scene: self.session.scene.generation(),
+            values: self.session.values.generation(),
+            status: status.finish(),
+            covered: !self.no_overlay(),
+            focus: self.a11y.focus,
         }
     }
 

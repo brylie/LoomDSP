@@ -1262,6 +1262,19 @@ impl App {
         // What this message means for a screen reader's tree.
         let touch = match (&message, cause) {
             (Message::A11y(_), _) => a11y::Touch::Own,
+            // The timers and watchers that only look: they rebuild the
+            // tree only when they changed something it reports. The audio
+            // watcher's load reading comes several times a second while
+            // audio plays, and the tree does not say the load yet.
+            (
+                Message::AudioPoll
+                | Message::MidiPoll
+                | Message::Autosave
+                | Message::MidiGhosts
+                | Message::Audio(_)
+                | Message::InputAudio(_),
+                _,
+            ) => a11y::Touch::Poll(self.a11y.is_active().then(|| self.a11y_poll_key())),
             (_, FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced) => a11y::Touch::Live,
             _ => a11y::Touch::Changed,
         };

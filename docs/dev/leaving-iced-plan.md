@@ -155,6 +155,8 @@ The tasks:
    - actions round-trip through `App::update` as one undo step;
    - the tree changes when the snapshot changes, and only then.
 
+A known cost, measured in slice 2 with `--measure-tree` (release build, macOS): one build of the tree takes about 3 ms on a 300-module patch and 0.3 ms on `subtractive.ron`. A build is the UI snapshot, the widget IDs, the whole tree, and the comparison with what was sent; how the time splits between them is not measured. There is at most one build per turn of the event loop, so a knob drag builds the tree at up to the pointer's rate. Timers and watchers that change nothing the tree reports build nothing, and moving live values build it 4 times a second. The cost begins when an assistive tool first asks for the tree. On macOS it then stays until the app quits, because `accesskit_macos` 0.27.2 never says that the tool left. Making one build cheaper is not part of step 1.4.
+
 ### 1.5 AccessKit's macOS adapter
 
 The spike found two gaps in `accesskit_macos` 0.27.2:
@@ -180,6 +182,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 1. Create the runtime in `crates/loom-ui`, generic over the app and the driver ([UI layer spec](../design/ui-layer.md), section 2, rule 9). The code that links it to Iced during phases 2 and 3 goes in `crates/loom-app/src/iced_bridge/` (spec section 1, rule 6). The runtime owns:
    - the message queue;
    - `fn handle(&mut self, event: Event) -> ...`: our own event enum covering window, pointer, keyboard, IME, redraw, and wake-ups;
+   - a redraw after every batch of messages, or another way to apply a request that arrives with no other event. A screen reader's Focus action reaches the canvas as a request that the canvas applies when it next draws ([UI layer spec](../design/ui-layer.md), section 7, rule 20). Phase 1 relies on Iced drawing the window after each batch, and our runtime must give the same guarantee;
    - effects, which replace `Task`: widget operations (focus a field, scroll to), clipboard read and write, exit, file dialogs, timers, window commands. Each is an enum variant, not a future, so the headless harness can see and run each one or panic on it.
 2. Port `App::update` to return `Effects` instead of `Task<Message>`. Do it file by file, behind an adapter that turns effects into Iced tasks, so the app keeps running on `iced::application` until 2.2 lands.
 3. Port subscriptions to event sources that wake the loop:

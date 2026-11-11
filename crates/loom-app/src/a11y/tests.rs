@@ -1618,3 +1618,42 @@ fn a_measured_layer_builds_and_times_the_tree() {
     assert!(after.average() <= after.worst);
     assert_eq!(BuildTimes::default().average(), Duration::ZERO);
 }
+
+/// A timer's poll that changes nothing builds no tree, however many come.
+/// One that changes the status line asks for one build. With no screen
+/// reader, a poll takes no key at all (ui-layer.md, section 7, rule 7).
+#[test]
+fn a_poll_that_changes_nothing_builds_no_tree() {
+    let (mut app, _, _) = app_with_filter();
+    app.a11y = Access::measured();
+    app.a11y.locating = false;
+
+    let before = app.a11y_poll_key();
+    for _ in 0..20 {
+        for poll in [
+            Message::AudioPoll,
+            Message::MidiPoll,
+            Message::Autosave,
+            Message::MidiGhosts,
+        ] {
+            let _ = app.update(poll);
+            assert!(!app.a11y.locating, "a poll that changed nothing asks for no build");
+        }
+    }
+    assert_eq!(app.a11y_poll_key(), before);
+
+    // The same poll, after something it reports changed underneath it.
+    let _ = app.a11y_after(Touch::Poll(Some(before)));
+    assert!(!app.a11y.locating);
+    app.alerts.say("The audio device is gone");
+    assert_ne!(app.a11y_poll_key(), before);
+    let _ = app.a11y_after(Touch::Poll(Some(before)));
+    assert!(app.a11y.locating, "a changed status asks for one build");
+    let _ = app.a11y_after(Touch::Poll(Some(before)));
+    assert!(app.a11y.locating, "and one build is on its way, not two");
+
+    // Each part of the key is something the tree reports.
+    let key = app.a11y_poll_key();
+    app.a11y.set_focus(Some((1, 0)));
+    assert_ne!(app.a11y_poll_key(), key);
+}
