@@ -507,11 +507,15 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
             node.set_numeric_value(f64::from(widget.position));
             node
         }
+        // A label's text is its value, and it has no label of its own:
+        // an adapter gives a label node's label in place of its value
+        // (`accesskit_macos` 0.27.2, `label_is_exposed_in_value`), so a
+        // name set as the label would hide the reading. The value says
+        // both, as a meter's text does: "Cents: 12.5 cents".
         WidgetViewKind::Readout { .. } => {
             let mut node = Node::new(Role::Label);
-            node.set_value(widget.text.clone());
-            description = None;
-            node
+            node.set_value(format!("{}: {}", detail.name, widget.text));
+            return node;
         }
         WidgetViewKind::Scope => {
             description = trace_words(widget);
