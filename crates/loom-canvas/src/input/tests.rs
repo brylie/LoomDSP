@@ -4339,5 +4339,18 @@ fn a_focus_request_lands_after_a_level_or_frame_change() {
             "{change}: it lands once there is room"
         );
         assert!(landed.contains(&CanvasEvent::FocusChanged(Some((2, 0)))), "{change}");
+
+        // The very first redraw has no width: its key is still the one a
+        // later request is told from, so a request made before the width
+        // comes lands once it does.
+        let mut state = CanvasInput::default();
+        let _ = redraw(&model(5, 1), &mut state, 0.0);
+        let landed = redraw(&model(6, 1), &mut state, 800.0);
+        assert_eq!(
+            state.focused_control(),
+            Some((2, 0)),
+            "{change}: a request made while the first framing waits lands"
+        );
+        assert!(landed.contains(&CanvasEvent::FocusChanged(Some((2, 0)))), "{change}");
     }
 }

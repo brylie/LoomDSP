@@ -200,8 +200,12 @@ impl CanvasModel<'_> {
                 // canvas to have a width.
                 let reset_waits = (new_frame || new_level) && bounds.width <= 0.0;
                 let (focus_key, focus_control) = self.focus_request;
-                if self.focus_policy.interactive
-                    && !reset_waits
+                if reset_waits {
+                    // The first key is noted even so, as the one a later
+                    // request is told from. A key already noted is kept,
+                    // so a request made while waiting still lands.
+                    state.focus_key.get_or_insert(focus_key);
+                } else if self.focus_policy.interactive
                     && state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
                     && let Some((module, widget)) = focus_control
                 {
