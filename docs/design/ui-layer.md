@@ -346,7 +346,7 @@ Each phase also passes the parity gates in [the plan](../dev/leaving-iced-plan.m
 
 Phase 1:
 
-- [ ] `loom-ui-core` exists, depends on no toolkit and no LoomDSP crate, and has an example program.
+- [x] `loom-ui-core` exists, depends on no toolkit and no LoomDSP crate, and has an example program. `crates/loom-ui-core/tests/purity.rs` checks the dependencies, and the example is `examples/hit_test.rs`.
 - [x] `loom-canvas` names Iced only on its widget side: `widget.rs`, the files under `widget/` (the primitive wrapper and the Iced painter among them), and `iced_convert.rs`. `crates/loom-canvas/tests/purity.rs` checks it.
 - [ ] A test checks that every interactive element kind on a tile and in the inspector has an operable role from the table, a non-empty name, and a value, with the unit in the description.
 - [ ] A test checks that screen reader SetValues on one control, each within 500 ms of the last, make one undo step; that an action on another control, a key press, or Undo closes the group; and that Undo is enabled while the group is open.
