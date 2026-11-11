@@ -28,7 +28,7 @@ The choice is for the long run. So each criterion is answered twice where versio
 | 1. IME composition | Not built in: we hold the preedit text ourselves | Built in: `PlainEditor` composes, and gives the area for the candidate window |
 | 2. AccessKit text | Not built in: we write it | Not built in since 0.12: we write it |
 | 3. One font system | Yes, now: the canvas can use Iced's own font system | No, until the panels leave Iced |
-| 4. Glyph drawing | Now: `cryoglyph`, already in our tree. After phase 4: `glyphon`, or our own atlas | Our own atlas, now and later. Vello needs `wgpu` 30 |
+| 4. Glyph drawing | Now: `cryoglyph`, already in our tree, maintained by Iced's authors (`iced-rs/cryoglyph`), so text drawing moves at Iced's pace until phase 4. After phase 4: `glyphon`, or our own atlas | Our own atlas, now and later. Vello needs `wgpu` 30 |
 | 5. Same font as today | Yes on macOS: same face, same widths. Same code path elsewhere | No on macOS: Helvetica by default; with `system-ui` the same face, but widths differ by up to 4% |
 | 6. Licences and versions | Passes. Adds no crate now | Passes. Adds 35 crates |
 
@@ -146,11 +146,30 @@ Leaving Iced was partly about churn, so the text crate's own pace matters.
 - **Parley:** seven minor releases in twelve months: 0.6.0 (2025-10-06), 0.7.0 (2025-11-24), 0.8.0 (2026-03-27), 0.9.0 (2026-04-21), 0.10.0 (2026-06-01), 0.11.0 (2026-06-26), 0.12.0 (2026-10-09). The 0.12 release notes mark 19 entries "Breaking change". They include a new crate split (`parley_engine`), the AccessKit removal, `Cluster` becoming a grapheme cluster, and removed and renamed layout metrics.
 - **`glyphon`:** one release per `wgpu` major: three in the last year (0.10.0 on 2025-12-18, 0.11.0 on 2026-04-13, 0.12.0 on 2026-07-09).
 
+### The rest of a single-line field (section 8, rules 2 and 3)
+
+Not a criterion of rule 8, but lines we owe. From each editor's API: `cosmic-text`'s `Edit` trait and `Action` and `Motion` enums (`src/edit/mod.rs`, `src/cursor.rs`; the same pieces in 0.15 and 0.19), and Parley's `PlainEditor` and its driver (`src/editing/editor.rs`, 0.12.0).
+
+| Feature | `cosmic-text` | Parley |
+|---|---|---|
+| Caret and selection | `cursor`, `set_cursor`, `selection`, `set_selection` (lines 204 to 213); `Selection::Normal`, `Word`, and `Line` | A selection with `select_*` methods, `selection_geometry` (line 830), `cursor_geometry` (line 857) |
+| Word movement | `Motion::PreviousWord`, `NextWord`, `LeftWord`, `RightWord` (`cursor.rs`, from line 119) | `move_word_left` and `move_word_right` (line 534), `select_word_*`, `delete_word` (line 259), `backdelete_word` |
+| Home and End | `Motion::Home`, `SoftHome`, `End` (`cursor.rs`, lines 103 to 107) | `move_to_line_start` (line 463), `move_to_line_end`, `move_to_text_start`, `move_to_text_end` |
+| Select all, double-click | No select-all action: set the selection from the buffer's start to its end, about 5 lines. `Action::DoubleClick` and `TripleClick` (line 47) | `select_all` (line 554), `select_word_at_point` (line 676) |
+| Clipboard | `copy_selection` (line 307), `delete_selection`, `insert_string` (line 315). The clipboard itself is ours, through effects | `selected_text` (line 817), `insert_or_replace_selection` (line 166). The same |
+| Undo inside the field | Change tracking: `start_change`, `finish_change`, and `apply_change` (lines 322 to 328), and a `Change` that reverses itself. The undo stack and its grouping are ours: about 60 lines | None found. We keep snapshots of text and selection before each edit, which is cheap for one line of text: about 80 lines |
+
+Both give the movement and selection rule 2 asks for. Both leave the undo stack to us; `cosmic-text` gives the reversible changes that fill it. Neither gives the key bindings; mapping our key events to these calls is ours under either choice, and about the same size.
+
 ### Fit with what we already have
 
 - **`TextMeasure` and `Painter` (plan step 1.3):** both fit. `measure(text, style, wrap_width)` becomes a buffer or a layout's width and height. `Painter::text` becomes a glyph run for the atlas. `Shaping::Simple` and `Shaping::Full` map to `cosmic-text`'s `Basic` and `Advanced`. Parley's style properties name no shaping mode (none found in `src/style/mod.rs`), so `Simple` would mean nothing there.
 - **Level of detail (panels spec: text close up, bars further out):** not affected by either. It decides whether text is drawn at all.
 - **Shaping cost with many tile labels:** `cosmic-text` keeps the shaping in each `Buffer` until its text or attributes change, and has an optional `shape-run-cache` feature that shares shaped runs between buffers (`src/shape_run_cache.rs`, in 0.15 and 0.19). A Parley `Layout` must be rebuilt for any change to its text or style (crate docs, `src/lib.rs`), with no shared cache. We would keep one layout per label, keyed by text, size, and weight, beside the canvas's frame cache. Either way, labels are shaped once and redrawn from the cache; with Parley the cache is ours.
+
+### Against the plan's stop point
+
+The plan stops the work if "IME or text editing needs more than a few hundred lines on top of `cosmic-text`" (Stop points). On the `cosmic-text` path we owe about 150 lines for the preedit and about 60 for the undo stack: about 210 lines that only `cosmic-text` needs. The AccessKit text glue, 200 to 300 lines, is owed under either choice, so it is not a cost of `cosmic-text`. All of it together is 410 to 510 lines, before step 3.3 maps keys to the editor. The `cosmic-text` part is within "a few hundred". The total is near the line's edge, and step 3.3 should count its lines against it as it goes. On the Parley path the same count is about 80 lines (undo), plus the same AccessKit glue.
 
 ## The question for Brylie
 
@@ -158,7 +177,7 @@ Leaving Iced was partly about churn, so the text crate's own pace matters.
 
 - **`cosmic-text` (recommended).**
   - *Gives:* today's font and widths exactly, so the parity gates hold. One font system with Iced's panels now. Glyph drawing from a crate already in our tree (`cryoglyph`) now and `glyphon` later. No new crates now. A slower release pace.
-  - *Costs:* our own IME preedit handling, about 150 lines. Our AccessKit text glue, 200 to 300 lines. A version bump with small API changes after phase 4. A dependency on Iced's `cryoglyph` until then.
+  - *Costs:* our own IME preedit handling, about 150 lines, and our undo stack inside a field, about 60, with the changes `cosmic-text` tracks. Our AccessKit text glue, 200 to 300 lines, owed under either choice. A version bump with small API changes after phase 4. A dependency on `cryoglyph`, maintained by Iced's authors, until then. Together about 410 to 510 lines of ours, near the plan's stop point of "a few hundred lines on top of `cosmic-text`", of which about 210 are owed to `cosmic-text` alone.
 - **Parley.**
   - *Gives:* IME composition and the candidate area built in. Grapheme clusters that fit AccessKit's character lists. A design that its authors build for editors.
   - *Costs:*
@@ -166,7 +185,7 @@ Leaving Iced was partly about churn, so the text crate's own pace matters.
     - a second font system until phase 3 ends;
     - 35 new crates;
     - a different font on macOS by default, and different widths even with `system-ui`, so the parity gates fail until that is understood;
-    - our AccessKit text glue all the same, 200 to 300 lines;
+    - our AccessKit text glue all the same, 200 to 300 lines, and our undo stack inside a field, about 80 lines;
     - a faster release pace with large breaking releases.
 
 Rule 8 puts IME first. Parley wins that criterion outright, but `cosmic-text` meets it with about 150 lines of our own, and 3, 4, 5, and 6 then favour `cosmic-text`. That is the reasoning behind the recommendation. If you weigh built-in composition above the rest, Parley is the choice, and the font question in criterion 5 must be solved before step 2.4b can pass its parity gate.
