@@ -17,12 +17,25 @@ const fn param(name: &'static str, min: f32, max: f32, default: f32, unit: &'sta
 const CUTOFF: ParamSpec = param("cutoff", 20.0, 20_000.0, 1_000.0, "Hz").logarithmic();
 const GAIN: ParamSpec = param("gain", -10.0, 10.0, 1.0, "");
 
+/// A continuous slider steps 1% of its travel, 0.1% with Shift, as the
+/// tile's knob does.
+#[test]
+fn a_continuous_slider_steps_as_the_knob() {
+    assert_eq!(slider_step(&CUTOFF), loom_canvas::ARROW_SHARE);
+    assert_eq!(slider_fine_step(&GAIN), loom_canvas::ARROW_SHARE_FINE);
+}
+
 #[test]
 fn whole_numbers_snap() {
     let channel = param("channel", 0.0, 16.0, 0.0, "").integer();
     assert_eq!(channel.denormalize(0.52), 8.0);
     assert_eq!(format(&channel, 3.0), "3");
     assert!((slider_step(&channel) - 1.0 / 16.0).abs() < 1e-6);
+    assert_eq!(
+        slider_fine_step(&channel),
+        slider_step(&channel),
+        "Shift moves one value too"
+    );
 }
 
 #[test]

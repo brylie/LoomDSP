@@ -461,6 +461,7 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
         ParamMode::Edit {
             position,
             step,
+            fine: _,
             control,
             assignments,
             adding,
@@ -530,10 +531,11 @@ fn value_control(module: u32, label: &str, p: &ParamRow, position: f32, step: f3
                     position,
                 })
             };
-            // One of its own arrow-key steps (section 7, rule 5): the
-            // toolkit slider's step over its travel.
-            let up = (position + step).min(1.0);
-            let down = (position - step).max(0.0);
+            // One of its own arrow-key steps (section 7, rule 5), as the
+            // toolkit slider takes it: to the next step on its grid.
+            let steps = (position / step).round();
+            let up = (step * (steps + 1.0)).min(1.0);
+            let down = (step * (steps - 1.0)).max(0.0);
             Item {
                 label: Some(label.to_string()),
                 // The value with its unit, as the row shows it.

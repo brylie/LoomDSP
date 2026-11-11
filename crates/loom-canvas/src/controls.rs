@@ -1537,10 +1537,11 @@ impl ValueDrag {
 }
 
 /// What one arrow key press adds to a continuous control, as a share of its
-/// travel.
-const ARROW_SHARE: f32 = 0.01;
+/// travel. The inspector's sliders take the same step (`param.rs`), so a
+/// parameter steps alike on its tile and in the inspector.
+pub const ARROW_SHARE: f32 = 0.01;
 /// The same with Shift held.
-const ARROW_SHARE_FINE: f32 = 0.001;
+pub const ARROW_SHARE_FINE: f32 = 0.001;
 
 /// How far one arrow key press, without Shift, moves a control that holds a
 /// number, as a share of its travel: 1% for a continuous value, one step

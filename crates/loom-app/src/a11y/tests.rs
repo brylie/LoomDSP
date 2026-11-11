@@ -2493,6 +2493,13 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
         let node = app.session.controller.graph().node(ModuleId(module)).unwrap();
         spec.normalize(node.params[index])
     };
+    // From a place on the slider's grid, so each step is a whole step.
+    ui.send(Message::Inspector(crate::inspector::Message::Param {
+        module,
+        index,
+        position: 0.5,
+    }));
+    ui.send(Message::SliderReleased);
     let steps = ui.app.session.edits.history.len();
     let before = position(&ui.app);
     let node_id = node_of(&mut ui.app, &slider_id);
@@ -2757,4 +2764,52 @@ fn a_scroll_moves_the_rows_and_is_a_message_only_while_listening() {
     let places = ui.places();
     let moved = ui.app.a11y_tree(&places);
     assert!(y(&moved) < y(&first), "the row's node moved up with the row");
+}
+
+/// One Increment on the inspector's Cutoff slider and one on the tile's
+/// Cutoff knob move the parameter the same amount, 1% of its travel, as
+/// their arrow keys do (Brylie's choice, 2026-11-11).
+#[test]
+fn the_inspector_slider_and_the_tile_knob_step_alike() {
+    let (app, module, knob) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = inspector_of(&mut ui, &[module]);
+    let index = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(ModuleId(module))
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    let spec = ui.app.control_target(module, knob, ControlPart::Main).unwrap().spec;
+    let position =
+        |app: &App| spec.normalize(app.session.controller.graph().node(ModuleId(module)).unwrap().params[index]);
+    let at = std::time::Instant::now();
+    let mut moved = Vec::new();
+    for target in ["inspector", "tile"] {
+        ui.send(Message::Inspector(crate::inspector::Message::Param {
+            module,
+            index,
+            position: 0.5,
+        }));
+        ui.send(Message::SliderReleased);
+        let (_, _, _) = inspector_of(&mut ui, &[module]);
+        let node_id = if target == "inspector" {
+            let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+            node_of(&mut ui.app, &crate::inspector::ids::part(&row, "value"))
+        } else {
+            widget_node(&mut ui.app, module, knob)
+        };
+        let before = position(&ui.app);
+        let _ = ui.app.a11y_action(&request(Action::Increment, node_id, None), at);
+        ui.app.reader_event(crate::edits::ReaderEvent::Close);
+        moved.push(position(&ui.app) - before);
+    }
+    assert!(
+        (moved[0] - loom_canvas::ARROW_SHARE).abs() < 1e-4,
+        "the inspector slider: {moved:?}"
+    );
+    assert!((moved[0] - moved[1]).abs() < 1e-4, "the same as the knob: {moved:?}");
 }

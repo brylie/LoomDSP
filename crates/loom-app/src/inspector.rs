@@ -382,6 +382,8 @@ pub enum ParamMode {
         position: f32,
         /// Slider step, as a position.
         step: f32,
+        /// Slider step with Shift held, as a position.
+        fine: f32,
         /// What edits the value: a slider, or its choice names.
         control: ParamControl,
         /// One per assignment, in engine order.
@@ -637,6 +639,7 @@ impl App {
             ParamMode::Edit {
                 position: spec.normalize(value),
                 step: param::slider_step(spec),
+                fine: param::slider_fine_step(spec),
                 control: ParamControl::of(spec, value),
                 assignments: self.assignment_rows(id, index),
                 adding: (self.session.gestures.adding() == Some((id, index))).then(|| self.sources(id, index)),
@@ -1434,6 +1437,7 @@ fn param_row_view<'a>(
         ParamMode::Edit {
             position,
             step,
+            fine,
             control,
             assignments,
             adding,
@@ -1462,13 +1466,13 @@ fn param_row_view<'a>(
                 head,
                 match p.range {
                     Some(range) => row![
-                        with_ghost(value_control(id, index, control, position, step, &ui), ghost),
+                        with_ghost(value_control(id, index, control, position, (step, fine), &ui), ghost),
                         range_view(id, index, range, &ui),
                     ]
                     .spacing(6)
                     .align_y(iced::Alignment::Center)
                     .into(),
-                    None => with_ghost(value_control(id, index, control, position, step, &ui), ghost),
+                    None => with_ghost(value_control(id, index, control, position, (step, fine), &ui), ghost),
                 },
             ]
             .spacing(2);
@@ -1830,7 +1834,7 @@ fn value_control<'a>(
     index: usize,
     control: ParamControl,
     position: f32,
-    step: f32,
+    (step, fine): (f32, f32),
     row: &UiId,
 ) -> Element<'a, AppMessage> {
     let ui = ids::part(row, "value");
@@ -1847,6 +1851,7 @@ fn value_control<'a>(
         })
         .on_release(AppMessage::SliderReleased)
         .step(step)
+        .shift_step(fine)
         .into(),
         ParamControl::Radio { choices, selected } => {
             let mut list = column![].spacing(3);

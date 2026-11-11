@@ -4,13 +4,26 @@
 
 use loom_core::{ParamMapping, ParamSpec};
 
-/// Slider step in slider positions (0 to 1). Whole-number parameters move
-/// one value per step, so the slider snaps to them.
+/// Slider step in slider positions (0 to 1): what one arrow key press moves
+/// the inspector's slider, as on the tile's knob, 1% of its travel.
+/// Whole-number parameters move one value per step, so the slider snaps to
+/// them. The toolkit's slider also snaps a drag to this step.
 pub fn slider_step(spec: &ParamSpec) -> f32 {
     if spec.options.integer && spec.max > spec.min {
         1.0 / (spec.max - spec.min)
     } else {
-        0.001
+        loom_canvas::ARROW_SHARE
+    }
+}
+
+/// The slider's step with Shift held, as on the tile's knob: 0.1% of its
+/// travel, for the keys and for a drag. One value for a whole-number
+/// parameter.
+pub fn slider_fine_step(spec: &ParamSpec) -> f32 {
+    if spec.options.integer && spec.max > spec.min {
+        slider_step(spec)
+    } else {
+        loom_canvas::ARROW_SHARE_FINE
     }
 }
 
