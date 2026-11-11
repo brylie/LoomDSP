@@ -102,6 +102,8 @@ pub(crate) struct WidgetIds {
     ids: BTreeMap<u32, Vec<Option<UiId>>>,
     /// What each widget is, by tile and panel index.
     details: BTreeMap<(u32, usize), Detail>,
+    /// The widgets that only show a value, which can move on its own.
+    live: std::collections::BTreeSet<UiId>,
 }
 
 /// What a panel widget is, beyond what the snapshot says of it: enough to
@@ -188,7 +190,11 @@ impl WidgetIds {
                 // Two widgets can show the same value, as a meter and its
                 // level history do. The later ones are counted, from 2.
                 let earlier = ids.iter().flatten().filter(|other| other.is_under(&id)).count();
-                if earlier == 0 { id } else { id.with(earlier as u64 + 1) }
+                let id = if earlier == 0 { id } else { id.with(earlier as u64 + 1) };
+                if kind == WidgetKey::Display {
+                    self.live.insert(id.clone());
+                }
+                id
             });
             ids.push(id);
         }
@@ -198,6 +204,13 @@ impl WidgetIds {
     /// The ID of one widget, if it has one.
     pub(crate) fn get(&self, module: u32, widget: usize) -> Option<&UiId> {
         self.ids.get(&module)?.get(widget)?.as_ref()
+    }
+
+    /// True for a widget that shows a live value: a meter, a light, a
+    /// readout, a scope. Its node is sent at most every 250 ms
+    /// (ui-layer.md, section 7, rule 7).
+    pub(crate) fn is_live(&self, id: &UiId) -> bool {
+        self.live.contains(id)
     }
 
     /// Says what one widget is. Without this the widget is a plain label.
@@ -242,14 +255,73 @@ pub(super) fn node_id(table: &mut IdTable, id: &UiId) -> NodeId {
 /// A world rectangle as AccessKit wants it: in the window, in physical
 /// pixels (ui-layer.md, section 7, rule 8).
 fn physical(view: &CanvasView, world: Rect, scale: f32) -> accesskit::Rect {
-    let a = view.to_window(loom_ui_core::Point::new(world.x, world.y));
-    let b = view.to_window(loom_ui_core::Point::new(world.x + world.width, world.y + world.height));
+    let logical = view.rect_to_window(loom_ui_core::Rect::new(
+        loom_ui_core::Point::new(world.x, world.y),
+        loom_ui_core::Size::new(world.width, world.height),
+    ));
     let s = f64::from(scale);
     accesskit::Rect {
-        x0: f64::from(a.x) * s,
-        y0: f64::from(a.y) * s,
-        x1: f64::from(b.x) * s,
-        y1: f64::from(b.y) * s,
+        x0: f64::from(logical.x) * s,
+        y0: f64::from(logical.y) * s,
+        x1: f64::from(logical.x + logical.width) * s,
+        y1: f64::from(logical.y + logical.height) * s,
+    }
+}
+
+/// What the screen reader was last sent, so the next update holds only the
+/// nodes that changed (ui-layer.md, section 7, rule 7).
+#[derive(Debug, Default)]
+pub(crate) struct Sent {
+    /// Every node as last sent, by node ID.
+    nodes: BTreeMap<u64, Node>,
+    /// The node that had focus.
+    focus: Option<NodeId>,
+}
+
+impl Sent {
+    /// Forgets what was sent, so the next update is the whole tree: when a
+    /// screen reader starts to listen, or stops.
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The part of a whole tree that differs from what was last sent, and
+    /// true if a change was held back. `None` when nothing is to be sent.
+    ///
+    /// `hold` names the nodes that show a live value. A change on one of
+    /// them waits, so a meter is sent at most as often as the caller lets
+    /// live values through. A node the screen reader has never had is
+    /// always sent. The first update holds every node and says which is
+    /// the root.
+    pub(crate) fn changes(&mut self, whole: &TreeUpdate, hold: impl Fn(NodeId) -> bool) -> (Option<TreeUpdate>, bool) {
+        let first = self.nodes.is_empty();
+        let mut held = false;
+        let mut nodes = Vec::new();
+        for (id, node) in &whole.nodes {
+            match self.nodes.get(&id.0) {
+                Some(last) if last == node => {}
+                Some(_) if hold(*id) => held = true,
+                _ => {
+                    self.nodes.insert(id.0, node.clone());
+                    nodes.push((*id, node.clone()));
+                }
+            }
+        }
+        // A node that is gone leaves with its parent's new list of children.
+        let shown: std::collections::BTreeSet<u64> = whole.nodes.iter().map(|(id, _)| id.0).collect();
+        self.nodes.retain(|id, _| shown.contains(id));
+        let moved = self.focus != Some(whole.focus);
+        self.focus = Some(whole.focus);
+        if nodes.is_empty() && !moved {
+            return (None, held);
+        }
+        let update = TreeUpdate {
+            nodes,
+            tree: if first { whole.tree.clone() } else { None },
+            tree_id: whole.tree_id,
+            focus: whole.focus,
+        };
+        (Some(update), held)
     }
 }
 

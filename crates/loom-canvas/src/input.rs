@@ -269,6 +269,15 @@ impl CanvasView {
         let s = self.camera.to_screen(world);
         Point::new(self.bounds.x + s.x, self.bounds.y + s.y)
     }
+
+    /// A world rectangle in window coordinates, in logical pixels: where
+    /// something on the canvas is in the window, for a screen reader's
+    /// cursor or a script's pointer.
+    pub fn rect_to_window(&self, world: Rect) -> Rect {
+        let a = self.to_window(Point::new(world.x, world.y));
+        let b = self.to_window(Point::new(world.x + world.width, world.y + world.height));
+        Rect::new(a, Size::new(b.x - a.x, b.y - a.y))
+    }
 }
 
 impl<'a> CanvasModel<'a> {

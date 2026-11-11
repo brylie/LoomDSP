@@ -1025,8 +1025,8 @@ fn actions_wait_while_a_panel_owns_input() {
     assert!(!app.unsaved(), "no edit was made");
 }
 
-/// The refresh timer runs only once a screen reader listens, and the events
-/// that only set up the layer change nothing in the patch.
+/// Nothing is built until a screen reader listens, and the events that
+/// only set up the layer change nothing in the patch.
 #[test]
 fn a_screen_reader_turns_the_layer_on() {
     let (mut app, _, _) = app_with_filter();
@@ -1035,14 +1035,201 @@ fn a_screen_reader_turns_the_layer_on() {
     let _ = app.a11y_event(Event::Attached(Ok(())));
     let _ = app.a11y_event(Event::Attached(Err("no window".into())));
     assert!(!app.a11y.active, "attaching is not listening");
+    let _ = app.a11y_event(Event::Located(None));
+    assert!(app.a11y.ids.is_empty(), "no tree without a screen reader");
+    let _ = app.a11y_after(Touch::Changed);
+    assert!(!app.a11y.locating, "and no rebuild is asked for");
 
     let _ = app.a11y_event(Event::Activated);
     assert!(app.a11y.active);
+    assert!(app.a11y.locating, "the first tree is on its way");
     let _ = app.a11y_subscription();
-    let _ = app.a11y_event(Event::Refresh);
     let _ = app.a11y_event(Event::Located(None));
+    assert!(!app.a11y.locating);
     assert!(!app.a11y.ids.is_empty(), "locating the canvas built the tree");
     assert!(!app.unsaved(), "no edit was made");
+}
+
+/// Makes a screen reader listen, and takes the first whole tree.
+fn listen(app: &mut App) {
+    let _ = app.a11y_event(Event::Activated);
+    let _ = app.a11y_event(Event::Located(None));
+}
+
+/// The node IDs in an update, sorted.
+fn sent_ids(update: &TreeUpdate) -> Vec<NodeId> {
+    let mut ids: Vec<NodeId> = update.nodes.iter().map(|(id, _)| *id).collect();
+    ids.sort_unstable_by_key(|id| id.0);
+    ids
+}
+
+/// The first update is the whole tree with its root. After that, a build
+/// with nothing changed sends nothing, and a turned knob sends that knob's
+/// node alone (ui-layer.md, section 7, rule 7).
+#[test]
+fn only_changed_nodes_are_sent() {
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_event(Event::Activated);
+    let (whole, first) = app.a11y_changes(None);
+    let first = first.expect("the first update is sent");
+    assert!(first.tree.is_some(), "it names the root");
+    assert_eq!(sent_ids(&first), sent_ids(&whole));
+
+    let (_, again) = app.a11y_changes(None);
+    assert!(again.is_none(), "nothing changed, so nothing is sent");
+
+    let cutoff = widget_node(&mut app, module, knob);
+    let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+        module,
+        widget: knob,
+        position: 0.25,
+        part: ControlPart::Main,
+    }));
+    let _ = app.update(Message::SliderReleased);
+    let (_, changes) = app.a11y_changes(None);
+    let changes = changes.expect("the knob changed");
+    assert!(changes.tree.is_none(), "the root is named once");
+    let changed = sent_ids(&changes);
+    assert!(changed.contains(&cutoff));
+    // The knob, and at most what shows the same value beside it.
+    assert!(changed.len() <= 2, "{changed:?}");
+    assert!(changed.len() < whole.nodes.len());
+}
+
+/// A message that changes nothing the tree reports sends nothing, and a
+/// change of selection, which the tree does not report, sends nothing.
+#[test]
+fn a_message_that_changes_nothing_sends_nothing() {
+    let (mut app, module, _) = app_with_filter();
+    listen(&mut app);
+    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+    assert!(app.a11y.locating, "the message asked for a rebuild");
+    app.a11y.locating = false;
+    let (_, changes) = app.a11y_changes(None);
+    assert!(changes.is_none());
+}
+
+/// Messages that arrive while a rebuild waits for the canvas ask for no
+/// second one: the one on its way holds them.
+#[test]
+fn one_rebuild_at_a_time() {
+    let (mut app, _, _) = app_with_filter();
+    listen(&mut app);
+    let _ = app.a11y_after(Touch::Changed);
+    assert!(app.a11y.locating);
+    // Asking again while it waits changes nothing.
+    let _ = app.a11y_after(Touch::Changed);
+    let _ = app.a11y_after(Touch::Own);
+    assert!(app.a11y.locating);
+    let _ = app.a11y_event(Event::Located(None));
+    assert!(!app.a11y.locating);
+}
+
+/// Runs the engine and hands the app the lights and meters that moved, as
+/// the watcher thread does.
+fn move_live_values(app: &mut App) {
+    let tiles: Vec<u32> = app.ui_snapshot().tiles.iter().map(|t| t.id).collect();
+    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(tiles)));
+    let watch = app.watched_lights().expect("the patch shows lights");
+    app.process(4_800);
+    let _ = app.update(Message::Lights(watch.read()));
+}
+
+/// The nodes of widgets that only show a value, among `ids`.
+fn live_among(app: &App, ids: &[NodeId]) -> Vec<NodeId> {
+    let snapshot = app.ui_snapshot();
+    let widgets = app.a11y_widget_ids(&snapshot);
+    ids.iter()
+        .copied()
+        .filter(|node| app.a11y.ids.id(node.0).is_some_and(|id| widgets.is_live(id)))
+        .collect()
+}
+
+/// A node that shows a live value is held until the live timer fires, so
+/// it is sent at most every 250 ms. The timer runs only while a live value
+/// waits, and the last value is sent after the values stop moving
+/// (ui-layer.md, section 7, rule 7).
+#[test]
+fn live_values_wait_for_the_timer() {
+    let mut app = app_with_every_widget();
+    listen(&mut app);
+    assert!(!app.a11y.live_waits(), "at rest no timer runs");
+
+    // The engine runs: meters and lights move.
+    move_live_values(&mut app);
+    assert!(app.a11y.live_waits(), "live values wait for the timer");
+
+    // A rebuild for another reason holds the live nodes back.
+    app.a11y.locating = false;
+    let (_, changes) = app.a11y_changes(None);
+    let sent = changes.map(|update| sent_ids(&update)).unwrap_or_default();
+    assert_eq!(live_among(&app, &sent), Vec::new(), "live nodes wait");
+    assert!(app.a11y.live_waits());
+
+    // The timer fires: the live values are sent, and the timer stops.
+    let _ = app.a11y_event(Event::LiveTick);
+    assert!(app.a11y.locating, "the timer asks for a rebuild");
+    app.a11y.locating = false;
+    let (_, changes) = app.a11y_changes(None);
+    let sent = sent_ids(&changes.expect("the lights moved"));
+    assert!(!live_among(&app, &sent).is_empty(), "the moved values are sent");
+    assert!(!app.a11y.live_waits(), "nothing waits, so the timer stops");
+
+    // The values have stopped, and the last ones were sent.
+    let (_, none) = app.a11y_changes(None);
+    assert!(none.is_none());
+}
+
+/// A new scale factor sends every node that has bounds again, and the
+/// same one asks for nothing (ui-layer.md, section 7, rule 8).
+#[test]
+fn a_new_scale_factor_resends_bounds() {
+    let (mut app, module, knob) = app_with_filter();
+    let view = CanvasView {
+        bounds: Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0)),
+        camera: Camera::default(),
+    };
+    let _ = app.a11y_event(Event::Activated);
+    let _ = app.a11y_changes(Some(&view));
+    app.a11y.locating = false;
+
+    let _ = app.a11y_event(Event::ScaleFactor(1.0));
+    assert!(!app.a11y.locating, "the same scale factor asks for nothing");
+    let _ = app.a11y_event(Event::ScaleFactor(2.0));
+    assert!(app.a11y.locating, "a new one asks for a rebuild");
+    let (_, changes) = app.a11y_changes(Some(&view));
+    let changed = sent_ids(&changes.expect("bounds changed"));
+    assert!(changed.contains(&node_of(&mut app, &tile_id(module))));
+    assert!(changed.contains(&widget_node(&mut app, module, knob)));
+}
+
+/// When the screen reader leaves, nothing is built, and one that comes
+/// back gets the whole tree again.
+#[test]
+fn a_screen_reader_that_leaves_stops_the_tree() {
+    let (mut app, _, _) = app_with_filter();
+    listen(&mut app);
+    let _ = app.a11y_event(Event::Deactivated);
+    assert!(!app.a11y.is_active());
+    let _ = app.a11y_after(Touch::Changed);
+    let _ = app.a11y_after(Touch::Live);
+    assert!(!app.a11y.locating && !app.a11y.live_waits());
+
+    let _ = app.a11y_event(Event::Activated);
+    let (whole, first) = app.a11y_changes(None);
+    assert_eq!(sent_ids(&first.expect("the whole tree again")), sent_ids(&whole));
+}
+
+/// The window event that carries a new scale factor becomes the layer's
+/// event, and other window events do not.
+#[test]
+fn a_rescaled_window_reports_its_scale_factor() {
+    let window = iced::window::Id::unique();
+    let status = iced::event::Status::Ignored;
+    let rescaled = iced::Event::Window(iced::window::Event::Rescaled(2.0));
+    assert!(matches!(super::rescaled(rescaled, status, window), Some(Event::ScaleFactor(s)) if s == 2.0));
+    let focused = iced::Event::Window(iced::window::Event::Focused);
+    assert!(super::rescaled(focused, status, window).is_none());
 }
 
 /// The widget operation that finds the canvas reports the view the canvas

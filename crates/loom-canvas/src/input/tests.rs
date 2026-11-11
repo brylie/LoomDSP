@@ -4029,3 +4029,20 @@ fn the_next_deadline_is_the_earlier_of_what_is_pending() {
     let held = CanvasModel::new(&scene, &none).arrow_group(ArrowGroupView::Held);
     assert_eq!(input.next_deadline(&held), Some(hover_due));
 }
+
+/// A world rectangle lands in the window where its corners do: moved by
+/// the canvas's place in the window and scaled by the zoom.
+#[test]
+fn a_world_rect_in_the_window() {
+    let view = CanvasView {
+        bounds: Rect::new(Point::new(100.0, 50.0), Size::new(800.0, 600.0)),
+        camera: Camera::default(),
+    };
+    let world = Rect::new(Point::new(10.0, 20.0), Size::new(30.0, 40.0));
+    let found = view.rect_to_window(world);
+    let corner = view.to_window(Point::new(10.0, 20.0));
+    let far = view.to_window(Point::new(40.0, 60.0));
+    assert_eq!((found.x, found.y), (corner.x, corner.y));
+    assert!((found.x + found.width - far.x).abs() < 1e-4);
+    assert!((found.y + found.height - far.y).abs() < 1e-4);
+}

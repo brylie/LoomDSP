@@ -212,7 +212,7 @@ A screen reader reads the window through an accessibility tree, built with Acces
 
 Every node is named by a UI ID (`loom_ui_core::UiId`): a path of keys taken from what the element shows, such as the canvas, a module ID, the kind `param`, and a parameter name, written `canvas/4/param/cutoff`. A table (`loom_ui_core::IdTable`) gives each UI ID its AccessKit node ID. An ID keeps its number while its element exists, and a number is never used for another element, because a screen reader keeps its place by it.
 
-So far the tree holds the status line, the tiles, and the controls on them, and it is rebuilt on a timer while a screen reader listens. The rest of plan step 1.4 adds the other panels and sends only what changed.
+So far the tree holds the status line, the tiles, and the controls on them, and each widget has the role the specification gives its kind. While a screen reader listens, the tree is rebuilt after a message that may have changed it, and only the nodes that differ from the last send go out; live values go at most every 250 ms, from a timer that runs only while they wait. The rest of plan step 1.4 adds the other panels and sends only what changed.
 
 ## Describing a module
 

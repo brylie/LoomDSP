@@ -19,10 +19,10 @@
 //!   kept between events ([`Access`]), and the Iced glue that finds the
 //!   canvas in the window.
 //!
-//! This is plan step 1.4, first slice: the spike's code as a module, with
-//! the spike's coverage (status line, tiles, tile controls). While a screen
-//! reader listens the whole tree is still rebuilt on a timer. The next slice
-//! rebuilds it when it changes and sends only the changed nodes.
+//! The tree is built only while a screen reader listens, after a message
+//! that may have changed what it reports, and only the nodes that changed
+//! are sent. Nodes that show a live value are sent at most every 250 ms.
+//! Nothing runs on a timer at rest (ui-layer.md, section 7, rule 7).
 
 use accesskit::{ActionRequest, TreeUpdate};
 use iced::advanced::widget::operation::Outcome;
@@ -64,11 +64,23 @@ mod platform {
     }
 
     /// No adapter to send the tree to.
-    pub(super) fn push(_update: TreeUpdate) {}
+    pub(super) fn push(_whole: TreeUpdate, _changes: Option<TreeUpdate>) {}
 }
 
-/// How often the tree is rebuilt while a screen reader listens.
-const REFRESH: Duration = Duration::from_millis(500);
+/// The least time between two updates of a node that shows a live value:
+/// a meter, a light, a readout, a scope.
+pub(crate) const LIVE_INTERVAL: Duration = Duration::from_millis(250);
+
+/// What a message means for the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Touch {
+    /// The accessibility layer's own message: it rebuilds for itself.
+    Own,
+    /// Only live values moved: meters, lights, traces.
+    Live,
+    /// Anything else: a view model may have changed.
+    Changed,
+}
 
 /// What the accessibility layer tells the app.
 #[cfg_attr(
@@ -86,8 +98,15 @@ pub(crate) enum Event {
     ScaleFactor(f32),
     /// A screen reader started listening.
     Activated,
-    /// Time to rebuild the tree.
-    Refresh,
+    /// The screen reader left. No adapter on macOS says so
+    /// (`accesskit_macos` 0.27.2); the adapters of phase 2 do.
+    #[cfg_attr(
+        target_os = "macos",
+        allow(dead_code, reason = "accesskit_macos 0.27.2 never says a screen reader left")
+    )]
+    Deactivated,
+    /// Live values changed a while ago: time to send them.
+    LiveTick,
     /// Where the canvas is in the window, for a rebuild.
     Located(Option<CanvasView>),
     /// A screen reader asked for an action.
@@ -104,6 +123,16 @@ pub(crate) struct Access {
     active: bool,
     /// The window's scale factor: AccessKit wants physical pixels.
     scale: f32,
+    /// What the screen reader was last sent.
+    sent: tree::Sent,
+    /// True while a rebuild waits for the window to say where the canvas
+    /// is. Messages that arrive meanwhile are in that rebuild.
+    locating: bool,
+    /// True while live values have changed and were not sent yet. The
+    /// timer that sends them runs only then.
+    live_dirty: bool,
+    /// True when the next rebuild sends live values too.
+    flush_live: bool,
 }
 
 impl Default for Access {
@@ -112,6 +141,10 @@ impl Default for Access {
             ids: IdTable::new(),
             active: false,
             scale: 1.0,
+            sent: tree::Sent::default(),
+            locating: false,
+            live_dirty: false,
+            flush_live: false,
         }
     }
 }
@@ -124,6 +157,16 @@ impl Access {
     pub(crate) fn patch_replaced(&mut self) {
         self.ids.forget(&tree::canvas_id());
     }
+
+    /// True while a screen reader listens.
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// True while live values wait to be sent.
+    pub(crate) fn live_waits(&self) -> bool {
+        self.active && self.live_dirty
+    }
 }
 
 /// The task that attaches the accessibility layer to the app's window at
@@ -135,6 +178,14 @@ pub(crate) fn attach() -> Task<Event> {
 /// Asks the window where the canvas is.
 fn locate() -> Task<Event> {
     iced_runtime::task::widget(FindCanvas(None)).map(Event::Located)
+}
+
+/// The window's new scale factor, from a window event.
+fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Event> {
+    match event {
+        iced::Event::Window(iced::window::Event::Rescaled(scale)) => Some(Event::ScaleFactor(scale)),
+        _ => None,
+    }
 }
 
 /// A widget operation that finds the patch canvas and its camera.
@@ -157,15 +208,68 @@ impl Operation<Option<CanvasView>> for FindCanvas {
 }
 
 impl crate::App {
-    /// Events from the adapter, and a refresh timer while a screen reader
-    /// listens.
+    /// Events from the adapter. While a screen reader listens: the window's
+    /// scale factor when it changes, and a timer only while live values
+    /// wait to be sent. With no screen reader, and at rest, nothing runs.
     pub(crate) fn a11y_subscription(&self) -> Subscription<Event> {
-        let timer = if self.a11y.active {
-            iced::time::every(REFRESH).map(|_| Event::Refresh)
+        let live = if self.a11y.live_waits() {
+            iced::time::every(LIVE_INTERVAL).map(|_| Event::LiveTick)
         } else {
             Subscription::none()
         };
-        Subscription::batch([platform::events(), timer])
+        let scale = if self.a11y.is_active() {
+            iced::event::listen_with(rescaled)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([platform::events(), live, scale])
+    }
+
+    /// Notes a message the app just handled. Live values wait for the
+    /// timer. Anything else asks for a rebuild now, unless one is on its
+    /// way. With no screen reader this does nothing.
+    pub(crate) fn a11y_after(&mut self, touch: Touch) -> Task<Event> {
+        if !self.a11y.active {
+            return Task::none();
+        }
+        match touch {
+            Touch::Own => Task::none(),
+            Touch::Live => {
+                self.a11y.live_dirty = true;
+                Task::none()
+            }
+            Touch::Changed => self.a11y_rebuild(),
+        }
+    }
+
+    /// Asks the window where the canvas is, to rebuild the tree when the
+    /// answer comes. One request at a time.
+    fn a11y_rebuild(&mut self) -> Task<Event> {
+        if !self.a11y.active || self.a11y.locating {
+            return Task::none();
+        }
+        self.a11y.locating = true;
+        locate()
+    }
+
+    /// Builds the tree and gives what the screen reader must be sent: the
+    /// whole tree, and the nodes that changed since the last send, if any.
+    /// Live values go only when `flush_live` was set.
+    pub(crate) fn a11y_changes(&mut self, view: Option<&CanvasView>) -> (TreeUpdate, Option<TreeUpdate>) {
+        let snapshot = self.ui_snapshot();
+        let ids = self.a11y_widget_ids(&snapshot);
+        let whole = tree::tree(&snapshot, &ids, view, self.a11y.scale, &mut self.a11y.ids);
+        let flush = std::mem::take(&mut self.a11y.flush_live);
+        if flush {
+            self.a11y.live_dirty = false;
+        }
+        let table = &self.a11y.ids;
+        let hold = |node: accesskit::NodeId| !flush && table.id(node.0).is_some_and(|id| ids.is_live(id));
+        let (changes, held) = self.a11y.sent.changes(&whole, hold);
+        if held {
+            self.a11y.live_dirty = true;
+        }
+        (whole, changes)
     }
 
     /// The UI IDs of every tile's panel widgets, from the names that find
@@ -232,6 +336,7 @@ impl crate::App {
     }
 
     /// The tree as it is now, with the canvas placed by `view`.
+    #[cfg(test)]
     pub(crate) fn a11y_tree(&mut self, view: Option<&CanvasView>) -> TreeUpdate {
         let snapshot = self.ui_snapshot();
         let ids = self.a11y_widget_ids(&snapshot);
@@ -283,23 +388,43 @@ impl crate::App {
                 Task::none()
             }
             Event::ScaleFactor(scale) => {
+                // Every node's bounds change with it, so all are sent again.
+                let changed = self.a11y.scale != scale;
                 self.a11y.scale = scale;
-                Task::none()
+                if changed {
+                    self.a11y_rebuild().map(Message::A11y)
+                } else {
+                    Task::none()
+                }
             }
             Event::Activated => {
                 self.a11y.active = true;
-                locate().map(Message::A11y)
+                // The screen reader has nothing yet: send the whole tree.
+                self.a11y.sent.clear();
+                self.a11y_rebuild().map(Message::A11y)
             }
-            Event::Refresh => locate().map(Message::A11y),
+            Event::Deactivated => {
+                self.a11y.active = false;
+                self.a11y.live_dirty = false;
+                self.a11y.sent.clear();
+                Task::none()
+            }
+            Event::LiveTick => {
+                self.a11y.flush_live = true;
+                self.a11y_rebuild().map(Message::A11y)
+            }
             Event::Located(view) => {
-                let update = self.a11y_tree(view.as_ref());
-                platform::push(update);
+                self.a11y.locating = false;
+                if self.a11y.active {
+                    let (whole, changes) = self.a11y_changes(view.as_ref());
+                    platform::push(whole, changes);
+                }
                 Task::none()
             }
             Event::Action(request) => {
                 let mut tasks = self.a11y_action(&request, std::time::Instant::now());
-                // Show the new value at once, not at the next refresh.
-                tasks.push(locate().map(Message::A11y));
+                // Show the new value at once.
+                tasks.push(self.a11y_rebuild().map(Message::A11y));
                 Task::batch(tasks)
             }
         }

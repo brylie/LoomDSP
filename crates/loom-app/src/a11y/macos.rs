@@ -124,17 +124,21 @@ fn attach_to(window: &dyn iced::window::Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Sends a new tree to the adapter. Does nothing before the adapter is
-/// attached, and the adapter passes it on only while a screen reader
-/// listens.
-pub(super) fn push(update: TreeUpdate) {
+/// Sends the nodes that changed to the adapter, and keeps the whole tree
+/// for a screen reader that starts to listen later. Does nothing before
+/// the adapter is attached, and the adapter passes changes on only while a
+/// screen reader listens.
+pub(super) fn push(whole: TreeUpdate, changes: Option<TreeUpdate>) {
     ATTACHED.with(|attached| {
         let mut attached = attached.borrow_mut();
         let Some(attached) = attached.as_mut() else {
             return;
         };
-        *attached.latest.borrow_mut() = Some(update.clone());
-        if let Some(events) = attached.adapter.update_if_active(|| update) {
+        *attached.latest.borrow_mut() = Some(whole);
+        let Some(changes) = changes else {
+            return;
+        };
+        if let Some(events) = attached.adapter.update_if_active(|| changes) {
             events.raise();
         }
     });
