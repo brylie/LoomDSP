@@ -286,7 +286,45 @@ impl crate::App {
             self.a11y.live_dirty = false;
         }
         let table = &self.a11y.ids;
-        let hold = |node: accesskit::NodeId| !flush && table.id(node.0).is_some_and(|id| ids.is_live(id));
+        // The canvas in the window, in physical pixels, as node bounds are.
+        let screen = view.map(|view| {
+            let s = f64::from(self.a11y.scale);
+            let b = view.bounds;
+            accesskit::Rect {
+                x0: f64::from(b.x) * s,
+                y0: f64::from(b.y) * s,
+                x1: f64::from(b.x + b.width) * s,
+                y1: f64::from(b.y + b.height) * s,
+            }
+        });
+        let canvas = tree::canvas_id();
+        let hold = |node: accesskit::NodeId, built: &accesskit::Node| {
+            let Some(id) = table.id(node.0) else {
+                return tree::Hold::Send;
+            };
+            // Below a panel that owns the input, what is inside a tile
+            // keeps the value last sent. The tile itself is sent, hidden.
+            if ids.is_covered() && id.is_under(&canvas) && tree::tile_of(id).is_none() && *id != canvas {
+                return tree::Hold::Skip;
+            }
+            if !ids.is_live(id) {
+                return tree::Hold::Send;
+            }
+            // A live value off screen keeps the value last sent.
+            let off_screen = match (screen, built.bounds()) {
+                (Some(screen), Some(bounds)) => {
+                    bounds.x1 <= screen.x0 || bounds.x0 >= screen.x1 || bounds.y1 <= screen.y0 || bounds.y0 >= screen.y1
+                }
+                _ => false,
+            };
+            if off_screen {
+                tree::Hold::Skip
+            } else if flush {
+                tree::Hold::Send
+            } else {
+                tree::Hold::Wait
+            }
+        };
         let (changes, held) = self.a11y.sent.changes(&whole, hold);
         if held {
             self.a11y.live_dirty = true;
@@ -300,6 +338,9 @@ impl crate::App {
         let graph = self.session.controller.graph();
         let hierarchy = &self.session.hierarchy;
         let mut ids = tree::WidgetIds::default();
+        if !self.no_overlay() {
+            ids.set_covered();
+        }
         for tile in &snapshot.tiles {
             let part = crate::surface::part_tile(hierarchy, tile.id);
             let node = graph.node(ModuleId(part));
@@ -310,9 +351,12 @@ impl crate::App {
                 tree::tile_id(tile.id)
             } else if let Some(node) = node {
                 tree::part_id(tile.id, tree::SlotPart::Module(node.descriptor.id))
-            } else {
-                let key = hierarchy.key_at(&hierarchy.path_of(ModuleId(part))).unwrap_or_default();
+            } else if let Some(key) = hierarchy.key_at(&hierarchy.path_of(ModuleId(part))) {
                 tree::part_id(tile.id, tree::SlotPart::SubPatch(key))
+            } else {
+                // A part with no key cannot be told from another: its
+                // controls get no IDs, so no nodes, rather than shared ones.
+                continue;
             };
             let widgets = (0..tile.widgets.len()).map(|index| {
                 // From the panel's description, not from how the widget is

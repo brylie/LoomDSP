@@ -1395,6 +1395,84 @@ fn focus_ends_the_group_and_a_new_patch_forgets_it() {
     assert_eq!(update.focus, node_of(&mut app, &window_id()));
 }
 
+/// While a panel owns the input, the tiles are hidden from a screen
+/// reader, focus is not reported inside them, and what is inside a tile
+/// keeps the value last sent. When the panel closes, the tiles show again
+/// with their current values (ui-layer.md, section 7, rule 7).
+#[test]
+fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
+    let (mut app, module, knob) = app_with_filter();
+    let _ = app.a11y_event(Event::Activated);
+    let (whole, _) = app.a11y_changes(None);
+    let tile = node_of(&mut app, &tile_id(module));
+    let cutoff = widget_node(&mut app, module, knob);
+    assert!(!node(&whole, tile).is_hidden());
+    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let _ = app.a11y_changes(None);
+
+    app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
+    // The patch changes behind the panel, as MIDI or a script can do.
+    app.set_param(module, 0, 0.5);
+    let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+        module,
+        widget: knob,
+        position: 0.1,
+        part: ControlPart::Main,
+    }));
+    let _ = app.update(Message::SliderReleased);
+    let (whole, changes) = app.a11y_changes(None);
+    assert!(node(&whole, tile).is_hidden());
+    assert_eq!(
+        whole.focus,
+        node_of(&mut app, &window_id()),
+        "no focus inside a hidden tile"
+    );
+    let sent = sent_ids(&changes.expect("the tile is sent, hidden"));
+    assert!(sent.contains(&tile));
+    assert!(!sent.contains(&cutoff), "the knob keeps the value last sent");
+
+    app.overlays = crate::overlays::Overlays::default();
+    let (whole, changes) = app.a11y_changes(None);
+    assert!(!node(&whole, tile).is_hidden());
+    let sent = sent_ids(&changes.expect("the tiles show again"));
+    assert!(sent.contains(&tile) && sent.contains(&cutoff));
+}
+
+/// A live value off screen keeps the value last sent, and nothing waits
+/// for it, so the live timer does not run for a meter nobody can see. When
+/// it comes on screen it is sent again.
+#[test]
+fn live_values_off_screen_are_not_sent() {
+    let mut app = app_with_every_widget();
+    let on_screen = CanvasView {
+        bounds: Rect::new(Point::new(0.0, 0.0), Size::new(4000.0, 4000.0)),
+        camera: Camera::default(),
+    };
+    // The canvas is a small corner far from every tile.
+    let away = CanvasView {
+        bounds: Rect::new(Point::new(-9000.0, -9000.0), Size::new(1.0, 1.0)),
+        camera: Camera::default(),
+    };
+    let _ = app.a11y_event(Event::Activated);
+    let _ = app.a11y_changes(Some(&away));
+    move_live_values(&mut app);
+    assert!(app.a11y.live_waits());
+
+    app.a11y.flush_live = true;
+    let (_, changes) = app.a11y_changes(Some(&away));
+    let sent = changes.map(|update| sent_ids(&update)).unwrap_or_default();
+    assert_eq!(live_among(&app, &sent), Vec::new(), "off screen, nothing is sent");
+    assert!(!app.a11y.live_waits(), "and the timer stops");
+
+    // On screen now: the bounds changed, so the live nodes wait, then go.
+    let _ = app.a11y_changes(Some(&on_screen));
+    assert!(app.a11y.live_waits());
+    app.a11y.flush_live = true;
+    let (_, changes) = app.a11y_changes(Some(&on_screen));
+    let sent = sent_ids(&changes.expect("on screen, the values are sent"));
+    assert!(!live_among(&app, &sent).is_empty());
+}
+
 /// The widget operation that finds the canvas reports the view the canvas
 /// gave it, and nothing when no canvas answered.
 #[test]

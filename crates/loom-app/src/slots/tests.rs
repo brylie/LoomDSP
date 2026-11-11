@@ -820,3 +820,30 @@ fn swapping_a_part_makes_its_controls_new_elements() {
         part_id(slot, SlotPart::Module("loom.filter.svf"))
     );
 }
+
+/// A slot whose part is a sub-patch keys its controls under `subpatch`
+/// and the part's key, with the kind `exposed`, so they are not taken for
+/// a module's parameters of the same name. Each has a node under the slot
+/// tile (ui-layer.md, section 4).
+#[test]
+fn a_sub_patch_part_keys_the_slots_controls_under_its_key() {
+    use crate::a11y::tree::{SlotPart, part_id};
+    let mut app = app_with(COMB_SLOT);
+    app.show_level(&ModulePath::top(2));
+    let slot = inside(&app, 9);
+    let snapshot = app.ui_snapshot();
+    let ids = app.a11y_widget_ids(&snapshot);
+    let tile = snapshot.tiles.iter().find(|t| t.id == slot).expect("the slot tile");
+    let found: Vec<_> = (0..tile.widgets.len()).filter_map(|i| ids.get(slot, i)).collect();
+    assert_eq!(
+        found,
+        [&part_id(slot, SlotPart::SubPatch("comb")).with("exposed").with("cutoff")]
+    );
+    let update = app.a11y_tree(None);
+    let cutoff = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == accesskit::Role::Slider)
+        .expect("the comb's cutoff is a slider");
+    assert_eq!(cutoff.1.label(), Some(tile.widgets[0].label.as_str()));
+}

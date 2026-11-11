@@ -106,6 +106,8 @@ pub(crate) struct WidgetIds {
     live: std::collections::BTreeSet<UiId>,
     /// The control with keyboard focus on the canvas, if one has it.
     focus: Option<(u32, usize)>,
+    /// True while a panel over the canvas owns the input.
+    covered: bool,
 }
 
 /// What a panel widget is, beyond what the snapshot says of it: enough to
@@ -215,6 +217,18 @@ impl WidgetIds {
         self.live.contains(id)
     }
 
+    /// Says that a panel over the canvas owns the input. The tiles are
+    /// then hidden from a screen reader, as they are from the pointer and
+    /// the keys (ui-layer.md, section 5, rule 3).
+    pub(crate) fn set_covered(&mut self) {
+        self.covered = true;
+    }
+
+    /// True while a panel over the canvas owns the input.
+    pub(crate) fn is_covered(&self) -> bool {
+        self.covered
+    }
+
     /// Says which control has keyboard focus on the canvas.
     pub(crate) fn set_focus(&mut self, module: u32, widget: usize) {
         self.focus = Some((module, widget));
@@ -275,6 +289,18 @@ fn physical(view: &CanvasView, world: Rect, scale: f32) -> accesskit::Rect {
     }
 }
 
+/// What to do with a node that differs from what was last sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Hold {
+    /// Send it now.
+    Send,
+    /// A live value: it waits for the live timer, which must keep running.
+    Wait,
+    /// Off screen, or below a panel that owns the input: it keeps the
+    /// value last sent, and nothing waits for it.
+    Skip,
+}
+
 /// What the screen reader was last sent, so the next update holds only the
 /// nodes that changed (ui-layer.md, section 7, rule 7).
 #[derive(Debug, Default)]
@@ -295,20 +321,28 @@ impl Sent {
     /// The part of a whole tree that differs from what was last sent, and
     /// true if a change was held back. `None` when nothing is to be sent.
     ///
-    /// `hold` names the nodes that show a live value. A change on one of
-    /// them waits, so a meter is sent at most as often as the caller lets
-    /// live values through. A node the screen reader has never had is
-    /// always sent. The first update holds every node and says which is
-    /// the root.
-    pub(crate) fn changes(&mut self, whole: &TreeUpdate, hold: impl Fn(NodeId) -> bool) -> (Option<TreeUpdate>, bool) {
+    /// `hold` says what to do with a node that changed. A live value
+    /// waits, so a meter is sent at most as often as the caller lets live
+    /// values through. A node off screen or below a panel is skipped. A
+    /// node the screen reader has never had is always sent. The first
+    /// update holds every node and says which is the root.
+    pub(crate) fn changes(
+        &mut self,
+        whole: &TreeUpdate,
+        hold: impl Fn(NodeId, &Node) -> Hold,
+    ) -> (Option<TreeUpdate>, bool) {
         let first = self.nodes.is_empty();
         let mut held = false;
         let mut nodes = Vec::new();
         for (id, node) in &whole.nodes {
-            match self.nodes.get(&id.0) {
-                Some(last) if last == node => {}
-                Some(_) if hold(*id) => held = true,
-                _ => {
+            let known = self.nodes.get(&id.0);
+            if known == Some(node) {
+                continue;
+            }
+            match known.map_or(Hold::Send, |_| hold(*id, node)) {
+                Hold::Wait => held = true,
+                Hold::Skip => {}
+                Hold::Send => {
                     self.nodes.insert(id.0, node.clone());
                     nodes.push((*id, node.clone()));
                 }
@@ -365,6 +399,11 @@ pub(crate) fn tree(
         let mut node = Node::new(Role::Group);
         node.set_label(tile.title.clone());
         place(&mut node, tile.bounds);
+        if ids.covered {
+            // Below a panel that owns the input: not there for a screen
+            // reader, with everything inside it.
+            node.set_hidden();
+        }
         node.add_action(Action::Focus);
         // Click selects the tile's module, so the inspector follows.
         node.add_action(Action::Click);
@@ -384,7 +423,7 @@ pub(crate) fn tree(
             if control {
                 w.add_action(Action::Focus);
             }
-            if ids.focus == Some((tile.id, index)) {
+            if ids.focus == Some((tile.id, index)) && !ids.covered {
                 focus = Some(child);
             }
             if let Some(bounds) = widget.bounds {
