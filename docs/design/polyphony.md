@@ -3,14 +3,14 @@
 How a cable carries one value per voice, how notes are given to voices, which modules make, merge, and spread voices, and what a module author has to do to become polyphonic (nothing, in most cases).
 
 - **Kind:** living specification.
-- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. Nothing is built yet.
+- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator is implemented in `loom-dsp`; bundles and source modules are not built yet.
 - **Decision behind it:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md) (per-voice signals, bundle as inferred width), refining [ADR-0020](../adr/0020-inferred-channel-count.md) (inferred channel count) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (every cable is `f32`). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of a new copy. [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md) for the allocator's panel.
 - **Use case and requirements:** UC10 (sequence chords and note clips), UC2 (live play). FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-MIDI-03 (MPE), FR-LIB-13, FR-LIB-20, NFR-RT-01, NFR-PERF-01, NFR-PERF-03.
 - **Builds on:** [Stereo cables](stereo.md) (widths, copies, downmix), [Changing a running patch](live-patching.md) (schedule swaps), [Sub-patches](sub-patches.md) (stack mode is not voices), [Module data](module-data.md) (stored notes and chords), [Scale and tuning](scale-and-tuning.md) (chords as scale steps), [Arrangement](arrangement.md) (the note cycle).
 - **Background:** [Voices and polyphony](../learn/voices-and-polyphony.md): what a voice is, why stealing exists, why a bundle is inferred, and why a gate carries the timing.
 - **Prior art:** per-voice signals are how a modular grid such as Bitwig's Grid carries polyphony. Hardware polysynths settled oldest-note and quietest-note stealing decades ago. Named only to explain the ideas; the rules and modules below are our own.
 - **Issues:** [#665](https://github.com/brylie/LoomDSP/issues/665) (this spec), [#666](https://github.com/brylie/LoomDSP/issues/666) (the note model). Users: [#510](https://github.com/brylie/LoomDSP/issues/510) (MIDI out), [#307](https://github.com/brylie/LoomDSP/issues/307) (multi-lane sequencer), [#50](https://github.com/brylie/LoomDSP/issues/50) (stored notes).
-- **Code:** none yet. It will extend `crates/loom-core/src/width.rs` and `compile.rs` (widths and copies), `crates/loom-modules/src/midi.rs` (Note input), and add a voice allocator to `loom-dsp` (ADR-0035).
+- **Code:** `crates/loom-dsp/src/voice.rs` (shared allocator). Bundle and module work will extend `crates/loom-core/src/width.rs` and `compile.rs` (widths and copies), `crates/loom-modules/src/midi.rs` (Note input), using the allocator in `loom-dsp` (ADR-0035).
 
 ## Goal
 
@@ -305,8 +305,36 @@ Cost:
 - **A playable keyboard** (MT-UI-04): a source like Note input, specified with its widget.
 - **A voice's MIDI channel as a signal.** Note input does not output it; MT-NOTE-07's routing by channel is specified with that module (M3).
 
+## Allocator interface (implemented, #673)
+
+- `voice::Allocator` owns 16 fixed slots and a 16-note mono held list. Call
+  `begin_frame` once per sample, apply events in arrival order, then read `voices`.
+  There is no block clock or MIDI dependency. `NoteId` is an opaque caller key.
+- `voices_for` finds the held voices of a note; `update_note` changes their pitch
+  and expression without changing gates or order. A Voice assigner can call it
+  every sample. Released voices hold their last values.
+- `configure` changes capacity, mode, and unison. Capacity is clamped to 1 to 16;
+  unison is clamped to 1 to capacity. New voices start silent; removed voices
+  forget their notes. Reducing to one voice remembers only its surviving note.
+- Invalid modes have a runtime fallback, without rewriting the stored mode:
+  Oldest and Quietest at one voice act as Legato; Legato and Retrigger above one
+  act as Oldest. A later capacity change resolves the stored mode again.
+- A return to a held mono key does not retrigger: it is caused by a note-off, not
+  a new note-on. Its pitch returns and its gate carries on. Velocity holds the
+  last note-on's value, preserving the original mono Note input behavior.
+- Unison takes whole groups. If capacity is not divisible by group size, stealing
+  releases whole note groups until a new group fits. Any remainder stays free.
+  Quietest compares the maximum level of each group's held voices. Ties use
+  oldest start order, then lowest voice index. Non-finite levels read as zero;
+  a short level slice is padded with zero. Without levels, Quietest is Oldest.
+- Notes begun or released on one frame are ordered by a serial number; free
+  voices use release order, then voice index. Timing and order counters saturate
+  instead of wrapping. At 48 kHz the frame counter lasts over 12 million years.
+- The keyboard, chord-change, and scripted note-cycle cases are covered by
+  algorithm tests, including block sizes 1, 77, and 512. Module-level acceptance
+  remains pending until the source modules exist.
+
 ## Open points
 
-- **The allocator's API** in `loom-dsp`: whether sources push events and pull per-voice state, or hand it a frame at a time. Decided in implementation, with the three sources above as its test cases.
 - **Lockstep copies for SIMD.** Whether the schedule format needs a per-voice stride for NFR-PERF-03, or the optimisation can stay inside the engine. Not before M2's exit criterion is measured.
 - **MPE zones.** How the lower and upper zones map onto Note input's `channel` setting, with FR-MIDI-03.

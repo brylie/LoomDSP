@@ -27,6 +27,7 @@ pub mod oscillator;
 pub mod phase;
 pub mod random;
 pub mod slew;
+pub mod voice;
 
 mod static_checks;
 /// The most a signal can be when it enters filters in series: 300 dB, far above
