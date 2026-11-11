@@ -174,6 +174,7 @@ Keys come from what the element shows, not from where it sits:
 | A sub-patch tile, a Patch input or output tile | Its flat module ID: instance and port tiles take IDs from the same table as modules ([sub-patches](sub-patches.md)) |
 | An exposed item on a sub-patch's surface, on its tile or its inspector rows | The instance's flat ID, the kind `exposed`, and the item's name on that surface |
 | A slot and its parts | The slot's flat ID, then the part's module type or library item |
+| A control on a slot's tile, or its inspector row | The slot's flat ID, then its part as above, then the kind and the name: `canvas/7/loom.filter.svf/param/cutoff`. A part that is a sub-patch is `subpatch` and then its key. When the slot swaps its part, the new part's controls are new elements, even where a name repeats |
 | A breadcrumb entry | The path of instance flat IDs from the top patch to that level |
 | A library item in the module browser | `library` and the item's path in the library folder |
 | A toolbar button | A fixed name (`undo`, `open`, `panic`) |
@@ -420,6 +421,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Which key moves between regions | Ctrl+Tab forward and Ctrl+Shift+Tab back, wrapping, with Ctrl on every platform, and working from a text field. Chosen over F6, which needs Fn on most keyboards | Section 6, rule 7 |
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
 | How a UI ID is written as text (2026-11-10) | A path: keys joined by `/`, digits as numbers, `/` and `%` escaped inside a name, and a name of digits escaped so it reads back as a name. The control channel's short names stay | Section 4, rule 5 |
+| Whether a slot's controls stay the same elements when its part is swapped (2026-11-11) | No. They are keyed under the part, so a swap makes new elements with new node IDs. The new part's controls can differ completely, and a screen reader must not read the new filter's cutoff as the old one's | Section 4, the key table |
 | Whether a tile's node offers Click (2026-11-10) | Yes. Click selects the tile's module; Focus alone still changes nothing | Section 7, the role table and rule 9 |
 
 Entries marked † are from web search summaries and the projects' prose, not from their source. Check them before relying on them.

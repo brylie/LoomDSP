@@ -91,13 +91,14 @@ fn widget_kinds_and_missing_names() {
     let mut ids = WidgetIds::default();
     ids.add_tile(
         3,
+        &tile_id(3),
         [
             (WidgetKey::Param, Some("gain".to_string())),
             (WidgetKey::Display, Some("out".to_string())),
             (WidgetKey::Param, None),
         ],
     );
-    ids.add_tile(9, [(WidgetKey::Exposed, Some("Cutoff".to_string()))]);
+    ids.add_tile(9, &tile_id(9), [(WidgetKey::Exposed, Some("Cutoff".to_string()))]);
 
     assert_eq!(ids.get(3, 0), Some(&tile_id(3).with("param").with("gain")));
     assert_eq!(ids.get(3, 1), Some(&tile_id(3).with("display").with("out")));
@@ -136,9 +137,10 @@ fn kinds_come_from_the_panel_and_agree_with_locate() {
             let Some(id) = ids.get(tile.id, index) else { continue };
             drawn.insert(widget.kind);
             let control = crate::surface::is_control(graph, hierarchy, tile.id, index);
-            let keys = id.keys();
+            // The kind and what follows it: a slot's part comes before them.
+            let keys = &id.keys()[2..];
             assert_eq!(
-                keys[2] == IdKey::from("display"),
+                keys[0] == IdKey::from("display"),
                 !control,
                 "{} on tile {}: {id}",
                 widget.kind,
@@ -151,8 +153,8 @@ fn kinds_come_from_the_panel_and_agree_with_locate() {
             // `11:display:out` or `11:display:out:2` for a display, however
             // `locate` would write it: the name and the count must match.
             let located = targets::name(graph, hierarchy, Part::Display(tile.id, index)).unwrap();
-            let bound = name(&keys[3]);
-            match keys.get(4) {
+            let bound = name(&keys[1]);
+            match keys.get(2) {
                 Some(count) => {
                     counted += 1;
                     assert_eq!(located, format!("{}:display:{bound}:{}", tile.id, name(count)));
@@ -184,6 +186,7 @@ fn widgets_bound_to_the_same_name_get_different_ids() {
     let mut ids = WidgetIds::default();
     ids.add_tile(
         11,
+        &tile_id(11),
         [
             (WidgetKey::Display, Some("out".to_string())),
             (WidgetKey::Display, Some("out".to_string())),
@@ -330,6 +333,7 @@ fn a_widget_with_no_name_is_left_out() {
     let mut ids = named.clone();
     ids.add_tile(
         module,
+        &tile_id(module),
         (0..tile.widgets.len()).map(|index| (WidgetKey::Param, (index != knob).then(|| format!("w{index}")))),
     );
     let all = tree::tree(&snapshot, &named, None, 1.0, &mut app.a11y.ids);

@@ -50,6 +50,27 @@ pub(crate) fn tile_of(id: &UiId) -> Option<u32> {
     }
 }
 
+/// What fills a slot: the key of a slot's part in a UI ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlotPart<'a> {
+    /// A module, by its module type ID.
+    Module(&'a str),
+    /// A sub-patch, by its definition's key in the patch.
+    SubPatch(&'a str),
+}
+
+/// The ID the controls of a slot tile sit in: the slot's flat ID, then its
+/// part (ui-layer.md, section 4). When the slot swaps its part, the new
+/// part's controls are new elements, even where a name repeats, so a screen
+/// reader does not read the new filter's cutoff as the old one's.
+pub(crate) fn part_id(slot: u32, part: SlotPart<'_>) -> UiId {
+    match part {
+        SlotPart::Module(kind) => tile_id(slot).with(kind),
+        // Two keys, so a sub-patch named like a module type is not it.
+        SlotPart::SubPatch(key) => tile_id(slot).with("subpatch").with(key),
+    }
+}
+
 /// What kind of item a panel widget is, which is the kind word in its UI
 /// ID (ui-layer.md, section 4, rule 2). The app decides it from the panel's
 /// description, as `targets.rs` does, never from how the widget is drawn.
@@ -82,13 +103,20 @@ impl WidgetKey {
 pub(crate) struct WidgetIds(BTreeMap<u32, Vec<Option<UiId>>>);
 
 impl WidgetIds {
-    /// Adds a tile's widgets. `widgets` gives, for each widget in panel
-    /// order, its kind and the name that finds it again.
-    pub(crate) fn add_tile(&mut self, module: u32, widgets: impl IntoIterator<Item = (WidgetKey, Option<String>)>) {
+    /// Adds a tile's widgets. `under` is the ID they sit in: the tile's, or
+    /// for a slot the tile's and then its part ([`part_id`]). `widgets`
+    /// gives, for each widget in panel order, its kind and the name that
+    /// finds it again.
+    pub(crate) fn add_tile(
+        &mut self,
+        module: u32,
+        under: &UiId,
+        widgets: impl IntoIterator<Item = (WidgetKey, Option<String>)>,
+    ) {
         let mut ids: Vec<Option<UiId>> = Vec::new();
         for (kind, name) in widgets {
             let id = name.map(|name| {
-                let id = tile_id(module).with(kind.word()).with(name);
+                let id = under.clone().with(kind.word()).with(name);
                 // Two widgets can show the same value, as a meter and its
                 // level history do. The later ones are counted, from 2.
                 let earlier = ids.iter().flatten().filter(|other| other.is_under(&id)).count();

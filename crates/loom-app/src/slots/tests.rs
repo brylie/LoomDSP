@@ -748,3 +748,75 @@ fn restore_links_puts_moved_links_back() {
     app.restore_links(&links);
     assert_eq!(app.session.controller.graph().assignment(id), Some(&assignment));
 }
+
+/// A slot tile's controls are keyed under its part, so swapping the part
+/// makes them new elements for a screen reader: new UI IDs and new node
+/// IDs, even for a control whose name repeats, while the slot tile keeps
+/// its own node (ui-layer.md, section 4).
+#[test]
+fn swapping_a_part_makes_its_controls_new_elements() {
+    use crate::a11y::tree::{SlotPart, part_id, tile_id};
+    let (mut app, slot, _) = with_slot();
+    // The ID and node of the slot tile's control bound to `cutoff`, and the
+    // slot tile's own node.
+    let look = |app: &mut App| {
+        let snapshot = app.ui_snapshot();
+        let ids = app.a11y_widget_ids(&snapshot);
+        let update = app.a11y_tree(None);
+        let tile = snapshot.tiles.iter().find(|t| t.id == slot).expect("the slot tile");
+        let (tile_node, tile_built) = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == accesskit::Role::Group && n.label() == Some(tile.title.as_str()))
+            .expect("the slot tile's node");
+        let index = (0..tile.widgets.len())
+            .find(|i| ids.get(slot, *i).is_some_and(|id| id.to_string().ends_with("/cutoff")))
+            .expect("a control bound to cutoff");
+        let id = ids.get(slot, index).unwrap().clone();
+        let label = tile.widgets[index].label.clone();
+        let node = *tile_built
+            .children()
+            .iter()
+            .find(|child| {
+                update
+                    .nodes
+                    .iter()
+                    .any(|(n, built)| n == *child && built.label() == Some(label.as_str()))
+            })
+            .expect("the cutoff control's node");
+        let all: Vec<accesskit::NodeId> = update.nodes.iter().map(|(n, _)| *n).collect();
+        (id, node, *tile_node, all)
+    };
+
+    let (before_id, before_node, tile_before, _) = look(&mut app);
+    assert_eq!(
+        before_id,
+        part_id(slot, SlotPart::Module("loom.filter.svf"))
+            .with("param")
+            .with("cutoff")
+    );
+    assert!(before_id.is_under(&tile_id(slot)));
+
+    let _ = app.update(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.onepole@1".to_string()),
+    });
+    let (after_id, after_node, tile_after, all) = look(&mut app);
+
+    assert_eq!(
+        after_id,
+        part_id(slot, SlotPart::Module("loom.filter.onepole"))
+            .with("param")
+            .with("cutoff")
+    );
+    assert_ne!(after_id, before_id);
+    assert_ne!(after_node, before_node, "the new part's cutoff is a new element");
+    assert!(!all.contains(&before_node), "the old part's control left the tree");
+    assert_eq!(tile_after, tile_before, "the slot tile is the same element");
+
+    // A sub-patch part is keyed apart from a module type of the same name.
+    assert_ne!(
+        part_id(slot, SlotPart::SubPatch("loom.filter.svf")),
+        part_id(slot, SlotPart::Module("loom.filter.svf"))
+    );
+}

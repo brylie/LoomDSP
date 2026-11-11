@@ -176,7 +176,18 @@ impl crate::App {
         let mut ids = tree::WidgetIds::default();
         for tile in &snapshot.tiles {
             let part = crate::surface::part_tile(hierarchy, tile.id);
-            let on_module = graph.node(ModuleId(part)).is_some();
+            let node = graph.node(ModuleId(part));
+            let on_module = node.is_some();
+            // A slot's controls are its part's: keyed under the part, so a
+            // swap makes new elements.
+            let under = if part == tile.id {
+                tree::tile_id(tile.id)
+            } else if let Some(node) = node {
+                tree::part_id(tile.id, tree::SlotPart::Module(node.descriptor.id))
+            } else {
+                let key = hierarchy.key_at(&hierarchy.path_of(ModuleId(part))).unwrap_or_default();
+                tree::part_id(tile.id, tree::SlotPart::SubPatch(key))
+            };
             let widgets = (0..tile.widgets.len()).map(|index| {
                 // From the panel's description, not from how the widget is
                 // drawn, so the kind agrees with the names `locate` takes.
@@ -189,7 +200,7 @@ impl crate::App {
                 };
                 (kind, crate::surface::widget_name(graph, hierarchy, tile.id, index))
             });
-            ids.add_tile(tile.id, widgets);
+            ids.add_tile(tile.id, &under, widgets);
         }
         ids
     }
