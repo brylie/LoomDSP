@@ -173,10 +173,19 @@ impl Operation<Places> for Collect {
                 self.inside.offset.x + translation.x,
                 self.inside.offset.y + translation.y,
             ),
-            // Inside two areas, only what both show can be seen. The
-            // nearest one's bounds are what the part's rectangle is cut
-            // by first; the tree marks each area as clipping.
-            clip: Some(own),
+            // Inside two areas, only what both show can be seen, so the
+            // clip is where they overlap. An area scrolled wholly out of
+            // the outer one shows nothing: its clip is empty, and nothing
+            // inside it is shown.
+            clip: Some(match self.inside.clip {
+                Some(outer) => own.intersection(outer).unwrap_or_else(|| {
+                    Rect::new(
+                        loom_ui_core::Point::new(own.x, own.y),
+                        loom_ui_core::Size::new(0.0, 0.0),
+                    )
+                }),
+                None => own,
+            }),
         });
     }
 
