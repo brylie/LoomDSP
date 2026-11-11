@@ -229,7 +229,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
 ### 2.4 Text drawing for the canvas
 
-1. Replace Iced's text renderer for tile text with a glyph atlas renderer on `cosmic-text`. `glyphon` † is the usual choice; Iced's `cryoglyph` is a fork of it. Check its licence with `cargo deny`.
+1. Replace Iced's text renderer for tile text with a glyph atlas renderer on the crate chosen by spec section 8, rule 8. **2.4a, the comparison, is done:** [research note](../research/2026-11-text-crate-choice.md), with a recommendation for Brylie to decide. It found that no `glyphon` release builds with our `wgpu` 27 (its releases target 25, 28, 29, and 30), so while Iced fixes our `wgpu`, a `cosmic-text` canvas draws with `cryoglyph` 0.1, already in our tree, and a Parley canvas needs an atlas of our own. Step 2.4b draws the canvas text once the crate is chosen.
 2. Give it a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
 3. Share one `cosmic-text` `FontSystem` between the canvas and the Iced panels if Iced allows it; otherwise accept two for now and note it.
 
@@ -321,4 +321,6 @@ Stop and ask the maintainer if any of these happen:
 
 ## Unverified facts
 
-Entries marked † were not checked against source or release notes when this plan was written. Check each before relying on it: Iced's integration example, `glyphon`, `taffy`, `pulldown-cmark`, and `arboard`, including their licences and the versions that match `wgpu` 27 and `winit` 0.30.
+Entries marked † were not checked against source or release notes when this plan was written. Check each before relying on it: Iced's integration example, `taffy`, `pulldown-cmark`, and `arboard`, including their licences and the versions that match `wgpu` 27 and `winit` 0.30.
+
+Checked in step 2.4a ([research note](../research/2026-11-text-crate-choice.md)): `glyphon` (MIT OR Apache-2.0 OR Zlib; no release for `wgpu` 27), and the spec's two Parley claims in section 8, rule 8. Parley's AccessKit text properties existed up to 0.11.1 and were removed in 0.12.0. Its editor does track IME composition.

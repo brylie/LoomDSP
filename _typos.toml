@@ -11,3 +11,7 @@ formant = "formant"
 ND = "ND"
 # "Resonance" cut with an ellipsis to fit a tile, as the snapshot shows it.
 Reson = "Reson"
+# The OpenType table for size-dependent tracking in Apple's fonts.
+trak = "trak"
+# A crate name in a dependency tree (`writeable`, of ICU4X).
+writeable = "writeable"
