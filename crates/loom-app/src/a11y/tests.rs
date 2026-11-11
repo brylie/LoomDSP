@@ -389,6 +389,63 @@ fn every_widget_kind_has_its_role_a_name_and_a_value() {
     }
 }
 
+/// A widget the app says nothing of is a plain label with its text. One
+/// with a kind but no parameter is a slider over the control's travel,
+/// from 0 to 1, and still takes a value and a step.
+#[test]
+fn a_widget_without_a_detail_or_a_parameter() {
+    let (mut app, module, knob) = app_with_filter();
+    let snapshot = app.ui_snapshot();
+    let count = snapshot.tiles.iter().find(|t| t.id == module).unwrap().widgets.len();
+    let named = |ids: &mut WidgetIds| {
+        ids.add_tile(
+            module,
+            &tile_id(module),
+            (0..count).map(|i| (WidgetKey::Param, (i == knob).then(|| "cutoff".to_string()))),
+        );
+    };
+    let mut bare = WidgetIds::default();
+    named(&mut bare);
+    let id = bare.get(module, knob).unwrap().clone();
+    let update = tree::tree(&snapshot, &bare, None, 1.0, &mut app.a11y.ids);
+    let target = node_of(&mut app, &id);
+    let found = node(&update, target);
+    assert_eq!(found.role(), Role::Label);
+    assert!(found.description().is_some_and(|text| !text.is_empty()));
+    let up = request(Action::Increment, target, None);
+    assert!(actions::canvas_events(&snapshot, &bare, &app.a11y.ids, &up).is_empty());
+
+    let mut travel = WidgetIds::default();
+    named(&mut travel);
+    let kind = loom_canvas::WidgetViewKind::Knob { steps: 0 };
+    travel.set_detail(
+        module,
+        knob,
+        tree::Detail {
+            kind: kind.clone(),
+            name: "Cutoff".into(),
+            main: None,
+            second: None,
+        },
+    );
+    assert_eq!(tree::piece_id(&id, &kind, tree::Piece::Whole), id);
+    let update = tree::tree(&snapshot, &travel, None, 1.0, &mut app.a11y.ids);
+    let found = node(&update, target);
+    assert_eq!(found.role(), Role::Slider);
+    assert_eq!(found.min_numeric_value(), Some(0.0));
+    assert_eq!(found.max_numeric_value(), Some(1.0));
+    let set = request(Action::SetValue, target, Some(ActionData::NumericValue(3.0)));
+    assert_eq!(
+        actions::canvas_events(&snapshot, &travel, &app.a11y.ids, &set),
+        vec![CanvasEvent::SetControl {
+            module,
+            widget: knob,
+            position: 1.0,
+            part: ControlPart::Main,
+        }]
+    );
+}
+
 /// A scope is an image that says its trace's lowest and highest points in
 /// words, once it has a trace.
 #[test]
@@ -892,6 +949,11 @@ fn each_value_of_a_two_value_control_is_its_own_slider() {
     let (part, at) = part_of(events(&app, &request(Action::Decrement, y, None)));
     assert_eq!(part, ControlPart::Second);
     assert!((at - (before - 0.01)).abs() < 1e-6);
+    let x = piece_node(&mut app, module, pad, tree::Piece::Main);
+    let x_before = position(&app, module, pad);
+    let (part, at) = part_of(events(&app, &request(Action::Increment, x, None)));
+    assert_eq!(part, ControlPart::Main);
+    assert!((at - (x_before + 0.01)).abs() < 1e-6);
 
     let (module, range) = first_of(&app, "range");
     let low = piece_node(&mut app, module, range, tree::Piece::Main);
