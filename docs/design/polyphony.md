@@ -269,16 +269,21 @@ Bundles and copies:
 
 Allocation, at block sizes 1, 77, and 512 with scripted events:
 
+Checked **Algorithm** items below are covered by `loom-dsp` tests. MIDI routing,
+level cables, and source-module processing at these block sizes remain pending
+with the source modules. Reference-render and Voice assigner criteria stay open.
+
+
 - [ ] Given 8 voices and a ninth note-on, then in Oldest mode the voice whose note started first has its gate low on the note's frame and high on the next frame with the new pitch (reference test).
-- [ ] Given Quietest mode with `level` patched, then the voice with the lowest level is stolen; with `level` unconnected, the oldest (test).
+- [x] **Algorithm:** Given Quietest mode with `level` patched, then the voice with the lowest level is stolen; with `level` unconnected, the oldest (test).
 - [ ] Given one voice, then Legato keeps the gate high while any note is held and Retrigger drops it for one sample on each note (reference test).
-- [ ] Given a note-on for a note already sounding, then its voices retrigger and no other voice changes; given the same pitch on two MPE member channels, then it takes two voices (test).
+- [x] **Algorithm:** Given a note-on for a note already sounding, then its voices retrigger and no other voice changes; given the same pitch on two MPE member channels, then it takes two voices (test).
 - [ ] Given Voice assigner with `unison` 2, then a note takes two voices together and its note-off releases both; given a pressure change on the input voice, then both output voices' `pressure` follow it (test).
-- [ ] Given note-offs and note-ons for a chord change with one shared pitch, then the shared pitch's voice keeps its gate high across the change (test).
+- [x] **Algorithm:** Given note-offs and note-ons for a chord change with one shared pitch, then the shared pitch's voice keeps its gate high across the change (test).
 - [ ] Given a note-on at frame `i`, then the gate rises at frame `i` at every block size (reference test).
-- [ ] Given a note-off, then the voice holds its pitch and velocity until its next note (test).
-- [ ] Given a note-on and a note-off on one frame, then the gate is high for exactly that frame (test).
-- [ ] Given the same events in the same order, then the same voices are chosen on every run (test).
+- [x] **Algorithm:** Given a note-off, then the voice holds its pitch and velocity until its next note (test).
+- [x] **Algorithm:** Given a note-on and a note-off on one frame, then a fresh voice has a one-sample gate on that frame; a stolen or retriggered voice has its low sample first, a one-sample gate on the next frame, then goes low (test).
+- [x] **Algorithm:** Given the same events in the same order, then the same voices are chosen on every run (test).
 
 Voice modules:
 
@@ -327,12 +332,23 @@ Cost:
   Quietest compares the maximum level of each group's held voices. Ties use
   oldest start order, then lowest voice index. Non-finite levels read as zero;
   a short level slice is padded with zero. Without levels, Quietest is Oldest.
+- A different note taking a voice freed on this same frame retriggers it:
+  its gate is low on frame f and high from f+1. A gate that was high on the
+  previous frame also needs a low output sample before the voice can restart.
+  Otherwise an off followed by an on can leave the emitted gate high throughout,
+  so the envelope never sees a rising edge. Shared chord notes keep their gates.
+- A stolen or retriggered note that also ends on frame f keeps its required
+  low sample on f, gives a one-sample high gate on f+1, then stays low from f+2.
+  A fresh voice still gives its on/off pulse on f itself. A later note-on on a
+  different voice does not cancel either pulse. These timing cases are explicit
+  exceptions to rule 24's immediate gate drop, as the fresh pulse in rule 26 is.
 - Notes begun or released on one frame are ordered by a serial number; free
   voices use release order, then voice index. Timing and order counters saturate
   instead of wrapping. At 48 kHz the frame counter lasts over 12 million years.
 - The keyboard, chord-change, and scripted note-cycle cases are covered by
-  algorithm tests, including block sizes 1, 77, and 512. Module-level acceptance
-  remains pending until the source modules exist.
+  algorithm tests. Replays in chunks of 1, 77, and 512 check deterministic event
+  order; the allocator has no block API. Block-size invariance and reference
+  renders are tested in the source modules when those modules exist.
 
 ## Open points
 

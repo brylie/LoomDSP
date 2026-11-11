@@ -298,7 +298,7 @@ fn chord_change_keeps_shared_pitches() {
     assert!(a.voices()[0].gate && a.voices()[2].gate);
 }
 
-/// A script shaped like a note cycle lands on identical samples at every block size.
+/// A note-cycle script grouped into chunks, with the same sample clock and event order.
 fn cycle(block: usize) -> Vec<Vec<Voice>> {
     let mut a = Allocator::new(2);
     let mut rendered = Vec::new();
@@ -320,6 +320,17 @@ fn cycle(block: usize) -> Vec<Vec<Voice>> {
                     a.note_off(NoteId(3));
                     a.note_on(note(3));
                 }
+                600 => a.note_off(NoteId(3)),
+                601 => {
+                    a.note_on(note(7));
+                    a.note_off(NoteId(7));
+                    a.note_on(note(8));
+                }
+                700 => a.note_on(note(9)),
+                701 => {
+                    a.note_on(note(10));
+                    a.note_off(NoteId(10));
+                }
                 _ => {}
             }
             rendered.push(a.voices().to_vec());
@@ -328,13 +339,149 @@ fn cycle(block: usize) -> Vec<Vec<Voice>> {
     rendered
 }
 
-/// Allocation and gate edges do not depend on the caller's buffer boundaries.
+/// Chunking the same event script is deterministic. Source modules test block timing.
 #[test]
-fn scripted_cycle_is_block_invariant_and_repeatable() {
+fn scripted_cycle_is_deterministic_across_chunked_replays() {
     let expected = cycle(1);
     assert_eq!(cycle(77), expected);
     assert_eq!(cycle(512), expected);
     assert_eq!(cycle(1), expected);
     assert!(!expected[76][0].gate);
     assert!(expected[77][0].gate);
+    assert!(expected[511][1].gate);
+    assert!(!expected[512][1].gate);
+    assert!(!expected[512][0].gate);
+    assert!(expected[513][0].gate);
+    assert!(expected[601].iter().all(|voice| voice.gate));
+    assert!(!expected[602][1].gate);
+    assert!(!expected[701][0].gate);
+    assert!(expected[702][0].gate);
+    assert!(!expected[703][0].gate);
+}
+
+/// Another note-on must not clear a free voice's pending one-sample pulse.
+#[test]
+fn a_later_note_on_preserves_another_voices_pulse() {
+    let mut a = Allocator::new(3);
+    frame(&mut a);
+    a.note_on(note(1));
+    a.note_off(NoteId(1));
+    assert!(a.voices()[0].gate);
+    a.note_on(note(2));
+    assert!(a.voices()[0].gate, "note 1 still has its one-sample pulse");
+    assert!(a.voices()[1].gate);
+    assert!(!a.voices()[2].gate);
+    frame(&mut a);
+    assert!(!a.voices()[0].gate);
+    assert!(a.voices()[1].gate);
+}
+
+/// A full chord change restarts arriving notes but preserves the shared note's gate.
+#[test]
+fn a_full_chord_change_retriggers_same_frame_reused_voices() {
+    let mut a = Allocator::new(3);
+    frame(&mut a);
+    for id in [60, 64, 67] {
+        a.note_on(note(id));
+    }
+    frame(&mut a);
+    for id in [64, 67] {
+        a.note_off(NoteId(id));
+    }
+    for id in [65, 69] {
+        a.note_on(note(id));
+    }
+    assert_eq!(
+        a.voices().iter().map(|voice| voice.gate).collect::<Vec<_>>(),
+        [true, false, false]
+    );
+    assert_eq!(a.voices()[0].note, Some(note(60)));
+    assert_eq!(a.voices()[1].note, Some(note(65)));
+    assert_eq!(a.voices()[2].note, Some(note(69)));
+    frame(&mut a);
+    assert!(a.voices().iter().all(|voice| voice.gate));
+}
+
+/// Steal/off and repeated-identity/off retain their delayed one-sample gate, also in unison.
+#[test]
+fn a_retriggered_note_ending_on_its_frame_gets_a_delayed_pulse() {
+    for capacity in [1, 2, 4] {
+        for repeated in [false, true] {
+            // Mono returning to another held key is not a note ending in silence.
+            if capacity == 1 && !repeated {
+                continue;
+            }
+            let unison = if capacity == 4 { 2 } else { 1 };
+            let mut a = Allocator::new(capacity);
+            a.configure(capacity, Mode::Retrigger, unison);
+            frame(&mut a);
+            for id in 1..=(capacity / unison) as u64 {
+                a.note_on(note(id));
+            }
+            frame(&mut a);
+            let id = if repeated { 1 } else { 99 };
+            a.note_on(note(id));
+            a.note_off(NoteId(id));
+            let group = |a: &Allocator| {
+                a.voices()
+                    .iter()
+                    .filter(|voice| voice.note.is_some_and(|note| note.id == NoteId(id)))
+                    .map(|voice| (voice.gate, voice.held))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                group(&a),
+                vec![(false, false); unison],
+                "low on f: capacity {capacity}, repeated {repeated}"
+            );
+            frame(&mut a);
+            assert_eq!(
+                group(&a),
+                vec![(true, false); unison],
+                "high on f+1: capacity {capacity}, repeated {repeated}"
+            );
+            frame(&mut a);
+            assert_eq!(
+                group(&a),
+                vec![(false, false); unison],
+                "low on f+2: capacity {capacity}, repeated {repeated}"
+            );
+        }
+    }
+}
+
+/// Reusing a pulse's voice on the next frame also needs a low output sample first.
+#[test]
+fn a_previous_frames_pulse_cannot_hide_the_next_notes_edge() {
+    for capacity in [1, 3] {
+        let mut a = Allocator::new(capacity);
+        frame(&mut a);
+        a.note_on(note(1));
+        a.note_off(NoteId(1));
+        for id in 2..=capacity as u64 {
+            a.note_on(note(id));
+        }
+        assert!(a.voices()[0].gate);
+        frame(&mut a);
+        a.note_on(note(99));
+        assert!(!a.voices()[0].gate, "the next note needs its rising edge");
+        frame(&mut a);
+        assert!(a.voices()[0].gate);
+    }
+}
+
+/// A later mono Legato note-on cannot cancel a low sample already needed by a restart.
+#[test]
+fn legato_preserves_a_pending_restart_on_later_note_ons() {
+    let mut a = Allocator::new(1);
+    frame(&mut a);
+    a.note_on(note(1));
+    frame(&mut a);
+    a.note_off(NoteId(1));
+    a.note_on(note(2));
+    a.note_on(note(3));
+    assert!(!a.voices()[0].gate);
+    assert_eq!(a.voices()[0].note, Some(note(3)));
+    frame(&mut a);
+    assert!(a.voices()[0].gate);
 }

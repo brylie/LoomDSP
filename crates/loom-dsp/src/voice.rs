@@ -67,6 +67,9 @@ pub struct Voice {
     freed: u64,
     released_frame: u64,
     on_frame: u64,
+    /// Last frame's emitted gate, before this frame's pending edges apply.
+    was_high: bool,
+    /// Both flags together mean a released note's delayed one-sample pulse.
     rise_next: bool,
     fall_next: bool,
 }
@@ -135,13 +138,21 @@ impl Allocator {
     pub fn begin_frame(&mut self, levels: Option<&[f32]>) {
         self.frame = self.frame.saturating_add(1);
         for voice in &mut self.voices[..self.capacity] {
-            if voice.fall_next {
-                voice.gate = false;
-            } else if voice.rise_next && voice.held {
+            voice.was_high = voice.gate;
+            if voice.rise_next && voice.fall_next {
+                // A retriggered note that ended on its own frame still gets
+                // a high sample now, followed by its fall on the next frame.
                 voice.gate = true;
+                voice.rise_next = false;
+            } else {
+                if voice.fall_next {
+                    voice.gate = false;
+                } else if voice.rise_next && voice.held {
+                    voice.gate = true;
+                }
+                voice.rise_next = false;
+                voice.fall_next = false;
             }
-            voice.rise_next = false;
-            voice.fall_next = false;
         }
         self.levels = levels.map(|levels| {
             let mut result = [0.0; MAX_VOICES];
@@ -222,13 +233,15 @@ impl Allocator {
                 .filter(|&i| !self.voices[i].held)
                 .min_by_key(|&i| (self.voices[i].freed, i))
             {
-                let retrigger = stolen[i] || self.voices[i].gate;
+                let voice = &self.voices[i];
+                let retrigger =
+                    stolen[i] || voice.gate || voice.was_high || voice.released_frame == self.frame && self.frame != 0;
                 Self::start(&mut self.voices[i], note, self.frame, self.serial, retrigger);
             }
         }
         // Whole-group stealing can leave an unused remainder. Its gate must fall.
-        for voice in &mut self.voices[..self.capacity] {
-            if !voice.held {
+        for (i, voice) in self.voices[..self.capacity].iter_mut().enumerate() {
+            if stolen[i] && !voice.held {
                 voice.gate = false;
                 voice.rise_next = false;
                 voice.fall_next = false;
@@ -237,7 +250,8 @@ impl Allocator {
     }
 
     /// Releases all voices of a note. A fresh note-on followed by its note-off
-    /// on this sample keeps a one-sample gate; other note-offs lower it now.
+    /// on this sample keeps a one-sample gate. A retrigger/off on one frame
+    /// keeps its low sample, then emits the pulse on the next frame.
     #[inline]
     pub fn note_off(&mut self, id: NoteId) {
         self.serial = self.serial.saturating_add(1);
@@ -278,14 +292,19 @@ impl Allocator {
         voice.fall_next = false;
     }
 
-    /// Releases a voice while preserving a fresh note's one-sample pulse.
+    /// Releases a voice, retaining either a fresh or a delayed one-sample pulse.
     fn release(voice: &mut Voice, frame: u64, serial: u64) {
         voice.held = false;
         voice.freed = serial;
         voice.released_frame = frame;
-        voice.fall_next = voice.gate && voice.on_frame == frame;
-        voice.gate = voice.fall_next;
-        voice.rise_next = false;
+        if voice.rise_next && voice.on_frame == frame {
+            // Keep the pending rise, then fall one frame after that rise.
+            voice.fall_next = true;
+        } else {
+            voice.fall_next = voice.gate && voice.on_frame == frame;
+            voice.gate = voice.fall_next;
+            voice.rise_next = false;
+        }
     }
 
     /// Removes one remembered mono note, returning whether it was held.
@@ -312,7 +331,11 @@ impl Allocator {
         self.held[self.held_len] = Some(note);
         self.held_len += 1;
         let retrigger = self.voices[0].held && self.mode.for_capacity(1) == Mode::Retrigger
-            || self.voices[0].released_frame == self.frame && self.frame != 0;
+            || self.voices[0].rise_next
+            || !self.voices[0].held
+                && (self.voices[0].gate
+                    || self.voices[0].was_high
+                    || self.voices[0].released_frame == self.frame && self.frame != 0);
         Self::start(&mut self.voices[0], note, self.frame, self.serial, retrigger);
     }
 
