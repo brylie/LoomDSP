@@ -439,3 +439,31 @@ fn an_open_list_hides_hover_text() {
         .count();
     assert_eq!(layers, 1, "only the list");
 }
+
+/// The canvas's own painter sets an open field's text and measures it
+/// between pieces of one layer. It borrows its text only inside each call,
+/// so painting the field, its caret, and its reason never finds the text
+/// already borrowed (a `RefCell` panic in a debug build).
+#[test]
+fn the_canvas_painter_measures_inside_a_layer_without_a_borrow_clash() {
+    let scene = scene(vec![widget(WidgetViewKind::Knob { steps: 0 }, "gain")]);
+    let selected = BTreeSet::from([1]);
+    let model = CanvasModel::new(&scene, &selected)
+        .typed_check(|_, _, text| text.parse::<f32>().map(|_| ()).map_err(|_| "Not a number".to_string()));
+    let mut input = still(
+        &model,
+        Still {
+            focus: Some((1, 0)),
+            ..Still::default()
+        },
+    );
+    let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    send(&model, &mut input, typed(Key::Character('x'), "x"), centre);
+
+    let text = std::cell::RefCell::new(crate::text::CanvasText::new());
+    let mut list = crate::text::PaintList::new(BOUNDS);
+    input.paint(&model, BOUNDS, &mut crate::text::ListPainter::new(&text, &mut list));
+    assert!(!list.is_empty());
+    // The text is free again once painting ends.
+    assert!(text.try_borrow_mut().is_ok());
+}

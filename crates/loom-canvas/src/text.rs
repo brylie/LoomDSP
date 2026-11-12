@@ -20,6 +20,9 @@ use parley::{FontContext, FontFamily, GenericFamily, Layout, LayoutContext, Line
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+mod list;
+pub use list::{ListPainter, PaintList};
+
 /// A Parley layout of canvas text. Its brush is empty: the colour of a run
 /// is the painter's, not the layout's.
 pub(crate) type TextLayout = Layout<()>;
