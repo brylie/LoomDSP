@@ -462,6 +462,12 @@ pub struct Target {
     pub size: Size,
     /// Physical pixels per logical pixel.
     pub scale: f32,
+    /// The viewport's top-left corner in the host's logical pixels: where
+    /// painted text and boxes are placed from, and snapped to pixels.
+    pub origin: Point,
+    /// The whole target's size in physical pixels, which scissors are cut
+    /// to.
+    pub physical: (u32, u32),
 }
 
 /// What one frame of the canvas draws: plain data, built by the canvas and
@@ -481,6 +487,9 @@ pub struct CanvasFrame {
     pub(crate) camera: Camera,
     /// Opacity of cables that are not in focus.
     pub(crate) cable_dim: f32,
+    /// Text and floating boxes painted over the scene, in the host's
+    /// logical pixels. Empty until the host paints into it.
+    pub(crate) paint: crate::text::PaintList,
 }
 
 #[repr(C)]
@@ -594,6 +603,8 @@ pub struct CanvasRenderer {
     tiles: u32,
     markers: u32,
     plan: DrawPlan,
+    /// Painted text and boxes, drawn last.
+    text: text::TextRenderer,
 }
 
 const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
@@ -725,6 +736,7 @@ impl CanvasRenderer {
             tiles: 0,
             markers: 0,
             plan: DrawPlan::default(),
+            text: text::TextRenderer::new(device, format, &module, &layout),
         }
     }
 }
@@ -803,6 +815,7 @@ impl CanvasRenderer {
             controls: frame.controls.is_some(),
             traces: frame.traces.is_some(),
         };
+        self.text.prepare(device, queue, &frame.paint, target);
     }
 
     /// Draws the frame last prepared into `pass`.
@@ -868,6 +881,8 @@ impl CanvasRenderer {
                 pass.draw(0..vertices, instances);
             }
         }
+        // Text and floating boxes over everything, in the order painted.
+        self.text.draw(pass, &self.shapes);
     }
 
     /// Uploads one cable in the target's own coordinates, for a renderer
@@ -906,6 +921,9 @@ impl CanvasRenderer {
         pass.draw(0..CABLE_VERTICES, 0..1);
     }
 }
+
+mod atlas;
+mod text;
 
 #[cfg(test)]
 mod tests;

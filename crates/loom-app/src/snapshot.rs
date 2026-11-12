@@ -38,6 +38,9 @@ pub struct UiSnapshot {
     pub errors: Vec<crate::alerts::KeptError>,
     /// True while MIDI learn mode is on and the status bar says so.
     pub learning: bool,
+    /// The toolbar's buttons: what each says, whether it works, and its
+    /// hover text.
+    pub toolbar: crate::toolbar::Model,
     /// The step Undo would take back, by name.
     pub undo: Option<String>,
     /// The step Redo would replay, by name.
@@ -59,6 +62,10 @@ pub struct UiSnapshot {
     pub help: Option<crate::help::Model>,
     /// The rows of the recent list, while it is open.
     pub recent: Option<Vec<crate::recent::Row>>,
+    /// The module browser, while it is open: its query, rows, and highlight.
+    pub browser: Option<crate::browser::Model>,
+    /// Your patches, while it is open: its fields, filters, and rows.
+    pub patches: Option<crate::patches::Model>,
     /// The open question, if any (`docs/design/files.md`).
     pub question: Option<crate::question::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
@@ -655,6 +662,7 @@ impl App {
             status_severity: self.alerts.severity(),
             errors: self.alerts.kept().to_vec(),
             learning: self.session.learn.is_on(),
+            toolbar: self.toolbar_model(),
             undo: self.session.edits.history.undo_step().map(|s| s.name().to_string()),
             redo: self.session.edits.history.redo_step().map(|s| s.name().to_string()),
             selection: self.session.selection.iter().copied().collect(),
@@ -665,6 +673,8 @@ impl App {
             inspector: self.inspector_model(),
             help: self.overlays.help.as_ref().map(|help| help.model.clone()),
             recent: self.overlays.recent_rows().cloned(),
+            browser: self.overlays.browser().map(|open| open.model().clone()),
+            patches: self.overlays.patches().map(|open| open.model().clone()),
             question: self.overlays.question.as_ref().map(crate::question::Question::model),
             matrix: self
                 .session
@@ -730,6 +740,12 @@ pub fn headless(args: &Args) -> Result<App, String> {
 /// JSON.
 pub fn run(args: &Args) -> Result<String, String> {
     serde_json::to_string_pretty(&headless(args)?.ui_snapshot()).map_err(|e| e.to_string())
+}
+
+/// Writes a value in a snapshot as its text, for a type with no serde form
+/// of its own, such as a UI ID.
+pub(crate) fn display<S: serde::Serializer>(value: &impl std::fmt::Display, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_str(value)
 }
 
 #[cfg(test)]

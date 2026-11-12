@@ -21,8 +21,10 @@
 //!
 //! The types hold what today's elements match on and no more. [`Key`] has
 //! one variant for every modifier key and one for every key nothing uses.
-//! Events for text composition, touch, dropped files, and resizing are not
-//! here yet. Each arrives when an element needs it.
+//! Events for text composition and touch are not here yet. Each arrives
+//! when an element needs it. Dropped files, resizing, and other events
+//! about the window as a whole are not element events: a driver sends them
+//! to the runtime as `loom_ui::DriverEvent`.
 
 /// One thing that happened, as an element receives it.
 #[derive(Debug, Clone, PartialEq)]
@@ -154,6 +156,10 @@ pub enum Key {
     Home,
     /// End.
     End,
+    /// The menu key, which opens the menu of what has focus.
+    ContextMenu,
+    /// F10. With Shift, it opens a menu as the menu key does.
+    F10,
     /// Shift, Control, Alt, or the system key, on either side. One variant
     /// covers them all because nothing yet asks which one it was. Which
     /// ones are held is in [`Modifiers`].

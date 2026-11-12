@@ -90,6 +90,16 @@ Each advisory says the crate is no longer maintained as a standalone crate. They
 
 The two issue reports for AccessKit are drafted beside it, as `issue-1-slider-name.md` and `issue-2-value-description.md`. They live there, not here, so they are deleted with the reproduction once upstream has them.
 
+## Found later, while building step 1.4 (2026-11-12)
+
+Read in the same crate (`accesskit_macos` 0.27.2) while building the matrix (slice 3c) and the overlays (slices 4a and 4b). Each is from the source, not heard.
+
+| What | Finding | What LoomDSP does |
+|---|---|---|
+| Tables | No columns, no row or column counts, no header cells, and `accessibilityRows` only for a selectable container | The matrix's assignments are a list of rows, not a table |
+| `active_descendant` | Never read | A browser's highlighted row is also the list box's selected option, which the adapter does report |
+| `accessibilityPerformShowMenu` | Not implemented, so `Action::ShowContextMenu` never arrives | A tile's menu, and a library row's, open by VoiceOver's secondary click; the action works on other platforms |
+
 ## Not verified
 
 - **What VoiceOver says and does,** on any macOS version. Only the spike's one session, on one machine.

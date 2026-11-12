@@ -253,6 +253,9 @@ fn since(a: RenderCounts, b: RenderCounts) -> RenderCounts {
         overlay_uploads: b.overlay_uploads - a.overlay_uploads,
         trace_builds: b.trace_builds - a.trace_builds,
         trace_uploads: b.trace_uploads - a.trace_uploads,
+        text_uploads: b.text_uploads - a.text_uploads,
+        glyph_rasters: b.glyph_rasters - a.glyph_rasters,
+        glyph_skips: b.glyph_skips - a.glyph_skips,
     }
 }
 
@@ -272,6 +275,7 @@ fn line(w: &Window) -> String {
     format!(
         "fps={fps:.1} avg_ms={average_ms:.2} worst_ms={:.2} frames={} scene_builds={} control_builds={} \
          scene_uploads={} control_uploads={} overlay_uploads={} trace_uploads={} \
+         text_uploads={} glyph_rasters={} glyph_skips={} \
          causes=tick:{},live:{},meters:{},control:{},input:{},redraw:{},forced:{},other:{} cpu={:.1}",
         w.worst.as_secs_f64() * 1000.0,
         t.frames,
@@ -281,6 +285,9 @@ fn line(w: &Window) -> String {
         t.control_uploads,
         t.overlay_uploads,
         t.trace_uploads,
+        t.text_uploads,
+        t.glyph_rasters,
+        t.glyph_skips,
         w.causes.0[0],
         w.causes.0[1],
         w.causes.0[2],

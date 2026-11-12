@@ -28,7 +28,7 @@ use super::lint::is_blank;
 /// The name is a stable ID: patch files store it, so never rename a
 /// released parameter. The label and description are text for people. They
 /// can be reworded at any time, because patch files never store them.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamSpec {
     /// Stable name used in patch files. Never rename a released parameter.
     pub name: &'static str,

@@ -48,7 +48,7 @@ pub struct Help {
 /// Where the hand-written notes' example section starts. The overlay shows
 /// the reference sections between the notes and the example
 /// (help-pages.md, In the app).
-const EXAMPLE_HEADING: &str = "\n## Example";
+pub(crate) const EXAMPLE_HEADING: &str = "\n## Example";
 
 impl Help {
     /// Builds the view from the actual registry descriptor.
@@ -147,7 +147,10 @@ impl Help {
         let header = row![
             text(m.name).size(style::TITLE),
             space::horizontal(),
-            button(text("Close").size(style::CONTROL)).on_press(Message::CloseHelp)
+            crate::inspector::ids::named(
+                &crate::overlays::access::help_id().with("close"),
+                button(text("Close").size(style::CONTROL)).on_press(Message::CloseHelp),
+            )
         ]
         .align_y(iced::Alignment::Center);
         let mut content = column![].spacing(12).width(Length::Fill);
@@ -184,7 +187,10 @@ impl Help {
             }
         }
         if m.example.is_some() {
-            content = content.push(button(text("Open example").size(style::CONTROL)).on_press(Message::HelpExample));
+            content = content.push(crate::inspector::ids::named(
+                &crate::overlays::access::help_id().with("example"),
+                button(text("Open example").size(style::CONTROL)).on_press(Message::HelpExample),
+            ));
         }
         content = content.push(markdown::view(&self.tail, style::markdown(&theme)).map(Message::HelpLink));
         let panel = container(
@@ -205,6 +211,8 @@ impl Help {
         .height(Length::Fill)
         .style(container::rounded_box);
         // The panel takes its own clicks; the backdrop around it closes help.
+        // The panel is named by its UI ID, so the window says where it is.
+        let panel = crate::inspector::ids::named(&crate::overlays::access::help_id(), panel);
         let backdrop = container(iced::widget::opaque(panel))
             .center_x(Length::Fill)
             .center_y(Length::Fill)

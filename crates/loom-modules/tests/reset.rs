@@ -6,11 +6,9 @@
 
 mod common;
 
-use common::{busy_each, changed, pulses, selector};
-use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
-use loom_modules::ALL;
+use common::{busy_each, changed, choice_failures, dsp_modules, pulses, selector};
+use loom_core::{MidiEvent, ModuleDescriptor, TransportSettings};
 use loom_test::Harness;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// A one-second harness for `descriptor` with every parameter away from its
 /// default and a note left held across `reset()`, so MIDI Note's state is
@@ -34,16 +32,11 @@ fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Ha
     busy_each(harness, descriptor)
 }
 
-/// The DSP modules in [`ALL`] that fail `check_reset` on the harness `build`
-/// makes.
-fn failing(build: impl Fn(&'static ModuleDescriptor) -> Harness) -> Vec<&'static str> {
-    ALL.iter()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
-        .filter(|descriptor| {
-            let harness = build(descriptor);
-            catch_unwind(AssertUnwindSafe(|| harness.check_reset())).is_err()
-        })
-        .map(|descriptor| descriptor.id)
+/// One message per failing option of each DSP module in `ALL`, naming its
+/// setting and module, on the harness `build` makes.
+fn failing(build: impl Fn(&'static ModuleDescriptor) -> Harness) -> Vec<String> {
+    dsp_modules()
+        .flat_map(|descriptor| choice_failures(descriptor, changed, || build(descriptor), Harness::check_reset))
         .collect()
 }
 
@@ -52,7 +45,7 @@ fn failing(build: impl Fn(&'static ModuleDescriptor) -> Harness) -> Vec<&'static
 #[test]
 fn reset_clears_every_module_on_busy_inputs_when_stopped() {
     let failed = failing(|d| on_busy_inputs(harness(d, false), d));
-    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+    assert!(failed.is_empty(), "reset() leaves state in:\n{}", failed.join("\n"));
 }
 
 /// With a busy signal on every input, on a running transport, so state that
@@ -60,14 +53,14 @@ fn reset_clears_every_module_on_busy_inputs_when_stopped() {
 #[test]
 fn reset_clears_every_module_on_busy_inputs_when_playing() {
     let failed = failing(|d| on_busy_inputs(harness(d, true), d));
-    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+    assert!(failed.is_empty(), "reset() leaves state in:\n{}", failed.join("\n"));
 }
 
 /// With every input on its port default, on a stopped transport.
 #[test]
 fn reset_clears_every_module_on_default_inputs_when_stopped() {
     let failed = failing(|d| harness(d, false));
-    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+    assert!(failed.is_empty(), "reset() leaves state in:\n{}", failed.join("\n"));
 }
 
 /// With every input on its port default, on a running transport, so a module
@@ -75,7 +68,7 @@ fn reset_clears_every_module_on_default_inputs_when_stopped() {
 #[test]
 fn reset_clears_every_module_on_default_inputs_when_playing() {
     let failed = failing(|d| harness(d, true));
-    assert!(failed.is_empty(), "reset() leaves state in: {failed:?}");
+    assert!(failed.is_empty(), "reset() leaves state in:\n{}", failed.join("\n"));
 }
 
 /// A Selector's reset goes back to the wait and the start of the picks, with a

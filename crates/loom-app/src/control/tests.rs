@@ -973,6 +973,7 @@ fn locate_agrees_with_the_ui_harness() {
     let found = Found {
         canvas: Some(ui.canvas()),
         text: None,
+        places: crate::places::Places::default(),
     };
     // The two sides round differently, so allow a tiny difference.
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
@@ -1301,6 +1302,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
     let found = Found {
         canvas: Some(ui.canvas()),
         text: None,
+        places: crate::places::Places::default(),
     };
     let ask = |ui: &mut crate::ui_test::Ui, target: &str, then: AfterSearch| {
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -1650,6 +1652,7 @@ fn locate_finds_lights_and_meters() {
     let found = Found {
         canvas: Some(ui.canvas()),
         text: None,
+        places: crate::places::Places::default(),
     };
     let view = found.canvas.unwrap();
     let centre = |module: u32, widget: usize| {
@@ -2310,6 +2313,7 @@ fn locate_and_sample_find_a_surface_control() {
     let found = Found {
         canvas: Some(ui.canvas()),
         text: None,
+        places: crate::places::Places::default(),
     };
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
     let knob = locate(&ui.app, "2:cutoff", &found).unwrap();
@@ -2325,4 +2329,167 @@ fn locate_and_sample_find_a_surface_control() {
     assert!(position > 0.0 && position < 1.0, "300 Hz in 20 to 20000: {position}");
     let error = run(&mut ui.app, r#"{"cmd": "sample", "target": "2:resonance", "ms": 50}"#).unwrap_err();
     assert!(error.contains("(Voice) has no control `resonance`"), "{error}");
+}
+
+/// `locate` takes a UI ID as text beside the short names, and both find
+/// one element in one place (`docs/design/ui-layer.md`, section 4, rule
+/// 5). A part outside the canvas is where the window drew it.
+#[test]
+fn locate_takes_a_ui_id_as_text() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let places = ui.places();
+    let found = Found {
+        canvas: places.canvas,
+        text: None,
+        places,
+    };
+    let near = |a: Rect, b: Rect| {
+        (a.x - b.x).abs() < 0.01
+            && (a.y - b.y).abs() < 0.01
+            && (a.width - b.width).abs() < 0.01
+            && (a.height - b.height).abs() < 0.01
+    };
+    // On the canvas: a control, a tile, a port, and a badge.
+    let short = locate(&ui.app, "4:cutoff", &found).unwrap();
+    let by_id = locate(&ui.app, "canvas/4/param/cutoff", &found).unwrap();
+    assert!(near(short, by_id), "{short:?} and {by_id:?}");
+    assert!(near(
+        locate(&ui.app, "4", &found).unwrap(),
+        locate(&ui.app, "canvas/4", &found).unwrap()
+    ));
+    assert!(near(
+        locate(&ui.app, "8:output:out", &found).unwrap(),
+        locate(&ui.app, "canvas/8/output/out", &found).unwrap()
+    ));
+    assert!(near(
+        locate(&ui.app, "9:input:in", &found).unwrap(),
+        locate(&ui.app, "canvas/9/input/in", &found).unwrap()
+    ));
+    assert!(locate(&ui.app, "canvas/8/output/nonsense", &found).is_err());
+
+    // Outside the canvas: where the window drew the part.
+    let undo = locate(&ui.app, "toolbar/undo", &found).unwrap();
+    let label = ui.text("Undo").expect("the toolbar shows Undo");
+    assert!(undo.contains(label.center()), "the button holds its label");
+    assert!(undo.width < 200.0, "the button, not the toolbar");
+    let toolbar = locate(&ui.app, "toolbar", &found).unwrap();
+    assert!(toolbar.contains(undo.center()));
+    for id in ["panel/inspector", "panel/matrix", "stats/patch", "stats/midi", "status"] {
+        let rect = locate(&ui.app, id, &found).unwrap_or_else(|error| panic!("{id}: {error}"));
+        assert!(rect.width > 0.0 && rect.height > 0.0, "{id}");
+    }
+
+    // A UI ID that names nothing falls back to text in the window, and
+    // says so when that finds nothing either.
+    let error = locate(&ui.app, "toolbar/nonsense", &found).unwrap_err();
+    assert!(error.contains("UI ID `toolbar/nonsense`"), "{error}");
+    let error = locate(&ui.app, "canvas/4/param/nonsense", &found).unwrap_err();
+    assert!(error.contains("UI ID"), "{error}");
+    let with_text = Found {
+        text: Some(Rect::new(Point::new(1.0, 2.0), loom_ui_core::Size::new(3.0, 4.0))),
+        ..found.clone()
+    };
+    assert_eq!(locate(&ui.app, "toolbar/nonsense", &with_text).unwrap().x, 1.0);
+    // Text that starts with no panel's name is never taken for a UI ID.
+    assert_eq!(locate(&ui.app, "pads/warm", &with_text).unwrap().x, 1.0);
+    assert!(locate(&ui.app, "pads/warm", &found).unwrap_err().contains("text"));
+}
+
+/// An overlay's UI ID is taken for one: `question/cancel` finds the
+/// Cancel answer, not the text "question/cancel".
+#[test]
+fn locate_takes_an_overlay_ui_id() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app.overlays.question = Some(crate::question::Question::discard(
+        "Patch".to_string(),
+        crate::question::AfterDiscard::New,
+    ));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let found = Found {
+        canvas: places.canvas,
+        text: None,
+        places,
+    };
+    let cancel = locate(&ui.app, "question/cancel", &found).unwrap();
+    let label = ui.text("Cancel").expect("the question shows Cancel");
+    assert!(cancel.contains(label.center()), "the answer holds its label");
+
+    // The module browser's parts are found by UI ID too.
+    ui.app.overlays.question = None;
+    ui.send(Message::OpenBrowser);
+    let _ = ui.redraw();
+    let places = ui.places();
+    let found = Found {
+        canvas: places.canvas,
+        text: None,
+        places,
+    };
+    let search = locate(&ui.app, "browser/search", &found).unwrap();
+    let browser = locate(&ui.app, "browser", &found).unwrap();
+    assert!(browser.contains(search.center()), "the field is in the browser");
+}
+
+/// A part that is scrolled out of view is not located: a pointer sent
+/// there would land on something else.
+#[test]
+fn a_part_scrolled_out_of_view_is_not_located() {
+    use iced::advanced::widget::Operation;
+    use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset};
+    struct Still;
+    impl iced::advanced::widget::operation::Scrollable for Still {
+        fn snap_to(&mut self, _offset: RelativeOffset<Option<f32>>) {}
+        fn scroll_to(&mut self, _offset: AbsoluteOffset<Option<f32>>) {}
+        fn scroll_by(&mut self, _offset: AbsoluteOffset, _bounds: iced::Rectangle, _content: iced::Rectangle) {}
+    }
+    let area = iced::Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 100.0,
+        height: 100.0,
+    };
+    let row = |y: f32| iced::Rectangle {
+        x: 0.0,
+        y,
+        width: 100.0,
+        height: 20.0,
+    };
+    let mut find = Find {
+        text: String::new(),
+        found: Found::default(),
+        parts: crate::places::Collect::default(),
+    };
+    find.scrollable(None, area, area, iced::Vector::new(0.0, 0.0), &mut Still);
+    find.traverse(&mut |inside| {
+        inside.container(Some(&"inspector/4/param/cutoff".into()), row(10.0));
+        inside.container(Some(&"inspector/4/param/mix".into()), row(400.0));
+    });
+    let iced::advanced::widget::operation::Outcome::Some(found) = find.finish() else {
+        panic!("the search always has a result");
+    };
+    let app = crate::tests::app();
+    assert_eq!(locate(&app, "inspector/4/param/cutoff", &found).unwrap().y, 10.0);
+    let error = locate(&app, "inspector/4/param/mix", &found).unwrap_err();
+    assert!(error.contains("scrolled out of view"), "{error}");
+}
+
+/// A canvas UI ID is found through the commands themselves, not only by
+/// `locate` with a hand-built `Found`: the walk of the window gives the
+/// places the canvas, which the tree needs to place a canvas node. Both
+/// `locate` and a pointer command take one.
+#[test]
+fn a_canvas_ui_id_is_found_by_the_commands() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    for target in ["canvas/4/param/cutoff", "canvas/4"] {
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{target}"}}"#))
+            .unwrap_or_else(|why| panic!("{target}: {why}"));
+        assert!(
+            reply.contains_key("x") && reply.contains_key("y"),
+            "{target}: {reply:?}"
+        );
+    }
+    run_ui(&mut ui, r#"{"cmd": "hover", "target": "canvas/4/param/cutoff"}"#)
+        .unwrap_or_else(|why| panic!("hover: {why}"));
 }

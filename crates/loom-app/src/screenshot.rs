@@ -675,3 +675,5 @@ pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(),
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_gate_tests;

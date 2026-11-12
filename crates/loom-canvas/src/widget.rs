@@ -3,7 +3,8 @@
 //! This is the only Iced code in the canvas beside the GPU primitive. It
 //! turns Iced's events into ours, hands them to [`CanvasInput`], applies the
 //! [`Reaction`] to Iced's shell, and draws. The input handling itself is in
-//! `crate::input` and knows nothing of Iced.
+//! `crate::input` and knows nothing of Iced. The canvas draws its own text:
+//! Iced draws only the background and the primitive.
 
 use crate::CanvasEvent;
 use crate::camera::Camera;
@@ -16,20 +17,17 @@ use crate::theme::Palette;
 use crate::trace::ScopeTraces;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
-use iced::advanced::text;
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
-use iced::{Element, Font, Length};
+use iced::{Element, Length};
 use iced::{mouse, window};
 use std::collections::BTreeSet;
 use std::time::Instant;
 
 mod drag_line;
-mod painter;
 mod primitive;
 
 pub use drag_line::DragLine;
-use painter::{IcedMeasure, IcedPainter};
 use primitive::CanvasPrimitive;
 
 /// The patch canvas as an Iced widget. Draws a [`Scene`] and reports
@@ -200,7 +198,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for PatchCanvas<'_, Message>
 where
-    Renderer: iced_wgpu::primitive::Renderer + text::Renderer<Font = Font>,
+    Renderer: iced_wgpu::primitive::Renderer,
 {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<State>()
@@ -313,19 +311,18 @@ where
             },
             model.palette.background.to_iced(),
         );
-        renderer.draw_primitive(
-            bounds.to_iced(),
-            CanvasPrimitive(input.frame(model, bounds.size(), &state.cache)),
-        );
-        let measure = IcedMeasure::new(&*renderer);
-        input.paint(model, bounds, &measure, &mut IcedPainter::new(renderer));
+        // Text and floating boxes are painted into the frame, so the
+        // canvas's renderer draws them over its shapes in one primitive.
+        let mut frame = input.frame(model, bounds.size(), &state.cache);
+        frame.paint = input.paint_list(model, bounds, &state.cache);
+        renderer.draw_primitive(bounds.to_iced(), CanvasPrimitive(frame));
     }
 }
 
 impl<'a, Message, Theme, Renderer> From<PatchCanvas<'a, Message>> for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Renderer: iced_wgpu::primitive::Renderer + text::Renderer<Font = Font> + 'a,
+    Renderer: iced_wgpu::primitive::Renderer + 'a,
     Theme: 'a,
 {
     fn from(canvas: PatchCanvas<'a, Message>) -> Self {

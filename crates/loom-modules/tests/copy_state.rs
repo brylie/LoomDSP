@@ -5,9 +5,11 @@
 
 mod common;
 
-use common::{SEEDED_ROUTES, WRAP_FRAME, busy_each, changed, playing_short_bar, pulses, selector};
+use common::{
+    SEEDED_ROUTES, WRAP_FRAME, busy_each, busy_without_reset, changed, choice_failures, dsp_modules, playing_short_bar,
+    pulses, selector,
+};
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
-use loom_modules::ALL;
 use loom_test::Harness;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -33,16 +35,21 @@ fn notes() -> [MidiEvent; 5] {
 }
 
 /// A harness for `descriptor` with every parameter away from its default,
-/// a busy signal on every input, each at its own frequency, and notes held across
-/// the copy.
-fn harness(descriptor: &'static ModuleDescriptor) -> Harness {
+/// distinct busy inputs, and notes held across the copy. Reset inputs stay
+/// unconnected when `reset_busy` is false.
+fn harness(descriptor: &'static ModuleDescriptor, reset_busy: bool) -> Harness {
     let harness = descriptor
         .params
         .iter()
         .fold(Harness::new(descriptor).frames(FRAMES), |h, spec| {
             h.param(spec.name, changed(spec))
         });
-    busy_each(harness, descriptor).midi(notes())
+    let harness = if reset_busy {
+        busy_each(harness, descriptor)
+    } else {
+        busy_without_reset(harness, descriptor)
+    };
+    harness.midi(notes())
 }
 
 /// True for a module with a random generator, which re-derives it when it
@@ -52,70 +59,128 @@ fn seeded(descriptor: &ModuleDescriptor) -> bool {
     descriptor.param_index("seed").is_some() && !SEEDED_ROUTES.contains(&descriptor.id)
 }
 
-/// Every DSP module in [`ALL`] except seeded ones continues bit-identically
-/// in a copy that took its state. Panics with the IDs of all that fail.
+/// Every choice continues identically on distinct busy inputs, including reset.
 #[test]
 fn every_module_hands_over_its_state() {
-    let failed: Vec<&str> = ALL
-        .iter()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)) && !seeded(descriptor))
-        .filter(|descriptor| {
-            let harness = harness(descriptor);
-            catch_unwind(AssertUnwindSafe(|| harness.check_copy_state(AT))).is_err()
+    check_busy_copies(true, false);
+}
+
+/// Modules with reset inputs also run without reset edges, so a random stream
+/// advances far enough to expose its loss.
+#[test]
+fn every_module_hands_over_its_state_without_busy_resets() {
+    check_busy_copies(false, false);
+}
+
+/// A seeded signal generator re-derives its stream; each option copies repeatably.
+#[test]
+fn seeded_modules_copy_repeatably() {
+    assert!(dsp_modules().any(seeded), "Noise has a seed");
+    check_busy_copies(true, true);
+}
+
+/// Runs every option, retaining strict continuation for seeded routing modules.
+fn check_busy_copies(reset_busy: bool, repeatable: bool) {
+    let descriptors: Vec<_> = dsp_modules()
+        .filter(|d| seeded(d) == repeatable)
+        .filter(|d| reset_busy || d.input_index("reset").is_some())
+        .collect();
+    if !reset_busy {
+        assert!(
+            !descriptors.is_empty(),
+            "the reset-inactive run needs modules with reset inputs"
+        );
+        assert!(
+            descriptors.iter().any(|d| d.id == "loom.route.selector"),
+            "the reset-inactive run must include Selector; check its reset port name"
+        );
+    }
+    let failed: Vec<String> = descriptors
+        .into_iter()
+        .flat_map(|descriptor| {
+            choice_failures(
+                descriptor,
+                changed,
+                || harness(descriptor, reset_busy),
+                |h| {
+                    if repeatable {
+                        h.check_copy_state_repeatable(AT);
+                    } else {
+                        h.check_copy_state(AT);
+                    }
+                },
+            )
         })
-        .map(|descriptor| descriptor.id)
         .collect();
     assert!(
         failed.is_empty(),
-        "these modules do not hand over their state: {failed:?}"
+        "busy copy at {AT}, reset busy = {reset_busy}, repeatable = {repeatable}:\n{}",
+        failed.join("\n")
     );
 }
 
-/// Every DSP module on its port defaults, on a playing transport. A connected
-/// input hides the transport, so only here do modules that follow the bar through
-/// a port default see it move. It copies mid-cycle, on the wrap, and on the frame
-/// after: a wrap detector looks back one frame, so only the last two can show a
-/// lost one. It runs at the default parameters and away from them.
-#[test]
-fn every_playing_module_hands_over_its_state() {
+/// All default-input playing scenarios, at one copy frame. Separate tests let
+/// the runner spread the longer per-option renders across workers.
+fn check_playing_copies(at: usize) {
     let mut failed = Vec::new();
-    for descriptor in ALL
-        .iter()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)) && !seeded(descriptor))
-    {
-        let plain = Harness::new(descriptor)
-            .frames(PLAYING_FRAMES)
-            .transport(playing_short_bar())
-            .midi(notes());
-        let turned = descriptor.params.iter().fold(
-            Harness::new(descriptor)
-                .frames(PLAYING_FRAMES)
-                .transport(playing_short_bar())
-                .midi(notes()),
-            |h, spec| h.param(spec.name, changed(spec)),
-        );
-        for harness in [plain, turned] {
-            for at in [AT, WRAP_FRAME, WRAP_FRAME + 1] {
-                if catch_unwind(AssertUnwindSafe(|| harness.check_copy_state(at))).is_err() {
-                    failed.push((descriptor.id, at));
-                }
-            }
+    for descriptor in dsp_modules() {
+        for turned in [false, true] {
+            let baseline = |spec: &loom_core::ParamSpec| if turned { changed(spec) } else { spec.default };
+            let build = || {
+                descriptor.params.iter().fold(
+                    Harness::new(descriptor)
+                        .frames(PLAYING_FRAMES)
+                        .transport(playing_short_bar())
+                        .midi(notes()),
+                    |h, spec| h.param(spec.name, baseline(spec)),
+                )
+            };
+            failed.extend(
+                choice_failures(descriptor, baseline, build, |h| {
+                    if seeded(descriptor) {
+                        h.check_copy_state_repeatable(at);
+                    } else {
+                        h.check_copy_state(at);
+                    }
+                })
+                .into_iter()
+                .map(|message| format!("turned = {turned}: {message}")),
+            );
         }
     }
-    assert!(
-        failed.is_empty(),
-        "these modules do not hand over their state on a playing transport: {failed:?}"
-    );
+    assert!(failed.is_empty(), "playing copy at {at}:\n{}", failed.join("\n"));
 }
 
-/// A seeded module copies, and two copies taken at the same frame play the
-/// same numbers, so a swap stays deterministic (rule 27).
+/// Every choice on port defaults with the transport playing, copied mid-cycle.
 #[test]
-fn seeded_modules_copy_repeatably() {
-    let seeded: Vec<_> = ALL.iter().filter(|descriptor| seeded(descriptor)).collect();
-    assert!(!seeded.is_empty(), "Noise has a seed");
-    for descriptor in seeded {
-        harness(descriptor).check_copy_state_repeatable(AT);
+fn every_playing_module_hands_over_its_state_mid_cycle() {
+    check_playing_copies(AT);
+}
+
+/// A copy on the wrap must remember the preceding phase.
+#[test]
+fn every_playing_module_hands_over_its_state_on_the_wrap() {
+    check_playing_copies(WRAP_FRAME);
+}
+
+/// A copy after the wrap must keep the pending trigger and flash state.
+#[test]
+fn every_playing_module_hands_over_its_state_after_the_wrap() {
+    check_playing_copies(WRAP_FRAME + 1);
+}
+
+/// At one step, the wrap alone enters the step again. With more steps a step
+/// change can hide a dropped wrap detector.
+#[test]
+fn a_one_step_euclidean_rhythm_copies_its_wrap_detector() {
+    let h = Harness::new(&loom_modules::gate::EUCLID)
+        .frames(PLAYING_FRAMES)
+        .transport(playing_short_bar())
+        .param("source", 0.0)
+        .param("steps", 1.0)
+        .param("hits", 1.0);
+    for at in [WRAP_FRAME, WRAP_FRAME + 1] {
+        assert!(h.check_copy_state(at), "frame {at}: copy_state_from returned false");
     }
 }
 
@@ -231,3 +296,6 @@ fn a_copy_refuses_another_type() {
     let mut other = make(&loom_modules::time::DELAY);
     assert!(other.copy_state_from(&*delay));
 }
+
+#[path = "copy_state/reset_hides.rs"]
+mod reset_hides;

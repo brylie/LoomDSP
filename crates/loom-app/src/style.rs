@@ -59,6 +59,23 @@ pub fn plain(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
     iced_button::text(theme, status)
 }
 
+/// `base`, outlined in the primary colour while `on`: the item of a menu
+/// that its keys are on. The outline sits on the button's own border, so it
+/// moves nothing, and the highlight never depends on colour alone.
+pub fn outlined(
+    base: fn(&Theme, iced_button::Status) -> iced_button::Style,
+    on: bool,
+) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
+    move |theme, status| {
+        let mut style = base(theme, status);
+        if on {
+            style.border.color = theme.extended_palette().primary.base.color;
+            style.border.width = 1.5;
+        }
+        style
+    }
+}
+
 /// A value shown as plain text that can be clicked to edit it, such as a
 /// cell of the modulation matrix. A light fill on hover, and an outline
 /// while it has keyboard focus, so focus never depends on colour alone.

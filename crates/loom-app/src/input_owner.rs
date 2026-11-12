@@ -183,6 +183,22 @@ impl App {
         )
     }
 
+    /// True while a pointer press reaches the window's own parts: a tile
+    /// and its controls, the toolbar, the right panel's tabs, and the stats
+    /// bar. That is only while nothing is open. Every panel and menu the
+    /// view draws puts a layer over the whole window (`view.rs`), either
+    /// to close itself on a press outside or to hold the press, so the
+    /// press never reaches what is below. The small menus on the canvas do
+    /// this too.
+    ///
+    /// A screen reader follows the pointer: what a press cannot reach is
+    /// hidden from it and refuses its actions (ui-layer.md, section 7,
+    /// rule 24). A test presses under every panel and checks that the tree
+    /// agrees (`a11y::tests::the_tree_follows_the_pointer_under_every_panel`).
+    pub(crate) fn pointer_reaches_window(&self) -> bool {
+        self.input_owner() == InputOwner::Canvas
+    }
+
     /// Who else has the keyboard, for the canvas: the overlays, the matrix,
     /// and the app's text fields. One place decides it, so the canvas never
     /// infers it from loose flags.
@@ -227,11 +243,15 @@ impl App {
         };
         let escape = *key == Key::Named(Named::Escape);
         match self.input_owner() {
-            // These have listeners or widgets of their own.
+            // These have listeners or widgets of their own, and the menus
+            // their own keys (`menus.rs`), which `update` gives them first.
             InputOwner::Question
             | InputOwner::Help
             | InputOwner::Patches
             | InputOwner::Browser
+            | InputOwner::RecentList
+            | InputOwner::ProbeMenu
+            | InputOwner::TileMenu
             | InputOwner::Canvas => {}
             InputOwner::Chooser if escape => self.overlays.chooser = None,
             InputOwner::Chooser => {}
@@ -240,10 +260,6 @@ impl App {
                 Key::Character(",") if modifiers.command() => self.toggle_preferences(),
                 _ => {}
             },
-            InputOwner::RecentList if escape => self.overlays.close_recent_list(),
-            InputOwner::ProbeMenu if escape => self.overlays.close_probe_menu(),
-            InputOwner::TileMenu if escape => self.overlays.close_tile_menu(),
-            InputOwner::RecentList | InputOwner::ProbeMenu | InputOwner::TileMenu => {}
         }
     }
 }

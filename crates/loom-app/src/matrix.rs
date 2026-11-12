@@ -13,6 +13,8 @@ use loom_core::{AssignmentId, Graph, ModuleId, OutputRef};
 use serde::Serialize;
 use std::fmt;
 
+pub(crate) mod access;
+
 /// The filter's widget ID. Its focus changes which keys the table takes
 /// (modulation.md, Filter focus).
 pub(crate) const FILTER: &str = "matrix-filter";
@@ -348,6 +350,10 @@ pub enum Event {
     AddApply,
     Apply,
     Cancel,
+    /// The rows were scrolled. Sent only while a screen reader listens, so
+    /// the tree is built again with the rows where they are now. It changes
+    /// nothing.
+    Scrolled,
 }
 
 /// Width kept for a card's depth value, such as "-100%".
@@ -375,40 +381,60 @@ impl fmt::Display for SortPick {
 /// Draws the tab's matrix from the same model used by the snapshot: one
 /// card per assignment, so every part fits the right-hand column without
 /// scrolling sideways (modulation.md, slice 3).
-pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a, Message> {
+///
+/// Each part that acts sits in a container named by its UI ID
+/// (`access.rs`), so the window can say where it is (`places.rs`). A
+/// scroll of the rows is a message only while a screen reader listens
+/// (`listening`), as in the inspector.
+pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: bool) -> Element<'a, Message> {
+    use crate::inspector::ids::named;
+    use access::part;
     let mut content = column![].spacing(7).width(Length::Fill);
-    content = content.push(
+    content = content.push(named(
+        &part("filter"),
         text_input("Filter modules or parameters", &model.filter)
             .id(FILTER)
             .on_input(|s| Message::Matrix(Event::Filter(s)))
             .size(style::CONTROL),
-    );
+    ));
     content = content.push(
         row![
-            checkbox(model.selected_only)
-                .label("Selected module only")
-                .on_toggle(|v| Message::Matrix(Event::SelectedOnly(v)))
-                .size(style::SWITCH)
-                .text_size(style::CONTROL),
+            named(
+                &part("selected-only"),
+                checkbox(model.selected_only)
+                    .label("Selected module only")
+                    .on_toggle(|v| Message::Matrix(Event::SelectedOnly(v)))
+                    .size(style::SWITCH)
+                    .text_size(style::CONTROL),
+            ),
             space::horizontal(),
-            button(text("Add").size(style::CONTROL)).on_press(Message::Matrix(Event::AddOpen)),
+            named(
+                &part("add"),
+                button(text("Add").size(style::CONTROL)).on_press(Message::Matrix(Event::AddOpen)),
+            ),
         ]
         .align_y(iced::Alignment::Center),
     );
     let mut sort = row![
         text("Sort by").size(style::SMALL).color(DIM),
-        pick_list(SortPick::all(), Some(SortPick(model.sort.map(|(c, _)| c))), |p| {
-            Message::Matrix(Event::SortBy(p.0))
-        })
-        .text_size(style::SMALL),
+        named(
+            &part("sort"),
+            pick_list(SortPick::all(), Some(SortPick(model.sort.map(|(c, _)| c))), |p| {
+                Message::Matrix(Event::SortBy(p.0))
+            })
+            .text_size(style::SMALL),
+        ),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center);
     if let Some((_, reverse)) = model.sort {
         sort = sort.push(iced::widget::tooltip(
-            button(text(if reverse { "↓" } else { "↑" }).size(style::CONTROL))
-                .style(style::plain)
-                .on_press(Message::Matrix(Event::ReverseSort)),
+            named(
+                &part("reverse"),
+                button(text(if reverse { "↓" } else { "↑" }).size(style::CONTROL))
+                    .style(style::plain)
+                    .on_press(Message::Matrix(Event::ReverseSort)),
+            ),
             container(text("Reverse the order").size(style::BODY))
                 .padding(6)
                 .style(container::rounded_box),
@@ -421,17 +447,29 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
         let targets = targets(graph);
         content = content.push(
             column![
-                pick_list(sources, add.source.clone(), |s| Message::Matrix(Event::AddSource(s)))
-                    .placeholder("Source output")
-                    .text_size(style::SMALL),
-                pick_list(targets, add.target.clone(), |t| Message::Matrix(Event::AddTarget(t)))
-                    .placeholder("Target parameter")
-                    .text_size(style::SMALL),
+                named(
+                    &part("new/source"),
+                    pick_list(sources, add.source.clone(), |s| Message::Matrix(Event::AddSource(s)))
+                        .placeholder("Source output")
+                        .text_size(style::SMALL),
+                ),
+                named(
+                    &part("new/target"),
+                    pick_list(targets, add.target.clone(), |t| Message::Matrix(Event::AddTarget(t)))
+                        .placeholder("Target parameter")
+                        .text_size(style::SMALL),
+                ),
                 row![
-                    button("Create")
-                        .on_press(Message::Matrix(Event::AddApply))
-                        .style(style::primary),
-                    button("Cancel").on_press(Message::Matrix(Event::Cancel)),
+                    named(
+                        &part("new/create"),
+                        button("Create")
+                            .on_press(Message::Matrix(Event::AddApply))
+                            .style(style::primary),
+                    ),
+                    named(
+                        &part("new/cancel"),
+                        button("Cancel").on_press(Message::Matrix(Event::Cancel)),
+                    ),
                 ]
                 .spacing(5),
             ]
@@ -506,24 +544,36 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
         };
         let card = column![
             row![
-                matrix_cell(on, focused(Column::On)),
-                matrix_cell(source, focused(Column::Source)),
+                matrix_cell(named(&access::cell(id, Column::On), on), focused(Column::On)),
+                matrix_cell(
+                    named(&access::cell(id, Column::Source), source),
+                    focused(Column::Source)
+                ),
                 space::horizontal(),
-                remove_button("Remove modulation", Message::Matrix(Event::Remove(id))),
+                named(
+                    &access::remove(id),
+                    remove_button("Remove modulation", Message::Matrix(Event::Remove(id))),
+                ),
             ]
             .spacing(4)
             .align_y(iced::Alignment::Center),
             row![
                 text("→").size(style::SMALL).color(DIM),
-                matrix_cell(target, focused(Column::Target)),
+                matrix_cell(
+                    named(&access::cell(id, Column::Target), target),
+                    focused(Column::Target)
+                ),
                 space::horizontal(),
-                matrix_cell(polarity, focused(Column::Polarity)),
+                matrix_cell(
+                    named(&access::cell(id, Column::Polarity), polarity),
+                    focused(Column::Polarity)
+                ),
             ]
             .spacing(4)
             .padding([0, 4])
             .align_y(iced::Alignment::Center),
             row![
-                depth_slider,
+                named(&access::cell(id, Column::Depth), depth_slider),
                 container(matrix_cell(depth_value, focused(Column::Depth))).width(DEPTH_TEXT),
             ]
             .spacing(6)
@@ -531,8 +581,11 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
             .align_y(iced::Alignment::Center),
         ]
         .spacing(2);
+        // The card's own container is named by the row's UI ID; the one
+        // around it keeps the ID the reveal looks for.
         let card = mouse_area(
             container(card)
+                .id(crate::places::widget_id(&access::row(id)))
                 .padding(6)
                 .width(Length::Fill)
                 .style(style::card(selected)),
@@ -541,14 +594,21 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph) -> Element<'a,
         let card = container(card);
         table = table.push(if selected { card.id("matrix-selected-row") } else { card });
     }
-    content = content.push(
-        scrollable(table)
-            .id("matrix-table")
-            .spacing(4)
-            .width(Length::Fill)
-            .height(Length::Fill),
-    );
-    container(content.padding(8)).width(280).height(Length::Fill).into()
+    let area = scrollable(named(&part("assignments"), table))
+        .id("matrix-table")
+        .spacing(4)
+        .width(Length::Fill)
+        .height(Length::Fill);
+    let area = if listening {
+        area.on_scroll(|_| Message::Matrix(Event::Scrolled))
+    } else {
+        area
+    };
+    content = content.push(area);
+    named(
+        &access::panel(),
+        container(content.padding(8)).width(280).height(Length::Fill),
+    )
 }
 
 /// Parses a signed percentage and rejects anything outside the edit range.
@@ -702,6 +762,7 @@ impl App {
                 self.session.matrix.edit = None;
                 self.session.matrix.add = None;
             }
+            Event::Scrolled => {}
         }
     }
 

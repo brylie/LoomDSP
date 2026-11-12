@@ -457,6 +457,19 @@ impl Ui {
         view.expect("the app view has a patch canvas")
     }
 
+    /// Where the window drew the canvas and each named part, as the
+    /// accessibility layer and the control channel's `locate` are told.
+    pub(crate) fn places(&mut self) -> crate::places::Places {
+        let mut collect = crate::places::Collect::default();
+        self.with_ui(|ui, renderer, _| {
+            ui.operate(
+                renderer,
+                &mut iced::advanced::widget::operation::black_box(&mut collect),
+            );
+        });
+        collect.places()
+    }
+
     /// The centre of a module's output port, by its stable name.
     pub(crate) fn output(&mut self, module: u32, name: &str) -> Point {
         self.port(module, name, true)

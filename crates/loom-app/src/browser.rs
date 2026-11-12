@@ -8,8 +8,9 @@ use iced::widget::{column, container, mouse_area, row, scrollable, space, text, 
 use iced::{Element, Length, Task, Theme};
 use loom_canvas::GRID;
 use loom_canvas::iced_convert::ToIced as _;
-use loom_core::ModuleDescriptor;
-use loom_ui_core::{Point, Rect};
+use loom_core::{Family, ModuleDescriptor};
+use loom_ui_core::{Point, Rect, UiId};
+use serde::Serialize;
 use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 
@@ -47,8 +48,10 @@ pub enum Message {
     Hover(usize),
     /// A row was clicked.
     Pick(usize),
-    /// A row was right-clicked: a library item opens its menu.
-    Menu(usize),
+    /// A row was right-clicked, or a screen reader asked for its menu
+    /// (`by_key`): a library item opens its menu. Opened by a screen reader,
+    /// the menu's first item is highlighted, as a menu opened by a key is.
+    Menu { row: usize, by_key: bool },
     /// Insert linked, from a library item's menu.
     InsertLinked(usize),
     /// The library folder was read.
@@ -116,16 +119,99 @@ enum Entry {
     Library(usize),
 }
 
+/// What the browser shows, as plain data (ADR-0021). The browser owns it and
+/// keeps it up to date in [`Browser::update`], so its view, the
+/// accessibility tree, and the UI snapshot read the same thing, and it
+/// changes only when what is shown does.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Model {
+    /// The search text.
+    pub query: String,
+    /// Every result, best first: the modules, then the library items.
+    pub rows: Vec<BrowserRow>,
+    /// The highlighted row, or `None` while no row matches.
+    pub highlight: Option<usize>,
+    /// What the area under the list says about the highlighted row.
+    pub about: Option<About>,
+    /// The row whose menu is open, if one is.
+    pub menu: Option<usize>,
+    /// The item of that menu the keys are on, if a key or a screen reader
+    /// has moved there.
+    pub menu_highlight: Option<usize>,
+    /// The line shown in place of the list while no row matches.
+    pub empty: Option<&'static str>,
+}
+
+/// One row of the list, as it is shown.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BrowserRow {
+    /// Its UI ID: `browser/module/<type id>` or `browser/library/<path>`.
+    #[serde(serialize_with = "crate::snapshot::display")]
+    pub id: UiId,
+    /// The module's or the sub-patch's name.
+    pub name: String,
+    /// The words beside its swatch: the family's label, or "Sub-patch".
+    pub mark: &'static str,
+    /// The family whose colour the swatch shows.
+    #[serde(skip)]
+    pub family: Family,
+    /// True for a library item, which has a menu.
+    pub library: bool,
+    /// What a screen reader says about the row, whichever row the keys are
+    /// on: a module's one-sentence description, or a library item's path.
+    pub description: String,
+    /// The UI ID as text, which names the row's container in the window:
+    /// worked out once with the row, not on every frame.
+    #[serde(skip)]
+    pub key: String,
+}
+
+/// What the area under the list says about the highlighted row: a module's
+/// description and type ID, or a library item's sentence and path.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct About {
+    /// The sentence.
+    pub text: String,
+    /// The line under it, quieter.
+    pub detail: String,
+}
+
+/// The items of a library row's menu, in order. Only one for now.
+pub(crate) const MENU_ITEMS: [&str; 1] = [INSERT_LINKED];
+
+/// The UI ID of the browser.
+pub(crate) fn browser_id() -> UiId {
+    UiId::panel("browser")
+}
+
+/// The UI ID of a row: a module by its type ID, a library item by its path
+/// in the library folder, each one key (ui-layer.md, section 4).
+fn row_id(entry: Entry, library: &[LibraryItem]) -> UiId {
+    match entry {
+        Entry::Module(d) => browser_id().with("module").with(d.id),
+        Entry::Library(i) => browser_id().with("library").with(library[i].library.as_str()),
+    }
+}
+
+/// The UI ID of a library row's menu, under its row.
+pub(crate) fn menu_id(row: &UiId) -> UiId {
+    row.clone().with("menu")
+}
+
+/// The UI ID of the menu's Insert linked item.
+pub(crate) fn insert_linked_id(row: &UiId) -> UiId {
+    menu_id(row).with("insert-linked")
+}
+
 /// An open browser.
 pub struct Browser {
     modules: Vec<&'static ModuleDescriptor>,
     /// The library folder's sub-patches, once read.
     library: Vec<LibraryItem>,
-    query: String,
+    /// What each row of the model is, by the same index.
     results: Vec<Entry>,
-    highlight: usize,
-    /// The row whose menu is open, if one is.
-    menu: Option<usize>,
+    /// What is shown.
+    model: Model,
     /// Where the new module goes: its top-left corner, snapped.
     world: Point,
     /// The panel's top-left corner, in window coordinates.
@@ -140,18 +226,48 @@ impl Browser {
     /// `at`, moved as needed to stay inside `area` (window coordinates).
     /// The library's items come with [`Message::Library`].
     pub fn open(modules: Vec<&'static ModuleDescriptor>, world: Point, at: Point, area: Rect) -> Self {
-        let results = search(&modules, "").into_iter().map(Entry::Module).collect();
-        Self {
+        let mut browser = Self {
             modules,
             library: Vec::new(),
-            query: String::new(),
-            results,
-            highlight: 0,
-            menu: None,
+            results: Vec::new(),
+            model: Model {
+                query: String::new(),
+                rows: Vec::new(),
+                highlight: None,
+                about: None,
+                menu: None,
+                menu_highlight: None,
+                empty: None,
+            },
             world: snap(world),
             at: inside(at, area),
             scroll: 0.0,
-        }
+        };
+        browser.search();
+        browser.set_highlight(0);
+        browser
+    }
+
+    /// What the browser shows.
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    /// The highlighted row's index, 0 while no row matches.
+    fn highlight(&self) -> usize {
+        self.model.highlight.unwrap_or(0)
+    }
+
+    /// Highlights `row`, within the list, and says what it is under it.
+    fn set_highlight(&mut self, row: usize) {
+        self.model.highlight = (!self.results.is_empty()).then(|| row.min(self.results.len() - 1));
+        self.model.about = self.model.highlight.map(|at| about(self.results[at], &self.library));
+    }
+
+    /// Opens the menu of `row`, or closes it with `None`.
+    fn set_menu(&mut self, row: Option<usize>, highlight: Option<usize>) {
+        self.model.menu = row;
+        self.model.menu_highlight = row.and(highlight);
     }
 
     /// Handles a message, and returns what the app should do and a task
@@ -162,49 +278,89 @@ impl Browser {
         let follow = matches!(message, Message::Query(_) | Message::Key(_));
         let outcome = match message {
             Message::Query(query) => {
-                self.query = query;
+                self.model.query = query;
                 self.search();
-                self.highlight = 0;
-                self.menu = None;
+                self.set_highlight(0);
+                self.set_menu(None, None);
                 Outcome::Stay
             }
             Message::Library(items) => {
                 self.library = items;
                 self.search();
-                self.highlight = self.highlight.min(self.results.len().saturating_sub(1));
+                self.set_highlight(self.highlight());
                 Outcome::Stay
             }
             Message::Hover(row) => {
-                if row < self.results.len() {
-                    self.highlight = row;
+                if row < self.results.len() && self.model.highlight != Some(row) {
+                    self.set_highlight(row);
                 }
                 Outcome::Stay
             }
             Message::Pick(row) => {
-                self.highlight = row;
+                self.set_highlight(row);
                 self.add(false)
             }
-            Message::Menu(row) => {
+            Message::Menu { row, by_key } => {
                 if matches!(self.results.get(row), Some(Entry::Library(_))) {
-                    self.highlight = row;
-                    self.menu = Some(row);
+                    self.set_highlight(row);
+                    self.set_menu(Some(row), by_key.then_some(0));
                 }
                 Outcome::Stay
             }
             Message::InsertLinked(row) => {
-                self.highlight = row;
-                self.menu = None;
+                self.set_highlight(row);
+                self.set_menu(None, None);
                 self.add(true)
             }
-            Message::Submit => self.add(false),
+            // While a library item's menu is open, Enter picks the item the
+            // keys are on, as in every menu (module-browser.md), and does
+            // nothing before a key has moved there.
+            Message::Submit => match (self.model.menu, self.model.menu_highlight) {
+                (Some(row), Some(_)) => {
+                    self.set_highlight(row);
+                    self.set_menu(None, None);
+                    self.add(true)
+                }
+                (Some(_), None) => Outcome::Stay,
+                (None, _) => self.add(false),
+            },
             Message::Scrolled(offset) => {
                 self.scroll = offset;
                 Outcome::Stay
             }
+            // Escape closes a menu first, then the browser.
+            Message::Key(Nav::Escape) if self.model.menu.is_some() => {
+                self.set_menu(None, None);
+                Outcome::Stay
+            }
             Message::Key(Nav::Escape) | Message::Close => Outcome::Close,
+            // Up and Down move in an open menu, as in every menu.
+            Message::Key(nav @ (Nav::Up | Nav::Down)) if self.model.menu.is_some() => {
+                let last = MENU_ITEMS.len() - 1;
+                let at = match (self.model.menu_highlight, nav) {
+                    (None, Nav::Down) => 0,
+                    (None, _) => last,
+                    (Some(at), Nav::Down) => {
+                        if at >= last {
+                            0
+                        } else {
+                            at + 1
+                        }
+                    }
+                    (Some(at), _) => {
+                        if at == 0 {
+                            last
+                        } else {
+                            at - 1
+                        }
+                    }
+                };
+                self.model.menu_highlight = Some(at);
+                Outcome::Stay
+            }
             Message::Key(nav) => {
                 self.step(nav);
-                self.menu = None;
+                self.set_menu(None, None);
                 Outcome::Stay
             }
         };
@@ -240,7 +396,7 @@ impl Browser {
 
     /// The highlighted module, if the highlight is on one.
     pub fn highlighted(&self) -> Option<&'static ModuleDescriptor> {
-        match self.results.get(self.highlight) {
+        match self.model.highlight.and_then(|at| self.results.get(at)) {
             Some(Entry::Module(descriptor)) => Some(descriptor),
             _ => None,
         }
@@ -248,23 +404,39 @@ impl Browser {
 
     /// The highlighted library item, if the highlight is on one.
     fn highlighted_item(&self) -> Option<&LibraryItem> {
-        match self.results.get(self.highlight) {
+        match self.model.highlight.and_then(|at| self.results.get(at)) {
             Some(Entry::Library(i)) => self.library.get(*i),
             _ => None,
         }
     }
 
     /// Fills the list from the query: the modules, then the library items.
+    /// The model's rows are built here, once per search, never per frame.
     fn search(&mut self) {
-        self.results = search(&self.modules, &self.query)
-            .into_iter()
-            .map(Entry::Module)
-            .chain(
-                search_library(&self.library, &self.query)
-                    .into_iter()
-                    .map(Entry::Library),
-            )
-            .collect();
+        self.results = results(&self.modules, &self.library, &self.model.query);
+        self.model.rows = rows(&self.results, &self.library);
+        self.model.empty = self.results.is_empty().then_some("No modules match.");
+        // The menu belongs to a row that may be gone.
+        self.set_menu(None, None);
+    }
+
+    /// The model worked out from scratch from the browser's own state: its
+    /// modules, its library, and the query, highlight, and menu the user
+    /// chose. A test compares it with the kept model after every message,
+    /// so an update that forgets to change the model fails.
+    #[cfg(test)]
+    pub(crate) fn fresh_model(&self) -> Model {
+        let results = results(&self.modules, &self.library, &self.model.query);
+        let highlight = self.model.highlight.filter(|&at| at < results.len());
+        Model {
+            query: self.model.query.clone(),
+            rows: rows(&results, &self.library),
+            highlight,
+            about: highlight.map(|at| about(results[at], &self.library)),
+            menu: self.model.menu,
+            menu_highlight: self.model.menu_highlight,
+            empty: results.is_empty().then_some("No modules match."),
+        }
     }
 
     fn add(&self, linked: bool) -> Outcome {
@@ -286,18 +458,19 @@ impl Browser {
         let Some(last) = self.results.len().checked_sub(1) else {
             return;
         };
-        self.highlight = match nav {
-            Nav::Up => self.highlight.saturating_sub(1),
-            Nav::Down => (self.highlight + 1).min(last),
-            Nav::PageUp => self.highlight.saturating_sub(ROWS),
-            Nav::PageDown => (self.highlight + ROWS).min(last),
-            Nav::Escape => self.highlight,
-        };
+        let at = self.highlight();
+        self.set_highlight(match nav {
+            Nav::Up => at.saturating_sub(1),
+            Nav::Down => (at + 1).min(last),
+            Nav::PageUp => at.saturating_sub(ROWS),
+            Nav::PageDown => (at + ROWS).min(last),
+            Nav::Escape => at,
+        });
     }
 
     /// Scrolls the list just enough to show the highlighted row.
     fn reveal(&mut self) -> Task<Message> {
-        let top = self.highlight as f32 * ROW_HEIGHT;
+        let top = self.highlight() as f32 * ROW_HEIGHT;
         let offset = if top < self.scroll {
             top
         } else if top + ROW_HEIGHT > self.scroll + LIST_HEIGHT {
@@ -310,14 +483,20 @@ impl Browser {
     }
 
     /// The panel, placed at its corner, with a library item's menu over it
-    /// when one is open. The app lays it over the window.
+    /// when one is open. The app lays it over the window. Drawn from the
+    /// model alone; each part is named by its UI ID, so the window says
+    /// where it is (`places.rs`).
     pub fn view(&self) -> Element<'_, Message> {
-        let input = text_input("Search modules", &self.query)
-            .id(INPUT)
-            .on_input(Message::Query)
-            .on_submit(Message::Submit)
-            .size(style::CONTROL)
-            .padding(6);
+        let model = &self.model;
+        let input = container(
+            text_input("Search modules", &model.query)
+                .id(INPUT)
+                .on_input(Message::Query)
+                .on_submit(Message::Submit)
+                .size(style::CONTROL)
+                .padding(6),
+        )
+        .id(crate::places::widget_id(&search_id()));
 
         let swatch = |colour: iced::Color| {
             container(space().width(8).height(8)).style(move |_: &Theme| container::Style {
@@ -329,23 +508,15 @@ impl Browser {
                 ..container::Style::default()
             })
         };
-        let rows = self.results.iter().enumerate().map(|(i, entry)| {
-            let highlighted = i == self.highlight;
-            let line = match entry {
-                // The family's colour and name, so colour is never the only
-                // cue (ADR-0029).
-                Entry::Module(d) => row![
-                    text(d.name).size(style::CONTROL),
-                    swatch(crate::scene::family_colour(d.family).to_iced()),
-                    text(d.family.label()).size(style::SMALL).color(style::QUIET),
-                ],
-                // A sub-patch, in the colour of a sub-patch tile.
-                Entry::Library(item) => row![
-                    text(self.library[*item].name.clone()).size(style::CONTROL),
-                    swatch(crate::scene::family_colour(loom_core::Family::Interface).to_iced()),
-                    text(LIBRARY_MARK).size(style::SMALL).color(style::QUIET),
-                ],
-            }
+        let rows = model.rows.iter().enumerate().map(|(i, r)| {
+            let highlighted = model.highlight == Some(i);
+            // The family's colour and name, so colour is never the only cue
+            // (ADR-0029). A sub-patch shows the colour of a sub-patch tile.
+            let line = row![
+                text(r.name.as_str()).size(style::CONTROL),
+                swatch(crate::scene::family_colour(r.family).to_iced()),
+                text(r.mark).size(style::SMALL).color(style::QUIET),
+            ]
             .spacing(8)
             .align_y(iced::Alignment::Center);
             let cell = container(line)
@@ -354,40 +525,37 @@ impl Browser {
                 .width(Length::Fill)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(move |theme: &Theme| row_style(theme, highlighted));
-            mouse_area(cell)
-                .on_move(move |_| Message::Hover(i))
-                .on_press(Message::Pick(i))
-                .on_right_press(Message::Menu(i))
-                .into()
+            container(
+                mouse_area(cell)
+                    .on_move(move |_| Message::Hover(i))
+                    .on_press(Message::Pick(i))
+                    .on_right_press(Message::Menu { row: i, by_key: false }),
+            )
+            .id(iced::widget::Id::from(r.key.clone()))
+            .into()
         });
-        let list: Element<'_, Message> = if self.results.is_empty() {
-            container(text("No modules match.").size(style::CONTROL).color(style::QUIET))
+        let list: Element<'_, Message> = match model.empty {
+            Some(line) => container(text(line).size(style::CONTROL).color(style::QUIET))
                 .padding(8)
                 .height(LIST_HEIGHT)
-                .into()
-        } else {
+                .into(),
             // The scrollbar takes its own space, so it covers no row text.
-            scrollable(column(rows))
-                .id(LIST)
-                .spacing(4)
-                .height(LIST_HEIGHT)
-                .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
-                .into()
+            None => container(
+                scrollable(column(rows))
+                    .id(LIST)
+                    .spacing(4)
+                    .height(LIST_HEIGHT)
+                    .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y)),
+            )
+            .id(crate::places::widget_id(&list_id()))
+            .into(),
         };
         // The ID goes with the description, so no row is cut by a column
         // or covered by the scrollbar (module-browser.md).
-        let about = match self.results.get(self.highlight) {
-            Some(Entry::Module(d)) => column![
-                text(d.description).size(style::BODY),
-                text(d.id).size(style::SMALL).color(style::QUIET),
-            ]
-            .spacing(2),
-            Some(Entry::Library(item)) => column![
-                text("A sub-patch from your library, inserted as a copy. Right-click it to insert it linked.")
-                    .size(style::BODY),
-                text(self.library[*item].library.clone())
-                    .size(style::SMALL)
-                    .color(style::QUIET),
+        let about = match &model.about {
+            Some(about) => column![
+                text(about.text.as_str()).size(style::BODY),
+                text(about.detail.as_str()).size(style::SMALL).color(style::QUIET),
             ]
             .spacing(2),
             None => column![],
@@ -396,25 +564,105 @@ impl Browser {
             .spacing(SPACING)
             .padding(PADDING)
             .width(WIDTH);
-        let panel = container(panel).style(panel_style);
+        let panel = container(panel)
+            .style(panel_style)
+            .id(crate::places::widget_id(&browser_id()));
         let panel: Element<'_, Message> = iced::widget::pin(iced::widget::opaque(panel))
             .position(self.at.to_iced())
             .into();
-        let Some(open) = self.menu else {
+        let Some(open) = model.menu else {
             return panel;
         };
+        let row = &model.rows[open].id;
         // The menu hangs under its row's right end.
         let row_top = self.at.y + PADDING + INPUT_HEIGHT + SPACING + open as f32 * ROW_HEIGHT - self.scroll;
+        let highlighted = model.menu_highlight == Some(0);
         let menu = container(column![
-            style::button(text(INSERT_LINKED).size(style::CONTROL))
-                .on_press(Message::InsertLinked(open))
-                .width(MENU_WIDTH)
+            container(
+                style::button(text(INSERT_LINKED).size(style::CONTROL))
+                    .style(style::outlined(style::secondary, highlighted))
+                    .on_press(Message::InsertLinked(open))
+                    .width(MENU_WIDTH)
+            )
+            .id(crate::places::widget_id(&insert_linked_id(row)))
         ])
         .padding(4)
-        .style(container::rounded_box);
+        .style(container::rounded_box)
+        .id(crate::places::widget_id(&menu_id(row)));
         let menu = iced::widget::pin(iced::widget::opaque(menu))
             .position(Point::new(self.at.x + WIDTH - MENU_WIDTH - PADDING, row_top + ROW_HEIGHT).to_iced());
         iced::widget::stack![panel, menu].into()
+    }
+}
+
+/// The UI ID of the browser's search field.
+pub(crate) fn search_id() -> UiId {
+    browser_id().with("search")
+}
+
+/// The UI ID of the browser's list.
+pub(crate) fn list_id() -> UiId {
+    browser_id().with("list")
+}
+
+/// The UI ID of the text under the list.
+pub(crate) fn about_id() -> UiId {
+    browser_id().with("about")
+}
+
+/// What the list shows for `query`: the modules, then the library items.
+fn results(modules: &[&'static ModuleDescriptor], library: &[LibraryItem], query: &str) -> Vec<Entry> {
+    search(modules, query)
+        .into_iter()
+        .map(Entry::Module)
+        .chain(search_library(library, query).into_iter().map(Entry::Library))
+        .collect()
+}
+
+/// The rows the model shows for `results`, each with its UI ID, made
+/// unique, its text worked out once, and its description.
+fn rows(results: &[Entry], library: &[LibraryItem]) -> Vec<BrowserRow> {
+    let mut ids = crate::a11y::items::UniqueIds::default();
+    results
+        .iter()
+        .map(|&entry| {
+            let id = ids.take(row_id(entry, library));
+            let key = id.to_string();
+            match entry {
+                Entry::Module(d) => BrowserRow {
+                    id,
+                    key,
+                    name: d.name.to_string(),
+                    mark: d.family.label(),
+                    family: d.family,
+                    library: false,
+                    description: d.description.to_string(),
+                },
+                Entry::Library(i) => BrowserRow {
+                    id,
+                    key,
+                    name: library[i].name.clone(),
+                    mark: LIBRARY_MARK,
+                    family: Family::Interface,
+                    library: true,
+                    description: library[i].library.clone(),
+                },
+            }
+        })
+        .collect()
+}
+
+/// What the area under the list says about `entry`.
+fn about(entry: Entry, library: &[LibraryItem]) -> About {
+    match entry {
+        Entry::Module(d) => About {
+            text: d.description.to_string(),
+            detail: d.id.to_string(),
+        },
+        Entry::Library(i) => About {
+            text: "A sub-patch from your library, inserted as a copy. Right-click it to insert it linked.".to_string(),
+            detail: library[i].library.clone(),
+        },
     }
 }
 
@@ -573,6 +821,8 @@ pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
         ..container::Style::default()
     }
 }
+
+pub(crate) mod access;
 
 #[cfg(test)]
 mod tests;

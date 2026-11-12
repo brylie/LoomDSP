@@ -235,6 +235,9 @@ impl Question {
             } else {
                 press
             };
+            // Each answer is named by its UI ID, so the window says where it
+            // is (`overlays/access.rs`).
+            let press = crate::inspector::ids::named(&crate::overlays::access::answer_id(answer.name()), press);
             buttons = buttons.push(container(press).padding(2).style(style::card(i == self.highlight)));
         }
         let panel = column![
@@ -244,11 +247,14 @@ impl Question {
         ]
         .spacing(12);
         opaque(
-            container(container(panel).padding(16).width(460).style(container::rounded_box))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
+            container(crate::inspector::ids::named(
+                &crate::overlays::access::question_id(),
+                container(panel).padding(16).width(460).style(container::rounded_box),
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
         )
     }
 }

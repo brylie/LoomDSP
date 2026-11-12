@@ -4,7 +4,7 @@
 
 use crate::gpu::{Cable, CanvasFrame, CanvasRenderer, Target};
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
-use loom_ui_core::Size;
+use loom_ui_core::{Point, Size};
 
 /// The canvas frame as an Iced shader primitive.
 #[derive(Debug)]
@@ -33,9 +33,12 @@ impl Primitive for CanvasPrimitive {
         bounds: &iced::Rectangle,
         viewport: &Viewport,
     ) {
+        let physical = viewport.physical_size();
         let target = Target {
             size: Size::new(bounds.width, bounds.height),
             scale: viewport.scale_factor(),
+            origin: Point::new(bounds.x, bounds.y),
+            physical: (physical.width, physical.height),
         };
         pipeline.0.prepare(device, queue, &self.0, target);
     }
@@ -75,9 +78,12 @@ impl Primitive for DragPrimitive {
         bounds: &iced::Rectangle,
         viewport: &Viewport,
     ) {
+        let physical = viewport.physical_size();
         let target = Target {
             size: Size::new(bounds.width, bounds.height),
             scale: viewport.scale_factor(),
+            origin: Point::new(bounds.x, bounds.y),
+            physical: (physical.width, physical.height),
         };
         pipeline.0.prepare_cable(device, queue, self.cable, self.zoom, target);
     }

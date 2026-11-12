@@ -177,3 +177,31 @@ fn names_find_sub_patch_tiles_and_port_tiles() {
     assert_eq!(name(graph, h, port(input, false, 0)), None);
     assert_eq!(find(graph, h, 999, "cutoff"), Err("no module 999".to_string()));
 }
+
+/// `param:` names a module's own parameter only, and `exposed:` an item a
+/// sub-patch tile exposes only. Each says which to use on the other kind
+/// of tile (`docs/design/ui-layer.md`, section 4, rule 2).
+#[test]
+fn param_and_exposed_prefixes_name_one_kind() {
+    let ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    let graph = ui.app.session.controller.graph();
+    let h = &ui.app.session.hierarchy;
+    // Tile 2 is the Voice sub-patch: its Cutoff is exposed.
+    assert_eq!(find(graph, h, 2, "exposed:cutoff"), Ok(Part::Control(2, 0)));
+    let error = find(graph, h, 2, "param:cutoff").unwrap_err();
+    assert!(error.contains("use `exposed:cutoff`"), "{error}");
+    let error = find(graph, h, 2, "exposed:nonsense").unwrap_err();
+    assert!(error.contains("exposes no `nonsense`"), "{error}");
+
+    let mut app = crate::App::new(crate::tests::app_args());
+    let svf = app.session.controller.add_module("loom.filter.svf").unwrap().0;
+    let graph = app.session.controller.graph();
+    let h = &app.session.hierarchy;
+    assert_eq!(find(graph, h, svf, "param:cutoff"), find(graph, h, svf, "cutoff"));
+    // The filter also has an input named `cutoff`: the prefix never finds it.
+    assert!(matches!(find(graph, h, svf, "param:cutoff"), Ok(Part::Control(..))));
+    let error = find(graph, h, svf, "param:lowpass").unwrap_err();
+    assert!(error.contains("no control for a parameter `lowpass`"), "{error}");
+    let error = find(graph, h, svf, "exposed:cutoff").unwrap_err();
+    assert!(error.contains("use `param:cutoff`"), "{error}");
+}

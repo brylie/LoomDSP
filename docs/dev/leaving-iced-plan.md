@@ -50,9 +50,9 @@ Measured at commit `6091e52`.
 1. **The view models are the seam.** `App::ui_snapshot`, `inspector.rs`, and the other plain-data models (ADR-0021) describe what the user sees. The accessibility tree, the control channel, `--dump-ui`, and the tests all read them. New code reads them too. Nothing reads a toolkit widget tree to find out what is on screen.
 2. **One runtime, two drivers.** The window and the headless harness must run the same code for events, layout, and messages. Only the event source and the drawing target differ. This is what keeps the tests honest.
 3. **No hidden skips.** A harness that cannot run an effect (a file dialog, a window command, a timer) panics with a message, as the `Ui` harness does today.
-4. **Do not invent text.** Shaping, font fallback, line breaking, glyph drawing, and the editing model come from the text crate and its glyph renderer. Which crate is chosen at step 2.4 ([spec](../design/ui-layer.md), section 8, rule 8). The steps below name `cosmic-text` and `glyphon`, today's stack under Iced; if Parley is chosen, steps 2.4, 3.3, and phase 4 change to name it and its glyph drawing.
+4. **Do not invent text.** Shaping, font fallback, line breaking, glyph rasterising, and the editing model come from Parley and `swash`, chosen at step 2.4 ([spec](../design/ui-layer.md), section 8, rules 1 and 8). The glyph atlas that draws them is ours, because no atlas crate takes Parley's glyph runs at our `wgpu`; it stays small and behind the `Painter` boundary.
 5. **Licences.** Every new crate goes through `cargo deny check` before it is used. Only permissive licences (ADR-0006).
-6. **Clean room.** The agent may read the source of dependencies accepted under ADR-0006, which includes Iced, `winit`, `wgpu`, `cosmic-text`, and AccessKit. It must not read the source of other audio applications or other UI frameworks that are not dependencies.
+6. **Clean room.** The agent may read the source of dependencies accepted under ADR-0006, which includes Iced, `winit`, `wgpu`, `cosmic-text`, and AccessKit, and from step 2.4b Parley, its crates, and `swash`. It must not read the source of other audio applications or other UI frameworks that are not dependencies.
 7. **Same versions during the move.** Use the `winit` and `wgpu` versions Iced 0.14 already pulls in, so the lock file never holds two of either.
 8. **Parity gates** at the end of every phase (below). A phase is done only when they pass.
 9. **Build the layer for reuse.** The new UI crates are candidates for publishing later (FR-SDK-06), and could serve other audio tools beside LoomDSP. So:
@@ -136,8 +136,8 @@ The step lands in four parts, the second as two pull requests:
 2. The canvas tree made correct, in two pull requests, because together they pass the size a review can hold:
    - each tile widget's role and real range, the arrow-key step, the undo group of task 4, task 5, and new bounds for every node when the window's scale factor changes;
    - canvas focus, tiles hidden below a panel that owns the input, and live values off screen.
-3. The toolbar, the status and stats bars, the inspector, and the matrix tab.
-4. The module browser and every overlay, and the tests of task 6 that cover every view.
+3. The toolbar, the status and stats bars, the inspector, and the matrix tab, as three pull requests: the bars with the toolbar and the right panel's tabs, where the bounds of toolkit-drawn parts and `locate` by UI ID also land; the inspector; the matrix.
+4. The module browser and every overlay, and the tests of task 6 that cover every view, as three pull requests: the menus, help, and the question (4a); the module browser and Your patches (4b); Preferences, the licence chooser, and task 6's tests (4c). Until this part lands, a screen reader finds nothing in the window while a panel or a menu is open: what is below is hidden, as a pointer cannot reach it, and the panel itself has no nodes yet. This part closes that gap.
 
 The tasks:
 
@@ -155,7 +155,7 @@ The tasks:
    - actions round-trip through `App::update` as one undo step;
    - the tree changes when the snapshot changes, and only then.
 
-A known cost, measured in slice 2 with `--measure-tree` (release build, macOS): one build of the tree takes about 3 ms on a 300-module patch and 0.3 ms on `subtractive.ron`. A build is the UI snapshot, the widget IDs, the whole tree, and the comparison with what was sent; how the time splits between them is not measured. There is at most one build per turn of the event loop, so a knob drag builds the tree at up to the pointer's rate. Timers and watchers that change nothing the tree reports build nothing, and moving live values build it 4 times a second. The cost begins when an assistive tool first asks for the tree. On macOS it then stays until the app quits, because `accesskit_macos` 0.27.2 never says that the tool left. Making one build cheaper is not part of step 1.4.
+A known cost, measured in slice 2 with `--measure-tree` (release build, macOS): one build of the tree takes about 3 ms on a 300-module patch and 0.3 ms on `subtractive.ron`. A build is the UI snapshot, the widget IDs, the whole tree, and the comparison with what was sent; how the time splits between them is not measured. There is at most one build per turn of the event loop, so a knob drag builds the tree at up to the pointer's rate. Timers and watchers that change nothing the tree reports build nothing, and moving live values build it 4 times a second. Since the stats bar is reported, its load reading is one of those live values: with audio running, a patch with no meter on screen is still built at the live rate. On the 300-module patch that is about 21 builds in 8 seconds, and 73 frames against 35 with no screen reader. The cost begins when an assistive tool first asks for the tree. On macOS it then stays until the app quits, because `accesskit_macos` 0.27.2 never says that the tool left. Making one build cheaper is not part of step 1.4. The matrix's parts, measured another way: a release-mode test that opens a patch, opens the Matrix tab, and times 900 builds of the tree with `App::a11y_tree` (after 30 warm-up builds), so the display's rate cannot change the result. On a patch of 25 LFOs and 25 filters with 50 assignments (356 items with the tab open), one build takes 0.70 ms (median; 0.84 ms at the 95th percentile), against 0.28 ms with nothing reported for the matrix. This method times the snapshot, the widget IDs, and the whole tree, without the comparison with what was sent that `--measure-tree` includes, and in a test, not the live window, so its numbers are not comparable with the 3 ms above. The same way, on `subtractive.ron`: 0.061 ms with nothing open, and with an overlay open at most 0.088 ms, for module help's 27 items (a menu, the Recent list, and the question add under 0.005 ms). Slice 4b, the same way, with 300 generated patches in the library folder: the module browser open over every module and the 300 library items (366 items, each option with its own description) takes 0.36 ms a build (median; 0.37 ms at the 95th percentile), against 0.022 ms with it closed; Your patches with the 300 files (319 items) 0.28 ms, against 0.022 ms. Both are under the 1 ms line, so every row is reported. With no screen reader, `view()` takes 0.161 ms with the browser open (0.147 ms before 4b) and 0.119 ms with Your patches (0.105 ms): naming each row's container costs about 15 µs a frame once its ID's text is kept with the row, and 0.1 ms when it was written on every frame.
 
 ### 1.5 AccessKit's macOS adapter
 
@@ -179,17 +179,28 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
 ### 2.1 Our own runtime
 
-1. Create the runtime in `crates/loom-ui`, generic over the app and the driver ([UI layer spec](../design/ui-layer.md), section 2, rule 9). The code that links it to Iced during phases 2 and 3 goes in `crates/loom-app/src/iced_bridge/` (spec section 1, rule 6). The runtime owns:
-   - the message queue;
-   - `fn handle(&mut self, event: Event) -> ...`: our own event enum covering window, pointer, keyboard, IME, redraw, and wake-ups;
-   - a redraw after every batch of messages, or another way to apply a request that arrives with no other event. A screen reader's Focus action reaches the canvas as a request that the canvas applies when it next draws ([UI layer spec](../design/ui-layer.md), section 7, rule 20). Phase 1 relies on Iced drawing the window after each batch, and our runtime must give the same guarantee;
-   - effects, which replace `Task`: widget operations (focus a field, scroll to), clipboard read and write, exit, file dialogs, timers, window commands. Each is an enum variant, not a future, so the headless harness can see and run each one or panic on it.
-2. Port `App::update` to return `Effects` instead of `Task<Message>`. Do it file by file, behind an adapter that turns effects into Iced tasks, so the app keeps running on `iced::application` until 2.2 lands.
+1. **Done (2.1a):** the runtime in `crates/loom-ui`, generic over the app and the routing target, with the driver as a trait ([UI layer spec](../design/ui-layer.md), section 2, rule 9). Built from LoomDSP's own needs, not from Iced's shapes (section 2's decisions). It has:
+   - `DriverEvent`: an element event with the pointer beside it, a window event (resize, scale factor, focus, close request, dropped file), a system redraw request, an animation frame, a frame shown, a wake-up, and a deadline reached. Element events stay `loom-ui-core`'s `Event`;
+   - `Runtime::handle(event, now, driver) -> Next`: the message queue, one `update` per message with its effects right after it, messages from effects on the next turn, and `Next` (run again, frames, a deadline, or sleep);
+   - `Effects` as plain values, each named, carried out by the runtime, the routing `Target`, or the `Driver` (section 2's effects table), and `Context` for `update` (the time, a waker, the focus, the window);
+   - the redraw guarantee: a turn draws when a panel model changed, the target asks, an effect asks, or the system asks (section 2, rule 10). A request with no model change, such as a screen reader's Focus action on the canvas, asks with the draw-again effect. Not "a redraw after every batch": the bridge's target gives that for the Iced views until they move;
+   - `Waker` and deadlines from state (`App::next_deadline`), so the loop sleeps until something is due;
+   - `headless::Headless` and `headless::Harness`: a driver that keeps everything in memory, runs work inline and in order, and panics naming any dialog, question, or capture the test did not answer. Step 2.3's `Ui` stands on it;
+   - `examples/countdown.rs`, a terminal driver with no window, and `tests/purity.rs` (only `loom-ui-core`, no window toolkit named, no clock read).
+   The phase 2 acceptance criteria on effects are ticked at step 2.3, when the app's `Ui` harness runs on this driver. The tests that already hold them: `headless/tests.rs` (`a_file_dialog_with_no_answer_panics_naming_it` and the two beside it), `runtime/tests.rs` (`one_message_gives_one_update_and_effect_messages_wait`, `work_runs_inline_and_its_messages_arrive_in_order`).
+2. Port `App::update` to return `Effects` instead of `Task<Message>`. Do it file by file, behind an adapter in `crates/loom-app/src/iced_bridge/` that turns effects into Iced tasks, so the app keeps running on `iced::application` until 2.2 lands. Waits for step 1.4, which changes the same files. Work in it:
+   - **Dialogs take two turns.** `files.rs` and `recovery.rs` block inside `update` today. The app must now hold what waits on the answer: the unsaved changes when the window closes, and the crash recovery choice at start.
+   - **The four `Task::done` call sites** go, each by its own reason. None queues on purpose to run after a commit or after the view changed: `browser.rs` 525 and `patches.rs` 237 are the test-only inline readers, which become work effects that the headless driver runs inline; `a11y/macos.rs` 98 answers "no window" and goes with that file at step 2.2; `control/run.rs` 72 answers "no window" for a screenshot and becomes the capture effect.
+   - **The focus query** (`Message::TextFocus`) becomes a read of `cx.focused()` in the same turn. **Paste** becomes the clipboard read effect, still one turn later.
+   - **Frames stop running `update`.** `LiveFrame` today calls `scene::update_live_values` (`lib.rs` 1750), which copies live modulated values into the canvas's values, and checks the audio input. With frames that run no update, that copy moves to a draw-time read of the live value table (section 3, rule 7). Until then, a deadline at display rate that runs only while the app is `animating` keeps the meters and live positions moving. Decide which with the step, and write it in the spec.
 3. Port subscriptions to event sources that wake the loop:
-   - the control channel listener, the MIDI learn watcher, the input watcher, and audio watch send messages through a waker the driver gives (an `EventLoopProxy` in the `winit` shell);
-   - timers (frame meter, alerts, autosave) become deadlines the runtime returns, which the `winit` shell waits on with `ControlFlow::WaitUntil`.
+   - the control channel listener, the MIDI learn watcher, the input watcher, audio watch, and the telemetry monitor become watchers that take a `Waker` from `update`'s context. The app holds each watcher's handle in its state, and dropping the handle stops it without blocking (section 2, rule 7). **Done in the runtime:** the `Waker` and its wake function. The app side waits for item 2;
+   - timers (frame meter, alerts, autosave) become deadlines the app returns from `next_deadline`, which the `winit` shell waits on with `ControlFlow::WaitUntil`. **Done in the runtime;** the app side waits for item 2;
+   - `ControlFrame` becomes the after-draw effect, and `Frame` (measuring) and `LiveFrame` become `animating`.
 
    While nothing is due, the loop sleeps (NFR-PERF-04, control channel rule 7).
+
+   **Not met at today's baseline:** phase 2's idle criterion asks for no redraws in 10 idle seconds. On `main` at `085f217a`, `--measure-idle` on `subtractive.ron` draws 266 frames, 263 of them for meter messages that arrive while nothing plays. That is section 3, rule 7's work (live values outside `update`), not this step's.
 
 ### 2.2 The winit shell
 
@@ -212,15 +223,22 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 ### 2.3 The headless harness on the same runtime
 
 1. Rewrite `ui_test.rs` internals so `Ui` drives the phase 2.1 runtime, not Iced's runtime. Its public API (`Ui::new`, pointer and key methods, `output`, `input`, `control`, `text`, `exited`, the in-memory clipboard) does not change. The 15 files that use it should not need edits.
-2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text measurement needs only `cosmic-text`'s font system, which runs on the CPU.
+2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text that Iced still draws keeps Iced's measure, so layout matches the drawn widths. Text that Parley draws, from step 2.4b on, is measured by Parley, which needs only its font and layout contexts on the CPU.
 3. Drawing tests (`screenshot.rs`, its smoke test) render to an offscreen `wgpu` texture. Without a GPU adapter they skip with `NO_GPU`, as today. Iced's `tiny-skia` fallback goes away; nothing should depend on it once events need no renderer. If CI has no GPU, try a software `wgpu` adapter (such as llvmpipe through Vulkan, or WARP on Windows) and record whether it works.
 4. Add an accessibility test driver to the harness: `Ui::a11y_tree()` returns the current tree, and `Ui::a11y_action(name, action)` performs an action by node name. Agents and tests can then check the tree the way a screen reader sees it.
 
 ### 2.4 Text drawing for the canvas
 
-1. Replace Iced's text renderer for tile text with a glyph atlas renderer on `cosmic-text`. `glyphon` † is the usual choice; Iced's `cryoglyph` is a fork of it. Check its licence with `cargo deny`.
-2. Give it a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
-3. Share one `cosmic-text` `FontSystem` between the canvas and the Iced panels if Iced allows it; otherwise accept two for now and note it.
+1. **2.4a, done:** the text crate is Parley ([research note](../research/2026-11-text-crate-choice.md); spec section 8, rule 8). No `glyphon` release builds with our `wgpu` 27, and nothing like it takes Parley's glyph runs, so step 2.4b builds a glyph atlas of our own: rasterise with `swash`, pack with `etagere`, and draw instanced quads, about 680 lines in the parts the research note costs. Ask the maintainer if it grows well past that (stop points).
+2. **2.4b, done:** draw tile text with Parley and that atlas, behind a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Ask Parley for `system-ui`. Keep one Parley layout per label, keyed by its text, size, and weight, beside the canvas's frame cache, since a layout is rebuilt for any change. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
+3. The canvas has its own Parley font context beside Iced's font system until phase 3 moves the panels. Ask for `system-ui` with the optical size axis at its default. Tile text changes width here (spec section 8, rule 6), so this step's gate is: the `--screenshot-window` pixel diff is identical outside the bounds of the moved text (masked from the text rectangles the scene or the view lays out), every `locate` answer is unchanged, the pixels inside those bounds may differ, and the pull request records the change in width per label (least, greatest, and median). That screenshot is then the new baseline, and the pixel-identical gate resumes from 2.4b on. The other parity gates are unchanged.
+4. **Measured at 2.4b,** on macOS, against `e04c5bde`:
+   - The gate (`text_gate`, an ignored test in `crates/loom-app/src/screenshot/text_gate_tests.rs`): on all seven example patches, no pixel differs outside the moved text, inside or outside the canvas. `--dump-ui`, plain and with a selection, is byte-identical for each patch, so every tile, port, and control bound that `locate` answers from is unchanged. Tile layout and hit tests never measured text: they use `scene::text_width`'s estimate.
+   - Widths, 424 tile labels: -1.7% to +5.3%, median +3.4%. One label now leaves its box: "Out +90°" in `modulation.ron`, by 0.27 world units of 37 (#120).
+   - The first layout, with the font scan: about 80 ms.
+   - `--generate 300 --bench --bench-seconds 10`, four runs each, base then new: CPU 19.2% to 25.8% before, 16.6% to 19.1% after; worst frame 22 to 28 ms before, 23 to 30 ms after; 60 fps both (one base run at 72, as the display's rate moved). Glyph instances upload on frames where the camera moves, as Iced's text did; scene geometry still uploads once.
+   - `--measure-idle` on `subtractive.ron`, two runs each: CPU 7.4% and 7.8% before, 5.3% and 5.6% after; frame causes unchanged (meters, #730); one text upload per run.
+   - The atlas: about 840 lines with its shader, 670 without comments.
 
 ### 2.5 The agent tools on the new shell
 
@@ -247,6 +265,7 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
    - **Hit-testing and focus:** a focus order, focus rings, Tab and Shift+Tab, and focus that the accessibility tree reports.
    - **Accessibility:** every widget gives its AccessKit node from the same element, so the tree and the screen cannot disagree.
    - **Style:** the tokens in `style.rs` (text sizes, button roles, palette) carry over unchanged. The test that forbids inline `.size(N)` keeps working.
+   - **Slider steps:** our slider has a drag step apart from its arrow-key step, so dragging stays fine while the arrow keys move further. The inspector's slider then steps 1% of travel on an arrow key and on a screen reader's Increment, 0.1% with Shift, as the tile's knob does: Brylie's choice of 2026-11-11, deferred until here because Iced's slider shares one step between both ([UI layer spec](../design/ui-layer.md), the decisions row on how an inspector slider steps).
 2. Stacking follows the layers the user sees, not which toolkit draws them. While both toolkits draw, keep today's order: canvas, then panels (toolbar, inspector, stats bar), then overlays, then the question on top. A converted toolbar must not cover an Iced question. So draw and route by layer: each layer is drawn by its toolkit in turn, and an event goes to the topmost layer first, then down to lower layers only if it is not taken. Converting the overlays early (row 3 below) keeps this simple, because the top layers then belong to `loom-ui`. A test checks that the question takes a click over the toolbar at every step.
 
 ### 3.2 The order of views
@@ -265,10 +284,18 @@ Move the simplest views first. One pull request per row, each passing the parity
 
 ### 3.3 Text input and editing
 
-1. Single-line input (browser search, number entry, names) builds on `cosmic-text`'s `Editor`: cursor, selection, word movement, clipboard, undo inside the field.
-2. IME: send `winit` IME events (preedit and commit) to the focused field, and report the cursor area to the window so the candidate window appears in the right place. Test with a Japanese or Chinese input method on macOS and record the result.
+1. Single-line input (browser search, number entry, names) builds on Parley's `PlainEditor`, with Parley's `complex-scripts` feature for dictionary word breaking in Thai, Lao, Chinese, and Japanese (off for the canvas, which never moves by word), behind a field type of our own: cursor, selection, word movement, and clipboard come from it, and undo inside the field is ours, by snapshots of text and selection (about 80 lines).
+2. IME: send `winit` IME events to the focused field through `PlainEditor`, and report `ime_cursor_area` to the window so the candidate window appears in the right place. `winit` ends a composition with an empty `Preedit` and then a `Commit` that carries the final text, so the mapping is:
+   - `Preedit` with text: `set_compose(text, cursor)`.
+   - `Preedit` with empty text: `clear_compose()`. This drops only the preedit text, never committed text.
+   - `Commit(text)`: insert `text` at the selection (`insert_or_replace_selection`). `finish_compose` is not used for it: it would keep the preedit as text, and the commit would then insert it a second time.
+   - Focus leaving the field while composing: `finish_compose()`, so what the user saw stays.
+
+   A test sends the sequence `Preedit("にほ")`, `Preedit("")`, `Commit("日本")` and checks the field holds "日本" once, with the caret after it. Also test with a Japanese or Chinese input method on macOS and record the result.
 3. The multi-line editor (patch info authors) comes last. If it costs too much, keep it on Iced's `text_editor` and finish phase 3 without it. Phase 4 then waits until it is done.
 4. Clipboard: use a permissive clipboard crate such as `arboard` †, behind the effect from 2.1, so the harness keeps its in-memory clipboard.
+
+Each view's move changes its text widths once (spec section 8, rule 6). The view's step uses the gate of step 2.4b, item 3, masked to that view's text, and its screenshot becomes the new baseline.
 
 ### Phase 3 done
 
@@ -276,7 +303,7 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
 
 ## Phase 4: Remove Iced
 
-1. Remove `iced`, `iced_wgpu`, and `iced_runtime` from `Cargo.toml` files. Depend on `winit`, `wgpu`, `cosmic-text`, the glyph renderer, `accesskit`, and `accesskit_winit` directly.
+1. Remove `iced`, `iced_wgpu`, and `iced_runtime` from `Cargo.toml` files. Depend on `winit`, `wgpu`, Parley, `swash`, `accesskit`, and `accesskit_winit` directly. With Iced gone, `cosmic-text` and `cryoglyph` leave the tree, and the canvas and the panels share one Parley font context. Once our `wgpu` is free to move, weigh Vello against our glyph atlas.
 2. Run `cargo deny check` and `cargo tree -d`, and remove duplicates.
 3. Update the documents:
    - `AGENTS.md` (App and Canvas paragraphs, commands);
@@ -284,7 +311,8 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
    - `docs/design/visual-system.md` and `docs/design/control-channel.md`;
    - the `ui_test.rs` module comment;
    - OQ-13 and OQ-14 in `docs/product/open-questions.md`. OQ-14 closes; OQ-13 now depends on our shell, not Iced.
-4. Write an explainer in `docs/learn/` on how the UI layer works: the runtime, effects, layout, and the accessibility tree. It is the documentation Iced did not have.
+4. Delete the text gate tool (`crates/loom-app/src/screenshot/text_gate_tests.rs`): it measures with Iced's paragraph.
+5. Write an explainer in `docs/learn/` on how the UI layer works: the runtime, effects, layout, and the accessibility tree. It is the documentation Iced did not have.
 
 ## Stop points
 
@@ -297,7 +325,7 @@ Each phase is worth keeping on its own. The maintainer can stop after any of the
 Stop and ask the maintainer if any of these happen:
 
 - a parity gate fails and the fix is not clear;
-- IME or text editing needs more than a few hundred lines on top of `cosmic-text`;
+- IME or text editing needs more than a few hundred lines on top of Parley, or the glyph atlas grows past 1,000 lines (the research note estimates about 680);
 - an AccessKit gap blocks a phase and upstream has not answered;
 - the idle CPU or frame rate gets worse and cannot be recovered in the same phase.
 
@@ -310,4 +338,6 @@ Stop and ask the maintainer if any of these happen:
 
 ## Unverified facts
 
-Entries marked † were not checked against source or release notes when this plan was written. Check each before relying on it: Iced's integration example, `glyphon`, `taffy`, `pulldown-cmark`, and `arboard`, including their licences and the versions that match `wgpu` 27 and `winit` 0.30.
+Entries marked † were not checked against source or release notes when this plan was written. Check each before relying on it: Iced's integration example, `taffy`, `pulldown-cmark`, and `arboard`, including their licences and the versions that match `wgpu` 27 and `winit` 0.30.
+
+Checked in step 2.4a ([research note](../research/2026-11-text-crate-choice.md)): `glyphon` (MIT OR Apache-2.0 OR Zlib; no release for `wgpu` 27), and the spec's two Parley claims in section 8, rule 8. Parley's AccessKit text properties existed up to 0.11.1 and were removed in 0.12.0. Its editor does track IME composition.

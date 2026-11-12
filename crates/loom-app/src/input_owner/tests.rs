@@ -68,6 +68,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
                 module: id.0,
                 at: Point::new(100.0, 100.0),
                 area,
+                by_key: false,
             }));
         }
         InputOwner::Canvas => {}

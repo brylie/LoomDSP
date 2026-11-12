@@ -139,7 +139,7 @@ fn insert(ui: &mut Ui, name: &str, linked: bool) -> u32 {
         .map(|(row, _)| row)
         .unwrap_or_else(|| panic!("{name} is in the library list"));
     if linked {
-        ui.send(Message::Browser(browser::Message::Menu(row)));
+        ui.send(Message::Browser(browser::Message::Menu { row, by_key: false }));
         ui.send(Message::Browser(browser::Message::InsertLinked(row)));
     } else {
         ui.send(Message::Browser(browser::Message::Pick(row)));
@@ -230,7 +230,7 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
     // The item's menu holds Insert linked.
     let row = ui.app.overlays.browser().unwrap().library_rows()[0].0;
     assert!(ui.text(browser::INSERT_LINKED).is_none());
-    ui.send(Message::Browser(browser::Message::Menu(row)));
+    ui.send(Message::Browser(browser::Message::Menu { row, by_key: false }));
     ui.redraw();
     assert!(ui.text(browser::INSERT_LINKED).is_some(), "the menu opened");
 }

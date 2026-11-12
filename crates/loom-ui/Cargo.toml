@@ -1,0 +1,21 @@
+[package]
+name = "loom-ui"
+description = "A UI runtime: events in, one update per message, effects as plain values, and a driver trait, with no window toolkit behind it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords = ["gui", "ui", "runtime", "accessibility"]
+categories = ["gui"]
+
+# Only loom-ui-core for now. The runtime and the App trait name no window
+# toolkit (docs/design/ui-layer.md, section 2, rule 9); the winit shell
+# arrives in plan step 2.2, in its own module.
+[dependencies]
+loom-ui-core.workspace = true
+
+[lints]
+workspace = true

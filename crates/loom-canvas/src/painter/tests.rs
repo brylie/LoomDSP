@@ -1,4 +1,4 @@
-use super::testing::{FixedMeasure, Painted, Recorder};
+use super::testing::{Painted, Recorder};
 use super::*;
 
 /// A plain style for the tests.
@@ -7,7 +7,6 @@ fn style(size: f32) -> TextStyle {
         size,
         line_height: 1.2,
         weight: Weight::Regular,
-        shaping: Shaping::Simple,
     }
 }
 
@@ -58,11 +57,11 @@ fn the_recorder_keeps_everything_in_order() {
     assert_eq!(run.colour, Color::WHITE);
 }
 
-/// The fixed measure gives one line without a wrap width, and breaks into
-/// lines of whole characters with one.
+/// The recorder's fixed measure gives one line without a wrap width, and
+/// breaks into lines of whole characters with one.
 #[test]
 fn the_fixed_measure_wraps_by_whole_characters() {
-    let measure = FixedMeasure;
+    let mut measure = Recorder::default();
     assert_eq!(measure.measure("abcd", style(10.0), None), Size::new(20.0, 12.0));
     assert_eq!(measure.measure("abcd", style(10.0), Some(100.0)), Size::new(20.0, 12.0));
     assert_eq!(

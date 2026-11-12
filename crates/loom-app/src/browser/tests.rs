@@ -110,21 +110,21 @@ fn arrows_move_the_highlight_and_stop_at_the_ends() {
     let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default());
     let last = browser.results.len() - 1;
     let _ = browser.update(Message::Key(Nav::Up));
-    assert_eq!(browser.highlight, 0);
+    assert_eq!(browser.highlight(), 0);
     let _ = browser.update(Message::Key(Nav::Down));
-    assert_eq!(browser.highlight, 1);
+    assert_eq!(browser.highlight(), 1);
     // As many pages as it takes, so a new module does not break this test.
     for _ in 0..browser.results.len() {
         let _ = browser.update(Message::Key(Nav::PageDown));
     }
-    assert_eq!(browser.highlight, last);
+    assert_eq!(browser.highlight(), last);
     let _ = browser.update(Message::Key(Nav::Down));
-    assert_eq!(browser.highlight, last);
+    assert_eq!(browser.highlight(), last);
     let _ = browser.update(Message::Key(Nav::PageUp));
-    assert_eq!(browser.highlight, last.saturating_sub(ROWS));
+    assert_eq!(browser.highlight(), last.saturating_sub(ROWS));
     // A new query highlights the first result again.
     let _ = browser.update(Message::Query("a".into()));
-    assert_eq!(browser.highlight, 0);
+    assert_eq!(browser.highlight(), 0);
 }
 
 #[test]

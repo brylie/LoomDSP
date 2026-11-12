@@ -12,6 +12,7 @@ mod alerts;
 mod audio_watch;
 #[cfg(test)]
 mod autosave_tests;
+mod bars;
 mod bench;
 mod boot;
 mod browser;
@@ -45,6 +46,7 @@ mod licence_chooser;
 mod lights;
 mod live;
 mod matrix;
+mod menus;
 mod modes;
 mod modulation;
 mod monitor;
@@ -54,6 +56,7 @@ mod param;
 mod patch_file;
 mod patch_info;
 mod patches;
+mod places;
 mod pointer;
 mod preferences;
 mod probe_menu;
@@ -75,6 +78,7 @@ mod style;
 mod subscriptions;
 mod surface;
 mod targets;
+mod toolbar;
 #[cfg(any(test, feature = "test-ui"))]
 #[allow(dead_code, reason = "the crate's unit tests use the rest of this harness")]
 pub mod ui_test;
@@ -519,9 +523,10 @@ impl Message {
     /// No wildcard, on purpose: a new message must choose a side.
     fn allowed_during_question(&self) -> bool {
         match self {
-            // Screen reader actions wait like clicks; the rest keeps the tree current.
-            Self::A11y(event) => !matches!(event, a11y::Event::Action(_)),
-            Self::Question(_)
+            // A screen reader action becomes ordinary messages, each checked on
+            // its own, so a Click on one of the question's answers is heard and
+            // one on anything below it waits, as a press would.
+            Self::A11y(_) | Self::Question(_)
             // Never asked: `update` routes it before this check, and each
             // message it becomes is checked on its own.
             | Self::Input { .. }
@@ -1262,19 +1267,16 @@ impl App {
         // What this message means for a screen reader's tree.
         let touch = match (&message, cause) {
             (Message::A11y(_), _) => a11y::Touch::Own,
-            // The timers and watchers that only look: they rebuild the
-            // tree only when they changed something it reports. The audio
-            // watcher's load reading comes several times a second while
-            // audio plays, and the tree does not say the load yet.
-            (
-                Message::AudioPoll
-                | Message::MidiPoll
-                | Message::Autosave
-                | Message::MidiGhosts
-                | Message::Audio(_)
-                | Message::InputAudio(_),
-                _,
-            ) => a11y::Touch::Poll(self.a11y.is_active().then(|| self.a11y_poll_key())),
+            // The audio watchers' readings: the load, the dropouts, and
+            // the bar's warnings. The load and the dropouts are live
+            // values, so these wait for the live timer, which then sends a
+            // new warning too, at most 250 ms late.
+            (Message::Audio(_) | Message::InputAudio(_), _) => a11y::Touch::Live,
+            // The timers that only look: they rebuild the tree only when
+            // they changed something it reports.
+            (Message::AudioPoll | Message::MidiPoll | Message::Autosave | Message::MidiGhosts, _) => {
+                a11y::Touch::Poll(self.a11y.is_active().then(|| self.a11y_poll_key()))
+            }
             (_, FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced) => a11y::Touch::Live,
             _ => a11y::Touch::Changed,
         };
@@ -1306,6 +1308,20 @@ impl App {
                 Task::none()
             }
             Message::File(FileAction::Browse) => self.open_patches(),
+            // An open menu has its own keys (`menus.rs`): Enter sends what its
+            // item sends, which may return work of its own. Any other key goes
+            // where it went before, so a shortcut still works over a menu.
+            Message::Key(event)
+                if menus::is_menu_key(&event)
+                    && matches!(
+                        self.input_owner(),
+                        input_owner::InputOwner::RecentList
+                            | input_owner::InputOwner::ProbeMenu
+                            | input_owner::InputOwner::TileMenu
+                    ) =>
+            {
+                self.menu_key(&event)
+            }
             Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. })
                 if modifiers.command()
                     && modifiers.shift()

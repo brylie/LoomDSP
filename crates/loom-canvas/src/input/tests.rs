@@ -3540,7 +3540,11 @@ fn right_click_elsewhere_opens_no_menu() {
     let tile = scene.module(1).unwrap().bounds().center();
     assert!(matches!(
         right_click(&canvas, &mut CanvasInput::default(), tile).as_slice(),
-        [CanvasEvent::TileMenu { module: 1, .. }]
+        [CanvasEvent::TileMenu {
+            module: 1,
+            by_key: false,
+            ..
+        }]
     ));
     for at in [input, Point::new(300.0, 500.0)] {
         let events = right_click(&canvas, &mut CanvasInput::default(), at);
@@ -4239,6 +4243,101 @@ fn an_arrow_on_a_focused_control_is_taken() {
             }));
         }
     }
+}
+
+/// The menu key and Shift+F10 open the menu of the selected tile at its
+/// top-left corner, also while one of its controls has focus, which does
+/// not take the key. With no tile to open it for, and on F10 without
+/// Shift, nothing opens.
+#[test]
+fn the_menu_key_and_shift_f10_open_the_tile_menu() {
+    let mut first = module(2, 0.0);
+    first.panel = panel();
+    let second = module(3, 200.0);
+    let corner = second.position;
+    let scene = Scene::new(vec![first, second], Vec::new());
+    let press = |key: Key, modifiers: Modifiers| {
+        Event::Key(KeyEvent::Pressed {
+            key,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    };
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    };
+    let menus = |events: &[CanvasEvent]| -> Vec<(u32, Point)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                CanvasEvent::TileMenu { module, at, by_key, .. } => {
+                    assert!(*by_key, "a key asked for it");
+                    Some((*module, *at))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let on_second = BTreeSet::from([3]);
+    let none = BTreeSet::new();
+    for (key, modifiers) in [(Key::ContextMenu, Modifiers::NONE), (Key::F10, shift)] {
+        let mut state = CanvasInput::default();
+        let opened = host_event(
+            &CanvasModel::new(&scene, &on_second),
+            &mut state,
+            &press(key, modifiers),
+        );
+        let at = state.camera.to_screen(corner);
+        assert_eq!(
+            menus(&opened),
+            [(3, at)],
+            "{key:?}: the selected tile's menu, at its corner"
+        );
+        // The key acts on the selection, not the pointer, so it works with
+        // the pointer off the canvas.
+        let mut state = CanvasInput::default();
+        let away = drive(
+            &CanvasModel::new(&scene, &on_second),
+            &mut state,
+            &press(key, modifiers),
+            Point::new(900.0, 700.0),
+        );
+        assert_eq!(menus(&away).len(), 1, "{key:?}: no pointer over the canvas");
+
+        let on_first = BTreeSet::from([2]);
+        let mut state = CanvasInput::default();
+        let _ = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &Event::Redraw);
+        state.focus.set(2, 0, true);
+        let opened = host_event(&CanvasModel::new(&scene, &on_first), &mut state, &press(key, modifiers));
+        assert_eq!(
+            menus(&opened).first().map(|(module, _)| *module),
+            Some(2),
+            "{key:?}: a focused control does not take the key"
+        );
+
+        let mut state = CanvasInput::default();
+        let nothing = host_event(&CanvasModel::new(&scene, &none), &mut state, &press(key, modifiers));
+        assert!(menus(&nothing).is_empty(), "no tile to open it for");
+        // With no menu to open, the key is not used, so it is not taken
+        // from the rest of the window.
+        let mut state = CanvasInput::default();
+        let moment = Moment {
+            pointer: None,
+            bounds: Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+            now: Instant::now(),
+        };
+        let unused = state.handle(&CanvasModel::new(&scene, &none), &press(key, modifiers), moment);
+        assert!(!unused.taken, "{key:?}: not taken when no menu opens");
+    }
+    let mut state = CanvasInput::default();
+    let plain = host_event(
+        &CanvasModel::new(&scene, &on_second),
+        &mut state,
+        &press(Key::F10, Modifiers::NONE),
+    );
+    assert!(menus(&plain).is_empty(), "F10 alone opens nothing");
 }
 
 /// A selection that moves while a choice's list is open keeps the focus

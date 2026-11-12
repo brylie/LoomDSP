@@ -3,11 +3,11 @@
 A test harness for module authors: render one module with given inputs and parameters, check it against a stored reference render, and check that block size does not change its output.
 
 - **Kind:** living specification.
-- **Status:** Implemented, M1. [Blind spots in the shared checks](#blind-spots-in-the-shared-checks), [All inputs at once](#all-inputs-at-once), and [Changes during a render](#changes-during-a-render) Implemented, M2 (2026-11-04, [#564](https://github.com/brylie/LoomDSP/issues/564), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)).
+- **Status:** Implemented, M1. [Blind spots in the shared checks](#blind-spots-in-the-shared-checks), [All inputs at once](#all-inputs-at-once), and [Changes during a render](#changes-during-a-render) Implemented, M2 (updated 2026-11-11, [#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) ("The SDK harness must cover this"), [ADR-0037](../adr/0037-finite-inputs-hold-at-the-largest-finite-value.md) (the overflow rule).
 - **Background:** [Block-size invariance](../learn/block-size-invariance.md): why a module must sound the same at any block size, and what breaks it.
 - **Use case and requirements:** FR-SDK-02, NFR-OSS-05.
-- **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules), [#127](https://github.com/brylie/LoomDSP/issues/127) (non-finite inputs), [#552](https://github.com/brylie/LoomDSP/issues/552) (huge inputs), [#564](https://github.com/brylie/LoomDSP/issues/564), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)
+- **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules), [#127](https://github.com/brylie/LoomDSP/issues/127) (non-finite inputs), [#552](https://github.com/brylie/LoomDSP/issues/552) (huge inputs), [#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)
 - **Code:** `crates/loom-test`; the built-in modules use it in `crates/loom-modules/tests/reference.rs`.
 
 ## Goal
@@ -97,7 +97,8 @@ output channels do not alias each other or the inputs.
 | `.check_reset()` | Renders a new instance, calls `reset()`, renders again with the same inputs, MIDI, and transport, and fails unless the second render is bit-identical to the first. `reset()` must snap smoothing to its targets and clear the state `process` changes ([live patching](live-patching.md), rule 7). `crates/loom-modules/tests/reset.rs` runs it on every built-in DSP module for 1 s, with every parameter away from its default and a note held across the reset, on busy inputs (each input at its own frequency) and on port defaults, with the transport stopped and running. |
 | `.check_copy_state(at)` | At block sizes 1, 77, and 512: runs a new instance for `at` frames, copies its state into a second new instance with `Module::copy_state_from`, runs both to the end, and fails unless they are bit-identical from frame `at`, and their display values match at the copy ([stereo](stereo.md), rules 25 and 26). A module with no state passes without copying. `crates/loom-modules/tests/copy_state.rs` runs it on every built-in DSP module, with busy inputs (each input at its own frequency), held notes, and every parameter away from its default, and on port defaults with the transport playing, copying on the bar wrap ([Blind spots in the shared checks](#blind-spots-in-the-shared-checks)). It also has focused tests for Clock and Transport on a playing transport, because a stopped transport skips their wrap detectors. Those copy on the frame a trigger fires and on the frame after, at a tempo with no whole-frame beats: a wrap detector looks back only one frame, so a copy in the middle of a cycle passes even if it loses the detector. |
 | `.check_copy_state_repeatable(at)` | For a seeded module, which re-derives its random state when it copies (rule 27): two copies taken at frame `at` play the same, and the copy returns `true`. |
-| `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1068, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
+| `.non_finite_start(frame)` | Sets the first bad frame for the non-finite check, default 1068. A custom start covers a transport wrap on port defaults. The busy signal edge alignment and its sample-rate limit apply only at the default start. |
+| `.check_non_finite_recovery()` | For each input in turn, and for each of NaN, infinity, and minus infinity, puts that value on the input for 8 frames from frame 1068, or the configured start, as a connected cable. Renders in blocks of 1 frame (as a feedback loop calls the module) and of 512. Fails unless every output is finite again 10 ms after the bad frames (480 frames at 48 kHz, scaled with the sample rate), up to the end of the render. Every other frame and input reads what the render reads without the check. |
 | `.check_extreme_recovery()` | See [Huge finite inputs](#huge-finite-inputs). |
 | `.check_extreme_recovery_on(input)`, `.check_extreme_stays_bounded_on(input)` | The check for one input, and the same without the comparison, for an input with a stated exception. |
 | `.check_extreme_recovery_all()`, `.check_extreme_stays_bounded_all()` | The check with the huge value on every input at once, and the same without the comparison, for a module with a stated exception. See [All inputs at once](#all-inputs-at-once). |
@@ -170,6 +171,9 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] A parameter change and a transport change land on the same frame at block sizes 1, 77, and 512, for every built-in DSP module.
 - [x] A scheduled time signature change is a jump for one call, and a tempo or running change is not (test).
 - [x] Every continuous smoothed parameter of every built-in DSP module and test module reports its glide through `Module::param_glide` and stops once it has settled, and every whole-number one reports none (`crates/loom-modules/tests/param_glide.rs`).
+- [x] Every built-in DSP module passes the non-finite, reset, and appropriate copy checks in every option of every choice parameter, with other parameters kept at each existing baseline.
+- [x] The shared copy scenario without busy resets detects lost state that frequent resets hide: `copy_state/reset_hides.rs` proves that a counter which drops its count on copy passes with busy resets and fails without them, using Selector's input layout and the suite's own harness builder.
+- [x] The port-default playing non-finite wrap scenario fails for a module that keeps a bad value captured only on a bar wrap.
 
 ## Huge finite inputs
 
@@ -199,7 +203,7 @@ The check for one input cannot see a bug that needs two huge inputs together. Tw
 
 ## Blind spots in the shared checks
 
-**Status:** Implemented, M2 ([#564](https://github.com/brylie/LoomDSP/issues/564)).
+**Status:** Implemented, M2 ([#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632)).
 
 The checks over every module in `ALL` must reach the state they claim to test. These rules exist because a timing gap passes silently.
 
@@ -208,14 +212,16 @@ The checks over every module in `ALL` must reach the state they claim to test. T
 - **A bar short enough to wrap.** The playing runs use 130 BPM in 1/4, so a bar is one beat, and the bar wraps at frame 22,154. *Why 130:* a beat at this tempo is not a whole number of frames, so the frame after a wrap has a phase above 0, and a lost wrap detector shows. *Why 1/4:* at 4/4 the first bar wrap is at frame 88,615, far past these renders.
 - **Copies on the wrap.** The playing copy run copies at frame 2,500, on the wrap, and on the frame after it. A wrap detector looks back only one frame, so a copy in the middle of a cycle passes even if it loses the detector.
 - **Each input has its own frequency.** `copy_state.rs` and `reset.rs` give each input a different busy frequency, with none a multiple of another. With one signal on every input, a routing module gives the same output whichever input it picks, and a wrong pick does not show. `non_finite.rs` keeps one signal on every input, because its edges must line up with the bad frames.
+- **Each choice runs separately.** The non-finite, copy, and reset suites run their existing baselines and each other option of each choice parameter, with all other parameters unchanged. Non-finite checks use default parameters. Reset and busy copy checks use `changed()`; playing copy checks use both defaults and `changed()`. Seeded signal generators run the repeatable copy check in each option; seeded routing modules run the strict continuation check.
+- **Reset inputs stay off in one busy copy run.** A reset input can fire as often as the clock. Selector's reset at 79 Hz fires between every two step edges at 71 Hz, so every random pick is the first one from the seed, and a lost stream does not show. `copy_state.rs` also runs each option of modules with a reset input with that input on its port default, keeping the other inputs at their usual frequencies. This extra run asserts that its module set is nonempty and includes Selector. Modules without a reset input are already covered by the ordinary busy run. A faulty counter in `copy_state/reset_hides.rs` uses Selector's actual input layout and the suite's harness builder: it drops its count on copy, passes with busy resets, and fails without them. It emits the count only on step edges, so a reset before the next step can hide the loss.
+- **Bad values span the bar wrap in a separate run.** The port-default playing non-finite run also starts its eight bad frames at 22,150, four frames before the wrap. The check connects only the input under test, leaving other inputs on their defaults. A module that captures an input on the default bar phase's wrap proves this timing through the same scenario builder. Busy signals are not used here, because their edges align with the original window.
+- **One Euclidean step exposes a lost wrap detector.** A focused playing copy check uses Phase source, one step, and one hit, on port defaults, copied on the wrap and the following frame. A detector cleared on copy loses the trigger on the wrap; at more than one step a step change can hide that loss.
 
 Known limits, so nobody assumes more than these runs show:
 
 - `Signal::non_finite_busy` holds below 95,600 Hz. Its edges are fixed in frames, but the recovery time scales with the rate, so at 96 kHz the next edge overwrites a bad value before the check looks. The shared runs use 48 kHz. A test records this limit.
-- The bad frames do not overlap the bar wrap, so a module that stores a bad value only on a wrap is not covered.
 - Clock has no inputs, so `check_non_finite_recovery` has nothing to send it, and passes without testing anything.
-- `changed()` puts Selector in Select mode, which never draws from its random stream. So the shared copy check does not cover that stream. A focused test in `copy_state.rs` does.
-- A lost wrap detector does not show on Euclidean rhythm at more than one step, because the step changes on a wrap anyway. It shows on Phase Trigger, so the run can see this kind of bug.
+- Choices vary one at a time, so combinations are not covered by these shared runs. For example, the busy copy runs use a changed baseline with Allow repeats for Selector. They do not exercise Random with Avoid, which the focused `selector()` tests cover. The playing copy baseline can select that pair but has no step edges to make random draws.
 
 ## Changes during a render
 
