@@ -655,11 +655,30 @@ impl Frame<'_> {
 
     /// A panel's root item and everything in it. The panel cuts off what
     /// it scrolls out of view, and says so; those parts stay in the tree
-    /// with their real bounds (ui-layer.md, section 7, rule 7).
+    /// with their real bounds (ui-layer.md, section 7, rule 7). The panel's
+    /// own bounds are the part of it that shows: its content can be taller
+    /// than the area that scrolls it, and a clipping node larger than what
+    /// it shows would claim rows out of view are visible.
     fn panel(&mut self, item: &items::Item) -> NodeId {
         let id = self.item(item);
+        let shown = self.places.of(&item.id).and_then(|place| {
+            let clip = place.clip?;
+            Some(place.rect.intersection(clip).unwrap_or(loom_ui_core::Rect::new(
+                loom_ui_core::Point::new(place.rect.x, place.rect.y),
+                loom_ui_core::Size::new(0.0, 0.0),
+            )))
+        });
+        let s = f64::from(self.scale);
         if let Some((_, node)) = self.nodes.iter_mut().rev().find(|(node, _)| *node == id) {
             node.set_clips_children();
+            if let Some(r) = shown {
+                node.set_bounds(accesskit::Rect {
+                    x0: f64::from(r.x) * s,
+                    y0: f64::from(r.y) * s,
+                    x1: f64::from(r.x + r.width) * s,
+                    y1: f64::from(r.y + r.height) * s,
+                });
+            }
         }
         id
     }
@@ -760,7 +779,9 @@ impl Frame<'_> {
             node.set_children(children);
         }
         let id = self.add(&item.id, node);
-        if item.focus.is_some() && item.focus.as_ref() == self.field {
+        // A covered field is hidden, so it cannot be focused, even while
+        // the window has not yet said its keys have moved.
+        if !self.covered && item.focus.is_some() && item.focus.as_ref() == self.field {
             self.focused = Some(id);
         }
         id

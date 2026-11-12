@@ -472,6 +472,10 @@ pub struct DrivesGroup {
 /// One line under **Drives**. It selects its target.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DrivesLine {
+    /// The assignment the line shows, which keys its UI ID: a line keeps
+    /// its node while the lines before it come and go.
+    #[serde(skip)]
+    pub id: AssignmentId,
     pub target: u32,
     pub text: String,
     /// False for an assignment that is off: its text ends in "(off)" and
@@ -1107,7 +1111,7 @@ impl App {
                 output: node.descriptor.outputs.get(port).map_or("?", |p| p.label),
                 lines: assignments
                     .into_iter()
-                    .map(|(_, a)| {
+                    .map(|(id, a)| {
                         let mut line = format!(
                             "{}, {}",
                             modulation::target_name(graph, a.target, a.param),
@@ -1117,6 +1121,7 @@ impl App {
                             line.push_str(" (off)");
                         }
                         DrivesLine {
+                            id,
                             target: a.target.0,
                             text: line,
                             enabled: a.enabled,
@@ -1451,8 +1456,8 @@ fn param_row_view<'a>(
             )]
             .spacing(6)
             .align_y(iced::Alignment::Center);
-            for exposure in own.into_iter().chain(p.exposure) {
-                head = head.push(expose_button(exposure, &ui));
+            for (exposure, own) in own.map(|e| (e, true)).into_iter().chain(p.exposure.map(|e| (e, false))) {
+                head = head.push(expose_button(exposure, &ids::expose(&ui, own)));
             }
             head = head
                 .push(space::horizontal())
@@ -1521,17 +1526,14 @@ fn param_row_view<'a>(
 
 /// The button on a parameter's row that puts it on the enclosing sub-patch's
 /// surface, or takes it off again, saying what it is exposed as
-/// (sub-patches.md, Exposing).
-fn expose_button<'a>(exposure: ExposureRow, row: &UiId) -> Element<'a, AppMessage> {
+/// (sub-patches.md, Exposing). `ui` is its UI ID, from [`ids::expose`].
+fn expose_button<'a>(exposure: ExposureRow, ui: &UiId) -> Element<'a, AppMessage> {
     let ExposureRow {
         module,
         index,
         name,
         surface,
     } = exposure;
-    // A row can have two: one for its own tile's surface and one for the
-    // enclosing sub-patch. The surface's name tells them apart.
-    let ui = ids::part(row, "expose").with(surface.as_str());
     let shown: Element<'a, AppMessage> = match name {
         Some(name) => row![
             text(format!("as {name}")).size(style::SMALL).color(DIM),
@@ -1549,7 +1551,7 @@ fn expose_button<'a>(exposure: ExposureRow, row: &UiId) -> Element<'a, AppMessag
             .on_press(AppMessage::Inspector(Message::Expose { module, index }))
             .into(),
     };
-    ids::named(&ui, shown)
+    ids::named(ui, shown)
 }
 
 /// The small button beside a mapping's ×, which opens its options rows.
@@ -2052,10 +2054,9 @@ fn drives_view<'a>(drives: Vec<DrivesGroup>, panel: &UiId) -> Element<'a, AppMes
     let mut list = column![text("Drives").size(style::CONTROL)].spacing(4);
     for group in drives {
         list = list.push(text(group.output).size(style::SMALL).color(DIM));
-        for (n, line) in group.lines.into_iter().enumerate() {
+        for line in group.lines {
             let label = text(line.text).size(style::SMALL);
-            // Keyed by the output and the line's place under it.
-            let id = ids::part(panel, "drives").with(group.output).with(n as u32);
+            let id = ids::drives_line(panel, group.output, line.id);
             list = list.push(
                 container(
                     button(if line.enabled { label } else { label.color(DIM) })

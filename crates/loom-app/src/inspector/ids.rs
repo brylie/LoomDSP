@@ -48,7 +48,7 @@ pub(crate) fn row(tile: u32, kind: Kind, name: &str) -> UiId {
 
 /// The UI ID of one part of a row, or of the panel, by a fixed name:
 /// `value` for the slider or the choices, `field` for the typed value,
-/// `range`, `expose`, `midi/options`, and so on.
+/// `range`, `midi/options`, and so on.
 pub(crate) fn part(outer: &UiId, name: &'static str) -> UiId {
     name.split('/').fold(outer.clone(), UiId::with)
 }
@@ -57,6 +57,21 @@ pub(crate) fn part(outer: &UiId, name: &'static str) -> UiId {
 /// by the assignment's own ID.
 pub(crate) fn assignment(row: &UiId, id: u32) -> UiId {
     row.clone().with("assignment").with(id)
+}
+
+/// The UI ID of an Expose or Unexpose button on `row`. A row can have two:
+/// one for its own tile's surface (`own`) and one for the enclosing
+/// sub-patch's. They are keyed by that role, not by the surface's name,
+/// since two sub-patches can share a name.
+pub(crate) fn expose(row: &UiId, own: bool) -> UiId {
+    part(row, "expose").with(if own { "own" } else { "enclosing" })
+}
+
+/// The UI ID of a line under **Drives**: the output's label, then the
+/// assignment the line shows, never its place under the output, so a line
+/// keeps its node while lines before it come and go.
+pub(crate) fn drives_line(panel: &UiId, output: &str, id: loom_core::AssignmentId) -> UiId {
+    part(panel, "drives").with(output).with(id.0)
 }
 
 /// The UI ID of the patch's own inspector, shown while nothing is
