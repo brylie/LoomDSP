@@ -123,14 +123,11 @@ fn browse_opens_patches_in_the_app() {
     preferences.library = Some(dir.clone());
     let _ = app.rig.store.save(preferences);
     let _ = app.send(AppMessage::File(FileAction::Browse));
-    assert!(app.overlays.patches().is_some());
-    for path in patch_files(&dir, &AtomicBool::new(false)) {
-        let rows = vec![Row::read(&path)];
-        let _ = app.send(AppMessage::Patches(Message::Found {
-            open: app.patches_open,
-            rows,
-        }));
-    }
+    // The reader ran as the browser opened (work runs inline in a test):
+    // every patch file is listed once, with no rows added by hand.
+    let files = patch_files(&dir, &AtomicBool::new(false)).len();
+    let browser = app.overlays.patches().expect("the browser is open");
+    assert_eq!(browser.shown().count(), files, "the reader's rows, each once");
     let _ = app.send(AppMessage::Patches(Message::Search("bass".into())));
     let _ = app.send(AppMessage::Patches(Message::Submit));
     assert!(app.overlays.patches().is_none());

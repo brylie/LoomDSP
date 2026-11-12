@@ -721,7 +721,7 @@ struct App {
     outbox: iced_bridge::Outbox,
     /// What waits for a native dialog's answer (`dialogs.rs`). It belongs
     /// to the window: a dialog's answer can open another patch.
-    waiting: Option<dialogs::Waiting>,
+    waiting: Option<dialogs::Pending>,
     /// A crash copy found at start, until the window is open to offer it.
     recovery_offer: Option<dialogs::RecoveryOffer>,
 }

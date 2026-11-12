@@ -373,3 +373,33 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(ui.app.session.controller.graph().nodes().count(), count);
 }
+
+/// With no program that draws native questions, Save asks nothing and adds
+/// no name, and the offer is still to come: once a dialog can be shown,
+/// the next Save asks (patch-metadata.md, rule 3).
+#[test]
+fn with_no_dialogs_the_credit_question_waits_for_one() {
+    let dir = folder("credit-no-dialogs");
+    let patch = dir.join("drone.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, metadata: Metadata(name: "Drone", authors: ["Ada Lovelace"]))"#,
+    )
+    .unwrap();
+    let mut args = args_with(&dir, r#"(author: "Sam Rivera")"#);
+    args.patch = Some(patch.clone());
+    let mut app = App::new(args);
+    let _ = dialogs::asked();
+
+    dialogs::no_dialogs();
+    save(&mut app);
+    assert_eq!(dialogs::asked(), [], "nothing was asked");
+    assert_eq!(
+        crate::patch_file::load(&patch).unwrap().metadata.authors,
+        ["Ada Lovelace"]
+    );
+    assert!(
+        app.session.document.should_offer_credit("Sam Rivera"),
+        "the offer is still to come"
+    );
+}

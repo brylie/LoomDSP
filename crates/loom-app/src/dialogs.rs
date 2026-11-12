@@ -51,6 +51,17 @@ pub(crate) enum Waiting {
     Recovery(Box<RecoveryOffer>),
 }
 
+/// What waits, and the engine generation it was asked under: an answer
+/// that arrives after New or Open replaced the patch belongs to the patch
+/// it was asked about, which is gone.
+#[derive(Debug)]
+pub(crate) struct Pending {
+    /// What waits.
+    pub waiting: Waiting,
+    /// `App::generation` when it was asked.
+    pub generation: u64,
+}
+
 /// A dialog's answer.
 #[derive(Debug, Clone)]
 pub(crate) enum DialogAnswer {
@@ -135,7 +146,10 @@ impl App {
         if self.waiting.is_some() {
             return false;
         }
-        self.waiting = Some(waiting);
+        self.waiting = Some(Pending {
+            waiting,
+            generation: self.generation,
+        });
         self.effect(Effects::file_dialog(request, |path| {
             Message::Dialog(DialogAnswer::File(path))
         }));
@@ -149,7 +163,10 @@ impl App {
         if self.waiting.is_some() {
             return false;
         }
-        self.waiting = Some(waiting);
+        self.waiting = Some(Pending {
+            waiting,
+            generation: self.generation,
+        });
         self.effect(Effects::ask(question, |choice| {
             Message::Dialog(DialogAnswer::Choice(choice))
         }));
@@ -159,15 +176,24 @@ impl App {
     /// What waits for a dialog, if anything.
     #[cfg(test)]
     pub(crate) fn waiting(&self) -> Option<&Waiting> {
-        self.waiting.as_ref()
+        self.waiting.as_ref().map(|pending| &pending.waiting)
     }
 
     /// Applies a dialog's answer to what waited for it. An answer with
-    /// nothing waiting, or of the wrong kind, changes nothing.
+    /// nothing waiting, or of the wrong kind, changes nothing. Nor does one
+    /// for a patch that New or Open has replaced since: it would write the
+    /// new patch where the old one was to go, or credit the wrong patch. The
+    /// recovery question is the exception, as its answer is what replaces
+    /// the patch.
     pub(crate) fn dialog_answered(&mut self, answer: DialogAnswer) {
-        let Some(waiting) = self.waiting.take() else {
+        let Some(Pending { waiting, generation }) = self.waiting.take() else {
             return;
         };
+        if generation != self.generation && !matches!(waiting, Waiting::Recovery(_)) {
+            self.alerts
+                .warn("The patch changed while the dialog was open, so its answer was not used.".to_string());
+            return;
+        }
         match (waiting, answer) {
             (Waiting::Open, DialogAnswer::File(path)) => {
                 if let Some(path) = path {

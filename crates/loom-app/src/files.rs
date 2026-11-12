@@ -204,12 +204,11 @@ pub const ADD_MY_NAME: &str = "Add my name";
 /// then nothing is added, and the question is asked again next time. Its
 /// answer goes through [`author_added`].
 pub fn author_question(name: &str, authors: &[String]) -> Option<Question> {
-    #[cfg(test)]
-    if !fake::asked_add_author(name) {
+    if !dialogs_available() {
         return None;
     }
-    #[cfg(not(test))]
-    if !dialogs_available() {
+    #[cfg(test)]
+    if !fake::asked_add_author(name) {
         return None;
     }
     let by = if authors.is_empty() {

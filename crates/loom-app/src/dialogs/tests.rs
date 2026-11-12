@@ -46,7 +46,7 @@ fn open_shows_a_dialog_and_opens_on_its_answer() {
         ),
         "{effects:?}"
     );
-    assert!(matches!(app.waiting, Some(Waiting::Open)));
+    assert!(matches!(app.waiting(), Some(Waiting::Open)));
     assert!(app.session.document.file().is_none(), "nothing opens before the answer");
 
     let effects = update(&mut app, Message::Dialog(DialogAnswer::File(Some(path.clone()))));
@@ -78,7 +78,7 @@ fn save_as_carries_what_comes_after_it() {
     let mut app = app();
     assert!(!app.save_as_then(Some(AfterDiscard::Close)), "not written yet");
     assert!(matches!(
-        app.waiting,
+        app.waiting(),
         Some(Waiting::SaveAs {
             next: Some(AfterDiscard::Close)
         })
@@ -105,7 +105,7 @@ fn a_second_dialog_waits_for_none() {
         !effects.iter().any(|effect| matches!(effect, Effect::FileDialog { .. })),
         "{effects:?}"
     );
-    assert!(matches!(app.waiting, Some(Waiting::Open)));
+    assert!(matches!(app.waiting(), Some(Waiting::Open)));
     let _ = fake::asked();
 }
 
@@ -154,4 +154,47 @@ fn the_recovery_question_is_not_due_while_another_dialog_waits() {
     let _ = update(&mut app, Message::Dialog(DialogAnswer::File(None)));
     assert!(app.next_deadline().is_some(), "due again once it answers");
     let _ = fake::asked();
+}
+
+/// A Save As answer that arrives after the patch was replaced writes
+/// nothing: it belonged to the patch it was asked about, and the new one
+/// must not go where the old one was to be saved.
+#[test]
+fn an_answer_for_a_replaced_patch_is_not_used() {
+    let dir = TempDir::new("dialogs-stale");
+    let path = dir.0.join("mine.ron");
+    let mut app = app();
+    assert!(!app.save_as_then(Some(AfterDiscard::Close)));
+    assert!(app.replace(Source::Empty), "New, by a script, while the dialog is open");
+    let _ = update(&mut app, Message::Dialog(DialogAnswer::File(Some(path.clone()))));
+    assert!(!path.exists(), "nothing was written");
+    assert!(!app.quit, "and Close did not run");
+    assert!(app.waiting.is_none());
+    assert!(
+        app.alerts.status().contains("the dialog was open"),
+        "{}",
+        app.alerts.status()
+    );
+    let _ = fake::asked();
+}
+
+/// The recovery question's answer is the exception: it is what replaces
+/// the patch, so it is used whatever the patch is meanwhile.
+#[test]
+fn a_recovery_answer_is_used_after_a_replace() {
+    let dir = TempDir::new("dialogs-stale-recovery");
+    let mut app = app();
+    app.recovery_offer = Some(RecoveryOffer {
+        orphan: recovery::tests::orphan_for(&dir.0, None),
+        start: StartPatch::Generated(2),
+        found: Instant::now(),
+    });
+    let _ = update(&mut app, Message::AskRecovery);
+    assert!(app.replace(Source::Empty));
+    let modules = app.session.controller.graph().nodes().count();
+    let _ = update(&mut app, Message::Dialog(DialogAnswer::Choice(Some(2))));
+    assert!(
+        app.session.controller.graph().nodes().count() > modules,
+        "Not Now opened the start patch"
+    );
 }
