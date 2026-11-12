@@ -8,7 +8,7 @@ A searchable list of module types that adds the chosen module to the canvas, whe
 - **Use case and requirements:** FR-CANVAS-03, FR-CANVAS-06, NFR-UX-01, NFR-UX-05.
 - **Prior art:** many node editors open a search box at the pointer when you press a key on the canvas, and add the chosen node there. We use the idea, not any product's layout or wording.
 - **Issues:** [#11](https://github.com/brylie/LoomDSP/issues/11)
-- **Code:** `crates/loom-app/src/browser.rs` (search and panel), `crates/loom-canvas/src/widget/event.rs` (`CanvasEvent::OpenBrowser`).
+- **Code:** `crates/loom-app/src/browser.rs` (search, model, and panel), `crates/loom-app/src/browser/access.rs` (what a screen reader finds), `crates/loom-canvas/src/widget/event.rs` (`CanvasEvent::OpenBrowser`).
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -55,6 +55,11 @@ The browser is a small floating panel: a search field on top, a list of matches 
 | Pointer over a row | Highlights it. |
 | Click on a row | Adds that module and closes the browser. |
 | Click outside the browser | Closes the browser and adds nothing. |
+| Right-click on a library item | Opens its menu, with **Insert linked**. |
+
+While a library item's menu is open, the menu has the keys, as every menu does ([UI layer](ui-layer.md), section 6, rule 8): Down and Up move to its item, Enter picks the item the keys are on (and does nothing before a key has moved there), and Escape closes the menu, and the browser only on a second press. Any other key closes the menu and goes on as above.
+
+A screen reader finds the browser as a dialog named "Add module": the search field, which keeps the focus, and the list as a list box whose selected option is the highlighted row. A library item offers its menu to a screen reader (ShowContextMenu), opened on its first item ([UI layer](ui-layer.md), section 7, rule 27).
 
 ### Adding
 
@@ -107,3 +112,4 @@ None. Settled when the spec was agreed:
 - **Double-click on empty canvas opens the browser too.** It needs no keyboard. A double-click on a control still resets it.
 - **Auto-connect from a port** is left for a later issue.
 - **Every registered module is listed.** Hiding modules waits until one needs it.
+- **A library item's menu follows the menu keys** (settled 2026-11-12). Before, any key closed it, and Enter inserted a copy while the menu showed Insert linked, which a keyboard or screen reader user could not get past.

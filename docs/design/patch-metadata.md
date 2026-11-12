@@ -128,6 +128,7 @@ FR-SHARE-06, [#246](https://github.com/brylie/LoomDSP/issues/246).
 - **Search** matches the name, description, and tags, ignoring case. It combines with the filters (all must match).
 - **Keys:** typing goes to the search field. Up and Down move in the list. Enter opens the highlighted patch, asking first about unsaved changes as Open does. Escape closes the overlay. Tab moves between the search and Author fields (NFR-UX-01). The licence filters still need a pointer: see **Tab to the filters** below.
 - **Reading files:** the folder is read on a thread off the UI thread when the overlay opens; rows appear as files are read. Only the metadata fields are kept. *Why:* a folder of hundreds of patches must not freeze the window.
+- **With a screen reader:** the overlay is a dialog named "Your patches". The search field has the focus; the list is a list box whose selected option is the highlighted row; the licence filters are check boxes and the tags toggle buttons. A file that does not read is named "... could not read" and opens nothing. As rows arrive, the focus stays where it is and the list's size grows ([UI layer](ui-layer.md), section 7, rule 27).
 - Inserting a patch as a sub-patch is done from the module browser ([sub-patches](sub-patches.md#library)), not here. *Why:* this browser opens patches; the module browser adds things to the canvas.
 
 ## Rules
