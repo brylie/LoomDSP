@@ -9,7 +9,7 @@ fn with_xy() -> (Ui, u32) {
     let xy = ui.app.session.controller.add_module("loom.display.xy").unwrap().0;
     ui.app.commit();
     ui.redraw();
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![xy])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![xy])));
     (ui, xy)
 }
 
@@ -36,7 +36,7 @@ fn a_pair_follows_the_screen() {
         .pair_probe(x, y)
         .expect("a probe while on screen");
     assert!(ui.app.session.engine.monitor.watched().xy.contains_key(&probe));
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
     assert_eq!(ui.app.session.engine.live.pair_probe(x, y), None);
     assert!(!ui.app.session.controller.has_probe_pair(probe));
     assert!(ui.app.session.engine.monitor.watched().xy.is_empty());
@@ -88,7 +88,7 @@ fn a_trace_reaches_the_widget() {
         points: vec![[0.25, 0.5]],
         ..loom_canvas::Trace::default()
     };
-    let _ = ui.app.update(Message::Telemetry(crate::monitor::Update {
+    let _ = ui.app.send(Message::Telemetry(crate::monitor::Update {
         xy: vec![(probe, trace.clone())],
         ..crate::monitor::Update::default()
     }));

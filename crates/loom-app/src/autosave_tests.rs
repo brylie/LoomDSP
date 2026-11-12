@@ -88,12 +88,12 @@ fn settle(app: &mut App, now: Instant, mut done: impl FnMut(&App) -> bool) {
 
 /// Turns the filter's cutoff, as a slider would.
 fn turn_knob(app: &mut App, position: f32) {
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
 }
 
 /// Turns a knob to `position` and waits for the copy. Returns the session
@@ -144,9 +144,9 @@ fn selection_and_notes_make_no_copy() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
     let t0 = Instant::now();
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(4)));
-    let _ = app.update(Message::HoldNote);
-    let _ = app.update(Message::HoldNote);
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+    let _ = app.send(Message::HoldNote);
+    let _ = app.send(Message::HoldNote);
     for i in 0..40 {
         app.autosave(t0 + recovery::TICK * i);
         std::thread::sleep(Duration::from_millis(1));
@@ -160,12 +160,12 @@ fn saving_or_undoing_deletes_the_copy() {
     let setup = Setup::new("save");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = edit_and_keep(&mut app);
-    let _ = app.update(Message::File(crate::FileAction::Save));
+    let _ = app.send(Message::File(crate::FileAction::Save));
     settle(&mut app, Instant::now(), |_| !dir.join("patch.ron").exists());
     assert!(!dir.join("info.ron").exists());
 
     let dir = edit_and_keep_at(&mut app, 0.3);
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert!(!app.unsaved());
     settle(&mut app, Instant::now() + Duration::from_secs(60), |_| {
         !dir.join("patch.ron").exists()
@@ -178,7 +178,7 @@ fn a_clean_exit_deletes_the_folder() {
     let setup = Setup::new("exit");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
-    let _ = app.update(Message::File(crate::FileAction::Close));
+    let _ = app.send(Message::File(crate::FileAction::Close));
     assert!(!app.run_files.autosave_on());
     assert!(!dir.exists());
     assert!(sessions(&setup.root()).is_empty());
@@ -388,7 +388,7 @@ fn restore_reports_unknown_modules() {
         app.alerts.status()
     );
     let message = app.alerts.status().to_string();
-    let _ = app.update(Message::Canvas(loom_canvas::CanvasEvent::Move {
+    let _ = app.send(Message::Canvas(loom_canvas::CanvasEvent::Move {
         ids: vec![1],
         delta: loom_ui_core::Vector::new(12.0, 0.0),
     }));
@@ -510,7 +510,7 @@ fn a_failed_autosave_stays_as_a_warning_until_it_works() {
     assert_eq!(snapshot.errors[0].cause, alerts::Cause::Autosave);
     assert_eq!(snapshot.errors[0].severity, alerts::Severity::Warning);
 
-    let _ = app.update(Message::File(FileAction::New));
+    let _ = app.send(Message::File(FileAction::New));
     assert_eq!(app.alerts.kept().len(), 1, "a new patch does not fix the disk");
 
     app.autosave_report(recovery::Report::Works);
@@ -525,7 +525,7 @@ fn a_failed_autosave_can_be_dismissed() {
     let setup = Setup::new("dismiss");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     app.autosave_report(recovery::Report::Failed("Autosave failed: disk full.".to_string()));
-    let _ = app.update(Message::DismissError(alerts::Cause::Autosave));
+    let _ = app.send(Message::DismissError(alerts::Cause::Autosave));
     assert!(app.alerts.kept().is_empty());
     assert_eq!(app.alerts.status(), "");
 }

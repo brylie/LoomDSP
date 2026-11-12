@@ -90,7 +90,7 @@ fn with_slot() -> (App, u32, u32) {
         "{:?}",
         labels(&app, svf)
     );
-    let _ = app.update(Message::MakeSlot {
+    let _ = app.send(Message::MakeSlot {
         module: svf,
         role: "loom.role.filter".to_string(),
     });
@@ -171,7 +171,7 @@ fn swap_from_the_tile_menu_and_undo_fades_back() {
         "the current part is not offered"
     );
     assert_eq!(items.last().map(String::as_str), Some("Dissolve slot"));
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
@@ -290,7 +290,7 @@ fn the_inspector_shows_the_slot_and_swaps_it() {
     );
     assert!(rows.role_params.iter().all(|(_, module, _)| *module == svf));
     assert!(rows.other_params.iter().all(|(l, _, _)| l != "Cutoff"));
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.onepole@1".to_string()),
     });
@@ -306,7 +306,7 @@ fn the_inspector_shows_the_slot_and_swaps_it() {
     // Expose on a part-only parameter is refused; on a role parameter it
     // goes through the slot.
     app.process(600);
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
@@ -323,7 +323,7 @@ fn the_inspector_shows_the_slot_and_swaps_it() {
             node.parameter_index("resonance").unwrap(),
         )
     };
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Expose {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Expose {
         module: ladder,
         index: slope,
     }));
@@ -331,7 +331,7 @@ fn the_inspector_shows_the_slot_and_swaps_it() {
         app.alerts.status(),
         "Cannot expose: Expose a Filter parameter: Slope is only on Ladder"
     );
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Expose {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Expose {
         module: ladder,
         index: resonance,
     }));
@@ -355,7 +355,7 @@ fn a_bound_surface_control_offers_the_swap_through_its_tile() {
     app.show_level(&ModulePath::root());
     let items = labels(&app, 2);
     assert!(items.contains(&"Swap Filter to Ladder".to_string()), "{items:?}");
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
@@ -382,7 +382,7 @@ fn dissolve_slot_and_the_clipboard_refusal() {
     app.session.selection = std::collections::BTreeSet::from([slot]);
     assert!(app.copy().is_none());
     assert_eq!(app.alerts.status(), CANNOT_COPY_SLOT);
-    let _ = app.update(Message::DissolveSlot(slot));
+    let _ = app.send(Message::DissolveSlot(slot));
     assert_eq!(app.alerts.status(), "Filter slot dissolved");
     assert!(titles(&app).contains(&"SVF".to_string()));
     assert!(!titles(&app).contains(&"Filter".to_string()));
@@ -522,7 +522,7 @@ fn undo_restores_the_links_a_swap_removed() {
             .midi_mapping_of(loom_core::ModuleId(ladder), slope)
             .is_some()
     );
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.svf@1".to_string()),
     });
@@ -559,7 +559,7 @@ fn undo_of_a_swap_from_a_sub_patch_part_leaves_no_extra_modules() {
     };
     let before = modules(&app);
     let saved_before = app.current_patch().to_ron().unwrap();
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
@@ -582,13 +582,13 @@ fn undo_of_a_swap_from_a_sub_patch_part_leaves_no_extra_modules() {
 #[test]
 fn a_refused_swap_during_a_fade_leaves_everything_in_step() {
     let (mut app, slot, svf) = with_slot();
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
     assert_eq!(app.session.hierarchy.fading_slots().len(), 1);
     let steps = app.session.edits.history.len();
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.osc.sine@1".to_string()),
     });
@@ -606,7 +606,7 @@ fn a_refused_swap_during_a_fade_leaves_everything_in_step() {
             .all(|(_, n)| n.descriptor.id != "loom.struct.fade" && n.descriptor.id != "loom.osc.sine")
     );
     assert_eq!(app.session.edits.history.len(), steps, "no step for a refused swap");
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
@@ -619,7 +619,7 @@ fn a_refused_swap_during_a_fade_leaves_everything_in_step() {
 fn swapping_back_to_a_held_sub_patch_from_the_app() {
     let mut app = app_with(COMB_SLOT);
     let slot = inside(&app, 9);
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.svf@1".to_string()),
     });
@@ -635,7 +635,7 @@ fn swapping_back_to_a_held_sub_patch_from_the_app() {
         .expect("the held comb is offered");
     assert_eq!(held.label, "Comb");
     assert!(!held.current);
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: held.to.clone(),
     });
@@ -670,7 +670,7 @@ fn swapping_back_to_a_held_sub_patch_from_the_app() {
 #[test]
 fn the_slot_inspector_draws() {
     let (mut app, slot, _) = with_slot();
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
@@ -697,7 +697,7 @@ fn make_slot_redoes_and_dissolve_slot_undoes() {
         app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)),
         Some(loom_core::ModuleId(svf))
     );
-    let _ = app.update(Message::DissolveSlot(slot));
+    let _ = app.send(Message::DissolveSlot(slot));
     assert!(titles(&app).contains(&"SVF".to_string()));
     app.undo();
     assert_eq!(app.alerts.status(), "Undo: dissolve Filter slot");
@@ -797,7 +797,7 @@ fn swapping_a_part_makes_its_controls_new_elements() {
     );
     assert!(before_id.is_under(&tile_id(slot)));
 
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot,
         to: SwapTarget::Module("loom.filter.onepole@1".to_string()),
     });

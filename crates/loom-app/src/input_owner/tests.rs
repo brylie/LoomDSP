@@ -175,7 +175,7 @@ fn an_empty_route_counts_as_input() {
     let listening = app.listening();
     let event = iced::Event::Keyboard(released);
     assert!(listening.route(event.clone(), Status::Captured).is_empty());
-    let _ = app.update(Message::Input {
+    let _ = app.send(Message::Input {
         event,
         status: Status::Captured,
         listening,
@@ -194,7 +194,7 @@ fn a_route_reads_who_was_listening_before_the_event() {
         app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
-    let _ = app.update(Message::File(crate::FileAction::New));
+    let _ = app.send(Message::File(crate::FileAction::New));
     assert!(app.overlays.question.is_some());
     let enter = iced::Event::Keyboard(keyboard::Event::KeyPressed {
         key: Key::Named(Named::Enter),
@@ -205,7 +205,7 @@ fn a_route_reads_who_was_listening_before_the_event() {
         text: None,
         repeat: false,
     });
-    let _ = app.update(Message::Input {
+    let _ = app.send(Message::Input {
         event: enter,
         status: Status::Captured,
         listening: before,

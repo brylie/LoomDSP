@@ -1248,7 +1248,7 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, 64])
     ));
     app.process(128);
-    let _ = app.update(Message::Midi);
+    let _ = app.send(Message::Midi);
     let (_, mapping) = app
         .session
         .controller
@@ -1266,7 +1266,7 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     for (value, expected) in [(127, 2000.0), (0, 200.0)] {
         assert!(send_cc(&midi, value));
         app.process(128);
-        let _ = app.update(Message::Midi);
+        let _ = app.send(Message::Midi);
         let cutoff_now = app.session.controller.graph().node(svf).unwrap().params[cutoff];
         assert!((cutoff_now - expected).abs() < 1e-2, "CC {value}: {cutoff_now}");
     }
@@ -1319,7 +1319,7 @@ fn waiting_pickup_at(app: &mut App, value: u8) {
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value])
     ));
     app.process(128);
-    let _ = app.update(Message::Midi);
+    let _ = app.send(Message::Midi);
     assert_eq!(app.session.controller.midi_waiting().len(), 1, "the pickup waits");
 }
 

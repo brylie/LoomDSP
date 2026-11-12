@@ -39,7 +39,7 @@ fn first_cable(app: &App) -> (PortRef, InputRef) {
 
 /// Opens the menu as a right-click on `output` would, at `world`.
 fn open(app: &mut App, output: PortRef, world: Point) {
-    let _ = app.update(Message::Canvas(CanvasEvent::ProbeMenu {
+    let _ = app.send(Message::Canvas(CanvasEvent::ProbeMenu {
         output,
         world,
         at: Point::new(100.0, 100.0),
@@ -86,7 +86,7 @@ fn add_scope_and_meter_on_an_output_and_a_cable() {
             let tiles: Vec<Rect> = app.session.scene.modules().iter().map(|m| m.bounds()).collect();
 
             open(&mut app, output, world);
-            let _ = app.update(Message::ProbeMenu(super::Message::Pick(probe)));
+            let _ = app.send(Message::ProbeMenu(super::Message::Pick(probe)));
             assert!(app.overlays.probe_menu().is_none());
 
             let graph = app.session.controller.graph();
@@ -143,16 +143,16 @@ fn escape_and_a_click_outside_close_the_menu() {
             repeat: false,
         })
     };
-    let _ = app.update(press(iced::keyboard::Key::Character("a".into())));
+    let _ = app.send(press(iced::keyboard::Key::Character("a".into())));
     assert!(
         app.overlays.probe_menu().is_some() && app.overlays.browser().is_none(),
         "A does not open the browser"
     );
-    let _ = app.update(press(iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)));
+    let _ = app.send(press(iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)));
     assert!(app.overlays.probe_menu().is_none());
 
     open(&mut app, output, port);
-    let _ = app.update(Message::ProbeMenu(super::Message::Close));
+    let _ = app.send(Message::ProbeMenu(super::Message::Close));
     assert!(app.overlays.probe_menu().is_none());
     assert_eq!(app.session.controller.graph().nodes().count(), modules);
     assert_eq!(
@@ -167,11 +167,11 @@ fn clipboard_keys_do_nothing_while_the_menu_is_open() {
     let mut app = app();
     let (output, _) = first_cable(&app);
     let port = app.session.scene.port_position(output).unwrap();
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![output.module])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![output.module])));
     let modules = app.session.controller.graph().nodes().count();
     open(&mut app, output, port);
-    let _ = app.update(tests::command_key("d"));
-    let _ = app.update(tests::command_key("x"));
+    let _ = app.send(tests::command_key("d"));
+    let _ = app.send(tests::command_key("x"));
     assert_eq!(app.session.controller.graph().nodes().count(), modules);
     assert!(app.overlays.probe_menu().is_some());
 }
@@ -184,10 +184,10 @@ fn a_removed_output_adds_nothing() {
     let (output, _) = first_cable(&app);
     let port = app.session.scene.port_position(output).unwrap();
     open(&mut app, output, port);
-    let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![output.module])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Delete(vec![output.module])));
     let modules = app.session.controller.graph().nodes().count();
     let undo = app.session.edits.history.undo_step().map(|s| s.name().to_string());
-    let _ = app.update(Message::ProbeMenu(super::Message::Pick(Probe::Scope)));
+    let _ = app.send(Message::ProbeMenu(super::Message::Pick(Probe::Scope)));
     assert_eq!(app.session.controller.graph().nodes().count(), modules);
     assert_eq!(
         app.session.edits.history.undo_step().map(|s| s.name().to_string()),

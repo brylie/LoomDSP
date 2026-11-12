@@ -61,7 +61,7 @@ fn the_question_is_drawn_in_the_window() {
 fn a_clean_patch_is_not_asked_about() {
     let mut app = app();
     assert!(!app.unsaved());
-    let _ = app.update(AppMessage::File(FileAction::Close));
+    let _ = app.send(AppMessage::File(FileAction::Close));
     assert!(app.overlays.question.is_none());
     assert!(app.quit);
 }
@@ -394,17 +394,17 @@ fn rows_still_reach_a_browser_under_the_question() {
     let mut preferences = app.rig.store.saved().clone();
     preferences.library = Some(dir.0.clone());
     let _ = app.rig.store.save(preferences);
-    let _ = app.update(AppMessage::File(FileAction::Browse));
+    let _ = app.send(AppMessage::File(FileAction::Browse));
     app.edit(|app| {
         app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
-    let _ = app.update(AppMessage::File(FileAction::Close));
+    let _ = app.send(AppMessage::File(FileAction::Close));
     assert!(app.overlays.question.is_some());
     let rows = vec![crate::patches::Row::read(&dir.0.join("a.ron"))];
     let open = app.patches_open;
-    let _ = app.update(AppMessage::Patches(crate::patches::Message::Found { open, rows }));
-    let _ = app.update(AppMessage::Question(Message::Escape));
+    let _ = app.send(AppMessage::Patches(crate::patches::Message::Found { open, rows }));
+    let _ = app.send(AppMessage::Question(Message::Escape));
     let browser = app.overlays.patches().expect("the browser is still open");
     assert_eq!(browser.shown().count(), 1);
 }

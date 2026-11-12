@@ -723,14 +723,14 @@ fn increment_turns_the_knob_and_can_be_undone() {
     let cutoff = widget_node(&mut app, module, knob);
     let before = position(&app, module, knob);
 
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Increment, cutoff, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Increment, cutoff, None))));
 
     let after = position(&app, module, knob);
     assert!((after - (before + 0.01).min(1.0)).abs() < 1e-4, "{before} -> {after}");
     // The turn is in an open group, and Undo closes the group and takes it.
     assert_eq!(app.undo_hint().unwrap(), "Undo: the screen reader edit");
 
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Decrement, cutoff, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Decrement, cutoff, None))));
     assert!((position(&app, module, knob) - before).abs() < 1e-4);
 }
 
@@ -791,7 +791,7 @@ fn quick_sets_on_one_control_are_one_undo_step() {
     assert_eq!(app.undo_hint().unwrap(), "Undo: the screen reader edit");
 
     // Undo closes the group first, then takes it back as one step.
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert!((position(&app, module, knob) - before).abs() < 1e-6);
     assert_eq!(app.session.edits.reader_group(), crate::edits::ReaderGroup::Closed);
 }
@@ -821,9 +821,9 @@ fn a_screen_reader_group_ends_as_the_rule_says() {
 
     // The deadline: the canvas wakes once and reports it.
     let _ = app.a11y_action(&up(cutoff), t);
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(499) }));
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(499) }));
     assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed, "not yet due");
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(500) }));
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(500) }));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(steps(&app), start + 1);
 
@@ -838,13 +838,13 @@ fn a_screen_reader_group_ends_as_the_rule_says() {
     assert_eq!(steps(&app), start + 3);
 
     // A key press or a pointer press on the canvas ends it.
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupEnd));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(steps(&app), start + 4);
 
     // An arrow key press does too, before its own group opens.
     let _ = app.a11y_action(&up(cutoff), t + ms(3000));
-    let _ = app.update(Message::Canvas(CanvasEvent::ArrowPressed { at: t + ms(3100) }));
+    let _ = app.send(Message::Canvas(CanvasEvent::ArrowPressed { at: t + ms(3100) }));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(steps(&app), start + 5);
 }
@@ -1047,7 +1047,7 @@ fn focus_does_not_change_the_selection() {
 
     assert!(events(&app, &request(Action::Focus, tile, None)).is_empty());
     assert!(events(&app, &request(Action::Focus, cutoff, None)).is_empty());
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Focus, tile, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Focus, tile, None))));
 
     assert_eq!(app.ui_snapshot().selection, before);
     assert!(!app.unsaved(), "no edit was made");
@@ -1070,11 +1070,11 @@ fn click_on_a_tile_selects_it() {
         events(&app, &request(Action::Click, tile, None)),
         vec![CanvasEvent::Select(vec![module])]
     );
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Click, tile, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Click, tile, None))));
     assert_eq!(app.ui_snapshot().selection, vec![module]);
 
     let second = node_of(&mut app, &tile_id(other));
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Click, second, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Click, second, None))));
     assert_eq!(
         app.ui_snapshot().selection,
         vec![other],
@@ -1204,13 +1204,13 @@ fn only_changed_nodes_are_sent() {
     assert!(again.is_none(), "nothing changed, so nothing is sent");
 
     let cutoff = widget_node(&mut app, module, knob);
-    let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+    let _ = app.send(Message::Canvas(CanvasEvent::SetControl {
         module,
         widget: knob,
         position: 0.25,
         part: ControlPart::Main,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     let (_, changes) = app.a11y_changes(&Places::default());
     let changes = changes.expect("the knob changed");
     assert!(changes.tree.is_none(), "the root is named once");
@@ -1231,12 +1231,12 @@ fn only_changed_nodes_are_sent() {
 fn a_message_that_changes_nothing_sends_nothing() {
     let (mut app, module, _) = app_with_filter();
     listen(&mut app);
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
     app.a11y.locating = false;
     let (_, changes) = app.a11y_changes(&Places::default());
     assert!(changes.is_some(), "the inspector now shows the module");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
     assert!(app.a11y.locating, "the message asked for a rebuild");
     app.a11y.locating = false;
     let (_, changes) = app.a11y_changes(&Places::default());
@@ -1263,10 +1263,10 @@ fn one_rebuild_at_a_time() {
 /// the watcher thread does.
 fn move_live_values(app: &mut App) {
     let tiles: Vec<u32> = app.ui_snapshot().tiles.iter().map(|t| t.id).collect();
-    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(tiles)));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(tiles)));
     let watch = app.watched_lights().expect("the patch shows lights");
     app.process(4_800);
-    let _ = app.update(Message::Lights(watch.read()));
+    let _ = app.send(Message::Lights(watch.read()));
 }
 
 /// The nodes of widgets that only show a value, among `ids`.
@@ -1376,7 +1376,7 @@ fn focus_is_reported_on_the_focused_control() {
     let root = node_of(&mut app, &window_id());
     assert_eq!(whole.focus, root);
 
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     let cutoff = widget_node(&mut app, module, knob);
     let (whole, changes) = app.a11y_changes(&Places::default());
     assert_eq!(whole.focus, cutoff);
@@ -1385,7 +1385,7 @@ fn focus_is_reported_on_the_focused_control() {
     let (_, again) = app.a11y_changes(&Places::default());
     assert!(again.is_none(), "the same focus sends nothing");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(None)));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(None)));
     let (whole, changes) = app.a11y_changes(&Places::default());
     assert_eq!(whole.focus, root);
     assert!(changes.is_some());
@@ -1455,7 +1455,7 @@ fn focus_ends_the_group_and_a_new_patch_forgets_it() {
     let cutoff = widget_node(&mut app, module, knob);
     let steps = app.session.edits.history.len();
     let _ = app.a11y_action(&request(Action::Increment, cutoff, None), std::time::Instant::now());
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     assert_eq!(app.session.edits.reader_group(), crate::edits::ReaderGroup::Closed);
     assert_eq!(app.session.edits.history.len(), steps + 1);
 
@@ -1479,19 +1479,19 @@ fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
     let tile = node_of(&mut app, &tile_id(module));
     let cutoff = widget_node(&mut app, module, knob);
     assert!(!node(&whole, tile).is_hidden());
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     let _ = app.a11y_changes(&Places::default());
 
     app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
     // The patch changes behind the panel, as MIDI or a script can do.
     app.set_param(module, 0, 0.5);
-    let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+    let _ = app.send(Message::Canvas(CanvasEvent::SetControl {
         module,
         widget: knob,
         position: 0.1,
         part: ControlPart::Main,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     let (whole, changes) = app.a11y_changes(&Places::default());
     assert!(node(&whole, tile).is_hidden());
     assert_eq!(
@@ -1595,7 +1595,7 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
     let (mut app, module, knob) = app_with_filter();
     let other = app.session.controller.add_module("loom.filter.svf").unwrap().0;
     app.commit();
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![other])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![other])));
     let mut ui = crate::ui_test::Ui::with_app(app);
     // The first frame only notes the request's key.
     let _ = ui.redraw();
@@ -1682,7 +1682,7 @@ fn a_poll_that_changes_nothing_builds_no_tree() {
             Message::Autosave,
             Message::MidiGhosts,
         ] {
-            let _ = app.update(poll);
+            let _ = app.send(poll);
             assert!(!app.a11y.locating, "a poll that changed nothing asks for no build");
         }
     }
@@ -1841,7 +1841,7 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
     ui.app.a11y.locating = false;
     ui.app.text_focus.any = true;
 
-    let task = ui.app.update(Message::Canvas(CanvasEvent::Select(Vec::new())));
+    let task = ui.app.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
     let log = ui.run_task(task);
     let rebuilds = log
         .iter()
@@ -2179,7 +2179,7 @@ fn bar_readings_are_live_and_the_frame_is_in_the_poll_key() {
     let (mut app, _, _) = app_with_filter();
     app.a11y = Access::measured();
     app.a11y.locating = false;
-    let _ = app.update(Message::Audio(crate::audio_watch::Event::Stats {
+    let _ = app.send(Message::Audio(crate::audio_watch::Event::Stats {
         dropouts: 0,
         at: std::time::Instant::now(),
         peak: 0.1,
@@ -2191,10 +2191,10 @@ fn bar_readings_are_live_and_the_frame_is_in_the_poll_key() {
     assert!(app.a11y.live_waits(), "it waits for the live timer");
 
     let key = app.a11y_poll_key();
-    let _ = app.update(Message::Learn(crate::learn::Message::Toggle));
+    let _ = app.send(Message::Learn(crate::learn::Message::Toggle));
     assert_ne!(app.a11y_poll_key(), key, "the toolbar and the bar changed");
     let key = app.a11y_poll_key();
-    let _ = app.update(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
+    let _ = app.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     assert_ne!(app.a11y_poll_key(), key, "the open tab changed");
 }
 
@@ -2226,7 +2226,7 @@ fn with_each_panel() -> Vec<(crate::input_owner::InputOwner, crate::ui_test::Ui)
         }),
         open(&|app, _| app.overlays.open(Overlay::RecentList(Vec::new()))),
         open(&|app, _| {
-            let _ = app.update(Message::Preferences(crate::settings::Message::Open));
+            let _ = app.send(Message::Preferences(crate::settings::Message::Open));
         }),
         open(&|app, _| {
             let browser = crate::patches::PatchBrowser::new(1, std::path::PathBuf::from("unread"));
@@ -2844,7 +2844,7 @@ fn a_covered_field_is_not_focused() {
     let places = ui.places();
     assert_eq!(ui.app.a11y_tree(&places).focus, field, "focused while open");
 
-    let _ = ui.app.update(Message::ShowShortcuts);
+    let _ = ui.app.send(Message::ShowShortcuts);
     let update = ui.app.a11y_tree(&places);
     assert!(node(&update, field).is_hidden());
     assert_ne!(update.focus, field, "not focused while covered");
@@ -3584,7 +3584,7 @@ fn with_each_small_overlay() -> Vec<(&'static str, crate::ui_test::Ui)> {
         (
             "help",
             open(&|app| {
-                let _ = app.update(Message::ShowModuleHelp(4));
+                let _ = app.send(Message::ShowModuleHelp(4));
             }),
         ),
         (
@@ -3765,7 +3765,7 @@ fn only_the_overlay_that_owns_the_input_is_reported() {
 fn the_menu_key_opens_no_tile_menu_under_help() {
     use iced::keyboard::{Key, Modifiers, key::Named};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
     let _ = ui.redraw();
     let _ = ui.tap(Key::Named(Named::ContextMenu), Modifiers::empty());
     assert_eq!(ui.app.overlays.tile_menu().map(|(module, _)| module), Some(4));
@@ -4102,7 +4102,7 @@ fn every_inspector_state_is_reported_with_named_parts() {
         .expect("a Patch port tile inside the Voice");
     ui.send(Message::Canvas(CanvasEvent::Select(vec![port])));
     check(&mut ui, "port", |m| matches!(m, Inspector::Port(_)));
-    let _ = ui.app.update(Message::MakeSlot {
+    let _ = ui.app.send(Message::MakeSlot {
         module: svf,
         role: "loom.role.filter".to_string(),
     });
@@ -4327,7 +4327,7 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
     let mut ui = crate::ui_test::Ui::with_app(app);
     // Run so the focus the opening asks for is reported back, as the
     // window would report it.
-    let task = ui.app.update(Message::File(crate::FileAction::Browse));
+    let task = ui.app.send(Message::File(crate::FileAction::Browse));
     let _ = ui.run_task(task);
     let _ = ui.redraw();
     let open = ui.app.patches_open;

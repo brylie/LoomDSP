@@ -37,7 +37,7 @@ fn rows(app: &App) -> PatchRows {
 
 /// Sends a patch info edit through the app.
 fn send(app: &mut App, message: Message) {
-    let _ = app.update(AppMessage::PatchInfo(message));
+    let _ = app.send(AppMessage::PatchInfo(message));
 }
 
 /// patch-metadata.md, Patch info: with nothing selected, the inspector
@@ -139,7 +139,7 @@ fn a_new_patch_takes_the_defaults() {
     assert_eq!(app.session.document.info().license.as_deref(), Some("CC-BY-4.0"));
     assert_eq!(rows(&app).authors, ["Ada Lovelace"]);
     assert!(!app.unsaved());
-    let _ = app.update(AppMessage::File(FileAction::New));
+    let _ = app.send(AppMessage::File(FileAction::New));
     assert_eq!(app.session.document.info().authors, ["Ada Lovelace"]);
     assert_eq!(app.session.document.info().license.as_deref(), Some("CC-BY-4.0"));
     let _ = std::fs::remove_dir_all(dir);

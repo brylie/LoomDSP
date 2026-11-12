@@ -4,6 +4,14 @@ use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::time::Duration;
 
+impl App {
+    /// Applies one message, as tests do. It forwards to `update` until
+    /// `update` returns effects (plan step 2.1b), when it runs a turn.
+    pub(crate) fn send(&mut self, message: Message) -> Task<Message> {
+        self.update(message)
+    }
+}
+
 /// A full queue stages fresh modules until the idle engine drains it;
 /// the next update commits them without another edit from the player.
 #[test]
@@ -17,7 +25,7 @@ fn a_full_queue_retries_staged_modules() {
     }
     assert!(!app.commit());
     assert!(app.session.retry_commit);
-    let _ = app.update(Message::Tick);
+    let _ = app.send(Message::Tick);
     assert!(!app.session.retry_commit);
     assert!(!app.session.controller.has_uncommitted_changes());
     assert_eq!(app.session.controller.last_report().modules, 4);
@@ -72,7 +80,7 @@ fn a_full_queue_keeps_the_loss_of_the_undo_history_on_screen() {
         app.alerts.status()
     );
 
-    let _ = app.update(Message::Tick);
+    let _ = app.send(Message::Tick);
     assert!(!app.session.retry_commit, "the retry worked");
     let kept = app.alerts.kept_field().expect("the loss stays on screen");
     assert!(kept.text.contains("undo history cleared"), "{}", kept.text);
@@ -134,7 +142,7 @@ fn live_value_overflow_warning_is_latched_per_patch() {
 fn audio_watcher_events_update_the_stats_model() {
     let mut app = app();
     let now = Instant::now();
-    let _ = app.update(Message::Audio(audio_watch::Event::Stats {
+    let _ = app.send(Message::Audio(audio_watch::Event::Stats {
         dropouts: 1,
         at: now,
         peak: 0.95,
@@ -145,7 +153,7 @@ fn audio_watcher_events_update_the_stats_model() {
     assert_eq!(app.session.engine.stream.load().0, 0.95);
     assert_eq!(app.session.engine.stream.load().1, 0.95);
     assert_eq!(app.alerts.dropout_count(), 1);
-    let _ = app.update(Message::Audio(audio_watch::Event::Stalled {
+    let _ = app.send(Message::Audio(audio_watch::Event::Stalled {
         callbacks: 3,
         advanced: now,
     }));
@@ -273,7 +281,7 @@ fn fake_audio_keeps_taking_edits() {
     app.commit();
     for burst in 0..10 {
         for i in 0..500 {
-            let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
+            let _ = app.send(Message::Inspector(crate::inspector::Message::Param {
                 module: filter.0,
                 index: 0,
                 position: ((burst * 500 + i) % 100) as f32 / 100.0,
@@ -300,7 +308,7 @@ fn no_audio_keeps_taking_edits() {
     app.commit();
     let capacity = loom_core::EngineConfig::default().command_capacity;
     for i in 0..5_000 {
-        let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
+        let _ = app.send(Message::Inspector(crate::inspector::Message::Param {
             module: filter.0,
             index: 0,
             position: (i % 100) as f32 / 100.0,
@@ -318,7 +326,7 @@ fn no_audio_keeps_taking_edits() {
 }
 
 fn open_at(app: &mut App, world: Point) {
-    let _ = app.update(Message::Canvas(CanvasEvent::OpenBrowser {
+    let _ = app.send(Message::Canvas(CanvasEvent::OpenBrowser {
         world,
         at: Point::ORIGIN,
         area: loom_ui_core::Rect::new(Point::ORIGIN, loom_ui_core::Size::new(1000.0, 800.0)),
@@ -326,7 +334,7 @@ fn open_at(app: &mut App, world: Point) {
 }
 
 fn type_query(app: &mut App, query: &str) {
-    let _ = app.update(Message::Browser(browser::Message::Query(query.to_string())));
+    let _ = app.send(Message::Browser(browser::Message::Query(query.to_string())));
 }
 
 #[test]
@@ -338,7 +346,7 @@ fn adding_from_the_browser_is_one_undo_step_at_the_snapped_point() {
     // Opening, typing, and closing are not edits.
     open_at(&mut app, Point::new(250.0, 130.0));
     type_query(&mut app, "svf");
-    let _ = app.update(Message::Browser(browser::Message::Key(browser::Nav::Escape)));
+    let _ = app.send(Message::Browser(browser::Message::Key(browser::Nav::Escape)));
     assert!(app.overlays.browser().is_none());
     assert_eq!(
         app.session.edits.history.undo_step().map(|s| s.name().to_string()),
@@ -347,7 +355,7 @@ fn adding_from_the_browser_is_one_undo_step_at_the_snapped_point() {
 
     open_at(&mut app, Point::new(250.0, 130.0));
     type_query(&mut app, "svf");
-    let _ = app.update(Message::Browser(browser::Message::Submit));
+    let _ = app.send(Message::Browser(browser::Message::Submit));
     assert!(app.overlays.browser().is_none());
     assert_eq!(app.session.controller.graph().nodes().count(), before + 1);
     let id = *app.session.selection.iter().next().expect("the new module is selected");
@@ -368,12 +376,12 @@ fn keys_go_to_the_browser_not_the_shortcuts() {
     let before = app.session.controller.graph().nodes().count();
     open_at(&mut app, Point::ORIGIN);
     type_query(&mut app, "saw");
-    let _ = app.update(Message::Browser(browser::Message::Submit));
+    let _ = app.send(Message::Browser(browser::Message::Submit));
     assert_eq!(app.session.controller.graph().nodes().count(), before + 1);
 
     // Cmd+Z or Ctrl+Z while the browser is open does not undo.
     open_at(&mut app, Point::ORIGIN);
-    let _ = app.update(Message::Key(iced::keyboard::Event::KeyPressed {
+    let _ = app.send(Message::Key(iced::keyboard::Event::KeyPressed {
         key: iced::keyboard::Key::Character("z".into()),
         modified_key: iced::keyboard::Key::Character("z".into()),
         physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
@@ -403,7 +411,7 @@ fn drop_env(app: &mut App, env: ModuleId, filter: ModuleId, widget: usize) {
         output: true,
         index: 0,
     };
-    let _ = app.update(Message::Canvas(CanvasEvent::Assign {
+    let _ = app.send(Message::Canvas(CanvasEvent::Assign {
         from,
         module: filter.0,
         widget,
@@ -490,7 +498,7 @@ fn a_drop_on_a_toggle_or_radio_moves_one_step() {
     for (port, _) in outputs {
         for (bind, _) in cases {
             let widget = d.panel.widgets.iter().position(|w| w.binds(bind)).unwrap();
-            let _ = app.update(Message::Canvas(CanvasEvent::Assign {
+            let _ = app.send(Message::Canvas(CanvasEvent::Assign {
                 from: loom_canvas::PortRef {
                     module: source.0,
                     output: true,
@@ -538,12 +546,12 @@ fn add_modulation_matches_a_drop() {
     sorted.sort();
     assert_eq!(sources, sorted, "module order, then port order");
 
-    let _ = app.update(Message::Modulation(crate::modulation::Message::AddModulation {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::AddModulation {
         module: filter.0,
         index: cutoff,
     }));
     assert_eq!(app.session.gestures.adding(), Some((filter.0, cutoff)));
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source,
         module: filter.0,
         index: cutoff,
@@ -577,17 +585,17 @@ fn inspector_rows_edit_and_remove_assignments() {
     let steps = app.session.edits.history.len();
 
     for depth in [0.3, 0.4, 0.5] {
-        let _ = app.update(Message::Modulation(crate::modulation::Message::Depth { id, depth }));
+        let _ = app.send(Message::Modulation(crate::modulation::Message::Depth { id, depth }));
     }
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     assert_eq!(assignments(&app)[0].depth, 0.5);
     assert_eq!(app.session.edits.history.len(), steps + 1, "one drag, one step");
 
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Polarity {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Polarity {
         id,
         choice: modulation::PolarityChoice::Bipolar,
     }));
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Enabled {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Enabled {
         id,
         enabled: false,
     }));
@@ -601,7 +609,7 @@ fn inspector_rows_edit_and_remove_assignments() {
     app.undo();
     assert_eq!(assignments(&app)[0].depth, 0.25);
 
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Unassign(id)));
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Unassign(id)));
     assert!(assignments(&app).is_empty());
     assert!(modulation::on_param(app.session.controller.graph(), filter, cutoff).is_empty());
 }
@@ -624,21 +632,21 @@ fn badges_count_every_assignment_on_an_output() {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: env, port: 0 },
         module: filter.0,
         index: resonance,
     }));
     assert_eq!(badge(&app), 2);
     let id = app.session.controller.graph().assignments().next().unwrap().0;
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Enabled {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Enabled {
         id,
         enabled: false,
     }));
     assert_eq!(badge(&app), 2, "off still counts");
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Unassign(id)));
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Unassign(id)));
     assert_eq!(badge(&app), 1);
-    let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![filter.0])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Delete(vec![filter.0])));
     assert_eq!(badge(&app), 0);
 }
 
@@ -653,7 +661,7 @@ fn drives_lists_targets_and_selects_them() {
     let targets: Vec<_> = drives[&0].iter().map(|(_, a)| (a.target, a.param)).collect();
     assert_eq!(targets, vec![(filter, cutoff)]);
     assert!(modulation::drives(app.session.controller.graph(), filter).is_empty());
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(filter.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(filter.0)));
     assert_eq!(app.session.selection, BTreeSet::from([filter.0]));
 }
 
@@ -665,7 +673,7 @@ fn assignments_keep_their_order_through_a_save() {
     let (env, filter, cutoff, widget) = env_and_filter(&mut app);
     let other = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: other, port: 0 },
         module: filter.0,
         index: cutoff,
@@ -697,7 +705,7 @@ fn two_sources(app: &mut App) -> (ModuleId, ModuleId, ModuleId, usize, usize) {
     let sine = app.session.controller.add_module("loom.osc.sine").unwrap();
     app.commit();
     drop_env(app, env, filter, widget);
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: OutputRef { module: sine, port: 0 },
         module: filter.0,
         index: cutoff,
@@ -780,12 +788,12 @@ fn an_arc_drag_is_one_step_and_shows_only_its_assignment() {
     };
     let mark = |app: &App| app.session.values.get(filter.0, widget).unwrap().modulation;
     let both = mark(&app);
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
-    let _ = app.update(drag(0.1));
-    let _ = app.update(drag(0.1));
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureStart));
+    let _ = app.send(drag(0.1));
+    let _ = app.send(drag(0.1));
     let during = mark(&app);
     assert_ne!(during, both, "the arc shows the dragged assignment alone");
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureEnd));
     assert!(!app.session.gestures.depth_dragging());
     let depth = |app: &App| {
         app.session
@@ -811,15 +819,15 @@ fn a_selected_source_picks_the_arc_drag() {
     let mut app = app();
     let (env, sine, filter, _, widget) = two_sources(&mut app);
     app.session.selection = BTreeSet::from([sine.0]);
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
-    let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureStart));
+    let _ = app.send(Message::Canvas(CanvasEvent::DragDepth {
         module: filter.0,
         widget,
         pinned: None,
         delta: 0.1,
         part: loom_canvas::ControlPart::Main,
     }));
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureEnd));
     let depth = |source| {
         app.session
             .controller
@@ -843,15 +851,15 @@ fn an_arc_drag_with_no_choice_changes_nothing() {
     app.session.selection.clear();
     let before = assignments(&app);
     let steps = app.session.edits.history.len();
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
-    let _ = app.update(Message::Canvas(CanvasEvent::DragDepth {
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureStart));
+    let _ = app.send(Message::Canvas(CanvasEvent::DragDepth {
         module: filter.0,
         widget,
         pinned: None,
         delta: 0.2,
         part: loom_canvas::ControlPart::Main,
     }));
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureEnd));
     assert_eq!(assignments(&app), before);
     assert_eq!(app.session.edits.history.len(), steps);
     assert!(
@@ -1026,7 +1034,7 @@ fn duplicate_from_the_keyboard_is_one_step_offset_by_two_grid_units() {
     let mut app = app();
     let (sine, _) = two_selected(&mut app);
     let before = app.session.controller.graph().nodes().count();
-    let _ = app.update(command_key("d"));
+    let _ = app.send(command_key("d"));
     assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
     assert_eq!(step_name(&app).as_deref(), Some("duplicate 2 modules"));
     let first = *app.session.selection.iter().next().unwrap();
@@ -1074,8 +1082,8 @@ fn clipboard_keys_go_to_the_browser_while_it_is_open() {
     two_selected(&mut app);
     let before = app.session.controller.graph().nodes().count();
     open_at(&mut app, Point::ORIGIN);
-    let _ = app.update(command_key("d"));
-    let _ = app.update(command_key("x"));
+    let _ = app.send(command_key("d"));
+    let _ = app.send(command_key("x"));
     assert_eq!(app.session.controller.graph().nodes().count(), before);
 }
 
@@ -1104,13 +1112,13 @@ fn a_paste_for_a_closed_patch_is_dropped() {
     two_selected(&mut app);
     let text = app.copy().unwrap();
     let before = app.session.controller.graph().nodes().count();
-    let _ = app.update(Message::Pasted {
+    let _ = app.send(Message::Pasted {
         world: Point::ORIGIN,
         text: Some(text.clone()),
         generation: app.generation + 1,
     });
     assert_eq!(app.session.controller.graph().nodes().count(), before);
-    let _ = app.update(Message::Pasted {
+    let _ = app.send(Message::Pasted {
         world: Point::ORIGIN,
         text: Some(text),
         generation: app.generation,
@@ -1132,10 +1140,10 @@ fn panic_is_not_an_edit() {
     let steps = app.session.edits.history.len();
     let cables = app.session.controller.graph().cables().count();
     app.session.engine.holding = true;
-    let _ = app.update(Message::Panic);
+    let _ = app.send(Message::Panic);
     // The MIDI poll runs while the app has an engine, and finds nothing.
     let _ = app.subscription();
-    let _ = app.update(Message::MidiPoll);
+    let _ = app.send(Message::MidiPoll);
     assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
     assert!(!app.session.engine.holding, "Hold note lets go");
     let gain = app
@@ -1158,7 +1166,7 @@ fn panic_is_not_an_edit() {
 #[test]
 fn the_panic_key_button_and_command_run_panic() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::OpenBrowser);
+    let _ = ui.app.send(Message::OpenBrowser);
     ui.redraw();
     ui.typewrite("sin");
     let messages = ui.tap(
@@ -1173,7 +1181,7 @@ fn the_panic_key_button_and_command_run_panic() {
     );
 
     ui.app.alerts.say(String::new());
-    let _ = ui.app.update(Message::Browser(browser::Message::Close));
+    let _ = ui.app.send(Message::Browser(browser::Message::Close));
     ui.redraw();
     let button = ui.text("Panic").expect("a Panic button on the toolbar");
     ui.move_to(button.center());
@@ -1206,7 +1214,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
         .unwrap();
     let held = |app: &App| app.session.controller.graph().node(id).unwrap().params[hold];
 
-    let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed {
+    let _ = app.send(Message::Canvas(CanvasEvent::ButtonPressed {
         module: id.0,
         widget: 0,
     }));
@@ -1228,7 +1236,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
     assert!(!rows.contains("\"Hold\""), "{rows}");
     let copied = app.copy().unwrap();
     let before: BTreeSet<u32> = app.session.controller.graph().nodes().map(|(m, _)| m.0).collect();
-    let _ = app.update(Message::Pasted {
+    let _ = app.send(Message::Pasted {
         world: Point::new(400.0, 0.0),
         text: Some(copied),
         generation: app.generation,
@@ -1244,7 +1252,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
     assert_eq!(node.params[hold], 0.0, "a pasted button is released");
     assert_eq!(held(&app), 1.0, "the original is still held");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased {
+    let _ = app.send(Message::Canvas(CanvasEvent::ButtonReleased {
         module: id.0,
         widget: 0,
     }));
@@ -1266,16 +1274,16 @@ fn a_running_engine_moves_the_live_dot() {
     let source = app.session.controller.add_module("loom.math.constant").unwrap();
     app.session.controller.set_param_named(source, "value", 0.5).unwrap();
     let (_, filter, cutoff, widget) = env_and_filter(&mut app);
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: out(source),
         module: filter.0,
         index: cutoff,
     }));
-    let _ = app.update(Message::LiveFrame);
+    let _ = app.send(Message::LiveFrame);
     assert_eq!(tile_widget(&app, filter, widget).live, None, "the engine has not run");
 
     app.process(64);
-    let _ = app.update(Message::LiveFrame);
+    let _ = app.send(Message::LiveFrame);
     let knob = tile_widget(&app, filter, widget);
     let live = knob.live.expect("a live value");
     assert!(live > knob.position, "a positive source raises the cutoff: {knob:?}");
@@ -1296,11 +1304,11 @@ fn a_running_engine_lights_the_envelope() {
     app.commit();
     let d = app.session.controller.graph().node(env).unwrap().descriptor;
     let light = d.panel.widgets.iter().position(|w| w.binds("level")).unwrap();
-    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![env.0])));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![env.0])));
     let watch = app.watched_lights().expect("the level light is on screen");
 
     app.process(480);
-    let _ = app.update(Message::Lights(watch.read()));
+    let _ = app.send(Message::Lights(watch.read()));
     assert_eq!(tile_widget(&app, env, light).position, 0.0, "no gate, no level");
 
     app.session.controller.connect_named(gate, "out", env, "gate").unwrap();
@@ -1308,7 +1316,7 @@ fn a_running_engine_lights_the_envelope() {
     app.process(4_800);
     // A level light draws its value as it is, with no fade.
     let mut fades = vec![lights::Fade::default(); watch.lights.len()];
-    let _ = app.update(Message::Lights(watch.shown(&mut fades, Instant::now())));
+    let _ = app.send(Message::Lights(watch.shown(&mut fades, Instant::now())));
     let level = tile_widget(&app, env, light).position;
     assert!(level > 0.5, "the gate is held: {level}");
 }
@@ -1326,7 +1334,7 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     app.commit();
     let d = app.session.controller.graph().node(dynamics).unwrap().descriptor;
     let meter = d.panel.widgets.iter().position(|w| w.binds("reduction")).unwrap();
-    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![dynamics.0])));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![dynamics.0])));
     let watch = app.watched_lights().expect("the meter is on screen");
     let entry = watch
         .lights
@@ -1365,7 +1373,7 @@ fn a_meter_says_its_value_past_its_range() {
     app.commit();
     let d = app.session.controller.graph().node(dynamics).unwrap().descriptor;
     let meter = d.panel.widgets.iter().position(|w| w.binds("reduction")).unwrap();
-    let _ = app.update(Message::Lights(vec![((dynamics.0, meter), -60.0)]));
+    let _ = app.send(Message::Lights(vec![((dynamics.0, meter), -60.0)]));
     let widget = tile_widget(&app, dynamics, meter);
     assert_eq!(widget.position, 0.0);
     assert_eq!(widget.text, "Reduction: -60.0 dB");
@@ -1592,8 +1600,8 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
     );
     app.undo();
     assert!(app.session.controller.graph().node(duplicate).is_none());
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Unassign(assignment)));
-    let _ = app.update(Message::Learn(crate::learn::Message::Unmap {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Unassign(assignment)));
+    let _ = app.send(Message::Learn(crate::learn::Message::Unmap {
         module: missing.0,
         index: 0,
     }));
@@ -1619,7 +1627,7 @@ fn inspector_shows_nominal_port_ranges() {
     let mut app = app();
     let env = app.session.controller.add_module("loom.env.envelope").unwrap();
     app.commit();
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(env.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(env.0)));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
         panic!("one module is selected");
     };
@@ -1656,7 +1664,7 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
         inspector::ParamMode::Edit { control, .. } => control.clone(),
         inspector::ParamMode::Learn { .. } => panic!("not in learn mode"),
     };
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(button.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(button.0)));
     let params = rows(&app, button);
     let mode = params.iter().find(|p| p.label == "Mode").unwrap();
     assert_eq!(
@@ -1671,7 +1679,7 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
     assert_eq!(control(on), inspector::ParamControl::Slider);
 
     let undo = app.session.edits.history.undo_step().map(|s| s.name().to_string());
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Choice {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Choice {
         module: button.0,
         index: mode.index,
         choice: 1,
@@ -1687,14 +1695,14 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
         undo,
         "one step"
     );
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert_eq!(
         app.session.controller.graph().node(button).unwrap().params[mode.index],
         0.0
     );
 
     // More than four names: a pick list.
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(lfo.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(lfo.0)));
     let shape = rows(&app, lfo).into_iter().find(|p| p.label == "Shape").unwrap();
     let inspector::ParamControl::PickList { choices, selected } = control(&shape) else {
         panic!("five shapes are a pick list: {shape:?}");
@@ -1773,7 +1781,7 @@ fn the_inspector_selects_a_control_range() {
     let mul = app.session.controller.add_module("loom.math.mul").unwrap();
     app.session.controller.set_param(mul, 0, 0.5).unwrap();
     app.commit();
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(mul.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(mul.0)));
     let gain_row = |app: &App| {
         let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
             panic!("one module is selected");
@@ -1785,7 +1793,7 @@ fn the_inspector_selects_a_control_range() {
     assert_eq!(range.choices[0], "-0.1 to 0.1");
     assert_eq!(range.choices[range.selected.unwrap()], "-1 to 1");
 
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Range {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Range {
         module: mul.0,
         index: 0,
         range: 0,
@@ -1829,7 +1837,7 @@ fn the_inspector_selects_a_control_range() {
         "1% of the range"
     );
 
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     let node = app.session.controller.graph().node(mul).unwrap();
     assert_eq!(
         (node.params[0], node.range(0)),
@@ -1838,7 +1846,7 @@ fn the_inspector_selects_a_control_range() {
     // A parameter without ranges has no selector.
     let lfo = app.session.controller.add_module("loom.mod.lfo").unwrap();
     app.commit();
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(lfo.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(lfo.0)));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
         panic!("one module is selected");
     };
@@ -1863,7 +1871,7 @@ fn a_one_sample_trigger_lights_the_divide_light() {
     app.commit();
     let d = app.session.controller.graph().node(divide).unwrap().descriptor;
     let light = d.panel.widgets.iter().position(|w| w.binds("fired")).unwrap();
-    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![divide.0])));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![divide.0])));
     let watch = app.watched_lights().expect("the trigger light is on screen");
 
     // The constant's rise is one trigger in the first frame, then 4 799
@@ -1871,12 +1879,12 @@ fn a_one_sample_trigger_lights_the_divide_light() {
     app.process(4_800);
     let start = Instant::now();
     let mut fades = vec![lights::Fade::default(); watch.lights.len()];
-    let _ = app.update(Message::Lights(watch.shown(&mut fades, start)));
+    let _ = app.send(Message::Lights(watch.shown(&mut fades, start)));
     assert_eq!(tile_widget(&app, divide, light).position, 1.0, "the trigger lit it");
 
     app.process(4_800);
     let later = start + lights::FADE;
-    let _ = app.update(Message::Lights(watch.shown(&mut fades, later)));
+    let _ = app.send(Message::Lights(watch.shown(&mut fades, later)));
     assert_eq!(
         tile_widget(&app, divide, light).position,
         0.0,
@@ -1902,13 +1910,13 @@ fn a_running_engine_fills_the_meter() {
     let d = app.session.controller.graph().node(meter).unwrap().descriptor;
     let widget = d.panel.widgets.iter().position(|w| w.binds("out")).unwrap();
     // On screen, so the meter gets a probe.
-    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![meter.0])));
-    let _ = app.update(Message::Meters(app.session.engine.monitor.read()));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![meter.0])));
+    let _ = app.send(Message::Meters(app.session.engine.monitor.read()));
     let before = tile_widget(&app, meter, widget);
     assert_eq!((before.position, before.peak), (0.0, 0.0), "the engine has not run");
 
     app.process(4_800);
-    let _ = app.update(Message::Meters(app.session.engine.monitor.read()));
+    let _ = app.send(Message::Meters(app.session.engine.monitor.read()));
     let shown = tile_widget(&app, meter, widget);
     assert_eq!(shown.kind, "meter");
     assert!(shown.position > 0.0, "a level: {shown:?}");
@@ -1937,7 +1945,7 @@ fn a_mapped_control_change_turns_the_knob() {
         let change = loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value]);
         assert!(loom_host_desktop::send_midi(&midi, change));
         app.process(128);
-        let _ = app.update(Message::Midi);
+        let _ = app.send(Message::Midi);
         let knob = tile_widget(&app, filter, widget);
         assert_eq!(knob.position, position, "CC 74 at {value}: {knob:?}");
         let param = app.session.controller.graph().node(filter).unwrap().params[cutoff];
@@ -1973,10 +1981,10 @@ fn the_run_toggle_follows_a_cable_on_run() {
         "the toggle shows the input"
     );
     assert_eq!(run_param(&app), 1.0, "Run itself is unchanged");
-    let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+    let _ = app.send(Message::Canvas(CanvasEvent::ToggleRun));
     assert_eq!(run_param(&app), 1.0, "Space leaves a driven Run alone");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
+    let _ = app.send(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
         module: transport.0,
         output: false,
         index: 0,
@@ -1984,7 +1992,7 @@ fn the_run_toggle_follows_a_cable_on_run() {
     assert_eq!(run_param(&app), 0.0, "the toggle takes the state the input left");
     app.process(1024);
     assert_eq!(transport_running(&app.session.controller), Some(false), "still stopped");
-    let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+    let _ = app.send(Message::Canvas(CanvasEvent::ToggleRun));
     app.process(1024);
     assert_eq!(
         transport_running(&app.session.controller),
@@ -1993,7 +2001,7 @@ fn the_run_toggle_follows_a_cable_on_run() {
     );
 
     // Delete leaves the Transport, and a second one is refused.
-    let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![transport.0, button.0])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Delete(vec![transport.0, button.0])));
     assert_eq!(app.session.controller.transport_module(), Some(transport));
     assert!(app.session.controller.graph().node(button).is_none());
     assert!(app.session.controller.add_module(TRANSPORT_MODULE).is_err());
@@ -2023,7 +2031,7 @@ fn a_loaded_run_cable_hands_its_state_to_the_toggle() {
     let (transport, run) = transport_run(&app.session.controller).expect("the patch has a Transport");
     app.process(2048);
     assert_eq!(transport_running(&app.session.controller), Some(false));
-    let _ = app.update(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
+    let _ = app.send(Message::Canvas(CanvasEvent::Disconnect(loom_canvas::PortRef {
         module: transport.0,
         output: false,
         index: 0,
@@ -2052,7 +2060,7 @@ fn the_transport_position_moves_only_while_running() {
     // frame the engine ran.
     let bar_phase = |app: &mut App, frames: usize| {
         app.process(frames);
-        let _ = app.update(Message::LiveFrame);
+        let _ = app.send(Message::LiveFrame);
         let knob = tile_widget(app, filter, widget);
         knob.live.expect("a live value") - knob.position
     };
@@ -2070,11 +2078,11 @@ fn the_transport_position_moves_only_while_running() {
         app.session.controller.graph().node(id).unwrap().params[index] >= 0.5
     };
     assert!(run_on(&app));
-    let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+    let _ = app.send(Message::Canvas(CanvasEvent::ToggleRun));
     assert!(!run_on(&app));
     assert!(bar_phase(&mut app, 4_800).abs() < 1e-6, "stopped at bar 1");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+    let _ = app.send(Message::Canvas(CanvasEvent::ToggleRun));
     assert!(run_on(&app));
     let first = bar_phase(&mut app, 4_800);
     assert!((first - expected(4_800)).abs() < 1e-4, "{first} vs {}", expected(4_800));
@@ -2085,7 +2093,7 @@ fn the_transport_position_moves_only_while_running() {
         expected(9_600)
     );
 
-    let _ = app.update(Message::Canvas(CanvasEvent::ToggleRun));
+    let _ = app.send(Message::Canvas(CanvasEvent::ToggleRun));
     let held = bar_phase(&mut app, 4_800);
     assert!(
         (held - expected(9_600)).abs() < 1e-4,
@@ -2113,14 +2121,14 @@ fn removed_probes_lose_their_levels() {
             peak: 0.6,
             right: None,
         };
-        let _ = app.update(Message::Meters(vec![(probe, level)]));
+        let _ = app.send(Message::Meters(vec![(probe, level)]));
         assert_eq!(app.session.meter_levels.len(), 1);
 
         app.session.engine.live.set_activity(false);
         app.sync_probes();
         assert!(app.session.meter_levels.is_empty(), "{:?}", app.session.meter_levels);
         // A late reading for the removed probe is ignored.
-        let _ = app.update(Message::Meters(vec![(probe, level)]));
+        let _ = app.send(Message::Meters(vec![(probe, level)]));
         assert!(app.session.meter_levels.is_empty());
     }
 }
@@ -2140,12 +2148,12 @@ fn the_snapshot_shows_the_inspector_rows() {
         .find(|(_, a)| a.source == out(sine))
         .unwrap()
         .0;
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Enabled {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Enabled {
         id: off,
         enabled: false,
     }));
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(filter.0)));
-    let _ = app.update(Message::Modulation(crate::modulation::Message::AddModulation {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(filter.0)));
+    let _ = app.send(Message::Modulation(crate::modulation::Message::AddModulation {
         module: filter.0,
         index: cutoff,
     }));
@@ -2181,7 +2189,7 @@ fn the_snapshot_shows_the_inspector_rows() {
     assert!(pickable.iter().any(|&(_, enabled)| enabled), "{pickable:?}");
     assert!(rows.drives.is_empty(), "the filter drives nothing");
 
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(sine.0)));
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(sine.0)));
     let inspector::Inspector::Module(rows) = app.ui_snapshot().inspector else {
         panic!("the sine is selected");
     };
@@ -2255,7 +2263,7 @@ fn app_with_filter() -> (App, u32, usize) {
 /// Turns the filter's Cutoff with the inspector slider.
 fn slide(app: &mut App, module: u32, index: usize, values: &[f32]) {
     for &value in values {
-        let _ = app.update(Message::Inspector(crate::inspector::Message::ParamValue {
+        let _ = app.send(Message::Inspector(crate::inspector::Message::ParamValue {
             module,
             index,
             value,
@@ -2283,39 +2291,39 @@ fn pending_arrow_group_yields_to_undo_and_inspector() {
     let original = app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
     let set = |app: &mut App, position| {
         let at = std::time::Instant::now();
-        let _ = app.update(Message::Canvas(CanvasEvent::ArrowStep { at }));
-        let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+        let _ = app.send(Message::Canvas(CanvasEvent::ArrowStep { at }));
+        let _ = app.send(Message::Canvas(CanvasEvent::SetControl {
             module,
             widget,
             position,
             part: loom_canvas::ControlPart::Main,
         }));
-        let _ = app.update(Message::Canvas(CanvasEvent::ArrowReleased { at }));
+        let _ = app.send(Message::Canvas(CanvasEvent::ArrowReleased { at }));
     };
     let value = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff];
 
     set(&mut app, 0.6);
     assert!(app.session.edits.gesture_open());
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert_eq!(value(&app), original, "Undo must act before the 500 ms timer");
     assert!(!app.session.edits.gesture_open());
-    let _ = app.update(Message::Redo);
+    let _ = app.send(Message::Redo);
     assert_ne!(value(&app), original, "Redo must also act before the timer");
-    let _ = app.update(Message::Undo);
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupEnd));
+    let _ = app.send(Message::Undo);
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupEnd));
     assert!(!app.session.edits.gesture_open());
 
     set(&mut app, 0.7);
     let arrow_value = value(&app);
     slide(&mut app, module, cutoff, &[800.0, 900.0]);
     assert!(app.session.edits.slider_gesture_open());
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupEnd));
     assert!(
         app.session.edits.slider_gesture_open(),
         "late arrow end must leave the slider open"
     );
-    let _ = app.update(Message::SliderReleased);
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::SliderReleased);
+    let _ = app.send(Message::Undo);
     assert_eq!(value(&app), arrow_value, "slider and arrow are separate steps");
 }
 
@@ -2348,9 +2356,9 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
         },
         CanvasEvent::ArrowReleased { at },
     ] {
-        let _ = app.update(Message::Canvas(event));
+        let _ = app.send(Message::Canvas(event));
     }
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert_eq!(
         app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
         original
@@ -2369,11 +2377,11 @@ fn arrow_resumed_after_undo_starts_a_new_step() {
         CanvasEvent::ArrowReleased { at },
         CanvasEvent::EditGroupEnd,
     ] {
-        let _ = app.update(Message::Canvas(event));
+        let _ = app.send(Message::Canvas(event));
     }
     assert_eq!(app.session.edits.history.len(), 1, "the undone step was replaced");
     assert!(!app.session.edits.gesture_open());
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert_eq!(
         app.session.controller.graph().node(ModuleId(module)).unwrap().params[cutoff],
         original
@@ -2391,20 +2399,20 @@ fn an_inspector_slider_gesture_closes_at_release_at_the_next_edit_and_at_undo() 
     // Release.
     slide(&mut app, filter, cutoff, &[500.0, 600.0, 700.0]);
     assert!(app.session.edits.slider_gesture_open());
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     assert!(!app.session.edits.gesture_open());
     assert_eq!(app.session.edits.history.len(), steps + 1, "one drag, one step");
 
     // The next edit, here a canvas gesture start.
     slide(&mut app, filter, cutoff, &[800.0, 900.0]);
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureStart));
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureStart));
     assert!(!app.session.edits.slider_gesture_open());
     assert_eq!(
         app.session.edits.history.len(),
         steps + 2,
         "the start closed the slider's step"
     );
-    let _ = app.update(Message::Canvas(CanvasEvent::GestureEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::GestureEnd));
     assert_eq!(
         app.session.edits.history.len(),
         steps + 2,
@@ -2413,7 +2421,7 @@ fn an_inspector_slider_gesture_closes_at_release_at_the_next_edit_and_at_undo() 
 
     // Undo, which takes back the slider's step it closes.
     slide(&mut app, filter, cutoff, &[1000.0]);
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert!(!app.session.edits.gesture_open());
     let value = app.session.controller.graph().node(ModuleId(filter)).unwrap().params[cutoff];
     assert_eq!(value, 900.0, "undo took back the slider's last step");
@@ -2438,10 +2446,10 @@ fn a_release_clears_the_hold_after_a_mode_change() {
     let held = |app: &App| app.session.controller.graph().node(id).unwrap().params[hold];
 
     app.session.controller.set_param(id, mode, 1.0).unwrap();
-    let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
+    let _ = app.send(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
     assert_eq!(held(&app), 1.0, "the hold is down");
     app.session.controller.set_param(id, mode, 0.0).unwrap();
-    let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
+    let _ = app.send(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
     assert_eq!(held(&app), 0.0, "the release let go of the hold");
     app.session.controller.set_param(id, mode, 1.0).unwrap();
     assert_eq!(held(&app), 0.0, "Momentary mode comes back released");
@@ -2465,10 +2473,10 @@ fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
     let hold = node.descriptor.param_index("hold").unwrap();
     let (module, widget) = (id.0, 0);
     let press = |app: &mut App, param: usize, release: bool| {
-        let _ = app.update(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
+        let _ = app.send(Message::Canvas(CanvasEvent::ButtonPressed { module, widget }));
         let held = app.session.controller.graph().node(id).unwrap().params[param];
         if release {
-            let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
+            let _ = app.send(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
         }
         held
     };
@@ -2478,7 +2486,7 @@ fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
     let steps = app.session.edits.history.len();
     assert_eq!(press(&mut app, hold, false), 1.0, "the hold is down");
     assert_eq!(app.session.edits.history.len(), steps, "a momentary press is no step");
-    let _ = app.update(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
+    let _ = app.send(Message::Canvas(CanvasEvent::ButtonReleased { module, widget }));
     assert_eq!(app.session.controller.graph().node(id).unwrap().params[hold], 0.0);
     assert_eq!(app.session.edits.history.len(), steps, "nor is its release");
 
@@ -2498,7 +2506,7 @@ fn a_momentary_hold_makes_no_step_and_a_toggle_press_does() {
 #[test]
 fn new_says_it_started_an_empty_patch() {
     let (mut app, id, _) = app_with_filter();
-    let _ = app.update(Message::File(FileAction::New));
+    let _ = app.send(Message::File(FileAction::New));
     assert_eq!(app.alerts.status(), "new patch");
     let filters = app
         .session
@@ -2514,7 +2522,7 @@ fn new_says_it_started_an_empty_patch() {
 #[test]
 fn an_unbundled_help_link_says_so() {
     let mut app = app();
-    let _ = app.update(Message::HelpLink("nowhere.md".to_string()));
+    let _ = app.send(Message::HelpLink("nowhere.md".to_string()));
     assert!(app.overlays.help.is_none());
     assert_eq!(app.alerts.status(), "Linked document is not bundled: nowhere.md");
 }
@@ -2524,10 +2532,10 @@ fn an_unbundled_help_link_says_so() {
 #[test]
 fn learn_disarms_on_a_second_click_and_bad_params_say_why() {
     let (mut app, id, cutoff) = app_with_filter();
-    let _ = app.update(Message::Learn(learn::Message::Toggle));
-    let _ = app.update(Message::Learn(learn::Message::Arm((id, cutoff))));
+    let _ = app.send(Message::Learn(learn::Message::Toggle));
+    let _ = app.send(Message::Learn(learn::Message::Arm((id, cutoff))));
     assert!(app.session.learn.is_armed((id, cutoff)));
-    let _ = app.update(Message::Learn(learn::Message::Arm((id, cutoff))));
+    let _ = app.send(Message::Learn(learn::Message::Arm((id, cutoff))));
     assert!(!app.session.learn.is_armed((id, cutoff)));
     assert_eq!(app.alerts.status(), "MIDI learn: click a control to map it");
 
@@ -2544,8 +2552,8 @@ fn learn_disarms_on_a_second_click_and_bad_params_say_why() {
 #[test]
 fn the_matrix_add_form_needs_a_source_and_a_target() {
     let (mut app, _, _) = app_with_filter();
-    let _ = app.update(Message::Matrix(matrix::Event::AddOpen));
-    let _ = app.update(Message::Matrix(matrix::Event::AddApply));
+    let _ = app.send(Message::Matrix(matrix::Event::AddOpen));
+    let _ = app.send(Message::Matrix(matrix::Event::AddApply));
     assert_eq!(app.alerts.status(), "Choose a source and a target");
     assert!(app.session.controller.graph().assignments().next().is_none());
 }
@@ -2581,7 +2589,7 @@ fn a_full_patch_refuses_duplicate_and_undo() {
     // Something else takes the freed slot.
     app.session.controller.add_module("loom.osc.saw").unwrap();
     assert!(app.commit());
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert!(
         app.alerts.status().starts_with("Cannot undo "),
         "{}",
@@ -2598,7 +2606,7 @@ fn a_broken_help_example_says_why() {
     let mut help = help::Help::new(descriptor);
     help.model.example = Some("not a patch".to_string());
     app.overlays.help = Some(help);
-    let _ = app.update(Message::HelpExample);
+    let _ = app.send(Message::HelpExample);
     assert!(
         app.alerts.status().starts_with("Could not open example: "),
         "{}",
@@ -2658,7 +2666,7 @@ fn a_panic_that_cannot_be_sent_says_so() {
         status.starts_with("Panic: ") && !status.contains("every note"),
         "{status}"
     );
-    let _ = app.update(Message::Tick);
+    let _ = app.send(Message::Tick);
     app.panic();
     assert!(
         app.alerts.status().starts_with("Panic: every note"),
@@ -2777,7 +2785,7 @@ fn typing_in_authors(over_canvas: bool) -> crate::ui_test::Ui {
     let mut ui = crate::ui_test::Ui::open("sine.ron");
     let _ = ui
         .app
-        .update(Message::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
+        .send(Message::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
     ui.redraw();
     let label = ui.text("Authors, one per line").expect("the patch form shows");
     let field = Point::new(label.center_x(), label.y + label.height + 14.0);

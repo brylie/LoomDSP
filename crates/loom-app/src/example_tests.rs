@@ -61,12 +61,12 @@ fn press_save(ui: &mut Ui) {
 
 /// Turns the filter's cutoff, as a slider would: one undo step.
 fn turn_knob(app: &mut App) {
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position: 0.8,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
 }
 
 /// An example given on the command line opens as an untitled copy, clean
@@ -79,7 +79,7 @@ fn an_example_opens_as_a_clean_untitled_copy() {
     assert!(app.session.document.file().is_none());
     assert!(!app.unsaved());
 
-    let _ = app.update(Message::File(crate::FileAction::Close));
+    let _ = app.send(Message::File(crate::FileAction::Close));
     assert!(app.quit, "a clean copy closes");
     assert_eq!(fake::asked(), Vec::new(), "and asks nothing");
 }
@@ -148,7 +148,7 @@ fn opening_an_example_from_a_file_gives_a_copy() {
     assert_eq!(app.ui_snapshot().title, "subtractive (example) - LoomDSP");
 
     turn_knob(&mut app);
-    let _ = app.update(Message::File(crate::FileAction::Close));
+    let _ = app.send(Message::File(crate::FileAction::Close));
     assert_eq!(
         app.ui_snapshot().question.unwrap().title,
         "Save changes to \"subtractive (example)\"?"

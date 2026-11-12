@@ -16,7 +16,7 @@ fn run(app: &mut App, line: &str) -> Answer {
         if let Ok(answer) = receiver.try_recv() {
             return answer;
         }
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
         if app.control_waiting() {
             std::thread::sleep(Duration::from_millis(16));
         }
@@ -121,7 +121,7 @@ fn serve_script(app: &mut App, script: &'static str, vars: &'static [(&'static s
         if let Ok(call) = rx.try_recv() {
             let _ = app.control(call);
         }
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
         std::thread::sleep(Duration::from_millis(1));
     }
     String::from_utf8(client.join().unwrap())
@@ -624,7 +624,7 @@ fn sample_follows_a_live_value_frame_by_frame() {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(env),
             port: 0,
@@ -677,7 +677,7 @@ fn sample_reads_the_named_value_of_a_two_value_widget() {
         .spec(node.descriptor.param_index("pad_y").unwrap())
         .unwrap()
         .normalize(1_000.0);
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(env),
             port: 0,
@@ -725,11 +725,11 @@ fn removing_the_sampled_module_ends_the_sample() {
     };
     let _ = app.control(call);
     for _ in 0..=FRAMES_BEFORE_ANSWER {
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
     }
     assert!(receiver.try_recv().is_err(), "still sampling");
-    let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![4])));
-    let _ = app.update(Message::ControlFrame(Instant::now()));
+    let _ = app.send(Message::Canvas(CanvasEvent::Delete(vec![4])));
+    let _ = app.send(Message::ControlFrame(Instant::now()));
     let error = receiver.try_recv().unwrap().unwrap_err();
     assert!(error.contains("removed while sampling"), "{error}");
     assert!(!app.control_waiting());
@@ -778,7 +778,7 @@ fn run_playing(app: &mut App, line: &str) -> Answer {
             return answer;
         }
         app.run_engine(sound);
-        let _ = app.update(Message::ControlFrame(now));
+        let _ = app.send(Message::ControlFrame(now));
         now += TEST_FRAME;
     }
     receiver.try_recv().expect("answered")
@@ -848,7 +848,7 @@ fn opening_a_patch_ends_a_running_sample() {
     };
     let _ = app.control(call);
     for _ in 0..=FRAMES_BEFORE_ANSWER {
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
     }
     assert!(receiver.try_recv().is_err(), "still sampling");
     // Module 4 of this patch also has a `resonance` control.
@@ -960,7 +960,7 @@ fn opening_a_patch_keeps_waiting_answers() {
     let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/sine.ron");
     assert!(app.replace(crate::Source::File(&patch)));
     for _ in 0..FRAMES_BEFORE_ANSWER {
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
     }
     assert_eq!(receiver.try_recv(), Ok(Ok(Map::new())));
 }
@@ -1011,7 +1011,7 @@ fn pointer_ui() -> crate::ui_test::Ui {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = ui.app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(5),
             port: 0,
@@ -1046,7 +1046,7 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
             return (answer, messages);
         }
         messages.extend(ui.redraw());
-        let task = ui.app.update(Message::ControlFrame(Instant::now()));
+        let task = ui.app.send(Message::ControlFrame(Instant::now()));
         messages.extend(ui.run_task(task));
     }
     (receiver.try_recv().expect("answered after drawing"), messages)
@@ -1060,7 +1060,7 @@ fn a_script_reads_the_typed_field_from_the_snapshot() {
     ui.app.commit();
     let _ = ui
         .app
-        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let at = ui.control(id.0, "cutoff");
     ui.move_to(at);
@@ -1200,7 +1200,7 @@ fn a_script_drags_an_output_onto_an_inspector_row() {
     let mut ui = pointer_ui();
     let _ = ui
         .app
-        .update(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
     ui.redraw();
     let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
     let before = ui.app.session.controller.graph().assignments().count();
@@ -1236,7 +1236,7 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
     let mut answer = None;
     for _ in 0..50 {
         ui.redraw();
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+        let _ = ui.app.send(Message::ControlFrame(Instant::now()));
         if let Ok(a) = receiver.try_recv() {
             answer = Some(a);
             break;
@@ -1421,7 +1421,7 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
         ui.text("no device (clock) at 48000 Hz").is_some(),
         "the bar shows the clock"
     );
-    let _ = ui.app.update(Message::OpenBrowser);
+    let _ = ui.app.send(Message::OpenBrowser);
     ui.redraw();
     assert!(ui.app.overlays.browser().is_some());
     run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#).unwrap();
@@ -1536,7 +1536,7 @@ fn a_scripted_press_routes_as_a_real_one_for_each_overlay() {
 #[test]
 fn type_filters_the_open_browser() {
     let mut ui = typing_ui();
-    let _ = ui.app.update(Message::OpenBrowser);
+    let _ = ui.app.send(Message::OpenBrowser);
     ui.redraw();
     ui.focus(crate::browser::INPUT);
     let before = ui.app.overlays.browser().unwrap().results().len();
@@ -2028,7 +2028,7 @@ fn a_script_types_an_exact_value() {
     ui.step(&[]);
     let _ = ui
         .app
-        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let target = format!("{}:cutoff", id.0);
     run_ui(&mut ui, &format!(r#"{{"cmd": "hover", "target": "{target}"}}"#)).unwrap();

@@ -160,7 +160,7 @@ impl Run {
 
     /// Presses Hold note.
     fn hold(&mut self) {
-        let _ = self.app.update(Message::HoldNote);
+        let _ = self.app.send(Message::HoldNote);
         assert!(self.app.session.engine.holding, "the note is held");
     }
 
@@ -344,7 +344,7 @@ fn no_click_on_quit() {
     run.play(0.5);
     let switch = run.tape.len();
     run.app.quit = true;
-    let _ = run.app.update(Message::Tick);
+    let _ = run.app.send(Message::Tick);
     assert!(!run.tape.is_playing(), "the stream stopped");
     let left = run.left();
     assert!(left.len() > switch, "the fade-out was played");
@@ -414,7 +414,7 @@ fn record_covers_the_whole_run() {
     run.open("sine.ron");
     run.play(0.3);
     run.app.quit = true;
-    let _ = run.app.update(Message::Tick);
+    let _ = run.app.send(Message::Tick);
     assert_eq!(run.tape.stream_starts().len(), 3);
     let path = run.dir.join("run.wav");
     let tape = run.left();
@@ -506,7 +506,7 @@ fn a_failed_device_change_keeps_the_recording() {
     run.play(0.2);
     assert_eq!(run.tape.stream_starts().len(), 2, "Fake A plays again");
     run.app.quit = true;
-    let _ = run.app.update(Message::Tick);
+    let _ = run.app.send(Message::Tick);
     drop(run.app.rig.recorder.take());
     let audio = loom_analysis::read_wav(&run.dir.join("run.wav")).unwrap();
     assert_eq!(audio.channels[0], run.left(), "both streams are in the file");
@@ -1068,14 +1068,14 @@ fn a_slot_swap_during_playback_has_no_click() {
     let mut run = Setup::new("slot_swap", PatchFrom::Text(NOISE_SLOT)).start();
     run.play(0.5);
     let switch = run.left().len();
-    let _ = run.app.update(Message::SwapSlot {
+    let _ = run.app.send(Message::SwapSlot {
         slot: 9,
         to: crate::slots::SwapTarget::Module("loom.filter.ladder@1".to_string()),
     });
     assert_eq!(run.app.alerts.status(), "Swapped Filter to Ladder.");
     run.play(0.1);
     // A tick finishes the fade once every fade reports done.
-    let _ = run.app.update(Message::Tick);
+    let _ = run.app.send(Message::Tick);
     assert!(
         run.app.session.hierarchy.fading_slots().is_empty(),
         "the fade finished after 100 ms of audio"

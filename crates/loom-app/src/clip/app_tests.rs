@@ -19,9 +19,7 @@ fn with_meter() -> (Ui, u32) {
 
 /// Tells the app that only this module's displays are on screen.
 fn show(ui: &mut Ui, module: u32) {
-    let _ = ui
-        .app
-        .update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![module])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![module])));
 }
 
 /// Sends a peak on the meter's current probe, as the telemetry thread does.
@@ -39,7 +37,7 @@ fn send_peak(ui: &mut Ui, meter: u32, peak: f32) {
         bad: false,
         after,
     };
-    let _ = ui.app.update(Message::Telemetry(Update {
+    let _ = ui.app.send(Message::Telemetry(Update {
         peaks: vec![(probe, news)],
         ..Update::default()
     }));
@@ -152,7 +150,7 @@ fn the_state_survives_panning_away() {
     let (mut ui, meter) = with_meter();
     send_peak(&mut ui, meter, 2.0);
     let first = ui.app.session.engine.live.probe(output(&ui, meter)).unwrap();
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
     show(&mut ui, meter);
     let second = ui.app.session.engine.live.probe(output(&ui, meter)).unwrap();
     assert_ne!(first, second, "a new probe");
@@ -178,7 +176,7 @@ fn a_peak_from_before_a_reset_is_dropped() {
         after: ui.app.peak_resets()[&probe],
     };
     ui.app.reset_clip((meter, 0), true);
-    let _ = ui.app.update(Message::Telemetry(Update {
+    let _ = ui.app.send(Message::Telemetry(Update {
         peaks: vec![(probe, old)],
         ..Update::default()
     }));
@@ -228,7 +226,7 @@ fn the_inspector_resets_it() {
 #[test]
 fn other_modules_have_no_reset_button() {
     let mut ui = Ui::open("sine.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![3])));
     ui.redraw();
     assert!(ui.text("Reset clip").is_none());
 }
@@ -255,7 +253,7 @@ fn a_reset_of_one_meter_keeps_a_clip_on_another() {
     ui.redraw();
     let _ = ui
         .app
-        .update(Message::Canvas(CanvasEvent::VisibleDisplays(vec![first, second])));
+        .send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![first, second])));
     let probe = ui.app.session.engine.live.probe(output(&ui, second)).unwrap();
     let news = PeakNews {
         peak: 2.0,
@@ -263,7 +261,7 @@ fn a_reset_of_one_meter_keeps_a_clip_on_another() {
         after: ui.app.peak_resets()[&probe],
     };
     ui.app.reset_clip((first, 0), false);
-    let _ = ui.app.update(Message::Telemetry(Update {
+    let _ = ui.app.send(Message::Telemetry(Update {
         peaks: vec![(probe, news)],
         ..Update::default()
     }));
