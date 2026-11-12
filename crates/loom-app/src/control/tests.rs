@@ -2396,6 +2396,41 @@ fn locate_takes_a_ui_id_as_text() {
     assert!(locate(&ui.app, "pads/warm", &found).unwrap_err().contains("text"));
 }
 
+/// An overlay's UI ID is taken for one: `question/cancel` finds the
+/// Cancel answer, not the text "question/cancel".
+#[test]
+fn locate_takes_an_overlay_ui_id() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app.overlays.question = Some(crate::question::Question::discard(
+        "Patch".to_string(),
+        crate::question::AfterDiscard::New,
+    ));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let found = Found {
+        canvas: places.canvas,
+        text: None,
+        places,
+    };
+    let cancel = locate(&ui.app, "question/cancel", &found).unwrap();
+    let label = ui.text("Cancel").expect("the question shows Cancel");
+    assert!(cancel.contains(label.center()), "the answer holds its label");
+
+    // The module browser's parts are found by UI ID too.
+    ui.app.overlays.question = None;
+    ui.send(Message::OpenBrowser);
+    let _ = ui.redraw();
+    let places = ui.places();
+    let found = Found {
+        canvas: places.canvas,
+        text: None,
+        places,
+    };
+    let search = locate(&ui.app, "browser/search", &found).unwrap();
+    let browser = locate(&ui.app, "browser", &found).unwrap();
+    assert!(browser.contains(search.center()), "the field is in the browser");
+}
+
 /// A part that is scrolled out of view is not located: a pointer sent
 /// there would land on something else.
 #[test]

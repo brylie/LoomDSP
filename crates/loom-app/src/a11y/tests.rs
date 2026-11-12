@@ -3732,7 +3732,11 @@ fn the_question_reports_its_highlight_and_takes_a_screen_reader_answer() {
     );
     let root = node(&update, node_of(&mut ui.app, &crate::overlays::access::question_id()));
     assert_eq!(root.role(), Role::AlertDialog);
-    assert_eq!(root.description(), Some(model.text.as_str()));
+    // The sentence is heard as a text's value, not as a description a
+    // screen reader may never say.
+    assert_eq!(root.description(), None);
+    let text = node_of(&mut ui.app, &crate::overlays::access::question_id().with("text"));
+    assert_eq!(node(&update, text).value(), Some(model.text.as_str()));
     let cancel = node_of(&mut ui.app, &crate::overlays::access::answer_id("cancel"));
     ui.send(Message::A11y(Event::Action(request(Action::Click, cancel, None))));
     assert!(ui.app.overlays.question.is_none(), "Cancel answered it");
@@ -3753,6 +3757,24 @@ fn only_the_overlay_that_owns_the_input_is_reported() {
     let frames = ui.app.a11y_frames();
     assert_eq!(frames.overlay.len(), 1);
     assert_eq!(frames.overlay[0].id, crate::overlays::access::help_id());
+}
+
+/// The menu key opens the selected tile's menu with the pointer anywhere,
+/// but never under an overlay that owns the input, such as help.
+#[test]
+fn the_menu_key_opens_no_tile_menu_under_help() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let _ = ui.tap(Key::Named(Named::ContextMenu), Modifiers::empty());
+    assert_eq!(ui.app.overlays.tile_menu().map(|(module, _)| module), Some(4));
+    ui.app.overlays.close_tile_menu();
+    ui.app.overlays.help = Some(crate::help::Help::shortcuts());
+    let _ = ui.redraw();
+    let _ = ui.tap(Key::Named(Named::ContextMenu), Modifiers::empty());
+    assert!(ui.app.overlays.tile_menu().is_none(), "help keeps the key");
+    assert!(ui.app.overlays.help.is_some());
 }
 
 /// A tile's node offers ShowContextMenu, which opens the tile's menu at the

@@ -4295,6 +4295,16 @@ fn the_menu_key_and_shift_f10_open_the_tile_menu() {
             [(3, at)],
             "{key:?}: the selected tile's menu, at its corner"
         );
+        // The key acts on the selection, not the pointer, so it works with
+        // the pointer off the canvas.
+        let mut state = CanvasInput::default();
+        let away = drive(
+            &CanvasModel::new(&scene, &on_second),
+            &mut state,
+            &press(key, modifiers),
+            Point::new(900.0, 700.0),
+        );
+        assert_eq!(menus(&away).len(), 1, "{key:?}: no pointer over the canvas");
 
         let on_first = BTreeSet::from([2]);
         let mut state = CanvasInput::default();
@@ -4310,6 +4320,16 @@ fn the_menu_key_and_shift_f10_open_the_tile_menu() {
         let mut state = CanvasInput::default();
         let nothing = host_event(&CanvasModel::new(&scene, &none), &mut state, &press(key, modifiers));
         assert!(menus(&nothing).is_empty(), "no tile to open it for");
+        // With no menu to open, the key is not used, so it is not taken
+        // from the rest of the window.
+        let mut state = CanvasInput::default();
+        let moment = Moment {
+            pointer: None,
+            bounds: Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+            now: Instant::now(),
+        };
+        let unused = state.handle(&CanvasModel::new(&scene, &none), &press(key, modifiers), moment);
+        assert!(!unused.taken, "{key:?}: not taken when no menu opens");
     }
     let mut state = CanvasInput::default();
     let plain = host_event(
