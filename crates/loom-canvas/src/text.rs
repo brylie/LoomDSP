@@ -19,8 +19,8 @@
 //! of a new identity, and the atlas's old images age out.
 
 use crate::painter::{TextStyle, Weight};
+use fontique::{Collection, CollectionOptions, SourceCache};
 use loom_ui_core::Size;
-use parley::fontique::{Collection, CollectionOptions, SourceCache};
 use parley::{
     FontContext, FontData, FontFamily, GenericFamily, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
     StyleProperty,

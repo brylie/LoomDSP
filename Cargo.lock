@@ -2301,6 +2301,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "etagere",
+ "fontique",
  "iced",
  "iced_wgpu",
  "loom-ui-core",

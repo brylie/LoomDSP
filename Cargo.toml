@@ -86,6 +86,11 @@ bytemuck = { version = "1", features = ["derive"] }
 # rule 8). Pinned: Parley breaks its API about every two months, so it is
 # upgraded on purpose, behind our own types.
 parley = "=0.12.0"
+# Parley's font discovery, named here only to turn on `fontconfig-dlopen`:
+# on Linux, fontconfig is loaded when the app runs, not linked when it
+# builds, so a build needs no libfontconfig headers and the binary no hard
+# link. Same version as Parley's, so Cargo unifies the features.
+fontique = { version = "=0.12.0", features = ["fontconfig-dlopen"] }
 # Glyph rasterising and atlas packing for canvas text. Both already in the
 # lock through Iced; listed here so the canvas names its own versions.
 swash = "0.2.10"
