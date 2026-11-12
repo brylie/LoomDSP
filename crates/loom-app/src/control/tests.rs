@@ -2530,3 +2530,31 @@ fn a_crop_takes_the_pixels_of_its_region() {
         [1, 0, 0, 255, 2, 0, 0, 255, 1, 1, 0, 255, 2, 1, 0, 255]
     );
 }
+
+/// A `screenshot` asks for a capture as an effect, and its answer comes
+/// back as `Message::Captured`, which saves and replies. The harness draws
+/// no window, so it answers that there is nothing to capture, and the
+/// reply says so: for the whole window, an area, and a target's area.
+#[test]
+fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
+    let mut ui = pointer_ui();
+    let path = std::env::temp_dir().join(format!("loom-capture-effect-{}.png", std::process::id()));
+    let path = path.display();
+    for line in [
+        format!(r#"{{"cmd": "screenshot", "path": "{path}"}}"#),
+        format!(r#"{{"cmd": "screenshot", "path": "{path}", "rect": [0, 0, 10, 10]}}"#),
+        format!(r#"{{"cmd": "screenshot", "path": "{path}", "target": "4:cutoff", "margin": 4}}"#),
+    ] {
+        let (answer, messages) = drive(&mut ui, &line);
+        assert!(
+            answer.unwrap_err().contains("no window to capture"),
+            "{line}: the harness has no window"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| matches!(message, Message::Captured { .. })),
+            "{line}: the capture's answer is a message"
+        );
+    }
+}

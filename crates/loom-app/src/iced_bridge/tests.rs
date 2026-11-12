@@ -167,3 +167,16 @@ fn a_turns_scrolls_run_one_after_another() {
     assert_eq!(target.take_tasks().len(), 1, "one chained task");
     assert!(target.take_tasks().is_empty(), "and it is taken once");
 }
+
+/// A capture becomes one Iced task, which asks the window for its latest
+/// frame; nothing is answered before Iced runs it.
+#[test]
+fn a_capture_becomes_an_iced_task() {
+    let (sender, inbox) = std::sync::mpsc::channel();
+    let waker = Waker::new(sender, std::sync::Arc::new(|| {}));
+    let mut driver = IcedDriver::default();
+    let reply = loom_ui::effect::Reply::new(|_image: Result<Image, NoGpu>| Message::BenchDone);
+    loom_ui::Driver::<Message>::capture(&mut driver, reply, &waker);
+    assert_eq!(driver.tasks.len(), 1);
+    assert!(inbox.try_recv().is_err(), "the answer waits for Iced");
+}
