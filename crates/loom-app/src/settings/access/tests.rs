@@ -21,7 +21,7 @@ fn open(name: &str, fake: Fake) -> (App, Rc<Fake>) {
         },
         ..crate::tests::app_args()
     };
-    let mut app = App::boot_with(args, &mut crate::recovery::Dialogs, Rc::new(fake::Shared(fake.clone())));
+    let mut app = App::boot_with(args, Rc::new(fake::Shared(fake.clone())));
     app.preferences(Message::Open);
     (app, fake)
 }
@@ -44,7 +44,7 @@ fn part<'a>(window: &'a Item, id: &UiId) -> &'a Item {
 fn step_up(app: &mut App, key: &str) {
     let window = dialog(app);
     let up = part(&window, &preferences_id().with(key)).step.0.clone();
-    let _ = app.update(up.unwrap_or_else(|| panic!("{key} steps up")));
+    let _ = app.send(up.unwrap_or_else(|| panic!("{key} steps up")));
 }
 
 /// The window is a dialog named "Preferences", with its parts in screen
@@ -171,7 +171,7 @@ fn a_device_that_fails_is_said_and_stepped_past() {
 fn the_name_field_saves_what_a_screen_reader_sets() {
     let (mut app, _) = open("author", Fake::new(&[fake::device("Fake A")], &[]));
     for message in SetText::PreferencesAuthor.messages("Ada") {
-        let _ = app.update(message);
+        let _ = app.send(message);
     }
     assert_eq!(app.rig.store.saved().author, "Ada");
     assert_eq!(
@@ -223,7 +223,7 @@ fn a_step_back_from_a_failed_device_goes_on_down() {
     let down = |app: &mut App| {
         let window = dialog(app);
         let down = part(&window, &preferences_id().with("device")).step.1.clone();
-        let _ = app.update(down.expect("the device list steps down"));
+        let _ = app.send(down.expect("the device list steps down"));
     };
     down(&mut app);
     assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));

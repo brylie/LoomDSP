@@ -2426,8 +2426,8 @@ fn locate_takes_an_overlay_ui_id() {
     assert!(browser.contains(search.center()), "the field is in the browser");
 
     // Preferences' parts, and the chooser's over it, too.
-    let _ = ui.app.update(Message::Browser(crate::browser::Message::Close));
-    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.app.send(Message::Browser(crate::browser::Message::Close));
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
     let found = Found {
         canvas: None,
@@ -2439,7 +2439,7 @@ fn locate_takes_an_overlay_ui_id() {
     assert!(close.contains(label.center()), "the button holds its label");
     let _ = ui
         .app
-        .update(Message::Preferences(crate::settings::Message::ChooseLicence));
+        .send(Message::Preferences(crate::settings::Message::ChooseLicence));
     let _ = ui.redraw();
     let found = Found {
         canvas: None,

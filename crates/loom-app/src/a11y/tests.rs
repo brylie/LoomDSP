@@ -4374,14 +4374,14 @@ fn with_every_view() -> Vec<(String, crate::ui_test::Ui)> {
         .map(|(owner, ui)| (format!("{owner:?}"), ui))
         .collect();
     let (mut app, module, _) = app_with_filter();
-    let _ = app.update(Message::Preferences(crate::settings::Message::Open));
-    let _ = app.update(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let _ = app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = app.send(Message::Preferences(crate::settings::Message::ChooseLicence));
     let mut ui = crate::ui_test::Ui::with_app(app);
     let _ = ui.redraw();
     all.push(("chooser over Preferences".to_string(), ui));
     for tab in [crate::matrix::Tab::Inspector, crate::matrix::Tab::Matrix] {
         let (mut app, _, _) = app_with_filter();
-        let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+        let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
         app.right_tab = tab;
         let mut ui = crate::ui_test::Ui::with_app(app);
         let _ = ui.redraw();
@@ -4495,7 +4495,7 @@ fn the_chooser_over_preferences_hides_it_until_it_closes() {
     use crate::licence_chooser::access::licence_id;
     use crate::settings::access::preferences_id;
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
     let frames = ui.app.a11y_frames();
     assert_eq!(frames.overlay[0].id, preferences_id());
@@ -4550,7 +4550,7 @@ fn a_licence_from_the_chooser_adds_no_undo_step() {
     let steps = ui.app.session.edits.history.len();
     let _ = ui
         .app
-        .update(Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
+        .send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
     let _ = ui.redraw();
     for part in [
         licence_id().with("changes").with("no"),
@@ -4566,14 +4566,14 @@ fn a_licence_from_the_chooser_adds_no_undo_step() {
     assert!(ui.app.session.document.info_unsaved());
     assert_eq!(ui.app.session.edits.history.len(), steps, "no undo step");
 
-    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui
         .app
-        .update(Message::Preferences(crate::settings::Message::ChooseLicence));
-    let _ = ui.app.update(Message::Licence(crate::licence_chooser::Message::Answer(
+        .send(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let _ = ui.app.send(Message::Licence(crate::licence_chooser::Message::Answer(
         crate::licence_chooser::Answer::GiveUp,
     )));
-    let _ = ui.app.update(Message::Licence(crate::licence_chooser::Message::Use));
+    let _ = ui.app.send(Message::Licence(crate::licence_chooser::Message::Use));
     assert!(ui.app.rig.store.saved().licence.is_some());
     assert_eq!(
         ui.app.session.edits.history.len(),
@@ -4601,7 +4601,7 @@ fn an_overlay_edit_is_one_undo_step() {
     }
     assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1);
     assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one step");
-    let _ = ui.app.update(Message::Undo);
+    let _ = ui.app.send(Message::Undo);
     assert_eq!(ui.app.ui_snapshot().tiles.len(), before, "one Undo takes it back");
 }
 
@@ -4611,7 +4611,7 @@ fn an_overlay_edit_is_one_undo_step() {
 #[test]
 fn one_change_in_preferences_sends_only_what_changed() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
     let _ = ui.app.a11y_event(Event::Activated);
     let places = ui.places();
@@ -4619,7 +4619,7 @@ fn one_change_in_preferences_sends_only_what_changed() {
     let on = ui.app.rig.store.saved().show_activity;
     let _ = ui
         .app
-        .update(Message::Preferences(crate::settings::Message::Activity(!on)));
+        .send(Message::Preferences(crate::settings::Message::Activity(!on)));
     let _ = ui.redraw();
     let places = ui.places();
     let (_, changes) = ui.app.a11y_changes(&places);
