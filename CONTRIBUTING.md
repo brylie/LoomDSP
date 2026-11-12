@@ -124,7 +124,7 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 | Licences | Only permissive licences, no banned crates, only crates.io as a source | `mise run deny-policy` |
 | Security advisories | No dependency has a RustSec advisory. On a pull request, only when it changes `Cargo.toml`, `Cargo.lock`, or `deny.toml`; always on `main` and in the weekly run | `mise run deny-advisories` |
 | Spelling | Typos in code and docs | `mise run typos` |
-| ADR status | Every ADR has one allowed status that matches the index, and none is Proposed | `mise run adr-status` |
+| ADR status | Every ADR has one allowed status that matches the index, and none is Proposed. Agent instruction files (`AGENTS.md`, `CLAUDE.md`, and the skills under `.claude/`) cite no superseded or missing ADR | `mise run adr-status` |
 | Test placement | Tests are in their own files, not inline in code modules ([Where tests live](#where-tests-live)) | `mise run test-placement` |
 
 To change a check, change its task in `mise.toml`. The hooks and CI both pick it up.

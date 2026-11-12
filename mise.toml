@@ -114,8 +114,9 @@ description = "Check spelling"
 run = "typos"
 
 [tasks.adr-status]
-description = "Check that every ADR has one allowed status, matching the index (no Proposed ADRs on main)"
-run = "sh scripts/check-adr-status.sh"
+description = "Check that every ADR has one allowed status, matching the index (no Proposed ADRs on main), and that agent instruction files cite no superseded ADR"
+# The second command tests the citation check itself on small example repositories.
+run = ["sh scripts/check-adr-status.sh", "sh scripts/test-check-adr-citations.sh", "sh scripts/check-adr-citations.sh"]
 
 [tasks.test-placement]
 description = "Check that tests live in their own files, not inline in code modules"
