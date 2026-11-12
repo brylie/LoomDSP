@@ -36,6 +36,19 @@ pub(crate) struct Place {
     /// The bounds of the nearest scrolling area around it, which cuts off
     /// what lies outside. `None` for a part in no scrolling area.
     pub clip: Option<Rect>,
+    /// The nearest scrolling area around it, to scroll the part into view.
+    /// `None` for a part in no scrolling area.
+    pub area: Option<Area>,
+}
+
+/// A scrolling area, as a walk of the window meets it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Area {
+    /// Its place in the order the walk meets scrolling areas, from 0. A
+    /// second walk of the same window counts to the same area.
+    pub index: usize,
+    /// Its own bounds in the window: what it shows.
+    pub bounds: Rect,
 }
 
 impl Place {
@@ -85,6 +98,8 @@ struct Scroll {
     offset: Vector,
     /// The bounds of the nearest one, in the window.
     clip: Option<Rect>,
+    /// The nearest one itself.
+    area: Option<Area>,
 }
 
 /// The widget operation that collects [`Places`].
@@ -102,6 +117,8 @@ pub(crate) struct Collect {
     inside: Scroll,
     /// A scrolling area just reported, which the next `traverse` enters.
     entering: Option<Scroll>,
+    /// How many scrolling areas the walk has met.
+    areas: usize,
 }
 
 /// What [`Collect::enter`] gives back, for [`Collect::leave`].
@@ -153,6 +170,7 @@ impl Operation<Places> for Collect {
             Place {
                 rect,
                 clip: self.inside.clip,
+                area: self.inside.area,
             },
         );
     }
@@ -168,7 +186,13 @@ impl Operation<Places> for Collect {
         // The area's own bounds are in its parent's content, so they move
         // by the parent's offset. Its content moves by both.
         let own = moved(bounds.to_core(), self.inside.offset);
+        let area = Area {
+            index: self.areas,
+            bounds: own,
+        };
+        self.areas += 1;
         self.entering = Some(Scroll {
+            area: Some(area),
             offset: Vector::new(
                 self.inside.offset.x + translation.x,
                 self.inside.offset.y + translation.y,

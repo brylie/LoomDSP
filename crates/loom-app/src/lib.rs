@@ -376,6 +376,14 @@ enum Message {
         found: control::Found,
         then: control::AfterSearch,
     },
+    /// The window was captured for a `screenshot` command: save it, all
+    /// of it or the part inside `area`, and answer.
+    Captured {
+        call: control::Call,
+        path: std::path::PathBuf,
+        area: Option<loom_ui_core::Rect>,
+        image: Result<loom_ui::effect::Image, loom_ui::effect::NoGpu>,
+    },
     /// Whether a text field has focus, for a `type` command.
     TypeFocus {
         call: control::Call,
@@ -545,6 +553,7 @@ impl Message {
             | Self::Control(_)
             | Self::ControlFrame(_)
             | Self::Located { .. }
+            | Self::Captured { .. }
             | Self::TypeFocus { .. }
             | Self::Frame(_)
             | Self::Tick
@@ -1288,9 +1297,11 @@ impl App {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
             Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
-            Message::Control(_) | Message::ControlFrame(_) | Message::Located { .. } | Message::TypeFocus { .. } => {
-                FrameCause::Control
-            }
+            Message::Control(_)
+            | Message::ControlFrame(_)
+            | Message::Located { .. }
+            | Message::Captured { .. }
+            | Message::TypeFocus { .. } => FrameCause::Control,
             Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) => FrameCause::Input,
             Message::Frame(_) => FrameCause::Forced,
             _ => FrameCause::Other,
@@ -1403,6 +1414,15 @@ impl App {
                 found,
                 then,
             } => self.located(call, &target, &found, then),
+            Message::Captured {
+                call,
+                path,
+                area,
+                image,
+            } => {
+                self.captured(&call, &path, area, image);
+                Task::none()
+            }
             Message::TypeFocus { call, text, focused } => {
                 self.type_after_focus_check(call, &text, focused);
                 Task::none()
@@ -1492,7 +1512,8 @@ impl App {
         let Some(open) = self.overlays.patches_mut() else {
             return Task::none();
         };
-        let (outcome, task) = open.update(message);
+        let (outcome, effects) = open.update(message);
+        self.effect(effects);
         match outcome {
             patches::Outcome::Stay => {}
             patches::Outcome::Close => self.overlays.close_patches(),
@@ -1501,7 +1522,7 @@ impl App {
                 self.after_discard(question::AfterDiscard::OpenPath(path));
             }
         }
-        task.map(Message::Patches)
+        Task::none()
     }
 
     /// Handles a browser message: keep it open, close it, or add a module.
@@ -1513,7 +1534,8 @@ impl App {
         let Some(open) = self.overlays.browser_mut() else {
             return Task::none();
         };
-        let (outcome, task) = open.update(message);
+        let (outcome, effects) = open.update(message);
+        self.effect(effects);
         match outcome {
             browser::Outcome::Stay => {}
             browser::Outcome::Close => self.overlays.close_browser(),
@@ -1526,7 +1548,7 @@ impl App {
                 self.insert_library_item(&item, linked, world);
             }
         }
-        task.map(Message::Browser)
+        Task::none()
     }
 
     /// Starts reading the library folder for the open browser's list of
@@ -1634,6 +1656,7 @@ impl App {
             | Message::TextFocus(_)
             | Message::Inspector(_)
             | Message::Located { .. }
+            | Message::Captured { .. }
             | Message::TypeFocus { .. }
             | Message::Matrix(_)
             | Message::MatrixKey(_) => {}

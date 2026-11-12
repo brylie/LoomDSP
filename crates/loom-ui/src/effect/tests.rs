@@ -266,11 +266,15 @@ fn debug_output_names_each_effect() {
 /// An image holds exactly four bytes per pixel, and gives them back.
 #[test]
 fn an_image_holds_four_bytes_per_pixel() {
-    let image = Image::new(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).expect("eight bytes for two pixels");
+    let image = Image::new(2, 1, 2.0, vec![1, 2, 3, 4, 5, 6, 7, 8]).expect("eight bytes for two pixels");
     assert_eq!((image.width(), image.height()), (2, 1));
+    assert_eq!(image.scale(), 2.0, "the scale it was drawn at");
     assert_eq!(image.rgba(), [1, 2, 3, 4, 5, 6, 7, 8]);
-    assert_eq!(Image::new(2, 1, vec![0; 7]), None);
-    assert_eq!(Image::new(0, 0, Vec::new()).map(|image| image.rgba().len()), Some(0));
+    assert_eq!(Image::new(2, 1, 1.0, vec![0; 7]), None);
+    assert_eq!(
+        Image::new(0, 0, 1.0, Vec::new()).map(|image| image.rgba().len()),
+        Some(0)
+    );
 }
 
 /// Taking the focus from every element is a focus effect to nothing, which

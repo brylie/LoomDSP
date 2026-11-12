@@ -108,3 +108,62 @@ fn the_hosted_app_describes_its_window() {
     let spec = loom_ui::App::window(&hosted);
     assert_eq!(spec.title, hosted.0.title());
 }
+
+/// A scroll moves only the scrolling area the walk meets in its place, by
+/// the move it was given, and leaves every other area alone.
+#[test]
+fn a_scroll_moves_only_its_own_area() {
+    use iced::advanced::widget::Operation;
+    use iced::advanced::widget::operation::Scrollable;
+    use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset};
+    /// Records each move it is given.
+    #[derive(Default)]
+    struct Area(Vec<(f32, f32)>);
+    impl Scrollable for Area {
+        fn snap_to(&mut self, _: RelativeOffset<Option<f32>>) {}
+        fn scroll_to(&mut self, _: AbsoluteOffset<Option<f32>>) {}
+        fn scroll_by(&mut self, by: AbsoluteOffset, _: iced::Rectangle, _: iced::Rectangle) {
+            self.0.push((by.x, by.y));
+        }
+    }
+    let mut scroll = ScrollBy {
+        area: 1,
+        met: 0,
+        by: loom_ui_core::Vector::new(0.0, 26.0),
+    };
+    let (mut first, mut second, mut third) = (Area::default(), Area::default(), Area::default());
+    let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(100.0, 100.0));
+    for area in [&mut first, &mut second, &mut third] {
+        scroll.scrollable(None, bounds, bounds, iced::Vector::ZERO, area);
+    }
+    assert!(first.0.is_empty() && third.0.is_empty(), "the others stay");
+    assert_eq!(second.0, [(0.0, 26.0)]);
+}
+
+/// A scroll to a part the window does not show scrolls nothing, and
+/// asks for nothing more.
+#[test]
+fn a_scroll_to_a_missing_part_does_nothing() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.send(Message::OpenBrowser);
+    let _ = ui.redraw();
+    let before = ui.scroll_translation("module-browser-list");
+    let missing = UiId::panel("browser").with("module").with("nothing-by-this-name");
+    let messages = ui.run_task(scroll_into_view(&missing));
+    assert!(messages.is_empty());
+    assert_eq!(ui.scroll_translation("module-browser-list"), before);
+}
+
+/// Two scrolls in one turn become one task, the second after the first,
+/// so the second finds its part where the first moved it. Batched, both
+/// would work from the old offsets and their moves would add up.
+#[test]
+fn a_turns_scrolls_run_one_after_another() {
+    let mut target = IcedTarget::default();
+    let card = UiId::panel("matrix").with(3u32);
+    loom_ui::Target::<Message>::scroll_into_view(&mut target, &card);
+    loom_ui::Target::<Message>::scroll_into_view(&mut target, &card.clone().with("depth"));
+    assert!(target.tasks.is_empty(), "no scroll is batched on its own");
+    assert_eq!(target.take_tasks().len(), 1, "one chained task");
+    assert!(target.take_tasks().is_empty(), "and it is taken once");
+}

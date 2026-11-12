@@ -141,3 +141,36 @@ fn the_panel_stays_inside_the_canvas() {
     let corner = inside(Point::new(990.0, 730.0), area);
     assert_eq!(corner, Point::new(1000.0 - WIDTH, 740.0 - HEIGHT));
 }
+
+/// The list scrolls by the highlighted row's UI ID, just enough: not at
+/// all while the row is in view, down until its bottom shows, back up to
+/// its top, and to the end for the last row. Each time, the browser's own
+/// offset, which places a row's menu, is the one the list reports: the
+/// list does not tell the browser after the app scrolls it.
+#[test]
+fn the_list_scrolls_just_enough_and_the_browser_knows_where() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.send(crate::Message::OpenBrowser);
+    let _ = ui.redraw();
+    let press = |ui: &mut crate::ui_test::Ui, key: Named, times: usize| {
+        for _ in 0..times {
+            let _ = ui.tap(Key::Named(key), Modifiers::empty());
+        }
+        let _ = ui.redraw();
+        let list = ui.scroll_translation(LIST).expect("the list scrolls").y;
+        let browser = ui.app.overlays.browser().expect("the browser is open");
+        assert!((browser.scroll - list).abs() < 0.5, "{} and {list}", browser.scroll);
+        (browser.highlight(), list)
+    };
+    assert_eq!(press(&mut ui, Named::ArrowDown, 1), (1, 0.0), "in view: no scroll");
+    let (row, below) = press(&mut ui, Named::ArrowDown, ROWS - 1);
+    assert_eq!(row, ROWS, "the first row past the view");
+    assert!((below - ROW_HEIGHT).abs() < 0.5, "its bottom shows: {below}");
+    assert_eq!(press(&mut ui, Named::ArrowUp, ROWS), (0, 0.0), "above: back to its top");
+    let rows = ui.app.overlays.browser().unwrap().model().rows.len();
+    let (last, end) = press(&mut ui, Named::PageDown, rows);
+    assert_eq!(last, rows - 1, "the last row");
+    let most = rows as f32 * ROW_HEIGHT - LIST_HEIGHT;
+    assert!((end - most).abs() < 0.5, "the end of the list: {end}, not {most}");
+}

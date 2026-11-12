@@ -19,93 +19,6 @@ pub(crate) mod access;
 /// (modulation.md, Filter focus).
 pub(crate) const FILTER: &str = "matrix-filter";
 
-/// Finds the selected cell and reveals it with the smallest scroll.
-struct RevealRow {
-    viewport: Option<(iced::Rectangle, iced::Vector)>,
-    row: Option<iced::Rectangle>,
-    cell: Option<iced::Rectangle>,
-}
-
-impl<T: 'static> iced::advanced::widget::Operation<T> for RevealRow {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<T>)) {
-        operate(self);
-    }
-
-    fn scrollable(
-        &mut self,
-        id: Option<&iced::advanced::widget::Id>,
-        bounds: iced::Rectangle,
-        _content_bounds: iced::Rectangle,
-        translation: iced::Vector,
-        _state: &mut dyn iced::advanced::widget::operation::Scrollable,
-    ) {
-        if id == Some(&iced::advanced::widget::Id::new("matrix-table")) {
-            self.viewport = Some((bounds, translation));
-        }
-    }
-
-    fn container(&mut self, id: Option<&iced::advanced::widget::Id>, bounds: iced::Rectangle) {
-        if id == Some(&iced::advanced::widget::Id::new("matrix-selected-row")) {
-            self.row = Some(bounds);
-        } else if id == Some(&iced::advanced::widget::Id::new("matrix-selected-cell")) {
-            self.cell = Some(bounds);
-        }
-    }
-
-    fn finish(&self) -> iced::advanced::widget::operation::Outcome<T> {
-        use iced::advanced::widget::operation::{Outcome, scrollable};
-        let Some((viewport, translation)) = self.viewport else {
-            return Outcome::None;
-        };
-        let y = self.row.map(|row| {
-            let top = row.y - translation.y;
-            let bottom = top + row.height;
-            if top < viewport.y {
-                (translation.y + top - viewport.y).max(0.0)
-            } else if bottom > viewport.y + viewport.height {
-                translation.y + bottom - (viewport.y + viewport.height)
-            } else {
-                translation.y
-            }
-        });
-        let x = self.cell.map(|cell| {
-            let left = cell.x - translation.x;
-            let right = left + cell.width;
-            if left < viewport.x {
-                (translation.x + left - viewport.x).max(0.0)
-            } else if right > viewport.x + viewport.width {
-                translation.x + right - (viewport.x + viewport.width)
-            } else {
-                translation.x
-            }
-        });
-        Outcome::Chain(Box::new(scrollable::scroll_to(
-            iced::advanced::widget::Id::new("matrix-table"),
-            scrollable::AbsoluteOffset { x, y },
-        )))
-    }
-}
-
-/// Reveals the selected matrix row and column after the view is laid out.
-pub(crate) fn reveal_selected() -> iced::Task<Message> {
-    iced::advanced::widget::operate(RevealRow {
-        viewport: None,
-        row: None,
-        cell: None,
-    })
-}
-
-/// Marks the active cell so its actual bounds can guide scrolling.
-fn matrix_cell<'a>(content: impl Into<Element<'a, Message>>, selected: bool) -> Element<'a, Message> {
-    let cell = container(content);
-    if selected {
-        cell.id("matrix-selected-cell")
-    } else {
-        cell
-    }
-    .into()
-}
-
 /// The right-hand panel on show.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -543,11 +456,8 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
         };
         let card = column![
             row![
-                matrix_cell(named(&access::cell(id, Column::On), on), focused(Column::On)),
-                matrix_cell(
-                    named(&access::cell(id, Column::Source), source),
-                    focused(Column::Source)
-                ),
+                named(&access::cell(id, Column::On), on),
+                named(&access::cell(id, Column::Source), source),
                 space::horizontal(),
                 named(
                     &access::remove(id),
@@ -558,22 +468,16 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
             .align_y(iced::Alignment::Center),
             row![
                 text("→").size(style::SMALL).color(DIM),
-                matrix_cell(
-                    named(&access::cell(id, Column::Target), target),
-                    focused(Column::Target)
-                ),
+                named(&access::cell(id, Column::Target), target),
                 space::horizontal(),
-                matrix_cell(
-                    named(&access::cell(id, Column::Polarity), polarity),
-                    focused(Column::Polarity)
-                ),
+                named(&access::cell(id, Column::Polarity), polarity),
             ]
             .spacing(4)
             .padding([0, 4])
             .align_y(iced::Alignment::Center),
             row![
                 named(&access::cell(id, Column::Depth), depth_slider),
-                container(matrix_cell(depth_value, focused(Column::Depth))).width(DEPTH_TEXT),
+                container(depth_value).width(DEPTH_TEXT),
             ]
             .spacing(6)
             .padding([0, 4])
@@ -590,8 +494,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
                 .style(style::card(selected)),
         )
         .on_press(Message::Matrix(Event::Select(id, state.cell)));
-        let card = container(card);
-        table = table.push(if selected { card.id("matrix-selected-row") } else { card });
+        table = table.push(card);
     }
     let area = scrollable(named(&part("assignments"), table))
         .id("matrix-table")
@@ -621,13 +524,33 @@ impl App {
     /// focus the depth field when an edit opens it, or scroll the selected
     /// card into view when the order or filter changes.
     pub(crate) fn matrix_message(&mut self, event: Event) -> iced::Task<Message> {
+        let reveal = matches!(
+            event,
+            Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_)
+        );
         let task = match event {
             Event::Edit(_, Column::Depth) => crate::editing::focus_text_field("matrix-depth"),
-            Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_) => reveal_selected(),
             _ => iced::Task::none(),
         };
         self.matrix_event(event);
+        if reveal {
+            let effects = self.reveal_selected();
+            self.effect(effects);
+        }
         task
+    }
+
+    /// Scrolls the selected assignment's card into view, then its chosen
+    /// cell: the card first, so all of it shows where it fits, then the
+    /// cell, which moves the table sideways too. Nothing while no card is
+    /// selected, or while it is filtered out of the view.
+    fn reveal_selected(&self) -> loom_ui::Effects<Message> {
+        let matrix = &self.session.matrix;
+        match matrix.selected {
+            Some(id) => loom_ui::Effects::scroll_into_view(access::row(id))
+                .and(loom_ui::Effects::scroll_into_view(access::cell(id, matrix.cell))),
+            None => loom_ui::Effects::none(),
+        }
     }
 
     /// True when the keyboard belongs to the matrix: its tab is open, it has
@@ -650,11 +573,10 @@ impl App {
         ) && self.session.matrix.edit.is_none()
             && self.session.matrix.cell == Column::Depth;
         self.matrix_key(key);
-        let scroll = if self.matrix_has_keys() {
-            reveal_selected()
-        } else {
-            iced::Task::none()
-        };
+        if self.matrix_has_keys() {
+            let effects = self.reveal_selected();
+            self.effect(effects);
+        }
         if open_depth
             && self
                 .session
@@ -663,9 +585,9 @@ impl App {
                 .as_ref()
                 .is_some_and(|e| e.column == Column::Depth)
         {
-            iced::Task::batch([scroll, crate::editing::focus_text_field("matrix-depth")])
+            crate::editing::focus_text_field("matrix-depth")
         } else {
-            scroll
+            iced::Task::none()
         }
     }
 

@@ -9,9 +9,10 @@
 use crate::style::{self, button};
 use crate::{DIM, files, recovery};
 use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Theme};
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
+use loom_ui::Effects;
 use loom_ui_core::UiId;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -245,8 +246,6 @@ pub enum Message {
     Pick(usize),
     /// Enter: open the highlighted patch.
     Submit,
-    /// The list scrolled.
-    Scrolled(f32),
     /// Up or Down.
     Step(i32),
     /// Escape, a click outside, or **Close**.
@@ -384,8 +383,6 @@ pub struct PatchBrowser {
     highlight: usize,
     /// What is shown.
     model: Model,
-    /// The list's scroll offset.
-    scroll: f32,
     /// Set when this browser goes, to stop the thread reading its folder.
     stop: Arc<AtomicBool>,
 }
@@ -424,7 +421,6 @@ impl PatchBrowser {
             shown: Vec::new(),
             highlight: 0,
             model,
-            scroll: 0.0,
             stop: Arc::new(AtomicBool::new(false)),
         };
         browser.show_filters();
@@ -512,9 +508,9 @@ impl PatchBrowser {
         self.tags.iter().map(String::as_str)
     }
 
-    /// Handles a message, and returns what the app should do and a task
+    /// Handles a message, and returns what the app should do and the effect
     /// that keeps the highlighted row in view.
-    pub fn update(&mut self, message: Message) -> (Outcome, Task<Message>) {
+    pub fn update(&mut self, message: Message) -> (Outcome, Effects<crate::Message>) {
         let follow = matches!(message, Message::Step(_));
         let outcome = match message {
             Message::Found { open, rows } => {
@@ -584,10 +580,6 @@ impl PatchBrowser {
                 self.open_highlighted()
             }
             Message::Submit => self.open_highlighted(),
-            Message::Scrolled(offset) => {
-                self.scroll = offset;
-                Outcome::Stay
-            }
             Message::Step(by) => {
                 let last = self.shown.len().saturating_sub(1);
                 self.highlight = self.highlight.saturating_add_signed(by as isize).min(last);
@@ -596,8 +588,8 @@ impl PatchBrowser {
             }
             Message::Close => Outcome::Close,
         };
-        let task = if follow { self.reveal() } else { Task::none() };
-        (outcome, task)
+        let effects = if follow { self.reveal() } else { Effects::none() };
+        (outcome, effects)
     }
 
     /// The highlighted patch to open, if it read.
@@ -626,18 +618,13 @@ impl PatchBrowser {
         self.show_rows();
     }
 
-    /// Scrolls the list just enough to show the highlighted row.
-    fn reveal(&mut self) -> Task<Message> {
-        let top = self.highlight as f32 * ROW_HEIGHT;
-        let offset = if top < self.scroll {
-            top
-        } else if top + ROW_HEIGHT > self.scroll + LIST_HEIGHT {
-            top + ROW_HEIGHT - LIST_HEIGHT
-        } else {
-            return Task::none();
-        };
-        self.scroll = offset;
-        iced::widget::operation::scroll_to(LIST, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: offset })
+    /// Scrolls the list just enough to show the highlighted row. The
+    /// window works out how far, so the browser keeps no offset of its own.
+    fn reveal(&self) -> Effects<crate::Message> {
+        match self.model.rows.get(self.highlight) {
+            Some(row) => Effects::scroll_into_view(row.id.clone()),
+            None => Effects::none(),
+        }
     }
 
     /// The browser, as a panel over the canvas. Drawn from the model alone;
@@ -721,15 +708,9 @@ impl PatchBrowser {
                 .padding(8)
                 .height(LIST_HEIGHT)
                 .into(),
-            None => container(
-                scrollable(column(rows))
-                    .id(LIST)
-                    .spacing(4)
-                    .height(LIST_HEIGHT)
-                    .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y)),
-            )
-            .id(crate::places::widget_id(&part_id("list")))
-            .into(),
+            None => container(scrollable(column(rows)).id(LIST).spacing(4).height(LIST_HEIGHT))
+                .id(crate::places::widget_id(&part_id("list")))
+                .into(),
         };
         let panel = column![
             row![

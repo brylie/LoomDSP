@@ -97,6 +97,23 @@ fn nested_scrolling_areas_add_their_offsets() {
     let outer = places.of(&id("matrix/8")).unwrap();
     assert_eq!(outer.rect, rect(0.0, 220.0, 300.0, 20.0));
     assert_eq!(outer.clip, Some(rect(0.0, 0.0, 300.0, 300.0)));
+    // Each part's nearest area, numbered in the order the walk met them,
+    // with the area's own bounds in the window, to scroll the part into
+    // view.
+    assert_eq!(
+        inner.area,
+        Some(Area {
+            index: 1,
+            bounds: rect(0.0, 100.0, 300.0, 100.0)
+        })
+    );
+    assert_eq!(
+        outer.area,
+        Some(Area {
+            index: 0,
+            bounds: rect(0.0, 0.0, 300.0, 300.0)
+        })
+    );
 }
 
 /// The canvas is found by its view, and a container with no ID is not a

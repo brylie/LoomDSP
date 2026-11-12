@@ -249,6 +249,36 @@ impl Rect {
         })
     }
 
+    /// The least move of this rectangle, as a view onto something larger,
+    /// that brings `part` into it: on each axis on its own, the distance
+    /// to the part's start when the part starts before the view, to its
+    /// end when it ends after it, and none when it is already inside.
+    ///
+    /// A part larger than the view on an axis cannot be shown whole, so its
+    /// start wins there: its top, or its left edge. That is where reading
+    /// begins.
+    ///
+    /// A scrolling area moves its content the other way: to bring the part
+    /// in, it adds this to its scroll offset.
+    #[must_use]
+    pub fn reveal(self, part: Self) -> Vector {
+        /// The move on one axis, for a view and a part each given by its
+        /// start and its length.
+        fn axis(view: f32, view_len: f32, part: f32, part_len: f32) -> f32 {
+            if part < view || part_len > view_len {
+                part - view
+            } else if part + part_len > view + view_len {
+                part + part_len - (view + view_len)
+            } else {
+                0.0
+            }
+        }
+        Vector::new(
+            axis(self.x, self.width, part.x, part.width),
+            axis(self.y, self.height, part.y, part.height),
+        )
+    }
+
     /// Whether the two rectangles share some area.
     #[must_use]
     pub fn intersects(self, other: Self) -> bool {

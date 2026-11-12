@@ -374,3 +374,60 @@ fn a_row_shows_what_it_read() {
     assert_eq!(Row::read(&dir.join("broken.ron")).details, "Could not read");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The list scrolls by the highlighted row's UI ID, just enough, as the
+/// window lays the rows out: nothing while the row shows, until its bottom
+/// meets the list's when it is below, until its top meets the list's when
+/// it is above, and to the end for the last row.
+#[test]
+fn the_list_scrolls_the_highlighted_row_just_into_view() {
+    let dir = crate::recovery::tests::TempDir::new("patches-scroll");
+    for i in 0..25 {
+        std::fs::write(
+            dir.0.join(format!("{i:02}.ron")),
+            format!(r#"Patch(version: 1, metadata: Metadata(name: "Patch {i:02}"))"#),
+        )
+        .unwrap();
+    }
+    let mut app = crate::tests::app();
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(dir.0.clone());
+    let _ = app.rig.store.save(preferences);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(AppMessage::File(FileAction::Browse));
+    let _ = ui.redraw();
+    let rows = ui.app.overlays.patches().unwrap().model().rows.len();
+    assert_eq!(rows, 25);
+    // Where the highlighted row is in the window, and what the list shows.
+    let step = |ui: &mut crate::ui_test::Ui, by: i32| {
+        ui.send(AppMessage::Patches(Message::Step(by)));
+        let _ = ui.redraw();
+        let browser = ui.app.overlays.patches().unwrap();
+        let row = browser.model().rows[browser.highlight].id.clone();
+        let place = ui.places().of(&row).expect("the window drew the row");
+        let list = place.clip.expect("the row is in the list");
+        let offset = ui.scroll_translation(LIST).expect("the list scrolls").y;
+        (place.rect, list, offset)
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+    let (_, _, offset) = step(&mut ui, 1);
+    assert!(near(offset, 0.0), "in view: no scroll");
+    let (row, list, offset) = step(&mut ui, 11);
+    assert!(offset > 0.0, "below: it scrolled");
+    assert!(
+        near(row.y + row.height, list.y + list.height),
+        "its bottom meets the list's"
+    );
+    // Rows 3 to 12 show now, so row 2 is above the view.
+    let (row, list, _) = step(&mut ui, -10);
+    assert!(near(row.y, list.y), "above: its top meets the list's");
+    let (_, _, before) = step(&mut ui, 1);
+    let (_, _, after) = step(&mut ui, 1);
+    assert!(near(before, after), "a row already in view scrolls nothing");
+    let (row, list, _) = step(&mut ui, 100);
+    assert_eq!(ui.app.overlays.patches().unwrap().highlight, rows - 1, "the last row");
+    assert!(
+        near(row.y + row.height, list.y + list.height),
+        "the end of the list shows"
+    );
+}

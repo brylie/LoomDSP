@@ -5,10 +5,11 @@
 
 use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Theme};
 use loom_canvas::GRID;
 use loom_canvas::iced_convert::ToIced as _;
 use loom_core::{Family, ModuleDescriptor};
+use loom_ui::Effects;
 use loom_ui_core::{Point, Rect, UiId};
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -216,8 +217,12 @@ pub struct Browser {
     world: Point,
     /// The panel's top-left corner, in window coordinates.
     at: Point,
-    /// The list's scroll offset, so a keyboard move can keep the highlight
-    /// in view.
+    /// The list's scroll offset, which places a library row's menu beside
+    /// its row. The toolkit reports it after the wheel or a drag, but not
+    /// after the app scrolls the list itself (`on_scroll` does not fire
+    /// then), so [`Browser::reveal`] moves it by the same rule the window
+    /// scrolls by, from the fixed row height. Our own scroll state replaces
+    /// it in phase 3.
     scroll: f32,
 }
 
@@ -270,9 +275,9 @@ impl Browser {
         self.model.menu_highlight = row.and(highlight);
     }
 
-    /// Handles a message, and returns what the app should do and a task
+    /// Handles a message, and returns what the app should do and the effect
     /// that keeps the highlighted row in view.
-    pub fn update(&mut self, message: Message) -> (Outcome, Task<Message>) {
+    pub fn update(&mut self, message: Message) -> (Outcome, Effects<crate::Message>) {
         // Typing and keys may move the highlight out of view. A pointer is
         // already on a visible row, and must not fight the scroll wheel.
         let follow = matches!(message, Message::Query(_) | Message::Key(_));
@@ -364,8 +369,8 @@ impl Browser {
                 Outcome::Stay
             }
         };
-        let task = if follow { self.reveal() } else { Task::none() };
-        (outcome, task)
+        let effects = if follow { self.reveal() } else { Effects::none() };
+        (outcome, effects)
     }
 
     /// The modules the list shows, best first, with the library items
@@ -468,18 +473,27 @@ impl Browser {
         });
     }
 
-    /// Scrolls the list just enough to show the highlighted row.
-    fn reveal(&mut self) -> Task<Message> {
-        let top = self.highlight() as f32 * ROW_HEIGHT;
-        let offset = if top < self.scroll {
-            top
-        } else if top + ROW_HEIGHT > self.scroll + LIST_HEIGHT {
-            top + ROW_HEIGHT - LIST_HEIGHT
-        } else {
-            return Task::none();
+    /// Scrolls the list just enough to show the highlighted row, and moves
+    /// [`Browser::scroll`] as the window will.
+    fn reveal(&mut self) -> Effects<crate::Message> {
+        let Some(row) = self.model.rows.get(self.highlight()) else {
+            return Effects::none();
         };
-        self.scroll = offset;
-        iced::widget::operation::scroll_to(LIST, scrollable::AbsoluteOffset { x: 0.0, y: offset })
+        let top = self.highlight() as f32 * ROW_HEIGHT;
+        let shown = loom_ui_core::Rect::new(
+            loom_ui_core::Point::new(0.0, self.scroll),
+            loom_ui_core::Size::new(1.0, LIST_HEIGHT),
+        );
+        let part = loom_ui_core::Rect::new(
+            loom_ui_core::Point::new(0.0, top),
+            loom_ui_core::Size::new(1.0, ROW_HEIGHT),
+        );
+        let by = shown.reveal(part).y;
+        if by == 0.0 {
+            return Effects::none();
+        }
+        self.scroll += by;
+        Effects::scroll_into_view(row.id.clone())
     }
 
     /// The panel, placed at its corner, with a library item's menu over it

@@ -64,26 +64,39 @@ pub(super) fn search(call: Call, target: String, then: AfterSearch) -> Task<Mess
     })
 }
 
-/// Captures the window as it was last drawn, and saves all of it, or the
-/// part inside `area` (logical window pixels).
-pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rect>) -> Task<Message> {
-    iced::window::latest()
-        .then(|id| match id {
-            Some(id) => iced::window::screenshot(id).map(Some),
-            None => Task::done(None),
-        })
-        .map(move |shot| call.answer(save_screenshot(shot, &path, area)))
-        .discard()
+/// Asks for the window as it was last drawn, to save all of it, or the
+/// part inside `area` (logical window pixels), once the capture comes.
+pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rect>) -> loom_ui::Effects<Message> {
+    loom_ui::Effects::capture(move |image| Message::Captured {
+        call,
+        path,
+        area,
+        image,
+    })
 }
 
-/// The part of a capture inside `area`, in physical pixels, cut to the
-/// image. `None` when nothing of it is inside.
-pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rect) -> Option<iced::Rectangle<u32>> {
+/// A part of a capture, in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Region {
+    /// Its left edge.
+    pub x: u32,
+    /// Its top edge.
+    pub y: u32,
+    /// Its width.
+    pub width: u32,
+    /// Its height.
+    pub height: u32,
+}
+
+/// The part of a `width` by `height` capture inside `area`, in physical
+/// pixels at `scale`, cut to the image. `None` when nothing of it is
+/// inside.
+pub(super) fn crop_region(width: u32, height: u32, scale: f32, area: Rect) -> Option<Region> {
     let x0 = (area.x * scale).floor().max(0.0);
     let y0 = (area.y * scale).floor().max(0.0);
-    let x1 = ((area.x + area.width) * scale).ceil().min(size.width as f32);
-    let y1 = ((area.y + area.height) * scale).ceil().min(size.height as f32);
-    (x1 > x0 && y1 > y0).then_some(iced::Rectangle {
+    let x1 = ((area.x + area.width) * scale).ceil().min(width as f32);
+    let y1 = ((area.y + area.height) * scale).ceil().min(height as f32);
+    (x1 > x0 && y1 > y0).then_some(Region {
         x: x0 as u32,
         y: y0 as u32,
         width: (x1 - x0) as u32,
@@ -91,34 +104,48 @@ pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rect) -> Opti
     })
 }
 
+/// The pixels of `image` inside `region`, row by row from the top.
+pub(super) fn crop(image: &loom_ui::effect::Image, region: Region) -> Vec<u8> {
+    let row = image.width() as usize * 4;
+    let (left, wide) = (region.x as usize * 4, region.width as usize * 4);
+    (region.y..region.y + region.height)
+        .flat_map(|y| {
+            let start = y as usize * row + left;
+            image.rgba()[start..start + wide].iter().copied()
+        })
+        .collect()
+}
+
 /// Saves a window capture, or the part of it inside `area`, as a PNG file.
 /// The reply has the image size in pixels, the scale factor, and, for an
 /// area, the area saved in logical window pixels.
 pub(super) fn save_screenshot(
-    shot: Option<iced::window::Screenshot>,
+    shot: Result<loom_ui::effect::Image, loom_ui::effect::NoGpu>,
     path: &std::path::Path,
     area: Option<Rect>,
 ) -> Answer {
-    let mut shot = shot.ok_or("no window to capture")?;
+    let shot = shot.map_err(|_| "no window to capture")?;
+    let scale = shot.scale();
+    let (mut width, mut height) = (shot.width(), shot.height());
     let mut saved = None;
-    if let Some(area) = area {
-        let region = crop_region(shot.size, shot.scale_factor, area).ok_or("the area is outside the window")?;
-        shot = shot
-            .crop(region)
-            .map_err(|e| format!("cannot cut the area out: {e:?}"))?;
-        let scale = shot.scale_factor;
+    let rgba = if let Some(area) = area {
+        let region = crop_region(width, height, scale, area).ok_or("the area is outside the window")?;
+        (width, height) = (region.width, region.height);
         saved = Some(json!({
             "x": region.x as f32 / scale,
             "y": region.y as f32 / scale,
             "width": region.width as f32 / scale,
             "height": region.height as f32 / scale,
         }));
-    }
-    crate::screenshot::write_png(path, shot.size, &shot.rgba)?;
+        crop(&shot, region)
+    } else {
+        shot.rgba().to_vec()
+    };
+    crate::screenshot::write_png(path, iced::Size::new(width, height), &rgba)?;
     let mut reply = fields(json!({
-        "width": shot.size.width,
-        "height": shot.size.height,
-        "scale": shot.scale_factor,
+        "width": width,
+        "height": height,
+        "scale": scale,
     }));
     if let Some(saved) = saved {
         reply.insert("area".to_string(), saved);
@@ -127,6 +154,17 @@ pub(super) fn save_screenshot(
 }
 
 impl App {
+    /// Saves a window capture for a `screenshot` command, and answers it.
+    pub(crate) fn captured(
+        &self,
+        call: &Call,
+        path: &std::path::Path,
+        area: Option<Rect>,
+        image: Result<loom_ui::effect::Image, loom_ui::effect::NoGpu>,
+    ) {
+        call.answer(save_screenshot(image, path, area));
+    }
+
     /// Runs a command from the control channel and answers it, now or once
     /// the task it returns has run.
     pub(crate) fn control(&mut self, call: Call) -> Task<Message> {
@@ -242,8 +280,8 @@ impl App {
                 Step::Screenshot(path, Area::Target { target, margin }) => {
                     tasks.push(search(call, target, AfterSearch::Screenshot { path, margin }));
                 }
-                Step::Screenshot(path, Area::Rect(area)) => tasks.push(capture(call, path, Some(area))),
-                Step::Screenshot(path, Area::Window) => tasks.push(capture(call, path, None)),
+                Step::Screenshot(path, Area::Rect(area)) => self.effect(capture(call, path, Some(area))),
+                Step::Screenshot(path, Area::Window) => self.effect(capture(call, path, None)),
             }
         }
         self.control_pending = waiting;
@@ -993,13 +1031,13 @@ impl App {
                 call.answer(rect.map(rect_fields));
                 Task::none()
             }
-            AfterSearch::Screenshot { path, margin } => match rect {
-                Ok(rect) => capture(call, path, Some(rect.expand(margin))),
-                Err(error) => {
-                    call.answer(Err(error));
-                    Task::none()
+            AfterSearch::Screenshot { path, margin } => {
+                match rect {
+                    Ok(rect) => self.effect(capture(call, path, Some(rect.expand(margin)))),
+                    Err(error) => call.answer(Err(error)),
                 }
-            },
+                Task::none()
+            }
         }
     }
 }

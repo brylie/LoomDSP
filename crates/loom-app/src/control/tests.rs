@@ -1,4 +1,4 @@
-use super::run::{crop_region, save_screenshot, search};
+use super::run::{Region, crop, crop_region, save_screenshot, search};
 use super::transport::*;
 use super::*;
 
@@ -1266,13 +1266,7 @@ fn a_capture_is_saved_whole_or_cut_to_an_area() {
     let dir = std::env::temp_dir().join(format!("loom-control-shot-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("shot.png");
-    let shot = || {
-        Some(iced::window::Screenshot::new(
-            vec![255u8; 40 * 20 * 4],
-            iced::Size::new(40, 20),
-            2.0,
-        ))
-    };
+    let shot = || Ok(loom_ui::effect::Image::new(40, 20, 2.0, vec![255u8; 40 * 20 * 4]).unwrap());
     let whole = save_screenshot(shot(), &path, None).unwrap();
     assert_eq!(
         (whole["width"].clone(), whole["height"].clone()),
@@ -1289,7 +1283,11 @@ fn a_capture_is_saved_whole_or_cut_to_an_area() {
             .unwrap_err()
             .contains("outside the window")
     );
-    assert!(save_screenshot(None, &path, None).unwrap_err().contains("no window"));
+    assert!(
+        save_screenshot(Err(loom_ui::effect::NoGpu), &path, None)
+            .unwrap_err()
+            .contains("no window")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1694,13 +1692,12 @@ fn locate_finds_lights_and_meters() {
 /// to the image.
 #[test]
 fn a_screenshot_area_is_scaled_and_cut_to_the_window() {
-    let size = iced::Size::new(200, 100);
     let rect = |x, y, w, h| Rect::new(Point::new(x, y), loom_ui_core::Size::new(w, h));
-    let region = crop_region(size, 2.0, rect(10.0, 5.0, 20.0, 10.0)).unwrap();
+    let region = crop_region(200, 100, 2.0, rect(10.0, 5.0, 20.0, 10.0)).unwrap();
     assert_eq!((region.x, region.y, region.width, region.height), (20, 10, 40, 20));
-    let region = crop_region(size, 1.0, rect(-10.0, 90.0, 30.0, 30.0)).unwrap();
+    let region = crop_region(200, 100, 1.0, rect(-10.0, 90.0, 30.0, 30.0)).unwrap();
     assert_eq!((region.x, region.y, region.width, region.height), (0, 90, 20, 10));
-    assert!(crop_region(size, 1.0, rect(300.0, 0.0, 10.0, 10.0)).is_none());
+    assert!(crop_region(200, 100, 1.0, rect(300.0, 0.0, 10.0, 10.0)).is_none());
 }
 
 /// `screenshot` takes `target` with `margin`, or `rect`, and refuses
@@ -2512,4 +2509,24 @@ fn a_canvas_ui_id_is_found_by_the_commands() {
     }
     run_ui(&mut ui, r#"{"cmd": "hover", "target": "canvas/4/param/cutoff"}"#)
         .unwrap_or_else(|why| panic!("hover: {why}"));
+}
+
+/// A crop keeps the pixels inside its region, row by row, and no others.
+#[test]
+fn a_crop_takes_the_pixels_of_its_region() {
+    // A 3 by 2 image whose every pixel says where it is.
+    let rgba = (0..2u8)
+        .flat_map(|y| (0..3u8).flat_map(move |x| [x, y, 0, 255]))
+        .collect();
+    let image = loom_ui::effect::Image::new(3, 2, 1.0, rgba).unwrap();
+    let region = Region {
+        x: 1,
+        y: 0,
+        width: 2,
+        height: 2,
+    };
+    assert_eq!(
+        crop(&image, region),
+        [1, 0, 0, 255, 2, 0, 0, 255, 1, 1, 0, 255, 2, 1, 0, 255]
+    );
 }
