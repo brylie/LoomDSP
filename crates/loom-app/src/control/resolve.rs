@@ -145,10 +145,22 @@ pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
     Rect::new(a, loom_ui_core::Size::new(b.x - a.x, b.y - a.y))
 }
 
-/// The first keys a UI ID's text can start with: the window's panels
-/// (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
+/// The first keys a UI ID's text can start with: the window's panels and
+/// the overlays (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
 /// with another word is not taken for a UI ID.
-const PANELS: [&str; 7] = ["canvas", "toolbar", "panel", "inspector", "matrix", "status", "stats"];
+const PANELS: [&str; 11] = [
+    "canvas",
+    "toolbar",
+    "panel",
+    "inspector",
+    "matrix",
+    "status",
+    "stats",
+    "menu",
+    "recent",
+    "question",
+    "help",
+];
 
 /// `target` as a UI ID, when it is the text of one: its first key is a
 /// panel's name.

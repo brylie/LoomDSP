@@ -19,6 +19,10 @@ fn a_link_reads_as_its_label_and_is_its_own_item() {
     let (words, links) = read_links("See [the **clock**](loom.clock.clock) and [x] `here`.");
     assert_eq!(words, "See the clock and [x] here.");
     assert_eq!(links, [("the clock".to_string(), "loom.clock.clock".to_string())]);
+    // A bracket before a link is not joined to it.
+    let (words, links) = read_links("See [x] then [there](a.b).");
+    assert_eq!(words, "See [x] then there.");
+    assert_eq!(links, [("there".to_string(), "a.b".to_string())]);
     let items = notes(&help_id().with("notes"), "Go [there](a.b).");
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].kind, Kind::Text);

@@ -67,23 +67,21 @@ impl App {
 }
 
 /// The question: an alert dialog named by its title, with its sentence as
-/// the description, and one button per answer.
+/// a text inside it, and one button per answer. The sentence is a text's
+/// value, not the dialog's description, because it must be heard: an
+/// error's title is only "LoomDSP" (section 7, rule 26).
 fn question_item(open: &question::Question, model: &question::Model) -> Item {
-    let buttons = open
-        .answers()
-        .iter()
-        .map(|&answer| {
-            Item::button(
-                answer_id(answer.name()),
-                answer.label(),
-                Some(Message::Question(question::Message::Answer(answer))),
-            )
-        })
-        .collect();
+    let mut parts = vec![Item::text(question_id().with("text"), model.text.clone())];
+    parts.extend(open.answers().iter().map(|&answer| {
+        Item::button(
+            answer_id(answer.name()),
+            answer.label(),
+            Some(Message::Question(question::Message::Answer(answer))),
+        )
+    }));
     Item {
         label: Some(model.title.clone()),
-        description: Some(model.text.clone()),
-        children: buttons,
+        children: parts,
         ..Item::new(question_id(), Kind::AlertDialog)
     }
 }
@@ -264,10 +262,15 @@ fn read_links(block: &str) -> (String, Vec<(String, String)>) {
     let mut rest = block;
     while let Some(open) = rest.find('[') {
         let after = &rest[open + 1..];
-        let found = after.find("](").and_then(|close| {
-            let target = &after[close + 2..];
-            target.find(')').map(|end| (close, &target[..end], close + 2 + end + 1))
-        });
+        // A label holds no `[`: one before the `](` starts the label, so
+        // this bracket is plain text and the next one is tried.
+        let found = after
+            .find("](")
+            .filter(|&close| !after[..close].contains('['))
+            .and_then(|close| {
+                let target = &after[close + 2..];
+                target.find(')').map(|end| (close, &target[..end], close + 2 + end + 1))
+            });
         match found {
             Some((close, target, used)) => {
                 words.push_str(&rest[..open]);
