@@ -442,7 +442,7 @@ pub struct AssignmentRow {
     pub depth: f32,
     /// The depth as text.
     pub depth_text: String,
-    #[serde(serialize_with = "display")]
+    #[serde(serialize_with = "crate::snapshot::display")]
     pub polarity: PolarityChoice,
     /// The polarity choices offered.
     #[serde(skip)]
@@ -481,10 +481,6 @@ pub struct DrivesLine {
     /// False for an assignment that is off: its text ends in "(off)" and
     /// is dimmed.
     pub enabled: bool,
-}
-
-fn display<S: serde::Serializer>(value: &impl std::fmt::Display, s: S) -> Result<S::Ok, S::Error> {
-    s.collect_str(value)
 }
 
 impl App {

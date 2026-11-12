@@ -102,3 +102,21 @@ fn actions_follow_the_item() {
     let text = Item::text(UiId::panel("x"), "Words");
     assert_eq!((text.label, text.value.as_deref()), (None, Some("Words")));
 }
+
+/// Two rows that would share an ID get distinct ones, in list order: the
+/// second gets ` 2` added to its last key, the third ` 3`, and an ID not
+/// taken is left as it is.
+#[test]
+fn ids_taken_twice_are_made_unique() {
+    let mut ids = UniqueIds::default();
+    let row = UiId::panel("patches").with("row").with("bass.ron");
+    assert_eq!(ids.take(row.clone()), row);
+    assert_eq!(ids.take(row.clone()).to_string(), "patches/row/bass.ron 2");
+    assert_eq!(ids.take(row.clone()).to_string(), "patches/row/bass.ron 3");
+    let other = UiId::panel("patches").with("row").with("pad.ron");
+    assert_eq!(ids.take(other.clone()), other);
+    // A key that is a number becomes a name with the number in it.
+    let numbered = UiId::panel("x").with(7u32);
+    assert_eq!(ids.take(numbered.clone()), numbered);
+    assert_eq!(ids.take(numbered).to_string(), "x/7 2");
+}

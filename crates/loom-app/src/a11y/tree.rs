@@ -661,7 +661,16 @@ impl Frame<'_> {
     /// it shows would claim rows out of view are visible.
     fn panel(&mut self, item: &items::Item) -> NodeId {
         let id = self.item(item);
-        let shown = self.places.of(&item.id).and_then(|place| {
+        self.clip_to_shown(id, &item.id);
+        id
+    }
+
+    /// Marks node `id`, drawn as `ui`, as cutting off its children, and
+    /// gives it the bounds of the part of it that shows: its content can be
+    /// taller than the area that scrolls it, and a clipping node larger than
+    /// what it shows would claim rows out of view are visible.
+    fn clip_to_shown(&mut self, id: NodeId, ui: &UiId) {
+        let shown = self.places.of(ui).and_then(|place| {
             let clip = place.clip?;
             Some(place.rect.intersection(clip).unwrap_or(loom_ui_core::Rect::new(
                 loom_ui_core::Point::new(place.rect.x, place.rect.y),
@@ -680,7 +689,6 @@ impl Frame<'_> {
                 });
             }
         }
-        id
     }
 
     /// The node of one item, after the nodes of what it holds. Its role
@@ -713,6 +721,8 @@ impl Frame<'_> {
             Kind::Menu => Role::Menu,
             Kind::MenuItem => Role::MenuItem,
             Kind::Link => Role::Link,
+            Kind::ListBox => Role::ListBox,
+            Kind::ListBoxOption => Role::ListBoxOption,
         });
         // A dialog or a menu owns the input while it is open, as the pointer
         // finds: nothing outside it can be reached (section 7, rule 27).
@@ -722,12 +732,12 @@ impl Frame<'_> {
         // A list says how many rows it has, and each row its place, so a
         // screen reader can say "3 of 7". AccessKit puts the size on the
         // list and counts places from zero.
-        if item.kind == Kind::List {
+        if matches!(item.kind, Kind::List | Kind::ListBox) {
             let rows: Vec<usize> = item
                 .children
                 .iter()
                 .zip(&built)
-                .filter(|(child, _)| child.kind == Kind::ListItem)
+                .filter(|(child, _)| matches!(child.kind, Kind::ListItem | Kind::ListBoxOption))
                 .map(|(_, (_, pushed))| *pushed)
                 .collect();
             node.set_size_of_set(rows.len());
@@ -755,12 +765,26 @@ impl Frame<'_> {
         if let Some(on) = item.on {
             node.set_toggled(if on { Toggled::True } else { Toggled::False });
         }
+        if let Some(selected) = item.selected {
+            node.set_selected(selected);
+        }
+        if let Some(active) = &item.active {
+            node.set_active_descendant(node_id(self.table, active));
+        }
         if item.enabled {
             if matches!(
                 item.kind,
                 Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem | Kind::Link
             ) {
                 node.add_action(Action::Click);
+            }
+            // An option offers Click only when it can be picked: a file that
+            // does not read is listed, and says why, but opens nothing.
+            if item.kind == Kind::ListBoxOption && item.click.is_some() {
+                node.add_action(Action::Click);
+            }
+            if item.menu.is_some() {
+                node.add_action(Action::ShowContextMenu);
             }
             if matches!(item.kind, Kind::Slider | Kind::Choice) {
                 node.add_action(Action::Increment);
@@ -779,6 +803,11 @@ impl Frame<'_> {
             node.set_children(children);
         }
         let id = self.add(&item.id, node);
+        // A list box scrolls, so it cuts off what it scrolls out of view and
+        // is as tall as what shows, as a panel is.
+        if item.kind == Kind::ListBox {
+            self.clip_to_shown(id, &item.id);
+        }
         // A covered field is hidden, so it cannot be focused, even while
         // the window has not yet said its keys have moved.
         if !self.covered && item.focus.is_some() && item.focus.as_ref() == self.field {

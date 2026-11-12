@@ -2433,6 +2433,8 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::Menu => Role::Menu,
                 Kind::MenuItem => Role::MenuItem,
                 Kind::Link => Role::Link,
+                Kind::ListBox => Role::ListBox,
+                Kind::ListBoxOption => Role::ListBoxOption,
             };
             assert_eq!(found.role(), role, "{}", item.id);
             match item.kind {
@@ -4116,4 +4118,229 @@ fn every_inspector_state_is_reported_with_named_parts() {
             .any(|item| item.id.to_string().contains("/member/")),
         "the layer's members are reported"
     );
+}
+
+/// The harness with the library preference at `dir`, which holds a
+/// sub-patch at `Voices/Voice.ron`, and the module browser open over it.
+fn browser_ui(dir: &std::path::Path) -> crate::ui_test::Ui {
+    std::fs::create_dir_all(dir.join("Voices")).unwrap();
+    std::fs::write(
+        dir.join("Voices/Voice.ron"),
+        r#"Patch(version: 1, metadata: Metadata(name: "Voice"))"#,
+    )
+    .unwrap();
+    let mut app = crate::tests::app();
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(dir.to_path_buf());
+    let _ = app.rig.store.save(preferences);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(Message::OpenBrowser);
+    let _ = ui.redraw();
+    assert!(ui.app.overlays.browser().is_some(), "the browser is open");
+    ui
+}
+
+/// The node of the option for the row at `row` in the open browser.
+fn browser_option(ui: &mut crate::ui_test::Ui, row: usize) -> NodeId {
+    let id = ui.app.overlays.browser().unwrap().model().rows[row].id.clone();
+    node_of(&mut ui.app, &id)
+}
+
+/// The module browser in the tree: a modal dialog whose search field has
+/// the focus, with the highlighted row as its active descendant and as the
+/// list box's selected option. Up and Down move the selection and leave
+/// the focus in the field. Every part that acts is where the window drew
+/// it.
+#[test]
+fn the_module_browser_is_reported_with_the_focus_in_its_field() {
+    let dir = crate::recovery::tests::TempDir::new("a11y-browser");
+    let mut ui = browser_ui(&dir.0);
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    let dialog = node(&update, node_of(&mut ui.app, &crate::browser::browser_id()));
+    assert_eq!(dialog.role(), Role::Dialog);
+    assert!(dialog.is_modal());
+    let field = node_of(&mut ui.app, &crate::browser::search_id());
+    assert_eq!(update.focus, field, "the search field has the focus");
+    let first = browser_option(&mut ui, 0);
+    assert_eq!(node(&update, field).active_descendant(), Some(first));
+    assert_eq!(node(&update, first).is_selected(), Some(true));
+    assert_eq!(node(&update, first).role(), Role::ListBoxOption);
+    let list = node(&update, node_of(&mut ui.app, &crate::browser::list_id()));
+    assert_eq!(list.role(), Role::ListBox);
+    assert_eq!(
+        list.size_of_set(),
+        Some(ui.app.overlays.browser().unwrap().model().rows.len())
+    );
+    assert!(list.clips_children());
+
+    let (overlay, _) = ui.app.overlay_items();
+    for item in overlay[0].walk() {
+        let acts = item.click.is_some() || item.focus.is_some() || item.set_text.is_some();
+        if acts && !matches!(item.kind, super::items::Kind::Dialog) {
+            assert!(places.of(&item.id).is_some(), "the window drew `{}`", item.id);
+        }
+    }
+
+    ui.send(Message::Browser(crate::browser::Message::Key(
+        crate::browser::Nav::Down,
+    )));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    let second = browser_option(&mut ui, 1);
+    assert_eq!(update.focus, field, "the focus stays in the field");
+    assert_eq!(node(&update, field).active_descendant(), Some(second));
+    assert_eq!(node(&update, second).is_selected(), Some(true));
+    assert_eq!(node(&update, first).is_selected(), Some(false));
+}
+
+/// A screen reader's Click on a module's option adds it, as a press does.
+#[test]
+fn a_click_on_a_browser_option_adds_its_module() {
+    let dir = crate::recovery::tests::TempDir::new("a11y-browser-click");
+    let mut ui = browser_ui(&dir.0);
+    let before = ui.app.ui_snapshot().tiles.len();
+    let _ = ui.places();
+    let option = browser_option(&mut ui, 0);
+    for task in ui
+        .app
+        .a11y_action(&request(Action::Click, option, None), std::time::Instant::now())
+    {
+        let _ = ui.run_task(task);
+    }
+    assert!(ui.app.overlays.browser().is_none(), "the browser closed");
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1);
+}
+
+/// ShowContextMenu on a library row opens its menu as a menu, with the
+/// focus on Insert linked; a Click there inserts the sub-patch linked. A
+/// module's option offers no menu.
+#[test]
+fn show_context_menu_on_a_library_row_opens_its_menu() {
+    let dir = crate::recovery::tests::TempDir::new("a11y-browser-menu");
+    let mut ui = browser_ui(&dir.0);
+    let row = ui
+        .app
+        .overlays
+        .browser()
+        .unwrap()
+        .model()
+        .rows
+        .iter()
+        .position(|row| row.library)
+        .expect("the library row");
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    let module = browser_option(&mut ui, 0);
+    assert!(!node(&update, module).supports_action(Action::ShowContextMenu));
+    let option = browser_option(&mut ui, row);
+    assert!(node(&update, option).supports_action(Action::ShowContextMenu));
+    let _ = ui.app.a11y_action(
+        &request(Action::ShowContextMenu, option, None),
+        std::time::Instant::now(),
+    );
+    let _ = ui.redraw();
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    let id = ui.app.overlays.browser().unwrap().model().rows[row].id.clone();
+    let item = node_of(&mut ui.app, &crate::browser::insert_linked_id(&id));
+    assert_eq!(update.focus, item, "the focus is on the menu's item");
+    assert_eq!(node(&update, item).role(), Role::MenuItem);
+    assert!(places.of(&crate::browser::insert_linked_id(&id)).is_some());
+
+    let before = ui.app.ui_snapshot().tiles.len();
+    for task in ui
+        .app
+        .a11y_action(&request(Action::Click, item, None), std::time::Instant::now())
+    {
+        let _ = ui.run_task(task);
+    }
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1, "inserted");
+    assert!(ui.app.overlays.browser().is_none());
+}
+
+/// Help opened over the browser owns the input, so the browser is not
+/// reported, and its options do not act.
+#[test]
+fn help_over_the_browser_hides_it() {
+    let dir = crate::recovery::tests::TempDir::new("a11y-browser-help");
+    let mut ui = browser_ui(&dir.0);
+    let _ = ui.places();
+    let option = browser_option(&mut ui, 0);
+    ui.send(Message::ShowHelp);
+    let _ = ui.redraw();
+    assert!(ui.app.overlays.help.is_some());
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    assert!(update.nodes.iter().all(|(id, _)| *id != option), "not reported");
+    let tiles = ui.app.ui_snapshot().tiles.len();
+    let _ = ui
+        .app
+        .a11y_action(&request(Action::Click, option, None), std::time::Instant::now());
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), tiles, "inert");
+}
+
+/// Your patches in the tree, as its rows stream in: after each batch the
+/// focus is still the search field, with no new focus to announce, the
+/// selected row keeps its node, and the list's size is the rows shown.
+#[test]
+fn your_patches_follows_each_batch_without_moving_the_focus() {
+    let library = crate::recovery::tests::TempDir::new("a11y-patches-library");
+    let source = crate::recovery::tests::TempDir::new("a11y-patches-rows");
+    for i in 0..9 {
+        std::fs::write(
+            source.0.join(format!("{i}.ron")),
+            format!(
+                r#"Patch(version: 1, metadata: Metadata(name: "Patch {i}", tags: ["t{}"]))"#,
+                i % 3
+            ),
+        )
+        .unwrap();
+    }
+    let mut app = crate::tests::app();
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(library.0.clone());
+    let _ = app.rig.store.save(preferences);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    // Run so the focus the opening asks for is reported back, as the
+    // window would report it.
+    let task = ui.app.update(Message::File(crate::FileAction::Browse));
+    let _ = ui.run_task(task);
+    let _ = ui.redraw();
+    let open = ui.app.patches_open;
+    let field = node_of(&mut ui.app, &crate::patches::part_id("search"));
+    let places = ui.places();
+    assert_eq!(ui.app.a11y_tree(&places).focus, field);
+
+    let paths = crate::patches::patch_files(&source.0, &std::sync::atomic::AtomicBool::new(false));
+    let mut selected: Option<(UiId, NodeId)> = None;
+    for batch in paths.chunks(3) {
+        let rows = batch.iter().map(|path| crate::patches::Row::read(path)).collect();
+        ui.send(Message::Patches(crate::patches::Message::Found { open, rows }));
+        let _ = ui.redraw();
+        let places = ui.places();
+        let update = ui.app.a11y_tree(&places);
+        assert_eq!(update.focus, field, "the focus stays in the field");
+        let model = ui.app.overlays.patches().unwrap().model().clone();
+        let list = node(&update, node_of(&mut ui.app, &crate::patches::part_id("list")));
+        assert_eq!(list.size_of_set(), Some(model.rows.len()));
+        let highlighted = model.rows[model.highlight.unwrap()].id.clone();
+        let number = node_of(&mut ui.app, &highlighted);
+        assert_eq!(node(&update, number).is_selected(), Some(true));
+        if let Some((id, before)) = &selected {
+            assert_eq!(id, &highlighted, "the highlight stays on its patch");
+            assert_eq!(*before, number, "and keeps its node");
+        }
+        selected = Some((highlighted, number));
+    }
+    // Every part that acts is where the window drew it.
+    let places = ui.places();
+    let (overlay, _) = ui.app.overlay_items();
+    for item in overlay[0].walk() {
+        let acts = item.click.is_some() || item.focus.is_some() || item.set_text.is_some();
+        if acts && item.kind != super::items::Kind::Dialog {
+            assert!(places.of(&item.id).is_some(), "the window drew `{}`", item.id);
+        }
+    }
 }

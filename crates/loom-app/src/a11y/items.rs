@@ -58,6 +58,13 @@ pub(crate) enum Kind {
     MenuItem,
     /// A link in text. Click follows it.
     Link,
+    /// A list of options to pick from, one selected, such as the module
+    /// browser's results. Its children are list box options, each told its
+    /// position and the list's size.
+    ListBox,
+    /// One option of a list box. `selected` says whether it is the one the
+    /// keys are on; Click picks it.
+    ListBoxOption,
 }
 
 /// A slider's number and range, in the units the user sees.
@@ -163,6 +170,13 @@ pub(crate) enum SetText {
     /// The matrix's filter. It filters as it is typed in and has no Enter
     /// of its own, so the text is the one message.
     MatrixFilter,
+    /// The module browser's search field. It searches as it is typed in,
+    /// and Enter would pick a row, so the text is the one message.
+    BrowserQuery,
+    /// Your patches' search field, which filters as it is typed in.
+    PatchesSearch,
+    /// Your patches' Author field, which filters as it is typed in.
+    PatchesAuthor,
 }
 
 impl SetText {
@@ -226,6 +240,9 @@ impl SetText {
                 Message::PatchInfo(crate::patch_info::Message::TagSubmit),
             ],
             Self::MatrixFilter => vec![Message::Matrix(crate::matrix::Event::Filter(text))],
+            Self::BrowserQuery => vec![Message::Browser(crate::browser::Message::Query(text))],
+            Self::PatchesSearch => vec![Message::Patches(crate::patches::Message::Search(text))],
+            Self::PatchesAuthor => vec![Message::Patches(crate::patches::Message::Author(text))],
         }
     }
 }
@@ -249,6 +266,14 @@ pub(crate) struct Item {
     pub number: Option<Number>,
     /// A check box's or an option's state.
     pub on: Option<bool>,
+    /// A list box option's state: true for the one the keys are on.
+    pub selected: Option<bool>,
+    /// For a field whose keys move in a list: the option they are on, as its
+    /// active descendant. AccessKit's macOS adapter (0.27.2) does not read
+    /// it; other platforms do.
+    pub active: Option<UiId>,
+    /// What ShowContextMenu sends: the part's menu, opened as a key would.
+    pub menu: Option<Message>,
     /// False while it can do nothing; its description then says why.
     pub enabled: bool,
     /// What a Click sends.
@@ -281,6 +306,9 @@ impl Item {
             description: None,
             number: None,
             on: None,
+            selected: None,
+            active: None,
+            menu: None,
             enabled: true,
             click: None,
             step: (None, None),
@@ -343,6 +371,7 @@ pub(crate) fn messages(item: &Item, action: accesskit::Action, data: Option<&acc
     }
     match (action, data) {
         (Action::Click, _) => item.click.clone().into_iter().collect(),
+        (Action::ShowContextMenu, _) => item.menu.clone().into_iter().collect(),
         (Action::Increment, _) => item.step.0.clone().into_iter().collect(),
         (Action::Decrement, _) => item.step.1.clone().into_iter().collect(),
         (Action::SetValue, Some(ActionData::NumericValue(value))) => item
@@ -359,3 +388,44 @@ pub(crate) fn messages(item: &Item, action: accesskit::Action, data: Option<&acc
 
 #[cfg(test)]
 mod tests;
+
+/// Makes the UI IDs of a list's rows unique as they are built. A row's ID
+/// comes from what it shows, such as a file's path, and two rows could in
+/// rare cases show the same text: two file names that differ only in bytes
+/// that are not UTF-8 read back as the same lossy text. A second row with an
+/// ID already taken gets ` 2` added to its last key, a third ` 3`, in list
+/// order, so no two nodes share an ID.
+#[derive(Debug, Default)]
+pub(crate) struct UniqueIds {
+    /// The IDs given so far.
+    taken: std::collections::HashSet<UiId>,
+}
+
+impl UniqueIds {
+    /// `id`, or `id` with a number added to its last key when it is taken.
+    pub(crate) fn take(&mut self, id: UiId) -> UiId {
+        if self.taken.insert(id.clone()) {
+            return id;
+        }
+        let keys = id.keys();
+        let (last, outer) = keys.split_last().expect("an ID has a key");
+        let base = match last {
+            loom_ui_core::IdKey::Name(name) => name.to_string(),
+            loom_ui_core::IdKey::Number(number) => number.to_string(),
+        };
+        (2..)
+            .map(|n| {
+                let key = format!("{base} {n}");
+                match outer.split_first() {
+                    Some((first, rest)) => rest
+                        .iter()
+                        .cloned()
+                        .fold(UiId::panel(first.clone()), UiId::with)
+                        .with(key.as_str()),
+                    None => UiId::panel(key.as_str()),
+                }
+            })
+            .find(|candidate| self.taken.insert(candidate.clone()))
+            .expect("a free number")
+    }
+}

@@ -12,6 +12,8 @@ use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrolla
 use iced::{Element, Length, Task, Theme};
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
+use loom_ui_core::UiId;
+use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -278,6 +280,100 @@ pub enum Outcome {
     Open(PathBuf),
 }
 
+/// What Your patches shows, as plain data (ADR-0021). The browser owns it
+/// and keeps it up to date in [`PatchBrowser::update`], so its view, the
+/// accessibility tree, and the UI snapshot read the same thing, and it
+/// changes only when what is shown does.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Model {
+    /// The search field's text.
+    pub search: String,
+    /// The Author field's text.
+    pub author: String,
+    /// The licence filters, in their order.
+    pub licences: Vec<LicenceBox>,
+    /// Every tag found so far, sorted, each once.
+    pub tags: Vec<TagChip>,
+    /// The rows shown, newest first.
+    pub rows: Vec<PatchRow>,
+    /// The highlighted row, or `None` while none is shown.
+    pub highlight: Option<usize>,
+    /// How many files have been read so far, shown or not.
+    pub loaded: usize,
+    /// The line shown in place of the list while no row is shown.
+    pub empty: Option<String>,
+    /// The library folder, as the line at the bottom shows it.
+    pub folder: String,
+}
+
+/// One licence filter: a check box.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LicenceBox {
+    /// The filter.
+    #[serde(skip)]
+    pub filter: LicenceFilter,
+    /// Its fixed key, for its UI ID: never its label, which may be reworded.
+    pub key: &'static str,
+    /// What it says.
+    pub label: &'static str,
+    /// True while it filters.
+    pub on: bool,
+}
+
+/// One tag: a button that picks it or unpicks it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TagChip {
+    /// The tag.
+    pub text: String,
+    /// True while it filters.
+    pub picked: bool,
+}
+
+/// One row of the list, as it is shown.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PatchRow {
+    /// Its UI ID: `patches/row/<path in the library folder>`.
+    #[serde(serialize_with = "crate::snapshot::display")]
+    pub id: UiId,
+    /// The patch's name, or its file name.
+    pub name: String,
+    /// The line under the name: authors, tags, licence, and date, or
+    /// "Could not read".
+    pub details: String,
+    /// False for a file that does not read: it cannot be opened.
+    pub readable: bool,
+}
+
+/// The fixed key of a licence filter.
+fn licence_key(filter: LicenceFilter) -> &'static str {
+    match filter {
+        LicenceFilter::LetsMeChange => "lets-me-change",
+        LicenceFilter::AllowsCommercialUse => "allows-commercial-use",
+        LicenceFilter::NoLicenceStated => "no-licence-stated",
+    }
+}
+
+/// The UI ID of Your patches.
+pub(crate) fn patches_id() -> UiId {
+    UiId::panel("patches")
+}
+
+/// The UI ID of a part of Your patches by its fixed name: `search`,
+/// `author`, `close`, `list`, `folder`, `empty`.
+pub(crate) fn part_id(name: &'static str) -> UiId {
+    patches_id().with(name)
+}
+
+/// The UI ID of a licence check box.
+pub(crate) fn licence_id(key: &'static str) -> UiId {
+    patches_id().with("licence").with(key)
+}
+
+/// The UI ID of a tag, one key whatever it holds.
+pub(crate) fn tag_id(tag: &str) -> UiId {
+    patches_id().with("tag").with(tag)
+}
+
 /// The open browser.
 pub struct PatchBrowser {
     /// Which opening this is, so rows read for an earlier one are dropped.
@@ -298,6 +394,8 @@ pub struct PatchBrowser {
     shown: Vec<usize>,
     /// The highlighted entry of `shown`.
     highlight: usize,
+    /// What is shown.
+    model: Model,
     /// The list's scroll offset.
     scroll: f32,
     /// Set when this browser goes, to stop the thread reading its folder.
@@ -316,7 +414,18 @@ impl Drop for PatchBrowser {
 impl PatchBrowser {
     /// An empty browser over `folder`. Rows come in with [`Message::Found`].
     pub fn new(open: u64, folder: PathBuf) -> Self {
-        Self {
+        let model = Model {
+            search: String::new(),
+            author: String::new(),
+            licences: Vec::new(),
+            tags: Vec::new(),
+            rows: Vec::new(),
+            highlight: None,
+            loaded: 0,
+            empty: None,
+            folder: folder.display().to_string(),
+        };
+        let mut browser = Self {
             open,
             folder,
             rows: Vec::new(),
@@ -326,9 +435,83 @@ impl PatchBrowser {
             filter: Filter::default(),
             shown: Vec::new(),
             highlight: 0,
+            model,
             scroll: 0.0,
             stop: Arc::new(AtomicBool::new(false)),
-        }
+        };
+        browser.show_filters();
+        browser.show_rows();
+        browser
+    }
+
+    /// What the browser shows.
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    /// Puts the filters in the model: the fields' text, the licence boxes,
+    /// and the tags with which are picked.
+    fn show_filters(&mut self) {
+        self.model.search.clone_from(&self.filter.search);
+        self.model.author.clone_from(&self.filter.author);
+        self.model.licences = LicenceFilter::ALL
+            .into_iter()
+            .map(|filter| LicenceBox {
+                filter,
+                key: licence_key(filter),
+                label: filter.label(),
+                on: self.filter.licence.contains(&filter),
+            })
+            .collect();
+        // The picked tags as a set once, not a search per tag.
+        let picked: BTreeSet<&str> = self.filter.tags.iter().map(String::as_str).collect();
+        self.model.tags = self
+            .tags
+            .iter()
+            .map(|tag| TagChip {
+                text: tag.clone(),
+                picked: picked.contains(tag.as_str()),
+            })
+            .collect();
+    }
+
+    /// Puts the rows shown in the model, each keyed by its path in the
+    /// library folder, once per refilter, never per frame.
+    fn show_rows(&mut self) {
+        let library = crate::patch_file::FolderLibrary {
+            root: self.folder.clone(),
+        };
+        let mut ids = crate::a11y::items::UniqueIds::default();
+        self.model.rows = self
+            .shown
+            .iter()
+            .map(|&i| {
+                let row = &self.rows[i];
+                let path = library
+                    .path_of(&row.path)
+                    .unwrap_or_else(|| row.path.to_string_lossy().into_owned());
+                PatchRow {
+                    id: ids.take(part_id("row").with(path.as_str())),
+                    name: row.name(),
+                    details: row.details.clone(),
+                    readable: row.info.is_some(),
+                }
+            })
+            .collect();
+        self.model.loaded = self.rows.len();
+        self.model.empty = self.shown.is_empty().then(|| {
+            if self.rows.is_empty() {
+                format!("No patches in {} yet.", self.folder.display())
+            } else {
+                "No patches match.".to_string()
+            }
+        });
+        self.show_highlight();
+    }
+
+    /// Puts the highlight in the model.
+    fn show_highlight(&mut self) {
+        self.model.highlight = (!self.shown.is_empty()).then_some(self.highlight);
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
@@ -351,6 +534,7 @@ impl PatchBrowser {
 
     /// Every tag in the folder, tidied, sorted, each once, for the tag
     /// filter.
+    #[cfg(test)]
     pub fn tags(&self) -> impl Iterator<Item = &str> {
         self.tags.iter().map(String::as_str)
     }
@@ -370,6 +554,7 @@ impl PatchBrowser {
                     );
                     self.rows.extend(rows);
                     self.refilter();
+                    self.show_filters();
                 }
                 Outcome::Stay
             }
@@ -377,12 +562,16 @@ impl PatchBrowser {
                 self.filter.search = text;
                 self.refilter();
                 self.highlight = 0;
+                self.show_highlight();
+                self.show_filters();
                 Outcome::Stay
             }
             Message::Author(text) => {
                 self.filter.author = text;
                 self.refilter();
                 self.highlight = 0;
+                self.show_highlight();
+                self.show_filters();
                 Outcome::Stay
             }
             Message::Tag(tag) => {
@@ -394,6 +583,8 @@ impl PatchBrowser {
                 }
                 self.refilter();
                 self.highlight = 0;
+                self.show_highlight();
+                self.show_filters();
                 Outcome::Stay
             }
             Message::Licence(filter, on) => {
@@ -403,16 +594,20 @@ impl PatchBrowser {
                 }
                 self.refilter();
                 self.highlight = 0;
+                self.show_highlight();
+                self.show_filters();
                 Outcome::Stay
             }
             Message::Hover(row) => {
                 if row < self.shown.len() {
                     self.highlight = row;
+                    self.show_highlight();
                 }
                 Outcome::Stay
             }
             Message::Pick(row) => {
                 self.highlight = row;
+                self.show_highlight();
                 self.open_highlighted()
             }
             Message::Submit => self.open_highlighted(),
@@ -423,6 +618,7 @@ impl PatchBrowser {
             Message::Step(by) => {
                 let last = self.shown.len().saturating_sub(1);
                 self.highlight = self.highlight.saturating_add_signed(by as isize).min(last);
+                self.show_highlight();
                 Outcome::Stay
             }
             Message::Close => Outcome::Close,
@@ -466,6 +662,7 @@ impl PatchBrowser {
             let at = self.shown().position(|row| row.path == path);
             self.highlight = at.unwrap_or(0);
         }
+        self.show_rows();
     }
 
     /// Scrolls the list just enough to show the highlighted row.
@@ -482,49 +679,67 @@ impl PatchBrowser {
         iced::widget::operation::scroll_to(LIST, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: offset })
     }
 
-    /// The browser, as a panel over the canvas.
+    /// The browser, as a panel over the canvas. Drawn from the model alone;
+    /// each part is named by its UI ID, so the window says where it is
+    /// (`places.rs`).
     pub fn view(&self) -> Element<'_, Message> {
-        let search = text_input("Search names, descriptions, and tags", &self.filter.search)
-            .id(SEARCH)
-            .on_input(Message::Search)
-            .on_submit(Message::Submit)
-            .size(style::CONTROL)
-            .padding(6);
-        let author = text_input("Author", &self.filter.author)
-            .id(AUTHOR)
-            .on_input(Message::Author)
-            .on_submit(Message::Submit)
-            .size(style::CONTROL)
-            .width(200);
+        let model = &self.model;
+        let named = |id: &UiId, content: Element<'static, Message>| -> Element<'static, Message> {
+            container(content).id(crate::places::widget_id(id)).into()
+        };
+        let search = named(
+            &part_id("search"),
+            text_input("Search names, descriptions, and tags", &model.search)
+                .id(SEARCH)
+                .on_input(Message::Search)
+                .on_submit(Message::Submit)
+                .size(style::CONTROL)
+                .padding(6)
+                .into(),
+        );
+        let author = named(
+            &part_id("author"),
+            text_input("Author", &model.author)
+                .id(AUTHOR)
+                .on_input(Message::Author)
+                .on_submit(Message::Submit)
+                .size(style::CONTROL)
+                .width(200)
+                .into(),
+        );
         let mut licences = row![].spacing(12);
-        for filter in LicenceFilter::ALL {
-            licences = licences.push(
-                checkbox(self.filter.licence.contains(&filter))
-                    .label(filter.label())
+        for licence in &model.licences {
+            let filter = licence.filter;
+            licences = licences.push(named(
+                &licence_id(licence.key),
+                checkbox(licence.on)
+                    .label(licence.label)
                     .size(style::SWITCH)
                     .text_size(style::CONTROL)
-                    .on_toggle(move |on| Message::Licence(filter, on)),
-            );
+                    .on_toggle(move |on| Message::Licence(filter, on))
+                    .into(),
+            ));
         }
-        let chips = self.tags().map(|tag| {
-            let tag = tag.to_string();
-            let picked = self.filter.tags.contains(&tag);
-            button(text(tag.clone()).size(style::SMALL))
-                .padding([2, 8])
-                // A picked tag looks like an open tab: filled and outlined.
-                // The primary role is kept for one main action per view.
-                .style(style::tab(picked))
-                .on_press(Message::Tag(tag))
-                .into()
+        let chips = model.tags.iter().map(|tag| {
+            named(
+                &tag_id(&tag.text),
+                button(text(tag.text.clone()).size(style::SMALL))
+                    .padding([2, 8])
+                    // A picked tag looks like an open tab: filled and outlined.
+                    // The primary role is kept for one main action per view.
+                    .style(style::tab(tag.picked))
+                    .on_press(Message::Tag(tag.text.clone()))
+                    .into(),
+            )
         });
         let tags = iced::widget::Row::with_children(chips).spacing(4).wrap();
 
-        let rows = self.shown().enumerate().map(|(i, r)| {
-            let highlighted = i == self.highlight;
+        let rows = model.rows.iter().enumerate().map(|(i, r)| {
+            let highlighted = model.highlight == Some(i);
             let cell = container(
                 column![
-                    text(r.name()).size(style::CONTROL),
-                    text(&r.details).size(style::SMALL).color(style::QUIET),
+                    text(r.name.as_str()).size(style::CONTROL),
+                    text(r.details.as_str()).size(style::SMALL).color(style::QUIET),
                 ]
                 .spacing(2),
             )
@@ -532,44 +747,53 @@ impl PatchBrowser {
             .height(ROW_HEIGHT)
             .width(Length::Fill)
             .style(move |theme: &Theme| crate::browser::row_style(theme, highlighted));
-            mouse_area(cell)
-                .on_move(move |_| Message::Hover(i))
-                .on_press(Message::Pick(i))
-                .into()
+            container(
+                mouse_area(cell)
+                    .on_move(move |_| Message::Hover(i))
+                    .on_press(Message::Pick(i)),
+            )
+            .id(crate::places::widget_id(&r.id))
+            .into()
         });
-        let list: Element<'_, Message> = if self.shown.is_empty() {
-            let line = if self.rows.is_empty() {
-                format!("No patches in {} yet.", self.folder.display())
-            } else {
-                "No patches match.".to_string()
-            };
-            container(text(line).size(style::CONTROL).color(style::QUIET))
+        let list: Element<'_, Message> = match &model.empty {
+            Some(line) => container(text(line.as_str()).size(style::CONTROL).color(style::QUIET))
                 .padding(8)
                 .height(LIST_HEIGHT)
-                .into()
-        } else {
-            scrollable(column(rows))
-                .id(LIST)
-                .spacing(4)
-                .height(LIST_HEIGHT)
-                .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
-                .into()
+                .into(),
+            None => container(
+                scrollable(column(rows))
+                    .id(LIST)
+                    .spacing(4)
+                    .height(LIST_HEIGHT)
+                    .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y)),
+            )
+            .id(crate::places::widget_id(&part_id("list")))
+            .into(),
         };
         let panel = column![
             row![
                 text("Your patches").size(style::TITLE),
                 space::horizontal(),
-                button(text("Close").size(style::CONTROL)).on_press(Message::Close),
+                named(
+                    &part_id("close"),
+                    button(text("Close").size(style::CONTROL))
+                        .on_press(Message::Close)
+                        .into()
+                ),
             ]
             .align_y(iced::Alignment::Center),
             search,
             row![author, licences].spacing(12).align_y(iced::Alignment::Center),
             tags,
             list,
-            text(self.folder.display().to_string()).size(style::SMALL).color(DIM),
+            text(model.folder.as_str()).size(style::SMALL).color(DIM),
         ]
         .spacing(8);
-        let panel = container(panel).padding(16).width(720).style(container::rounded_box);
+        let panel = container(panel)
+            .padding(16)
+            .width(720)
+            .style(container::rounded_box)
+            .id(crate::places::widget_id(&patches_id()));
         opaque(
             container(panel)
                 .width(Length::Fill)
@@ -599,6 +823,8 @@ pub(crate) fn key(
     };
     Some(crate::Message::Patches(message))
 }
+
+pub(crate) mod access;
 
 #[cfg(test)]
 mod tests;

@@ -57,11 +57,18 @@ impl App {
                 }
                 None => (Vec::new(), None),
             },
-            InputOwner::Canvas
-            | InputOwner::Browser
-            | InputOwner::Patches
-            | InputOwner::Preferences
-            | InputOwner::Chooser => (Vec::new(), None),
+            InputOwner::Browser => match self.overlays.browser() {
+                Some(open) => {
+                    let (item, focus) = crate::browser::access::items(open.model());
+                    (vec![item], focus)
+                }
+                None => (Vec::new(), None),
+            },
+            InputOwner::Patches => match self.overlays.patches() {
+                Some(open) => (vec![crate::patches::access::items(open.model())], None),
+                None => (Vec::new(), None),
+            },
+            InputOwner::Canvas | InputOwner::Preferences | InputOwner::Chooser => (Vec::new(), None),
         }
     }
 }
