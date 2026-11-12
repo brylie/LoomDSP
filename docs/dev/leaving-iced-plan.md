@@ -223,7 +223,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 ### 2.3 The headless harness on the same runtime
 
 1. Rewrite `ui_test.rs` internals so `Ui` drives the phase 2.1 runtime, not Iced's runtime. Its public API (`Ui::new`, pointer and key methods, `output`, `input`, `control`, `text`, `exited`, the in-memory clipboard) does not change. The 15 files that use it should not need edits.
-2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text measurement needs only Parley's font and layout contexts, which run on the CPU.
+2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text that Iced still draws keeps Iced's measure, so layout matches the drawn widths. Text that Parley draws, from step 2.4b on, is measured by Parley, which needs only its font and layout contexts on the CPU.
 3. Drawing tests (`screenshot.rs`, its smoke test) render to an offscreen `wgpu` texture. Without a GPU adapter they skip with `NO_GPU`, as today. Iced's `tiny-skia` fallback goes away; nothing should depend on it once events need no renderer. If CI has no GPU, try a software `wgpu` adapter (such as llvmpipe through Vulkan, or WARP on Windows) and record whether it works.
 4. Add an accessibility test driver to the harness: `Ui::a11y_tree()` returns the current tree, and `Ui::a11y_action(name, action)` performs an action by node name. Agents and tests can then check the tree the way a screen reader sees it.
 
@@ -277,7 +277,13 @@ Move the simplest views first. One pull request per row, each passing the parity
 ### 3.3 Text input and editing
 
 1. Single-line input (browser search, number entry, names) builds on Parley's `PlainEditor`, behind a field type of our own: cursor, selection, word movement, and clipboard come from it, and undo inside the field is ours, by snapshots of text and selection (about 80 lines).
-2. IME: send `winit` IME events (preedit and commit) to the focused field, through `PlainEditor`'s `set_compose`, `finish_compose`, and `clear_compose`, and report `ime_cursor_area` to the window so the candidate window appears in the right place. Test with a Japanese or Chinese input method on macOS and record the result.
+2. IME: send `winit` IME events to the focused field through `PlainEditor`, and report `ime_cursor_area` to the window so the candidate window appears in the right place. `winit` ends a composition with an empty `Preedit` and then a `Commit` that carries the final text, so the mapping is:
+   - `Preedit` with text: `set_compose(text, cursor)`.
+   - `Preedit` with empty text: `clear_compose()`. This drops only the preedit text, never committed text.
+   - `Commit(text)`: insert `text` at the selection (`insert_or_replace_selection`). `finish_compose` is not used for it: it would keep the preedit as text, and the commit would then insert it a second time.
+   - Focus leaving the field while composing: `finish_compose()`, so what the user saw stays.
+
+   A test sends the sequence `Preedit("にほ")`, `Preedit("")`, `Commit("日本")` and checks the field holds "日本" once, with the caret after it. Also test with a Japanese or Chinese input method on macOS and record the result.
 3. The multi-line editor (patch info authors) comes last. If it costs too much, keep it on Iced's `text_editor` and finish phase 3 without it. Phase 4 then waits until it is done.
 4. Clipboard: use a permissive clipboard crate such as `arboard` †, behind the effect from 2.1, so the harness keeps its in-memory clipboard.
 

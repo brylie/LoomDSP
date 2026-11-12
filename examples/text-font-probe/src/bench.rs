@@ -66,7 +66,7 @@ fn cosmic_15(shaping: cosmic_text_15::Shaping, name: &str) {
     let mut buffers = Vec::new();
     let first = median(|| {
         let at = Instant::now();
-        buffers = start
+        let built: Vec<Buffer> = start
             .iter()
             .map(|label| {
                 let mut buffer = Buffer::new(&mut system, Metrics::new(SIZE, SIZE * 1.3));
@@ -76,7 +76,10 @@ fn cosmic_15(shaping: cosmic_text_15::Shaping, name: &str) {
                 buffer
             })
             .collect();
-        at.elapsed()
+        let elapsed = at.elapsed();
+        // The old buffers are dropped after the timing, as Parley's are.
+        buffers = built;
+        elapsed
     });
     let mut flip = false;
     let again = median(|| {
@@ -106,7 +109,7 @@ fn cosmic_19(shaping: cosmic_text_19::Shaping, present: bool, name: &str) {
     let mut buffers = Vec::new();
     let first = median(|| {
         let at = Instant::now();
-        buffers = start
+        let built: Vec<Buffer> = start
             .iter()
             .map(|label| {
                 let mut buffer = Buffer::new(&mut system, Metrics::new(SIZE, SIZE * 1.3));
@@ -116,7 +119,10 @@ fn cosmic_19(shaping: cosmic_text_19::Shaping, present: bool, name: &str) {
                 buffer
             })
             .collect();
-        at.elapsed()
+        let elapsed = at.elapsed();
+        // The old buffers are dropped after the timing, as Parley's are.
+        buffers = built;
+        elapsed
     });
     let mut flip = false;
     let again = median(|| {

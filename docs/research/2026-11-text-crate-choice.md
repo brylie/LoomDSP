@@ -36,7 +36,7 @@ The choice is for the long run. So each criterion is answered twice where versio
 2. **Parley 0.12 removed its AccessKit integration.** It moved into Parley's `editor` example "to be copied and adapted". Copying it would be porting framework code, which this project does not do. With either crate we write that part.
 3. **Parley's IME support is real and built in.** `cosmic-text` has none.
 4. **On macOS, `cosmic-text` matches today exactly, and Parley does not.** Widths decide layout, hit tests, and `locate` answers, so a mismatch fails the parity gate.
-5. **Parley shapes labels faster, but not by a margin that matters.** With the system font named for both, Parley takes about 4.6 µs per tile label and `cosmic-text` 0.19 about 5.4 to 7 µs. Most of `cosmic-text`'s slower default time is a fallback search for the missing "Open Sans".
+5. **Parley shapes labels faster, but not by a margin that matters.** With the system font named for both, Parley takes about 4.8 µs per tile label and `cosmic-text` 0.19 about 5.7 to 6.8 µs. Most of `cosmic-text`'s slower default time is a fallback search for the missing "Open Sans".
 6. **Decision: Parley,** chosen for the long run. Brylie left the choice to the driver. The first draft of this note recommended `cosmic-text`, weighted by facts that last only while Iced is in the app. See [the choice](#the-choice).
 
 ## 1. IME composition in a single-line field
@@ -184,20 +184,20 @@ Both give the movement and selection rule 2 asks for. Both leave the undo stack 
 
 ### Shaping speed
 
-Measured with `cargo run --release -- --bench` in the probe, on the machine above: 2,000 different labels such as "Resonance 17 Hz" at 9 px. "First" builds and shapes each label; "again" gives every label new text and shapes it again. Medians of five runs, after one warm-up run. Three runs of the whole benchmark agreed to within about 20%, and kept the same order.
+Measured with `cargo run --release -- --bench` in the probe, on the machine above: 2,000 different labels such as "Resonance 17 Hz" at 9 px. "First" builds and shapes each label; "again" gives every label new text and shapes it again. Medians of five runs, after one warm-up run. Each figure is the median of three runs of the whole benchmark. Those runs agreed to within about 20%, except one slower run for `cosmic-text` 0.19 without the system font named, and all three kept the same order. Every case drops its old buffers or layouts after its time is taken, so no case counts freeing them (fixed in review; the figures moved by less than the noise).
 
 | Case | First, per label | Again, per label |
 |---|---|---|
-| `cosmic-text` 0.15, basic shaping (today) | 15.3 µs | 15.3 µs |
-| `cosmic-text` 0.15, advanced shaping | 13.2 µs | 13.1 µs |
-| `cosmic-text` 0.19, basic | 23.7 µs | 20.0 µs |
-| `cosmic-text` 0.19, advanced | 21.1 µs | 17.4 µs |
-| `cosmic-text` 0.19, basic, system font named | 10.5 µs | 8.5 µs |
-| `cosmic-text` 0.19, advanced, system font named | 7.0 µs | 5.4 µs |
-| Parley 0.12, `system-ui` | 4.5 µs | 4.7 µs |
+| `cosmic-text` 0.15, basic shaping (today) | 15.5 µs | 15.5 µs |
+| `cosmic-text` 0.15, advanced shaping | 13.2 µs | 13.3 µs |
+| `cosmic-text` 0.19, basic | 23.2 µs | 19.8 µs |
+| `cosmic-text` 0.19, advanced | 21.0 µs | 17.8 µs |
+| `cosmic-text` 0.19, basic, system font named | 10.2 µs | 8.8 µs |
+| `cosmic-text` 0.19, advanced, system font named | 6.8 µs | 5.7 µs |
+| Parley 0.12, `system-ui` | 4.8 µs | 4.8 µs |
 
 - The default `cosmic-text` setup asks for "Open Sans", which is not installed, so shaping searches the fallback list. Naming the system font (`set_sans_serif_family(".SF NS")`) removes most of that time.
-- The fair comparison is the last two rows: Parley is about 1.2 to 1.5 times as fast.
+- The fair comparison is the last two rows: Parley is about 1.2 to 1.4 times as fast.
 - Either way, 2,000 labels shape in 10 to 15 ms, once. The canvas then draws them from its cache, so shaping speed does not decide the choice.
 - Not measured: drawing, line breaking of long text, and other platforms.
 

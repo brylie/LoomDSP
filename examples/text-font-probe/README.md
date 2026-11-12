@@ -28,7 +28,9 @@ Each line gives the path, the size in pixels, the label, its width in logical pi
 
 ```sh
 cargo run --release -- --bench
-``` It runs on any platform; the research note records what it printed on macOS and what is expected, from source, on Windows and Linux.
+```
+
+It runs on any platform; the research note records what it printed on macOS and what is expected, from source, on Windows and Linux.
 
 ## macOS's own text
 
