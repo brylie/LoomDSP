@@ -165,13 +165,34 @@ const WIDTH: u32 = 256;
 /// The height of the GPU tests' target.
 const HEIGHT: u32 = 96;
 
+/// Runs `future` on this thread until it is done. The canvas names no
+/// UI toolkit outside its widget (`tests/purity.rs`), so it has no
+/// executor of its own.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    /// Wakes the waiting thread.
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(std::sync::Arc::new(Unpark(std::thread::current())));
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        if let std::task::Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+        std::thread::park();
+    }
+}
+
 /// A device and queue, or `None` on a machine with no GPU adapter, where
 /// the GPU tests skip as the screenshot tests do.
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter =
-        iced::futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
-    iced::futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+    block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
 }
 
 /// Draws an empty scene with `list` painted over it, and returns the RGBA
