@@ -146,7 +146,8 @@ impl CanvasText {
         &self.current[&key][text]
     }
 
-    /// The size of `text` in `style`, as [`layout`](Self::layout) sets it.
+    /// The size of `text` in `style`, read from the same cached layout the
+    /// canvas draws.
     pub fn measure(&mut self, text: &str, style: TextStyle, wrap: Option<f32>) -> Size {
         let layout = self.layout(text, style, wrap);
         Size::new(layout.width(), layout.height())
