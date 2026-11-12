@@ -3,13 +3,12 @@
 //! that turns a [`TextRun`] or a [`Quad`] into an Iced value.
 
 use crate::iced_convert::{ToCore as _, ToIced as _};
-use crate::painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
+use crate::painter::{Painter, Quad, TextMeasure, TextRun, TextStyle, Vertical, Weight};
 use crate::tile_text::Align;
 use iced::advanced::renderer;
 use iced::advanced::text::{self, Paragraph as _, Text};
 use iced::{Font, Pixels, alignment};
 use loom_ui_core::{Rect, Size};
-use std::marker::PhantomData;
 
 /// `font` in the weight a style asks for.
 fn font_for(font: Font, weight: Weight) -> Font {
@@ -22,14 +21,9 @@ fn font_for(font: Font, weight: Weight) -> Font {
     }
 }
 
-/// Iced's shaping mode for ours. Iced's basic mode is the cheap path, and
-/// its advanced mode shapes fully with fallback fonts.
-fn shaping_for(shaping: Shaping) -> text::Shaping {
-    match shaping {
-        Shaping::Simple => text::Shaping::Basic,
-        Shaping::Full => text::Shaping::Advanced,
-    }
-}
+/// Every run is shaped in full with fallback fonts (see [`TextStyle`]),
+/// which is Iced's advanced mode.
+const SHAPING: text::Shaping = text::Shaping::Advanced;
 
 /// Iced's wrapping for a run or a measurement.
 fn wrapping_for(wrap: bool) -> text::Wrapping {
@@ -58,7 +52,7 @@ fn iced_text(run: &TextRun<'_>, font: Font) -> Text<String, Font> {
             Vertical::Center => alignment::Vertical::Center,
             Vertical::Top => alignment::Vertical::Top,
         },
-        shaping: shaping_for(run.style.shaping),
+        shaping: SHAPING,
         wrapping: wrapping_for(run.wrap),
     }
 }
@@ -76,7 +70,7 @@ fn iced_quad(quad: Quad) -> renderer::Quad {
     }
 }
 
-/// Paints into an Iced renderer.
+/// Paints into an Iced renderer, and measures as it sets text.
 pub(super) struct IcedPainter<'r, Renderer> {
     renderer: &'r mut Renderer,
     font: Font,
@@ -119,30 +113,12 @@ where
     }
 }
 
-/// Measures text as an Iced renderer would set it.
-pub(super) struct IcedMeasure<Renderer> {
-    font: Font,
-    renderer: PhantomData<fn() -> Renderer>,
-}
-
-impl<Renderer> IcedMeasure<Renderer>
+/// Measures text as the Iced renderer sets it.
+impl<Renderer> TextMeasure for IcedPainter<'_, Renderer>
 where
     Renderer: text::Renderer<Font = Font>,
 {
-    /// A measure that uses the renderer's default font.
-    pub(super) fn new(renderer: &Renderer) -> Self {
-        Self {
-            font: renderer.default_font(),
-            renderer: PhantomData,
-        }
-    }
-}
-
-impl<Renderer> TextMeasure for IcedMeasure<Renderer>
-where
-    Renderer: text::Renderer<Font = Font>,
-{
-    fn measure(&self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
+    fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
         Renderer::Paragraph::with_text(Text {
             content: text,
             bounds: iced::Size::new(wrap_width.unwrap_or(f32::INFINITY), f32::INFINITY),
@@ -151,7 +127,7 @@ where
             font: font_for(self.font, style.weight),
             align_x: text::Alignment::Left,
             align_y: alignment::Vertical::Top,
-            shaping: shaping_for(style.shaping),
+            shaping: SHAPING,
             wrapping: wrapping_for(wrap_width.is_some()),
         })
         .min_bounds()

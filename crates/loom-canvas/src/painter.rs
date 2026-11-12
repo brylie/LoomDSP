@@ -3,13 +3,13 @@
 //!
 //! The canvas works out what goes where and hands each piece to a
 //! [`Painter`]. It asks a [`TextMeasure`] how large a piece of text is. It
-//! never names a text renderer. Whoever hosts the canvas supplies both:
-//! today the Iced widget, later our own text renderer
-//! (docs/dev/leaving-iced-plan.md, step 2.4).
+//! never names a text renderer. One object does both, a [`TextPainter`],
+//! so what is measured and what is drawn are set by the same code: in the
+//! app, `crate::text::CanvasText` and its paint list.
 //!
 //! Nothing here knows about patches, so these types could serve other
-//! elements. They stay in this crate until the text renderer is chosen,
-//! because that choice may reshape them.
+//! elements. They stay in this crate until phase 3 builds the element tree
+//! (docs/dev/leaving-iced-plan.md).
 
 use crate::tile_text::Align;
 use loom_ui_core::{Color, Point, Rect, Size};
@@ -32,18 +32,9 @@ pub enum Weight {
     Bold,
 }
 
-/// What the text may hold, which decides how much work shaping it needs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shaping {
-    /// Plain interface text: one glyph for each character, left to right,
-    /// from the interface font. The cheap path, for labels and numbers.
-    Simple,
-    /// Text that may hold a symbol or a script the interface font lacks,
-    /// such as a check mark. It needs full shaping and fallback fonts.
-    Full,
-}
-
-/// How a piece of text is set, for drawing and for measuring.
+/// How a piece of text is set, for drawing and for measuring. Every run is
+/// shaped in full, with fallback fonts for a symbol or a script the
+/// interface font lacks, so no style asks for a cheaper path.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextStyle {
     /// The font size in logical pixels.
@@ -52,8 +43,6 @@ pub struct TextStyle {
     pub line_height: f32,
     /// How heavy the letters are.
     pub weight: Weight,
-    /// What the text may hold.
-    pub shaping: Shaping,
 }
 
 /// One piece of text to paint. The text is borrowed: a painter that keeps
@@ -72,7 +61,7 @@ pub struct TextRun<'a> {
     pub align: Align,
     /// Where the anchor is, top to bottom.
     pub vertical: Vertical,
-    /// Size, line height, weight, and shaping.
+    /// Size, line height, and weight.
     pub style: TextStyle,
     /// Break lines between words to fit `bounds`. Otherwise one line.
     pub wrap: bool,
@@ -111,7 +100,8 @@ impl Quad {
 }
 
 /// Takes what the canvas paints, in the order it is to appear: a later
-/// piece is over an earlier one in the same layer.
+/// piece is over an earlier one in the same layer, whether it is text or a
+/// box. So a selection highlight goes before its text, and a caret after.
 pub trait Painter {
     /// Paints one piece of text.
     fn text(&mut self, run: &TextRun<'_>);
@@ -131,8 +121,17 @@ pub trait TextMeasure {
     /// The size of `text` in `style`. With `wrap_width`, lines break
     /// between words to fit that width, and the size is that of the lines
     /// together. Without it, the text is one line.
-    fn measure(&self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size;
+    ///
+    /// It takes `&mut self` because measuring sets the text, and a measure
+    /// keeps what it set for the painting that follows.
+    fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size;
 }
+
+/// Paints and measures with one object, so the size the canvas lays a box
+/// out by is the size of the text drawn in it.
+pub trait TextPainter: Painter + TextMeasure {}
+
+impl<T: Painter + TextMeasure + ?Sized> TextPainter for T {}
 
 #[cfg(test)]
 pub(crate) mod testing;

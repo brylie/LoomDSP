@@ -29,7 +29,7 @@ mod painter;
 mod primitive;
 
 pub use drag_line::DragLine;
-use painter::{IcedMeasure, IcedPainter};
+use painter::IcedPainter;
 use primitive::CanvasPrimitive;
 
 /// The patch canvas as an Iced widget. Draws a [`Scene`] and reports
@@ -317,8 +317,7 @@ where
             bounds.to_iced(),
             CanvasPrimitive(input.frame(model, bounds.size(), &state.cache)),
         );
-        let measure = IcedMeasure::new(&*renderer);
-        input.paint(model, bounds, &measure, &mut IcedPainter::new(renderer));
+        input.paint(model, bounds, &mut IcedPainter::new(renderer));
     }
 }
 

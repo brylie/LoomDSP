@@ -1,7 +1,6 @@
 //! What the canvas paints above its GPU shapes: tile text, the choice list,
-//! the typed field, and hover text. Each piece goes to a [`Painter`], and
-//! text is sized by a [`TextMeasure`], so nothing here names a text
-//! renderer.
+//! the typed field, and hover text. Each piece goes to a [`TextPainter`],
+//! which also sizes text, so nothing here names a text renderer.
 //!
 //! This is drawing, in a folder named for input. It is here because it
 //! reads [`CanvasInput`]'s private state: the focus, the open list or
@@ -13,7 +12,7 @@
 use super::*;
 use crate::controls::PanelValues;
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX};
-use crate::painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
+use crate::painter::{Painter, Quad, TextPainter, TextRun, TextStyle, Vertical, Weight};
 use crate::scene::BADGE_TEXT_SIZE;
 use crate::tile_text::Align;
 
@@ -23,7 +22,6 @@ fn plain(size: f32, line_height: f32) -> TextStyle {
         size,
         line_height,
         weight: Weight::Regular,
-        shaping: Shaping::Simple,
     }
 }
 
@@ -47,13 +45,13 @@ impl CanvasInput {
     /// then the open choice list, the open typed field, and hover text,
     /// each in its own layer. `bounds` is the canvas's place in the host's
     /// logical pixels. Call it after the renderer has drawn the frame.
-    pub fn paint(&self, model: &CanvasModel<'_>, bounds: Rect, measure: &dyn TextMeasure, painter: &mut dyn Painter) {
+    pub fn paint(&self, model: &CanvasModel<'_>, bounds: Rect, painter: &mut dyn TextPainter) {
         let empty = PanelValues::default();
         let values = model.values.unwrap_or(&empty);
         model.paint_tile_text(self, values, bounds, painter);
         model.paint_select_popup(self, bounds, painter);
-        model.paint_typed_field(self, bounds, measure, painter);
-        model.paint_hover_text(self, bounds, measure, painter);
+        model.paint_typed_field(self, bounds, painter);
+        model.paint_hover_text(self, bounds, painter);
     }
 }
 
@@ -261,11 +259,9 @@ impl CanvasModel<'_> {
                     bounds: Size::new(rect.width - 12.0, 17.0),
                     align: Align::Left,
                     vertical: Vertical::Center,
-                    // The check mark is not in every interface font.
-                    style: TextStyle {
-                        shaping: Shaping::Full,
-                        ..plain(12.0, 1.2)
-                    },
+                    // The check mark is not in every interface font; full
+                    // shaping falls back to a font that has it.
+                    style: plain(12.0, 1.2),
                     wrap: false,
                     colour: self.palette.text,
                     clip: bounds,
@@ -291,13 +287,7 @@ impl CanvasModel<'_> {
 
     /// Paints the open field above all tile text. Bad text gets a warning
     /// outline, and its reason on a line below (rule 8: not colour alone).
-    fn paint_typed_field(
-        &self,
-        state: &CanvasInput,
-        bounds: Rect,
-        measure: &dyn TextMeasure,
-        painter: &mut dyn Painter,
-    ) {
+    fn paint_typed_field(&self, state: &CanvasInput, bounds: Rect, painter: &mut dyn TextPainter) {
         let Some(field) = state.focus.typed() else {
             return;
         };
@@ -320,7 +310,11 @@ impl CanvasModel<'_> {
             clip,
         };
         let inner = FIELD_WIDTH_PX - 2.0 * FIELD_PADDING_PX;
-        let width_of = |content: &str| measure.measure(content, style, None).width;
+        // Measured before painting starts, since one object does both.
+        let mut width_of = |content: &str| painter.measure(content, style, None).width;
+        let text_width = width_of(&field.draft.text);
+        let caret_width = width_of(&field.draft.text[..field.caret]);
+        let reason_width = error.map(&mut width_of);
         let text_at = Point::new(area.x + FIELD_PADDING_PX, area.center_y());
         painter.begin_layer(bounds);
         {
@@ -340,7 +334,7 @@ impl CanvasModel<'_> {
                 painter.quad(Quad::filled(
                     Rect::new(
                         Point::new(text_at.x - 1.0, area.y + 3.0),
-                        Size::new(width_of(&field.draft.text).min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
+                        Size::new(text_width.min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
                     ),
                     self.palette.control_track,
                     0.0,
@@ -348,15 +342,15 @@ impl CanvasModel<'_> {
             }
             painter.text(&line(&field.draft.text, inner, text_at, area));
             if !field.selected {
-                let x = text_at.x + width_of(&field.draft.text[..field.caret]).min(inner);
+                let x = text_at.x + caret_width.min(inner);
                 painter.quad(Quad::filled(
                     Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),
                     self.palette.text,
                     0.0,
                 ));
             }
-            if let Some(reason) = error {
-                let place = typed_reason_bounds(area, width_of(reason) + 2.0 * FIELD_PADDING_PX, bounds);
+            if let (Some(reason), Some(reason_width)) = (error, reason_width) {
+                let place = typed_reason_bounds(area, reason_width + 2.0 * FIELD_PADDING_PX, bounds);
                 painter.quad(Quad {
                     rect: place,
                     fill: self.palette.control_body,
@@ -379,13 +373,7 @@ impl CanvasModel<'_> {
     /// description, and the name when it differs, at a fixed screen size in
     /// a layer above the tiles. Drawn at any zoom, because hover text is
     /// what the user needs where tile text is too small to read.
-    fn paint_hover_text(
-        &self,
-        state: &CanvasInput,
-        bounds: Rect,
-        measure: &dyn TextMeasure,
-        painter: &mut dyn Painter,
-    ) {
+    fn paint_hover_text(&self, state: &CanvasInput, bounds: Rect, painter: &mut dyn TextPainter) {
         if state.focus.has_overlay() {
             return;
         }
@@ -404,12 +392,12 @@ impl CanvasModel<'_> {
         let inner = crate::hover::text_width(bounds.width);
         // Each line is measured wrapped at word boundaries, then painted
         // in that size. The text, its style, its room, and its colour.
-        let line = |content, size: f32, colour: Color, weight: Weight| {
+        let mut line = |content, size: f32, colour: Color, weight: Weight| {
             let style = TextStyle {
                 weight,
                 ..plain(size, 1.3)
             };
-            let measured = measure.measure(content, style, Some(inner));
+            let measured = painter.measure(content, style, Some(inner));
             (
                 content,
                 style,

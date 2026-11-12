@@ -60,7 +60,7 @@ pub use input::{
     CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView, ControlPart,
     EditGroupView, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
-pub use painter::{Painter, Quad, Shaping, TextMeasure, TextRun, TextStyle, Vertical, Weight};
+pub use painter::{Painter, Quad, TextMeasure, TextPainter, TextRun, TextStyle, Vertical, Weight};
 pub use reaction::{CursorShape, Reaction};
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,

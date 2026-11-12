@@ -2,7 +2,7 @@
 //! that records each piece in order and a measure with fixed widths.
 
 use super::*;
-use crate::painter::testing::{FixedMeasure, Painted, Recorder};
+use crate::painter::testing::{Painted, Recorder};
 use crate::scene::{HoverText, ModuleView, PanelView, PortShape, PortView, WidgetView};
 use crate::{Camera, WidgetValue};
 use loom_ui_core::{Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent};
@@ -67,7 +67,7 @@ fn scene(widgets: Vec<WidgetView>) -> Scene {
 /// What the canvas paints in this state.
 fn painted(model: &CanvasModel<'_>, input: &CanvasInput) -> Recorder {
     let mut recorder = Recorder::default();
-    input.paint(model, BOUNDS, &FixedMeasure, &mut recorder);
+    input.paint(model, BOUNDS, &mut recorder);
     recorder
 }
 
@@ -136,7 +136,6 @@ fn a_tile_paints_its_title_ports_and_captions() {
         assert!(on_screen.expand(1.0).contains(run.anchor), "{run:?}");
         assert!(!run.wrap);
         assert_eq!(run.vertical, Vertical::Center);
-        assert_eq!(run.style.shaping, Shaping::Simple);
     }
 }
 
@@ -252,7 +251,6 @@ fn an_open_choice_list_paints_in_its_own_layer_over_the_tile_text() {
     let Painted::Text { run, .. } = &recorder.painted[tile_text + 3] else {
         panic!("a row");
     };
-    assert_eq!(run.style.shaping, Shaping::Full);
     assert_eq!(run.clip, BOUNDS);
 }
 

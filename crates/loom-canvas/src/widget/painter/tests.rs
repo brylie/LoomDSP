@@ -15,7 +15,6 @@ fn run(text: &str) -> TextRun<'_> {
             size: 10.0,
             line_height: 1.2,
             weight: Weight::Regular,
-            shaping: Shaping::Simple,
         },
         wrap: false,
         colour: Color::WHITE,
@@ -24,7 +23,7 @@ fn run(text: &str) -> TextRun<'_> {
 }
 
 /// A run becomes Iced text with the same text, room, size, line height,
-/// and alignment, on one line with basic shaping.
+/// and alignment, on one line, shaped in full.
 #[test]
 fn a_run_becomes_iced_text() {
     let text = iced_text(&run("gain"), Font::DEFAULT);
@@ -35,11 +34,11 @@ fn a_run_becomes_iced_text() {
     assert_eq!(text.font, Font::DEFAULT);
     assert_eq!(text.align_x, text::Alignment::Center);
     assert_eq!(text.align_y, alignment::Vertical::Center);
-    assert_eq!(text.shaping, text::Shaping::Basic);
+    assert_eq!(text.shaping, text::Shaping::Advanced);
     assert_eq!(text.wrapping, text::Wrapping::None);
 }
 
-/// Each alignment, weight, shaping, and wrap choice has its Iced value.
+/// Each alignment, weight, and wrap choice has its Iced value.
 #[test]
 fn each_choice_on_a_run_has_its_iced_value() {
     for (align, expected) in [
@@ -63,8 +62,6 @@ fn each_choice_on_a_run_has_its_iced_value() {
 
     assert_eq!(font_for(Font::DEFAULT, Weight::Regular), Font::DEFAULT);
     assert_eq!(font_for(Font::DEFAULT, Weight::Bold).weight, iced::font::Weight::Bold);
-    assert_eq!(shaping_for(Shaping::Simple), text::Shaping::Basic);
-    assert_eq!(shaping_for(Shaping::Full), text::Shaping::Advanced);
 }
 
 /// A box becomes an Iced quad with the same place, outline, and corners.
@@ -87,17 +84,16 @@ fn a_quad_becomes_an_iced_quad() {
     assert_eq!(quad.border.radius, 4.0.into());
 }
 
-/// The painter and the measure run against Iced's null renderer, which
+/// The painter, measuring too, runs against Iced's null renderer, which
 /// draws nothing and measures everything as empty.
 #[test]
 fn the_painter_and_measure_drive_an_iced_renderer() {
     let mut renderer = ();
-    let measure = IcedMeasure::new(&renderer);
-    let style = run("a").style;
-    assert_eq!(measure.measure("abc", style, None), Size::new(0.0, 0.0));
-    assert_eq!(measure.measure("abc", style, Some(50.0)), Size::new(0.0, 0.0));
-
     let mut painter = IcedPainter::new(&mut renderer);
+    let style = run("a").style;
+    assert_eq!(painter.measure("abc", style, None), Size::new(0.0, 0.0));
+    assert_eq!(painter.measure("abc", style, Some(50.0)), Size::new(0.0, 0.0));
+
     let clip = Rect::new(Point::ORIGIN, Size::new(10.0, 10.0));
     painter.begin_layer(clip);
     painter.quad(Quad::filled(clip, Color::BLACK, 0.0));

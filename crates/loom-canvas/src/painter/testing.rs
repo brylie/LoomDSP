@@ -1,5 +1,5 @@
-//! Test doubles for painting: a painter that records what it is given, and
-//! a measure with a fixed width for each character.
+//! A test double for painting: a painter that records what it is given and
+//! measures with a fixed width for each character.
 
 use super::*;
 
@@ -31,7 +31,8 @@ impl Painted {
     }
 }
 
-/// A painter that keeps everything it is given, in order.
+/// A painter that keeps everything it is given, in order, and measures
+/// every character as half the font size wide.
 #[derive(Debug, Default)]
 pub(crate) struct Recorder {
     /// What was painted, first to last.
@@ -66,14 +67,11 @@ impl Painter for Recorder {
     }
 }
 
-/// A measure where every character is half the font size wide, and a line
-/// is `line_height` times the size high. Wrapping breaks after as many
+/// Every character is half the font size wide, and a line is
+/// `line_height` times the size high. Wrapping breaks after as many
 /// characters as fit.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct FixedMeasure;
-
-impl TextMeasure for FixedMeasure {
-    fn measure(&self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
+impl TextMeasure for Recorder {
+    fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
         let advance = style.size * 0.5;
         let characters = text.chars().count() as f32;
         let line = style.size * style.line_height;
