@@ -17,6 +17,9 @@ iced = { workspace = true }
 iced_wgpu.workspace = true
 wgpu.workspace = true
 bytemuck.workspace = true
+parley.workspace = true
+swash.workspace = true
+etagere.workspace = true
 
 [lints]
 workspace = true

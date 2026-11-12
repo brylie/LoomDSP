@@ -82,6 +82,14 @@ wgpu = { version = "27", default-features = false }
 # Builds the app view headlessly in loom-app tests (#189). Same version as Iced.
 iced_runtime = "0.14"
 bytemuck = { version = "1", features = ["derive"] }
+# Text layout for our own UI layer (docs/design/ui-layer.md, section 8,
+# rule 8). Pinned: Parley breaks its API about every two months, so it is
+# upgraded on purpose, behind our own types.
+parley = "=0.12.0"
+# Glyph rasterising and atlas packing for canvas text. Both already in the
+# lock through Iced; listed here so the canvas names its own versions.
+swash = "0.2.10"
+etagere = "0.2.15"
 # PNG files for `loom-app --screenshot`.
 png = "0.18"
 # Per-user folders for autosave recovery copies (docs/design/autosave.md).

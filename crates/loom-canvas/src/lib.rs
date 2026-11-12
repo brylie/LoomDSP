@@ -43,6 +43,7 @@ mod painter;
 mod reaction;
 mod scene;
 pub mod stats;
+mod text;
 mod theme;
 mod tile_text;
 mod trace;
@@ -67,6 +68,7 @@ pub use scene::{
     PORT_HIT_RADIUS, PanelView, PartText, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal,
     WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
+pub use text::CanvasText;
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{Align, TextItem, TextKind, for_each as for_each_tile_text};
 pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace};
