@@ -8,16 +8,23 @@
 //! dropped one frame later (see [`CanvasText::begin_frame`]), so a still
 //! canvas sets no text again, and a zoom gesture leaves no old sizes behind.
 //!
-//! The system's fonts are found and loaded once for the whole process:
-//! each `CanvasText` clones one font context, whose collection shares its
-//! scan and whose source cache shares the loaded files between clones. A
-//! canvas made again, as on New or Open, finds and loads no font again, and
-//! a font keeps one identity, so glyph images made for it are reused.
+//! The system's fonts are found once for the whole process: each
+//! `CanvasText` clones one font context, whose collection shares its scan,
+//! so a canvas made again, as on New or Open, scans nothing. Its source
+//! cache shares loaded font files between clones while any of them holds
+//! the file, and each `CanvasText` holds every file it has used. So a font
+//! keeps one identity while its canvas lives, and the glyph atlas reuses
+//! its images (`gpu/atlas.rs`) even after a zoom too far out for text. A
+//! file no canvas holds any more is loaded again when next used, as a font
+//! of a new identity, and the atlas's old images age out.
 
 use crate::painter::{TextStyle, Weight};
 use loom_ui_core::Size;
 use parley::fontique::{Collection, CollectionOptions, SourceCache};
-use parley::{FontContext, FontFamily, GenericFamily, Layout, LayoutContext, LineHeight, StyleProperty};
+use parley::{
+    FontContext, FontData, FontFamily, GenericFamily, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
+    StyleProperty,
+};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -82,6 +89,8 @@ pub struct CanvasText {
     previous: Layouts,
     /// Layouts built since the counter was last read, for tests and stats.
     built: u64,
+    /// Every font file a layout has used, held so it stays loaded.
+    held: Vec<FontData>,
 }
 
 impl Default for CanvasText {
@@ -109,6 +118,7 @@ impl CanvasText {
             current: Layouts::new(),
             previous: Layouts::new(),
             built: 0,
+            held: Vec::new(),
         }
     }
 
@@ -160,6 +170,16 @@ impl CanvasText {
         }
         let mut layout = builder.build(text);
         layout.break_all_lines(wrap);
+        for line in layout.lines() {
+            for item in line.items() {
+                if let PositionedLayoutItem::GlyphRun(run) = item {
+                    let font = run.run().font();
+                    if !self.held.iter().any(|held| held.data.id() == font.data.id()) {
+                        self.held.push(font.clone());
+                    }
+                }
+            }
+        }
         layout
     }
 }

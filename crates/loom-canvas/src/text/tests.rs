@@ -143,3 +143,22 @@ fn debug_counts_the_layouts() {
     assert!(shown.contains("current: 1"), "{shown}");
     assert!(shown.contains("previous: 0"), "{shown}");
 }
+
+/// A font keeps one identity while its canvas lives, even after every
+/// layout that used it is dropped, so the glyph atlas can reuse its images.
+#[test]
+fn a_font_stays_loaded_while_its_canvas_lives() {
+    let Some(mut text) = text() else { return };
+    let id = |text: &mut CanvasText| {
+        let layout = text.layout("Cutoff", style(10.0), None);
+        let line = layout.lines().next().expect("a line");
+        match line.items().next() {
+            Some(PositionedLayoutItem::GlyphRun(run)) => run.run().font().data.id(),
+            _ => panic!("a glyph run"),
+        }
+    };
+    let before = id(&mut text);
+    text.begin_frame();
+    text.begin_frame();
+    assert_eq!(id(&mut text), before);
+}

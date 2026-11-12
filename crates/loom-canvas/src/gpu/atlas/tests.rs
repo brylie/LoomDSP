@@ -91,11 +91,15 @@ fn a_glyph_is_placed_on_whole_pixels_and_uploaded_once() {
 fn quarter_pixels_make_their_own_images() {
     let mut atlas = Atlas::new(MAX_SIZE);
     atlas.begin_frame();
+    // The lists are kept: a font file no list holds may load again as
+    // another font (see `crate::text`).
+    let mut lists = Vec::new();
     for x in [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 7.5] {
         let Some(list) = painted("o", Point::new(x, 0.0)) else {
             return;
         };
         place_all(&mut atlas, &list, 1.0).unwrap();
+        lists.push(list);
     }
     assert_eq!(atlas.len(), 4);
 }
