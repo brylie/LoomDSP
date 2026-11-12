@@ -157,6 +157,9 @@ pub struct BrowserRow {
     pub family: Family,
     /// True for a library item, which has a menu.
     pub library: bool,
+    /// What a screen reader says about the row, whichever row the keys are
+    /// on: a module's one-sentence description, or a library item's path.
+    pub description: String,
     /// The UI ID as text, which names the row's container in the window:
     /// worked out once with the row, not on every frame.
     #[serde(skip)]
@@ -258,17 +261,7 @@ impl Browser {
     /// Highlights `row`, within the list, and says what it is under it.
     fn set_highlight(&mut self, row: usize) {
         self.model.highlight = (!self.results.is_empty()).then(|| row.min(self.results.len() - 1));
-        self.model.about = self.model.highlight.map(|at| match self.results[at] {
-            Entry::Module(d) => About {
-                text: d.description.to_string(),
-                detail: d.id.to_string(),
-            },
-            Entry::Library(i) => About {
-                text: "A sub-patch from your library, inserted as a copy. Right-click it to insert it linked."
-                    .to_string(),
-                detail: self.library[i].library.clone(),
-            },
-        });
+        self.model.about = self.model.highlight.map(|at| about(self.results[at], &self.library));
     }
 
     /// Opens the menu of `row`, or closes it with `None`.
@@ -420,45 +413,30 @@ impl Browser {
     /// Fills the list from the query: the modules, then the library items.
     /// The model's rows are built here, once per search, never per frame.
     fn search(&mut self) {
-        self.results = search(&self.modules, &self.model.query)
-            .into_iter()
-            .map(Entry::Module)
-            .chain(
-                search_library(&self.library, &self.model.query)
-                    .into_iter()
-                    .map(Entry::Library),
-            )
-            .collect();
-        let mut ids = crate::a11y::items::UniqueIds::default();
-        self.model.rows = self
-            .results
-            .iter()
-            .map(|&entry| match entry {
-                Entry::Module(d) => BrowserRow {
-                    key: String::new(),
-                    id: ids.take(row_id(entry, &self.library)),
-                    name: d.name.to_string(),
-                    mark: d.family.label(),
-                    family: d.family,
-                    library: false,
-                },
-                Entry::Library(i) => BrowserRow {
-                    key: String::new(),
-                    id: ids.take(row_id(entry, &self.library)),
-                    name: self.library[i].name.clone(),
-                    mark: LIBRARY_MARK,
-                    family: Family::Interface,
-                    library: true,
-                },
-            })
-            .map(|mut row| {
-                row.key = row.id.to_string();
-                row
-            })
-            .collect();
+        self.results = results(&self.modules, &self.library, &self.model.query);
+        self.model.rows = rows(&self.results, &self.library);
         self.model.empty = self.results.is_empty().then_some("No modules match.");
         // The menu belongs to a row that may be gone.
         self.set_menu(None, None);
+    }
+
+    /// The model worked out from scratch from the browser's own state: its
+    /// modules, its library, and the query, highlight, and menu the user
+    /// chose. A test compares it with the kept model after every message,
+    /// so an update that forgets to change the model fails.
+    #[cfg(test)]
+    pub(crate) fn fresh_model(&self) -> Model {
+        let results = results(&self.modules, &self.library, &self.model.query);
+        let highlight = self.model.highlight.filter(|&at| at < results.len());
+        Model {
+            query: self.model.query.clone(),
+            rows: rows(&results, &self.library),
+            highlight,
+            about: highlight.map(|at| about(results[at], &self.library)),
+            menu: self.model.menu,
+            menu_highlight: self.model.menu_highlight,
+            empty: results.is_empty().then_some("No modules match."),
+        }
     }
 
     fn add(&self, linked: bool) -> Outcome {
@@ -630,6 +608,62 @@ pub(crate) fn list_id() -> UiId {
 /// The UI ID of the text under the list.
 pub(crate) fn about_id() -> UiId {
     browser_id().with("about")
+}
+
+/// What the list shows for `query`: the modules, then the library items.
+fn results(modules: &[&'static ModuleDescriptor], library: &[LibraryItem], query: &str) -> Vec<Entry> {
+    search(modules, query)
+        .into_iter()
+        .map(Entry::Module)
+        .chain(search_library(library, query).into_iter().map(Entry::Library))
+        .collect()
+}
+
+/// The rows the model shows for `results`, each with its UI ID, made
+/// unique, its text worked out once, and its description.
+fn rows(results: &[Entry], library: &[LibraryItem]) -> Vec<BrowserRow> {
+    let mut ids = crate::a11y::items::UniqueIds::default();
+    results
+        .iter()
+        .map(|&entry| {
+            let id = ids.take(row_id(entry, library));
+            let key = id.to_string();
+            match entry {
+                Entry::Module(d) => BrowserRow {
+                    id,
+                    key,
+                    name: d.name.to_string(),
+                    mark: d.family.label(),
+                    family: d.family,
+                    library: false,
+                    description: d.description.to_string(),
+                },
+                Entry::Library(i) => BrowserRow {
+                    id,
+                    key,
+                    name: library[i].name.clone(),
+                    mark: LIBRARY_MARK,
+                    family: Family::Interface,
+                    library: true,
+                    description: library[i].library.clone(),
+                },
+            }
+        })
+        .collect()
+}
+
+/// What the area under the list says about `entry`.
+fn about(entry: Entry, library: &[LibraryItem]) -> About {
+    match entry {
+        Entry::Module(d) => About {
+            text: d.description.to_string(),
+            detail: d.id.to_string(),
+        },
+        Entry::Library(i) => About {
+            text: "A sub-patch from your library, inserted as a copy. Right-click it to insert it linked.".to_string(),
+            detail: library[i].library.clone(),
+        },
+    }
 }
 
 /// The modules that match a query, best first.

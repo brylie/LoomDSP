@@ -458,61 +458,44 @@ impl PatchBrowser {
     fn show_filters(&mut self) {
         self.model.search.clone_from(&self.filter.search);
         self.model.author.clone_from(&self.filter.author);
-        self.model.licences = LicenceFilter::ALL
-            .into_iter()
-            .map(|filter| LicenceBox {
-                filter,
-                key: licence_key(filter),
-                label: filter.label(),
-                on: self.filter.licence.contains(&filter),
-            })
-            .collect();
-        // The picked tags as a set once, not a search per tag.
-        let picked: BTreeSet<&str> = self.filter.tags.iter().map(String::as_str).collect();
-        self.model.tags = self
-            .tags
-            .iter()
-            .map(|tag| TagChip {
-                text: tag.clone(),
-                picked: picked.contains(tag.as_str()),
-            })
-            .collect();
+        self.model.licences = licence_boxes(&self.filter);
+        self.model.tags = tag_chips(&self.tags, &self.filter);
     }
 
     /// Puts the rows shown in the model, each keyed by its path in the
     /// library folder, once per refilter, never per frame.
     fn show_rows(&mut self) {
-        let library = crate::patch_file::FolderLibrary {
-            root: self.folder.clone(),
-        };
-        let mut ids = crate::a11y::items::UniqueIds::default();
-        self.model.rows = self
-            .shown
-            .iter()
-            .map(|&i| {
-                let row = &self.rows[i];
-                let path = library
-                    .path_of(&row.path)
-                    .unwrap_or_else(|| row.path.to_string_lossy().into_owned());
-                let id = ids.take(part_id("row").with(path.as_str()));
-                PatchRow {
-                    key: id.to_string(),
-                    id,
-                    name: row.name(),
-                    details: row.details.clone(),
-                    readable: row.info.is_some(),
-                }
-            })
-            .collect();
+        self.model.rows = patch_rows(&self.rows, &self.shown, &self.folder);
         self.model.loaded = self.rows.len();
-        self.model.empty = self.shown.is_empty().then(|| {
-            if self.rows.is_empty() {
-                format!("No patches in {} yet.", self.folder.display())
-            } else {
-                "No patches match.".to_string()
-            }
-        });
+        self.model.empty = empty_line(&self.rows, &self.shown, &self.folder);
         self.show_highlight();
+    }
+
+    /// The model worked out from scratch from the browser's own state: the
+    /// rows read, the filter, and the highlight the user chose. A test
+    /// compares it with the kept model after every message, so an update
+    /// that forgets to change the model fails.
+    #[cfg(test)]
+    pub(crate) fn fresh_model(&self) -> Model {
+        let tags: BTreeSet<String> = self
+            .rows
+            .iter()
+            .flat_map(|row| row.prepared.iter())
+            .flat_map(|p| p.tags())
+            .cloned()
+            .collect();
+        let shown = matching(&self.rows, &self.filter);
+        Model {
+            search: self.filter.search.clone(),
+            author: self.filter.author.clone(),
+            licences: licence_boxes(&self.filter),
+            tags: tag_chips(&tags, &self.filter),
+            rows: patch_rows(&self.rows, &shown, &self.folder),
+            highlight: (!shown.is_empty()).then_some(self.highlight),
+            loaded: self.rows.len(),
+            empty: empty_line(&self.rows, &shown, &self.folder),
+            folder: self.folder.display().to_string(),
+        }
     }
 
     /// Puts the highlight in the model.
@@ -648,20 +631,8 @@ impl PatchBrowser {
         {
             self.refilters += 1;
         }
-        let empty = self.filter == Filter::default();
-        let matcher = self.filter.matcher();
         let highlighted = self.highlighted().map(|row| row.path.clone());
-        let mut shown: Vec<usize> = (0..self.rows.len())
-            .filter(|&i| match &self.rows[i].prepared {
-                Some(prepared) => matcher.matches(prepared),
-                None => empty,
-            })
-            .collect();
-        shown.sort_by(|&a, &b| {
-            let (a, b) = (&self.rows[a], &self.rows[b]);
-            b.changed.cmp(&a.changed).then_with(|| a.path.cmp(&b.path))
-        });
-        self.shown = shown;
+        self.shown = matching(&self.rows, &self.filter);
         // Rows that arrive while the user looks keep the highlight on
         // the same patch.
         if let Some(path) = highlighted {
@@ -808,6 +779,87 @@ impl PatchBrowser {
                 .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
         )
     }
+}
+
+/// The rows that match `filter`, by index into `rows`, newest first. A
+/// file that does not read matches only an empty search and no filters, so
+/// it is still listed.
+fn matching(rows: &[Row], filter: &Filter) -> Vec<usize> {
+    let empty = *filter == Filter::default();
+    let matcher = filter.matcher();
+    let mut shown: Vec<usize> = (0..rows.len())
+        .filter(|&i| match &rows[i].prepared {
+            Some(prepared) => matcher.matches(prepared),
+            None => empty,
+        })
+        .collect();
+    shown.sort_by(|&a, &b| {
+        let (a, b) = (&rows[a], &rows[b]);
+        b.changed.cmp(&a.changed).then_with(|| a.path.cmp(&b.path))
+    });
+    shown
+}
+
+/// The licence check boxes, in their order, each on while it filters.
+fn licence_boxes(filter: &Filter) -> Vec<LicenceBox> {
+    LicenceFilter::ALL
+        .into_iter()
+        .map(|licence| LicenceBox {
+            filter: licence,
+            key: licence_key(licence),
+            label: licence.label(),
+            on: filter.licence.contains(&licence),
+        })
+        .collect()
+}
+
+/// Every tag in `tags`, each picked while it filters. The picked tags are a
+/// set once, not a search per tag.
+fn tag_chips(tags: &BTreeSet<String>, filter: &Filter) -> Vec<TagChip> {
+    let picked: BTreeSet<&str> = filter.tags.iter().map(String::as_str).collect();
+    tags.iter()
+        .map(|tag| TagChip {
+            text: tag.clone(),
+            picked: picked.contains(tag.as_str()),
+        })
+        .collect()
+}
+
+/// The model's rows for the rows `shown`, each keyed by its path in
+/// `folder`, made unique, with its ID's text worked out once.
+fn patch_rows(rows: &[Row], shown: &[usize], folder: &Path) -> Vec<PatchRow> {
+    let library = crate::patch_file::FolderLibrary {
+        root: folder.to_path_buf(),
+    };
+    let mut ids = crate::a11y::items::UniqueIds::default();
+    shown
+        .iter()
+        .map(|&i| {
+            let row = &rows[i];
+            let path = library
+                .path_of(&row.path)
+                .unwrap_or_else(|| row.path.to_string_lossy().into_owned());
+            let id = ids.take(part_id("row").with(path.as_str()));
+            PatchRow {
+                key: id.to_string(),
+                id,
+                name: row.name(),
+                details: row.details.clone(),
+                readable: row.info.is_some(),
+            }
+        })
+        .collect()
+}
+
+/// The line shown in place of the list while no row is shown.
+fn empty_line(rows: &[Row], shown: &[usize], folder: &Path) -> Option<String> {
+    shown.is_empty().then(|| {
+        if rows.is_empty() {
+            format!("No patches in {} yet.", folder.display())
+        } else {
+            "No patches match.".to_string()
+        }
+    })
 }
 
 /// The keys the open browser handles, whether or not a widget used them:

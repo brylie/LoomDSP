@@ -156,3 +156,57 @@ fn streamed_rows_keep_their_ids_and_the_list_grows() {
     assert_eq!(seen.len(), paths.len());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The kept model never drifts from what the browser's state says: after
+/// every kind of message, in an order that reaches each arm of `update`,
+/// it equals the model worked out from scratch.
+#[test]
+fn the_kept_model_matches_a_fresh_one_after_every_message() {
+    use loom_patch::metadata::LicenceFilter;
+    let dir = library("fresh");
+    let paths = patch_files(&dir, &AtomicBool::new(false));
+    let mut browser = PatchBrowser::new(1, dir.clone());
+    let check = |browser: &PatchBrowser, step: &str| {
+        assert_eq!(browser.model(), &browser.fresh_model(), "after {step}");
+    };
+    check(&browser, "open");
+    let mut steps: Vec<(&str, Message)> = vec![(
+        "Found for an earlier opening",
+        Message::Found {
+            open: 0,
+            rows: vec![Row::read(&paths[0])],
+        },
+    )];
+    for path in &paths {
+        steps.push((
+            "Found",
+            Message::Found {
+                open: 1,
+                rows: vec![Row::read(path)],
+            },
+        ));
+    }
+    steps.extend([
+        ("Step down", Message::Step(1)),
+        ("Hover", Message::Hover(2)),
+        ("Step up", Message::Step(-1)),
+        ("Scrolled", Message::Scrolled(30.0)),
+        ("Search", Message::Search("bass".into())),
+        ("Search cleared", Message::Search(String::new())),
+        ("Author", Message::Author("sam".into())),
+        ("Author with no match", Message::Author("nobody at all".into())),
+        ("Author cleared", Message::Author(String::new())),
+        ("Tag on", Message::Tag("drone".into())),
+        ("Licence on", Message::Licence(LicenceFilter::LetsMeChange, true)),
+        ("Licence off", Message::Licence(LicenceFilter::LetsMeChange, false)),
+        ("Tag off", Message::Tag("drone".into())),
+        ("Pick", Message::Pick(0)),
+        ("Submit", Message::Submit),
+        ("Close", Message::Close),
+    ]);
+    for (step, message) in steps {
+        let _ = browser.update(message);
+        check(&browser, step);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

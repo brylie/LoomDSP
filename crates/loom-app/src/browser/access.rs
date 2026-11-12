@@ -39,9 +39,10 @@ pub(crate) fn items(model: &Model) -> (Item, Option<UiId>) {
                         // The mark is in the name, as the row shows it beside
                         // the name: a sub-patch can share a module's name.
                         label: Some(format!("{}, {}", row.name, row.mark)),
-                        description: selected
-                            .then(|| model.about.as_ref().map(|about| about.text.clone()))
-                            .flatten(),
+                        // Every option has its own, so a reader browsing the
+                        // list with its own cursor hears each one, and it
+                        // does not change as the highlight moves.
+                        description: Some(row.description.clone()),
                         selected: Some(selected),
                         click: Some(browser(Message::Pick(at))),
                         menu: row.library.then(|| browser(Message::Menu { row: at, by_key: true })),

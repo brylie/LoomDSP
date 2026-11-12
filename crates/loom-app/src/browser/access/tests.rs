@@ -180,3 +180,87 @@ fn no_match_shows_the_line_and_no_option() {
             .any(|item| item.value.as_deref() == Some("No modules match."))
     );
 }
+
+/// The kept model never drifts from what the browser's state says: after
+/// every kind of message, in an order that reaches each arm of `update`,
+/// it equals the model worked out from scratch.
+#[test]
+fn the_kept_model_matches_a_fresh_one_after_every_message() {
+    use super::super::Nav;
+    let mut browser = browser();
+    let check = |browser: &Browser, step: &str| {
+        assert_eq!(browser.model(), &browser.fresh_model(), "after {step}");
+    };
+    check(&browser, "open and Library");
+    let library = library_row(&browser, "Pad");
+    let steps: Vec<(&str, Message)> = vec![
+        ("Hover", Message::Hover(3)),
+        ("Down", Message::Key(Nav::Down)),
+        ("PageDown", Message::Key(Nav::PageDown)),
+        ("PageUp", Message::Key(Nav::PageUp)),
+        ("Up", Message::Key(Nav::Up)),
+        ("Scrolled", Message::Scrolled(52.0)),
+        (
+            "Menu by pointer",
+            Message::Menu {
+                row: library,
+                by_key: false,
+            },
+        ),
+        ("Enter with no item", Message::Submit),
+        ("Down in the menu", Message::Key(Nav::Down)),
+        ("Up in the menu", Message::Key(Nav::Up)),
+        ("Escape in the menu", Message::Key(Nav::Escape)),
+        (
+            "Menu by key",
+            Message::Menu {
+                row: library,
+                by_key: true,
+            },
+        ),
+        ("Enter in the menu", Message::Submit),
+        ("Menu on a module row", Message::Menu { row: 0, by_key: true }),
+        (
+            "PageDown closes a menu",
+            Message::Menu {
+                row: library,
+                by_key: false,
+            },
+        ),
+        ("PageDown", Message::Key(Nav::PageDown)),
+        ("InsertLinked", Message::InsertLinked(library)),
+        ("Pick", Message::Pick(1)),
+        ("Query", Message::Query("filter".into())),
+        ("Query with no match", Message::Query("zzzz nothing".into())),
+        ("Down with no rows", Message::Key(Nav::Down)),
+        ("Enter with no rows", Message::Submit),
+        ("Query cleared", Message::Query(String::new())),
+        ("Library again", Message::Library(Vec::new())),
+        ("Escape", Message::Key(Nav::Escape)),
+        ("Close", Message::Close),
+    ];
+    for (step, message) in steps {
+        let _ = browser.update(message);
+        check(&browser, step);
+    }
+}
+
+/// Every option has its own description, so a reader browsing the list
+/// with its own cursor hears each one: a module's sentence, a library
+/// item's path. The longer sentence stays on the text under the list.
+#[test]
+fn every_option_has_its_own_description() {
+    let browser = browser();
+    let (dialog, _) = items(browser.model());
+    let list = dialog.children.iter().find(|item| item.kind == Kind::ListBox).unwrap();
+    let modules: Vec<&'static loom_core::ModuleDescriptor> = loom_modules::registry().iter().collect();
+    for (option, row) in list.children.iter().zip(&browser.model().rows) {
+        let description = option.description.as_deref().unwrap_or_default();
+        assert!(!description.is_empty(), "{} has a description", row.id);
+        if !row.library {
+            assert!(modules.iter().any(|d| d.description == description), "{}", row.id);
+        }
+    }
+    let bass = &list.children[library_row(&browser, "Bass voice")];
+    assert_eq!(bass.description.as_deref(), Some("Voices/Bass voice.ron"));
+}
