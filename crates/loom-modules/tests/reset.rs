@@ -32,8 +32,8 @@ fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Ha
     busy_each(harness, descriptor)
 }
 
-/// The DSP modules in `ALL` that fail `check_reset` on the harness `build`
-/// makes.
+/// One message per failing option of each DSP module in `ALL`, naming its
+/// setting and module, on the harness `build` makes.
 fn failing(build: impl Fn(&'static ModuleDescriptor) -> Harness) -> Vec<String> {
     dsp_modules()
         .flat_map(|descriptor| choice_failures(descriptor, changed, || build(descriptor), Harness::check_reset))

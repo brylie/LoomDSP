@@ -65,7 +65,8 @@ fn every_module_hands_over_its_state() {
     check_busy_copies(true, false);
 }
 
-/// Without reset edges, a random stream advances far enough to expose its loss.
+/// Modules with reset inputs also run without reset edges, so a random stream
+/// advances far enough to expose its loss.
 #[test]
 fn every_module_hands_over_its_state_without_busy_resets() {
     check_busy_copies(false, false);
@@ -80,8 +81,22 @@ fn seeded_modules_copy_repeatably() {
 
 /// Runs every option, retaining strict continuation for seeded routing modules.
 fn check_busy_copies(reset_busy: bool, repeatable: bool) {
-    let failed: Vec<String> = dsp_modules()
+    let descriptors: Vec<_> = dsp_modules()
         .filter(|d| seeded(d) == repeatable)
+        .filter(|d| reset_busy || d.input_index("reset").is_some())
+        .collect();
+    if !reset_busy {
+        assert!(
+            !descriptors.is_empty(),
+            "the reset-inactive run needs modules with reset inputs"
+        );
+        assert!(
+            descriptors.iter().any(|d| d.id == "loom.route.selector"),
+            "the reset-inactive run must include Selector; check its reset port name"
+        );
+    }
+    let failed: Vec<String> = descriptors
+        .into_iter()
         .flat_map(|descriptor| {
             choice_failures(
                 descriptor,
@@ -281,3 +296,6 @@ fn a_copy_refuses_another_type() {
     let mut other = make(&loom_modules::time::DELAY);
     assert!(other.copy_state_from(&*delay));
 }
+
+#[path = "copy_state/reset_hides.rs"]
+mod reset_hides;

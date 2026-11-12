@@ -35,7 +35,7 @@ fn on_busy_inputs(harness: Harness, descriptor: &'static ModuleDescriptor) -> Ha
 }
 
 /// Runs the check on a harness for every DSP module in `ALL` and panics
-/// with the IDs of all that fail, not only the first.
+/// with one message per failing option, naming the setting and module.
 ///
 /// Unit delays and audio outputs are left out: the engine runs them, not
 /// `process`. A unit delay holds one sample, and the engine turns NaN into
