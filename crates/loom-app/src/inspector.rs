@@ -1514,8 +1514,8 @@ fn param_row_view<'a>(
             } else {
                 editor
             };
-            let modulation: Element<'a, AppMessage> = if accepts_drop {
-                modulation_view(id, index, assignments, adding, &ui)
+            let modulation: Element<'a, AppMessage> = if accepts_drop || !assignments.is_empty() {
+                modulation_view(id, index, assignments, adding, accepts_drop, &ui)
             } else {
                 space::vertical().height(0).into()
             };
@@ -1941,13 +1941,14 @@ impl std::fmt::Display for Choice {
     }
 }
 
-/// Under a parameter's slider: one row per assignment, then **Add
-/// modulation** and, while it is open, its list.
+/// Under a parameter's slider: one row per existing assignment. Rows that
+/// accept new assignments also show **Add modulation** and its source list.
 fn modulation_view<'a>(
     module: u32,
     index: usize,
     assignments: Vec<AssignmentRow>,
     adding: Option<Vec<SourceRow>>,
+    allow_add: bool,
     row: &UiId,
 ) -> Element<'a, AppMessage> {
     let center = iced::Alignment::Center;
@@ -2013,6 +2014,9 @@ fn modulation_view<'a>(
                 .width(Length::Fill)
                 .style(style::card(false)),
         );
+    }
+    if !allow_add {
+        return rows.into();
     }
     rows = rows.push(ids::named(
         &ids::part(row, "add"),

@@ -2508,3 +2508,34 @@ fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
 fn test_modules_voice_index() -> usize {
     loom_modules::test_modules::VOICES.param_index("voices").unwrap()
 }
+
+/// Button-only rows retain existing assignments and removal without offering new modulation.
+#[test]
+fn a_button_only_row_keeps_existing_modulation_removable() {
+    use crate::inspector::ids;
+    let mut ui = Ui::open("subtractive.ron");
+    let button = select_new(&mut ui, "loom.ui.button");
+    let assignment = ui
+        .app
+        .session
+        .controller
+        .add_assignment_named(ModuleId(7), "out", button, "on", 0.25)
+        .unwrap();
+    ui.app.commit();
+    inspector_row(&mut ui, button.0, "On");
+    let row = ids::row(button.0, ids::Kind::Param, "on");
+    let remove = ids::part(&ids::assignment(&row, assignment.0), "remove");
+    let add = ids::part(&row, "add");
+    let places = ui.places();
+    let at = places
+        .of(&remove)
+        .expect("existing assignment's remove action stays visible");
+    assert!(places.of(&add).is_none(), "the row offers no add action");
+    let accessible = crate::inspector::access::items(&ui.app.inspector_model());
+    assert!(crate::a11y::items::find(&accessible, &remove).is_some());
+    assert!(crate::a11y::items::find(&accessible, &add).is_none());
+    ui.move_to(at.rect.center());
+    ui.press();
+    ui.release();
+    assert!(ui.app.session.controller.graph().assignment(assignment).is_none());
+}
