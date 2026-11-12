@@ -157,6 +157,10 @@ pub struct BrowserRow {
     pub family: Family,
     /// True for a library item, which has a menu.
     pub library: bool,
+    /// The UI ID as text, which names the row's container in the window:
+    /// worked out once with the row, not on every frame.
+    #[serde(skip)]
+    pub key: String,
 }
 
 /// What the area under the list says about the highlighted row: a module's
@@ -431,6 +435,7 @@ impl Browser {
             .iter()
             .map(|&entry| match entry {
                 Entry::Module(d) => BrowserRow {
+                    key: String::new(),
                     id: ids.take(row_id(entry, &self.library)),
                     name: d.name.to_string(),
                     mark: d.family.label(),
@@ -438,12 +443,17 @@ impl Browser {
                     library: false,
                 },
                 Entry::Library(i) => BrowserRow {
+                    key: String::new(),
                     id: ids.take(row_id(entry, &self.library)),
                     name: self.library[i].name.clone(),
                     mark: LIBRARY_MARK,
                     family: Family::Interface,
                     library: true,
                 },
+            })
+            .map(|mut row| {
+                row.key = row.id.to_string();
+                row
             })
             .collect();
         self.model.empty = self.results.is_empty().then_some("No modules match.");
@@ -543,7 +553,7 @@ impl Browser {
                     .on_press(Message::Pick(i))
                     .on_right_press(Message::Menu { row: i, by_key: false }),
             )
-            .id(crate::places::widget_id(&r.id))
+            .id(iced::widget::Id::from(r.key.clone()))
             .into()
         });
         let list: Element<'_, Message> = match model.empty {

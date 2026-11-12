@@ -342,6 +342,10 @@ pub struct PatchRow {
     pub details: String,
     /// False for a file that does not read: it cannot be opened.
     pub readable: bool,
+    /// The UI ID as text, which names the row's container in the window:
+    /// worked out once with the row, not on every frame.
+    #[serde(skip)]
+    pub key: String,
 }
 
 /// The fixed key of a licence filter.
@@ -490,8 +494,10 @@ impl PatchBrowser {
                 let path = library
                     .path_of(&row.path)
                     .unwrap_or_else(|| row.path.to_string_lossy().into_owned());
+                let id = ids.take(part_id("row").with(path.as_str()));
                 PatchRow {
-                    id: ids.take(part_id("row").with(path.as_str())),
+                    key: id.to_string(),
+                    id,
                     name: row.name(),
                     details: row.details.clone(),
                     readable: row.info.is_some(),
@@ -752,7 +758,7 @@ impl PatchBrowser {
                     .on_move(move |_| Message::Hover(i))
                     .on_press(Message::Pick(i)),
             )
-            .id(crate::places::widget_id(&r.id))
+            .id(iced::widget::Id::from(r.key.clone()))
             .into()
         });
         let list: Element<'_, Message> = match &model.empty {
