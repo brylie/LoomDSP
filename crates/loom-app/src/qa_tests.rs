@@ -142,7 +142,7 @@ impl<'a> Setup<'a> {
             },
             ..tests::app_args()
         };
-        let app = App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(host.clone())));
+        let app = App::boot_with(args, Rc::new(fake::Shared(host.clone())));
         assert!(tape.is_playing(), "the patch plays: {}", app.alerts.status());
         if let Some(stats) = app.session.engine.stream.stats() {
             let dev = app.rig.playing.as_ref().map(|p| p.device.clone()).unwrap_or_default();

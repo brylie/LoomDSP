@@ -1,7 +1,7 @@
 use super::*;
 use crate::devices::fake::{self, Event, Fake};
 use crate::preferences::FILE_NAME;
-use crate::{Args, Source, recovery};
+use crate::{Args, Source};
 use loom_host_desktop::InputError;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -29,7 +29,7 @@ fn args(dir: &std::path::Path) -> Args {
 }
 
 fn start(args: Args, fake: &Rc<Fake>) -> App {
-    App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(fake.clone())))
+    App::boot_with(args, Rc::new(fake::Shared(fake.clone())))
 }
 
 fn write(dir: &std::path::Path, text: &str) -> PathBuf {

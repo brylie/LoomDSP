@@ -218,6 +218,14 @@ impl Ui {
         log
     }
 
+    /// Applies `message` as the runtime does, then every message it
+    /// produces and what those produce in turn, and returns them all.
+    pub(crate) fn deliver(&mut self, message: Message) -> Vec<Message> {
+        let mut log = Vec::new();
+        self.drain(VecDeque::from([message]), &mut log);
+        log
+    }
+
     /// Applies queued messages until none is left, through `App::update`, as
     /// the runtime does. Messages that tasks produce go to `log`, and so do the
     /// messages an input message routes to.
@@ -233,9 +241,47 @@ impl Ui {
                 // only then do their tasks run, as in the app.
                 log.extend(listening.route(event.clone(), *status));
             }
-            let task = self.app.update(message);
-            self.run(task, &mut queue, log);
+            let replies = self.turn(message, &mut queue, log);
+            log.extend(replies.iter().cloned());
+            queue.extend(replies);
         }
+    }
+
+    /// One message through `update`, as the runtime runs it: tasks from
+    /// code not yet ported run as Iced's would, and effects as a driver
+    /// carries them out. Messages from tasks go to `queue` and `log`; the
+    /// messages effects send back (a dialog's answer, work's results) are
+    /// returned, for the caller to apply.
+    ///
+    /// Work runs inline, the clipboard is the harness's own, and Quit marks
+    /// it exited. A dialog is answered from the fake dialogs in a unit test;
+    /// in a test under `tests/`, where they are off, it panics, naming it
+    /// (ui-layer.md, section 2, rule 3), as an effect it cannot run does.
+    fn turn(&mut self, message: Message, queue: &mut VecDeque<Message>, log: &mut Vec<Message>) -> Vec<Message> {
+        let (sender, inbox) = std::sync::mpsc::channel();
+        let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+        let window = loom_ui::WindowState::new(loom_ui_core::Size::new(WINDOW.width, WINDOW.height));
+        let cx = loom_ui::Context::new(Instant::now(), &waker, None, window);
+        let effects = self.app.update(message, &cx);
+        for task in self.app.outbox.take() {
+            self.run(task, queue, log);
+        }
+        for effect in effects {
+            #[cfg(test)]
+            let Some(effect) = crate::dialogs::fake::answer(&self.app, effect, &waker) else {
+                continue;
+            };
+            match effect {
+                loom_ui::Effect::Work(job) => job.run(&waker),
+                loom_ui::Effect::ClipboardWrite(text) => self.clipboard.0 = Some(text),
+                loom_ui::Effect::ClipboardRead(reply) => {
+                    waker.send(reply.give(self.clipboard.0.clone()));
+                }
+                loom_ui::Effect::Quit => self.exited = true,
+                other => panic!("Ui: the harness cannot run the effect `{}`", other.name()),
+            }
+        }
+        inbox.try_iter().collect()
     }
 
     /// Runs a task to the end. Messages it produces go to `queue` and to
@@ -329,9 +375,13 @@ impl Ui {
     }
 
     /// Sends one message and runs its widget operations as the runtime does.
+    /// A dialog's answer and the results of work are applied too, as the
+    /// runtime would on the next turns; messages from tasks are not.
     pub(crate) fn send(&mut self, message: Message) {
-        let task = self.app.update(message);
-        self.run(task, &mut VecDeque::new(), &mut Vec::new());
+        let replies = self.turn(message, &mut VecDeque::new(), &mut Vec::new());
+        for reply in replies {
+            self.send(reply);
+        }
     }
 
     /// Gives keyboard focus to the widget with this ID, as a click on it

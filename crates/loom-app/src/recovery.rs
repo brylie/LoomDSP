@@ -12,7 +12,6 @@
 
 use crate::files;
 use loom_patch::Patch;
-use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -250,47 +249,35 @@ pub enum Choice {
     Restore,
     Discard,
     NotNow,
-    /// No dialog could be shown (Linux without `zenity` or `kdialog`).
-    Unavailable,
 }
 
-/// How the app talks to the user at start. Tests answer without dialogs.
+/// How a test answers the crash recovery question, which the app asks
+/// once its window is open (`App::ask_recovery`).
+#[cfg(test)]
 pub trait Prompt {
+    /// The answer to the question about `orphan`.
     fn ask(&mut self, orphan: &Orphan) -> Choice;
-    fn error(&mut self, message: &str);
 }
 
-/// The native dialogs.
-pub struct Dialogs;
-
-impl Prompt for Dialogs {
-    fn ask(&mut self, orphan: &Orphan) -> Choice {
-        if !files::dialogs_available() {
-            return Choice::Unavailable;
-        }
-        let (title, text) = orphan.question();
-        let result = MessageDialog::new()
-            .set_level(MessageLevel::Warning)
-            .set_title(title)
-            .set_description(text)
-            .set_buttons(MessageButtons::YesNoCancelCustom(
-                "Restore".to_string(),
-                "Discard".to_string(),
-                "Not Now".to_string(),
-            ))
-            .show();
-        match result {
-            MessageDialogResult::Custom(label) if label == "Restore" => Choice::Restore,
-            MessageDialogResult::Custom(label) if label == "Discard" => Choice::Discard,
-            MessageDialogResult::Yes => Choice::Restore,
-            MessageDialogResult::No => Choice::Discard,
-            // A closed dialog keeps the copy.
-            _ => Choice::NotNow,
-        }
+/// The crash recovery question about `orphan`, as a native dialog asks it.
+/// Its answer goes through [`choice`].
+pub fn question(orphan: &Orphan) -> loom_ui::effect::Question {
+    let (title, text) = orphan.question();
+    loom_ui::effect::Question {
+        level: loom_ui::effect::Level::Warning,
+        title,
+        text,
+        buttons: vec!["Restore".to_string(), "Discard".to_string(), "Not Now".to_string()],
     }
+}
 
-    fn error(&mut self, message: &str) {
-        files::show_error(message);
+/// What the button pressed in [`question`] chooses. A dialog closed with no
+/// button keeps the copy, as Not Now does.
+pub fn choice(answer: loom_ui::effect::Choice) -> Choice {
+    match answer {
+        Some(0) => Choice::Restore,
+        Some(1) => Choice::Discard,
+        _ => Choice::NotNow,
     }
 }
 

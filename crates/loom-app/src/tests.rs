@@ -4,14 +4,6 @@ use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::time::Duration;
 
-impl App {
-    /// Applies one message, as tests do. It forwards to `update` until
-    /// `update` returns effects (plan step 2.1b), when it runs a turn.
-    pub(crate) fn send(&mut self, message: Message) -> Task<Message> {
-        self.update(message)
-    }
-}
-
 /// A full queue stages fresh modules until the idle engine drains it;
 /// the next update commits them without another edit from the player.
 #[test]

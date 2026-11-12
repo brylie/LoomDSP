@@ -755,22 +755,12 @@ pub fn library_items(folder: &Path) -> Vec<LibraryItem> {
     items
 }
 
-/// Reads the library folder for the list, on a thread, so the window never
-/// waits for the disk; the items arrive as one [`Message::Library`].
-#[cfg(not(test))]
-pub fn read_library(folder: PathBuf) -> Task<Message> {
-    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
-        let _ = sender.send(library_items(&folder));
-    });
-    Task::perform(async move { receiver.await.unwrap_or_default() }, Message::Library)
-}
-
-/// Reads the library folder at once: the headless test harness runs a task
-/// to its end and cannot wait for a thread.
-#[cfg(test)]
-pub fn read_library(folder: PathBuf) -> Task<Message> {
-    Task::done(Message::Library(library_items(&folder)))
+/// Reads the library folder for the list as background work, so the
+/// window never waits for the disk; the items arrive as one
+/// [`Message::Library`]. Under test the work runs inline (ui-layer.md,
+/// section 2, rule 4).
+pub fn read_library(folder: PathBuf) -> loom_ui::Effects<crate::Message> {
+    loom_ui::Effects::work(move || crate::Message::Browser(Message::Library(library_items(&folder))))
 }
 
 /// Snaps a world point to the grid, for a new module's corner.

@@ -147,6 +147,13 @@ fn a_new_patch_takes_the_defaults() {
 
 /// Acceptance and rule 3: opening a patch by others and saving it keeps
 /// every author, and offers once to add the user's name at the end.
+/// Save, as the toolbar sends it, and check that it wrote the file: the
+/// credit question, when asked, is answered on a later turn.
+fn save(app: &mut App) {
+    let _ = app.send(crate::Message::File(crate::FileAction::Save));
+    assert!(!app.unsaved(), "saved");
+}
+
 #[test]
 fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     let dir = folder("credit");
@@ -164,20 +171,20 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
 
     // Declined: every author stays, and the question is not asked again.
     dialogs::answer_add_author(Some(false));
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.metadata.authors, ["Ada Lovelace"]);
     assert_eq!(saved.metadata.tags, ["drone"]);
     assert_eq!(saved.metadata.license.as_deref(), Some("CC-BY-4.0"));
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(dialogs::asked(), []);
 
     // Opened again, it asks again; accepting adds the name at the end.
     app.open_path(&patch);
     dialogs::answer_add_author(Some(true));
     app.session.patch_info.tag_draft = "half-typ".into();
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(
         app.session.patch_info.tag_draft, "half-typ",
         "a tag being typed is kept"
@@ -207,7 +214,7 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
         app.session.document.info().authors,
         ["Ada Lovelace", "Sam Rivera", "Lin"]
     );
-    assert!(app.save());
+    save(&mut app);
 
     // With no dialog to ask, nothing is added, and the next Save asks.
     app.open_path(&patch);
@@ -215,9 +222,9 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
         .document
         .edit_info(|info| info.authors = vec!["Ada Lovelace".into()]);
     dialogs::answer_add_author(None);
-    assert!(app.save());
+    save(&mut app);
     dialogs::answer_add_author(Some(false));
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(dialogs::asked().len(), 2);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -238,7 +245,7 @@ fn metadata_edits_are_saved() {
     let mut app = App::new(args);
     send(&mut app, Message::TagDraft("ambient,".into()));
     assert!(app.unsaved());
-    assert!(app.save());
+    save(&mut app);
     assert!(!app.unsaved());
     let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.metadata.description, "Soft.");

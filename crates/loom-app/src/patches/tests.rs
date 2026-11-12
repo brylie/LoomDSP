@@ -252,10 +252,9 @@ fn closing_the_browser_stops_its_reader() {
 fn opening_a_patch_stops_the_reader() {
     let dir = library("opened");
     let (mut app, stop) = app_browsing(&dir);
-    let _ = app.send(AppMessage::Patches(Message::Found {
-        open: app.patches_open,
-        rows: vec![Row::read(&dir.join("pad.ron"))],
-    }));
+    // The reader ran to its end as the browser opened; the search leaves
+    // only the pad.
+    let _ = app.send(AppMessage::Patches(Message::Search("Pad".to_string())));
     let _ = app.send(AppMessage::Patches(Message::Submit));
     assert!(app.overlays.patches().is_none());
     assert!(stop.load(Ordering::Relaxed));

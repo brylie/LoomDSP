@@ -1,6 +1,7 @@
 //! File commands: the patch name and unsaved mark, Save, Save As, New,
 //! Open, and replacing the patch with another (`docs/design/files.md`).
 
+use crate::dialogs::Waiting;
 use crate::overlays::Overlay;
 use crate::question::{AfterDiscard, Answer, Kind, Message as QuestionMessage, Question};
 use crate::session::{PatchSession, Started};
@@ -13,6 +14,15 @@ use std::time::Instant;
 /// The status bar text when Save to library is asked with no sub-patch to
 /// save: at the top level, or on a tile that is not one.
 pub(crate) const SAVE_TO_LIBRARY_INSIDE: &str = "Save to library works on a sub-patch: open one, or use its tile menu";
+
+/// Why the patch was not replaced. Nothing changed.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum NotReplaced {
+    /// Audio plays now, and the new patch would have no device to play on.
+    NoDevice(String),
+    /// The patch did not load.
+    NotLoaded(String),
+}
 
 impl App {
     /// The name of the patch as the title shows it, without the mark.
@@ -29,7 +39,6 @@ impl App {
     /// Writes the patch to `path`. On success the path becomes the current
     /// file and the unsaved mark clears.
     pub(crate) fn write_to(&mut self, path: PathBuf) -> bool {
-        self.offer_credit();
         let patch = self.current_patch();
         match crate::patch_file::save(&patch, &path) {
             Ok(()) => {
@@ -80,7 +89,7 @@ impl App {
 
     /// Notes the folder of a file picked in a dialog. A failed write costs
     /// only the convenience, so it is only said.
-    fn used_folder_of(&mut self, path: &Path) {
+    pub(crate) fn used_folder_of(&mut self, path: &Path) {
         if let Err(e) = self.rig.recent.used_folder_of(path) {
             self.alerts.warn(format!("Could not keep the last folder: {e}."));
         }
@@ -107,23 +116,39 @@ impl App {
 
     /// Offers once per patch to add the user's name to its authors, before
     /// the first Save (patch-metadata.md, rule 3). Never with the control
-    /// channel on, where nobody could answer a dialog.
-    fn offer_credit(&mut self) {
+    /// channel on, where nobody could answer a dialog. Returns true when it
+    /// asked: the write to `path`, and then `next`, wait for the answer.
+    fn offer_credit(&mut self, path: &Path, next: Option<AfterDiscard>) -> bool {
         let name = self.rig.store.saved().author.trim().to_string();
         if !self.control.is_empty() || !self.session.document.should_offer_credit(&name) {
-            return;
+            return false;
         }
-        match files::confirm_add_author(&name, &self.session.document.info().authors) {
-            Some(true) => {
-                self.session.document.edit_info(|info| info.authors.push(name));
-                // The authors box shows the new name, so its next edit
-                // keeps it.
-                // Only the authors box: a tag being typed stays.
-                self.session.patch_info.authors = crate::patch_info::State::new(self.session.document.info()).authors;
+        match files::author_question(&name, &self.session.document.info().authors) {
+            Some(question) => {
+                let waiting = Waiting::Credit {
+                    name,
+                    path: path.to_path_buf(),
+                    next,
+                };
+                self.ask_question(waiting, question)
             }
-            Some(false) => {}
-            None => self.session.document.credit_not_asked(),
+            None => {
+                self.session.document.credit_not_asked();
+                false
+            }
         }
+    }
+
+    /// The answer to the credit question: adds the name or not, then writes.
+    pub(crate) fn credit_answered(&mut self, name: String, added: bool, path: PathBuf, next: Option<AfterDiscard>) {
+        if added {
+            self.session.document.edit_info(|info| info.authors.push(name));
+            // The authors box shows the new name, so its next edit
+            // keeps it.
+            // Only the authors box: a tag being typed stays.
+            self.session.patch_info.authors = crate::patch_info::State::new(self.session.document.info()).authors;
+        }
+        self.write_now_then(path, next);
     }
 
     /// Lists a patch given on the command line, in a normal windowed run.
@@ -160,7 +185,7 @@ impl App {
     /// Asks where to save, saves there, then runs `next`. With the control
     /// channel on it stops, because a native picker would stop the app with
     /// nobody to close it (control-channel.md, rule 9).
-    fn save_as_then(&mut self, next: Option<AfterDiscard>) -> bool {
+    pub(crate) fn save_as_then(&mut self, next: Option<AfterDiscard>) -> bool {
         self.finish_edits();
         if !self.control.is_empty() {
             self.alerts
@@ -188,7 +213,15 @@ impl App {
                 self.dialog_folder().map(|dir| files::free_path(&dir, &name)).or(hint)
             }
         };
-        match files::pick_save(start.as_deref()) {
+        // The answer comes on a later turn (`dialogs.rs`).
+        self.ask_file(Waiting::SaveAs { next }, files::save_request(start.as_deref()));
+        false
+    }
+
+    /// The Save As dialog's answer: saves there, then runs `next`, or asks
+    /// first about a file the dialog did not ask about.
+    pub(crate) fn save_as_chosen(&mut self, saving: files::Saving, next: Option<AfterDiscard>) -> bool {
+        match saving {
             files::Saving::Cancelled => false,
             files::Saving::Chosen(path) => {
                 self.used_folder_of(&path);
@@ -202,8 +235,19 @@ impl App {
         }
     }
 
-    /// Writes the patch to `path`. If that worked, runs `next`.
-    fn write_then(&mut self, path: PathBuf, next: Option<AfterDiscard>) -> bool {
+    /// Writes the patch to `path`. If that worked, runs `next`. The first
+    /// save of a patch by others may ask to credit the user first; the
+    /// write then waits for the answer (`dialogs.rs`).
+    pub(crate) fn write_then(&mut self, path: PathBuf, next: Option<AfterDiscard>) -> bool {
+        if self.offer_credit(&path, next.clone()) {
+            return false;
+        }
+        self.write_now_then(path, next)
+    }
+
+    /// Writes the patch to `path` with no question, then runs `next` if it
+    /// worked.
+    pub(crate) fn write_now_then(&mut self, path: PathBuf, next: Option<AfterDiscard>) -> bool {
         let written = self.write_to(path);
         if written && let Some(next) = next {
             self.proceed(next);
@@ -246,10 +290,10 @@ impl App {
                 // up the library folder makes it.
                 let has_folder = current.as_deref().and_then(Path::parent).is_some_and(Path::is_dir);
                 let fallback = if has_folder { None } else { self.dialog_folder() };
-                if let Some(path) = files::pick_open(current.as_deref(), fallback.as_deref()) {
-                    self.used_folder_of(&path);
-                    self.open_path(&path);
-                }
+                self.ask_file(
+                    Waiting::Open,
+                    files::open_request(current.as_deref(), fallback.as_deref()),
+                );
             }
             AfterDiscard::OpenPath(path) => {
                 self.open_path(&path);
@@ -299,6 +343,21 @@ impl App {
     /// Replaces the patch (and its engine) with `source`. If the source does
     /// not load, the running patch is unchanged.
     pub(crate) fn replace(&mut self, source: Source) -> bool {
+        let message = match self.try_replace(source) {
+            Ok(()) => return true,
+            Err(NotReplaced::NoDevice(e)) => format!(
+                "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
+            ),
+            Err(NotReplaced::NotLoaded(e)) => format!("Could not open the patch: {e}. The current patch is unchanged."),
+        };
+        self.show_error(&message);
+        self.alerts.error(alerts::Cause::File, message);
+        false
+    }
+
+    /// Replaces the patch as [`App::replace`] does, but says nothing when
+    /// it cannot: the caller words why, as a restore does (`dialogs.rs`).
+    pub(crate) fn try_replace(&mut self, source: Source) -> Result<(), NotReplaced> {
         // Choosing the device does not start a stream, so the old patch keeps
         // playing. The engine is built at the rate of the device that will
         // play it.
@@ -312,12 +371,7 @@ impl App {
         };
         // Playing now and no device to play on afterwards: keep what plays.
         if let (Err(e), true) = (&output, self.session.engine.stream.is_playing()) {
-            let message = format!(
-                "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
-            );
-            self.show_error(&message);
-            self.alerts.error(alerts::Cause::File, message);
-            return false;
+            return Err(NotReplaced::NoDevice(e.clone()));
         }
         let sample_rate = output
             .as_ref()
@@ -329,12 +383,7 @@ impl App {
         };
         let loaded = match Loaded::read(config, self.test_modules, source, &self.rig.library()) {
             Ok(loaded) => loaded,
-            Err(e) => {
-                let message = format!("Could not open the patch: {e}. The current patch is unchanged.");
-                self.show_error(&message);
-                self.alerts.error(alerts::Cause::File, message);
-                return false;
-            }
+            Err(e) => return Err(NotReplaced::NotLoaded(e)),
         };
         // Nothing can fail from here: fade the old engine out and free the
         // audio device before the new engine takes it. MIDI inputs stay
@@ -386,7 +435,7 @@ impl App {
         drop(old);
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());
-        true
+        Ok(())
     }
 
     /// Tells the user that something failed, in the window, unless the
@@ -596,25 +645,39 @@ impl App {
                     return false;
                 }
                 let start = folder.as_ref().map(|folder| files::free_path(&folder.root, &name));
-                match files::pick_save(start.as_deref()) {
-                    files::Saving::Cancelled => return false,
-                    files::Saving::Chosen(path) => path,
-                    // A name typed without its extension that another file
-                    // has: ask, as Save As does.
-                    files::Saving::Confirm(path) => {
-                        if !self.library_file_is_sound(&file, &path, &name) {
-                            return false;
-                        }
-                        self.overlays.question = Some(Question::replace_library(path, file, name));
-                        return false;
-                    }
-                }
+                // The answer comes on a later turn (`dialogs.rs`).
+                let waiting = Waiting::SaveToLibrary {
+                    file: Box::new(file),
+                    name,
+                };
+                self.ask_file(waiting, files::save_request(start.as_deref()));
+                return false;
             }
         };
-        if !self.library_file_is_sound(&file, &target, &name) {
-            return false;
+        self.library_target_chosen(file, name, files::Saving::Chosen(target))
+    }
+
+    /// Where a sub-patch goes in the library, from its link or its dialog:
+    /// writes it there, or asks first about a file the dialog did not ask
+    /// about.
+    pub(crate) fn library_target_chosen(&mut self, file: Patch, name: String, saving: files::Saving) -> bool {
+        match saving {
+            files::Saving::Cancelled => false,
+            files::Saving::Chosen(target) => {
+                if !self.library_file_is_sound(&file, &target, &name) {
+                    return false;
+                }
+                self.write_library_file(&file, &target, &name)
+            }
+            // A name typed without its extension that another file has:
+            // ask, as Save As does.
+            files::Saving::Confirm(path) => {
+                if self.library_file_is_sound(&file, &path, &name) {
+                    self.overlays.question = Some(Question::replace_library(path, file, name));
+                }
+                false
+            }
         }
-        self.write_library_file(&file, &target, &name)
     }
 
     /// Refuses, with the reason in the status bar, a library file that

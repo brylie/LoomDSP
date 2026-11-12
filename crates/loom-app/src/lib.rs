@@ -22,6 +22,7 @@ mod clipboard;
 mod control;
 mod controls;
 mod devices;
+mod dialogs;
 mod document;
 mod documents;
 mod editing;
@@ -33,6 +34,7 @@ mod files;
 mod gestures;
 mod help;
 mod history;
+mod iced_bridge;
 mod input_owner;
 mod input_session;
 mod input_watch;
@@ -249,12 +251,12 @@ pub fn run() -> iced::Result {
     let start = move || {
         let mut app = App::new(args.clone());
         app.remember_opened_at_start(&args);
-        (app, App::start_task())
+        iced_bridge::Bridge::start(app, App::start_task())
     };
-    let result = iced::application(start, App::update, App::view)
-        .title(App::title)
-        .theme(App::theme)
-        .subscription(App::subscription)
+    let result = iced::application(start, iced_bridge::Bridge::update, iced_bridge::Bridge::view)
+        .title(iced_bridge::Bridge::title)
+        .theme(iced_bridge::Bridge::theme)
+        .subscription(iced_bridge::Bridge::subscription)
         .exit_on_close_request(false)
         .window_size(WINDOW)
         .antialiasing(false)
@@ -462,6 +464,10 @@ enum Message {
     },
     /// The accessibility tree for screen readers (`a11y.rs`).
     A11y(a11y::Event),
+    /// A native dialog's answer, for what waits on it (`dialogs.rs`).
+    Dialog(dialogs::DialogAnswer),
+    /// Ask the crash recovery question, once the window is open.
+    AskRecovery,
 }
 
 /// The Transport module and the index of its `run` parameter, if the patch
@@ -512,6 +518,7 @@ impl Message {
                 | Self::Inspector(inspector::Message::UnknownLabelDraft { .. })
                 | Self::TextFocusCheck
                 | Self::TextFocus(_)
+                | Self::AskRecovery
         )
     }
 
@@ -550,6 +557,10 @@ impl Message {
             | Self::Midi
             // The answer to a question asked before this one opened.
             | Self::TextFocus(_)
+            // A native dialog's answer: what it was asked for is already
+            // decided, as a question's answer is.
+            | Self::Dialog(_)
+            | Self::AskRecovery
             // These say they were ignored, so they must arrive.
             | Self::FileDropped(_)
             | Self::DropsDone => true,
@@ -702,6 +713,17 @@ struct App {
     /// The accessibility tree's node IDs and whether a screen reader
     /// listens. It belongs to the window, so it stays when the patch changes.
     a11y: a11y::Access,
+    /// The effects this update returns, from code deep in a call chain
+    /// (`App::effect`). Empty between updates.
+    effects: loom_ui::Effects<Message>,
+    /// Iced tasks from code not yet ported, for the bridge to run
+    /// (`iced_bridge.rs`). Empty between turns.
+    outbox: iced_bridge::Outbox,
+    /// What waits for a native dialog's answer (`dialogs.rs`). It belongs
+    /// to the window: a dialog's answer can open another patch.
+    waiting: Option<dialogs::Waiting>,
+    /// A crash copy found at start, until the window is open to offer it.
+    recovery_offer: Option<dialogs::RecoveryOffer>,
 }
 
 /// Where a patch comes from.
@@ -1236,8 +1258,21 @@ impl App {
     /// A window event from the input listener goes first to `Listening::route`,
     /// and each message it becomes comes back here.
     ///
+    /// One message, from the runtime (`iced_bridge.rs`), and its effects
+    /// (ui-layer.md, section 2). Code not yet ported still returns an Iced
+    /// task, which goes to the bridge's outbox.
+    pub(crate) fn update(
+        &mut self,
+        message: Message,
+        _cx: &loom_ui::Context<'_, Message>,
+    ) -> loom_ui::Effects<Message> {
+        let task = self.update_iced(message);
+        self.outbox.push(task);
+        std::mem::take(&mut self.effects)
+    }
+
     /// A workflow returns the `Task` it needs; this joins them.
-    fn update(&mut self, message: Message) -> Task<Message> {
+    fn update_iced(&mut self, message: Message) -> Task<Message> {
         use loom_canvas::stats::FrameCause;
         // Above the steps below: each message it routes to takes them, so
         // one event counts once.
@@ -1373,6 +1408,14 @@ impl App {
                 Task::none()
             }
             Message::A11y(event) => self.a11y_event(event),
+            Message::Dialog(answer) => {
+                self.dialog_answered(answer);
+                Task::none()
+            }
+            Message::AskRecovery => {
+                self.ask_recovery();
+                Task::none()
+            }
             message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
             message => {
                 self.handle(message);
@@ -1415,7 +1458,8 @@ impl App {
             control::close(&self.control);
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
             self.run_files.finish();
-            Task::batch([task, iced::exit()])
+            self.effect(loom_ui::Effects::quit());
+            task
         } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
             Task::batch([task, editing::focus_text_field(browser::INPUT)])
         } else {
@@ -1436,9 +1480,10 @@ impl App {
             return Task::none();
         };
         self.patches_open += 1;
-        let (browser, task) = patches::PatchBrowser::open(self.patches_open, folder);
+        let (browser, read) = patches::PatchBrowser::open(self.patches_open, folder);
         self.overlays.open(Overlay::Patches(browser));
-        Task::batch([task.map(Message::Patches), editing::focus_text_field(patches::SEARCH)])
+        self.effect(read);
+        editing::focus_text_field(patches::SEARCH)
     }
 
     /// Handles a patches browser message: keep it open, close it, or open
@@ -1492,7 +1537,10 @@ impl App {
             return Task::none();
         }
         match self.rig.store.saved().library_folder() {
-            Some(folder) => browser::read_library(folder).map(Message::Browser),
+            Some(folder) => {
+                self.effect(browser::read_library(folder));
+                Task::none()
+            }
             None => Task::none(),
         }
     }
@@ -1576,7 +1624,9 @@ impl App {
     fn handle(&mut self, message: Message) {
         match message {
             // `update` runs these: they return tasks.
-            Message::Browser(_)
+            Message::Dialog(_)
+            | Message::AskRecovery
+            | Message::Browser(_)
             | Message::Input { .. }
             | Message::Control(_)
             | Message::ControlFrame(_)

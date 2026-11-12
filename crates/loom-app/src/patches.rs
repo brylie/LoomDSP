@@ -207,39 +207,23 @@ fn send_batches(rows: &mpsc::Receiver<Row>, mut now: impl FnMut() -> Instant, mu
     }
 }
 
-/// Reads the patch files in `folder` on one thread and sends the rows in
-/// batches from another, so the window never waits for the disk. The reader
-/// ends when `stop` is set, so a closed browser does not go on reading a large
-/// or slow library. The batcher then ends too, which ends the task. If the
-/// task goes first, the batcher ends, and then the reader.
-#[cfg(not(test))]
-fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
-    let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
-    let (rows_in, rows_out) = mpsc::channel();
-    std::thread::spawn(move || {
-        read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
-    });
-    std::thread::spawn(move || {
-        send_batches(&rows_out, Instant::now, |rows| {
-            sender.unbounded_send(Message::Found { open, rows }).is_ok()
+/// Reads the patch files in `folder` as background work: one thread reads
+/// and the work's own thread sends the rows in batches, so the window never
+/// waits for the disk. The reader ends when `stop` is set, so a closed
+/// browser does not go on reading a large or slow library. The batcher then
+/// ends too, which ends the work. If nothing listens any more, the batcher
+/// ends, and then the reader. Under test the work runs inline, to its end
+/// (ui-layer.md, section 2, rule 4).
+fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> loom_ui::Effects<crate::Message> {
+    loom_ui::Effects::job(move |waker| {
+        let (rows_in, rows_out) = mpsc::channel();
+        std::thread::spawn(move || {
+            read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
         });
-    });
-    Task::run(receiver, |message| message)
-}
-
-/// Reads the patch files at once: the headless test harness runs a task
-/// to its end and cannot wait for a thread.
-#[cfg(test)]
-fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
-    let (rows_in, rows_out) = mpsc::channel();
-    read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
-    drop(rows_in);
-    let mut tasks = Vec::new();
-    send_batches(&rows_out, Instant::now, |rows| {
-        tasks.push(Task::done(Message::Found { open, rows }));
-        true
-    });
-    Task::batch(tasks)
+        send_batches(&rows_out, Instant::now, |rows| {
+            waker.send(crate::Message::Patches(Message::Found { open, rows }))
+        });
+    })
 }
 
 /// A browser message.
@@ -505,7 +489,7 @@ impl PatchBrowser {
 
     /// Opens a browser over `folder` and the task that reads it on a
     /// thread, one message per file. The caller focuses [`SEARCH`].
-    pub fn open(open: u64, folder: PathBuf) -> (Self, Task<Message>) {
+    pub fn open(open: u64, folder: PathBuf) -> (Self, loom_ui::Effects<crate::Message>) {
         let browser = Self::new(open, folder.clone());
         let reader = read(open, folder, browser.stop.clone());
         (browser, reader)

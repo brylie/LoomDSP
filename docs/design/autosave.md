@@ -124,7 +124,7 @@ A clean exit deletes the session's own folder, as the last thing it does. So a f
 
 ### The offer at start
 
-When there is an orphan with a recovery copy, the app shows a question at start, before the window opens and before it loads any patch:
+When there is an orphan with a recovery copy, the app asks a question in a native dialog as soon as its window is open, before it loads any patch. Until the answer, the window shows an empty patch, which makes no sound:
 
 > **Restore unsaved changes to "drone.ron"?**
 > LoomDSP did not close properly. A copy of your unsaved changes from 20 October, 14:31 was kept.
@@ -140,7 +140,7 @@ For a patch never saved, the name is `Untitled`. The time is `written`, in local
 
 *Why Not Now:* on stage, the player may want to start a known patch fast and look at the lost one later. Discard is final; Not Now is the safe default when unsure.
 
-*Why before the window:* the window then opens on the patch the player chose, never first on an empty or older one.
+*Why once the window is open, with nothing loaded:* the window never shows the command-line patch or an older one before the player chooses, and nothing plays meanwhile. Asking from inside the running app, not before it, is how every other dialog works: the question is one turn and its answer the next ([UI layer](ui-layer.md), section 2, "Dialogs take two turns"), so the window can keep drawing while the question is open. Until 2026-11, the question came before the window opened; the empty patch shown behind it is the one visible difference.
 
 If the window is closed or the dialog cannot be shown, the result is **Not Now**. On Linux without `zenity` or `kdialog` (see [files.md](files.md#dialog-crate)), the status bar says: `Unsaved changes from a crash were kept. Install zenity or kdialog to restore them, or open <path to patch.ron>.` *Why:* nothing is ever deleted without the user's choice.
 
@@ -181,7 +181,7 @@ If `file` no longer exists, the question adds: `"drone.ron" no longer exists.` R
 - It **keeps its file path** only when the file is unchanged since the copy's session last touched it. Then Save writes the recovered work where the player expects. Otherwise there is no current file, and Save acts as Save As, starting in the file's folder with the name `drone (recovered).ron`, so the changed file is not offered for replacing.
 - The undo history is empty. *Why:* the history is not saved in the copy. The patch counts as changed, as after `History::clear` ([files.md](files.md#what-counts-as-an-unsaved-change)).
 - Positions come from the copy, as for Open. Selection, pan, and zoom are reset.
-- Restore builds a new engine and controller, as Open does ([files.md](files.md#open-replaces-the-patch)). If the copy does not load (it does not read, or it reads but names a module or parameter the app does not know), the app shows `Could not restore the unsaved changes: <the patch error>. The copy is kept at <path to patch.ron>.`, keeps the orphan folder, and starts empty.
+- Restore builds a new engine and controller, as Open does ([files.md](files.md#open-replaces-the-patch)). If the copy does not load (it does not read, or it reads but names a module or parameter the app does not know), the app shows `Could not restore the unsaved changes: <the patch error>. The copy is kept at <path to patch.ron>.` in the window, as a failed Open shows its error, and in the status line, keeps the orphan folder, and stays empty. *Why in the window:* the window is open by the time the answer comes, so a second native box is not needed.
 
 **The orphan is deleted only after the new session has its own copy.** Right after a successful restore, the app writes the new session's recovery copy at once (no 2 second wait), and deletes the orphan folder when that write succeeds. *Why:* if the app crashes again during the restore, the work must still be somewhere.
 
@@ -296,6 +296,7 @@ Known gaps, accepted to keep the first version simple. Each can be revisited if 
 - The writer does not `fsync` (Limitation 2).
 - Only the newest orphan is offered at each start (Limitation 3).
 - With a patch on the command line, the offer comes first and Restore wins.
+- The offer comes once the window is open, over an empty patch, and a failed restore says so in the window (2026-11-12, UI layer plan step 2.1, item 2). It came before the window opened, and a failed restore showed a native error box.
 
 ## Later
 

@@ -478,7 +478,7 @@ impl App {
         // One update, so the levels do not fall with the time the run took.
         let mut levels = Levels::default();
         levels.update(&readings, std::time::Instant::now());
-        let _ = self.update(crate::Message::Meters(levels.all().collect()));
+        let _ = self.update_iced(crate::Message::Meters(levels.all().collect()));
         // An output carries a signal if it peaked above -80 dB at the end
         // of the run.
         let activity = watch
@@ -491,7 +491,7 @@ impl App {
                 (probe, peak > crate::monitor::ACTIVITY_THRESHOLD)
             })
             .collect();
-        let _ = self.update(crate::Message::Telemetry(crate::monitor::Update {
+        let _ = self.update_iced(crate::Message::Telemetry(crate::monitor::Update {
             levels: Vec::new(),
             traces,
             histories: histories
@@ -518,9 +518,9 @@ impl App {
             peaks: peaks.news(),
             activity,
         }));
-        let _ = self.update(crate::Message::LiveFrame);
+        let _ = self.update_iced(crate::Message::LiveFrame);
         if let Some(watch) = self.watched_lights() {
-            let _ = self.update(crate::Message::Lights(watch.read()));
+            let _ = self.update_iced(crate::Message::Lights(watch.read()));
         }
     }
 

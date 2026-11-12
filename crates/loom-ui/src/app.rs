@@ -75,7 +75,20 @@ pub struct Context<'a, M> {
     pub(crate) window: WindowState,
 }
 
-impl<M> Context<'_, M> {
+impl<'a, M> Context<'a, M> {
+    /// A context for a driver or a test that calls `update` itself, outside
+    /// a [`Runtime`](crate::Runtime): the bridge to a toolkit that owns the
+    /// event loop, or a test that steps one app with no window. A
+    /// [`Runtime`](crate::Runtime) makes its own for every update.
+    pub fn new(now: Instant, waker: &'a Waker<M>, focused: Option<UiId>, window: WindowState) -> Self {
+        Self {
+            now,
+            waker,
+            focused,
+            window,
+        }
+    }
+
     /// The moment this turn runs, from the driver.
     pub fn now(&self) -> Instant {
         self.now

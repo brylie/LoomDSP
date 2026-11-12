@@ -1046,8 +1046,7 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
             return (answer, messages);
         }
         messages.extend(ui.redraw());
-        let task = ui.app.send(Message::ControlFrame(Instant::now()));
-        messages.extend(ui.run_task(task));
+        messages.extend(ui.deliver(Message::ControlFrame(Instant::now())));
     }
     (receiver.try_recv().expect("answered after drawing"), messages)
 }
@@ -1749,11 +1748,7 @@ fn on_fake_devices(name: &str, fake: &std::rc::Rc<crate::devices::fake::Fake>) -
         },
         ..crate::tests::app_args()
     };
-    App::boot_with(
-        args,
-        &mut crate::recovery::Dialogs,
-        std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())),
-    )
+    App::boot_with(args, std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())))
 }
 
 /// The Preferences commands go through the window's messages: the

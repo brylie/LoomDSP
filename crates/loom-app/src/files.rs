@@ -4,7 +4,7 @@
 //! what the operating systems expect; audio runs on its own thread and keeps
 //! playing while one is open.
 
-use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+use loom_ui::effect::{Choice, FileAction, FileFilter, FileRequest, Level, Question};
 use std::path::{Path, PathBuf};
 
 /// The file extension of a patch.
@@ -143,39 +143,47 @@ fn start_dir(file: Option<&Path>, fallback: Option<&Path>) -> Option<PathBuf> {
         .or_else(|| crate::documents::folder().filter(|dir| dir.is_dir()))
 }
 
-fn dialog(file: Option<&Path>, fallback: Option<&Path>) -> FileDialog {
-    let dialog = FileDialog::new().add_filter("LoomDSP patch", &[EXTENSION]);
-    match start_dir(file, fallback) {
-        Some(dir) => dialog.set_directory(dir),
-        None => dialog,
-    }
+/// The kinds of file the Open and Save dialogs offer.
+fn patch_filters() -> Vec<FileFilter> {
+    vec![FileFilter {
+        name: "LoomDSP patch".to_string(),
+        extensions: vec![EXTENSION.to_string()],
+    }]
 }
 
-/// Asks for a patch to open.
-pub fn pick_open(current: Option<&Path>, fallback: Option<&Path>) -> Option<PathBuf> {
+/// The Open dialog for a patch, starting in the current file's folder, or
+/// `fallback`, or the Documents folder.
+pub fn open_request(current: Option<&Path>, fallback: Option<&Path>) -> FileRequest {
+    let folder = start_dir(current, fallback);
     #[cfg(test)]
-    if let Some(answer) = fake::pick_open(start_dir(current, fallback)) {
-        return answer;
+    fake::asked_open(folder.clone());
+    FileRequest {
+        action: FileAction::Open,
+        title: "Open patch".to_string(),
+        filters: patch_filters(),
+        folder,
+        file_name: None,
     }
-    dialog(current, fallback).set_title("Open patch").pick_file()
 }
 
-/// What the Save dialog picked, starting at `current`.
-fn picked_save(current: Option<&Path>) -> Option<PathBuf> {
+/// The Save dialog, starting at `current`: the current file, or a file
+/// name to suggest. Its answer goes through [`saving`].
+pub fn save_request(current: Option<&Path>) -> FileRequest {
     #[cfg(test)]
-    if let Some(answer) = fake::pick_save(current) {
-        return answer;
+    fake::asked_save(current);
+    FileRequest {
+        action: FileAction::Save,
+        title: "Save patch".to_string(),
+        filters: patch_filters(),
+        folder: start_dir(current, None),
+        file_name: Some(display_name(current)),
     }
-    dialog(current, None)
-        .set_title("Save patch")
-        .set_file_name(display_name(current))
-        .save_file()
 }
 
-/// Asks where to save, starting at `current`: the current file, or a file
-/// name to suggest. The result always has an extension.
-pub fn pick_save(current: Option<&Path>) -> Saving {
-    let Some(picked) = picked_save(current) else {
+/// What the Save dialog's answer means. The result always has an
+/// extension.
+pub fn saving(picked: Option<PathBuf>) -> Saving {
+    let Some(picked) = picked else {
         return Saving::Cancelled;
     };
     let path = with_extension(picked.clone());
@@ -188,14 +196,19 @@ pub fn pick_save(current: Option<&Path>) -> Saving {
     }
 }
 
-/// Asks whether to add the user's name to the authors of a patch made by
+/// The button that adds the user's name, in [`author_question`].
+pub const ADD_MY_NAME: &str = "Add my name";
+
+/// The question to add the user's name to the authors of a patch made by
 /// others (patch-metadata.md, rule 3). `None` when no dialog can be shown:
-/// then nothing is added, and the question is asked again next time.
-pub fn confirm_add_author(name: &str, authors: &[String]) -> Option<bool> {
+/// then nothing is added, and the question is asked again next time. Its
+/// answer goes through [`author_added`].
+pub fn author_question(name: &str, authors: &[String]) -> Option<Question> {
     #[cfg(test)]
-    if let Some(answer) = fake::confirm_add_author(name) {
-        return answer;
+    if !fake::asked_add_author(name) {
+        return None;
     }
+    #[cfg(not(test))]
     if !dialogs_available() {
         return None;
     }
@@ -204,31 +217,32 @@ pub fn confirm_add_author(name: &str, authors: &[String]) -> Option<bool> {
     } else {
         format!("This patch is by {}.", authors.join(", "))
     };
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Info)
-        .set_title(format!("Add \"{name}\" as an author?"))
-        .set_description(format!(
-            "{by} Adding your name credits your changes. Every author stays in the list."
-        ))
+    Some(Question {
+        level: Level::Info,
+        title: format!("Add \"{name}\" as an author?"),
+        text: format!("{by} Adding your name credits your changes. Every author stays in the list."),
         // Two answers only: the save goes ahead either way, so a Cancel
         // button would promise something the question does not do.
-        .set_buttons(MessageButtons::OkCancelCustom(
-            "Add my name".to_string(),
-            "Not for this patch".to_string(),
-        ))
-        .show();
-    match result {
-        MessageDialogResult::Custom(label) if label == "Add my name" => Some(true),
-        MessageDialogResult::Ok | MessageDialogResult::Yes => Some(true),
-        _ => Some(false),
-    }
+        buttons: vec![ADD_MY_NAME.to_string(), "Not for this patch".to_string()],
+    })
+}
+
+/// True when the answer to [`author_question`] adds the name. A dialog
+/// closed with no button declines, as "Not for this patch" does.
+pub fn author_added(choice: Choice) -> bool {
+    choice == Some(0)
 }
 
 /// False on Linux when no program that draws message boxes is installed.
 /// Then the dialog would return "cancel" without showing anything. Only the
 /// credit and crash recovery questions are still native.
 pub fn dialogs_available() -> bool {
-    if !cfg!(target_os = "linux") {
+    // Tests say what the machine has, so they never depend on it.
+    #[cfg(test)]
+    if !fake::dialogs_available() {
+        return false;
+    }
+    if !cfg!(target_os = "linux") || cfg!(test) {
         return true;
     }
     let Some(path) = std::env::var_os("PATH") else {
@@ -237,24 +251,8 @@ pub fn dialogs_available() -> bool {
     std::env::split_paths(&path).any(|dir| ["zenity", "kdialog"].iter().any(|p| dir.join(p).is_file()))
 }
 
-/// Tells the user that something failed before the window exists. Once it
-/// does, the app says so in the window (`App::show_error`). One button, so
-/// it cannot be a question.
-pub fn show_error(message: &str) {
-    // Tests record the message: a native dialog would stop them.
-    #[cfg(test)]
-    fake::show_error(message);
-    #[cfg(not(test))]
-    MessageDialog::new()
-        .set_level(MessageLevel::Error)
-        .set_title("LoomDSP")
-        .set_description(message)
-        .set_buttons(MessageButtons::Ok)
-        .show();
-}
-
-/// Stand-ins for the Open and Save dialogs, and native questions and error
-/// messages, in tests, which must not stop at a native dialog. Each test
+/// Stand-ins for the Open and Save dialogs and the credit question in
+/// tests, which must not stop at a native dialog. Each test
 /// runs on its own thread, so each has its own record.
 #[cfg(test)]
 pub mod fake;

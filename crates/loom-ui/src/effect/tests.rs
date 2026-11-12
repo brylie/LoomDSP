@@ -272,3 +272,18 @@ fn an_image_holds_four_bytes_per_pixel() {
     assert_eq!(Image::new(2, 1, vec![0; 7]), None);
     assert_eq!(Image::new(0, 0, Vec::new()).map(|image| image.rgba().len()), Some(0));
 }
+
+/// Taking the focus from every element is a focus effect to nothing, which
+/// keeps the selection as it is.
+#[test]
+fn unfocus_moves_the_focus_to_nothing() {
+    let list: Vec<Effect<Msg>> = Effects::unfocus().into_iter().collect();
+    assert!(matches!(
+        list.as_slice(),
+        [Effect::Focus {
+            target: FocusTarget::Nothing,
+            select: Selection::Keep
+        }]
+    ));
+    assert_eq!(list[0].name(), names::FOCUS);
+}

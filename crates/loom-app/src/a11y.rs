@@ -656,7 +656,7 @@ impl crate::App {
         if matrix {
             self.matrix_reader_select(&id);
         }
-        let tasks = messages.into_iter().map(|message| self.update(message)).collect();
+        let tasks = messages.into_iter().map(|message| self.update_iced(message)).collect();
         self.reader_event(ReaderEvent::Applied);
         Some(tasks)
     }
@@ -735,7 +735,7 @@ impl crate::App {
                 by_key: true,
             };
             self.reader_event(ReaderEvent::Close);
-            return vec![self.update(crate::Message::Canvas(event))];
+            return vec![self.update_iced(crate::Message::Canvas(event))];
         }
         if request.action == accesskit::Action::Focus {
             // Focus on a control moves the canvas's keyboard focus there.
@@ -782,7 +782,7 @@ impl crate::App {
         } else {
             ReaderEvent::Close
         });
-        let tasks = messages.into_iter().map(|message| self.update(message)).collect();
+        let tasks = messages.into_iter().map(|message| self.update_iced(message)).collect();
         // The step's release, at once: the group now waits for the next.
         self.reader_event(ReaderEvent::Applied);
         tasks

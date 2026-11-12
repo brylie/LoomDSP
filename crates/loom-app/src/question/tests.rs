@@ -401,12 +401,19 @@ fn rows_still_reach_a_browser_under_the_question() {
     });
     let _ = app.send(AppMessage::File(FileAction::Close));
     assert!(app.overlays.question.is_some());
-    let rows = vec![crate::patches::Row::read(&dir.0.join("a.ron"))];
+    // The reader ran to its end as the browser opened (work runs inline in
+    // a test). A row it finds later still arrives under the question.
+    std::fs::write(
+        dir.0.join("b.ron"),
+        r#"Patch(version: 1, metadata: Metadata(name: "B"))"#,
+    )
+    .unwrap();
+    let rows = vec![crate::patches::Row::read(&dir.0.join("b.ron"))];
     let open = app.patches_open;
     let _ = app.send(AppMessage::Patches(crate::patches::Message::Found { open, rows }));
     let _ = app.send(AppMessage::Question(Message::Escape));
     let browser = app.overlays.patches().expect("the browser is still open");
-    assert_eq!(browser.shown().count(), 1);
+    assert_eq!(browser.shown().count(), 2);
 }
 
 /// The strongest colour is on the safe answer, where Enter starts, and never

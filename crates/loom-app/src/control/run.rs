@@ -264,7 +264,7 @@ impl App {
             return (Then::Now(Err(question_open_error(question))), Task::none());
         }
         let mut tasks = Vec::new();
-        let mut send = |app: &mut App, message: Message| tasks.push(app.update(message));
+        let mut send = |app: &mut App, message: Message| tasks.push(app.update_iced(message));
         let answer = match call.command.clone() {
             Command::Select { modules, .. } => self.check_modules(&modules).map(|()| {
                 send(self, Message::Canvas(CanvasEvent::Select(modules)));

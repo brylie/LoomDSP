@@ -16,24 +16,31 @@ use std::rc::Rc;
 use std::time::Instant;
 
 impl App {
-    pub(crate) fn new(args: Args) -> Self {
-        Self::boot(args, &mut recovery::Dialogs)
-    }
-
     /// Starts the app on the real devices. Tests get the real audio but no
     /// MIDI inputs, so connected hardware cannot change their results.
-    pub(crate) fn boot(args: Args, prompt: &mut dyn recovery::Prompt) -> Self {
+    pub(crate) fn new(args: Args) -> Self {
         #[cfg(test)]
         let host: Rc<dyn devices::Host> = Rc::new(devices::fake::NoMidi);
         #[cfg(not(test))]
         let host: Rc<dyn devices::Host> = Rc::new(devices::System);
-        Self::boot_with(args, prompt, host)
+        Self::boot_with(args, host)
+    }
+
+    /// Starts as [`App::new`] does, then answers the crash recovery
+    /// question with `prompt`, through the same two turns the app takes
+    /// (`dialogs.rs`).
+    #[cfg(test)]
+    pub(crate) fn boot(args: Args, prompt: &mut dyn recovery::Prompt) -> Self {
+        let mut app = Self::new(args);
+        app.answer_recovery_with(prompt);
+        app
     }
 
     /// Starts the app: reads the preferences, opens this run's recovery
-    /// folder, offers a copy left by a crash, then opens the patch and the
-    /// devices (`docs/design/autosave.md`, `docs/design/preferences.md`).
-    pub(crate) fn boot_with(args: Args, prompt: &mut dyn recovery::Prompt, host: Rc<dyn devices::Host>) -> Self {
+    /// folder, keeps a copy left by a crash to offer once the window is
+    /// open, then opens the patch and the devices (`docs/design/autosave.md`,
+    /// `docs/design/preferences.md`).
+    pub(crate) fn boot_with(args: Args, host: Rc<dyn devices::Host>) -> Self {
         let (store, mut notes) = settings::open_store(&args.devices);
         let (recent, recent_note) = crate::recent::RecentList::open(store.path());
         notes.extend(recent_note);
@@ -41,51 +48,23 @@ impl App {
         rig.recent = recent;
         let mut session_folder = None;
         let mut autosave_off = None;
-        let mut restore = None;
+        let mut offer = None;
         if let Some(root) = args.recovery_root() {
             match root.and_then(|root| recovery::start(&root)) {
                 Ok(startup) => {
                     session_folder = Some(startup.session);
-                    if let Some(orphan) = startup.orphan {
-                        match prompt.ask(&orphan) {
-                            recovery::Choice::Restore => restore = Some(orphan),
-                            recovery::Choice::Discard => {
-                                if let Err(e) = orphan.discard() {
-                                    notes.push(format!("Could not delete the recovery copy: {e}."));
-                                }
-                            }
-                            recovery::Choice::NotNow => {}
-                            recovery::Choice::Unavailable => notes.push(format!(
-                                "Unsaved changes from a crash were kept. Install zenity or kdialog to restore them, or open {}.",
-                                orphan.patch_path().display()
-                            )),
-                        }
+                    match startup.orphan {
+                        Some(orphan) if files::dialogs_available() => offer = Some(orphan),
+                        Some(orphan) => notes.push(format!(
+                            "Unsaved changes from a crash were kept. Install zenity or kdialog to restore them, or open {}.",
+                            orphan.patch_path().display()
+                        )),
+                        None => {}
                     }
                 }
                 Err(e) => autosave_off = Some(format!("Autosave is off: {e}.")),
             }
         }
-        // The file is checked after the answer: it can change while the
-        // question is open.
-        let mut restore_failed = false;
-        let mut restore_error = |e: &str, orphan: recovery::Orphan, notes: &mut Vec<String>| {
-            let message = format!(
-                "Could not restore the unsaved changes: {e}. The copy is kept at {}.",
-                orphan.patch_path().display()
-            );
-            prompt.error(&message);
-            notes.push(message);
-            // Dropping the orphan keeps its folder for a later start.
-        };
-        let mut recovered = restore.and_then(|orphan| match orphan.load() {
-            Ok(patch) => Some((orphan.file_state(), orphan, patch)),
-            Err(e) => {
-                restore_error(&e, orphan, &mut notes);
-                restore_failed = true;
-                None
-            }
-        });
-
         let (output, audio_notes) = settings::open_output(&rig, args.no_audio, args.fake_audio);
         notes.extend(audio_notes);
         if let (Some(path), Ok(output)) = (&args.record, &output) {
@@ -99,11 +78,10 @@ impl App {
             }
         }
         let sample_rate = output.as_ref().map(|o| o.sample_rate() as f32).unwrap_or(48_000.0);
-        let source = match &recovered {
-            Some((_, _, patch)) => Source::Recovered(Box::new(patch.clone())),
-            None if restore_failed => Source::Empty,
-            None => args.source(),
-        };
+        // While a copy waits to be offered, nothing opens: the answer
+        // decides between it and the patch asked for (autosave.md, Crash
+        // recovery).
+        let source = if offer.is_some() { Source::Empty } else { args.source() };
         let mut status = String::new();
         let config = EngineConfig {
             output_safety: args.output_safety.unwrap_or(rig.store.saved().output_safety),
@@ -111,12 +89,7 @@ impl App {
         };
         let library = rig.library();
         let loaded = Loaded::read(config, args.test_modules, source, &library).unwrap_or_else(|e| {
-            // A copy that reads but does not load is a failed restore too:
-            // the orphan is kept, not adopted.
-            match recovered.take() {
-                Some((_, orphan, _)) => restore_error(&e, orphan, &mut notes),
-                None => status = e,
-            }
+            status = e;
             Loaded::read(config, args.test_modules, Source::Empty, &library).expect("an empty patch always loads")
         });
         let mut app = Self::assemble(output, sample_rate, loaded, 1, &args, rig, true);
@@ -128,15 +101,12 @@ impl App {
         app.run_files.set_examples(files::bundled_examples());
         app.run_files.copy_if_example(&mut app.session.document);
         // The compile report gives way to anything that needs reading.
-        let mut keep = !status.is_empty();
+        let keep = !status.is_empty();
         if keep {
             app.alerts.error(alerts::Cause::File, status);
         }
         app.run_files.start_autosave(session_folder);
-        if let Some((state, orphan, _)) = recovered {
-            app.restored(state, orphan, &args);
-            keep = true;
-        }
+        app.recovery_offer = offer.map(|orphan| crate::dialogs::RecoveryOffer::new(orphan, &args));
         if !notes.is_empty() {
             let notes = notes.join(" ");
             if keep {
@@ -154,12 +124,12 @@ impl App {
 
     /// Sets up a patch restored from a recovery copy (autosave.md, After a
     /// restore): marked unsaved, with its file only if that is unchanged.
-    pub(crate) fn restored(&mut self, state: recovery::FileState, orphan: recovery::Orphan, args: &Args) {
+    pub(crate) fn restored(&mut self, state: recovery::FileState, orphan: recovery::Orphan, asked_for: &Source<'_>) {
         self.session.document.restore(state);
         // Nothing on disk holds this patch.
         self.session.edits.history.clear();
         let when = recovery::local_time(orphan.written());
-        self.alerts.say(match args.source() {
+        self.alerts.say(match asked_for {
             Source::File(path) => format!(
                 "Restored unsaved changes from {when}. {} was not opened.",
                 files::display_name(Some(path))
@@ -251,6 +221,10 @@ impl App {
             } else {
                 crate::a11y::Access::default()
             },
+            effects: loom_ui::Effects::none(),
+            outbox: crate::iced_bridge::Outbox::default(),
+            waiting: None,
+            recovery_offer: None,
         };
         app.settle_session(first_midi, connect_midi, recording_stopped, fresh);
         app

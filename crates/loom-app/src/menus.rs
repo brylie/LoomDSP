@@ -222,7 +222,7 @@ impl App {
                 Task::none()
             }
             Key::Named(Named::Enter) if !repeat => match menu.highlighted() {
-                Some(item) => self.update(item.message.clone()),
+                Some(item) => self.update_iced(item.message.clone()),
                 None => Task::none(),
             },
             _ => {

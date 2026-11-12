@@ -1841,8 +1841,7 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
     ui.app.a11y.locating = false;
     ui.app.text_focus.any = true;
 
-    let task = ui.app.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
-    let log = ui.run_task(task);
+    let log = ui.deliver(Message::Canvas(CanvasEvent::Select(Vec::new())));
     let rebuilds = log
         .iter()
         .filter(|message| matches!(message, Message::A11y(Event::Located(_))))
@@ -4327,8 +4326,7 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
     let mut ui = crate::ui_test::Ui::with_app(app);
     // Run so the focus the opening asks for is reported back, as the
     // window would report it.
-    let task = ui.app.send(Message::File(crate::FileAction::Browse));
-    let _ = ui.run_task(task);
+    let _ = ui.deliver(Message::File(crate::FileAction::Browse));
     let _ = ui.redraw();
     let open = ui.app.patches_open;
     let field = node_of(&mut ui.app, &crate::patches::part_id("search"));

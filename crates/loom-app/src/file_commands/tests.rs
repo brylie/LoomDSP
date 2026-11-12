@@ -121,6 +121,15 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // The window's, so it stays, but the tiles' node IDs are dropped.
         // `a11y/tests.rs` covers both.
         a11y: _,
+        // Filled and taken within one `update` (`App::effect`).
+        effects: _,
+        // Filled and taken within one turn, by the bridge.
+        outbox: _,
+        // The window's: a dialog's answer may itself replace the patch, and
+        // what waited is taken before it does (`dialogs.rs`).
+        waiting: _,
+        // Taken by the first turn, before anything can replace the patch.
+        recovery_offer: _,
     } = &app;
     let PatchSession {
         controller,

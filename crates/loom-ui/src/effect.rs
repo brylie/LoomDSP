@@ -108,6 +108,9 @@ pub enum FocusTarget {
     Next,
     /// The previous element in the focus order.
     Previous,
+    /// No element: focus leaves every element, so a text field that had it
+    /// closes and the keys go to the app's shortcuts (section 6, rule 1).
+    Nothing,
 }
 
 /// What happens to a text field's selection when it takes focus.
@@ -369,6 +372,14 @@ impl<M> Effects<M> {
         let target = if back { FocusTarget::Previous } else { FocusTarget::Next };
         Self::one(Effect::Focus {
             target,
+            select: Selection::Keep,
+        })
+    }
+
+    /// Take the focus from every element.
+    pub fn unfocus() -> Self {
+        Self::one(Effect::Focus {
+            target: FocusTarget::Nothing,
             select: Selection::Keep,
         })
     }

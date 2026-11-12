@@ -232,7 +232,7 @@ impl App {
             loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
             return Task::none();
         }
-        Task::batch(messages.into_iter().map(|message| self.update(message)))
+        Task::batch(messages.into_iter().map(|message| self.update_iced(message)))
     }
 
     /// A key no widget used while an overlay has the input. An overlay's keys

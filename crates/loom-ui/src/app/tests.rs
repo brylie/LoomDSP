@@ -2,6 +2,7 @@ use super::*;
 use crate::event::DriverEvent;
 use crate::headless::Harness;
 use crate::routing::NoTarget;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 /// The minimal app's messages.
@@ -86,4 +87,23 @@ fn the_context_gives_a_waker_and_the_window() {
     assert!(heard, "the watcher's message arrived");
     harness.send(Msg::Look);
     assert_eq!(harness.app().windows, [WindowState::new(Size::new(320.0, 200.0))]);
+}
+
+/// A context made outside a runtime, as the bridge to Iced and a test
+/// stepping one app make them, gives back what it was made with.
+#[test]
+fn a_context_made_by_hand_reads_back_what_it_was_given() {
+    let (sender, _queue) = mpsc::channel::<Msg>();
+    let waker = Waker::new(sender, Arc::new(|| {}));
+    let now = Instant::now();
+    let field = UiId::panel("inspector").with("field");
+    let window = WindowState::new(Size::new(640.0, 480.0));
+    let cx = Context::new(now, &waker, Some(field.clone()), window);
+    assert_eq!(cx.now(), now);
+    assert_eq!(cx.focused(), Some(&field));
+    assert_eq!(cx.window(), window);
+    assert!(
+        cx.waker().send(Msg::Look),
+        "the waker sends into the queue it was made with"
+    );
 }

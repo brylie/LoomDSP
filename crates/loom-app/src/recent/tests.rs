@@ -270,7 +270,7 @@ fn both_dialogs_start_in_the_remembered_folder() {
     // First, the library.
     let _ = app.send(AppMessage::File(FileAction::Open));
     assert_eq!(fake::asked(), [Asked::Open(Some(library.clone()))]);
-    assert!(!app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     assert_eq!(fake::asked(), [Asked::Save(Some(library.join("Untitled.ron")))]);
 
     // A file picked in a dialog makes its folder the last one.
@@ -288,12 +288,12 @@ fn both_dialogs_start_in_the_remembered_folder() {
     let _ = app.send(AppMessage::File(FileAction::New));
     let _ = app.send(AppMessage::File(FileAction::Open));
     assert_eq!(fake::asked(), [Asked::Open(Some(project.clone()))]);
-    assert!(!app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     assert_eq!(fake::asked(), [Asked::Save(Some(project.join("Untitled.ron")))]);
 
     // Once that folder is gone, the library again.
     std::fs::remove_dir_all(&project).unwrap();
-    assert!(!app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     assert_eq!(fake::asked(), [Asked::Save(Some(library.join("Untitled.ron")))]);
 }
 
@@ -305,8 +305,9 @@ fn save_as_remembers_its_folder() {
     std::fs::create_dir_all(&project).unwrap();
     let mut app = app_with_library(&dir.0);
     fake::answer_save(Some(project.join("mine.ron")));
-    assert!(app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     fake::answer_save(None);
+    assert!(project.join("mine.ron").is_file());
     assert_eq!(app.rig.recent.last_folder(), Some(project.as_path()));
 }
 

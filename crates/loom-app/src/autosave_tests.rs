@@ -13,7 +13,6 @@ use std::time::Duration;
 struct Answer {
     choice: Choice,
     asked: Vec<(String, String)>,
-    errors: Vec<String>,
 }
 
 impl Answer {
@@ -21,19 +20,26 @@ impl Answer {
         Self {
             choice,
             asked: Vec::new(),
-            errors: Vec::new(),
         }
     }
+}
+
+/// The error a failed restore shows in the window, which it also keeps in
+/// the status line.
+fn restore_error(app: &App) -> String {
+    let shown = app.ui_snapshot().question.expect("the error shows in the window");
+    assert!(
+        app.alerts.status().starts_with("Could not restore"),
+        "{}",
+        app.alerts.status()
+    );
+    shown.text
 }
 
 impl Prompt for Answer {
     fn ask(&mut self, orphan: &Orphan) -> Choice {
         self.asked.push(orphan.question());
         self.choice
-    }
-
-    fn error(&mut self, message: &str) {
-        self.errors.push(message.to_string());
     }
 }
 
@@ -234,7 +240,8 @@ fn no_dialog_keeps_the_copy() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let crashed = edit_and_keep(&mut app);
     drop(app);
-    let app = setup.boot(None, &mut Answer::new(Choice::Unavailable));
+    files::fake::no_dialogs();
+    let app = setup.boot(None, &mut Answer::new(Choice::NotNow));
     assert!(crashed.join("patch.ron").exists());
     assert!(
         app.alerts
@@ -324,9 +331,8 @@ fn a_broken_copy_is_kept() {
 
     let mut answer = Answer::new(Choice::Restore);
     let app = setup.boot(Some(setup.file()), &mut answer);
-    let [error] = answer.errors.as_slice() else {
-        panic!("one error: {:?}", answer.errors)
-    };
+    // The window is open by the time it answers, so the error shows in it.
+    let error = restore_error(&app);
     assert!(error.starts_with("Could not restore the unsaved changes: "), "{error}");
     assert!(error.contains("The copy is kept at "), "{error}");
     assert_eq!(
@@ -352,8 +358,7 @@ fn a_copy_that_does_not_load_is_kept() {
 
     let mut answer = Answer::new(Choice::Restore);
     let mut app = setup.boot(None, &mut answer);
-    assert_eq!(answer.errors.len(), 1, "{:?}", answer.errors);
-    assert!(answer.errors[0].starts_with("Could not restore the unsaved changes: "));
+    assert!(restore_error(&app).starts_with("Could not restore the unsaved changes: "));
     assert_eq!(
         app.title(),
         "Untitled - LoomDSP",
@@ -381,7 +386,7 @@ fn restore_reports_unknown_modules() {
     .unwrap();
     let mut answer = Answer::new(Choice::Restore);
     let mut app = setup.boot(None, &mut answer);
-    assert!(answer.errors.is_empty());
+    assert!(app.overlays.question.is_none(), "no error shows");
     assert!(
         app.alerts.status().contains("future.effect@1"),
         "{}",
@@ -561,4 +566,45 @@ fn autosave_that_is_off_stays_as_a_warning() {
 
     app.alerts.say("Something newer");
     assert_eq!(app.alerts.kept().len(), 1);
+}
+
+/// The recovery question comes once the window is open, not before: the
+/// app starts with an empty patch and a deadline due at once, the question
+/// is an effect of that deadline's turn, and the patch the command line
+/// asked for opens only on the answer (autosave.md, Crash recovery).
+#[test]
+fn the_recovery_question_waits_for_the_window() {
+    use loom_ui::{Context, Effect, Waker, WindowState};
+    let setup = Setup::new("after-window");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    let crashed = edit_and_keep(&mut app);
+    drop(app);
+
+    let mut app = App::new(setup.args(Some(setup.file())));
+    assert!(
+        app.session.document.file().is_none(),
+        "nothing opens while the copy waits"
+    );
+    let deadline = app.next_deadline().expect("the question is due");
+    assert!(deadline.at <= Instant::now());
+    assert!(matches!(deadline.message, Message::AskRecovery));
+
+    let (sender, _queue) = std::sync::mpsc::channel();
+    let waker = Waker::new(sender, std::sync::Arc::new(|| {}));
+    let window = WindowState::new(loom_ui_core::Size::new(800.0, 600.0));
+    let cx = Context::new(Instant::now(), &waker, None, window);
+    let effects: Vec<_> = app.update(Message::AskRecovery, &cx).into_iter().collect();
+    let [Effect::Ask { question, .. }] = effects.as_slice() else {
+        panic!("one question: {effects:?}")
+    };
+    assert_eq!(question.buttons, ["Restore", "Discard", "Not Now"]);
+    assert!(app.next_deadline().is_none(), "asked once");
+
+    let _ = app.update(Message::Dialog(crate::dialogs::DialogAnswer::Choice(Some(2))), &cx);
+    assert_eq!(
+        app.session.document.file(),
+        Some(setup.file().as_path()),
+        "Not Now opens the patch"
+    );
+    assert!(crashed.join("patch.ron").exists(), "the copy is kept");
 }
