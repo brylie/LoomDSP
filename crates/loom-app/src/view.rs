@@ -282,6 +282,7 @@ impl App {
                     .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
                 &self.session.matrix,
                 self.session.controller.graph(),
+                self.a11y.is_active(),
             ),
         };
         column![tabs, panel].width(280).height(Length::Fill).into()
