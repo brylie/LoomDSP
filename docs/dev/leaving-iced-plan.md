@@ -230,8 +230,15 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 ### 2.4 Text drawing for the canvas
 
 1. **2.4a, done:** the text crate is Parley ([research note](../research/2026-11-text-crate-choice.md); spec section 8, rule 8). No `glyphon` release builds with our `wgpu` 27, and nothing like it takes Parley's glyph runs, so step 2.4b builds a glyph atlas of our own: rasterise with `swash`, pack with `etagere`, and draw instanced quads, about 680 lines in the parts the research note costs. Ask the maintainer if it grows well past that (stop points).
-2. **2.4b:** draw tile text with Parley and that atlas, behind a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Ask Parley for `system-ui`. Keep one Parley layout per label, keyed by its text, size, and weight, beside the canvas's frame cache, since a layout is rebuilt for any change. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
+2. **2.4b, done:** draw tile text with Parley and that atlas, behind a `Painter` and a `TextMeasure` (phase 1.3), in place of the Iced ones. Ask Parley for `system-ui`. Keep one Parley layout per label, keyed by its text, size, and weight, beside the canvas's frame cache, since a layout is rebuilt for any change. Keep the level-of-detail rules in `docs/design/panels.md` (text close up, bars further out).
 3. The canvas has its own Parley font context beside Iced's font system until phase 3 moves the panels. Ask for `system-ui` with the optical size axis at its default. Tile text changes width here (spec section 8, rule 6), so this step's gate is: the `--screenshot-window` pixel diff is identical outside the bounds of the moved text (masked from the text rectangles the scene or the view lays out), every `locate` answer is unchanged, the pixels inside those bounds may differ, and the pull request records the change in width per label (least, greatest, and median). That screenshot is then the new baseline, and the pixel-identical gate resumes from 2.4b on. The other parity gates are unchanged.
+4. **Measured at 2.4b,** on macOS, against `e04c5bde`:
+   - The gate (`text_gate`, an ignored test in `crates/loom-app/src/screenshot/text_gate_tests.rs`): on all seven example patches, no pixel differs outside the moved text, inside or outside the canvas. `--dump-ui`, plain and with a selection, is byte-identical for each patch, so every tile, port, and control bound that `locate` answers from is unchanged. Tile layout and hit tests never measured text: they use `scene::text_width`'s estimate.
+   - Widths, 424 tile labels: -1.7% to +5.3%, median +3.4%. One label now leaves its box: "Out +90°" in `modulation.ron`, by 0.27 world units of 37 (#120).
+   - The first layout, with the font scan: about 80 ms.
+   - `--generate 300 --bench --bench-seconds 10`, four runs each, base then new: CPU 19.2% to 25.8% before, 16.6% to 19.1% after; worst frame 22 to 28 ms before, 23 to 30 ms after; 60 fps both (one base run at 72, as the display's rate moved). Glyph instances upload on frames where the camera moves, as Iced's text did; scene geometry still uploads once.
+   - `--measure-idle` on `subtractive.ron`, two runs each: CPU 7.4% and 7.8% before, 5.3% and 5.6% after; frame causes unchanged (meters, #730); one text upload per run.
+   - The atlas: about 840 lines with its shader, 670 without comments.
 
 ### 2.5 The agent tools on the new shell
 
@@ -277,7 +284,7 @@ Move the simplest views first. One pull request per row, each passing the parity
 
 ### 3.3 Text input and editing
 
-1. Single-line input (browser search, number entry, names) builds on Parley's `PlainEditor`, behind a field type of our own: cursor, selection, word movement, and clipboard come from it, and undo inside the field is ours, by snapshots of text and selection (about 80 lines).
+1. Single-line input (browser search, number entry, names) builds on Parley's `PlainEditor`, with Parley's `complex-scripts` feature for dictionary word breaking in Thai, Lao, Chinese, and Japanese (off for the canvas, which never moves by word), behind a field type of our own: cursor, selection, word movement, and clipboard come from it, and undo inside the field is ours, by snapshots of text and selection (about 80 lines).
 2. IME: send `winit` IME events to the focused field through `PlainEditor`, and report `ime_cursor_area` to the window so the candidate window appears in the right place. `winit` ends a composition with an empty `Preedit` and then a `Commit` that carries the final text, so the mapping is:
    - `Preedit` with text: `set_compose(text, cursor)`.
    - `Preedit` with empty text: `clear_compose()`. This drops only the preedit text, never committed text.
@@ -304,7 +311,8 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
    - `docs/design/visual-system.md` and `docs/design/control-channel.md`;
    - the `ui_test.rs` module comment;
    - OQ-13 and OQ-14 in `docs/product/open-questions.md`. OQ-14 closes; OQ-13 now depends on our shell, not Iced.
-4. Write an explainer in `docs/learn/` on how the UI layer works: the runtime, effects, layout, and the accessibility tree. It is the documentation Iced did not have.
+4. Delete the text gate tool (`crates/loom-app/src/screenshot/text_gate_tests.rs`): it measures with Iced's paragraph.
+5. Write an explainer in `docs/learn/` on how the UI layer works: the runtime, effects, layout, and the accessibility tree. It is the documentation Iced did not have.
 
 ## Stop points
 
