@@ -835,15 +835,11 @@ fn matrix_with_a_row() -> Ui {
 
 /// Clicks the filter, as a person would.
 fn click_filter(ui: &mut Ui) {
-    let at = ui.field(FILTER);
+    let at = ui.field(&filter_part());
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert_eq!(
-        ui.focused_field(),
-        Some(iced::advanced::widget::Id::new(FILTER)),
-        "the click focused the filter"
-    );
+    assert_eq!(ui.focused_field(), Some(filter_part()), "the click focused the filter");
 }
 
 /// What a key must not change: the row, the cell, any edit, and the patch.

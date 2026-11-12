@@ -84,7 +84,7 @@ pub(crate) fn patch() -> UiId {
 /// the container's, so a focus request finds the field and the window's
 /// walk finds the container.
 pub(crate) fn field(id: &UiId) -> iced::advanced::widget::Id {
-    iced::advanced::widget::Id::from(format!("{id}/text"))
+    crate::places::field_widget_id(id)
 }
 
 /// `content` in a container named `id`, so the window can say where it is.

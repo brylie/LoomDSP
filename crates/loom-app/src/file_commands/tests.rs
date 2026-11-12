@@ -5,7 +5,7 @@ use crate::recovery::tests::TempDir;
 use crate::session::{EngineLink, PatchSession};
 use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
-use crate::{App, Source, alerts, control, controls, editing, help, live, settings};
+use crate::{App, Source, alerts, control, controls, help, live, settings};
 use iced::keyboard::{Key, Modifiers};
 use loom_core::{OutputRef, OutputSafety, ProbeId};
 use std::sync::Arc;
@@ -36,7 +36,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         index: 0,
         draft: loom_canvas::TypedDraft::new("1".to_string(), |_| Ok(())),
     });
-    app.text_focus = editing::TextFocus { any: true, field: None };
+    app.focus = Some(crate::patch_info::tags_part());
     app.session.lights.insert((added.0, 0), 1.0);
     app.session.run_driven = true;
     app.session.meter_levels.insert(ProbeId(99), live::Level::default());
@@ -85,7 +85,10 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // `document/tests.rs` and `autosave_tests.rs` cover what it does.
         run_files: _,
         right_tab,
-        text_focus,
+        // The window may still focus a field the new patch's views keep, so
+        // it stays until the window says otherwise; the app asks it again.
+        focus: _,
+        focus_question,
         generation,
         test_modules,
         // The update that sets it ends by exiting the app, so a replace never
@@ -193,7 +196,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert_eq!(gestures.adding(), None);
     assert!(linked_before.is_none());
     assert!(value_draft.is_none());
-    assert!(!text_focus.any);
+    assert!(focus_question.get(), "the window is asked where focus is");
     assert!(lights.is_empty());
     assert!(!run_driven);
     assert!(meter_levels.is_empty());

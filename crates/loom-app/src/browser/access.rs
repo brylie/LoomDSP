@@ -3,9 +3,7 @@
 //! it, and a library row's menu while it is open (ui-layer.md, section 7,
 //! rule 27). Built from the browser's model, which its view draws too.
 
-use super::{
-    INPUT, INSERT_LINKED, Message, Model, about_id, browser_id, insert_linked_id, list_id, menu_id, search_id,
-};
+use super::{INSERT_LINKED, Message, Model, about_id, browser_id, insert_linked_id, list_id, menu_id, search_id};
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, SetText};
 use loom_ui_core::UiId;
@@ -22,7 +20,10 @@ pub(crate) fn items(model: &Model) -> (Item, Option<UiId>) {
         set_text: Some(SetText::BrowserQuery),
         // The field keeps the keys while a menu is open, but the keys act on
         // the menu, so the menu has the reported focus then.
-        focus: model.menu.is_none().then(|| iced::advanced::widget::Id::new(INPUT)),
+        focus: model
+            .menu
+            .is_none()
+            .then(|| crate::places::field_widget_id(&search_id())),
         active: highlighted.map(|row| row.id.clone()),
         ..Item::new(search_id(), Kind::Field)
     }];

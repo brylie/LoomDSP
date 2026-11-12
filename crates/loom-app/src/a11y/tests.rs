@@ -1835,11 +1835,12 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
     let _ = ui.redraw();
     // A real field with real focus, so each time the app asks, the
     // answer is that a field has it.
-    ui.focus(crate::patch_info::TAG_INPUT);
+    ui.focus(&crate::patch_info::tags_part());
     assert!(ui.text_field_focused(), "the tag field took focus");
+    let _ = ui.deliver(Message::TextFocusCheck);
+    assert!(ui.app.focus.is_some(), "the app heard of it");
     let _ = ui.app.a11y_event(Event::Activated);
     ui.app.a11y.locating = false;
-    ui.app.text_focus.any = true;
 
     let log = ui.deliver(Message::Canvas(CanvasEvent::Select(Vec::new())));
     let rebuilds = log
@@ -1848,7 +1849,7 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
         .count();
     let asked = log
         .iter()
-        .filter(|message| matches!(message, Message::TextFocus(_)))
+        .filter(|message| matches!(message, Message::FocusMoved(_)))
         .count();
     assert!(rebuilds <= 2, "{rebuilds} rebuilds for one message");
     assert!(asked <= 1, "focus was asked {asked} times");
@@ -2574,14 +2575,11 @@ fn an_inspector_field_takes_text_and_focus() {
     assert!(found.label().is_some_and(|name| name.contains("value")));
     assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
 
-    let at = std::time::Instant::now();
-    let tasks = ui.app.a11y_action(
-        &request(Action::SetValue, field, Some(ActionData::Value("640".into()))),
-        at,
-    );
-    for task in tasks {
-        let _ = ui.run_task(task);
-    }
+    let _ = ui.deliver(Message::A11y(Event::Action(request(
+        Action::SetValue,
+        field,
+        Some(ActionData::Value("640".into())),
+    ))));
     let index = ui
         .app
         .session
@@ -2595,12 +2593,13 @@ fn an_inspector_field_takes_text_and_focus() {
     assert!((value - 640.0).abs() < 0.5, "{value}");
 
     // Focus moves keyboard focus to the field, and the tree says so.
-    let tasks = ui.app.a11y_action(&request(Action::Focus, field, None), at);
-    assert_eq!(tasks.len(), 1, "one focus request");
-    for task in tasks {
-        let _ = ui.run_task(task);
-    }
-    assert_eq!(ui.focused_field(), Some(crate::controls::value_field_id(module, index)));
+    let _ = ui.deliver(Message::A11y(Event::Action(request(Action::Focus, field, None))));
+    assert_eq!(ui.focused_field(), ui.app.value_field_part(module, index));
+    assert_eq!(
+        ui.app.focus,
+        ui.app.value_field_part(module, index),
+        "the app heard of it"
+    );
     let places = ui.places();
     assert_eq!(ui.app.a11y_tree(&places).focus, field);
 }
@@ -2834,12 +2833,7 @@ fn a_covered_field_is_not_focused() {
     let _ = inspector_of(&mut ui, &[module]);
     let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
     let field = node_of(&mut ui.app, &crate::inspector::ids::part(&row, "field"));
-    for task in ui
-        .app
-        .a11y_action(&request(Action::Focus, field, None), std::time::Instant::now())
-    {
-        let _ = ui.run_task(task);
-    }
+    let _ = ui.deliver(Message::A11y(Event::Action(request(Action::Focus, field, None))));
     let places = ui.places();
     assert_eq!(ui.app.a11y_tree(&places).focus, field, "focused while open");
 
@@ -3931,7 +3925,7 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     let _ = ui.release();
     let _ = ui.typewrite("1234");
     assert!(ui.app.session.value_draft.is_some(), "a draft is typed");
-    assert!(ui.app.text_focus.any);
+    assert!(ui.app.focus.is_some());
     let cutoff = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[index];
     let before = cutoff(&ui.app);
 
@@ -3939,7 +3933,7 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     let target = widget_node(&mut ui.app, module, knob);
     ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
     let _ = ui.redraw();
-    assert!(!ui.app.text_focus.any, "the field is closed");
+    assert!(!ui.app.focus.is_some(), "the field is closed");
     assert!(ui.app.session.value_draft.is_none(), "its draft is dropped");
     assert_eq!(cutoff(&ui.app), before, "and not submitted");
     let _ = ui.tap(

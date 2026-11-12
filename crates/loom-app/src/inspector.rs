@@ -488,7 +488,10 @@ impl App {
     /// task, which moves focus.
     pub(crate) fn inspector_message(&mut self, message: Message) -> Task<AppMessage> {
         match message {
-            Message::ValueSubmit { module, index } => return self.value_submit(module, index),
+            Message::ValueSubmit { module, index } => {
+                self.value_submit(module, index);
+                return Task::none();
+            }
             Message::UnknownLabelDraft { module, value } => self.session.gestures.draft_label(module, value),
             Message::UnknownLabelApply { module } => {
                 if let Some(value) = self.session.gestures.take_label(module) {
@@ -1794,7 +1797,7 @@ fn value_field<'a>(
     };
     let bad = field.error.is_some();
     let input = text_input(&value, &field.text)
-        .id(crate::controls::value_field_id(module, index))
+        .id(ids::field(&ids::part(row, "field")))
         .on_input(move |text| AppMessage::Inspector(Message::ValueText { module, index, text }))
         .on_submit(AppMessage::Inspector(Message::ValueSubmit { module, index }))
         .size(style::BODY)

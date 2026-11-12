@@ -15,9 +15,11 @@ use std::fmt;
 
 pub(crate) mod access;
 
-/// The filter's widget ID. Its focus changes which keys the table takes
-/// (modulation.md, Filter focus).
-pub(crate) const FILTER: &str = "matrix-filter";
+/// The filter's part, `matrix/filter`. Its focus changes which keys the
+/// table takes (modulation.md, Filter focus).
+pub(crate) fn filter_part() -> loom_ui_core::UiId {
+    access::part("filter")
+}
 
 /// Finds the selected cell and reveals it with the smallest scroll.
 struct RevealRow {
@@ -392,7 +394,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
     content = content.push(named(
         &part("filter"),
         text_input("Filter modules or parameters", &model.filter)
-            .id(FILTER)
+            .id(crate::places::field_widget_id(&filter_part()))
             .on_input(|s| Message::Matrix(Event::Filter(s)))
             .size(style::CONTROL),
     ));
@@ -515,7 +517,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
         };
         let depth_value: Element<'a, Message> = if let Some(e) = editing.filter(|e| e.column == Column::Depth) {
             text_input(&modulation::depth_text(a.depth), &e.depth)
-                .id("matrix-depth")
+                .id(crate::places::field_widget_id(&access::cell(id, Column::Depth)))
                 .on_input(|s| Message::Matrix(Event::DepthText(s)))
                 .on_submit(Message::Matrix(Event::Apply))
                 .size(style::SMALL)
@@ -622,7 +624,10 @@ impl App {
     /// card into view when the order or filter changes.
     pub(crate) fn matrix_message(&mut self, event: Event) -> iced::Task<Message> {
         let task = match event {
-            Event::Edit(_, Column::Depth) => crate::editing::focus_text_field("matrix-depth"),
+            Event::Edit(id, Column::Depth) => {
+                self.effect(loom_ui::Effects::focus(access::cell(id, Column::Depth)));
+                iced::Task::none()
+            }
             Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_) => reveal_selected(),
             _ => iced::Task::none(),
         };
@@ -655,18 +660,11 @@ impl App {
         } else {
             iced::Task::none()
         };
-        if open_depth
-            && self
-                .session
-                .matrix
-                .edit
-                .as_ref()
-                .is_some_and(|e| e.column == Column::Depth)
-        {
-            iced::Task::batch([scroll, crate::editing::focus_text_field("matrix-depth")])
-        } else {
-            scroll
+        if open_depth && let Some(edit) = self.session.matrix.edit.as_ref().filter(|e| e.column == Column::Depth) {
+            let depth = access::cell(edit.id, Column::Depth);
+            self.effect(loom_ui::Effects::focus(depth));
         }
+        scroll
     }
 
     /// Which one matrix assignment the canvas should show without pinning.
@@ -946,7 +944,7 @@ impl App {
         // must not change a row while the player is typing (modulation.md,
         // Filter focus).
         let leaves = matches!(key, keyboard::Key::Named(Named::Escape | Named::Tab));
-        if !leaves && self.text_focus.field == Some(iced::advanced::widget::Id::new(FILTER)) {
+        if !leaves && self.focus == Some(filter_part()) {
             return;
         }
         if key == keyboard::Key::Named(Named::Escape) {

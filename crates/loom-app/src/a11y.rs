@@ -589,7 +589,7 @@ impl crate::App {
         tree::Frames {
             bars: self.bars_model(),
             panel,
-            focused_field: self.text_focus.field.clone(),
+            focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
             focused_item: self.matrix_focus(),
             overlay,
             overlay_focus,
@@ -630,9 +630,10 @@ impl crate::App {
                 return Some(Vec::new());
             };
             self.reader_event(ReaderEvent::Close);
-            let task = iced::widget::operation::focus(field)
-                .chain(crate::editing::text_focus().map(crate::Message::TextFocus));
-            return Some(vec![task]);
+            if let Some(part) = crate::places::field_of(&field) {
+                self.effect(loom_ui::Effects::focus(part));
+            }
+            return Some(Vec::new());
         }
         let messages = items::messages(&item, request.action, request.data.as_ref());
         let joins = item.groups && actions::joins_group(request.action);
@@ -751,10 +752,8 @@ impl crate::App {
                 // field itself; with no press, the app closes it, then
                 // reads focus back as after a press.
                 self.canvas_event(loom_canvas::CanvasEvent::PointerDown);
-                if self.text_focus.any {
-                    return vec![
-                        crate::editing::unfocus_text_fields().chain(Task::done(crate::Message::TextFocusCheck)),
-                    ];
+                if self.focus.is_some() {
+                    self.effect(loom_ui::Effects::unfocus());
                 }
             }
             return Vec::new();

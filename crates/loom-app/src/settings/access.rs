@@ -6,7 +6,7 @@
 //! time (rule 15). Its open menu is Iced's and is not reported.
 
 use super::model::{Model, Note, Part, Picks};
-use super::{AUTHOR_INPUT, Message};
+use super::{Message, author_part};
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, SetText};
 use loom_ui_core::UiId;
@@ -103,8 +103,8 @@ pub(crate) fn items(model: &Model) -> Item {
         label: Some("Your name".to_string()),
         value: Some(model.author.clone()),
         set_text: Some(SetText::PreferencesAuthor),
-        focus: Some(iced::advanced::widget::Id::new(AUTHOR_INPUT)),
-        ..Item::new(id.clone().with("author"), Kind::Field)
+        focus: Some(crate::places::field_widget_id(&author_part())),
+        ..Item::new(author_part(), Kind::Field)
     });
     // A text part is read by its value alone: an adapter reads a label in
     // place of the value, so the row's label goes in the words.

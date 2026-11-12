@@ -31,7 +31,6 @@ const LIST_HEIGHT: f32 = ROWS as f32 * ROW_HEIGHT;
 /// Width of a library item's menu.
 const MENU_WIDTH: f32 = 140.0;
 
-pub(crate) const INPUT: &str = "module-browser-search";
 const LIST: &str = "module-browser-list";
 
 /// The mark a library item's row shows in place of a module's family.
@@ -490,7 +489,7 @@ impl Browser {
         let model = &self.model;
         let input = container(
             text_input("Search modules", &model.query)
-                .id(INPUT)
+                .id(crate::places::field_widget_id(&search_id()))
                 .on_input(Message::Query)
                 .on_submit(Message::Submit)
                 .size(style::CONTROL)

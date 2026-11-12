@@ -230,15 +230,13 @@ impl App {
                     call.answer(answer);
                 }
                 Step::Locate(target) => tasks.push(search(call, target, AfterSearch::Locate)),
-                Step::Type(text) => {
-                    tasks.push(
-                        crate::editing::text_field_focused().map(move |focused| Message::TypeFocus {
-                            call: call.clone(),
-                            text: text.clone(),
-                            focused,
-                        }),
-                    )
-                }
+                Step::Type(text) => tasks.push(crate::iced_bridge::after_focus_read(move |focused| {
+                    Message::TypeFocus {
+                        call: call.clone(),
+                        text: text.clone(),
+                        focused,
+                    }
+                })),
                 Step::Screenshot(path, Area::Target { target, margin }) => {
                     tasks.push(search(call, target, AfterSearch::Screenshot { path, margin }));
                 }

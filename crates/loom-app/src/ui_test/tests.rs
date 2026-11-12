@@ -2263,7 +2263,7 @@ fn focus_cutoff_field(ui: &mut Ui) -> (ModuleId, usize) {
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert!(ui.app.text_focus.any, "the app knows the field has focus");
+    assert!(ui.app.focus.is_some(), "the app knows the field has focus");
     (id, index)
 }
 
@@ -2347,7 +2347,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
         ui.app.session.selection.contains(&id.0),
         "Escape in a field keeps the selection"
     );
-    assert!(!ui.app.text_focus.any, "the field gave up focus");
+    assert!(!ui.app.focus.is_some(), "the field gave up focus");
     ui.tap(keyboard::Key::Named(Named::Escape), none);
     assert!(ui.app.session.selection.is_empty());
 }
@@ -2363,7 +2363,7 @@ fn tab_closes_an_inspector_field() {
     assert!(ui.app.session.value_draft.is_some());
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
     assert!(ui.app.session.value_draft.is_none());
-    assert!(!ui.app.text_focus.any);
+    assert!(!ui.app.focus.is_some());
     assert_eq!(param_value(&ui, id, "cutoff"), before);
 }
 
@@ -2374,7 +2374,10 @@ fn tab_from_a_value_field_moves_the_canvas() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let (id, _) = focus_cutoff_field(&mut ui);
-    assert!(!ui.app.tab_moves_between_fields(), "a value field is in no list");
+    assert!(
+        !ui.app.tab_moves_between_fields(ui.app.focus.as_ref()),
+        "a value field is in no list"
+    );
     let messages = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
     assert!(
         messages.iter().any(|m| matches!(m, Message::Canvas(_))),
@@ -2399,7 +2402,7 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
         "abc",
         "bad text keeps its focus"
     );
-    assert!(ui.app.text_focus.any);
+    assert!(ui.app.focus.is_some());
 
     let node = ui.app.session.controller.graph().node(id).unwrap();
     let other = node.descriptor.param_index("level").unwrap();
@@ -2408,14 +2411,14 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
     ui.press();
     ui.release();
     assert!(ui.app.session.value_draft.is_none(), "the bad text went with the focus");
-    assert!(ui.app.text_focus.any, "the other field has focus now");
+    assert!(ui.app.focus.is_some(), "the other field has focus now");
 
     ui.typewrite("5");
     assert!(ui.app.session.value_draft.is_some());
     assert!(ui.app.replace(crate::Source::Empty));
     ui.step(&[]);
     assert!(ui.app.session.value_draft.is_none());
-    assert!(!ui.app.text_focus.any);
+    assert!(!ui.app.focus.is_some());
 }
 
 /// A readout shows its value as text in the snapshot, at its own place,
@@ -2456,4 +2459,50 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     assert_eq!(ui.app.session.selection, [id.0].into());
     let node = ui.app.session.controller.graph().node(id).unwrap();
     assert_eq!(node.params[0], 7.0, "a press edits nothing");
+}
+
+/// Cmd+Z straight after a click into a text field, with nothing between,
+/// undoes the field's typing and never the patch: the click's focus is
+/// known by the time the key arrives (undo.md, Gestures). Written before the
+/// focus round trip went (plan step 2.1, item 2, part b), and kept after.
+#[test]
+fn undo_right_after_a_click_into_a_field_leaves_the_patch() {
+    let mut ui = Ui::open("sine.ron");
+    let mut added = None;
+    ui.app.edit(|app| {
+        added = Some(
+            app.session
+                .controller
+                .add_module("test.panel")
+                .expect("a built-in module"),
+        );
+        app.commit();
+    });
+    let id = added.expect("added");
+    let _ = ui
+        .app
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
+    ui.redraw();
+    let index = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(id)
+        .unwrap()
+        .descriptor
+        .param_index("cutoff")
+        .unwrap();
+    let steps = ui.app.session.edits.history.len();
+    assert!(steps > 0, "the patch has a step to undo");
+
+    let at = ui.value_field(id.0, index);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+
+    assert!(ui.app.session.controller.graph().node(id).is_some(), "the module stays");
+    assert_eq!(ui.app.session.edits.history.len(), steps, "no step was undone");
+    assert!(ui.text_field_focused(), "the field still has focus");
 }

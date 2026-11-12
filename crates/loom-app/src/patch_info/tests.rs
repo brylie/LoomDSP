@@ -343,7 +343,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     let count = ui.app.session.controller.graph().nodes().count();
 
     let z = || Key::Character("z".into());
-    ui.focus(TAG_INPUT);
+    ui.focus(&tags_part());
     ui.typewrite("drone");
     ui.tap(z(), Modifiers::COMMAND);
     assert_eq!(
@@ -362,7 +362,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     );
 
     // Redo waits for the field the same way.
-    ui.focus(TAG_INPUT);
+    ui.focus(&tags_part());
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(
         ui.app.session.controller.graph().nodes().count(),

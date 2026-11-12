@@ -46,6 +46,123 @@ pub(crate) enum Bridged {
     Woken,
     /// The app's deadline has come.
     Deadline,
+    /// Iced's answer to the focus question (`focus_query`).
+    Focus(FocusAnswer),
+}
+
+/// Which widget has keyboard focus, as Iced's widgets know it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct FocusAnswer {
+    /// A focusable widget has focus.
+    pub any: bool,
+    /// Its widget ID, if it has one.
+    pub widget: Option<iced::advanced::widget::Id>,
+}
+
+impl FocusAnswer {
+    /// The part with focus: the field's part when its widget ID is one
+    /// `places::field_widget_id` made. A focused widget with no such ID still
+    /// has focus, so it reads as [`unnamed_field`], and the canvas still
+    /// leaves the keys to it.
+    pub(crate) fn part(&self) -> Option<UiId> {
+        let named = self.widget.as_ref().and_then(crate::places::field_of);
+        named.or_else(|| self.any.then(unnamed_field))
+    }
+}
+
+/// The part reported for a focused field whose widget has no field ID.
+pub(crate) fn unnamed_field() -> UiId {
+    UiId::panel("unnamed-field")
+}
+
+/// Asks Iced which widget has focus. Iced's text fields do not say when
+/// focus moves, and a press can move it, so the bridge asks after a turn
+/// that may have moved it (`App::take_focus_question`) and after every
+/// focus effect.
+pub(crate) fn focus_query<T: Send + 'static>(reply: impl Fn(FocusAnswer) -> T + Send + 'static) -> Task<T> {
+    iced::advanced::widget::operate(FindFocus::default()).map(reply)
+}
+
+/// The widget operation that finds the focused widget. The `Ui` harness
+/// runs it on its own view, as the bridge does through Iced.
+#[derive(Default)]
+pub(crate) struct FindFocus(pub FocusAnswer);
+
+impl iced::advanced::widget::Operation<FocusAnswer> for FindFocus {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<FocusAnswer>)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        state: &mut dyn iced::advanced::widget::operation::Focusable,
+    ) {
+        if state.is_focused() {
+            self.0 = FocusAnswer {
+                any: true,
+                widget: id.cloned(),
+            };
+        }
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<FocusAnswer> {
+        iced::advanced::widget::operation::Outcome::Some(self.0.clone())
+    }
+}
+
+/// Asks Iced whether a text field has focus, then gives the app `reply`'s
+/// message. Undo and redo keep this round trip until phase 3: Cmd+Z right
+/// after a click into a field must see the click's focus, and only Iced's
+/// widgets know it by then (ui_test/tests.rs,
+/// `undo_right_after_a_click_into_a_field_leaves_the_patch`).
+pub(crate) fn after_focus_read(reply: impl Fn(bool) -> Message + Send + 'static) -> Task<Message> {
+    focus_query(move |answer| reply(answer.any))
+}
+
+/// Asks Iced which part has focus, then gives the app `reply`'s message.
+/// Tab between a view's fields keeps this round trip until phase 3, as
+/// undo does: a field can take focus with no message (a search field
+/// focused as its browser opens), and the key must not wait for the app
+/// to hear of it.
+pub(crate) fn after_focus_part(reply: impl Fn(Option<UiId>) -> Message + Send + 'static) -> Task<Message> {
+    focus_query(move |answer| reply(answer.part()))
+}
+
+/// The Iced task that carries out a focus effect: the field's widget for
+/// an element, chained with select-all when asked, and then the focus
+/// question, so the app hears where focus went. Shared by the bridge and
+/// the `Ui` harness.
+pub(crate) fn focus_task<T: Send + 'static>(
+    target: &FocusTarget,
+    select: Selection,
+    answer: impl Fn(FocusAnswer) -> T + Send + 'static,
+) -> Task<T> {
+    focus_moves(target, select).chain(focus_query(answer))
+}
+
+/// The widget operations that move focus for a focus effect, with no
+/// question after them. In the bridge era only text fields take focus, so
+/// an element is its text field's widget.
+pub(crate) fn focus_moves<T: Send + 'static>(target: &FocusTarget, select: Selection) -> Task<T> {
+    match target {
+        FocusTarget::Element(id) => {
+            let widget = crate::places::field_widget_id(id);
+            let focus = iced::widget::operation::focus(widget.clone());
+            match select {
+                Selection::Keep => focus,
+                Selection::All => focus.chain(iced::advanced::widget::operate(
+                    iced::advanced::widget::operation::text_input::select_all(widget),
+                )),
+            }
+        }
+        FocusTarget::Next => iced::widget::operation::focus_next(),
+        FocusTarget::Previous => iced::widget::operation::focus_previous(),
+        FocusTarget::Nothing => iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::focus(
+            iced::advanced::widget::Id::unique(),
+        )),
+    }
 }
 
 /// Tasks from code not yet ported, drained by the bridge after each turn.
@@ -152,14 +269,38 @@ impl Bridge {
             }
             Bridged::Woken => self.turn(DriverEvent::Woken),
             Bridged::Deadline => self.turn(DriverEvent::DeadlineReached),
+            // Every answer reaches the app, changed or not, as the window's
+            // word on focus after a press: a press elsewhere ends a draft
+            // whose field never had focus.
+            //
+            // The order keeps the app's copy of focus with the target's.
+            // What is already queued runs first, under the focus it was sent
+            // under; then the target takes the answer, and `FocusMoved` runs
+            // alone, so no other message sees the new focus before the app
+            // has heard of it.
+            Bridged::Focus(answer) => {
+                let queued = self.turn(DriverEvent::Woken);
+                let part = answer.part();
+                self.runtime.target_mut().focused = part.clone();
+                let moved = self.step(|runtime, now, driver| runtime.deliver(Message::FocusMoved(part), now, driver));
+                Task::batch([queued, moved])
+            }
         }
     }
 
     /// Runs one turn and returns what Iced must do for it.
     fn turn(&mut self, event: DriverEvent) -> Task<Bridged> {
+        self.step(|runtime, now, driver| runtime.handle(event, now, driver))
+    }
+
+    /// Runs one turn by `run`, and returns what Iced must do for it.
+    fn step(
+        &mut self,
+        run: impl FnOnce(&mut Runtime<Hosted, IcedTarget>, Instant, &mut IcedDriver) -> loom_ui::Next,
+    ) -> Task<Bridged> {
         let mut driver = IcedDriver::default();
         let now = Instant::now();
-        let next = self.runtime.handle(event, now, &mut driver);
+        let next = run(&mut self.runtime, now, &mut driver);
         let mut tasks = driver.tasks;
         tasks.append(&mut self.runtime.target_mut().tasks);
         tasks.extend(
@@ -171,6 +312,10 @@ impl Bridge {
                 .into_iter()
                 .map(|t| t.map(Bridged::App)),
         );
+        // A message that may have moved focus: ask Iced where it is now.
+        if self.runtime.app().0.take_focus_question() {
+            tasks.push(focus_query(Bridged::Focus));
+        }
         // A deadline already due runs next. Later deadlines wait for item 3,
         // when timers become deadlines.
         if next.deadline.is_some_and(|at| at <= now) {
@@ -231,6 +376,8 @@ fn wake_stream(source: &WakeSource) -> impl Stream<Item = ()> + use<> {
 #[derive(Default)]
 pub(crate) struct IcedTarget {
     tasks: Vec<Task<Bridged>>,
+    /// The part with focus, from Iced's last answer.
+    focused: Option<UiId>,
 }
 
 impl loom_ui::Target<Message> for IcedTarget {
@@ -238,34 +385,17 @@ impl loom_ui::Target<Message> for IcedTarget {
     fn input(&mut self, _: &loom_ui_core::Event, _: Option<loom_ui_core::Point>, _: Instant, _: &mut Vec<Message>) {}
 
     fn focus(&mut self, target: &FocusTarget, select: Selection) {
-        let task: Task<Bridged> = match target {
-            FocusTarget::Element(id) => {
-                let widget = widget_id(id);
-                let focus = iced::widget::operation::focus(widget.clone());
-                match select {
-                    Selection::Keep => focus,
-                    Selection::All => focus.chain(iced::advanced::widget::operate(
-                        iced::advanced::widget::operation::text_input::select_all(widget),
-                    )),
-                }
-            }
-            FocusTarget::Next => iced::widget::operation::focus_next(),
-            FocusTarget::Previous => iced::widget::operation::focus_previous(),
-            FocusTarget::Nothing => iced::advanced::widget::operate(
-                iced::advanced::widget::operation::focusable::focus(iced::advanced::widget::Id::unique()),
-            ),
-        };
-        self.tasks.push(task);
+        self.tasks.push(focus_task(target, select, Bridged::Focus));
     }
 
     /// Nothing scrolls by UI ID until plan step 2.1b's focus and scroll
     /// pull request; until then the views scroll by Iced task.
     fn scroll_into_view(&mut self, _id: &UiId) {}
 
-    /// Iced keeps focus inside its widgets. The focus pull request reads
-    /// it back here; until then the app asks Iced itself.
+    /// Iced keeps focus inside its widgets, so this is its last answer to
+    /// the focus question.
     fn focused(&self) -> Option<UiId> {
-        None
+        self.focused.clone()
     }
 
     /// Iced draws after every update, as it always has (section 2, rule
@@ -273,12 +403,6 @@ impl loom_ui::Target<Message> for IcedTarget {
     fn needs_redraw(&mut self, updates: usize) -> bool {
         updates > 0
     }
-}
-
-/// The Iced widget ID for an element's UI ID: its text, as the parts the
-/// toolkit draws are named (ui-layer.md, section 7).
-pub(crate) fn widget_id(id: &UiId) -> iced::advanced::widget::Id {
-    iced::advanced::widget::Id::from(id.to_string())
 }
 
 /// The driver: the effects that reach outside the app, as Iced tasks or as

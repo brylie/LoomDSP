@@ -597,3 +597,25 @@ fn next_says_when_to_draw() {
         "a resize draws through the system's redraw request"
     );
 }
+
+/// `deliver` runs its one message alone: what a waker queued before it
+/// waits for the next turn, and so does a deadline that is due. The bridge
+/// to Iced hands over the window's word on focus this way.
+#[test]
+fn deliver_runs_one_message_alone() {
+    let start = Instant::now();
+    let mut runtime = Runtime::new(
+        TestApp::default(),
+        NoTarget,
+        WindowState::new(Size::new(10.0, 10.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.waker().send(Msg::Add(1));
+    let next = runtime.deliver(Msg::Add(10), start, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Add(10)], "only the delivered message");
+    assert!(next.again, "the queued one is due next");
+    runtime.handle(DriverEvent::Woken, start, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Add(10), Msg::Add(1)]);
+    assert_eq!(runtime.counts().turns, 2);
+}

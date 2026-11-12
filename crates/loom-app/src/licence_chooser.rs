@@ -300,8 +300,12 @@ pub(crate) const DISCLAIMER: &str = "LoomDSP explains each licence in plain word
 /// The line shown while a question is still open.
 pub(crate) const UNANSWERED: &str = "Answer the questions to pick a licence.";
 
-/// The id of the **Other** field, so a screen reader's Focus reaches it.
-pub(crate) const OTHER_INPUT: &str = "licence-other";
+/// The part of the **Other** field, `licence/other-text`. Its text field's
+/// widget ID comes from it (`places::field_widget_id`), so a screen
+/// reader's Focus reaches it and the window's focus reads back.
+pub(crate) fn other_part() -> loom_ui_core::UiId {
+    access::licence_id().with("other-text")
+}
 
 /// The chooser, as a panel over the window, drawn from its model. Each part
 /// that acts is named by its UI ID, so the window says where it drew it.
@@ -372,7 +376,7 @@ pub(crate) fn view(model: Model) -> Element<'static, crate::Message> {
         ),
         container(named(
             text_input("For example MIT, or CC-BY-4.0 OR MIT", &model.other_text)
-                .id(iced::widget::Id::new(OTHER_INPUT))
+                .id(crate::places::field_widget_id(&other_part()))
                 .on_input(move |t| msg(Message::OtherText(t)))
                 .on_submit(msg(Message::Use))
                 .size(style::CONTROL)

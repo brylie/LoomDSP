@@ -340,7 +340,10 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
             select_first_module(&mut ui);
             open_overlay(&mut ui, owner);
             let modules = ui.app.session.controller.graph().nodes().count();
-            ui.run_task(crate::editing::unfocus_text_fields());
+            let _ = ui.run_task(crate::iced_bridge::focus_moves(
+                &loom_ui::effect::FocusTarget::Nothing,
+                loom_ui::effect::Selection::Keep,
+            ));
             ui.redraw();
             assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
             ui.clipboard.0 = Some("before".to_string());
@@ -361,7 +364,7 @@ fn duplicate_does_nothing_from_a_focused_search_field() {
     select_first_module(&mut ui);
     let modules = ui.app.session.controller.graph().nodes().count();
     open_overlay(&mut ui, InputOwner::Patches);
-    ui.focus(patches::SEARCH);
+    ui.focus(&patches::text_fields()[0]);
     assert!(ui.text_field_focused());
     assert_eq!(tap_command(&mut ui, "d"), modules);
 }
