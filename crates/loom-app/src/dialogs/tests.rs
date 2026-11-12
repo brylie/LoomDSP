@@ -178,6 +178,52 @@ fn an_answer_for_a_replaced_patch_is_not_used() {
     let _ = fake::asked();
 }
 
+/// A new engine for the same patch, as a device change makes, keeps the
+/// answer: the save happens. The engine's generation moves; the patch's
+/// number does not.
+#[test]
+fn an_answer_after_a_device_change_is_used() {
+    let dir = TempDir::new("dialogs-device");
+    let path = dir.0.join("mine.ron");
+    let mut app = app();
+    let session = app.session.id;
+    assert!(!app.save_as_then(None));
+    app.generation += 1;
+    let _ = update(&mut app, Message::Dialog(DialogAnswer::File(Some(path.clone()))));
+    assert_eq!(app.session.id, session, "the same patch");
+    assert!(path.is_file(), "the save happened");
+    let _ = fake::asked();
+}
+
+/// An Open answer is used after a replace: what the player picked to open
+/// does not depend on the patch that was showing. Unsaved changes in the
+/// patch that came meanwhile are asked about first.
+#[test]
+fn an_open_answer_is_used_after_a_replace() {
+    let dir = TempDir::new("dialogs-open-replaced");
+    let path = patch_in(&dir);
+    let mut app = app();
+    let _ = update(&mut app, Message::File(FileAction::Open));
+    assert!(app.replace(Source::Empty));
+    app.edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    let _ = update(&mut app, Message::Dialog(DialogAnswer::File(Some(path.clone()))));
+    assert!(
+        app.overlays.question.is_some(),
+        "the new patch's changes are asked about"
+    );
+    assert!(app.session.document.file().is_none(), "not opened over them yet");
+
+    let mut clean = crate::tests::app();
+    let _ = update(&mut clean, Message::File(FileAction::Open));
+    assert!(clean.replace(Source::Empty));
+    let _ = update(&mut clean, Message::Dialog(DialogAnswer::File(Some(path.clone()))));
+    assert_eq!(clean.session.document.file(), Some(path.as_path()), "opened");
+    let _ = fake::asked();
+}
+
 /// The recovery question's answer is the exception: it is what replaces
 /// the patch, so it is used whatever the patch is meanwhile.
 #[test]

@@ -51,15 +51,16 @@ pub(crate) enum Waiting {
     Recovery(Box<RecoveryOffer>),
 }
 
-/// What waits, and the engine generation it was asked under: an answer
-/// that arrives after New or Open replaced the patch belongs to the patch
-/// it was asked about, which is gone.
+/// What waits, and the patch it was asked about: an answer that arrives
+/// after New, Open, or a restore replaced the patch belongs to a patch that
+/// is gone. The patch is the session's number (`PatchSession::id`), not the
+/// engine's generation, which a device change also moves.
 #[derive(Debug)]
 pub(crate) struct Pending {
     /// What waits.
     pub waiting: Waiting,
-    /// `App::generation` when it was asked.
-    pub generation: u64,
+    /// `PatchSession::id` when it was asked.
+    pub session: u64,
 }
 
 /// A dialog's answer.
@@ -148,7 +149,7 @@ impl App {
         }
         self.waiting = Some(Pending {
             waiting,
-            generation: self.generation,
+            session: self.session.id,
         });
         self.effect(Effects::file_dialog(request, |path| {
             Message::Dialog(DialogAnswer::File(path))
@@ -165,7 +166,7 @@ impl App {
         }
         self.waiting = Some(Pending {
             waiting,
-            generation: self.generation,
+            session: self.session.id,
         });
         self.effect(Effects::ask(question, |choice| {
             Message::Dialog(DialogAnswer::Choice(choice))
@@ -180,16 +181,19 @@ impl App {
     }
 
     /// Applies a dialog's answer to what waited for it. An answer with
-    /// nothing waiting, or of the wrong kind, changes nothing. Nor does one
-    /// for a patch that New or Open has replaced since: it would write the
-    /// new patch where the old one was to go, or credit the wrong patch. The
-    /// recovery question is the exception, as its answer is what replaces
-    /// the patch.
+    /// nothing waiting, or of the wrong kind, changes nothing. Nor does a
+    /// save's or a credit's for a patch that New, Open, or a restore has
+    /// replaced since: it would write the new patch where the old one was to
+    /// go, or credit the wrong patch. Open and the recovery question are let
+    /// through: what the player picked to open does not depend on the patch
+    /// that was showing (it still asks first about unsaved changes), and the
+    /// recovery answer is itself what replaces the patch.
     pub(crate) fn dialog_answered(&mut self, answer: DialogAnswer) {
-        let Some(Pending { waiting, generation }) = self.waiting.take() else {
+        let Some(Pending { waiting, session }) = self.waiting.take() else {
             return;
         };
-        if generation != self.generation && !matches!(waiting, Waiting::Recovery(_)) {
+        let belongs = matches!(waiting, Waiting::Open | Waiting::Recovery(_)) || session == self.session.id;
+        if !belongs {
             self.alerts
                 .warn("The patch changed while the dialog was open, so its answer was not used.".to_string());
             return;
@@ -198,7 +202,13 @@ impl App {
             (Waiting::Open, DialogAnswer::File(path)) => {
                 if let Some(path) = path {
                     self.used_folder_of(&path);
-                    self.open_path(&path);
+                    if session == self.session.id {
+                        self.open_path(&path);
+                    } else {
+                        // Another patch came while the dialog was open: its
+                        // unsaved changes are asked about first.
+                        self.after_discard(AfterDiscard::OpenPath(path));
+                    }
                 }
             }
             (Waiting::SaveAs { next }, DialogAnswer::File(path)) => {

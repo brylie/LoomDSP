@@ -132,6 +132,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         recovery_offer: _,
     } = &app;
     let PatchSession {
+        // A new number for the new patch: `dialogs/tests.rs` covers what it
+        // is for.
+        id: _,
         controller,
         hierarchy,
         level,
