@@ -24,7 +24,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// A message for the Preferences window.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     Open,
     Close,
@@ -174,6 +174,20 @@ pub struct Window {
     lists: DeviceLists,
     /// The **Your name** field as typed, saved on Enter or on close.
     author: String,
+    /// The last audio choice that could not be used, and why. The window
+    /// shows why under its list, since the status line is hidden under the
+    /// window, and a step on that list goes on from it, so a device that
+    /// fails never blocks the ones after it.
+    failed: Option<Failed>,
+}
+
+/// An audio choice that could not be used.
+#[derive(Debug, Clone, PartialEq)]
+struct Failed {
+    /// The message that asked for it.
+    message: Message,
+    /// Why it could not be used, as the status line says it.
+    error: String,
 }
 
 impl Window {
@@ -181,6 +195,7 @@ impl Window {
         Self {
             lists: DeviceLists::read(host),
             author,
+            failed: None,
         }
     }
 }
@@ -382,6 +397,7 @@ impl App {
                 let lists = DeviceLists::read(&*self.rig.host);
                 if let Some(window) = self.overlays.preferences_mut() {
                     window.lists = lists;
+                    window.failed = None;
                 }
             }
             Message::Author(text) => {
@@ -700,17 +716,23 @@ impl App {
             let output = match devices::open_choice(&*self.rig.host, &play) {
                 Ok(output) => output,
                 Err(e) => {
-                    self.alerts.warn(self.could_not_use(&play, &e));
+                    let error = self.could_not_use(&play, &e);
+                    self.audio_failed(&change, &error);
+                    self.alerts.warn(error);
                     return;
                 }
             };
             if let Err(e) = self.restart_audio(output) {
+                self.audio_failed(&change, &e);
                 self.alerts.warn(e);
                 return;
             }
             self.audio_back();
         } else {
             self.audio_back();
+        }
+        if let Some(window) = self.overlays.preferences_mut() {
+            window.failed = None;
         }
         match change {
             Change::Device(_) => self.rig.flags.device = None,
@@ -721,6 +743,16 @@ impl App {
         // player's choice.
         if let Some(error) = self.rig.save(saved) {
             self.alerts.warn(error);
+        }
+    }
+
+    /// Notes in the open window that `change` could not be used.
+    fn audio_failed(&mut self, change: &Change, error: &str) {
+        if let Some(window) = self.overlays.preferences_mut() {
+            window.failed = Some(Failed {
+                message: Message::Audio(change.clone()),
+                error: error.to_string(),
+            });
         }
     }
 
@@ -1360,299 +1392,7 @@ impl App {
 
     /// The window, over the canvas, while it is open.
     pub(crate) fn preferences_view(&self) -> Option<Element<'_, crate::Message>> {
-        let window = self.overlays.preferences()?;
-        let heading = |label: &'static str| text(label).size(style::HEADING);
-        let note = |line: String| text(line).size(style::BODY).color(crate::DIM);
-
-        let mut safety = column![heading("Output safety")].spacing(6);
-        for (mode, line) in [
-            (
-                OutputSafety::LowLatency,
-                "Catches accidents. No added latency. May distort briefly when it acts.",
-            ),
-            (OutputSafety::Clean, "Transparent limiting. Adds 2 ms of latency."),
-            (
-                OutputSafety::Off,
-                "No protection. The raw patch output, clipped to -1 to 1.",
-            ),
-        ] {
-            let label = match mode {
-                OutputSafety::LowLatency => "Low latency (default)",
-                OutputSafety::Clean => "Clean",
-                OutputSafety::Off => "Off",
-            };
-            safety = safety.push(
-                column![
-                    radio(label, mode, Some(self.session.engine.stream.output_safety()), |m| {
-                        crate::Message::Preferences(Message::Safety(m))
-                    })
-                    .size(style::SWITCH)
-                    .text_size(style::CONTROL),
-                    container(note(line.to_string())).padding([0, 24]),
-                ]
-                .spacing(2),
-            );
-        }
-        if self.rig.safety_flag {
-            safety = safety.push(note("Set by --output-safety for this run.".into()));
-        }
-
-        let audio = self.audio_section(window, note);
-        let midi = self.midi_section(window, note);
-        let panic = column![
-            row![
-                text(self.panic_line()).size(style::CONTROL).width(Length::Fill),
-                button(
-                    text(if self.rig.panic_learn.is_some() {
-                        "Cancel"
-                    } else {
-                        "Learn"
-                    })
-                    .size(style::CONTROL)
-                )
-                .on_press(crate::Message::Preferences(Message::PanicLearn)),
-                button(text("Clear").size(style::CONTROL)).on_press_maybe(
-                    self.rig
-                        .store
-                        .saved()
-                        .panic
-                        .map(|_| crate::Message::Preferences(Message::PanicClear))
-                ),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center),
-            note("A control or pad that runs panic on every patch.".into()),
-        ]
-        .spacing(6);
-
-        let licence = loom_patch::metadata::Licence::of(self.rig.store.saved().licence.as_deref());
-        let patches = column![
-            labelled(
-                "Your name",
-                text_input("Added as author of new patches", &window.author)
-                    .on_input(|t| crate::Message::Preferences(Message::Author(t)))
-                    .on_submit(crate::Message::Preferences(Message::SaveAuthor))
-                    .size(style::CONTROL)
-                    .into(),
-            ),
-            note("Only the name is added to patches you share. Add more by hand if you want to.".into()),
-            labelled(
-                "Licence",
-                row![
-                    text(match licence {
-                        loom_patch::metadata::Licence::None => "No default".to_string(),
-                        other => other.short(),
-                    })
-                    .size(style::CONTROL)
-                    .width(Length::Fill),
-                    button(text("Choose").size(style::CONTROL))
-                        .on_press(crate::Message::Preferences(Message::ChooseLicence)),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into(),
-            ),
-            note("New patches start with this licence. You can change it for each patch.".into()),
-        ]
-        .spacing(6);
-
-        let panel = column![
-            row![
-                text("Preferences").size(style::TITLE),
-                space::horizontal(),
-                button(text("Close").size(style::CONTROL)).on_press(crate::Message::Preferences(Message::Close)),
-            ]
-            .align_y(iced::Alignment::Center),
-            scrollable(
-                column![
-                    safety,
-                    rule::horizontal(1),
-                    checkbox(self.rig.store.saved().show_activity)
-                        .label("Show signal activity on ports")
-                        .on_toggle(|on| crate::Message::Preferences(Message::Activity(on))),
-                    rule::horizontal(1),
-                    heading("Audio output"),
-                    audio,
-                    rule::horizontal(1),
-                    heading("MIDI inputs"),
-                    midi,
-                    rule::horizontal(1),
-                    heading("Panic"),
-                    panic,
-                    rule::horizontal(1),
-                    heading("New patches"),
-                    patches
-                ]
-                .spacing(12)
-                .padding([0, 12])
-            )
-        ]
-        .spacing(12);
-        let panel = container(panel)
-            .padding(16)
-            .width(560)
-            .max_height(720)
-            .style(container::rounded_box);
-        Some(opaque(
-            container(panel)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
-        ))
-    }
-
-    fn audio_section<'a>(
-        &'a self,
-        window: &'a Window,
-        note: impl Fn(String) -> iced::widget::Text<'a>,
-    ) -> Element<'a, crate::Message> {
-        let mut section = column![].spacing(8);
-        let shown = self.rig.shown_audio();
-        match &window.lists.outputs {
-            Err(e) => section = section.push(note(format!("Could not list the audio outputs: {e}"))),
-            Ok(outputs) => {
-                let default_name = outputs.default.clone().unwrap_or_else(|| "none".into());
-                let devices: Vec<Item<DeviceChoice>> = std::iter::once(Item {
-                    value: DeviceChoice::SystemDefault,
-                    label: format!("System default ({default_name})"),
-                })
-                .chain(outputs.devices.iter().map(|d| Item {
-                    value: DeviceChoice::Named(d.name.clone()),
-                    label: d.name.clone(),
-                }))
-                .collect();
-                let selected = Item::find(&devices, &shown.device);
-                section = section.push(labelled(
-                    "Device",
-                    row![
-                        pick_list(devices, selected, |item: Item<DeviceChoice>| {
-                            crate::Message::Preferences(Message::Audio(Change::Device(item.value)))
-                        })
-                        .text_size(style::CONTROL)
-                        .width(Length::Fill),
-                        button(text("Refresh").size(style::CONTROL))
-                            .on_press(crate::Message::Preferences(Message::Refresh)),
-                    ]
-                    .spacing(8)
-                    .into(),
-                ));
-                if self.rig.flags.device.is_some() {
-                    section = section.push(note("Set by --device for this run.".into()));
-                }
-                if let Some(info) = self.device_info(&shown.device) {
-                    let rates: Vec<Item<RateChoice>> = devices::rate_choices(&info)
-                        .into_iter()
-                        .map(|value| Item {
-                            label: match value {
-                                RateChoice::DeviceDefault => format!("Device default ({} Hz)", info.default_rate),
-                                RateChoice::Hz(hz) => format!("{hz} Hz"),
-                            },
-                            value,
-                        })
-                        .collect();
-                    let selected = Item::find(&rates, &shown.sample_rate);
-                    section = section.push(labelled(
-                        "Sample rate",
-                        pick_list(rates, selected, |item: Item<RateChoice>| {
-                            crate::Message::Preferences(Message::Audio(Change::Rate(item.value)))
-                        })
-                        .text_size(style::CONTROL)
-                        .width(Length::Fill)
-                        .into(),
-                    ));
-                    if self.rig.flags.sample_rate.is_some() {
-                        section = section.push(note("Set by --sample-rate for this run.".into()));
-                    }
-                    let rate = devices::effective_rate(&info, shown.sample_rate);
-                    let buffers: Vec<Item<BufferChoice>> = devices::buffer_choices(&info)
-                        .into_iter()
-                        .map(|value| Item {
-                            label: match value {
-                                BufferChoice::DeviceDefault => "Device default".to_string(),
-                                BufferChoice::Frames(f) => format!("{f} frames · {}", devices::buffer_time(f, rate)),
-                            },
-                            value,
-                        })
-                        .collect();
-                    let selected = Item::find(&buffers, &shown.buffer);
-                    section = section.push(labelled(
-                        "Buffer size",
-                        pick_list(buffers, selected, |item: Item<BufferChoice>| {
-                            crate::Message::Preferences(Message::Audio(Change::Buffer(item.value)))
-                        })
-                        .text_size(style::CONTROL)
-                        .width(Length::Fill)
-                        .into(),
-                    ));
-                    if self.rig.flags.buffer.is_some() {
-                        section = section.push(note("Set by --buffer for this run.".into()));
-                    }
-                }
-            }
-        }
-        match &window.lists.inputs {
-            Err(error) => section = section.push(note(format!("Could not list the audio inputs: {error}"))),
-            Ok(inputs) => {
-                let choices: Vec<Item<InputChoice>> = std::iter::once(Item {
-                    value: InputChoice::SystemDefault,
-                    label: format!("System default ({})", inputs.default.as_deref().unwrap_or("none")),
-                })
-                .chain(inputs.devices.iter().map(|name| Item {
-                    value: InputChoice::Named(name.clone()),
-                    label: name.clone(),
-                }))
-                .chain(std::iter::once(Item {
-                    value: InputChoice::Off,
-                    label: "Off".into(),
-                }))
-                .collect();
-                let selected = if self.rig.flags.no_input {
-                    Item::find(&choices, &InputChoice::Off)
-                } else if self.rig.flags.input.is_some() {
-                    self.rig
-                        .effective_input(inputs)
-                        .and_then(|name| Item::find(&choices, &InputChoice::Named(name.to_string())))
-                } else {
-                    Item::find(&choices, &shown.input)
-                };
-                section = section.push(labelled(
-                    "Audio input",
-                    pick_list(choices, selected, |item: Item<InputChoice>| {
-                        crate::Message::Preferences(Message::Input(item.value))
-                    })
-                    .text_size(style::CONTROL)
-                    .width(Length::Fill)
-                    .into(),
-                ));
-                if self.rig.flags.input.is_some() || self.rig.flags.no_input {
-                    section = section.push(note("Set by an input flag for this run.".into()));
-                }
-                if let (Some(input), Some(output)) = (self.rig.effective_input(inputs), &self.rig.playing) {
-                    if input == output.device {
-                        section = section.push(note(
-                            "Input and output use the same device. Speakers can feed the microphone.".into(),
-                        ));
-                    }
-                    let buffer = output.buffer.or_else(|| {
-                        self.session
-                            .engine
-                            .stream
-                            .stats()
-                            .map(|stats| stats.snapshot().largest_buffer)
-                            .filter(|&frames| frames > 0)
-                            .and_then(|frames| u32::try_from(frames).ok())
-                    });
-                    if let Some(buffer) = buffer {
-                        section = section.push(note(format!(
-                            "Input latency about {}. The patch adds no delay of its own.",
-                            devices::buffer_time(buffer.saturating_mul(2), output.rate)
-                        )));
-                    }
-                }
-            }
-        }
-        section.push(note(self.playing_line())).into()
+        self.preferences_model().map(preferences_panel)
     }
 
     /// The line under the audio controls: what is playing now.
@@ -1678,66 +1418,235 @@ impl App {
             None => format!("Not playing: {}.", self.session.engine.stream.label()),
         }
     }
+}
 
-    fn midi_section<'a>(
-        &'a self,
-        window: &'a Window,
-        note: impl Fn(String) -> iced::widget::Text<'a>,
-    ) -> Element<'a, crate::Message> {
-        let mut section = column![].spacing(6);
-        match &window.lists.midi {
-            Err(e) => section = section.push(note(format!("Could not list the MIDI inputs: {e}"))),
-            Ok(names) if names.is_empty() => section = section.push(note("No MIDI inputs found.".into())),
-            Ok(names) => {
-                for name in names {
-                    let on = self.rig.ports.iter().any(|port| port.name() == name);
-                    let name = name.clone();
-                    section = section.push(
-                        checkbox(on)
-                            .label(name.clone())
-                            .on_toggle(move |on| crate::Message::Preferences(Message::Midi(name.clone(), on)))
-                            .size(style::SWITCH)
-                            .text_size(style::CONTROL),
-                    );
-                }
-                section = section.push(note("New MIDI inputs are on until you turn them off.".into()));
-            }
-        }
-        if self.rig.flags.no_midi {
-            section = section.push(note("Set by --no-midi for this run.".into()));
-        } else if self.rig.flags.midi.is_some() {
-            section = section.push(note("Set by --midi for this run.".into()));
-        }
-        section.into()
+/// The id of the **Your name** field, so a screen reader's Focus reaches
+/// it. It goes away with Iced's text input in phase 3.
+pub(crate) const AUTHOR_INPUT: &str = "preferences-author";
+
+/// The Preferences window, drawn from its model. Each part is named by its
+/// UI ID, so the window says where it drew each one (`places.rs`).
+fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
+    use access::{part_id, preferences_id};
+    let msg = crate::Message::Preferences;
+    let heading = |label: &'static str| text(label).size(style::HEADING);
+    let note = |line: String| text(line).size(style::BODY).color(crate::DIM);
+
+    let note_of = |line: model::Note| named(note(line.text), part_id("note").with(line.key));
+    let mut modes = column![].spacing(6);
+    for mode in &model.safety {
+        let chosen = mode.chosen.then_some(mode.mode);
+        modes = modes.push(
+            column![
+                named(
+                    radio(mode.label, mode.mode, chosen, move |m| msg(Message::Safety(m)))
+                        .size(style::SWITCH)
+                        .text_size(style::CONTROL),
+                    part_id("safety").with(mode.key),
+                ),
+                container(note(mode.note.to_string())).padding([0, 24]),
+            ]
+            .spacing(2),
+        );
     }
+    let mut safety = column![heading("Output safety"), named(modes, part_id("safety"))].spacing(6);
+    for line in model.safety_notes {
+        safety = safety.push(note_of(line));
+    }
+
+    let mut audio = column![].spacing(8);
+    for part in model.audio {
+        audio = match part {
+            Part::Picks(picks) if picks.key == "device" => audio.push(labelled(
+                picks.label,
+                row![
+                    pick_list_of(picks),
+                    named(
+                        button(text("Refresh").size(style::CONTROL)).on_press(msg(Message::Refresh)),
+                        part_id("refresh"),
+                    ),
+                ]
+                .spacing(8)
+                .into(),
+            )),
+            Part::Picks(picks) => audio.push(labelled(picks.label, pick_list_of(picks))),
+            Part::Note(line) => audio.push(note_of(line)),
+            Part::Midi { .. } => audio,
+        };
+    }
+
+    let mut midi = column![].spacing(6);
+    for part in model.midi {
+        midi = match part {
+            Part::Midi { name, on, id } => midi.push(named(
+                checkbox(on)
+                    .label(name.clone())
+                    .on_toggle(move |on| msg(Message::Midi(name.clone(), on)))
+                    .size(style::SWITCH)
+                    .text_size(style::CONTROL),
+                id,
+            )),
+            Part::Note(line) => midi.push(note_of(line)),
+            Part::Picks(_) => midi,
+        };
+    }
+
+    let panic = column![
+        row![
+            container(named(text(model.panic.line).size(style::CONTROL), part_id("panic"))).width(Length::Fill),
+            named(
+                button(text(if model.panic.learning { "Cancel" } else { "Learn" }).size(style::CONTROL))
+                    .on_press(msg(Message::PanicLearn)),
+                part_id("panic").with("learn"),
+            ),
+            named(
+                button(text("Clear").size(style::CONTROL))
+                    .on_press_maybe(model.panic.can_clear.then_some(msg(Message::PanicClear))),
+                part_id("panic").with("clear"),
+            ),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+        note("A control or pad that runs panic on every patch.".into()),
+    ]
+    .spacing(6);
+
+    let patches = column![
+        labelled(
+            "Your name",
+            named(
+                text_input("Added as author of new patches", &model.author)
+                    .id(iced::widget::Id::new(AUTHOR_INPUT))
+                    .on_input(move |t| msg(Message::Author(t)))
+                    .on_submit(msg(Message::SaveAuthor))
+                    .size(style::CONTROL),
+                part_id("author"),
+            ),
+        ),
+        note("Only the name is added to patches you share. Add more by hand if you want to.".into()),
+        labelled(
+            "Licence",
+            row![
+                container(named(text(model.licence).size(style::CONTROL), part_id("licence"))).width(Length::Fill),
+                named(
+                    button(text("Choose").size(style::CONTROL)).on_press(msg(Message::ChooseLicence)),
+                    part_id("licence").with("choose"),
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        ),
+        note("New patches start with this licence. You can change it for each patch.".into()),
+    ]
+    .spacing(6);
+
+    let panel = column![
+        row![
+            text("Preferences").size(style::TITLE),
+            space::horizontal(),
+            named(
+                button(text("Close").size(style::CONTROL)).on_press(msg(Message::Close)),
+                part_id("close"),
+            ),
+        ]
+        .align_y(iced::Alignment::Center),
+        scrollable(
+            column![
+                safety,
+                rule::horizontal(1),
+                named(
+                    checkbox(model.activity)
+                        .label("Show signal activity on ports")
+                        .on_toggle(move |on| msg(Message::Activity(on))),
+                    part_id("activity"),
+                ),
+                rule::horizontal(1),
+                heading("Audio output"),
+                audio,
+                rule::horizontal(1),
+                heading("MIDI inputs"),
+                midi,
+                rule::horizontal(1),
+                heading("Panic"),
+                panic,
+                rule::horizontal(1),
+                heading("New patches"),
+                patches
+            ]
+            .spacing(12)
+            .padding([0, 12])
+        )
+    ]
+    .spacing(12);
+    let panel = container(panel)
+        .padding(16)
+        .width(560)
+        .max_height(720)
+        .style(container::rounded_box)
+        .id(crate::places::widget_id(&preferences_id()));
+    opaque(
+        container(panel)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
+    )
+}
+
+/// `element` in a container named by `id`, so the window says where it
+/// drew it.
+fn named<'a>(element: impl Into<Element<'a, crate::Message>>, id: loom_ui_core::UiId) -> Element<'a, crate::Message> {
+    container(element).id(crate::places::widget_id(&id)).into()
+}
+
+/// A list from its model: picking an option sends that option's message.
+fn pick_list_of(picks: Picks) -> Element<'static, crate::Message> {
+    let id = access::part_id(picks.key);
+    let shown: Vec<Shown> = picks
+        .options
+        .iter()
+        .enumerate()
+        .map(|(at, text)| Shown { at, text: text.clone() })
+        .collect();
+    let selected = picks.chosen.and_then(|at| shown.get(at).cloned());
+    let messages = picks.messages;
+    let list = pick_list(shown, selected, move |item: Shown| {
+        crate::Message::Preferences(messages[item.at].clone())
+    })
+    .text_size(style::CONTROL)
+    .width(Length::Fill);
+    container(list)
+        .width(Length::Fill)
+        .id(crate::places::widget_id(&id))
+        .into()
 }
 
 /// A control with its label on the left.
-fn labelled<'a>(label: &'a str, control: Element<'a, crate::Message>) -> Element<'a, crate::Message> {
+fn labelled(label: &'static str, control: Element<'static, crate::Message>) -> Element<'static, crate::Message> {
     row![text(label).size(style::CONTROL).width(100), control]
         .spacing(8)
         .align_y(iced::Alignment::Center)
         .into()
 }
 
-/// A menu entry: a value and its text.
+/// One option of a list as the list shows it: its place and its text.
 #[derive(Debug, Clone, PartialEq)]
-struct Item<T> {
-    value: T,
-    label: String,
+struct Shown {
+    at: usize,
+    text: String,
 }
 
-impl<T: PartialEq + Clone> Item<T> {
-    fn find(items: &[Self], value: &T) -> Option<Self> {
-        items.iter().find(|item| item.value == *value).cloned()
-    }
-}
-
-impl<T> fmt::Display for Item<T> {
+impl fmt::Display for Shown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.label)
+        f.write_str(&self.text)
     }
 }
+
+pub(crate) mod access;
+mod model;
+
+pub(crate) use model::{Model, Part, Picks};
 
 #[cfg(test)]
 mod tests;

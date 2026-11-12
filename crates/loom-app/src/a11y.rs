@@ -120,6 +120,12 @@ pub(crate) struct PollKey {
     frame: u64,
     /// True while a panel owns the input, which hides the tiles.
     covered: bool,
+    /// What the Preferences window shows, hashed, while it is open. Its
+    /// playing line and input notes read the audio stream, and its device
+    /// lists change when a poll finds a device gone, with no message of
+    /// their own. None of it is a live value: the buffer size it shows only
+    /// grows, so it changes once or twice a run.
+    preferences: u64,
     // The audio load and the dropout count are not here. They are live
     // values (ui-layer.md, section 3, rule 7): the message that brings
     // them is classed as live, and the live timer sends them.
@@ -381,6 +387,14 @@ impl crate::App {
             values: self.session.values.generation(),
             frame: frame.finish(),
             covered: !self.pointer_reaches_window(),
+            // Its debug text, which cannot fail. The model holds messages
+            // and `loom-core`'s `OutputSafety`, which do not derive `Hash`,
+            // and adding it across those crates for one key is not worth it.
+            preferences: self.preferences_model().map_or(0, |model| {
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                format!("{model:?}").hash(&mut hash);
+                hash.finish()
+            }),
             focus: self.a11y.focus,
         }
     }

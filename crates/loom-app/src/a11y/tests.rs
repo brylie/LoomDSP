@@ -4366,3 +4366,274 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
         }
     }
 }
+
+/// Each view and overlay for task 6's sweep: every state of
+/// [`with_each_panel`], the chooser over Preferences, and the right
+/// panel's two tabs with a tile selected.
+fn with_every_view() -> Vec<(String, crate::ui_test::Ui)> {
+    let mut all: Vec<(String, crate::ui_test::Ui)> = with_each_panel()
+        .into_iter()
+        .map(|(owner, ui)| (format!("{owner:?}"), ui))
+        .collect();
+    let (mut app, module, _) = app_with_filter();
+    let _ = app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = app.update(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    all.push(("chooser over Preferences".to_string(), ui));
+    for tab in [crate::matrix::Tab::Inspector, crate::matrix::Tab::Matrix] {
+        let (mut app, _, _) = app_with_filter();
+        let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+        app.right_tab = tab;
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        let _ = ui.redraw();
+        all.push((format!("{tab:?} tab, a tile selected"), ui));
+    }
+    all
+}
+
+/// Task 6, in every view and overlay: every node that offers an action has
+/// a role, a name, and a place, and every node with bounds lies inside the
+/// window.
+/// A part scrolled out of view keeps its real bounds, under a node that
+/// cuts it off (section 7, rule 7), so what is checked is the part that
+/// shows: its bounds cut by each such node above it.
+#[test]
+fn every_view_names_its_acting_parts_and_keeps_them_in_the_window() {
+    let window = accesskit::Rect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: f64::from(crate::ui_test::WINDOW.width),
+        y1: f64::from(crate::ui_test::WINDOW.height),
+    };
+    let cut = |a: accesskit::Rect, b: accesskit::Rect| accesskit::Rect {
+        x0: a.x0.max(b.x0),
+        y0: a.y0.max(b.y0),
+        x1: a.x1.min(b.x1),
+        y1: a.y1.min(b.y1),
+    };
+    for (name, mut ui) in with_every_view() {
+        let places = ui.places();
+        let update = ui.app.a11y_tree(&places);
+        let parent: std::collections::HashMap<NodeId, NodeId> = update
+            .nodes
+            .iter()
+            .flat_map(|(id, node)| node.children().iter().map(move |child| (*child, *id)))
+            .collect();
+        let of = |id: NodeId| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, node)| node);
+        for (id, node) in &update.nodes {
+            let acts = [
+                Action::Click,
+                Action::Increment,
+                Action::Decrement,
+                Action::SetValue,
+                Action::ShowContextMenu,
+            ]
+            .into_iter()
+            .any(|action| node.supports_action(action));
+            if acts && !node.is_hidden() {
+                assert_ne!(node.role(), Role::Unknown, "{name}: node {id:?}");
+                // A link in help's text is drawn inside one widget, so it
+                // has no place of its own (a phase 1 gap).
+                assert!(
+                    node.bounds().is_some() || node.role() == Role::Link,
+                    "{name}: {:?} {:?} has no place in the window",
+                    ui.app.a11y.ids.id(id.0),
+                    node.role()
+                );
+                assert!(
+                    node.label().is_some_and(|label| !label.is_empty()),
+                    "{name}: {:?} {:?} has a name",
+                    ui.app.a11y.ids.id(id.0),
+                    node.role()
+                );
+            }
+            if let Some(mut bounds) = node.bounds()
+                && !node.is_hidden()
+            {
+                let mut above = parent.get(id).copied();
+                while let Some(up) = above {
+                    if let Some(clip) = of(up).filter(|n| n.clips_children()).and_then(|n| n.bounds()) {
+                        bounds = cut(bounds, clip);
+                    }
+                    above = parent.get(&up).copied();
+                }
+                if bounds.x0 >= bounds.x1 || bounds.y0 >= bounds.y1 {
+                    continue; // scrolled out of view
+                }
+                let inside = bounds.x0 >= window.x0 - 0.5
+                    && bounds.y0 >= window.y0 - 0.5
+                    && bounds.x1 <= window.x1 + 0.5
+                    && bounds.y1 <= window.y1 + 0.5;
+                assert!(
+                    inside,
+                    "{name}: {:?} at {bounds:?} is outside the window",
+                    ui.app.a11y.ids.id(id.0)
+                );
+            }
+        }
+    }
+}
+
+/// Task 6, in every view and overlay: a build with nothing changed sends
+/// nothing, after the first one sent the whole tree.
+#[test]
+fn every_view_sends_nothing_when_nothing_changed() {
+    for (name, mut ui) in with_every_view() {
+        let _ = ui.app.a11y_event(Event::Activated);
+        let places = ui.places();
+        let (_, first) = ui.app.a11y_changes(&places);
+        assert!(first.is_some(), "{name}: the first build is sent");
+        let (_, again) = ui.app.a11y_changes(&places);
+        assert!(again.is_none(), "{name}: nothing changed, so nothing is sent");
+    }
+}
+
+/// The licence chooser over Preferences is reported alone: Preferences is
+/// hidden, and its parts do nothing. After Use, Preferences is reported
+/// again with the new default, and has the focus.
+#[test]
+fn the_chooser_over_preferences_hides_it_until_it_closes() {
+    use crate::licence_chooser::access::licence_id;
+    use crate::settings::access::preferences_id;
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.redraw();
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay[0].id, preferences_id());
+    let places = ui.places();
+    let _ = ui.app.a11y_tree(&places);
+    let choose = node_of(&mut ui.app, &preferences_id().with("licence").with("choose"));
+    ui.send(Message::A11y(Event::Action(request(Action::Click, choose, None))));
+    let _ = ui.redraw();
+
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay.len(), 1);
+    assert_eq!(frames.overlay[0].id, licence_id(), "only the chooser");
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    assert_eq!(ui.app.a11y.ids.id(update.focus.0), Some(&licence_id()));
+    let activity = node_of(&mut ui.app, &preferences_id().with("activity"));
+    let before = ui.app.rig.store.saved().show_activity;
+    ui.send(Message::A11y(Event::Action(request(Action::Click, activity, None))));
+    assert_eq!(ui.app.rig.store.saved().show_activity, before, "Preferences is inert");
+
+    for part in [licence_id().with("changes").with("give-up"), licence_id().with("use")] {
+        let places = ui.places();
+        let _ = ui.app.a11y_tree(&places);
+        let target = node_of(&mut ui.app, &part);
+        ui.send(Message::A11y(Event::Action(request(Action::Click, target, None))));
+        let _ = ui.redraw();
+    }
+    assert!(ui.app.overlays.chooser.is_none(), "Use closed it");
+    assert!(ui.app.rig.store.saved().licence.is_some(), "the default is set");
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay[0].id, preferences_id(), "Preferences is back");
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    assert_eq!(
+        ui.app.a11y.ids.id(update.focus.0),
+        Some(&preferences_id()),
+        "focus is on the window, since Choose is a button and takes none"
+    );
+    let licence = node(&update, node_of(&mut ui.app, &preferences_id().with("licence")));
+    assert_ne!(licence.value(), Some("No default"));
+}
+
+/// The chooser opened from the patch's details sets the patch's licence
+/// and marks the patch unsaved. Patch details are not undo steps
+/// (patch-metadata.md), and a default licence is a preference, so neither
+/// adds one.
+#[test]
+fn a_licence_from_the_chooser_adds_no_undo_step() {
+    use crate::licence_chooser::access::licence_id;
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let before = ui.app.session.document.info().license.clone();
+    let steps = ui.app.session.edits.history.len();
+    let _ = ui
+        .app
+        .update(Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
+    let _ = ui.redraw();
+    for part in [
+        licence_id().with("changes").with("no"),
+        licence_id().with("commercial").with("yes"),
+        licence_id().with("use"),
+    ] {
+        let places = ui.places();
+        let _ = ui.app.a11y_tree(&places);
+        let target = node_of(&mut ui.app, &part);
+        ui.send(Message::A11y(Event::Action(request(Action::Click, target, None))));
+    }
+    assert_ne!(ui.app.session.document.info().license, before, "the licence is set");
+    assert!(ui.app.session.document.info_unsaved());
+    assert_eq!(ui.app.session.edits.history.len(), steps, "no undo step");
+
+    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui
+        .app
+        .update(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let _ = ui.app.update(Message::Licence(crate::licence_chooser::Message::Answer(
+        crate::licence_chooser::Answer::GiveUp,
+    )));
+    let _ = ui.app.update(Message::Licence(crate::licence_chooser::Message::Use));
+    assert!(ui.app.rig.store.saved().licence.is_some());
+    assert_eq!(
+        ui.app.session.edits.history.len(),
+        steps,
+        "a preference is not an undo step"
+    );
+}
+
+/// Task 6's round trip: a screen reader's action on an overlay that edits
+/// the patch goes through `App::update` as one undo step, which one Undo
+/// takes back. Here, a Click on the module browser's first option.
+#[test]
+fn an_overlay_edit_is_one_undo_step() {
+    let dir = crate::recovery::tests::TempDir::new("a11y-browser-undo");
+    let mut ui = browser_ui(&dir.0);
+    let before = ui.app.ui_snapshot().tiles.len();
+    let steps = ui.app.session.edits.history.len();
+    let _ = ui.places();
+    let option = browser_option(&mut ui, 0);
+    for task in ui
+        .app
+        .a11y_action(&request(Action::Click, option, None), std::time::Instant::now())
+    {
+        let _ = ui.run_task(task);
+    }
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1);
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one step");
+    let _ = ui.app.update(Message::Undo);
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), before, "one Undo takes it back");
+}
+
+/// Task 6 in Preferences: one change sends the nodes it changed and no
+/// others. Turning activity on changes its check box, and the status line
+/// says so.
+#[test]
+fn one_change_in_preferences_sends_only_what_changed() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.redraw();
+    let _ = ui.app.a11y_event(Event::Activated);
+    let places = ui.places();
+    let _ = ui.app.a11y_changes(&places);
+    let on = ui.app.rig.store.saved().show_activity;
+    let _ = ui
+        .app
+        .update(Message::Preferences(crate::settings::Message::Activity(!on)));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let (_, changes) = ui.app.a11y_changes(&places);
+    let changes = changes.expect("the check box changed");
+    let activity = node_of(&mut ui.app, &crate::settings::access::preferences_id().with("activity"));
+    let status = node_of(&mut ui.app, &UiId::panel("status"));
+    let mut sent = sent_ids(&changes);
+    sent.sort_by_key(|id| id.0);
+    let mut expected = vec![activity, status];
+    expected.sort_by_key(|id| id.0);
+    assert_eq!(
+        sent, expected,
+        "the check box, and the status line that says what changed"
+    );
+}

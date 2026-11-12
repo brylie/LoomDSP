@@ -177,6 +177,13 @@ pub(crate) enum SetText {
     PatchesSearch,
     /// Your patches' Author field, which filters as it is typed in.
     PatchesAuthor,
+    /// Preferences' **Your name** field. It saves on Enter or on close, so
+    /// a screen reader's whole new text is typed and then saved, as Enter
+    /// would.
+    PreferencesAuthor,
+    /// The licence chooser's **Other** field. Enter in it would use the
+    /// licence, so the text is the one message.
+    LicenceOther,
 }
 
 impl SetText {
@@ -243,6 +250,11 @@ impl SetText {
             Self::BrowserQuery => vec![Message::Browser(crate::browser::Message::Query(text))],
             Self::PatchesSearch => vec![Message::Patches(crate::patches::Message::Search(text))],
             Self::PatchesAuthor => vec![Message::Patches(crate::patches::Message::Author(text))],
+            Self::PreferencesAuthor => vec![
+                Message::Preferences(crate::settings::Message::Author(text)),
+                Message::Preferences(crate::settings::Message::SaveAuthor),
+            ],
+            Self::LicenceOther => vec![Message::Licence(crate::licence_chooser::Message::OtherText(text))],
         }
     }
 }

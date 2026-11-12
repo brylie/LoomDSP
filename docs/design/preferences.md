@@ -132,6 +132,8 @@ The panel has two sections: Output safety, described here, and [Audio and MIDI d
 
 When the effective value comes from the command-line flag, a line under the section says: `Set by --output-safety for this run.` The selected choice shows the effective value.
 
+**With a screen reader:** the window is a dialog named "Preferences", with its parts in screen order. Output safety is a radio group whose answers carry their lines as descriptions; the four lists are combo boxes that say their chosen option and step one option at a time with Increment and Decrement; each MIDI input is a check box named by its port. **Your name** is a text field, and a screen reader's new text is saved as Enter saves it. After a list's step fails, the next step goes on from the option that failed, so a device that cannot be used never blocks the ones after it ([UI layer](ui-layer.md), section 7, rules 15 and 27).
+
 A choice applies as soon as it is clicked. There is no Apply or OK button. *Why:* the player hears the change at once and can compare modes while a patch plays. One setting does not need a two-step form.
 
 ### Changing the mode at run time
@@ -257,7 +259,7 @@ Each choice applies as soon as it is made, and is saved, like Output safety.
 
 **Restarting audio.** The engine runs inside the audio stream and is built for one sample rate, so a new device, rate, or buffer size needs a new stream and a new engine. The app:
 
-1. Opens the new device first. If that fails, the old audio keeps playing, nothing is saved, and the status bar says why: `Could not use "MOTU M4" at 192000 Hz: <reason>. Still playing on "MacBook Pro Speakers".`
+1. Opens the new device first. If that fails, the old audio keeps playing, nothing is saved, and the status bar says why: `Could not use "MOTU M4" at 192000 Hz: <reason>. Still playing on "MacBook Pro Speakers".` The window says it too, on a line under its audio lists, until a choice works or Refresh reads the lists again. *Why:* the status bar is under the window, so a screen reader in the window does not reach it.
 2. Fades the old engine out over 10 ms, then stops it ([output-safety.md](output-safety.md), rule 14). *Why:* stopping a stream mid-signal is a click, and a thump when the output holds a DC offset.
 3. Builds a new engine from the current patch, as it is now, with every unsaved edit, at the new rate. The new engine fades in over 10 ms, as every new engine does.
    Some devices open and then refuse to start their stream. Then the app builds the engine again at the old rate and plays it on the old device, as it was. Nothing is saved, and the status bar says why: `Could not use "MOTU M4": <reason>. Still playing on "MacBook Pro Speakers".` *Why:* Rule D5, a failed change must leave sound playing. Only if the old device cannot start again either is audio off, and the status bar says so.

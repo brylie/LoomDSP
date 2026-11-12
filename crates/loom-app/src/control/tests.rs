@@ -2429,6 +2429,31 @@ fn locate_takes_an_overlay_ui_id() {
     let search = locate(&ui.app, "browser/search", &found).unwrap();
     let browser = locate(&ui.app, "browser", &found).unwrap();
     assert!(browser.contains(search.center()), "the field is in the browser");
+
+    // Preferences' parts, and the chooser's over it, too.
+    let _ = ui.app.update(Message::Browser(crate::browser::Message::Close));
+    let _ = ui.app.update(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: None,
+        text: None,
+        places: ui.places(),
+    };
+    let close = locate(&ui.app, "preferences/close", &found).unwrap();
+    let label = ui.text("Close").expect("Preferences shows Close");
+    assert!(close.contains(label.center()), "the button holds its label");
+    let _ = ui
+        .app
+        .update(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: None,
+        text: None,
+        places: ui.places(),
+    };
+    let cancel = locate(&ui.app, "licence/cancel", &found).unwrap();
+    let label = ui.text("Cancel").expect("the chooser shows Cancel");
+    assert!(cancel.contains(label.center()));
 }
 
 /// A part that is scrolled out of view is not located: a pointer sent

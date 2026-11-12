@@ -68,6 +68,10 @@ pub struct UiSnapshot {
     pub patches: Option<crate::patches::Model>,
     /// The open question, if any (`docs/design/files.md`).
     pub question: Option<crate::question::Model>,
+    /// The Preferences window, while it is open.
+    pub preferences: Option<crate::settings::Model>,
+    /// The licence chooser, while it is open.
+    pub licence: Option<crate::licence_chooser::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
     pub matrix: MatrixModel,
     /// The stats bar's audio numbers.
@@ -676,6 +680,12 @@ impl App {
             browser: self.overlays.browser().map(|open| open.model().clone()),
             patches: self.overlays.patches().map(|open| open.model().clone()),
             question: self.overlays.question.as_ref().map(crate::question::Question::model),
+            preferences: self.preferences_model(),
+            licence: self
+                .overlays
+                .chooser
+                .as_ref()
+                .map(crate::licence_chooser::Chooser::model),
             matrix: self
                 .session
                 .matrix
