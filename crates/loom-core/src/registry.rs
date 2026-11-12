@@ -176,6 +176,18 @@ impl Registry {
                 "a Voices output needs a graph-shaping integer voices parameter from 1 to 16",
             ));
         }
+        if descriptor
+            .inputs
+            .iter()
+            .chain(descriptor.outputs)
+            .any(|port| port.channels == Channels::Voices)
+            && descriptor
+                .inputs
+                .iter()
+                .any(|port| !matches!(port.channels, Channels::Voices | Channels::Downmix))
+        {
+            return Err(invalid("a module with a Voices port needs Voices or Downmix inputs"));
+        }
         let has_stereo_port = descriptor
             .inputs
             .iter()

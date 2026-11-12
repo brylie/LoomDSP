@@ -1228,3 +1228,33 @@ fn a_repeatable_check_needs_a_copy() {
         .frames(200)
         .check_copy_state_repeatable(100);
 }
+
+/// A bundle consumer's explicit Stereo output has both sides with mono inputs.
+#[test]
+fn bundle_consumers_keep_explicit_stereo_outputs() {
+    /// Writes different values to the two sides of an explicit stereo output.
+    struct Stereo;
+    impl Stereo {
+        const OUT: usize = STEREO.output_index("out").unwrap();
+    }
+    impl Module for Stereo {
+        fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+            let [left, right] = io.stereo_output(Self::OUT);
+            left.fill(0.25);
+            right.fill(0.75);
+        }
+    }
+    static STEREO: ModuleDescriptor = ModuleDescriptor {
+        inputs: &[port("in", SignalType::Audio).with_channels(Channels::Voices)],
+        outputs: &[port("out", SignalType::Audio).with_channels(Channels::Stereo)],
+        params: &[],
+        role: ModuleRole::Dsp(|_| Box::new(Stereo)),
+        ..ECHO
+    };
+    let rendered = Harness::new(&STEREO)
+        .frames(1024)
+        .input("in", Signal::constant(0.0))
+        .check_block_sizes();
+    assert_eq!(rendered.voice_output("out", 0, 0), &[0.25; 1024]);
+    assert_eq!(rendered.voice_output("out", 0, 1), &[0.75; 1024]);
+}

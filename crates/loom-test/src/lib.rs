@@ -306,6 +306,7 @@ impl Harness {
             .descriptor
             .inputs
             .iter()
+            .chain(self.descriptor.outputs)
             .any(|port| port.channels == loom_core::Channels::Voices);
         let sides = self
             .bundle_inputs
@@ -321,6 +322,13 @@ impl Harness {
                     if port.channels == loom_core::Channels::Voices {
                         loom_core::Width { voices, sides: 1 }
                     } else if bundle_aware {
+                        let sides = if port.channels == loom_core::Channels::Stereo
+                            || (port.channels == loom_core::Channels::PerChannel && sides == 2)
+                        {
+                            2
+                        } else {
+                            1
+                        };
                         loom_core::Width { voices: 1, sides }
                     } else {
                         loom_core::Width::MONO

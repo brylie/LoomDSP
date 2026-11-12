@@ -625,7 +625,7 @@ impl Module for Chance {
         }
         let seed = io.param(Self::SEED);
         let chances: [_; CHANCE_LANES] = std::array::from_fn(|n| io.param(Self::CHANCE1 + n));
-        let connected: [bool; CHANCE_LANES] = std::array::from_fn(|n| io.is_connected(Self::TRIGGER1_IN + n));
+        let connected: [bool; CHANCE_LANES] = std::array::from_fn(|n| !io.uses_default(Self::TRIGGER1_IN + n));
         let ([trigger1, trigger2, trigger3, trigger4, reset], [a1, a2, a3, a4, b1, b2, b3, b4]) = io.split::<5, 8>();
         // A lane with no cable reads the lane above.
         let mut inputs = [trigger1, trigger2, trigger3, trigger4];

@@ -370,7 +370,7 @@ impl Module for Dynamics {
             io.param(Self::DETECT),
         );
         let (level_match, output, mix) = (io.param(Self::MATCH), io.param(Self::OUTPUT), io.param(Self::MIX));
-        let sidechained = io.is_connected(Self::SIDECHAIN_IN);
+        let sidechained = !io.uses_default(Self::SIDECHAIN_IN);
         let [left_in, right_in] = io.stereo_input(Self::IN);
         let [sidechain, _] = io.stereo_input(Self::SIDECHAIN_IN);
         let frames = left_in.len();

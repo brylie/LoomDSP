@@ -59,11 +59,11 @@ What the player sees.
 
    *Why voices do not follow the stereo split:* the stereo rules make control inputs `Downmix` so a stereo patch does not pay twice for a control signal that is the same on both sides ([stereo](stereo.md), rule 4). A voice's pitch and gate are the opposite case: they differ per voice by definition, and an envelope that read the maximum of eight gates could not play eight notes. The oscillators, Phase generator, Envelope, and Amplifier keep their `Downmix` control inputs and become polyphonic with no change. *Why one name for both sides of `Voices`:* it mirrors `Stereo`, which also means "reads both" on an input and "writes both" on an output.
 
-4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with any `Voices` port never runs per voice, whatever its other inputs receive. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
+4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with any `Voices` port never runs per voice, whatever its other inputs receive. Its inputs must all be `Voices` or `Downmix`; the registry refuses other input declarations. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
 
 5. **Output widths.** A `Voices` output has the module's voice count. Any other output has as many voices as its module runs. A `Stereo` output is stereo per voice. So a module with no inputs is one voice wide unless it declares a `Voices` output, and voices flow only from sources, as stereo flows only from stereo sources ([stereo](stereo.md), rule 7).
 
-6. **A narrower cable into a wider module is padded with the port's default.** Copies past the cable's last voice read the input's default: zero for a gate, the default pitch for a pitch. *Why:* a voice no source is playing should be silent, and the default is what an unconnected input reads already. Mono cables are the common case: a mono cable into a polyphonic module feeds every copy, as it feeds both stereo sides. That is the fan-out FR-VOICE-03 asks for, and it costs no module.
+6. **A narrower cable into a wider module is padded with the port's default.** Copies past the cable's last voice read the input's default: zero for a gate, the default pitch for a pitch. Padded value inputs keep their declared default and still report that a cable exists. When an input chooses an alternate source, its missing voice uses that source: OwnPhase runs its phase, Dynamics keys from its own signal, and Chance follows the lane above. These fallbacks use `uses_default`, while `is_connected` remains cable-only. *Why:* missing value inputs should not invent a playing signal; alternate-source inputs already define what replaces a missing source. Mono cables are the common case: a mono cable into a polyphonic module feeds every copy, as it feeds both stereo sides. That is the fan-out FR-VOICE-03 asks for, and it costs no module.
 
 7. **Voices are never downmixed by the engine.** A module that wants one signal from a bundle has a `Voices` input, or sits after a Voice merge, which offers sum, average, last, lowest, and highest. Audio Out is the one exception (rule 9). *Why:* the stereo downmix exists so that a mono module can sit on a stereo cable without a thought. There is no one right way to fold eight voices into one, and an averaged pitch is never what a player meant, so the choice stays with the player.
 
@@ -103,7 +103,11 @@ What the player sees.
   keeps the old graph value and running schedule. Ordinary parameters still
   use the next-buffer command path. `Controller::set_params_across` stages edits
   to multiple modules together, including every copy of a stack. One capacity
-  check and one compile publish the group, or all values stay unchanged. Writing
+  check and one compile publish a live edit, or all values stay unchanged.
+  Fresh modules and a graph with pending structural edits keep the values staged
+  until the caller commits the whole graph. Initial values reach fresh instances
+  before reset. MIDI feedback is reconciled before staging values and is not
+  imported again while compiling that snapshot. Writing
   an unchanged rounded structural value does not compile or change the graph
   revision; ordinary values in that group still take effect. A count edit is
   one undo step.
@@ -294,7 +298,7 @@ Bundles and copies:
 - [ ] Given a stereo source inside an 8-voice chain, then the chain runs as 16 copies, and each side of each voice is bit-identical to a mono chain fed that side (test).
 - [x] Given a bundle through a feedback loop, then every module in the loop runs per voice, and the inserted delay has state per voice (test).
 - [x] Given a patch with no source wider than one voice, then it compiles to the same schedule as before: the same operations, buffers, and instances (test).
-- [ ] Given a count raised from 4 to 8 while 4 notes play, then voices 1 to 4 keep their state and voices 5 to 8 start from reset; given a count lowered from 8 to 4, then four copies are returned to the control thread; neither allocates on the audio thread (`no_alloc` test).
+- [x] **Engine:** Given a count raised from 4 to 8 while 4 voices run, then voices 1 to 4 keep their state and voices 5 to 8 start from reset; given a count lowered from 8 to 4, then four copies are returned to the control thread; neither allocates on the audio thread (`no_alloc` test).
 - [x] Given a seeded module running as 8 voices, then no two voices play the same sequence (test).
 - [x] Given a descriptor with `Voices` inputs and `Voices` outputs (Voice assigner), then the registry accepts it and the module runs as one instance with its outputs at its `voices` count; given `Downmix` on an output, then the registry rejects it, as it does today (test).
 - [x] Given a port with an 8-voice cable, then its hover text says `8 voices` (`Ui` harness).

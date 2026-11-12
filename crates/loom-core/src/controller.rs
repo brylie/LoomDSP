@@ -232,6 +232,12 @@ impl Controller {
         // The compiled base values come from the graph, so it must hold what
         // MIDI mappings set in the engine first.
         self.sync_midi();
+        self.commit_synced()
+    }
+
+    /// Compiles a graph whose MIDI feedback was already reconciled before
+    /// staging edits. Importing feedback again would overwrite staged values.
+    fn commit_synced(&mut self) -> Result<&CompileReport, LoomError> {
         if !self.dirty {
             return Ok(&self.last_report);
         }

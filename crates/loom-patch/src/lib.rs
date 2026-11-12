@@ -348,6 +348,14 @@ pub enum PatchError {
         /// Controller number.
         controller: u8,
     },
+    /// A hand-edited file modulated a graph-shaping parameter.
+    #[error("modulation targets graph-shaping parameter `{param}` of module {module}")]
+    StructuralModulationTarget {
+        /// Module named by the patch.
+        module: u32,
+        /// Parameter or exposed name named by the patch.
+        param: String,
+    },
     /// The text is not a valid patch.
     #[error("invalid patch: {0}")]
     Parse(#[from] ron::error::SpannedError),

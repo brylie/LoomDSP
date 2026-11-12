@@ -1,6 +1,7 @@
 //! Parameters: one group of [`Controller`]'s methods.
 
 use super::*;
+use std::collections::BTreeSet;
 
 /// # Parameters
 ///
@@ -145,7 +146,9 @@ impl Controller {
     /// Values are clamped; the last entry for a target wins. A changed
     /// graph-shaping value prepares one schedule for the whole group. If
     /// structural values are unchanged, only ordinary commands are sent.
-    /// Capacity errors leave all graph values and the running schedule intact.
+    /// Fresh modules and already-dirty graphs remain staged until `commit`;
+    /// their initial parameters are applied before their first reset. Otherwise
+    /// capacity errors leave all graph values and the running schedule intact.
     pub fn set_params_across(&mut self, changes: &[(ModuleId, usize, f32)]) -> Result<(), LoomError> {
         let mut targets = BTreeMap::new();
         for &(module, index, value) in changes {
@@ -155,6 +158,19 @@ impl Controller {
             })?;
             targets.insert((module, index), (spec.clamp(value), spec.options.shapes_graph));
         }
+        // Reconcile older MIDI feedback before staging any screen values.
+        // The immediate commit below must not import feedback a second time.
+        self.collect_garbage();
+        self.sync_midi();
+        let fresh: BTreeSet<_> = targets
+            .keys()
+            .filter_map(|&(module, _)| {
+                self.graph.nodes[&module]
+                    .slot
+                    .filter(|&slot| self.slots.fresh_mut(slot).is_some())
+                    .map(|_| module)
+            })
+            .collect();
         let structural_changed = targets.iter().any(|(&(module, index), &(value, structural))| {
             structural && self.graph.nodes[&module].params[index] != value
         });
@@ -164,20 +180,37 @@ impl Controller {
                 ordinary.entry(module).or_default().push((index, value));
             }
         }
-        if !structural_changed {
-            let needed: usize = ordinary
-                .iter()
-                .map(|(module, changes)| {
-                    let node = &self.graph.nodes[module];
-                    if node.slot.is_some_and(|slot| self.slots.fresh_mut(slot).is_none()) {
-                        changes.len()
-                    } else {
-                        0
-                    }
-                })
-                .sum();
-            if self.commands.slots() < needed {
+        let ordinary_commands: usize = ordinary
+            .iter()
+            .map(|(module, changes)| {
+                if self.graph.nodes[module].slot.is_some() && !fresh.contains(module) {
+                    changes.len()
+                } else {
+                    0
+                }
+            })
+            .sum();
+        let live_structural = targets.iter().any(|(&(module, _), &(_, structural))| {
+            structural && self.graph.nodes[&module].slot.is_some() && !fresh.contains(&module)
+        });
+        let defer = structural_changed && (self.dirty || !live_structural);
+        if !structural_changed || defer {
+            if self.commands.slots() < ordinary_commands {
                 return Err(LoomError::QueueFull);
+            }
+            if defer {
+                for (&(module, index), &(value, structural)) in &targets {
+                    if structural {
+                        self.graph.nodes.get_mut(&module).expect("validated module").params[index] = value;
+                        if let Some(instance) = self.graph.nodes[&module]
+                            .slot
+                            .and_then(|slot| self.slots.fresh_mut(slot))
+                        {
+                            instance.module.set_param(index, value);
+                        }
+                    }
+                }
+                self.mark_dirty();
             }
             for (module, changes) in ordinary {
                 self.set_params(module, &changes)?;
@@ -209,12 +242,7 @@ impl Controller {
                 .filter(|&&(voice, side)| voice >= widths.voices[&id] || side >= sides)
                 .count();
         }
-        let needed = self.slots.waiting()
-            + starting
-            + stopping
-            + self.slots.retiring().len()
-            + 1
-            + ordinary.values().map(Vec::len).sum::<usize>();
+        let needed = self.slots.waiting() + starting + stopping + self.slots.retiring().len() + 1 + ordinary_commands;
         let error = if self.slots.free_count() < starting {
             Some(LoomError::TooManyModules(self.config.max_modules))
         } else if self.commands.slots() < needed {
@@ -228,27 +256,23 @@ impl Controller {
             }
             return Err(error);
         }
-        // Fresh instances get ordinary values before their first reset.
-        for (&module, changes) in &ordinary {
-            if let Some(fresh) = self.graph.nodes[&module]
+        // Fresh targets get every initial value before reset and insertion.
+        for (&(module, index), &(value, _)) in &targets {
+            if let Some(instance) = self.graph.nodes[&module]
                 .slot
                 .and_then(|slot| self.slots.fresh_mut(slot))
             {
-                for &(index, value) in changes {
-                    fresh.module.set_param(index, value);
-                }
+                instance.module.set_param(index, value);
             }
         }
         self.dirty = true;
-        if let Err(error) = self.commit() {
-            for (&module, changes) in &ordinary {
-                if let Some(fresh) = self.graph.nodes[&module]
+        if let Err(error) = self.commit_synced() {
+            for &(module, index) in targets.keys() {
+                if let Some(instance) = self.graph.nodes[&module]
                     .slot
                     .and_then(|slot| self.slots.fresh_mut(slot))
                 {
-                    for &(index, _) in changes {
-                        fresh.module.set_param(index, before[&module][index]);
-                    }
+                    instance.module.set_param(index, before[&module][index]);
                 }
             }
             for (module, params) in before {
@@ -259,7 +283,9 @@ impl Controller {
         }
         self.revision = self.revision.wrapping_add(1);
         for (module, changes) in ordinary {
-            self.set_params(module, &changes)?;
+            if !fresh.contains(&module) {
+                self.set_params(module, &changes)?;
+            }
         }
         Ok(())
     }
