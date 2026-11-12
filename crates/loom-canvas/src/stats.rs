@@ -33,6 +33,13 @@ pub struct RenderCounts {
     pub trace_builds: u64,
     /// Scope trace data uploaded to the GPU.
     pub trace_uploads: u64,
+    /// Painted text and boxes (glyph quads, floating boxes) uploaded to the
+    /// GPU. A still frame whose painted text did not change uploads none.
+    pub text_uploads: u64,
+    /// Glyph images rasterised into the atlas.
+    pub glyph_rasters: u64,
+    /// Glyphs left out because the atlas was full at its largest size.
+    pub glyph_skips: u64,
 }
 
 /// Message classes that can request a canvas frame (#252).
@@ -110,6 +117,9 @@ impl RenderCounts {
             overlay_uploads: read(Counter::OverlayUploads),
             trace_builds: read(Counter::TraceBuilds),
             trace_uploads: read(Counter::TraceUploads),
+            text_uploads: read(Counter::TextUploads),
+            glyph_rasters: read(Counter::GlyphRasters),
+            glyph_skips: read(Counter::GlyphSkips),
         }
     }
 }
@@ -124,9 +134,12 @@ pub(crate) enum Counter {
     OverlayUploads,
     TraceBuilds,
     TraceUploads,
+    TextUploads,
+    GlyphRasters,
+    GlyphSkips,
 }
 
-const COUNTERS: usize = 8;
+const COUNTERS: usize = 11;
 
 static GLOBAL: [AtomicU64; COUNTERS] = [const { AtomicU64::new(0) }; COUNTERS];
 

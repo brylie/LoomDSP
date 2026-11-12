@@ -8,34 +8,43 @@
 //! dropped one frame later (see [`CanvasText::begin_frame`]), so a still
 //! canvas sets no text again, and a zoom gesture leaves no old sizes behind.
 //!
-//! The system's fonts are found once for the whole process: each
-//! `CanvasText` clones one shared font collection, and fontique shares the
-//! scan between clones. A canvas made again, as on New or Open, finds no
-//! fonts again.
+//! The system's fonts are found and loaded once for the whole process:
+//! each `CanvasText` clones one font context, whose collection shares its
+//! scan and whose source cache shares the loaded files between clones. A
+//! canvas made again, as on New or Open, finds and loads no font again, and
+//! a font keeps one identity, so glyph images made for it are reused.
 
 use crate::painter::{TextStyle, Weight};
 use loom_ui_core::Size;
-use parley::fontique::{Collection, CollectionOptions};
+use parley::fontique::{Collection, CollectionOptions, SourceCache};
 use parley::{FontContext, FontFamily, GenericFamily, Layout, LayoutContext, LineHeight, StyleProperty};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-mod list;
+pub(crate) mod list;
 pub use list::{ListPainter, PaintList};
 
 /// A Parley layout of canvas text. Its brush is empty: the colour of a run
 /// is the painter's, not the layout's.
 pub(crate) type TextLayout = Layout<()>;
 
-/// The system's fonts, scanned once for the process. Cloning a collection
-/// shares the scan.
-fn shared_collection() -> Collection {
-    static BASE: OnceLock<Mutex<Collection>> = OnceLock::new();
-    BASE.get_or_init(|| Mutex::new(Collection::new(CollectionOptions::default())))
-        .lock()
-        // A panic while cloning leaves the collection as it was.
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+/// The system's fonts, scanned and loaded once for the process. A clone
+/// shares the scan and the loaded files.
+fn shared_fonts() -> FontContext {
+    static BASE: OnceLock<Mutex<FontContext>> = OnceLock::new();
+    BASE.get_or_init(|| {
+        Mutex::new(FontContext {
+            collection: Collection::new(CollectionOptions {
+                shared: true,
+                ..CollectionOptions::default()
+            }),
+            source_cache: SourceCache::new_shared(),
+        })
+    })
+    .lock()
+    // A panic while cloning leaves the context as it was.
+    .unwrap_or_else(std::sync::PoisonError::into_inner)
+    .clone()
 }
 
 /// What decides a layout besides its text. Floats are kept as bits, so the
@@ -95,10 +104,7 @@ impl CanvasText {
     /// optical size at its default (spec section 8, rule 6).
     pub fn new() -> Self {
         Self {
-            fonts: FontContext {
-                collection: shared_collection(),
-                source_cache: Default::default(),
-            },
+            fonts: shared_fonts(),
             layouts: LayoutContext::new(),
             current: Layouts::new(),
             previous: Layouts::new(),

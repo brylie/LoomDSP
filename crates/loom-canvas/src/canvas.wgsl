@@ -366,3 +366,56 @@ fn fs_grid(v: GridOut) -> @location(0) vec4<f32> {
     }
     return premultiply(vec4<f32>(1.0, 1.0, 1.0, 0.09), coverage);
 }
+
+// ---------------------------------------------------------------------------
+// Glyphs (canvas text), from the atlas pages (`gpu/atlas.rs`).
+//
+// Each glyph is one quad on whole physical pixels, so a texel of the page
+// is one pixel of the target and the pages are read without a sampler.
+// Drawn with the screen globals: no camera, positions in logical pixels
+// from the canvas's corner.
+
+@group(1) @binding(0) var glyph_coverage: texture_2d<f32>;
+@group(1) @binding(1) var glyph_colours: texture_2d<f32>;
+
+struct GlyphIn {
+    // x, y, width, height in logical pixels from the canvas's corner.
+    @location(0) rect: vec4<f32>,
+    // The image's corners in its page, in texels: left, top, right, bottom.
+    @location(1) uv: vec4<f32>,
+    // The colour of a coverage glyph's letters.
+    @location(2) colour: vec4<f32>,
+    // x: 1 for a colour glyph, read from the colour page.
+    @location(3) params: vec4<f32>,
+};
+
+struct GlyphOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) texel: vec2<f32>,
+    @location(1) colour: vec4<f32>,
+    @location(2) kind: f32,
+};
+
+@vertex
+fn vs_glyph(@builtin(vertex_index) vi: u32, glyph: GlyphIn) -> GlyphOut {
+    let corner = vec2<f32>(f32(vi & 1u), f32(vi >> 1u));
+    let p = glyph.rect.xy + corner * glyph.rect.zw;
+    var result: GlyphOut;
+    result.position = vec4<f32>(p.x / g.size.x * 2.0 - 1.0, 1.0 - p.y / g.size.y * 2.0, 0.0, 1.0);
+    result.texel = mix(glyph.uv.xy, glyph.uv.zw, corner);
+    result.colour = glyph.colour;
+    result.kind = glyph.params.x;
+    return result;
+}
+
+@fragment
+fn fs_glyph(v: GlyphOut) -> @location(0) vec4<f32> {
+    let at = vec2<i32>(floor(v.texel));
+    let coverage = textureLoad(glyph_coverage, at, 0).r;
+    let colour = textureLoad(glyph_colours, at, 0);
+    if (v.kind > 0.5) {
+        // Premultiplied already; the run's alpha fades it as a whole.
+        return colour * v.colour.a;
+    }
+    return premultiply(v.colour, coverage);
+}

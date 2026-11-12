@@ -17,6 +17,9 @@ pub struct FrameCache {
     controls: RefCell<Option<Arc<ControlGeometry>>>,
     traces: RefCell<Option<Arc<TraceGeometry>>>,
     lines: LinesCache,
+    /// The canvas's text and its layouts. Borrowed only inside each call
+    /// that sets text (`crate::text::ListPainter`).
+    text: RefCell<crate::text::CanvasText>,
 }
 
 impl CanvasInput {
@@ -93,7 +96,22 @@ impl CanvasInput {
             value_bars,
             camera,
             cable_dim: CABLE_OPACITY,
+            paint: crate::text::PaintList::default(),
         }
+    }
+
+    /// Paints the frame's text and floating boxes (see [`CanvasInput::paint`])
+    /// with the canvas's own text, for a canvas at `bounds` in the host's
+    /// logical pixels. A layout no frame used since the last is dropped.
+    pub fn paint_list(&self, model: &CanvasModel<'_>, bounds: Rect, cache: &FrameCache) -> crate::text::PaintList {
+        cache.text.borrow_mut().begin_frame();
+        let mut list = crate::text::PaintList::new(bounds);
+        self.paint(
+            model,
+            bounds,
+            &mut crate::text::ListPainter::new(&cache.text, &mut list),
+        );
+        list
     }
 }
 

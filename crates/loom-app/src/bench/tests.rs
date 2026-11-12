@@ -14,6 +14,9 @@ fn a_line_is_key_value_pairs() {
             overlay_uploads: 0,
             trace_builds: 3,
             trace_uploads: 3,
+            text_uploads: 4,
+            glyph_rasters: 50,
+            glyph_skips: 0,
         },
         worst: Duration::from_millis(9),
         causes: FrameCauses([2, 70, 1, 0, 3, 0, 44, 0]),
@@ -23,6 +26,7 @@ fn a_line_is_key_value_pairs() {
         line(&w),
         "fps=120.0 avg_ms=8.33 worst_ms=9.00 frames=600 scene_builds=1 control_builds=2 \
              scene_uploads=1 control_uploads=2 overlay_uploads=0 trace_uploads=3 \
+             text_uploads=4 glyph_rasters=50 glyph_skips=0 \
              causes=tick:2,live:70,meters:1,control:0,input:3,redraw:0,forced:44,other:0 cpu=4.1"
     );
 }
