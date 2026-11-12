@@ -403,3 +403,29 @@ fn with_no_dialogs_the_credit_question_waits_for_one() {
         "the offer is still to come"
     );
 }
+
+/// While another dialog waits, the credit question cannot be asked, so it
+/// is not marked as offered: the save goes ahead, and a later Save asks.
+#[test]
+fn a_credit_question_that_cannot_be_asked_yet_waits() {
+    let dir = folder("credit-waiting");
+    let patch = dir.join("drone.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, metadata: Metadata(name: "Drone", authors: ["Ada Lovelace"]))"#,
+    )
+    .unwrap();
+    let mut args = args_with(&dir, r#"(author: "Sam Rivera")"#);
+    args.patch = Some(patch.clone());
+    let mut app = App::new(args);
+    let _ = dialogs::asked();
+
+    // An Open dialog waits for its answer.
+    assert!(app.ask_file(crate::dialogs::Waiting::Open, crate::files::open_request(None, None)));
+    assert!(app.write_then(patch.clone(), None), "the save goes ahead");
+    assert!(
+        app.session.document.should_offer_credit("Sam Rivera"),
+        "the offer is still to come"
+    );
+    let _ = dialogs::asked();
+}

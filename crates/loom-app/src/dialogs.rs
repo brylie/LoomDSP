@@ -288,7 +288,8 @@ impl App {
         }
     }
 
-    /// Says that a restore failed, in the window and in the status line.
+    /// Says that a restore failed, in the window and as a kept file error in
+    /// the status line.
     /// Dropping the orphan keeps its folder for a later start.
     fn restore_failed(&mut self, error: &str, orphan: &recovery::Orphan) {
         let message = format!(
@@ -296,7 +297,9 @@ impl App {
             orphan.patch_path().display()
         );
         self.show_error(&message);
-        self.alerts.warn(message);
+        // Kept, as a failed Open's error is: the next status line does not
+        // hide where the copy is.
+        self.alerts.error(crate::alerts::Cause::File, message);
     }
 
     /// Opens the patch the command line asked for, after the recovery

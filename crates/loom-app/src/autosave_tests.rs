@@ -27,7 +27,13 @@ impl Answer {
 /// The error a failed restore shows in the window, which it also keeps in
 /// the status line.
 fn restore_error(app: &App) -> String {
-    let shown = app.ui_snapshot().question.expect("the error shows in the window");
+    let snapshot = app.ui_snapshot();
+    assert!(
+        snapshot.errors.iter().any(|e| e.cause == alerts::Cause::File),
+        "kept as a file error: {:?}",
+        snapshot.errors
+    );
+    let shown = snapshot.question.expect("the error shows in the window");
     assert!(
         app.alerts.status().starts_with("Could not restore"),
         "{}",

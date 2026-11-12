@@ -130,7 +130,13 @@ impl App {
                     path: path.to_path_buf(),
                     next,
                 };
-                self.ask_question(waiting, question)
+                if self.ask_question(waiting, question) {
+                    return true;
+                }
+                // Another dialog waits, so this one was not asked: the next
+                // Save offers it again, as when no dialog can be shown.
+                self.session.document.credit_not_asked();
+                false
             }
             None => {
                 self.session.document.credit_not_asked();
