@@ -2428,6 +2428,11 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::Field => Role::TextInput,
                 Kind::List => Role::List,
                 Kind::ListItem => Role::ListItem,
+                Kind::Dialog => Role::Dialog,
+                Kind::AlertDialog => Role::AlertDialog,
+                Kind::Menu => Role::Menu,
+                Kind::MenuItem => Role::MenuItem,
+                Kind::Link => Role::Link,
             };
             assert_eq!(found.role(), role, "{}", item.id);
             match item.kind {
