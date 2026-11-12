@@ -375,7 +375,7 @@ The role follows the widget that is drawn, as widgets follow the kind of value (
    - One `CanvasText` sets every run, with Parley's `system-ui`. Measuring and drawing read the same cached layout, so a box laid out by a measurement holds the text drawn in it. A layout is kept while frames use it and dropped one frame after the last one that did.
    - Every run is shaped in full, with fallback fonts. There is no cheaper path to ask for: Parley has none, and layouts are cached.
    - The canvas paints into a list of layers. Inside a layer, a later piece is over an earlier one, text or box: a selection highlight goes before its text, and a caret after it. A layer is over every layer before it, and is cut to its clip.
-   - The system's fonts are scanned once per process, and a canvas holds the font files it has used, so a new canvas on New or Open scans nothing and a font keeps its glyph images.
+   - The system's fonts are scanned once per process, and a canvas holds the font files it has used, so a new canvas on New or Open scans nothing and a font keeps its glyph images. On Linux, fontconfig is loaded when the app runs, not linked when it builds (fontique's `fontconfig-dlopen`), so a build needs no fontconfig headers.
    - The atlas never panics when full: it frees glyphs the frame did not use, then grows, and at its largest size leaves the rest out and counts them (`glyph_skips` in the bench report).
    - *Why:* drawing text inside the canvas's own primitive keeps a floating box over the tile text under it without Iced's layers, and is where phase 3 goes for every view. One layout for measuring and drawing rules out a box sized by one text system and filled by another.
 
