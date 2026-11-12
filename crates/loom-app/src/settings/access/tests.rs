@@ -90,6 +90,10 @@ fn preferences_is_a_dialog_of_named_parts() {
     }
     let clear = part(&window, &preferences_id().with("panic").with("clear"));
     assert!(!clear.enabled, "no trigger to clear");
+    let licence = part(&window, &preferences_id().with("licence"));
+    assert_eq!(licence.kind, Kind::Text);
+    assert!(licence.label.is_none(), "a label would be read in place of the words");
+    assert_eq!(licence.value.as_deref(), Some("Licence: No default"));
     let author = part(&window, &preferences_id().with("author"));
     assert_eq!(author.kind, Kind::Field);
     assert!(author.focus.is_some(), "a screen reader can focus it");
@@ -204,4 +208,33 @@ fn preferences_with_audio_playing_rebuilds_only_on_a_change() {
     assert!(again.is_none(), "nothing changed, so nothing is sent");
     step_up(&mut app, "device");
     assert_ne!(app.a11y_poll_key(), key, "the window shows another device");
+}
+
+/// A step back from a device that failed picks the one playing, which
+/// ends the failure, so the next step down goes on past it.
+#[test]
+fn a_step_back_from_a_failed_device_goes_on_down() {
+    let fake = Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]);
+    fake.broken.borrow_mut().push("Fake B".into());
+    let (mut app, _) = open("broken-back", fake);
+    step_up(&mut app, "device");
+    step_up(&mut app, "device");
+    assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));
+    let down = |app: &mut App| {
+        let window = dialog(app);
+        let down = part(&window, &preferences_id().with("device")).step.1.clone();
+        let _ = app.update(down.expect("the device list steps down"));
+    };
+    down(&mut app);
+    assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));
+    let window = dialog(&app);
+    assert!(
+        !window
+            .walk()
+            .iter()
+            .any(|item| item.id == preferences_id().with("note").with("audio-error")),
+        "picking the device in use ends the failure"
+    );
+    down(&mut app);
+    assert_eq!(app.rig.shown_audio().device, DeviceChoice::SystemDefault, "on past it");
 }

@@ -683,6 +683,11 @@ impl App {
         let mut play = shown.clone();
         change.apply(&mut play);
         if play == shown {
+            // Picking what plays now, such as a step back from a device
+            // that failed, ends the failure, so steps go on from here.
+            if let Some(window) = self.overlays.preferences_mut() {
+                window.failed = None;
+            }
             return;
         }
         let mut saved = self.rig.store.saved().clone();

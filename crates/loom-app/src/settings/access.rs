@@ -106,12 +106,10 @@ pub(crate) fn items(model: &Model) -> Item {
         focus: Some(iced::advanced::widget::Id::new(AUTHOR_INPUT)),
         ..Item::new(id.clone().with("author"), Kind::Field)
     });
+    // A text part is read by its value alone: an adapter reads a label in
+    // place of the value, so the row's label goes in the words.
     let licence = id.clone().with("licence");
-    parts.push(Item {
-        label: Some("Licence".to_string()),
-        value: Some(model.licence.clone()),
-        ..Item::new(licence.clone(), Kind::Text)
-    });
+    parts.push(Item::text(licence.clone(), format!("Licence: {}", model.licence)));
     parts.push(Item::button(
         licence.with("choose"),
         "Choose",
