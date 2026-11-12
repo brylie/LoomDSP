@@ -183,7 +183,7 @@ Keys come from what the element shows, not from where it sits:
 | Element | Key from |
 |---|---|
 | An inspector parameter row | The module ID, the kind `param`, and the parameter name: `inspector/4/param/cutoff`. On a sub-patch tile the kind is `exposed` and the name is the item's on its surface; a slot's rows sit under its part, as its tile controls do |
-| A part of an inspector row | The row's ID, then a fixed name: `value`, `field`, `range`, `learn`, `midi/options`, `midi/low`, `expose` and the surface's name, and so on |
+| A part of an inspector row | The row's ID, then a fixed name: `value`, `field`, `range`, `learn`, `midi/options`, `midi/low`, `expose/own` for the row's own tile's surface and `expose/enclosing` for the enclosing sub-patch's (not the surface's name, which two sub-patches can share), and so on |
 | The patch's own inspector, while nothing is selected | `inspector/patch`, then a fixed name; a tag by its text |
 | A modulation assignment row | The `AssignmentId`, under the parameter's row in the inspector: `inspector/4/param/cutoff/assignment/12`. In the matrix, under the panel: `matrix/assignment/12`, with its cells by column (`on`, `source`, `target`, `polarity`, `depth`) and `remove` |
 | A part of the matrix outside its rows | `matrix`, then a fixed name: `filter`, `selected-only`, `add`, `sort`, `reverse`, `assignments` (the list), `new/source`, `new/target`, `new/create`, `new/cancel` |
@@ -413,7 +413,7 @@ Phase 1:
 
 - [x] `loom-ui-core` exists, depends on no toolkit and no LoomDSP crate, and has an example program. `crates/loom-ui-core/tests/purity.rs` checks the dependencies, and the example is `examples/hit_test.rs`.
 - [x] `loom-canvas` names Iced only on its widget side: `widget.rs`, the files under `widget/` (the primitive wrapper and the Iced painter among them), and `iced_convert.rs`. `crates/loom-canvas/tests/purity.rs` checks it.
-- [x] A test checks that every interactive element kind on a tile and in the inspector has an operable role from the table, a non-empty name, and a value, with the unit in the description. For the inspector: `every_inspector_part_is_named_and_placed` (a module, a sub-patch tile, the patch), with the slider, field, and option tests beside it.
+- [x] A test checks that every interactive element kind on a tile and in the inspector has an operable role from the table, a non-empty name, and a value, with the unit in the description. For the inspector: `every_inspector_part_is_named_and_placed` (a module, a sub-patch tile, the patch) checks each part's role against the table, that a check box or option says on or off, a choice what is chosen, a slider its number, and a field its text, and that a button, check box, or option offers Click; the slider, field, and option tests beside it check the actions.
 - [x] A test checks that screen reader SetValues on one control, each within 500 ms of the last, make one undo step; that an action on another control, a key press, or Undo closes the group; and that Undo is enabled while the group is open.
 - [x] A test checks that Increment on a knob moves it by the same step as an arrow key. Both take it from one function, `loom_canvas::arrow_step`.
 - [x] A test checks that the tree changes when a view model, focus, or a scroll offset changes, and does not change on a message that changes none of what it reports. A view model and focus in `a11y/tests.rs`; a scroll offset in `a_scroll_moves_the_rows_and_is_a_message_only_while_listening`.

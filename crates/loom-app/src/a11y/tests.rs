@@ -2414,6 +2414,36 @@ fn every_inspector_part_is_named_and_placed() {
         let mut acting = 0;
         for item in panel.walk() {
             let found = node(&update, node_of(&mut ui.app, &item.id));
+            // The role the table in section 7 gives each kind, and the
+            // state each kind must say.
+            let role = match item.kind {
+                Kind::Group => Role::Group,
+                Kind::Text => Role::Label,
+                Kind::Button => Role::Button,
+                Kind::Check => Role::CheckBox,
+                Kind::Slider => Role::Slider,
+                Kind::Options => Role::RadioGroup,
+                Kind::Option => Role::RadioButton,
+                Kind::Choice => Role::ComboBox,
+                Kind::Field => Role::TextInput,
+                Kind::List => Role::List,
+                Kind::ListItem => Role::ListItem,
+            };
+            assert_eq!(found.role(), role, "{}", item.id);
+            match item.kind {
+                Kind::Check | Kind::Option => assert!(found.toggled().is_some(), "{} says on or off", item.id),
+                Kind::Choice => assert!(
+                    found.value().is_some_and(|value| !value.is_empty()),
+                    "{} says what is chosen",
+                    item.id
+                ),
+                Kind::Slider => assert!(found.numeric_value().is_some(), "{} says its value", item.id),
+                Kind::Field => assert!(found.value().is_some(), "{} says its text", item.id),
+                _ => {}
+            }
+            if item.enabled && matches!(item.kind, Kind::Button | Kind::Check | Kind::Option) {
+                assert!(found.supports_action(Action::Click), "{} can be pressed", item.id);
+            }
             if item.kind == Kind::Text {
                 assert_eq!(found.label(), None, "{}: text says its words as its value", item.id);
                 assert!(found.value().is_some_and(|text| !text.is_empty()), "{}", item.id);
@@ -2764,6 +2794,104 @@ fn a_scroll_moves_the_rows_and_is_a_message_only_while_listening() {
     let places = ui.places();
     let moved = ui.app.a11y_tree(&places);
     assert!(y(&moved) < y(&first), "the row's node moved up with the row");
+}
+
+/// A panel taller than the area that scrolls it says it is as tall as what
+/// shows, so a screen reader does not take rows out of view as visible.
+/// The rows keep their real bounds.
+#[test]
+fn a_scrolling_panel_is_as_tall_as_what_it_shows() {
+    let (mut ui, module) = scrolling_inspector();
+    let _ = ui.app.a11y_event(Event::Activated);
+    let _ = ui.redraw();
+    let places = ui.places();
+    let panel = crate::inspector::ids::panel(module);
+    let place = places.of(&panel).unwrap();
+    let clip = place.clip.unwrap();
+    let update = ui.app.a11y_tree(&places);
+    let bounds = node(&update, node_of(&mut ui.app, &panel)).bounds().unwrap();
+    let scale = f64::from(ui.app.a11y.scale);
+    assert!(
+        (bounds.height() - f64::from(clip.height) * scale).abs() < 1.0,
+        "{bounds:?} {clip:?}"
+    );
+    assert!(bounds.height() < f64::from(place.rect.height) * scale - 1.0);
+}
+
+/// A field that has the keys is not reported as focused while a panel lies
+/// over the window, even before the window says the keys have moved: it is
+/// hidden, and a hidden node cannot have focus.
+#[test]
+fn a_covered_field_is_not_focused() {
+    let (app, module, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = inspector_of(&mut ui, &[module]);
+    let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+    let field = node_of(&mut ui.app, &crate::inspector::ids::part(&row, "field"));
+    for task in ui
+        .app
+        .a11y_action(&request(Action::Focus, field, None), std::time::Instant::now())
+    {
+        let _ = ui.run_task(task);
+    }
+    let places = ui.places();
+    assert_eq!(ui.app.a11y_tree(&places).focus, field, "focused while open");
+
+    let _ = ui.app.update(Message::ShowShortcuts);
+    let update = ui.app.a11y_tree(&places);
+    assert!(node(&update, field).is_hidden());
+    assert_ne!(update.focus, field, "not focused while covered");
+}
+
+/// A line under Drives keeps its node while a line before it is removed:
+/// it is keyed by its assignment, not its place (section 4, rule 4).
+#[test]
+fn a_drives_line_keeps_its_node_when_one_before_it_goes() {
+    let (mut app, filter, _) = app_with_filter();
+    let lfo = app.session.controller.add_module("loom.mod.lfo").unwrap();
+    app.commit();
+    let graph = app.session.controller.graph();
+    let cutoff = graph.node(ModuleId(filter)).unwrap().parameter_index("cutoff").unwrap();
+    let resonance = graph
+        .node(ModuleId(filter))
+        .unwrap()
+        .parameter_index("resonance")
+        .unwrap();
+    let out = loom_core::OutputRef { module: lfo, port: 0 };
+    let first = app
+        .session
+        .controller
+        .add_assignment(out, ModuleId(filter), cutoff, 0.5)
+        .unwrap();
+    let second = app
+        .session
+        .controller
+        .add_assignment(out, ModuleId(filter), resonance, 0.5)
+        .unwrap();
+    app.commit();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let lines = |ui: &mut crate::ui_test::Ui| -> Vec<UiId> {
+        let (_, _, items) = inspector_of(ui, &[lfo.0]);
+        let drives = crate::inspector::ids::part(&crate::inspector::ids::panel(lfo.0), "drives");
+        super::items::find(&items, &drives)
+            .expect("the Drives list")
+            .children
+            .iter()
+            .map(|line| line.id.clone())
+            .collect()
+    };
+    let before = lines(&mut ui);
+    assert_eq!(before.len(), 2);
+    let kept = before
+        .iter()
+        .find(|id| id.to_string().ends_with(&format!("/{}", second.0)))
+        .expect("the second line is keyed by its assignment")
+        .clone();
+    let number = ui.app.a11y.ids.number(&kept);
+    let _ = ui.app.session.controller.remove_assignment(first).unwrap();
+    ui.app.commit();
+    assert_eq!(lines(&mut ui), vec![kept.clone()]);
+    assert_eq!(ui.app.a11y.ids.number(&kept), number);
 }
 
 /// One Increment on the inspector's Cutoff slider moves a tenth of one on

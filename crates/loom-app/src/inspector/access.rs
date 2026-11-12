@@ -265,8 +265,8 @@ fn module(m: &ModuleRows) -> Item {
 fn drives(panel: &UiId, groups: &[DrivesGroup]) -> Item {
     let mut lines = Vec::new();
     for group in groups {
-        for (n, line) in group.lines.iter().enumerate() {
-            let id = ids::part(panel, "drives").with(group.output).with(n as u32);
+        for line in &group.lines {
+            let id = ids::drives_line(panel, group.output, line.id);
             lines.push(Item::button(
                 id,
                 format!("{}: {}", group.output, line.text),
@@ -438,15 +438,19 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
     let index = p.index;
     let ui = &p.ui;
     let mut parts = Vec::new();
-    let mut description = Some(p.description.to_string()).filter(|text| !text.is_empty());
-    if let Some(unused) = &p.unused {
-        // Said in the row's name, so it is heard with the row.
-        description = description
-            .map(|text| format!("{text} {unused}"))
-            .or(Some(unused.clone()));
-    }
-    for exposure in own.into_iter().chain(p.exposure.as_ref()) {
-        parts.push(expose(exposure, ui));
+    let description = Some(p.description.to_string()).filter(|text| !text.is_empty());
+    // "Not used in AD" is said in the row's name, so it is heard with the
+    // row: a description may be read late or not at all (rule 26).
+    let name = match &p.unused {
+        Some(unused) => format!("{label}, {unused}"),
+        None => label.to_string(),
+    };
+    for (exposure, own) in own
+        .map(|e| (e, true))
+        .into_iter()
+        .chain(p.exposure.as_ref().map(|e| (e, false)))
+    {
+        parts.push(expose(exposure, &ids::expose(ui, own)));
     }
     match &p.mode {
         ParamMode::Learn { armed, detail } => {
@@ -477,6 +481,11 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
                         SetText::Value { module, index },
                     )
                 });
+                // A typed value that is not one is said as text of its own
+                // too, as the MIDI range's error is, so it is heard.
+                if let Some(reason) = &field_row.error {
+                    parts.push(Item::text(ids::part(ui, "field_error"), reason.clone()));
+                }
             } else {
                 parts.push(Item::text(ids::part(ui, "shown"), p.value.clone()));
             }
@@ -497,9 +506,11 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
                             .unwrap_or_else(|| "Full".to_string()),
                     ),
                     description: Some("What a full turn of the control covers.".to_string()),
+                    // "Full" is shown while no listed range holds the value;
+                    // a step up picks the first, as a pointer can pick any.
                     step: match range.selected {
                         Some(at) => (set(at + 1), at.checked_sub(1).and_then(set)),
-                        None => (None, None),
+                        None => (set(0), None),
                     },
                     ..Item::new(ids::part(ui, "range"), Kind::Choice)
                 });
@@ -510,7 +521,7 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
     }
     Item {
         description,
-        ..Item::group(ui.clone(), label, parts)
+        ..Item::group(ui.clone(), name, parts)
     }
 }
 
@@ -582,8 +593,8 @@ fn value_control(module: u32, label: &str, p: &ParamRow, position: f32, step: f3
 }
 
 /// The Expose or Unexpose button on a row, for the surface it acts on.
-fn expose(exposure: &ExposureRow, row: &UiId) -> Item {
-    let id = ids::part(row, "expose").with(exposure.surface.as_str());
+fn expose(exposure: &ExposureRow, id: &UiId) -> Item {
+    let id = id.clone();
     let (module, index) = (exposure.module, exposure.index);
     match &exposure.name {
         Some(name) => Item::button(

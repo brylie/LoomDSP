@@ -33,3 +33,19 @@ fn rows_and_their_parts_are_keyed_by_what_they_show() {
     assert_eq!(odd.keys().len(), 4);
     assert_eq!(odd.to_string().parse::<UiId>().unwrap(), odd);
 }
+
+/// The two Expose buttons a row can show are keyed by the surface they act
+/// on, own or enclosing, never by its name, which two sub-patches can
+/// share. A Drives line is keyed by its assignment, not its place.
+#[test]
+fn expose_buttons_and_drives_lines_are_keyed_by_what_they_act_on() {
+    let row = row(4, Kind::Param, "cutoff");
+    assert_eq!(expose(&row, true).to_string(), "inspector/4/param/cutoff/expose/own");
+    assert_eq!(
+        expose(&row, false).to_string(),
+        "inspector/4/param/cutoff/expose/enclosing"
+    );
+    let line = drives_line(&panel(4), "Out", loom_core::AssignmentId(12));
+    assert_eq!(line.to_string(), "inspector/4/drives/Out/12");
+    assert_eq!(line.to_string().parse::<UiId>().unwrap(), line);
+}
