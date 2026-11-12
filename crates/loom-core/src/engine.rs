@@ -1015,7 +1015,7 @@ impl Engine {
             downmixes,
             output_downmixes,
             right_ptrs,
-            bundle_ptrs,
+            bundle_ports,
             ..
         } = &mut *self.schedule;
 
@@ -1080,7 +1080,7 @@ impl Engine {
                         &output_ptrs[op.outputs.0 as usize..op.outputs.1 as usize],
                         &param_ptrs[op.params.0 as usize..op.params.1 as usize],
                         &right_ptrs[op.right.0 as usize..op.right.1 as usize],
-                        &bundle_ptrs[op.bundles.0 as usize..op.bundles.1 as usize],
+                        &bundle_ports[op.bundles.0 as usize..op.bundles.1 as usize],
                         op.connected,
                         offset,
                         len,

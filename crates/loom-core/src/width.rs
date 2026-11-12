@@ -47,7 +47,11 @@ pub(crate) struct Widths {
 
 /// Bundle-aware modules read every voice and side in one instance.
 fn bundles(descriptor: &ModuleDescriptor) -> bool {
-    descriptor.inputs.iter().any(|port| port.channels == Channels::Voices)
+    descriptor
+        .inputs
+        .iter()
+        .chain(descriptor.outputs)
+        .any(|port| port.channels == Channels::Voices)
 }
 
 /// Only ordinary DSP and delay modules can be copied per stereo side.

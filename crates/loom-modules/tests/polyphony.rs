@@ -625,3 +625,65 @@ fn removed_voice_copies_return_to_the_control_thread() {
         parts.controller.collect_garbage();
     }
 }
+
+/// Rounded unchanged counts send ordinary edits without compiling or swapping.
+#[test]
+fn unchanged_structural_values_do_not_swap_schedules() {
+    use std::sync::atomic::Ordering;
+    let mut parts = engine();
+    let source = parts.controller.add_module("test.voices").unwrap();
+    let out = parts.controller.add_module("loom.io.audio-out").unwrap();
+    parts.controller.connect_named(source, "out", out, "in").unwrap();
+    parts.controller.commit().unwrap();
+    render(&mut parts);
+    let revision = parts.controller.revision();
+    let swaps = parts.controller.stats().schedule_swaps.load(Ordering::Relaxed);
+    parts
+        .controller
+        .set_params(
+            source,
+            &[
+                (test_modules::VOICES.param_index("voices").unwrap(), 1.4),
+                (test_modules::VOICES.param_index("value").unwrap(), 0.02),
+            ],
+        )
+        .unwrap();
+    assert_eq!(render(&mut parts), [0.02; 512]);
+    assert_eq!(parts.controller.revision(), revision);
+    assert_eq!(parts.controller.stats().schedule_swaps.load(Ordering::Relaxed), swaps);
+}
+
+/// A Voices output owns its capacity even when an ordinary input carries more voices.
+#[test]
+fn a_bundle_output_module_is_never_copied() {
+    static SOURCE: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
+        id: "test.bundle-source-with-input",
+        inputs: &[loom_core::PortSpec {
+            channels: loom_core::Channels::Downmix,
+            ..test_modules::VOICES.inputs[0]
+        }],
+        ..test_modules::VOICES
+    };
+    let mut registry = Registry::new();
+    register_all(&mut registry).unwrap();
+    test_modules::register(&mut registry).unwrap();
+    registry.register(&SOURCE).unwrap();
+    let mut parts = create_engine(
+        Arc::new(registry),
+        EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::default()
+        },
+    );
+    let c = &mut parts.controller;
+    let four = c.add_module("test.voices").unwrap();
+    let two = c.add_module(SOURCE.id).unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(four, "voices", 4.0).unwrap();
+    c.set_param_named(two, "voices", 2.0).unwrap();
+    c.connect_named(four, "out", two, "in").unwrap();
+    c.connect_named(two, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    assert_eq!(c.last_report().width(c.output_ref(two, "out").unwrap()).voices, 2);
+    assert_eq!(render(&mut parts), [(0.01f32 + 0.01) + (0.01 + 0.01 + 0.01); 512]);
+}

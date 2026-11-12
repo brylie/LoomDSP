@@ -195,7 +195,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         }
         let node = self.layout.nodes[v];
         let channel = self.layout.copy_channel(v, ch);
-        let bundle_start = self.schedule.bundle_ptrs.len() as u32;
+        let bundle_start = self.schedule.bundle_ports.len() as u32;
         let in_start = self.schedule.input_ptrs.len() as u32;
         let right_start = self.schedule.right_ptrs.len() as u32;
         let (connected, defaulted) = self.add_inputs(v, channel);
@@ -231,7 +231,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             channel: (channel % 2) as u8,
             voice: (channel / 2) as u8,
             voices: self.layout.widths.voices[&self.layout.ids[v]] as u8,
-            bundles: (bundle_start, s.bundle_ptrs.len() as u32),
+            bundles: (bundle_start, s.bundle_ports.len() as u32),
         });
         self.op_of_node[v][ch] = (s.ops.len() - 1) as u32;
         self.op_of_node[v][ch]
@@ -257,26 +257,34 @@ impl<'l, 'a> Builder<'l, 'a> {
             if node
                 .descriptor
                 .inputs
-                .get(port)
-                .is_some_and(|spec| spec.channels == Channels::Voices)
+                .iter()
+                .chain(node.descriptor.outputs)
+                .any(|spec| spec.channels == Channels::Voices)
             {
-                let width = layout
-                    .graph
-                    .source_of(input)
-                    .and_then(|from| layout.widths.outputs.get(&from).copied())
-                    .unwrap_or_default();
+                let width = if node.descriptor.inputs[port].channels == Channels::Voices {
+                    layout
+                        .graph
+                        .source_of(input)
+                        .and_then(|from| layout.widths.outputs.get(&from).copied())
+                        .unwrap_or_default()
+                } else {
+                    Width::MONO
+                };
+                let mut channels = Vec::with_capacity(width.voices * width.sides);
                 for voice in 0..width.voices {
                     for side in 0..width.sides {
-                        let (ptr, _) = self.resolve_input(input, voice * 2 + side);
-                        self.schedule.bundle_ptrs.push(crate::module::BundlePtr {
-                            port: port as u16,
-                            output: false,
-                            voice: voice as u8,
-                            side: side as u8,
-                            ptr: ptr as *mut f32,
-                        });
+                        let channel = if node.descriptor.inputs[port].channels == Channels::Voices {
+                            voice * 2 + side
+                        } else {
+                            ch
+                        };
+                        channels.push(self.resolve_input(input, channel).0 as *mut f32);
                     }
                 }
+                self.schedule.bundle_ports.push(crate::module::BundlePort {
+                    width,
+                    channels: channels.into_boxed_slice(),
+                });
             }
             if is_connected {
                 connected |= 1 << port;
@@ -319,24 +327,20 @@ impl<'l, 'a> Builder<'l, 'a> {
             self.schedule.output_ptrs.push(ptr);
             if node
                 .descriptor
-                .outputs
-                .get(port)
-                .is_some_and(|spec| spec.channels == Channels::Voices)
-                || node
-                    .descriptor
-                    .inputs
-                    .iter()
-                    .any(|spec| spec.channels == Channels::Voices)
+                .inputs
+                .iter()
+                .chain(node.descriptor.outputs)
+                .any(|spec| spec.channels == Channels::Voices)
             {
-                for channel in layout.output_channels(from) {
-                    self.schedule.bundle_ptrs.push(crate::module::BundlePtr {
-                        port: port as u16,
-                        output: true,
-                        voice: (channel / 2) as u8,
-                        side: (channel % 2) as u8,
-                        ptr: self.ptr(layout.channel_buffer(from, channel)),
-                    });
-                }
+                let width = layout.widths.outputs[&from];
+                let channels = layout
+                    .output_channels(from)
+                    .map(|channel| self.ptr(layout.channel_buffer(from, channel)))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                self.schedule
+                    .bundle_ports
+                    .push(crate::module::BundlePort { width, channels });
             }
             if node
                 .descriptor

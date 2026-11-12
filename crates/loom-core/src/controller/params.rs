@@ -27,9 +27,14 @@ impl Controller {
         }
         if clamped
             .iter()
-            .any(|&(index, _)| node.descriptor.params[index].options.shapes_graph)
+            .any(|&(index, _)| node.spec(index).is_some_and(|spec| spec.options.shapes_graph))
         {
-            return self.set_structural_params(module, &clamped);
+            return self.set_params_across(
+                &clamped
+                    .iter()
+                    .map(|&(index, value)| (module, index, value))
+                    .collect::<Vec<_>>(),
+            );
         }
         // Mapped parameters carry an edit token, as in `set_param`.
         let mappings: Vec<_> = clamped
@@ -135,23 +140,57 @@ impl Controller {
         Ok(value)
     }
 
-    /// Stages a structural edit, reserving all command space before compilation.
-    /// A failed preparation restores graph values and the prior dirty state.
-    fn set_structural_params(&mut self, module: ModuleId, changes: &[(usize, f32)]) -> Result<(), LoomError> {
-        let before = self.node(module)?.params.clone();
-        let was_dirty = self.dirty;
-        let ordinary: Vec<_> = changes
-            .iter()
-            .copied()
-            .filter(|&(index, _)| {
-                !self.node(module).expect("validated module").descriptor.params[index]
-                    .options
-                    .shapes_graph
-            })
-            .collect();
-        for &(index, value) in changes {
-            self.graph.nodes.get_mut(&module).expect("validated module").params[index] = value;
+    /// Sets parameters across modules as one transaction, or changes none.
+    ///
+    /// Values are clamped; the last entry for a target wins. A changed
+    /// graph-shaping value prepares one schedule for the whole group. If
+    /// structural values are unchanged, only ordinary commands are sent.
+    /// Capacity errors leave all graph values and the running schedule intact.
+    pub fn set_params_across(&mut self, changes: &[(ModuleId, usize, f32)]) -> Result<(), LoomError> {
+        let mut targets = BTreeMap::new();
+        for &(module, index, value) in changes {
+            let spec = self.node(module)?.spec(index).ok_or_else(|| LoomError::NoSuchParam {
+                module,
+                param: index.to_string(),
+            })?;
+            targets.insert((module, index), (spec.clamp(value), spec.options.shapes_graph));
         }
+        let structural_changed = targets.iter().any(|(&(module, index), &(value, structural))| {
+            structural && self.graph.nodes[&module].params[index] != value
+        });
+        let mut ordinary: BTreeMap<ModuleId, Vec<(usize, f32)>> = BTreeMap::new();
+        for (&(module, index), &(value, structural)) in &targets {
+            if !structural {
+                ordinary.entry(module).or_default().push((index, value));
+            }
+        }
+        if !structural_changed {
+            let needed: usize = ordinary
+                .iter()
+                .map(|(module, changes)| {
+                    let node = &self.graph.nodes[module];
+                    if node.slot.is_some_and(|slot| self.slots.fresh_mut(slot).is_none()) {
+                        changes.len()
+                    } else {
+                        0
+                    }
+                })
+                .sum();
+            if self.commands.slots() < needed {
+                return Err(LoomError::QueueFull);
+            }
+            for (module, changes) in ordinary {
+                self.set_params(module, &changes)?;
+            }
+            return Ok(());
+        }
+        let mut before = BTreeMap::new();
+        for (&(module, index), &(value, _)) in &targets {
+            let node = self.graph.nodes.get_mut(&module).expect("validated module");
+            before.entry(module).or_insert_with(|| node.params.clone());
+            node.params[index] = value;
+        }
+        let was_dirty = self.dirty;
         let widths = width::infer(&self.graph);
         let mut starting = 0;
         let mut stopping = 0;
@@ -170,7 +209,12 @@ impl Controller {
                 .filter(|&&(voice, side)| voice >= widths.voices[&id] || side >= sides)
                 .count();
         }
-        let needed = self.slots.waiting() + starting + stopping + self.slots.retiring().len() + 1 + ordinary.len();
+        let needed = self.slots.waiting()
+            + starting
+            + stopping
+            + self.slots.retiring().len()
+            + 1
+            + ordinary.values().map(Vec::len).sum::<usize>();
         let error = if self.slots.free_count() < starting {
             Some(LoomError::TooManyModules(self.config.max_modules))
         } else if self.commands.slots() < needed {
@@ -179,32 +223,45 @@ impl Controller {
             None
         };
         if let Some(error) = error {
-            self.graph.nodes.get_mut(&module).expect("validated module").params = before;
+            for (module, params) in before {
+                self.graph.nodes.get_mut(&module).expect("validated module").params = params;
+            }
             return Err(error);
         }
-        // New instances must receive their first ordinary values before
-        // commit resets them. Existing instances still receive commands.
-        let slot = self.node(module)?.slot;
-        if let Some(fresh) = slot.and_then(|slot| self.slots.fresh_mut(slot)) {
-            for &(index, value) in &ordinary {
-                fresh.module.set_param(index, value);
+        // Fresh instances get ordinary values before their first reset.
+        for (&module, changes) in &ordinary {
+            if let Some(fresh) = self.graph.nodes[&module]
+                .slot
+                .and_then(|slot| self.slots.fresh_mut(slot))
+            {
+                for &(index, value) in changes {
+                    fresh.module.set_param(index, value);
+                }
             }
         }
         self.dirty = true;
         if let Err(error) = self.commit() {
-            if let Some(fresh) = slot.and_then(|slot| self.slots.fresh_mut(slot)) {
-                for &(index, _) in &ordinary {
-                    fresh.module.set_param(index, before[index]);
+            for (&module, changes) in &ordinary {
+                if let Some(fresh) = self.graph.nodes[&module]
+                    .slot
+                    .and_then(|slot| self.slots.fresh_mut(slot))
+                {
+                    for &(index, _) in changes {
+                        fresh.module.set_param(index, before[&module][index]);
+                    }
                 }
             }
-            self.graph.nodes.get_mut(&module).expect("validated module").params = before;
+            for (module, params) in before {
+                self.graph.nodes.get_mut(&module).expect("validated module").params = params;
+            }
             self.dirty = was_dirty;
             return Err(error);
         }
         self.revision = self.revision.wrapping_add(1);
-        // Structural values travel with the schedule and compiled widths. Ordinary
-        // values still use the normal command path, whose room was reserved.
-        self.set_params(module, &ordinary)
+        for (module, changes) in ordinary {
+            self.set_params(module, &changes)?;
+        }
+        Ok(())
     }
 
     /// Sets a parameter by name.

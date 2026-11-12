@@ -261,36 +261,34 @@ impl App {
                 .node(module)
                 .and_then(|n| loom_core::ModuleNames::parameter_index(n, loom_patch::modes::MEMBER_PARAM));
             if let Some(index) = index {
-                let _ = self.session.controller.set_param(module, index, value);
                 // A select inside a stack: every copy's Member follows.
-                self.fan_out_param(module.0, index, value);
+                if let Err(error) = self.fan_out_param(module.0, index, value) {
+                    self.alerts.warn(error.to_string());
+                }
             }
         }
     }
 
-    /// Writes a parameter value of copy 0 of a stack into every other copy
-    /// at once, with no commit, so a knob drag moves every copy during the
-    /// drag (ADR-0040, invariant 9). A seed takes each copy's offset.
-    pub(crate) fn fan_out_param(&mut self, module: u32, index: usize, value: f32) {
-        let copies = self.session.hierarchy.copies_of(ModuleId(module)).to_vec();
-        if copies.is_empty() {
-            return;
-        }
+    /// Writes copy 0 and every stack copy together (ADR-0040, invariant 9).
+    /// Structural edits compile once and fail for the whole group. Ordinary
+    /// edits use next-buffer commands. Seeds take each copy's offset.
+    pub(crate) fn fan_out_param(&mut self, module: u32, index: usize, value: f32) -> Result<(), loom_core::LoomError> {
         let spec = self
             .session
             .controller
             .graph()
             .node(ModuleId(module))
-            .and_then(|n| n.descriptor.params.get(index).copied());
-        let Some(spec) = spec else { return };
-        for (copy, offset) in copies {
-            let value = if spec.name == SEED_PARAM {
+            .and_then(|node| node.descriptor.params.get(index));
+        let mut changes = vec![(ModuleId(module), index, value)];
+        for &(copy, offset) in self.session.hierarchy.copies_of(ModuleId(module)) {
+            let value = if let Some(spec) = spec.filter(|spec| spec.name == SEED_PARAM) {
                 seeded(spec.min, spec.max, value, offset)
             } else {
                 value
             };
-            let _ = self.session.controller.set_param(copy, index, value);
+            changes.push((copy, index, value));
         }
+        self.session.controller.set_params_across(&changes)
     }
 
     /// Applies `edit` to the copies of assignment `id` onto the other copies

@@ -641,3 +641,97 @@ fn delay_state_keys_keep_voices_and_sides_separate() {
         assert_eq!(tap.state, if voice < 4 { voice as f32 + 0.25 } else { 0.0 });
     }
 }
+
+/// One mono-voice stereo cable shares its downmix across every copied voice.
+#[test]
+fn mono_voice_stereo_downmixes_are_shared() {
+    static BUNDLE: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        inputs: &[],
+        outputs: &[port("out", crate::SignalType::Modulation).with_channels(Channels::Voices)],
+        params: &[ParamSpec {
+            name: "voices",
+            label: "Voices",
+            description: "Test capacity.",
+            min: 1.0,
+            max: 16.0,
+            default: 16.0,
+            unit: "",
+            options: crate::ParamOptions::DEFAULT,
+        }
+        .integer()
+        .shapes_graph()],
+        ..FOLLOWER
+    };
+    static STEREO: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        inputs: &[],
+        outputs: &[port("out", crate::SignalType::Modulation).with_channels(Channels::Stereo)],
+        params: &[],
+        ..FOLLOWER
+    };
+    static TARGET: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        inputs: &[
+            port("in", crate::SignalType::Modulation),
+            port("control", crate::SignalType::Modulation).with_channels(Channels::Downmix),
+        ],
+        outputs: &[port("out", crate::SignalType::Modulation)],
+        params: &[ParamSpec {
+            name: "gain",
+            label: "Gain",
+            description: "Test gain.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: crate::ParamOptions::DEFAULT,
+        }],
+        ..FOLLOWER
+    };
+    for assignment in [false, true] {
+        let mut graph = followers(3);
+        graph.nodes.get_mut(&ModuleId(1)).unwrap().descriptor = &BUNDLE;
+        graph.nodes.get_mut(&ModuleId(1)).unwrap().params = vec![16.0];
+        graph.nodes.get_mut(&ModuleId(2)).unwrap().descriptor = &STEREO;
+        let target = graph.nodes.get_mut(&ModuleId(3)).unwrap();
+        target.descriptor = &TARGET;
+        target.params = vec![0.0];
+        target.copy_slots = (1..16).map(|voice| ((voice, 0), voice + 3)).collect();
+        cable(&mut graph, 1, 3, 0);
+        if assignment {
+            graph.assignments.insert(
+                AssignmentId(1),
+                crate::Assignment {
+                    source: OutputRef {
+                        module: ModuleId(2),
+                        port: 0,
+                    },
+                    target: ModuleId(3),
+                    param: 0,
+                    depth: 1.0,
+                    polarity: None,
+                    enabled: true,
+                },
+            );
+        } else {
+            cable(&mut graph, 2, 3, 1);
+        }
+        let (schedule, _) = compile(
+            &graph,
+            &probes_on([3]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            48_000.0,
+            64,
+        );
+        assert_eq!(schedule.downmixes.len(), 1);
+        let shared = schedule.downmixes[0].output as *const f32;
+        if assignment {
+            assert_eq!(schedule.fills.len(), 16);
+            assert!(schedule.fills.iter().all(|fill| fill.sources[0].buffer == shared));
+        } else {
+            for (op, module) in schedule.ops.iter().enumerate().filter(|(_, op)| op.voices == 16) {
+                assert_eq!(module.voices, 16);
+                assert_eq!(input_ptr(&schedule, op, 1), shared);
+            }
+        }
+    }
+}

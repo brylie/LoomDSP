@@ -119,3 +119,44 @@ fn param_falls_back_to_the_base() {
     assert_eq!(swept.map_or(2, 0u8, |v| (v * 10.0).round() as u8), 3);
     assert_eq!(plain.map_or(2, 7u8, |_| 0), 7);
 }
+
+/// Direct bundle lookups keep ports, voices, stereo sides, and mono fan-out distinct.
+#[test]
+fn bundle_ports_address_every_channel_without_searching() {
+    /// Echoes two ports while checking their independent widths.
+    struct Echo;
+    impl Module for Echo {
+        fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+            assert_eq!(io.input_width(0), crate::Width { voices: 2, sides: 1 });
+            assert_eq!(io.input_width(1), crate::Width { voices: 2, sides: 2 });
+            for port in 0..2 {
+                let width = io.output_width(port);
+                for voice in 0..width.voices {
+                    if port == 0 {
+                        assert_eq!(io.voice_input(port, voice, 0), io.voice_input(port, voice, 1));
+                    }
+                    for side in 0..width.sides {
+                        let input = io.voice_input(port, voice, side);
+                        io.voice_output(port, voice, side).copy_from_slice(input);
+                    }
+                }
+            }
+        }
+    }
+    let layout = testing::BundleLayout::new(vec![
+        crate::Width { voices: 2, sides: 1 },
+        crate::Width { voices: 2, sides: 2 },
+    ]);
+    let inputs: Vec<_> = (0..layout.channels()).map(|channel| vec![channel as f32; 3]).collect();
+    let mut outputs = vec![vec![0.0; 3]; layout.channels()];
+    testing::run_bundles(
+        &mut Echo,
+        &ProcessContext::new(48_000.0, 3, &[]),
+        &layout,
+        &inputs.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+        &[true; 2],
+        &layout,
+        &mut outputs.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>(),
+    );
+    assert_eq!(outputs, inputs);
+}

@@ -211,7 +211,7 @@ pub(crate) struct Schedule {
     pub downmixes: Vec<DownmixOp>,
     pub output_downmixes: (u32, u32),
     pub right_ptrs: Vec<RightPtr>,
-    pub bundle_ptrs: Vec<crate::module::BundlePtr>,
+    pub bundle_ports: Vec<crate::module::BundlePort>,
     /// Original slot and each extra voice/side slot, sorted by original.
     /// Parameter edits and resets go to every follower.
     pub copies: Vec<(u32, u32)>,
@@ -255,7 +255,7 @@ impl Schedule {
             downmixes: Vec::new(),
             output_downmixes: (0, 0),
             right_ptrs: Vec::new(),
-            bundle_ptrs: Vec::new(),
+            bundle_ports: Vec::new(),
             copies: Vec::new(),
             stereo_copies: Vec::new(),
             structural_params: Vec::new(),

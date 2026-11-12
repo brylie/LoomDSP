@@ -108,7 +108,7 @@ pub enum Channels {
     /// `Downmix`.
     Stereo,
     /// Reads all voices itself on an input; writes the structural `voices`
-    /// count on an output. A module with a Voices input is never copied.
+    /// count on an output. A module with any Voices port is never copied.
     Voices,
 }
 

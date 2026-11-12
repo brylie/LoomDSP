@@ -55,11 +55,11 @@ What the player sees.
    | Value | On an input | On an output |
    |---|---|---|
    | `Channels::PerChannel`, `Channels::Downmix`, `Channels::Stereo` | A bundle arriving here makes the module run once per voice. Inside each voice the stereo meaning is unchanged: `PerChannel` copies per side, `Downmix` reads one value from the two sides, `Stereo` reads both sides of its voice. | As many voices as the module runs; sides as the stereo rules say. |
-   | `Channels::Voices` | The module reads every voice of the bundle itself, and is not copied per voice. | The output has as many voices as the module's `voices` parameter says. The module is a source. A module may have both: it then runs as one instance (Voice assigner). |
+   | `Channels::Voices` | The module reads every voice of the bundle itself, and is not copied per voice. | The output has as many voices as the module's `voices` parameter says. The module is a source and is never copied. A module may have both: it then runs as one instance (Voice assigner). |
 
    *Why voices do not follow the stereo split:* the stereo rules make control inputs `Downmix` so a stereo patch does not pay twice for a control signal that is the same on both sides ([stereo](stereo.md), rule 4). A voice's pitch and gate are the opposite case: they differ per voice by definition, and an envelope that read the maximum of eight gates could not play eight notes. The oscillators, Phase generator, Envelope, and Amplifier keep their `Downmix` control inputs and become polyphonic with no change. *Why one name for both sides of `Voices`:* it mirrors `Stereo`, which also means "reads both" on an input and "writes both" on an output.
 
-4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with a `Voices` input never runs per voice, whatever its other inputs receive. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
+4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with any `Voices` port never runs per voice, whatever its other inputs receive. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
 
 5. **Output widths.** A `Voices` output has the module's voice count. Any other output has as many voices as its module runs. A `Stereo` output is stereo per voice. So a module with no inputs is one voice wide unless it declares a `Voices` output, and voices flow only from sources, as stereo flows only from stereo sources ([stereo](stereo.md), rule 7).
 
@@ -101,7 +101,12 @@ What the player sees.
   and copy slots on the control thread, then publishes the schedule. Structural
   values reach every module copy as part of the schedule swap. Failure
   keeps the old graph value and running schedule. Ordinary parameters still
-  use the next-buffer command path. A count edit is one undo step.
+  use the next-buffer command path. `Controller::set_params_across` stages edits
+  to multiple modules together, including every copy of a stack. One capacity
+  check and one compile publish the group, or all values stay unchanged. Writing
+  an unchanged rounded structural value does not compile or change the graph
+  revision; ordinary values in that group still take effect. A count edit is
+  one undo step.
 - Structural values are saved and may be exposed on sub-patch surfaces. Their
   controls remain editable, but MIDI learn and modulation cannot target them,
   including through an exposed name. A patch file with a MIDI mapping on such

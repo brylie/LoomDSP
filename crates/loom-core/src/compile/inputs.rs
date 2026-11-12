@@ -159,6 +159,7 @@ impl Inputs {
                 groups.entry((v, assignment.param)).or_default().push(i);
             }
         }
+        let mut means = BTreeMap::new();
         for ((node, param), sources) in groups {
             for ch in 0..layout.channels(node) {
                 let buffer = buffers.add();
@@ -172,18 +173,19 @@ impl Inputs {
                             // A stereo source into a module that runs as one
                             // gives the mean, because a parameter has no signal
                             // type (stereo spec, rule 17).
-                            let output = buffers.add();
-                            self.downmixes[node].push(DownmixSpec {
-                                kind: DownmixKind::Mean,
-                                left: plan.assignment_buffer(layout, assignment, layout.copy_channel(node, ch) / 2 * 2),
-                                right: plan.assignment_buffer(
-                                    layout,
-                                    assignment,
-                                    layout.copy_channel(node, ch) / 2 * 2 + 1,
-                                ),
-                                output,
-                            });
-                            output
+                            let channel = layout.copy_channel(node, ch) / 2 * 2;
+                            let left = plan.assignment_buffer(layout, assignment, channel);
+                            let right = plan.assignment_buffer(layout, assignment, channel + 1);
+                            *means.entry((node, left, right)).or_insert_with(|| {
+                                let output = buffers.add();
+                                self.downmixes[node].push(DownmixSpec {
+                                    kind: DownmixKind::Mean,
+                                    left,
+                                    right,
+                                    output,
+                                });
+                                output
+                            })
                         };
                         SourceSpec { assignment: i, buffer }
                     })
@@ -213,6 +215,11 @@ impl Inputs {
                     continue;
                 }
                 for voice in 0..layout.widths.voices[&layout.ids[v]] {
+                    if voice > 0 && layout.widths.outputs[&from].voices == 1 {
+                        let shared = self.downmixed[&(input, 0)];
+                        self.downmixed.insert((input, voice), shared);
+                        continue;
+                    }
                     // Missing voices read defaults, rather than downmixing other voices.
                     let Some(left) = plan.input_buffer(layout, input, voice * 2) else {
                         continue;
