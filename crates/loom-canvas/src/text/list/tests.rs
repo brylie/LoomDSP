@@ -188,3 +188,28 @@ fn a_wrapped_run_breaks_at_its_width() {
     let lines: std::collections::BTreeSet<u32> = list.glyphs.iter().map(|g| g.origin.y.to_bits()).collect();
     assert!(lines.len() > 1, "{lines:?}");
 }
+
+/// A layer inside another is cut to both clips, and one wholly outside its
+/// parent is cut to nothing.
+#[test]
+fn a_nested_layer_is_cut_to_its_parent() {
+    let text = RefCell::new(CanvasText::new());
+    let mut list = PaintList::new(BOUNDS);
+    let parent = Rect::new(Point::new(200.0, 200.0), Size::new(50.0, 50.0));
+    let across = Rect::new(Point::new(240.0, 190.0), Size::new(30.0, 30.0));
+    let away = Rect::new(Point::new(400.0, 400.0), Size::new(10.0, 10.0));
+    let mut painter = ListPainter::new(&text, &mut list);
+    painter.begin_layer(parent);
+    painter.begin_layer(across);
+    painter.end_layer();
+    painter.begin_layer(away);
+    painter.end_layer();
+    painter.end_layer();
+    let clips: Vec<Rect> = list.layers.iter().map(|layer| layer.clip).collect();
+    assert_eq!(clips[2], Rect::new(Point::new(240.0, 200.0), Size::new(10.0, 20.0)));
+    assert_eq!(clips[4].size(), Size::new(0.0, 0.0), "outside its parent");
+    assert_eq!(clips[3], parent, "back to the parent's clip");
+    assert_eq!(clips[5], parent);
+    assert_eq!(clips[6], BOUNDS, "back to the canvas's clip");
+    assert_eq!(clips.len(), 7);
+}

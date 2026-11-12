@@ -326,6 +326,11 @@ impl Atlas {
         let corner = allocation.rectangle.min;
         let (x, y) = (corner.x as u32 + PAD, corner.y as u32 + PAD);
         let mut data = image.data;
+        // swash 0.2.10 gives colour outlines (COLR, as in Segoe UI Emoji)
+        // premultiplied: it draws each layer over a transparent image, as
+        // `(1 - a) * dst + a * colour`. Colour bitmaps (sbix and CBDT, as
+        // in Apple Color Emoji) are PNG data, which is straight alpha, and
+        // are scaled from their nearest strike to the size asked for.
         if matches!(image.source, Source::ColorBitmap(_)) {
             premultiply(&mut data);
         }

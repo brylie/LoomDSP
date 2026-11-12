@@ -229,6 +229,14 @@ impl Painter for ListPainter<'_> {
     }
 
     fn begin_layer(&mut self, clip: Rect) {
+        // A layer inside another is cut to both. One that does not overlap
+        // its parent shows nothing.
+        let clip = match self.list.open.last() {
+            Some(parent) => parent
+                .intersection(clip)
+                .unwrap_or(Rect::new(clip.position(), Size::new(0.0, 0.0))),
+            None => clip,
+        };
         self.list.open.push(clip);
         self.list.start_layer(clip);
     }

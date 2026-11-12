@@ -219,7 +219,8 @@ fn the_atlas_grows_to_its_largest_size() {
     assert!(shown.contains("size: 256"), "{shown}");
 }
 
-/// An emoji keeps its own colours, in the colour page, premultiplied.
+/// An emoji keeps its own colours, in the colour page, premultiplied, at
+/// the size asked for, not at its font's nearest strike.
 #[test]
 fn an_emoji_goes_to_the_colour_page() {
     let Some(list) = painted("😀", Point::ORIGIN) else {
@@ -237,6 +238,10 @@ fn an_emoji_goes_to_the_colour_page() {
         return;
     }
     assert_eq!(quads[0].params[0], 1.0);
+    // 12 px at scale 2: about 24 physical pixels, where a strike would be
+    // 40 to 160.
+    let size = upload.width.max(upload.height);
+    assert!((16..=32).contains(&size), "{size} pixels across");
     assert_eq!(upload.data.len() as u32, upload.width * upload.height * 4);
     assert!(
         upload
