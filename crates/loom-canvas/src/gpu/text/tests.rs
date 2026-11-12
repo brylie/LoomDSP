@@ -83,7 +83,9 @@ fn the_plan_keeps_the_painted_order() {
     let mut list = PaintList::new(BOUNDS);
     let popup = Rect::new(Point::new(150.0, 100.0), Size::new(100.0, 50.0));
     let mut painter = ListPainter::new(&text, &mut list);
-    painter.text(&run("Cutoff", Point::new(110.0, 60.0)));
+    // "Gain", not a word with "ff" or "fi": a font may join those into
+    // one glyph, as Linux CI's does.
+    painter.text(&run("Gain", Point::new(110.0, 60.0)));
     painter.begin_layer(popup);
     painter.quad(quad(Point::new(150.0, 100.0)));
     painter.text(&run("50", Point::new(155.0, 105.0)));
@@ -114,7 +116,7 @@ fn the_plan_keeps_the_painted_order() {
     );
     let first_box = plan.boxes[0];
     assert_eq!(first_box.rect(), [50.0, 50.0, 20.0, 10.0]);
-    assert_eq!(plan.glyphs.len(), 8, "six letters and two digits");
+    assert_eq!(plan.glyphs.len(), 6, "four letters and two digits");
 }
 
 /// A layer wholly outside the target draws nothing, and an empty batch

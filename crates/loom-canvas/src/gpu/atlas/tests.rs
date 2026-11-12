@@ -166,17 +166,29 @@ fn the_canvas_corner_moves_the_quads() {
 /// atlas is full.
 #[test]
 fn a_full_page_frees_what_the_frame_did_not_use() {
+    // The same letters a quarter physical pixel apart: other images of
+    // the same sizes, so the freed room fits them whatever the font.
+    let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     let (Some(first), Some(second)) = (
-        painted("ABCDEFGHIJKLMNOPQRSTUVWXYZ", Point::ORIGIN),
-        painted("abcdefghijklmnopqrstuvwxyz", Point::ORIGIN),
+        painted(letters, Point::ORIGIN),
+        painted(letters, Point::new(0.125, 0.0)),
     ) else {
         return;
     };
-    // Room for one alphabet of 12 px glyphs at scale 2, not two.
-    let mut atlas = Atlas::sized(128, 128);
+    // The smallest page that holds one alphabet at scale 2. Its sides are
+    // found, not fixed, because glyph sizes differ from font to font.
+    let side = (16..=1024)
+        .step_by(8)
+        .find(|&side| {
+            let mut atlas = Atlas::sized(side, side);
+            atlas.begin_frame();
+            place_all(&mut atlas, &first, 2.0).is_ok()
+        })
+        .expect("a page that holds one alphabet");
+    let mut atlas = Atlas::sized(side, side);
     atlas.begin_frame();
     place_all(&mut atlas, &first, 2.0).unwrap();
-    let mut both = Atlas::sized(128, 128);
+    let mut both = Atlas::sized(side, side);
     both.begin_frame();
     place_all(&mut both, &first, 2.0).unwrap();
     assert_eq!(
@@ -188,7 +200,7 @@ fn a_full_page_frees_what_the_frame_did_not_use() {
     place_all(&mut atlas, &second, 2.0).expect("the first alphabet's glyphs are freed");
     assert!(atlas.len() < 52);
 
-    let mut tiny = Atlas::sized(16, 16);
+    let mut tiny = Atlas::sized(side - 8, side - 8);
     tiny.begin_frame();
     assert_eq!(place_all(&mut tiny, &first, 2.0), Err(Full));
 }
