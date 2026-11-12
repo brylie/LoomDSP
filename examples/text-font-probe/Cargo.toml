@@ -1,0 +1,29 @@
+# Which font each text crate candidate draws "the system sans-serif" with,
+# and how wide it sets a few tile labels (docs/research/2026-11-text-crate-choice.md).
+# It is outside the LoomDSP workspace on purpose: it uses no LoomDSP crate,
+# CI does not build it, and its own Cargo.lock pins the versions the note
+# names. Delete this folder, and its `exclude` entry in the root Cargo.toml,
+# once plan step 2.4b lands.
+[package]
+name = "text-font-probe"
+description = "Prints the font face and text widths each text crate candidate gives for the system sans-serif."
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# Today's measure, exactly as the canvas calls it: Iced's paragraph, with
+# the features the app builds (no `fira-sans`, so the default font is the
+# generic sans-serif).
+iced_graphics = { version = "=0.14.0", default-features = false, features = ["web-colors"] }
+iced_core = "=0.14.0"
+# What Iced 0.14 uses underneath.
+cosmic_text_15 = { package = "cosmic-text", version = "=0.15.0" }
+# The newest cosmic-text, once Iced no longer pins it.
+cosmic_text_19 = { package = "cosmic-text", version = "=0.19.0" }
+parley = "=0.12.0"
+# To read a face's name from the bytes Parley hands back.
+skrifa = "=0.44.0"
+
+[workspace]

@@ -17,8 +17,10 @@ members = [
 ]
 # Fuzz targets need nightly; they have their own workspace (#44).
 # `examples/accesskit-macos-repro` is a reproduction for AccessKit upstream.
-# It stays out so its dependencies never reach the workspace tree.
-exclude = ["fuzz", "examples/accesskit-macos-repro"]
+# `examples/text-font-probe` compares the text crate candidates' fonts
+# (plan step 2.4). Both stay out so their dependencies never reach the
+# workspace tree.
+exclude = ["fuzz", "examples/accesskit-macos-repro", "examples/text-font-probe"]
 
 [workspace.package]
 version = "0.1.0"
