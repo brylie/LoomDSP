@@ -66,6 +66,21 @@ fn wrapping_breaks_between_words() {
     assert!(wrapped.height >= line.height * 2.0, "{wrapped:?} {line:?}");
 }
 
+/// A space at the end of the text widens it, so a caret after a typed
+/// space moves past it. A space where wrapping breaks a line takes no
+/// room in the box.
+#[test]
+fn a_trailing_space_counts_but_a_space_at_a_break_does_not() {
+    let Some(mut text) = text() else { return };
+    let word = text.measure("Gain", style(12.0), None);
+    let spaced = text.measure("Gain ", style(12.0), None);
+    assert!(spaced.width > word.width, "{spaced:?} {word:?}");
+    let narrow = word.width + 1.0;
+    let wrapped = text.measure("Gain Gain", style(12.0), Some(narrow));
+    assert!(wrapped.height > word.height, "it wraps: {wrapped:?}");
+    assert!((wrapped.width - word.width).abs() < 0.01, "{wrapped:?} {word:?}");
+}
+
 /// A symbol the interface font may lack still has a width: shaping falls
 /// back to a font that has it.
 #[test]

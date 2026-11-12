@@ -25,7 +25,9 @@
 //! The folder holds `NAME.png` for each patch `NAME.ron`, made at the base
 //! commit with `--screenshot-window NAME.png --scale 2`. Without the
 //! variable it measures only, and writes this commit's images to the
-//! system's temporary folder, so they can be the next baseline.
+//! system's temporary folder, so they can be the next baseline. It needs a
+//! GPU adapter either way, since the labels are found in the window it
+//! draws; without one it stops and says so.
 
 use super::*;
 use clap::Parser as _;
@@ -164,7 +166,9 @@ fn text_gate() {
     for patch in patches() {
         let name = patch.file_stem().unwrap().to_string_lossy().to_string();
         let Some((app, canvas, physical, pixels)) = window(&patch) else {
-            println!("{NO_GPU}: measuring only");
+            // The labels' places come from the window's scene and camera,
+            // which need the renderer too, so there is nothing to measure.
+            println!("{NO_GPU}: the gate needs one, nothing was measured");
             return;
         };
         let image = out.join(format!("{name}.png"));

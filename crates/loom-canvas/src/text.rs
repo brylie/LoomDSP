@@ -148,6 +148,10 @@ impl CanvasText {
 
     /// The size of `text` in `style`, read from the same cached layout the
     /// canvas draws.
+    ///
+    /// Spaces at the end of the text count, so a caret after a typed space
+    /// moves past it. A space where wrapping breaks a line does not, as it
+    /// takes no room in the box.
     pub fn measure(&mut self, text: &str, style: TextStyle, wrap: Option<f32>) -> Size {
         let layout = self.layout(text, style, wrap);
         Size::new(layout.width(), layout.height())
