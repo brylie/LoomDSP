@@ -2538,13 +2538,16 @@ fn a_crop_takes_the_pixels_of_its_region() {
 #[test]
 fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
     let mut ui = pointer_ui();
+    // Built as JSON, so a Windows path's backslashes are escaped.
     let path = std::env::temp_dir().join(format!("loom-capture-effect-{}.png", std::process::id()));
-    let path = path.display();
+    let path = path.display().to_string();
     for line in [
-        format!(r#"{{"cmd": "screenshot", "path": "{path}"}}"#),
-        format!(r#"{{"cmd": "screenshot", "path": "{path}", "rect": [0, 0, 10, 10]}}"#),
-        format!(r#"{{"cmd": "screenshot", "path": "{path}", "target": "4:cutoff", "margin": 4}}"#),
-    ] {
+        json!({"cmd": "screenshot", "path": path}),
+        json!({"cmd": "screenshot", "path": path, "rect": [0, 0, 10, 10]}),
+        json!({"cmd": "screenshot", "path": path, "target": "4:cutoff", "margin": 4}),
+    ]
+    .map(|command| command.to_string())
+    {
         let (answer, messages) = drive(&mut ui, &line);
         assert!(
             answer.unwrap_err().contains("no window to capture"),
