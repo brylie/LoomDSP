@@ -315,20 +315,19 @@ impl<D: BridgeDriver> Bridge<D> {
         let now = Instant::now();
         let next = run(&mut self.runtime, now, &mut self.driver);
         let mut tasks = self.driver.take_tasks();
-        tasks.extend(self.runtime.target_mut().take_tasks());
-        // What only Iced's widgets know, asked in order.
-        tasks.extend(
-            self.runtime
-                .app()
-                .0
-                .take_window_questions()
-                .into_iter()
-                .map(|question| question_task(question).map(Bridged::App)),
-        );
-        // A message that may have moved focus: ask Iced where it is now.
-        if self.runtime.app().0.take_focus_question() {
-            tasks.push(focus_query(Bridged::Focus));
+        // The window's work, one after another: focus and scroll first,
+        // then what only Iced's widgets know, in the order asked, then where
+        // focus is after a message that may have moved it. Iced runs a
+        // batch's tasks side by side, so a question batched beside a scroll
+        // could read the window from before it.
+        let mut window = Task::batch(self.runtime.target_mut().take_tasks());
+        for question in self.runtime.app().0.take_window_questions() {
+            window = window.chain(question_task(question).map(Bridged::App));
         }
+        if self.runtime.app().0.take_focus_question() {
+            window = window.chain(focus_query(Bridged::Focus));
+        }
+        tasks.push(window);
         // Messages wait in the runtime, such as those an update queued for
         // the next turn, which no waker announced: run that turn.
         if next.again {
