@@ -283,7 +283,7 @@ jobs:
       - run: mise run docs
 
   msrv:
-    name: Minimum Rust version (1.99)
+    name: Minimum Rust version (1.100)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

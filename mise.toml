@@ -13,7 +13,9 @@
 [tools]
 # clippy and rustfmt for the lint and format checks, llvm-tools for coverage,
 # and the WebAssembly target for the portability check (hard rule 6).
-rust = { version = "latest", components = "clippy,rustfmt,llvm-tools-preview", targets = "wasm32-unknown-unknown" }
+# `minimum_release_age = "0s"` lets CI use a new Rust release on release day
+# instead of holding `latest` on the previous one for 24 hours.
+rust = { version = "latest", components = "clippy,rustfmt,llvm-tools-preview", targets = "wasm32-unknown-unknown", minimum_release_age = "0s" }
 # Line coverage, for the coverage check and the CI uploads.
 "aqua:taiki-e/cargo-llvm-cov" = "latest"
 # Test runner for the coverage check; writes the JUnit report for Codecov.
@@ -90,7 +92,7 @@ description = "Check that the workspace still builds with the minimum Rust versi
 # Library and binary code only: dev-dependencies (benchmarks) may need a
 # newer compiler, and users never build them. Keep in step with
 # `rust-version` in Cargo.toml.
-run = "mise exec rust@1.99 -- cargo check --workspace"
+run = "mise exec rust@1.100.0 -- cargo check --workspace"
 
 [tasks.deny]
 description = "Check licences and advisories (ADR-0006)"
