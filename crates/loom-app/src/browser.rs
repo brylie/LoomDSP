@@ -488,11 +488,12 @@ impl Browser {
             loom_ui_core::Point::new(0.0, top),
             loom_ui_core::Size::new(1.0, ROW_HEIGHT),
         );
-        let by = shown.reveal(part).y;
-        if by == 0.0 {
-            return Effects::none();
-        }
-        self.scroll += by;
+        self.scroll += shown.reveal(part).y;
+        // Asked for even when the browser's own offset says the row shows:
+        // the toolkit keeps the offset it last scrolled to, though it
+        // shows it clamped while the list is short, so it can show another
+        // offset once the list grows again. The window knows which, and
+        // scrolls nothing when there is nothing to move.
         Effects::scroll_into_view(row.id.clone())
     }
 

@@ -174,3 +174,44 @@ fn the_list_scrolls_just_enough_and_the_browser_knows_where() {
     let most = rows as f32 * ROW_HEIGHT - LIST_HEIGHT;
     assert!((end - most).abs() < 0.5, "the end of the list: {end}, not {most}");
 }
+
+/// After a scroll down, a search that makes the list short, and the search
+/// cleared again, the first row shows. The toolkit keeps its own offset
+/// while the short list shows it clamped, so the browser always asks the
+/// window to show the row, even when its own offset says it shows.
+#[test]
+fn the_first_row_shows_after_a_short_list_grows_again() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.send(crate::Message::OpenBrowser);
+    let _ = ui.redraw();
+    for _ in 0..ROWS + 4 {
+        let _ = ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    }
+    let _ = ui.redraw();
+    assert!(ui.scroll_translation(LIST).unwrap().y > 0.0, "the list scrolled down");
+    let query = |ui: &mut crate::ui_test::Ui, text: &str| {
+        ui.send(crate::Message::Browser(Message::Query(text.into())));
+        let _ = ui.redraw();
+    };
+    query(&mut ui, "saw");
+    let rows = ui.app.overlays.browser().unwrap().model().rows.len();
+    assert!(rows < ROWS, "a list short enough to fit: {rows} rows");
+    query(&mut ui, "");
+    let browser = ui.app.overlays.browser().unwrap();
+    assert_eq!(browser.highlight(), 0);
+    let first = browser.model().rows[0].id.clone();
+    let place = ui.places().of(&first).expect("the window drew the first row");
+    let list = place.clip.expect("it is in the list");
+    assert!(
+        place.rect.y >= list.y - 0.5,
+        "the first row shows: {:?} in {list:?}",
+        place.rect
+    );
+    let shown = ui.scroll_translation(LIST).unwrap().y;
+    let ours = ui.app.overlays.browser().unwrap().scroll;
+    assert!(
+        (shown - ours).abs() < 0.5,
+        "the browser's offset {ours} is the list's {shown}"
+    );
+}
