@@ -1748,3 +1748,17 @@ fn a_retarget_onto_an_inner_parameter_keeps_the_matrix_selection() {
     let order: Vec<ModuleId> = graph.assignments().map(|(_, a)| a.source.module).collect();
     assert_eq!(order, [lfo, ModuleId(1)], "inner first, as the file loads them");
 }
+
+/// A sub-patch tile's exposed parameter takes a typed value in the
+/// inspector: the draft is keyed by the inner module, and every key stays in
+/// it until Enter commits it.
+#[test]
+fn an_exposed_value_field_takes_a_typed_value() {
+    let (mut ui, svf, cutoff) = nested_example_ui();
+    ui.app.session.selection = [2].into_iter().collect();
+    ui.redraw();
+    assert!(matches!(ui.app.inspector_model(), Inspector::SubPatch(_)));
+    ui.type_a_value(svf.0, cutoff, "440");
+    let value = ui.app.session.controller.graph().node(svf).unwrap().params[cutoff];
+    assert!((value - 440.0).abs() < 0.5, "{value}");
+}

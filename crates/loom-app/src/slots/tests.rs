@@ -901,3 +901,34 @@ fn tile_menu_items_are_keyed_by_what_they_do() {
     app.show_level(&ModulePath::root());
     check(&mut app, 2);
 }
+
+/// A slot's role parameter takes a typed value in the inspector: the draft
+/// is keyed by the part's module, and every key stays in it until Enter
+/// commits it.
+#[test]
+fn a_slot_value_field_takes_a_typed_value() {
+    let (mut app, slot, svf) = with_slot();
+    app.session.selection = std::collections::BTreeSet::from([slot]);
+    let cutoff = app
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(svf))
+        .unwrap()
+        .descriptor
+        .param_index("cutoff")
+        .unwrap();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.redraw();
+    assert!(matches!(ui.app.inspector_model(), Inspector::Slot(_)));
+    ui.type_a_value(svf, cutoff, "440");
+    let value = ui
+        .app
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(svf))
+        .unwrap()
+        .params[cutoff];
+    assert!((value - 440.0).abs() < 0.5, "{value}");
+}

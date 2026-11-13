@@ -195,9 +195,8 @@ impl Ui {
         // Something outside a turn may have asked where focus is, such as a
         // test replacing the patch directly. The bridge asks after its next
         // turn; the harness asks here.
-        if self.app.take_focus_question()
-            && let Some(moved) = self.focus_answer()
-        {
+        if self.app.take_focus_question() {
+            let moved = self.focus_answer();
             messages.extend(self.deliver(moved));
         }
         let theme = self.app.theme();
@@ -273,6 +272,11 @@ impl Ui {
         let (sender, inbox) = std::sync::mpsc::channel();
         let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
         let window = loom_ui::WindowState::new(loom_ui_core::Size::new(WINDOW.width, WINDOW.height));
+        // The record takes a focus answer as it is applied, as the bridge's
+        // target does just before it hands `FocusMoved` over.
+        if let Message::FocusMoved(part) = &message {
+            self.focused = part.clone();
+        }
         let cx = loom_ui::Context::new(Instant::now(), &waker, self.focused.clone(), window);
         let effects = self.app.update(message, &cx);
         for task in self.app.outbox.take() {
@@ -300,23 +304,19 @@ impl Ui {
         }
         let mut replies: Vec<Message> = inbox.try_iter().collect();
         // As the bridge does: after a message that may have moved focus, or a
-        // focus effect, ask the widgets, and if focus moved, tell the app at
-        // once, before any other message, so its copy never lags the record.
-        if (self.app.take_focus_question() || moved_focus)
-            && let Some(moved) = self.focus_answer()
-        {
-            log.push(moved.clone());
-            replies.extend(self.turn(moved, queue, log));
+        // focus effect, ask the widgets. The answer comes after what is
+        // already queued, which runs under the old focus.
+        if self.app.take_focus_question() || moved_focus {
+            replies.push(self.focus_answer());
         }
         replies
     }
 
     /// Reads focus from the widgets, as the bridge's focus question does,
-    /// and gives the app's message for the answer, changed or not.
-    fn focus_answer(&mut self) -> Option<Message> {
-        let part = self.read_focus().part();
-        self.focused = part.clone();
-        Some(Message::FocusMoved(part))
+    /// and gives the app's message for the answer, changed or not. The
+    /// record takes it when the message is applied (`turn`).
+    fn focus_answer(&mut self) -> Message {
+        Message::FocusMoved(self.read_focus().part())
     }
 
     /// What the widgets say has focus now.
@@ -448,6 +448,30 @@ impl Ui {
     /// The part whose text field has focus, read from the widgets.
     pub(crate) fn focused_field(&mut self) -> Option<loom_ui_core::UiId> {
         self.read_focus().part()
+    }
+
+    /// Clicks the inspector's value field for `module`'s parameter `index`,
+    /// types `text` into it, and presses Enter, checking the draft on the
+    /// way: the typed text is the draft until Enter commits it, and the
+    /// field keeps focus after, as it does for a module's own parameters.
+    pub(crate) fn type_a_value(&mut self, module: u32, index: usize, text: &str) {
+        let at = self.value_field(module, index);
+        self.move_to(at);
+        self.press();
+        self.release();
+        self.typewrite(text);
+        let draft = self.app.session.value_draft.as_ref().expect("a draft is typed");
+        assert_eq!(draft.draft.text, text, "every key stays in the draft");
+        self.tap(
+            keyboard::Key::Named(keyboard::key::Named::Enter),
+            keyboard::Modifiers::default(),
+        );
+        assert!(self.app.session.value_draft.is_none(), "Enter commits it");
+        assert_eq!(
+            self.app.focus,
+            self.app.value_field_part(module, index),
+            "the field keeps focus"
+        );
     }
 
     /// Where the inspector's value field for this parameter is in the window.

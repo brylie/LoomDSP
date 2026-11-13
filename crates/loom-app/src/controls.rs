@@ -406,26 +406,42 @@ impl App {
         }
     }
 
+    /// Every value field the inspector shows now, as (module, parameter
+    /// index, the field's part): a module's own parameters, a sub-patch
+    /// tile's exposed rows, and a slot's parameters, each under the inner
+    /// module that owns the parameter, as its draft is.
+    fn value_fields(&self) -> Vec<(u32, usize, UiId)> {
+        use crate::inspector::{Inspector, ParamRow, ids};
+        let field = |module: u32, row: &ParamRow| {
+            row.field
+                .is_some()
+                .then(|| (module, row.index, ids::part(&row.ui, "field")))
+        };
+        match self.inspector_model() {
+            Inspector::Module(rows) => rows.params.iter().filter_map(|p| field(rows.id, p)).collect(),
+            Inspector::SubPatch(s) => s.params.iter().filter_map(|e| field(e.module, &e.row)).collect(),
+            Inspector::Slot(s) => s
+                .role_params
+                .iter()
+                .chain(&s.other_params)
+                .filter_map(|(_, module, p)| field(*module, p))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// The part of this parameter's value field, as the inspector shows it,
     /// or `None` when the inspector does not show it.
     pub(crate) fn value_field_part(&self, module: u32, index: usize) -> Option<UiId> {
-        let crate::inspector::Inspector::Module(rows) = self.inspector_model() else {
-            return None;
-        };
-        (rows.id == module)
-            .then(|| rows.params.iter().find(|p| p.index == index))
-            .flatten()
-            .map(|p| crate::inspector::ids::part(&p.ui, "field"))
+        self.value_fields()
+            .into_iter()
+            .find(|(m, i, _)| (*m, *i) == (module, index))
+            .map(|(_, _, part)| part)
     }
 
     /// True if `part` is a value field the inspector shows.
     fn is_value_field(&self, part: &UiId) -> bool {
-        let crate::inspector::Inspector::Module(rows) = self.inspector_model() else {
-            return false;
-        };
-        rows.params
-            .iter()
-            .any(|p| p.field.is_some() && crate::inspector::ids::part(&p.ui, "field") == *part)
+        self.value_fields().iter().any(|(_, _, shown)| shown == part)
     }
 
     /// Enter in an inspector value field. After a commit the field selects its
