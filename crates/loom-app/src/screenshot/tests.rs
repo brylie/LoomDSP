@@ -45,7 +45,7 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
     // The same app laid out by the test harness, to find the buttons
     // by their text. A new patch has nothing to undo.
     let mut ui = crate::ui_test::Ui::with_app(app);
-    assert!(ui.app.session.edits.history.undo_step().is_none());
+    assert!(ui.app().session.edits.history.undo_step().is_none());
     let width = crate::WINDOW.width as usize;
     let mut fill = |label: &str| {
         let text = ui.text(label).unwrap_or_else(|| panic!("no `{label}` button"));

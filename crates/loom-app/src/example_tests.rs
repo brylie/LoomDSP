@@ -111,13 +111,13 @@ fn saving_an_example_asks_for_a_place_and_keeps_the_example() {
     let examples = Examples::new("example-save");
     let before = examples.example_text();
     let mut ui = Ui::with_app(app_with(examples.example()));
-    turn_knob(&mut ui.app);
-    assert_eq!(ui.app.ui_snapshot().title, "* subtractive (example) - LoomDSP");
+    turn_knob(ui.app_mut());
+    assert_eq!(ui.app().ui_snapshot().title, "* subtractive (example) - LoomDSP");
 
     // Cancelled: nothing is written, and the mark stays.
     press_save(&mut ui);
     assert_eq!(fake::asked(), vec![Asked::Save(Some(PathBuf::from("subtractive.ron")))]);
-    assert!(ui.app.unsaved());
+    assert!(ui.app().unsaved());
     assert_eq!(examples.example_text(), before);
 
     let mine = examples.tmp.0.join("mine.ron");
@@ -125,16 +125,16 @@ fn saving_an_example_asks_for_a_place_and_keeps_the_example() {
     press_save(&mut ui);
     assert_eq!(fake::asked().len(), 1);
     assert!(mine.is_file());
-    assert_eq!(ui.app.session.document.file(), Some(mine.as_path()));
-    assert_eq!(ui.app.ui_snapshot().title, "mine.ron - LoomDSP");
+    assert_eq!(ui.app().session.document.file(), Some(mine.as_path()));
+    assert_eq!(ui.app().ui_snapshot().title, "mine.ron - LoomDSP");
     assert_eq!(examples.example_text(), before, "the example keeps its comments");
     assert_eq!(examples.files(), vec!["subtractive.ron".to_string()]);
 
     // From now on Save writes the chosen file, with no dialog.
-    turn_knob(&mut ui.app);
+    turn_knob(ui.app_mut());
     press_save(&mut ui);
     assert_eq!(fake::asked(), Vec::new());
-    assert!(!ui.app.unsaved());
+    assert!(!ui.app().unsaved());
 }
 
 /// File > Open on an example, after its dialog, gives a copy too. The
@@ -168,12 +168,12 @@ fn a_folder_named_examples_elsewhere_is_not_a_copy() {
     fs::copy(examples.example(), &set).unwrap();
 
     let mut ui = Ui::with_app(app_with(set.clone()));
-    assert_eq!(ui.app.session.document.file(), Some(set.as_path()));
-    assert_eq!(ui.app.ui_snapshot().title, "set.ron - LoomDSP");
-    turn_knob(&mut ui.app);
+    assert_eq!(ui.app().session.document.file(), Some(set.as_path()));
+    assert_eq!(ui.app().ui_snapshot().title, "set.ron - LoomDSP");
+    turn_knob(ui.app_mut());
     press_save(&mut ui);
     assert_eq!(fake::asked(), Vec::new());
-    assert!(!ui.app.unsaved());
+    assert!(!ui.app().unsaved());
     assert_ne!(
         fs::read_to_string(&set).unwrap(),
         examples.example_text(),

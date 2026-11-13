@@ -147,8 +147,8 @@ fn prefixes_and_errors() {
 #[test]
 fn names_find_sub_patch_tiles_and_port_tiles() {
     let ui = crate::ui_test::Ui::open("nested-subtractive.ron");
-    let graph = ui.app.session.controller.graph();
-    let h = &ui.app.session.hierarchy;
+    let graph = ui.app().session.controller.graph();
+    let h = &ui.app().session.hierarchy;
     let port = |module, output, index| Part::Port(PortRef { module, output, index });
     assert_eq!(find(graph, h, 2, "cutoff"), Ok(Part::Control(2, 0)));
     assert_eq!(find(graph, h, 2, "pitch"), Ok(port(2, false, 0)));
@@ -184,8 +184,8 @@ fn names_find_sub_patch_tiles_and_port_tiles() {
 #[test]
 fn param_and_exposed_prefixes_name_one_kind() {
     let ui = crate::ui_test::Ui::open("nested-subtractive.ron");
-    let graph = ui.app.session.controller.graph();
-    let h = &ui.app.session.hierarchy;
+    let graph = ui.app().session.controller.graph();
+    let h = &ui.app().session.hierarchy;
     // Tile 2 is the Voice sub-patch: its Cutoff is exposed.
     assert_eq!(find(graph, h, 2, "exposed:cutoff"), Ok(Part::Control(2, 0)));
     let error = find(graph, h, 2, "param:cutoff").unwrap_err();

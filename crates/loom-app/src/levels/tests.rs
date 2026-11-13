@@ -74,7 +74,7 @@ fn titles(app: &App) -> Vec<String> {
 
 /// A point on a tile's header, in window coordinates.
 fn header(ui: &mut Ui, id: u32) -> Point {
-    let tile = ui.app.session.scene.module(id).expect("the tile is on the canvas");
+    let tile = ui.app().session.scene.module(id).expect("the tile is on the canvas");
     let world = Point::new(tile.position.x + tile.width() / 2.0, tile.position.y + 8.0);
     ui.canvas().to_window(world)
 }
@@ -117,10 +117,10 @@ fn opening_a_sub_patch_shows_its_inside_and_the_breadcrumb() {
     ui.press();
     ui.release();
     ui.redraw();
-    assert_eq!(ui.app.session.level, voice());
-    let snapshot = ui.app.ui_snapshot();
+    assert_eq!(ui.app().session.level, voice());
+    let snapshot = ui.app().ui_snapshot();
     assert_eq!(snapshot.level, ["Voice"]);
-    let mut shown = titles(&ui.app);
+    let mut shown = titles(ui.app());
     shown.sort();
     assert_eq!(shown, ["Sine", "out", "pitch"]);
     assert_eq!(snapshot.cables.len(), 2);
@@ -128,19 +128,19 @@ fn opening_a_sub_patch_shows_its_inside_and_the_breadcrumb() {
     // No drag was left open by the double-click: a move changes nothing.
     ui.move_to(Point::new(at.x + 40.0, at.y + 40.0));
     ui.redraw();
-    assert_eq!(ui.app.session.level, voice());
+    assert_eq!(ui.app().session.level, voice());
 
     // Escape, with nothing selected, goes up one level.
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
     ui.tap(keyboard::Key::Named(Named::Escape), Modifiers::empty());
-    assert_eq!(ui.app.session.level, ModulePath::root());
-    assert!(ui.app.ui_snapshot().level.is_empty());
+    assert_eq!(ui.app().session.level, ModulePath::root());
+    assert!(ui.app().ui_snapshot().level.is_empty());
 
     // The breadcrumb's Patch crumb goes up too.
     ui.send(Message::OpenLevel(voice()));
-    assert_eq!(ui.app.session.level, voice());
+    assert_eq!(ui.app().session.level, voice());
     ui.click_text("Patch");
-    assert_eq!(ui.app.session.level, ModulePath::root());
+    assert_eq!(ui.app().session.level, ModulePath::root());
 }
 
 /// Ctrl+Enter (Cmd+Enter) with one sub-patch selected opens it; with a
@@ -150,12 +150,12 @@ fn ctrl_enter_opens_the_selected_sub_patch() {
     let mut ui = Ui::with_app(nested_app());
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
     ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
-    assert_eq!(ui.app.session.level, ModulePath::root());
+    assert_eq!(ui.app().session.level, ModulePath::root());
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
     ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
-    assert_eq!(ui.app.session.level, voice());
+    assert_eq!(ui.app().session.level, voice());
     assert!(
-        ui.app.session.selection.is_empty(),
+        ui.app().session.selection.is_empty(),
         "the selection belongs to the level it was made on"
     );
 }
@@ -178,7 +178,7 @@ fn each_level_keeps_its_camera() {
     ui.redraw();
     let zoomed = ui.canvas().camera;
     assert!(zoomed.zoom > framed.zoom, "{zoomed:?} vs {framed:?}");
-    assert_eq!(ui.app.session.cameras.get(&voice()), Some(&zoomed));
+    assert_eq!(ui.app().session.cameras.get(&voice()), Some(&zoomed));
 
     ui.send(Message::OpenLevel(ModulePath::root()));
     ui.redraw();
@@ -304,11 +304,11 @@ fn graph_cables(app: &App) -> Vec<(loom_core::OutputRef, loom_core::InputRef)> {
 #[test]
 fn ctrl_g_makes_a_sub_patch_and_undo_brings_the_modules_back() {
     let mut ui = Ui::with_app(app_with(FLAT));
-    let before = graph_cables(&ui.app);
-    let saved = ui.app.current_patch();
+    let before = graph_cables(ui.app());
+    let saved = ui.app().current_patch();
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2, 3])));
     ui.tap(keyboard::Key::Character("g".into()), Modifiers::COMMAND);
-    let snapshot = ui.app.ui_snapshot();
+    let snapshot = ui.app().ui_snapshot();
     let tile = snapshot
         .tiles
         .iter()
@@ -326,23 +326,23 @@ fn ctrl_g_makes_a_sub_patch_and_undo_brings_the_modules_back() {
     assert_eq!(snapshot.selection, [tile.id]);
     assert_eq!(snapshot.status, "Made Sub-patch from 2 modules");
     assert_eq!(snapshot.undo.as_deref(), Some("make sub-patch"));
-    assert_eq!(graph_cables(&ui.app), before, "the sound did not change");
-    assert_eq!(ui.app.current_patch().subpatches.len(), 1);
+    assert_eq!(graph_cables(ui.app()), before, "the sound did not change");
+    assert_eq!(ui.app().current_patch().subpatches.len(), 1);
     // The tile stands where the members were.
-    assert_eq!(ui.app.session.positions[&tile.id], (192.0, 0.0));
+    assert_eq!(ui.app().session.positions[&tile.id], (192.0, 0.0));
 
-    ui.app.undo();
-    assert!(ui.app.session.hierarchy.is_flat());
-    assert_eq!(ui.app.current_patch(), saved);
-    assert_eq!(graph_cables(&ui.app), before);
-    let selected: Vec<u32> = ui.app.session.selection.iter().copied().collect();
+    ui.app_mut().undo();
+    assert!(ui.app().session.hierarchy.is_flat());
+    assert_eq!(ui.app().current_patch(), saved);
+    assert_eq!(graph_cables(ui.app()), before);
+    let selected: Vec<u32> = ui.app().session.selection.iter().copied().collect();
     assert_eq!(selected, [2, 3], "the members are selected again");
 
-    ui.app.redo();
-    let again = ui.app.ui_snapshot();
+    ui.app_mut().redo();
+    let again = ui.app().ui_snapshot();
     assert_eq!(again.tiles.iter().filter(|t| t.title == "Sub-patch").count(), 1);
     assert_eq!(again.selection, [tile.id]);
-    assert_eq!(ui.app.current_patch().subpatches.len(), 1);
+    assert_eq!(ui.app().current_patch().subpatches.len(), 1);
 }
 
 /// Dissolving the tile gives the modules and cables back, where the tile
@@ -350,17 +350,17 @@ fn ctrl_g_makes_a_sub_patch_and_undo_brings_the_modules_back() {
 #[test]
 fn dissolve_gives_the_modules_back_where_the_tile_was() {
     let mut ui = Ui::with_app(app_with(FLAT));
-    let saved = ui.app.current_patch();
+    let saved = ui.app().current_patch();
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2, 3])));
     ui.tap(keyboard::Key::Character("g".into()), Modifiers::COMMAND);
-    assert_eq!(ui.app.current_patch().subpatches.len(), 1);
+    assert_eq!(ui.app().current_patch().subpatches.len(), 1);
     ui.tap(
         keyboard::Key::Character("g".into()),
         Modifiers::COMMAND | Modifiers::SHIFT,
     );
-    assert!(ui.app.session.hierarchy.is_flat());
-    assert_eq!(ui.app.current_patch(), saved);
-    let snapshot = ui.app.ui_snapshot();
+    assert!(ui.app().session.hierarchy.is_flat());
+    assert_eq!(ui.app().current_patch(), saved);
+    let snapshot = ui.app().ui_snapshot();
     assert_eq!(snapshot.selection, [2, 3]);
     assert_eq!(snapshot.status, "Dissolved Sub-patch");
     assert_eq!(snapshot.undo.as_deref(), Some("dissolve Sub-patch"));
@@ -370,7 +370,7 @@ fn dissolve_gives_the_modules_back_where_the_tile_was() {
         keyboard::Key::Character("g".into()),
         Modifiers::COMMAND | Modifiers::SHIFT,
     );
-    assert_eq!(ui.app.ui_snapshot().status, "Select one sub-patch to dissolve");
+    assert_eq!(ui.app().ui_snapshot().status, "Select one sub-patch to dissolve");
 }
 
 /// Selecting only the Transport makes nothing, and says why.
@@ -828,7 +828,7 @@ fn a_direct_cable_replaces_a_record_from_an_unfed_port() {
 fn nested_example_ui() -> (Ui, ModuleId, usize) {
     use loom_core::ModuleNames;
     let ui = Ui::open("nested-subtractive.ron");
-    let graph = ui.app.session.controller.graph();
+    let graph = ui.app().session.controller.graph();
     let (svf, node) = graph
         .nodes()
         .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
@@ -839,7 +839,7 @@ fn nested_example_ui() -> (Ui, ModuleId, usize) {
 
 /// The filter's live cutoff.
 fn cutoff_of(ui: &Ui, svf: ModuleId, cutoff: usize) -> f32 {
-    ui.app.session.controller.graph().node(svf).unwrap().params[cutoff]
+    ui.app().session.controller.graph().node(svf).unwrap().params[cutoff]
 }
 
 /// Turning the Voice tile's surface control moves the filter's cutoff two
@@ -851,7 +851,7 @@ fn cutoff_of(ui: &Ui, svf: ModuleId, cutoff: usize) -> f32 {
 fn surface_and_inner_controls_move_together_and_undo_as_one() {
     let (mut ui, svf, cutoff) = nested_example_ui();
     assert_eq!(cutoff_of(&ui, svf, cutoff), 300.0);
-    let steps_before = ui.app.session.edits.history.len();
+    let steps_before = ui.app().session.edits.history.len();
 
     // Outside: the Voice tile (id 2) shows "cutoff" as its one control.
     let knob = ui.control(2, "cutoff");
@@ -859,33 +859,33 @@ fn surface_and_inner_controls_move_together_and_undo_as_one() {
     let turned = cutoff_of(&ui, svf, cutoff);
     assert!(turned > 300.0, "the surface knob moved the inner cutoff: {turned}");
     assert_eq!(
-        ui.app.session.edits.history.len(),
+        ui.app().session.edits.history.len(),
         steps_before + 1,
         "one step for the drag"
     );
-    let surface = ui.app.session.values.get(2, 0).unwrap().clone();
-    ui.app.undo();
+    let surface = ui.app().session.values.get(2, 0).unwrap().clone();
+    ui.app_mut().undo();
     assert_eq!(
         cutoff_of(&ui, svf, cutoff),
         300.0,
         "one undo step reverts the surface drag"
     );
-    ui.app.redo();
+    ui.app_mut().redo();
     assert_eq!(cutoff_of(&ui, svf, cutoff), turned);
 
     // Inside the Filter: the knob itself shows the same value and moves it.
     let filter = ModulePath::top(2).child(5);
-    ui.app.show_level(&filter);
+    ui.app_mut().show_level(&filter);
     ui.redraw();
     let inner_widget = crate::surface::find_control(
-        ui.app.session.controller.graph(),
-        &ui.app.session.hierarchy,
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
         svf.0,
         "cutoff",
     )
     .unwrap();
     assert_eq!(
-        ui.app.session.values.get(svf.0, inner_widget).unwrap().text,
+        ui.app().session.values.get(svf.0, inner_widget).unwrap().text,
         surface.text,
         "both controls say the same value"
     );
@@ -893,12 +893,12 @@ fn surface_and_inner_controls_move_together_and_undo_as_one() {
     ui.drag(inner, Point::new(inner.x, inner.y - 40.0), 8);
     let turned_inside = cutoff_of(&ui, svf, cutoff);
     assert!(turned_inside > turned);
-    ui.app.show_level(&ModulePath::root());
+    ui.app_mut().show_level(&ModulePath::root());
     ui.redraw();
     assert_eq!(
-        ui.app.session.values.get(2, 0).unwrap().text,
+        ui.app().session.values.get(2, 0).unwrap().text,
         crate::param::format(
-            &ui.app
+            &ui.app()
                 .control_target(2, 0, loom_canvas::ControlPart::Main)
                 .unwrap()
                 .spec,
@@ -906,7 +906,7 @@ fn surface_and_inner_controls_move_together_and_undo_as_one() {
         ),
         "the surface follows the inner knob"
     );
-    ui.app.undo();
+    ui.app_mut().undo();
     assert_eq!(
         cutoff_of(&ui, svf, cutoff),
         turned,
@@ -930,22 +930,22 @@ fn narrowed_nested() -> App {
 fn an_exposed_range_clamps_writes_from_both_sides() {
     use loom_core::ModuleNames;
     let mut ui = Ui::with_app(narrowed_nested());
-    let graph = ui.app.session.controller.graph();
+    let graph = ui.app().session.controller.graph();
     let (svf, node) = graph
         .nodes()
         .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
         .unwrap();
     let cutoff = node.parameter_index("cutoff").unwrap();
     let default = node.descriptor.params[cutoff].default;
-    let target = ui.app.control_target(2, 0, loom_canvas::ControlPart::Main).unwrap();
+    let target = ui.app().control_target(2, 0, loom_canvas::ControlPart::Main).unwrap();
     assert_eq!(
         (target.spec.min, target.spec.max),
         (200.0, 2000.0),
         "the surface spans the range"
     );
     let inner_widget = crate::surface::find_control(
-        ui.app.session.controller.graph(),
-        &ui.app.session.hierarchy,
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
         svf.0,
         "cutoff",
     )
@@ -966,7 +966,7 @@ fn an_exposed_range_clamps_writes_from_both_sides() {
     }));
     assert_eq!(cutoff_of(&ui, svf, cutoff), 200.0);
     assert_eq!(
-        ui.app
+        ui.app()
             .session
             .controller
             .graph()
@@ -979,21 +979,21 @@ fn an_exposed_range_clamps_writes_from_both_sides() {
     );
     // Dragged inside, far past the top.
     let filter = ModulePath::top(2).child(5);
-    ui.app.show_level(&filter);
+    ui.app_mut().show_level(&filter);
     ui.redraw();
     let inner = ui.control(svf.0, "cutoff");
     ui.drag(inner, Point::new(inner.x, inner.y - 400.0), 20);
     let dragged = cutoff_of(&ui, svf, cutoff);
     assert!(dragged > 200.0 && dragged <= 2000.0, "{dragged}");
     // Set from the inspector row.
-    ui.app.inspector_message(crate::inspector::Message::ParamValue {
+    ui.app_mut().inspector_message(crate::inspector::Message::ParamValue {
         module: svf.0,
         index: cutoff,
         value: 10000.0,
     });
     assert_eq!(cutoff_of(&ui, svf, cutoff), 2000.0);
     // Reset on the surface: the default, kept inside the range.
-    ui.app.show_level(&ModulePath::root());
+    ui.app_mut().show_level(&ModulePath::root());
     ui.redraw();
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::ResetControl {
         module: 2,
@@ -1002,7 +1002,7 @@ fn an_exposed_range_clamps_writes_from_both_sides() {
     }));
     assert_eq!(cutoff_of(&ui, svf, cutoff), default.clamp(200.0, 2000.0));
     // The file saves what plays.
-    let saved = ui.app.current_patch();
+    let saved = ui.app().current_patch();
     let instance = saved.modules.iter().find(|m| m.id == 2).unwrap();
     assert_eq!(instance.params.get("cutoff"), Some(&cutoff_of(&ui, svf, cutoff)));
 }
@@ -1037,33 +1037,33 @@ const MIXED: &str = r#"Patch(
 fn exposing_a_fader_puts_a_fader_on_the_surface() {
     let mut ui = Ui::with_app(app_with(MIXED));
     let inside = ModulePath::top(1);
-    let mixer = ui.app.session.hierarchy.id_at(&inside, 1).unwrap();
-    ui.app.show_level(&inside);
-    ui.app.session.selection = [mixer.0].into_iter().collect();
+    let mixer = ui.app().session.hierarchy.id_at(&inside, 1).unwrap();
+    ui.app_mut().show_level(&inside);
+    ui.app_mut().session.selection = [mixer.0].into_iter().collect();
     ui.redraw();
     // The first row is the first level, and its button is the first Expose.
     ui.click_text("Expose on Mix");
-    assert_eq!(ui.app.ui_snapshot().status, "Level 1 is exposed on Mix");
-    assert_eq!(ui.app.ui_snapshot().undo.as_deref(), Some("expose Level 1"));
-    let definition = ui.app.session.hierarchy.definition_of(ModuleId(1)).unwrap();
+    assert_eq!(ui.app().ui_snapshot().status, "Level 1 is exposed on Mix");
+    assert_eq!(ui.app().ui_snapshot().undo.as_deref(), Some("expose Level 1"));
+    let definition = ui.app().session.hierarchy.definition_of(ModuleId(1)).unwrap();
     assert_eq!(definition.exposed.len(), 1);
     assert_eq!(definition.exposed[0].name, "Level 1");
     // The inner fader now carries the mark and the row offers Unexpose.
     let level1 = crate::surface::find_control(
-        ui.app.session.controller.graph(),
-        &ui.app.session.hierarchy,
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
         mixer.0,
         "level1",
     )
     .unwrap();
-    let snapshot = ui.app.ui_snapshot();
+    let snapshot = ui.app().ui_snapshot();
     let tile = snapshot.tiles.iter().find(|t| t.id == mixer.0).unwrap();
     assert!(tile.widgets[level1].exposed);
     assert!(ui.text("Unexpose on Mix").is_some());
 
-    ui.app.show_level(&ModulePath::root());
+    ui.app_mut().show_level(&ModulePath::root());
     ui.redraw();
-    let snapshot = ui.app.ui_snapshot();
+    let snapshot = ui.app().ui_snapshot();
     let mix = snapshot.tiles.iter().find(|t| t.id == 1).expect("the Mix tile");
     assert_eq!(mix.widgets.len(), 1);
     assert_eq!(
@@ -1071,13 +1071,14 @@ fn exposing_a_fader_puts_a_fader_on_the_surface() {
         ("fader", "Level 1")
     );
 
-    ui.app.undo();
+    ui.app_mut().undo();
     assert_eq!(
-        ui.app.session.level, inside,
+        ui.app().session.level,
+        inside,
         "undo shows the level the step was made on"
     );
     assert!(
-        ui.app
+        ui.app()
             .session
             .hierarchy
             .definition_of(ModuleId(1))
@@ -1085,14 +1086,14 @@ fn exposing_a_fader_puts_a_fader_on_the_surface() {
             .exposed
             .is_empty()
     );
-    ui.app.show_level(&ModulePath::root());
+    ui.app_mut().show_level(&ModulePath::root());
     ui.redraw();
-    let snapshot = ui.app.ui_snapshot();
+    let snapshot = ui.app().ui_snapshot();
     let mix = snapshot.tiles.iter().find(|t| t.id == 1).unwrap();
     assert!(mix.widgets.is_empty(), "undo takes the fader off the surface");
-    ui.app.redo();
+    ui.app_mut().redo();
     assert_eq!(
-        ui.app
+        ui.app()
             .session
             .hierarchy
             .definition_of(ModuleId(1))
@@ -1111,7 +1112,7 @@ fn exposing_a_fader_puts_a_fader_on_the_surface() {
 fn a_modulation_reaches_inside_only_through_a_surface() {
     use loom_core::ModuleNames;
     let (mut ui, svf, cutoff) = nested_example_ui();
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let note_pitch = loom_core::OutputRef {
         module: ModuleId(1),
         port: 0,
@@ -1167,7 +1168,7 @@ fn a_modulation_reaches_inside_only_through_a_surface() {
 #[test]
 fn unexposing_removes_the_assignment_from_outside_in_one_step() {
     let (mut ui, svf, cutoff) = nested_example_ui();
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let note_pitch = loom_core::OutputRef {
         module: ModuleId(1),
         port: 0,
@@ -1552,7 +1553,7 @@ fn renaming_a_sub_patch_in_the_inspector() {
 fn the_inspector_offers_expose_and_shows_surface_rows() {
     use loom_core::ModuleNames;
     let (mut ui, svf, cutoff) = nested_example_ui();
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let filter_tile = app.session.hierarchy.id_at(&ModulePath::top(2), 5).unwrap();
     let parts = |e: &crate::inspector::ExposureRow| (e.module, e.index, e.name.clone(), e.surface.clone());
     app.session.selection = [2].into_iter().collect();
@@ -1667,7 +1668,7 @@ fn lfo_inside_voice(app: &mut App, svf: ModuleId, cutoff: usize) -> ModuleId {
 #[test]
 fn unexposing_on_an_outer_surface_keeps_assignments_still_exposed_below() {
     let (mut ui, svf, cutoff) = nested_example_ui();
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     app.assign(
         loom_core::OutputRef {
             module: ModuleId(1),
@@ -1709,7 +1710,7 @@ fn unexposing_on_an_outer_surface_keeps_assignments_still_exposed_below() {
 fn a_retarget_onto_an_inner_parameter_keeps_the_matrix_selection() {
     use loom_core::ModuleNames;
     let (mut ui, svf, cutoff) = nested_example_ui();
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let note_pitch = loom_core::OutputRef {
         module: ModuleId(1),
         port: 0,
@@ -1755,10 +1756,10 @@ fn a_retarget_onto_an_inner_parameter_keeps_the_matrix_selection() {
 #[test]
 fn an_exposed_value_field_takes_a_typed_value() {
     let (mut ui, svf, cutoff) = nested_example_ui();
-    ui.app.session.selection = [2].into_iter().collect();
+    ui.app_mut().session.selection = [2].into_iter().collect();
     ui.redraw();
-    assert!(matches!(ui.app.inspector_model(), Inspector::SubPatch(_)));
+    assert!(matches!(ui.app().inspector_model(), Inspector::SubPatch(_)));
     ui.type_a_value(svf.0, cutoff, "440");
-    let value = ui.app.session.controller.graph().node(svf).unwrap().params[cutoff];
+    let value = ui.app().session.controller.graph().node(svf).unwrap().params[cutoff];
     assert!((value - 440.0).abs() < 0.5, "{value}");
 }

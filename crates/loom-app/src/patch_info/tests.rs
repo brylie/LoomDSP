@@ -301,23 +301,23 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
         "  Sam  ".into(),
     )));
     ui.send(AppMessage::Preferences(crate::settings::Message::Close));
-    assert_eq!(ui.app.rig.store.saved().author, "Sam");
+    assert_eq!(ui.app().rig.store.saved().author, "Sam");
 
     ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
     ui.redraw();
-    assert!(ui.app.overlays.patches().is_some(), "Ctrl+Shift+O opens the browser");
+    assert!(ui.app().overlays.patches().is_some(), "Ctrl+Shift+O opens the browser");
     assert!(ui.text("Your patches").is_some());
     assert!(ui.text("Low Drone").is_some());
     ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
     ui.typewrite("drone");
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
     ui.redraw();
-    assert!(ui.app.overlays.patches().is_none());
+    assert!(ui.app().overlays.patches().is_none());
     // Unsaved changes are asked about first.
     ui.send(AppMessage::Question(crate::question::Message::Answer(
         crate::question::Answer::DontSave,
     )));
-    assert_eq!(ui.app.session.document.name(), "Low Drone");
+    assert_eq!(ui.app().session.document.name(), "Low Drone");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -331,32 +331,32 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     use iced::keyboard::{Key, Modifiers, key::Named};
     let mut ui = Ui::with_app(App::new(crate::tests::app_args()));
     let sine = ui
-        .app
+        .app()
         .modules
         .iter()
         .copied()
         .find(|d| d.id == "loom.osc.sine")
         .unwrap();
-    ui.app.add_module(sine, loom_ui_core::Point::ORIGIN);
-    ui.app.session.selection.clear();
+    ui.app_mut().add_module(sine, loom_ui_core::Point::ORIGIN);
+    ui.app_mut().session.selection.clear();
     ui.redraw();
-    let count = ui.app.session.controller.graph().nodes().count();
+    let count = ui.app().session.controller.graph().nodes().count();
 
     let z = || Key::Character("z".into());
     ui.focus(&tags_part());
     ui.typewrite("drone");
     ui.tap(z(), Modifiers::COMMAND);
     assert_eq!(
-        ui.app.session.controller.graph().nodes().count(),
+        ui.app().session.controller.graph().nodes().count(),
         count,
         "typing keeps the canvas edit"
     );
-    assert_eq!(ui.app.session.patch_info.tag_draft, "drone");
+    assert_eq!(ui.app().session.patch_info.tag_draft, "drone");
 
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     ui.tap(z(), Modifiers::COMMAND);
     assert_eq!(
-        ui.app.session.controller.graph().nodes().count(),
+        ui.app().session.controller.graph().nodes().count(),
         count - 1,
         "out of the field, undo works"
     );
@@ -365,13 +365,13 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     ui.focus(&tags_part());
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(
-        ui.app.session.controller.graph().nodes().count(),
+        ui.app().session.controller.graph().nodes().count(),
         count - 1,
         "typing keeps redo too"
     );
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
-    assert_eq!(ui.app.session.controller.graph().nodes().count(), count);
+    assert_eq!(ui.app().session.controller.graph().nodes().count(), count);
 }
 
 /// With no program that draws native questions, Save asks nothing and adds

@@ -920,10 +920,10 @@ fn a_slot_value_field_takes_a_typed_value() {
         .unwrap();
     let mut ui = crate::ui_test::Ui::with_app(app);
     ui.redraw();
-    assert!(matches!(ui.app.inspector_model(), Inspector::Slot(_)));
+    assert!(matches!(ui.app().inspector_model(), Inspector::Slot(_)));
     ui.type_a_value(svf, cutoff, "440");
     let value = ui
-        .app
+        .app()
         .session
         .controller
         .graph()

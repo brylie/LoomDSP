@@ -11,9 +11,9 @@ use crate::ui_test::Ui;
 fn questions_are_answered_after_the_turn_in_the_order_asked() {
     let mut ui = Ui::open("subtractive.ron");
     let _ = ui.redraw();
-    ui.app.ask_window(WindowQuestion::places(|_| Message::ShowShortcuts));
-    ui.app.ask_window(WindowQuestion::focus(|_| Message::ShowHelp));
-    ui.app
+    ui.app().ask_window(WindowQuestion::places(|_| Message::ShowShortcuts));
+    ui.app().ask_window(WindowQuestion::focus(|_| Message::ShowHelp));
+    ui.app()
         .ask_window(WindowQuestion::find("4".to_string(), |_| Message::CloseHelp));
     let log = ui.deliver(Message::Tick);
     let answers: Vec<_> = log
@@ -22,7 +22,7 @@ fn questions_are_answered_after_the_turn_in_the_order_asked() {
         .map(|message| format!("{message:?}"))
         .collect();
     assert_eq!(answers, ["ShowShortcuts", "ShowHelp", "CloseHelp"]);
-    assert!(ui.app.take_window_questions().is_empty(), "each asked once");
+    assert!(ui.app().take_window_questions().is_empty(), "each asked once");
 }
 
 /// The answers carry what the window holds: the canvas's places, and a
@@ -33,7 +33,7 @@ fn answers_carry_what_the_window_holds() {
     let _ = ui.redraw();
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let places = seen.clone();
-    ui.app.ask_window(WindowQuestion::places(move |found| {
+    ui.app().ask_window(WindowQuestion::places(move |found| {
         places
             .lock()
             .unwrap()
@@ -41,7 +41,7 @@ fn answers_carry_what_the_window_holds() {
         Message::Tick
     }));
     let focus = seen.clone();
-    ui.app.ask_window(WindowQuestion::focus(move |part| {
+    ui.app().ask_window(WindowQuestion::focus(move |part| {
         focus.lock().unwrap().push(format!("focus: {part:?}"));
         Message::Tick
     }));

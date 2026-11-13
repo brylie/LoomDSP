@@ -64,7 +64,7 @@ fn filter_inspector() -> (crate::ui_test::Ui, super::super::ModuleRows) {
     app.commit();
     let mut ui = crate::ui_test::Ui::with_app(app);
     ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![id.0])));
-    let Inspector::Module(rows) = ui.app.inspector_model() else {
+    let Inspector::Module(rows) = ui.app().inspector_model() else {
         panic!("a module's inspector");
     };
     (ui, rows)

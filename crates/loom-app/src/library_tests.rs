@@ -121,7 +121,7 @@ fn library() -> TempDir {
 fn open_browser(ui: &mut Ui) {
     ui.send(Message::OpenBrowser);
     ui.redraw();
-    assert!(ui.app.overlays.browser().is_some(), "the browser is open");
+    assert!(ui.app().overlays.browser().is_some(), "the browser is open");
 }
 
 /// Inserts the library item called `name` from the browser, as a copy or
@@ -129,7 +129,7 @@ fn open_browser(ui: &mut Ui) {
 fn insert(ui: &mut Ui, name: &str, linked: bool) -> u32 {
     open_browser(ui);
     let row = ui
-        .app
+        .app()
         .overlays
         .browser()
         .unwrap()
@@ -145,10 +145,10 @@ fn insert(ui: &mut Ui, name: &str, linked: bool) -> u32 {
         ui.send(Message::Browser(browser::Message::Pick(row)));
     }
     ui.redraw();
-    assert!(ui.app.overlays.browser().is_none(), "the browser closed");
-    let mut selected = ui.app.session.selection.iter();
+    assert!(ui.app().overlays.browser().is_none(), "the browser closed");
+    let mut selected = ui.app().session.selection.iter();
     let (Some(&id), None) = (selected.next(), selected.next()) else {
-        panic!("the new tile is selected: {}", ui.app.ui_snapshot().status);
+        panic!("the new tile is selected: {}", ui.app().ui_snapshot().status);
     };
     id
 }
@@ -202,7 +202,7 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     open_browser(&mut ui);
     let rows: Vec<(usize, String)> = ui
-        .app
+        .app()
         .overlays
         .browser()
         .unwrap()
@@ -210,7 +210,7 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
         .into_iter()
         .map(|(row, item)| (row, item.library.clone()))
         .collect();
-    let modules = ui.app.overlays.browser().unwrap().results().len();
+    let modules = ui.app().overlays.browser().unwrap().results().len();
     assert_eq!(
         rows,
         [
@@ -222,13 +222,13 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
     // A search finds a sub-patch by name, and the mark names what it is.
     ui.send(Message::Browser(browser::Message::Query("voice".into())));
     ui.redraw();
-    let browser = ui.app.overlays.browser().unwrap();
+    let browser = ui.app().overlays.browser().unwrap();
     assert_eq!(browser.library_rows().len(), 1);
     assert!(ui.text("Voice").is_some(), "the item's name");
     assert!(ui.text(browser::LIBRARY_MARK).is_some(), "marked as a sub-patch");
     assert!(ui.text("Voices/Voice.ron").is_some(), "the highlighted item's path");
     // The item's menu holds Insert linked.
-    let row = ui.app.overlays.browser().unwrap().library_rows()[0].0;
+    let row = ui.app().overlays.browser().unwrap().library_rows()[0].0;
     assert!(ui.text(browser::INSERT_LINKED).is_none());
     ui.send(Message::Browser(browser::Message::Menu { row, by_key: false }));
     ui.redraw();
@@ -243,7 +243,7 @@ fn a_library_item_is_inserted_as_a_copy() {
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", false);
-    let app = &ui.app;
+    let app = ui.app();
     assert_eq!(app.ui_snapshot().status, "Inserted Voice");
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("insert Voice"));
     assert_eq!(
@@ -280,9 +280,9 @@ fn a_library_item_is_inserted_as_a_copy() {
     assert_eq!(saved.subpatches["voice"].metadata.authors, ["Ada"], "credit travels");
     assert_eq!(saved.subpatches["voice"].library, None);
 
-    ui.app.undo();
-    assert!(ui.app.session.hierarchy.is_flat());
-    assert_eq!(ui.app.session.controller.graph().nodes().count(), 3);
+    ui.app_mut().undo();
+    assert!(ui.app().session.hierarchy.is_flat());
+    assert_eq!(ui.app().session.controller.graph().nodes().count(), 3);
 }
 
 /// Inserting a file that has a Transport and a Scale and tuning module
@@ -295,7 +295,7 @@ fn inserting_a_file_with_patch_wide_modules_leaves_them_out_with_a_note() {
     write(&dir.0, "Arp.ron", ARP_FILE);
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let arp = insert(&mut ui, "Arp", false);
-    let app = &ui.app;
+    let app = ui.app();
     assert_eq!(
         app.ui_snapshot().status,
         "Inserted Arp. Arp: its Transport was left out; connect its clock ports.; Arp: its Scale and tuning was left out; connect its pitch ports."
@@ -331,7 +331,7 @@ fn two_linked_instances_have_separate_definitions() {
     let first = insert(&mut ui, "Voice", true);
     let second = insert(&mut ui, "Voice", true);
     assert_ne!(first, second);
-    let app = &ui.app;
+    let app = ui.app();
     assert_eq!(
         app.session.hierarchy.library_of(ModuleId(first)),
         Some("Voices/Voice.ron")
@@ -370,7 +370,7 @@ fn editing_inside_a_linked_instance_unlinks_it_and_leaves_the_other() {
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let first = insert(&mut ui, "Voice", true);
     let second = insert(&mut ui, "Voice", true);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     // An exposed value is the instance's: still linked.
     let target = app.session.hierarchy.exposed_target(ModuleId(first), 0).unwrap();
     let gain = app
@@ -448,7 +448,7 @@ fn save_to_library_leaves_the_other_instance_until_the_patch_reloads() {
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let first = insert(&mut ui, "Voice", true);
     let second = insert(&mut ui, "Voice", true);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     set_inner_tune(app, first, 0.1);
     assert_eq!(app.session.hierarchy.library_of(ModuleId(first)), None);
     // The second keeps an exposed value of its own.
@@ -523,7 +523,7 @@ fn a_missing_library_file_loads_the_stored_copy_with_a_status() {
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", true);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let patch_file = dir.0.join("set.ron");
     crate::patch_file::save(&app.current_patch(), &patch_file).unwrap();
     std::fs::remove_file(dir.0.join("Voices").join("Voice.ron")).unwrap();
@@ -586,12 +586,12 @@ fn a_link_loop_keeps_the_stored_copy_and_a_self_link_is_refused_on_insert() {
     // Inserting a file linked inside a sub-patch that follows that file.
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", true);
-    let inside = ui.app.session.hierarchy.path_of(ModuleId(voice));
-    ui.app.show_level(&inside);
+    let inside = ui.app().session.hierarchy.path_of(ModuleId(voice));
+    ui.app_mut().show_level(&inside);
     ui.redraw();
     open_browser(&mut ui);
     let row = ui
-        .app
+        .app()
         .overlays
         .browser()
         .unwrap()
@@ -602,11 +602,11 @@ fn a_link_loop_keeps_the_stored_copy_and_a_self_link_is_refused_on_insert() {
         .0;
     ui.send(Message::Browser(browser::Message::InsertLinked(row)));
     assert_eq!(
-        ui.app.ui_snapshot().status,
+        ui.app().ui_snapshot().status,
         "Cannot insert Voice: sub-patch Voice › Voice contains itself"
     );
     assert_eq!(
-        ui.app.session.controller.graph().nodes().count(),
+        ui.app().session.controller.graph().nodes().count(),
         6,
         "nothing was added"
     );
@@ -637,8 +637,8 @@ fn save_to_library_inside_a_sub_patch_writes_a_file_that_opens_on_its_own() {
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", false);
     assert!(ui.text("Save to library").is_none(), "not at the top level");
-    let inside = ui.app.session.hierarchy.path_of(ModuleId(voice));
-    ui.app.show_level(&inside);
+    let inside = ui.app().session.hierarchy.path_of(ModuleId(voice));
+    ui.app_mut().show_level(&inside);
     ui.redraw();
     let _ = fake::asked();
     let target = dir.0.join("Mine").join("Lead.ron");
@@ -651,8 +651,8 @@ fn save_to_library_inside_a_sub_patch_writes_a_file_that_opens_on_its_own() {
     );
     assert!(target.is_file());
     // Opened on its own, it is a flat patch with its ports as modules.
-    assert!(ui.app.open_path(&target));
-    let app = &ui.app;
+    assert!(ui.app_mut().open_path(&target));
+    let app = ui.app();
     assert!(app.session.hierarchy.is_flat());
     assert_eq!(app.patch_name(), "Lead.ron");
     assert_eq!(app.session.document.info().name, "Voice");
@@ -689,7 +689,7 @@ fn pasting_a_sub_patch_tile_and_editing_inside_the_copy_leaves_the_original() {
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", true);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     app.session.selection = [voice].into_iter().collect();
     let text = app.copy().expect("a sub-patch tile copies");
     assert_eq!(app.ui_snapshot().status, "Copied Voice");
@@ -733,7 +733,7 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", false);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     // Cable the note into the tile and the tile into the output.
     let lid = app.session.hierarchy.path_of(ModuleId(voice)).last();
     let root = ModulePath::root();
@@ -872,7 +872,7 @@ fn a_changed_library_file_never_stops_the_patch_from_opening() {
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", true);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let lid = app.session.hierarchy.path_of(ModuleId(voice)).last();
     let root = ModulePath::root();
     assert!(app.change_hierarchy("connect", |h, _| {
@@ -931,11 +931,11 @@ fn a_changed_library_file_never_stops_the_patch_from_opening() {
 fn inserting_the_open_library_file_into_itself_is_refused() {
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
-    assert!(ui.app.open_path(&dir.0.join("Voices").join("Voice.ron")));
+    assert!(ui.app_mut().open_path(&dir.0.join("Voices").join("Voice.ron")));
     ui.redraw();
     open_browser(&mut ui);
     let row = ui
-        .app
+        .app()
         .overlays
         .browser()
         .unwrap()
@@ -946,12 +946,12 @@ fn inserting_the_open_library_file_into_itself_is_refused() {
         .0;
     ui.send(Message::Browser(browser::Message::InsertLinked(row)));
     assert_eq!(
-        ui.app.ui_snapshot().status,
+        ui.app().ui_snapshot().status,
         "Cannot insert Voice: sub-patch Voice › Voice contains itself"
     );
-    assert!(ui.app.session.hierarchy.is_flat(), "nothing was added");
+    assert!(ui.app().session.hierarchy.is_flat(), "nothing was added");
     let copy = insert(&mut ui, "Voice", false);
-    assert_eq!(ui.app.session.hierarchy.library_of(ModuleId(copy)), None);
+    assert_eq!(ui.app().session.hierarchy.library_of(ModuleId(copy)), None);
 }
 
 /// Save to library with a name typed without its extension, when a file
@@ -961,7 +961,7 @@ fn save_to_library_asks_before_replacing_a_file_named_without_its_extension() {
     let dir = library();
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let voice = insert(&mut ui, "Voice", false);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let _ = fake::asked();
     let target = dir.0.join("Voices").join("Voice.ron");
     let before = std::fs::read_to_string(&target).unwrap();
@@ -986,7 +986,7 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
     let mut ui = Ui::with_app(app_with(HOST, &dir.0));
     let first = insert(&mut ui, "Voice", true);
     let second = insert(&mut ui, "Voice", true);
-    let app = &mut ui.app;
+    let app = ui.app_mut();
     let inside = app.session.hierarchy.path_of(ModuleId(first));
     let generator = app.session.hierarchy.id_at(&inside, 2).unwrap();
     let exposed = app.session.hierarchy.exposed_target(ModuleId(second), 0).unwrap();

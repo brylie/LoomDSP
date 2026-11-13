@@ -977,21 +977,21 @@ fn locate_agrees_with_the_ui_harness() {
     };
     // The two sides round differently, so allow a tiny difference.
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
-    let knob = locate(&ui.app, "4:cutoff", &found).unwrap();
+    let knob = locate(ui.app(), "4:cutoff", &found).unwrap();
     assert!(near(knob.center(), ui.control(4, "cutoff")));
-    let out = locate(&ui.app, "8:out", &found).unwrap();
+    let out = locate(ui.app(), "8:out", &found).unwrap();
     assert!(near(out.center(), ui.output(8, "out")));
-    let input = locate(&ui.app, "9:in", &found).unwrap();
+    let input = locate(ui.app(), "9:in", &found).unwrap();
     assert!(near(input.center(), ui.input(9, "in")));
-    let tile = locate(&ui.app, "4", &found).unwrap();
+    let tile = locate(ui.app(), "4", &found).unwrap();
     assert!(tile.contains(knob.center()));
-    assert!(locate(&ui.app, "4:nonsense", &found).is_err());
+    assert!(locate(ui.app(), "4:nonsense", &found).is_err());
     let text = Found {
         text: Some(Rect::new(Point::new(1.0, 2.0), loom_ui_core::Size::new(3.0, 4.0))),
         ..found
     };
-    assert_eq!(locate(&ui.app, "Cutoff", &text).unwrap().x, 1.0);
-    assert!(locate(&ui.app, "Cutoff", &Found::default()).is_err());
+    assert_eq!(locate(ui.app(), "Cutoff", &text).unwrap().x, 1.0);
+    assert!(locate(ui.app(), "Cutoff", &Found::default()).is_err());
 }
 
 /// The subtractive patch in the headless UI harness, with the control
@@ -1000,9 +1000,9 @@ fn locate_agrees_with_the_ui_harness() {
 /// arc.
 fn pointer_ui() -> crate::ui_test::Ui {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.app.pointer = crate::pointer::Pointer::new(true);
+    ui.app_mut().pointer = crate::pointer::Pointer::new(true);
     let resonance = ui
-        .app
+        .app()
         .session
         .controller
         .graph()
@@ -1011,14 +1011,16 @@ fn pointer_ui() -> crate::ui_test::Ui {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = ui.app.send(Message::Modulation(crate::modulation::Message::Assign {
-        source: loom_core::OutputRef {
-            module: ModuleId(5),
-            port: 0,
-        },
-        module: 4,
-        index: resonance,
-    }));
+    let _ = ui
+        .app_mut()
+        .send(Message::Modulation(crate::modulation::Message::Assign {
+            source: loom_core::OutputRef {
+                module: ModuleId(5),
+                port: 0,
+            },
+            module: 4,
+            index: resonance,
+        }));
     ui.redraw();
     ui
 }
@@ -1054,10 +1056,10 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
 #[test]
 fn a_script_reads_the_typed_field_from_the_snapshot() {
     let mut ui = typing_ui();
-    let id = ui.app.session.controller.add_module("loom.filter.svf").unwrap();
-    ui.app.commit();
+    let id = ui.app_mut().session.controller.add_module("loom.filter.svf").unwrap();
+    ui.app_mut().commit();
     let _ = ui
-        .app
+        .app_mut()
         .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let at = ui.control(id.0, "cutoff");
@@ -1108,8 +1110,8 @@ fn a_script_hovers_pins_a_badge_and_unpins_it_with_escape() {
 
     assert_eq!(run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#), Ok(Map::new()));
     assert_eq!(pointer_of(&mut ui)["pinned"], Value::Null, "Escape unpinned the badge");
-    assert!(!ui.app.control_waiting(), "no frames asked for once done (rule 7)");
-    assert!(!ui.app.pointer.waiting());
+    assert!(!ui.app().control_waiting(), "no frames asked for once done (rule 7)");
+    assert!(!ui.app().pointer.waiting());
 }
 
 /// #251, as in #217: a drag on a knob's range arc, with Shift, changes
@@ -1117,13 +1119,23 @@ fn a_script_hovers_pins_a_badge_and_unpins_it_with_escape() {
 #[test]
 fn a_script_drags_a_range_arc() {
     let mut ui = pointer_ui();
-    let depth = |ui: &crate::ui_test::Ui| ui.app.session.controller.graph().assignments().next().unwrap().1.depth;
-    let resonance = |ui: &crate::ui_test::Ui| ui.app.session.controller.graph().node(ModuleId(4)).unwrap().params[1];
+    let depth = |ui: &crate::ui_test::Ui| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .assignments()
+            .next()
+            .unwrap()
+            .1
+            .depth
+    };
+    let resonance = |ui: &crate::ui_test::Ui| ui.app().session.controller.graph().node(ModuleId(4)).unwrap().params[1];
     let (before, value) = (depth(&ui), resonance(&ui));
     // On the ring beside the knob: its centre is a grid step below the
     // top of its cell, and the ring is about 12 units out.
     let index = ui
-        .app
+        .app()
         .session
         .controller
         .graph()
@@ -1133,7 +1145,7 @@ fn a_script_drags_a_range_arc() {
         .param_index("resonance")
         .unwrap();
     let widget = ui
-        .app
+        .app()
         .session
         .controller
         .graph()
@@ -1146,7 +1158,7 @@ fn a_script_drags_a_range_arc() {
         .position(|w| w.binds("resonance"))
         .unwrap();
     assert_eq!(index, 1);
-    let rect = ui.app.session.scene.module(4).unwrap().widget_bounds(widget).unwrap();
+    let rect = ui.app().session.scene.module(4).unwrap().widget_bounds(widget).unwrap();
     let ring = Point::new(rect.center_x() + 12.0, rect.y + loom_canvas::GRID - 1.0);
     let from = ui.canvas().to_window(ring);
     let line = format!(
@@ -1169,7 +1181,7 @@ fn a_script_drags_a_range_arc() {
 #[test]
 fn a_script_drags_an_output_onto_a_control() {
     let mut ui = pointer_ui();
-    let count = |ui: &crate::ui_test::Ui| ui.app.session.controller.graph().assignments().count();
+    let count = |ui: &crate::ui_test::Ui| ui.app().session.controller.graph().assignments().count();
     let before = count(&ui);
     run_ui(&mut ui, r#"{"cmd": "press", "target": "7:out"}"#).unwrap();
     run_ui(&mut ui, r#"{"cmd": "hover", "target": "4:cutoff"}"#).unwrap();
@@ -1197,16 +1209,16 @@ fn a_script_drags_an_output_onto_a_control() {
 fn a_script_drags_an_output_onto_an_inspector_row() {
     let mut ui = pointer_ui();
     let _ = ui
-        .app
+        .app_mut()
         .send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
     ui.redraw();
     let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
-    let before = ui.app.session.controller.graph().assignments().count();
+    let before = ui.app().session.controller.graph().assignments().count();
     let command = serde_json::json!({"cmd": "drag", "from": "7:out", "to": [row.x, row.y]}).to_string();
     run_ui(&mut ui, &command).unwrap();
-    assert_eq!(ui.app.session.controller.graph().assignments().count(), before + 1);
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), before + 1);
     run_ui(&mut ui, r#"{"cmd": "undo"}"#).unwrap();
-    assert_eq!(ui.app.session.controller.graph().assignments().count(), before);
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), before);
 }
 
 /// A real button let go while a script drag runs: the drag
@@ -1229,12 +1241,12 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
     for _ in 0..3 {
         ui.redraw();
     }
-    assert!(ui.app.pointer.waiting(), "the drag is still going in");
+    assert!(ui.app().pointer.waiting(), "the drag is still going in");
     ui.release();
     let mut answer = None;
     for _ in 0..50 {
         ui.redraw();
-        let _ = ui.app.send(Message::ControlFrame(Instant::now()));
+        let _ = ui.app_mut().send(Message::ControlFrame(Instant::now()));
         if let Ok(a) = receiver.try_recv() {
             answer = Some(a);
             break;
@@ -1306,7 +1318,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(Some(sender)))),
         };
-        ui.app.located(call, target, &found, then);
+        ui.app_mut().located(call, target, &found, then);
         receiver.try_recv()
     };
     let answer = ask(&mut ui, "4:cutoff", AfterSearch::Locate).unwrap().unwrap();
@@ -1321,7 +1333,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
     assert!(ask(&mut ui, "4:cutoff", then).is_err(), "not answered yet");
     // A search is a question for the window, asked after the turn.
     search(
-        &ui.app,
+        ui.app(),
         Call {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(None))),
@@ -1329,7 +1341,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
         "4".to_string(),
         AfterSearch::Locate,
     );
-    let asked = ui.app.take_window_questions();
+    let asked = ui.app().take_window_questions();
     assert!(matches!(asked.as_slice(), [crate::window_question::WindowQuestion::Find { text, .. }] if text == "4"));
 }
 
@@ -1347,7 +1359,7 @@ fn the_snapshot_names_what_the_pointer_is_on_and_does() {
         json!({"kind": "knob", "target": "4:cutoff"})
     );
     run_ui(&mut ui, r#"{"cmd": "release"}"#).unwrap();
-    let tile = ui.app.session.scene.module(4).unwrap().bounds();
+    let tile = ui.app().session.scene.module(4).unwrap().bounds();
     let title = ui
         .canvas()
         .to_window(Point::new(tile.x + tile.width * 0.5, tile.y + 6.0));
@@ -1416,16 +1428,16 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
         ..crate::tests::app_args()
     });
     let mut ui = crate::ui_test::Ui::with_app(app);
-    ui.app.pointer = crate::pointer::Pointer::new(true);
+    ui.app_mut().pointer = crate::pointer::Pointer::new(true);
     assert!(
         ui.text("no device (clock) at 48000 Hz").is_some(),
         "the bar shows the clock"
     );
-    let _ = ui.app.send(Message::OpenBrowser);
+    let _ = ui.app_mut().send(Message::OpenBrowser);
     ui.redraw();
-    assert!(ui.app.overlays.browser().is_some());
+    assert!(ui.app().overlays.browser().is_some());
     run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#).unwrap();
-    assert!(ui.app.overlays.browser().is_none(), "Escape closed the browser");
+    assert!(ui.app().overlays.browser().is_none(), "Escape closed the browser");
 }
 
 /// Runs a `type` command as the app does: the window reports whether a text
@@ -1438,7 +1450,7 @@ fn run_type(ui: &mut crate::ui_test::Ui, text: &str) -> Answer {
 /// An app with the script's pointer on, for typing tests.
 fn typing_ui() -> crate::ui_test::Ui {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.app.pointer = crate::pointer::Pointer::new(true);
+    ui.app_mut().pointer = crate::pointer::Pointer::new(true);
     ui
 }
 
@@ -1536,14 +1548,14 @@ fn a_scripted_press_routes_as_a_real_one_for_each_overlay() {
 #[test]
 fn type_filters_the_open_browser() {
     let mut ui = typing_ui();
-    let _ = ui.app.send(Message::OpenBrowser);
+    let _ = ui.app_mut().send(Message::OpenBrowser);
     ui.redraw();
     ui.focus(&crate::browser::search_id());
-    let before = ui.app.overlays.browser().unwrap().results().len();
+    let before = ui.app().overlays.browser().unwrap().results().len();
 
     assert_eq!(run_type(&mut ui, "osc saw"), Ok(Map::new()));
 
-    let browser = ui.app.overlays.browser().unwrap();
+    let browser = ui.app().overlays.browser().unwrap();
     let names: Vec<&str> = browser.results().iter().map(|d| d.id).collect();
     assert!(names.len() < before, "the list was filtered");
     assert!(names.contains(&"loom.osc.saw"), "found {names:?}");
@@ -1559,7 +1571,7 @@ fn type_is_refused_with_no_text_field_in_focus() {
     for _ in 0..4 {
         ui.redraw();
     }
-    assert!(ui.app.overlays.browser().is_none(), "no key reached the shortcuts");
+    assert!(ui.app().overlays.browser().is_none(), "no key reached the shortcuts");
 }
 
 /// An open question stops keys reaching the patch and its fields, so `type`
@@ -1600,13 +1612,13 @@ fn typed_text_becomes_one_key_per_character() {
 #[test]
 fn a_key_no_widget_takes_reaches_the_app() {
     let mut ui = pointer_ui();
-    assert!(ui.app.session.edits.history.undo_step().is_some());
-    let before = ui.app.session.controller.graph().assignments().count();
+    assert!(ui.app().session.edits.history.undo_step().is_some());
+    let before = ui.app().session.controller.graph().assignments().count();
     assert_eq!(
         run_ui(&mut ui, r#"{"cmd": "key", "key": "z", "modifiers": ["cmd"]}"#),
         Ok(Map::new())
     );
-    assert_eq!(ui.app.session.controller.graph().assignments().count(), before - 1);
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), before - 1);
 }
 
 /// Bad pointer commands get an error, and nothing stays held.
@@ -1645,9 +1657,21 @@ fn pointer_commands_refuse_what_they_cannot_aim_at() {
 #[test]
 fn locate_finds_lights_and_meters() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let env = ui.app.session.controller.add_module("loom.env.envelope").unwrap().0;
-    let meter = ui.app.session.controller.add_module("loom.display.meter").unwrap().0;
-    ui.app.commit();
+    let env = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("loom.env.envelope")
+        .unwrap()
+        .0;
+    let meter = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("loom.display.meter")
+        .unwrap()
+        .0;
+    ui.app_mut().commit();
     ui.redraw();
     let found = Found {
         canvas: Some(ui.canvas()),
@@ -1657,7 +1681,7 @@ fn locate_finds_lights_and_meters() {
     let view = found.canvas.unwrap();
     let centre = |module: u32, widget: usize| {
         view.to_window(
-            ui.app
+            ui.app()
                 .session
                 .scene
                 .module(module)
@@ -1669,7 +1693,7 @@ fn locate_finds_lights_and_meters() {
     };
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
     let light = ui
-        .app
+        .app()
         .session
         .controller
         .graph()
@@ -1681,12 +1705,12 @@ fn locate_finds_lights_and_meters() {
         .iter()
         .position(|w| w.binds("level"))
         .unwrap();
-    let rect = locate(&ui.app, &format!("{env}:level"), &found).unwrap();
+    let rect = locate(ui.app(), &format!("{env}:level"), &found).unwrap();
     assert!(near(rect.center(), centre(env, light)));
-    let rect = locate(&ui.app, &format!("{meter}:display:out"), &found).unwrap();
+    let rect = locate(ui.app(), &format!("{meter}:display:out"), &found).unwrap();
     assert!(near(rect.center(), centre(meter, 0)));
     // Without the prefix the name is the output (rule 10).
-    let rect = locate(&ui.app, &format!("{meter}:out"), &found).unwrap();
+    let rect = locate(ui.app(), &format!("{meter}:out"), &found).unwrap();
     let port = ui.output(meter, "out");
     assert!(near(rect.center(), port));
 }
@@ -2018,11 +2042,11 @@ fn open_and_save_failures_answer_with_the_reason() {
 #[test]
 fn a_script_types_an_exact_value() {
     let mut ui = crate::ui_test::Ui::open("sine.ron");
-    let id = ui.app.session.controller.add_module("test.panel").unwrap();
-    ui.app.refresh();
+    let id = ui.app_mut().session.controller.add_module("test.panel").unwrap();
+    ui.app_mut().refresh();
     ui.step(&[]);
     let _ = ui
-        .app
+        .app_mut()
         .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let target = format!("{}:cutoff", id.0);
@@ -2032,7 +2056,7 @@ fn a_script_types_an_exact_value() {
     for key in ["4", "4", "0", "enter"] {
         run_ui(&mut ui, &format!(r#"{{"cmd": "key", "key": "{key}"}}"#)).unwrap();
     }
-    let node = ui.app.session.controller.graph().node(id).unwrap();
+    let node = ui.app().session.controller.graph().node(id).unwrap();
     assert_eq!(node.params[node.descriptor.param_index("cutoff").unwrap()], 440.0);
 }
 
@@ -2311,18 +2335,18 @@ fn locate_and_sample_find_a_surface_control() {
         places: crate::places::Places::default(),
     };
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
-    let knob = locate(&ui.app, "2:cutoff", &found).unwrap();
+    let knob = locate(ui.app(), "2:cutoff", &found).unwrap();
     assert!(near(knob.center(), ui.control(2, "cutoff")));
-    let pitch = locate(&ui.app, "2:pitch", &found).unwrap();
+    let pitch = locate(ui.app(), "2:pitch", &found).unwrap();
     assert!(near(pitch.center(), ui.input(2, "pitch")));
-    assert!(locate(&ui.app, "2:resonance", &found).is_err(), "not exposed");
+    assert!(locate(ui.app(), "2:resonance", &found).is_err(), "not exposed");
 
-    let sample = run_playing(&mut ui.app, r#"{"cmd": "sample", "target": "2:cutoff", "ms": 50}"#).unwrap();
+    let sample = run_playing(ui.app_mut(), r#"{"cmd": "sample", "target": "2:cutoff", "ms": 50}"#).unwrap();
     let frames = sample["frames"].as_array().unwrap();
     assert!(!frames.is_empty());
     let position = frames[0]["position"].as_f64().unwrap();
     assert!(position > 0.0 && position < 1.0, "300 Hz in 20 to 20000: {position}");
-    let error = run(&mut ui.app, r#"{"cmd": "sample", "target": "2:resonance", "ms": 50}"#).unwrap_err();
+    let error = run(ui.app_mut(), r#"{"cmd": "sample", "target": "2:resonance", "ms": 50}"#).unwrap_err();
     assert!(error.contains("(Voice) has no control `resonance`"), "{error}");
 }
 
@@ -2346,49 +2370,49 @@ fn locate_takes_a_ui_id_as_text() {
             && (a.height - b.height).abs() < 0.01
     };
     // On the canvas: a control, a tile, a port, and a badge.
-    let short = locate(&ui.app, "4:cutoff", &found).unwrap();
-    let by_id = locate(&ui.app, "canvas/4/param/cutoff", &found).unwrap();
+    let short = locate(ui.app(), "4:cutoff", &found).unwrap();
+    let by_id = locate(ui.app(), "canvas/4/param/cutoff", &found).unwrap();
     assert!(near(short, by_id), "{short:?} and {by_id:?}");
     assert!(near(
-        locate(&ui.app, "4", &found).unwrap(),
-        locate(&ui.app, "canvas/4", &found).unwrap()
+        locate(ui.app(), "4", &found).unwrap(),
+        locate(ui.app(), "canvas/4", &found).unwrap()
     ));
     assert!(near(
-        locate(&ui.app, "8:output:out", &found).unwrap(),
-        locate(&ui.app, "canvas/8/output/out", &found).unwrap()
+        locate(ui.app(), "8:output:out", &found).unwrap(),
+        locate(ui.app(), "canvas/8/output/out", &found).unwrap()
     ));
     assert!(near(
-        locate(&ui.app, "9:input:in", &found).unwrap(),
-        locate(&ui.app, "canvas/9/input/in", &found).unwrap()
+        locate(ui.app(), "9:input:in", &found).unwrap(),
+        locate(ui.app(), "canvas/9/input/in", &found).unwrap()
     ));
-    assert!(locate(&ui.app, "canvas/8/output/nonsense", &found).is_err());
+    assert!(locate(ui.app(), "canvas/8/output/nonsense", &found).is_err());
 
     // Outside the canvas: where the window drew the part.
-    let undo = locate(&ui.app, "toolbar/undo", &found).unwrap();
+    let undo = locate(ui.app(), "toolbar/undo", &found).unwrap();
     let label = ui.text("Undo").expect("the toolbar shows Undo");
     assert!(undo.contains(label.center()), "the button holds its label");
     assert!(undo.width < 200.0, "the button, not the toolbar");
-    let toolbar = locate(&ui.app, "toolbar", &found).unwrap();
+    let toolbar = locate(ui.app(), "toolbar", &found).unwrap();
     assert!(toolbar.contains(undo.center()));
     for id in ["panel/inspector", "panel/matrix", "stats/patch", "stats/midi", "status"] {
-        let rect = locate(&ui.app, id, &found).unwrap_or_else(|error| panic!("{id}: {error}"));
+        let rect = locate(ui.app(), id, &found).unwrap_or_else(|error| panic!("{id}: {error}"));
         assert!(rect.width > 0.0 && rect.height > 0.0, "{id}");
     }
 
     // A UI ID that names nothing falls back to text in the window, and
     // says so when that finds nothing either.
-    let error = locate(&ui.app, "toolbar/nonsense", &found).unwrap_err();
+    let error = locate(ui.app(), "toolbar/nonsense", &found).unwrap_err();
     assert!(error.contains("UI ID `toolbar/nonsense`"), "{error}");
-    let error = locate(&ui.app, "canvas/4/param/nonsense", &found).unwrap_err();
+    let error = locate(ui.app(), "canvas/4/param/nonsense", &found).unwrap_err();
     assert!(error.contains("UI ID"), "{error}");
     let with_text = Found {
         text: Some(Rect::new(Point::new(1.0, 2.0), loom_ui_core::Size::new(3.0, 4.0))),
         ..found.clone()
     };
-    assert_eq!(locate(&ui.app, "toolbar/nonsense", &with_text).unwrap().x, 1.0);
+    assert_eq!(locate(ui.app(), "toolbar/nonsense", &with_text).unwrap().x, 1.0);
     // Text that starts with no panel's name is never taken for a UI ID.
-    assert_eq!(locate(&ui.app, "pads/warm", &with_text).unwrap().x, 1.0);
-    assert!(locate(&ui.app, "pads/warm", &found).unwrap_err().contains("text"));
+    assert_eq!(locate(ui.app(), "pads/warm", &with_text).unwrap().x, 1.0);
+    assert!(locate(ui.app(), "pads/warm", &found).unwrap_err().contains("text"));
 }
 
 /// An overlay's UI ID is taken for one: `question/cancel` finds the
@@ -2396,7 +2420,7 @@ fn locate_takes_a_ui_id_as_text() {
 #[test]
 fn locate_takes_an_overlay_ui_id() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.app.overlays.question = Some(crate::question::Question::discard(
+    ui.app_mut().overlays.question = Some(crate::question::Question::discard(
         "Patch".to_string(),
         crate::question::AfterDiscard::New,
     ));
@@ -2407,12 +2431,12 @@ fn locate_takes_an_overlay_ui_id() {
         text: None,
         places,
     };
-    let cancel = locate(&ui.app, "question/cancel", &found).unwrap();
+    let cancel = locate(ui.app(), "question/cancel", &found).unwrap();
     let label = ui.text("Cancel").expect("the question shows Cancel");
     assert!(cancel.contains(label.center()), "the answer holds its label");
 
     // The module browser's parts are found by UI ID too.
-    ui.app.overlays.question = None;
+    ui.app_mut().overlays.question = None;
     ui.send(Message::OpenBrowser);
     let _ = ui.redraw();
     let places = ui.places();
@@ -2421,24 +2445,24 @@ fn locate_takes_an_overlay_ui_id() {
         text: None,
         places,
     };
-    let search = locate(&ui.app, "browser/search", &found).unwrap();
-    let browser = locate(&ui.app, "browser", &found).unwrap();
+    let search = locate(ui.app(), "browser/search", &found).unwrap();
+    let browser = locate(ui.app(), "browser", &found).unwrap();
     assert!(browser.contains(search.center()), "the field is in the browser");
 
     // Preferences' parts, and the chooser's over it, too.
-    let _ = ui.app.send(Message::Browser(crate::browser::Message::Close));
-    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.app_mut().send(Message::Browser(crate::browser::Message::Close));
+    let _ = ui.app_mut().send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
     let found = Found {
         canvas: None,
         text: None,
         places: ui.places(),
     };
-    let close = locate(&ui.app, "preferences/close", &found).unwrap();
+    let close = locate(ui.app(), "preferences/close", &found).unwrap();
     let label = ui.text("Close").expect("Preferences shows Close");
     assert!(close.contains(label.center()), "the button holds its label");
     let _ = ui
-        .app
+        .app_mut()
         .send(Message::Preferences(crate::settings::Message::ChooseLicence));
     let _ = ui.redraw();
     let found = Found {
@@ -2446,7 +2470,7 @@ fn locate_takes_an_overlay_ui_id() {
         text: None,
         places: ui.places(),
     };
-    let cancel = locate(&ui.app, "licence/cancel", &found).unwrap();
+    let cancel = locate(ui.app(), "licence/cancel", &found).unwrap();
     let label = ui.text("Cancel").expect("the chooser shows Cancel");
     assert!(cancel.contains(label.center()));
 }

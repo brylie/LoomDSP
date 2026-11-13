@@ -273,9 +273,9 @@ fn a_new_patch_closes_help() {
     let mut ui = Ui::open("subtractive.ron");
     open_overlay(&mut ui, InputOwner::Help);
 
-    assert!(ui.app.replace(Source::Empty));
+    assert!(ui.app_mut().replace(Source::Empty));
 
-    assert_eq!(ui.app.input_owner(), InputOwner::Canvas);
+    assert_eq!(ui.app().input_owner(), InputOwner::Canvas);
 }
 
 /// Cmd+Shift+O opens Your patches from a menu on the canvas, because a menu
@@ -285,16 +285,16 @@ fn your_patches_opens_from_a_menu_and_closes_it() {
     let tmp = TempDir::new("patches-over-menu");
     for owner in [InputOwner::TileMenu, InputOwner::ProbeMenu] {
         let mut ui = Ui::open("subtractive.ron");
-        let mut preferences = ui.app.rig.store.saved().clone();
+        let mut preferences = ui.app().rig.store.saved().clone();
         preferences.library = Some(tmp.0.clone());
-        let _ = ui.app.rig.store.save(preferences);
+        let _ = ui.app_mut().rig.store.save(preferences);
         open_overlay(&mut ui, owner);
 
         ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
-        assert_eq!(ui.app.input_owner(), InputOwner::Patches, "{owner:?}");
+        assert_eq!(ui.app().input_owner(), InputOwner::Patches, "{owner:?}");
 
-        ui.app.overlays.close_patches();
-        assert_eq!(ui.app.input_owner(), InputOwner::Canvas, "the menu is gone");
+        ui.app_mut().overlays.close_patches();
+        assert_eq!(ui.app().input_owner(), InputOwner::Canvas, "the menu is gone");
     }
 }
 
@@ -329,11 +329,11 @@ fn a_failed_save_shows_the_reason_in_the_window() {
 
     ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
 
-    let status = ui.app.alerts.status().to_string();
+    let status = ui.app().alerts.status().to_string();
     assert!(status.starts_with("Could not save \"patch.ron\""), "{status}");
     assert!(status.ends_with("Your changes are not saved."), "{status}");
     let asked = fake::asked();
     assert!(matches!(asked.as_slice(), [Asked::Save(_)]), "{asked:?}");
-    assert_eq!(ui.app.ui_snapshot().question.unwrap().text, status);
-    assert_eq!(ui.app.session.document.file(), None);
+    assert_eq!(ui.app().ui_snapshot().question.unwrap().text, status);
+    assert_eq!(ui.app().session.document.file(), None);
 }

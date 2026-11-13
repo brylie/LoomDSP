@@ -173,15 +173,15 @@ fn the_button_opens_a_list_of_names() {
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
     assert!(ui.text("Recent").is_some());
-    assert_eq!(ui.app.ui_snapshot().recent, None);
+    assert_eq!(ui.app().ui_snapshot().recent, None);
     ui.send(AppMessage::OpenRecent);
-    assert_eq!(ui.app.ui_snapshot().recent, None, "nothing to list");
+    assert_eq!(ui.app().ui_snapshot().recent, None, "nothing to list");
 
-    assert!(ui.app.open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[0]));
     ui.redraw();
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
-    let rows = ui.app.ui_snapshot().recent.unwrap();
+    let rows = ui.app().ui_snapshot().recent.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "0.ron");
     assert_eq!(rows[0].folder, dir.0.display().to_string());
@@ -189,7 +189,7 @@ fn the_button_opens_a_list_of_names() {
     assert!(ui.text("0.ron").is_some());
 
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert_eq!(ui.app.ui_snapshot().recent, None);
+    assert_eq!(ui.app().ui_snapshot().recent, None);
 }
 
 /// Choosing a row asks about unsaved changes first, as Open does.
@@ -198,14 +198,14 @@ fn choosing_a_row_asks_first() {
     let dir = TempDir::new("recent-asks");
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
-    ui.app.rig.recent.remember(&files[0]).unwrap();
-    changed(&mut ui.app);
+    ui.app_mut().rig.recent.remember(&files[0]).unwrap();
+    changed(ui.app_mut());
     ui.send(AppMessage::OpenRecent);
     ui.send(AppMessage::Recent(Message::Pick(0)));
-    assert!(ui.app.overlays.question.is_some());
-    assert_eq!(ui.app.session.document.file(), None);
+    assert!(ui.app().overlays.question.is_some());
+    assert_eq!(ui.app().session.document.file(), None);
     ui.send(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
-    assert_eq!(ui.app.session.document.file(), Some(files[0].as_path()));
+    assert_eq!(ui.app().session.document.file(), Some(files[0].as_path()));
 }
 
 /// A missing file is dimmed. Choosing it takes it off the list, with a status
@@ -215,18 +215,22 @@ fn a_missing_file_is_dimmed_and_removed_when_chosen() {
     let dir = TempDir::new("recent-missing");
     let files = patches(&dir.0, 2);
     let mut ui = Ui::with_app(app());
-    ui.app.rig.recent.remember(&files[1]).unwrap();
-    ui.app.rig.recent.remember(&files[0]).unwrap();
+    ui.app_mut().rig.recent.remember(&files[1]).unwrap();
+    ui.app_mut().rig.recent.remember(&files[0]).unwrap();
     std::fs::remove_file(&files[0]).unwrap();
-    changed(&mut ui.app);
+    changed(ui.app_mut());
     ui.send(AppMessage::OpenRecent);
-    let rows = ui.app.ui_snapshot().recent.unwrap();
+    let rows = ui.app().ui_snapshot().recent.unwrap();
     assert!(rows[0].missing);
     assert!(!rows[1].missing);
     ui.send(AppMessage::Recent(Message::Pick(0)));
-    assert!(ui.app.overlays.question.is_none(), "nothing to ask about");
-    assert_eq!(ui.app.rig.recent.files(), &files[1..]);
-    assert!(ui.app.alerts.status().contains("0.ron"), "{}", ui.app.alerts.status());
+    assert!(ui.app().overlays.question.is_none(), "nothing to ask about");
+    assert_eq!(ui.app().rig.recent.files(), &files[1..]);
+    assert!(
+        ui.app().alerts.status().contains("0.ron"),
+        "{}",
+        ui.app().alerts.status()
+    );
 }
 
 /// A file that goes after the list opened is looked up again when chosen.
@@ -235,13 +239,13 @@ fn a_file_is_looked_up_again_when_chosen() {
     let dir = TempDir::new("recent-gone");
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
-    ui.app.rig.recent.remember(&files[0]).unwrap();
+    ui.app_mut().rig.recent.remember(&files[0]).unwrap();
     ui.send(AppMessage::OpenRecent);
-    assert!(!ui.app.ui_snapshot().recent.unwrap()[0].missing);
+    assert!(!ui.app().ui_snapshot().recent.unwrap()[0].missing);
     std::fs::remove_file(&files[0]).unwrap();
     ui.send(AppMessage::Recent(Message::Pick(0)));
-    assert!(ui.app.rig.recent.files().is_empty());
-    assert_eq!(ui.app.session.document.file(), None);
+    assert!(ui.app().rig.recent.files().is_empty());
+    assert_eq!(ui.app().session.document.file(), None);
 }
 
 /// An app with its library at `library`, on an untitled patch.
@@ -477,18 +481,18 @@ fn clipboard_keys_do_nothing_behind_the_list() {
     let dir = TempDir::new("recent-clipboard");
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
-    ui.app.rig.recent.remember(&files[0]).unwrap();
-    let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
+    ui.app_mut().rig.recent.remember(&files[0]).unwrap();
+    let (id, _) = ui.app().session.controller.graph().nodes().next().expect("a module");
     ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(vec![id.0])));
     ui.redraw();
-    let count = ui.app.session.controller.graph().nodes().count();
+    let count = ui.app().session.controller.graph().nodes().count();
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
     for key in ["x", "d"] {
         ui.tap(Key::Character(key.into()), Modifiers::COMMAND);
-        assert_eq!(ui.app.session.controller.graph().nodes().count(), count, "{key}");
+        assert_eq!(ui.app().session.controller.graph().nodes().count(), count, "{key}");
     }
-    assert!(ui.app.overlays.recent_rows().is_some(), "the list stays open");
+    assert!(ui.app().overlays.recent_rows().is_some(), "the list stays open");
 }
 
 /// Opening the list takes the keys from a focused matrix, so Delete removes
@@ -498,20 +502,20 @@ fn the_list_takes_the_keys_from_a_focused_matrix() {
     let dir = TempDir::new("recent-matrix");
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
-    ui.app.rig.recent.remember(&files[0]).unwrap();
-    ui.app.right_tab = crate::matrix::Tab::Matrix;
-    ui.app.session.matrix.focused = true;
+    ui.app_mut().rig.recent.remember(&files[0]).unwrap();
+    ui.app_mut().right_tab = crate::matrix::Tab::Matrix;
+    ui.app_mut().session.matrix.focused = true;
     ui.redraw();
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
-    assert!(!ui.app.session.matrix.focused);
+    assert!(!ui.app().session.matrix.focused);
     let messages = ui.tap(Key::Named(Named::Delete), Modifiers::empty());
     assert!(
         !messages.iter().any(|m| matches!(m, AppMessage::MatrixKey(_))),
         "{messages:?}"
     );
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert!(ui.app.overlays.recent_rows().is_none(), "one Escape closes it");
+    assert!(ui.app().overlays.recent_rows().is_none(), "one Escape closes it");
 }
 
 /// Open with a current file starts in its folder, and does not make the

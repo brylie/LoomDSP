@@ -34,13 +34,13 @@ fn open_on_cutoff() -> Ui {
 
 /// The filter's cutoff, in Hz.
 fn cutoff(ui: &Ui) -> f32 {
-    let node = ui.app.session.controller.graph().node(ModuleId(FILTER)).unwrap();
+    let node = ui.app().session.controller.graph().node(ModuleId(FILTER)).unwrap();
     node.params[node.descriptor.param_index("cutoff").unwrap()]
 }
 
 /// The index of the cutoff parameter, for inspector messages.
 fn cutoff_index(ui: &Ui) -> usize {
-    let node = ui.app.session.controller.graph().node(ModuleId(FILTER)).unwrap();
+    let node = ui.app().session.controller.graph().node(ModuleId(FILTER)).unwrap();
     node.descriptor.param_index("cutoff").unwrap()
 }
 
@@ -58,7 +58,7 @@ fn slide_cutoff(ui: &mut Ui, value: f32) {
 
 /// How many steps the history keeps.
 fn steps(ui: &Ui) -> usize {
-    ui.app.session.edits.history.len()
+    ui.app().session.edits.history.len()
 }
 
 /// Toolbar Undo right after an arrow release acts on the arrow step, before
@@ -73,7 +73,7 @@ fn undo_before_the_deadline_takes_the_arrow_step() {
 
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original, "Undo did not wait for the deadline");
-    assert!(!ui.app.session.edits.gesture_open());
+    assert!(!ui.app().session.edits.gesture_open());
     ui.click_text("Redo");
     assert_eq!(cutoff(&ui), arrowed, "Redo did not wait either");
 }
@@ -108,7 +108,7 @@ fn two_quick_arrows_are_one_step() {
     ui.tap(right(), keyboard::Modifiers::default());
     ui.redraw_at(Instant::now() + PAST_GROUP);
     assert_eq!(steps(&ui), before + 1, "one step for both taps");
-    assert!(!ui.app.session.edits.gesture_open(), "the deadline closed it");
+    assert!(!ui.app().session.edits.gesture_open(), "the deadline closed it");
 
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original, "one Undo takes both taps");
@@ -137,26 +137,26 @@ fn an_arrow_after_the_deadline_is_a_new_step() {
 fn an_arrow_right_after_undo_is_a_new_step() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
-    let place = ui.app.session.positions[&FILTER];
+    let place = ui.app().session.positions[&FILTER];
     ui.tap(right(), keyboard::Modifiers::default());
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original);
 
     ui.tap(right(), keyboard::Modifiers::default());
-    let moved = ui.app.session.positions[&FILTER];
+    let moved = ui.app().session.positions[&FILTER];
     assert_ne!(moved, place, "the arrow moved the tile");
     assert_eq!(
-        ui.app.redo_hint(),
+        ui.app().redo_hint(),
         Err(crate::editing::HistoryBlock::Nothing),
         "the released move is a new edit, so the undone knob step cannot come back"
     );
     ui.redraw_at(Instant::now() + PAST_GROUP);
-    assert!(!ui.app.session.edits.gesture_open());
+    assert!(!ui.app().session.edits.gesture_open());
     ui.click_text("Undo");
-    assert_eq!(ui.app.session.positions[&FILTER], place, "Undo takes the move back");
+    assert_eq!(ui.app().session.positions[&FILTER], place, "Undo takes the move back");
     assert_eq!(cutoff(&ui), original, "and leaves the knob as it was");
     ui.click_text("Redo");
-    assert_eq!(ui.app.session.positions[&FILTER], moved, "Redo brings back the move");
+    assert_eq!(ui.app().session.positions[&FILTER], moved, "Redo brings back the move");
     assert_eq!(cutoff(&ui), original, "not the undone knob step");
 }
 
@@ -189,12 +189,12 @@ fn undo_is_disabled_while_an_arrow_is_held() {
     ui.key_down(right(), false);
     let held = cutoff(&ui);
     assert_ne!(held, original, "the arrow moved the knob");
-    assert_eq!(ui.app.undo_hint(), Err(HistoryBlock::EditOpen));
-    assert_eq!(ui.app.redo_hint(), Err(HistoryBlock::EditOpen));
-    assert!(ui.app.session.edits.gesture_open());
+    assert_eq!(ui.app().undo_hint(), Err(HistoryBlock::EditOpen));
+    assert_eq!(ui.app().redo_hint(), Err(HistoryBlock::EditOpen));
+    assert!(ui.app().session.edits.gesture_open());
 
     ui.key_up(right());
-    assert!(ui.app.undo_hint().is_ok(), "a released group can be undone");
+    assert!(ui.app().undo_hint().is_ok(), "a released group can be undone");
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original);
 }
@@ -207,16 +207,16 @@ fn undo_is_disabled_while_an_arrow_is_held() {
 fn undo_and_redo_see_an_open_slider_gesture() {
     let mut ui = Ui::open(PATCH);
     let original = cutoff(&ui);
-    assert!(ui.app.undo_hint().is_err(), "a new patch has nothing to undo");
+    assert!(ui.app().undo_hint().is_err(), "a new patch has nothing to undo");
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(FILTER)));
     slide_cutoff(&mut ui, 2_500.0);
-    assert!(ui.app.session.edits.slider_gesture_open());
-    assert_eq!(ui.app.undo_hint().as_deref(), Ok("Undo: the slider edit"));
-    assert_eq!(ui.app.redo_hint(), Err(crate::editing::HistoryBlock::Nothing));
+    assert!(ui.app().session.edits.slider_gesture_open());
+    assert_eq!(ui.app().undo_hint().as_deref(), Ok("Undo: the slider edit"));
+    assert_eq!(ui.app().redo_hint(), Err(crate::editing::HistoryBlock::Nothing));
 
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original, "Undo closed the slider edit and took it");
-    assert!(ui.app.redo_hint().is_ok(), "and the slider edit can come back");
+    assert!(ui.app().redo_hint().is_ok(), "and the slider edit can come back");
 }
 
 /// An arrow press and the window losing focus in one frame: no key release
@@ -227,7 +227,7 @@ fn losing_focus_with_an_arrow_down_ends_the_group() {
     let original = cutoff(&ui);
     ui.step(&[key_pressed(right(), false), Event::Window(window::Event::Unfocused)]);
     assert_ne!(cutoff(&ui), original, "the arrow moved the knob");
-    assert!(!ui.app.session.edits.gesture_open(), "losing focus ended the group");
+    assert!(!ui.app().session.edits.gesture_open(), "losing focus ended the group");
 
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original);
@@ -242,17 +242,17 @@ fn slide_after_replacing(mut ui: Ui, replace: impl FnOnce(&mut Ui)) {
     replace(&mut ui);
     ui.redraw_at(early);
     assert!(
-        ui.app.session.controller.graph().node(ModuleId(FILTER)).is_some(),
+        ui.app().session.controller.graph().node(ModuleId(FILTER)).is_some(),
         "the new patch has the filter"
     );
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(FILTER)));
     slide_cutoff(&mut ui, 2_500.0);
-    assert!(ui.app.session.edits.slider_gesture_open());
+    assert!(ui.app().session.edits.slider_gesture_open());
     let before = steps(&ui);
 
     ui.redraw_at(Instant::now() + PAST_GROUP);
     assert!(
-        ui.app.session.edits.slider_gesture_open(),
+        ui.app().session.edits.slider_gesture_open(),
         "an old arrow group's end must not close the new patch's slider"
     );
     assert_eq!(steps(&ui), before, "and must make no step");
@@ -273,10 +273,10 @@ fn a_new_patch_ignores_an_old_arrow_group() {
     let mut ui = open_on_cutoff();
     ui.tap(right(), keyboard::Modifiers::default());
     ui.click_text("Undo");
-    assert!(!ui.app.unsaved(), "Undo made the patch saved, so no question opens");
+    assert!(!ui.app().unsaved(), "Undo made the patch saved, so no question opens");
     slide_after_replacing(ui, |ui| {
-        ui.app.after_discard(AfterDiscard::OpenPath(patch_path()));
-        assert!(ui.app.overlays.question.is_none());
+        ui.app_mut().after_discard(AfterDiscard::OpenPath(patch_path()));
+        assert!(ui.app().overlays.question.is_none());
     });
 }
 
@@ -286,12 +286,12 @@ fn a_new_patch_after_the_question_ignores_an_old_arrow_group() {
     let mut ui = open_on_cutoff();
     ui.tap(right(), keyboard::Modifiers::default());
     slide_after_replacing(ui, |ui| {
-        ui.app.after_discard(AfterDiscard::OpenPath(patch_path()));
-        assert!(ui.app.overlays.question.is_some(), "the arrow edit is unsaved");
+        ui.app_mut().after_discard(AfterDiscard::OpenPath(patch_path()));
+        assert!(ui.app().overlays.question.is_some(), "the arrow edit is unsaved");
         // The question has the canvas's input for a frame, as in the app.
         ui.redraw();
         ui.send(Message::Question(question::Message::Answer(Answer::DontSave)));
-        assert!(ui.app.overlays.question.is_none());
+        assert!(ui.app().overlays.question.is_none());
     });
 }
 
@@ -309,6 +309,6 @@ fn a_press_and_release_in_one_frame_still_close_the_group() {
     ]);
     assert_ne!(cutoff(&ui), original);
     ui.redraw_at(Instant::now() + PAST_GROUP);
-    assert!(!ui.app.session.edits.gesture_open(), "the deadline closed the group");
+    assert!(!ui.app().session.edits.gesture_open(), "the deadline closed the group");
     assert_eq!(steps(&ui), before + 1);
 }

@@ -401,10 +401,10 @@ fn the_mode_rows_draw_and_answer_clicks() {
     app.session.selection = [2].into();
     let mut ui = crate::ui_test::Ui::with_app(app);
     ui.click_text("Add member");
-    assert_eq!(ui.app.session.hierarchy.members_of(ModuleId(2)).len(), 2);
+    assert_eq!(ui.app().session.hierarchy.members_of(ModuleId(2)).len(), 2);
     assert!(ui.text("Members").is_some() && ui.text("Remove").is_some());
     ui.send(AppMessage::Mode(Message::RemoveMember(
-        ui.app.session.hierarchy.members_of(ModuleId(2))[1].0,
+        ui.app().session.hierarchy.members_of(ModuleId(2))[1].0,
     )));
     ui.send(AppMessage::Mode(Message::SetMode {
         tile: 2,
@@ -414,7 +414,7 @@ fn the_mode_rows_draw_and_answer_clicks() {
     ui.redraw();
     assert!(ui.text("Copies").is_some() && ui.text("Spread").is_some());
     ui.click_text("Stereo spread");
-    assert!(ui.app.session.hierarchy.modes_of(ModuleId(2)).unwrap().stereo_spread);
+    assert!(ui.app().session.hierarchy.modes_of(ModuleId(2)).unwrap().stereo_spread);
 }
 
 /// Member follows the member that plays: moving it up keeps it playing,

@@ -514,7 +514,10 @@ fn preferences_show_input_flag_before_the_stream_opens() {
     assert_eq!(fake.input_opens.get(), 0);
     app.preferences(Message::Open);
     let mut ui = crate::ui_test::Ui::with_app(app);
-    assert_eq!(ui.app.rig.effective_input(&fake.audio_inputs.borrow()), Some("Fake A"));
+    assert_eq!(
+        ui.app().rig.effective_input(&fake.audio_inputs.borrow()),
+        Some("Fake A")
+    );
     assert!(ui.text("Set by an input flag for this run.").is_some());
     assert!(
         ui.text("Input and output use the same device. Speakers can feed the microphone.")
@@ -529,7 +532,7 @@ fn preferences_show_input_flag_before_the_stream_opens() {
         0,
         "showing preferences never opens the microphone"
     );
-    ui.app.preferences(Message::Input(InputChoice::Off));
+    ui.app_mut().preferences(Message::Input(InputChoice::Off));
     assert!(
         ui.text("Input and output use the same device. Speakers can feed the microphone.")
             .is_none()
@@ -1688,8 +1691,8 @@ fn output_warnings_show_until_the_stream_stops() {
     assert!(ui.text("Output: bad samples silenced").is_some());
     assert!(ui.text("Output clipped").is_some());
 
-    ui.app.stop_audio();
-    let stats = ui.app.ui_snapshot().stats;
+    ui.app_mut().stop_audio();
+    let stats = ui.app().ui_snapshot().stats;
     assert!(!stats.output_silenced && !stats.output_clipped);
 }
 

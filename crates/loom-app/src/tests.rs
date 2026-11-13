@@ -1158,7 +1158,7 @@ fn panic_is_not_an_edit() {
 #[test]
 fn the_panic_key_button_and_command_run_panic() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let _ = ui.app.send(Message::OpenBrowser);
+    let _ = ui.app_mut().send(Message::OpenBrowser);
     ui.redraw();
     ui.typewrite("sin");
     let messages = ui.tap(
@@ -1167,13 +1167,13 @@ fn the_panic_key_button_and_command_run_panic() {
     );
     assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
     assert!(
-        ui.app.alerts.status().starts_with("Panic"),
+        ui.app().alerts.status().starts_with("Panic"),
         "{}",
-        ui.app.alerts.status()
+        ui.app().alerts.status()
     );
 
-    ui.app.alerts.say(String::new());
-    let _ = ui.app.send(Message::Browser(browser::Message::Close));
+    ui.app_mut().alerts.say(String::new());
+    let _ = ui.app_mut().send(Message::Browser(browser::Message::Close));
     ui.redraw();
     let button = ui.text("Panic").expect("a Panic button on the toolbar");
     ui.move_to(button.center());
@@ -2672,30 +2672,30 @@ fn a_panic_that_cannot_be_sent_says_so() {
 #[test]
 fn the_status_bar_shows_a_kept_error_beside_later_messages() {
     let mut ui = crate::ui_test::Ui::with_app(app());
-    ui.app.alerts.error(alerts::Cause::File, "save failed");
+    ui.app_mut().alerts.error(alerts::Cause::File, "save failed");
     ui.redraw();
     assert!(ui.text("Error: save failed").is_some());
     assert_eq!(
-        ui.app.ui_snapshot().status_severity,
+        ui.app().ui_snapshot().status_severity,
         alerts::Severity::Alarm,
         "the latest message is the error"
     );
     assert!(ui.text("×").is_some(), "the latest message can be dismissed too");
 
-    ui.app.alerts.say("saved");
+    ui.app_mut().alerts.say("saved");
     ui.redraw();
     assert!(ui.text("Error: save failed").is_some(), "it stays after info");
     assert!(ui.text("saved").is_some());
-    let snapshot = ui.app.ui_snapshot();
+    let snapshot = ui.app().ui_snapshot();
     assert_eq!(snapshot.status, "saved");
     assert_eq!(snapshot.status_severity, alerts::Severity::Normal);
     assert_eq!(snapshot.errors.len(), 1);
     assert_eq!(snapshot.errors[0].text, "save failed");
 
-    ui.app.alerts.warn("refused");
+    ui.app_mut().alerts.warn("refused");
     ui.redraw();
     assert!(ui.text("Warning: refused").is_some());
-    assert_eq!(ui.app.ui_snapshot().status_severity, alerts::Severity::Warning);
+    assert_eq!(ui.app().ui_snapshot().status_severity, alerts::Severity::Warning);
 }
 
 /// The × takes a kept error off the bar. A lost output has no ×, and its
@@ -2703,21 +2703,21 @@ fn the_status_bar_shows_a_kept_error_beside_later_messages() {
 #[test]
 fn pressing_x_dismisses_a_kept_error_but_a_lost_output_has_none() {
     let mut ui = crate::ui_test::Ui::with_app(app());
-    ui.app.alerts.error(alerts::Cause::Other, "the recording stopped");
-    ui.app.alerts.say("saved");
+    ui.app_mut().alerts.error(alerts::Cause::Other, "the recording stopped");
+    ui.app_mut().alerts.say("saved");
     ui.redraw();
     let x = ui.text("×").expect("a kept error can be dismissed").center();
     ui.move_to(x);
     ui.press();
     ui.release();
-    assert!(ui.app.alerts.kept().is_empty());
+    assert!(ui.app().alerts.kept().is_empty());
     assert!(ui.text("Error: the recording stopped").is_none());
 
-    ui.app.alerts.error(alerts::Cause::AudioOutput, "Audio: lost");
+    ui.app_mut().alerts.error(alerts::Cause::AudioOutput, "Audio: lost");
     ui.redraw();
     assert!(ui.text("Error: Audio: lost").is_some());
     assert!(ui.text("×").is_none(), "only sound or a choice ends a lost output");
-    let json = serde_json::to_value(ui.app.ui_snapshot()).unwrap();
+    let json = serde_json::to_value(ui.app().ui_snapshot()).unwrap();
     assert_eq!(json["status_severity"], "error");
     assert_eq!(json["errors"][0]["cause"], "audio_output");
     assert_eq!(json["errors"][0]["dismissible"], false);
@@ -2729,12 +2729,12 @@ fn pressing_x_dismisses_a_kept_error_but_a_lost_output_has_none() {
 fn the_status_bar_says_learning_while_learn_mode_is_on() {
     let mut ui = crate::ui_test::Ui::with_app(app());
     assert!(ui.text("Learning").is_none());
-    assert!(!ui.app.ui_snapshot().learning);
+    assert!(!ui.app().ui_snapshot().learning);
     ui.send(Message::Learn(learn::Message::Toggle));
-    ui.app.alerts.say("Mapped CC 74 to SVF Cutoff");
+    ui.app_mut().alerts.say("Mapped CC 74 to SVF Cutoff");
     ui.redraw();
     assert!(ui.text("Learning").is_some(), "the next message does not hide it");
-    assert!(ui.app.ui_snapshot().learning);
+    assert!(ui.app().ui_snapshot().learning);
     ui.send(Message::Learn(learn::Message::Toggle));
     ui.redraw();
     assert!(ui.text("Learning").is_none());
@@ -2776,7 +2776,7 @@ fn press_key(
 fn typing_in_authors(over_canvas: bool) -> crate::ui_test::Ui {
     let mut ui = crate::ui_test::Ui::open("sine.ron");
     let _ = ui
-        .app
+        .app_mut()
         .send(Message::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
     ui.redraw();
     let label = ui.text("Authors, one per line").expect("the patch form shows");
@@ -2875,7 +2875,7 @@ fn tab_moves_between_the_fields_of_one_view() {
     assert_eq!(ui.focused_field(), Some(tags), "Shift-Tab wraps back to Tags");
 
     let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
-    ui.app
+    ui.app_mut()
         .overlays
         .open(crate::overlays::Overlay::Patches(crate::patches::PatchBrowser::new(
             1,

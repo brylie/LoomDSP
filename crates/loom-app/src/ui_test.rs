@@ -116,6 +116,16 @@ impl Ui {
         self.tap(key, modifiers);
     }
 
+    /// The app, to read.
+    pub(crate) fn app(&self) -> &App {
+        &self.app
+    }
+
+    /// The app, for a test to set up state between turns.
+    pub(crate) fn app_mut(&mut self) -> &mut App {
+        &mut self.app
+    }
+
     /// What the window shows, as `--dump-ui` prints it.
     pub fn snapshot_json(&self) -> serde_json::Value {
         serde_json::to_value(self.app.ui_snapshot()).expect("the snapshot is plain data")

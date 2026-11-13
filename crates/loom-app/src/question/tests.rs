@@ -20,7 +20,7 @@ fn changed() -> Ui {
 
 /// What the open question shows.
 fn model(ui: &Ui) -> Model {
-    ui.app.ui_snapshot().question.expect("a question is open")
+    ui.app().ui_snapshot().question.expect("a question is open")
 }
 
 /// Gives an answer, as its button does.
@@ -35,7 +35,7 @@ fn modules(app: &App) -> usize {
 
 /// Selects the patch's first module, so that F1 has help to open.
 fn select_a_module(ui: &mut Ui) {
-    let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
+    let (id, _) = ui.app().session.controller.graph().nodes().next().expect("a module");
     ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(vec![id.0])));
     ui.redraw();
 }
@@ -76,14 +76,14 @@ fn each_way_of_dropping_the_patch_asks() {
 
     // New.
     let mut ui = changed();
-    let before = modules(&ui.app);
+    let before = modules(ui.app());
     ui.send(AppMessage::File(FileAction::New));
-    assert!(ui.app.overlays.question.is_some());
-    assert_eq!(modules(&ui.app), before, "it waits for the answer");
+    assert!(ui.app().overlays.question.is_some());
+    assert_eq!(modules(ui.app()), before, "it waits for the answer");
     answer(&mut ui, Answer::DontSave);
-    assert!(modules(&ui.app) < before);
-    assert!(!ui.app.unsaved());
-    assert_eq!(ui.app.alerts.status(), "new patch");
+    assert!(modules(ui.app()) < before);
+    assert!(!ui.app().unsaved());
+    assert_eq!(ui.app().alerts.status(), "new patch");
 
     // Open: the dialog comes after the answer, never before it.
     let mut ui = changed();
@@ -92,15 +92,15 @@ fn each_way_of_dropping_the_patch_asks() {
     assert_eq!(fake::asked(), Vec::new(), "no picker before the answer");
     answer(&mut ui, Answer::DontSave);
     assert!(matches!(fake::asked().as_slice(), [Asked::Open(_)]));
-    assert_eq!(ui.app.session.document.file(), Some(other.as_path()));
+    assert_eq!(ui.app().session.document.file(), Some(other.as_path()));
     fake::answer_open(None);
 
     // Closing the window.
     let mut ui = changed();
     ui.send(AppMessage::File(FileAction::Close));
-    assert!(!ui.app.quit, "it waits for the answer");
+    assert!(!ui.app().quit, "it waits for the answer");
     answer(&mut ui, Answer::DontSave);
-    assert!(ui.app.quit);
+    assert!(ui.app().quit);
 }
 
 /// Cancel stops the command and changes nothing, however it is given.
@@ -108,13 +108,13 @@ fn each_way_of_dropping_the_patch_asks() {
 fn cancel_changes_nothing() {
     for cancel in [Message::Answer(Answer::Cancel), Message::Escape] {
         let mut ui = changed();
-        let before = modules(&ui.app);
+        let before = modules(ui.app());
         ui.send(AppMessage::File(FileAction::Close));
         ui.send(AppMessage::Question(cancel));
-        assert!(ui.app.overlays.question.is_none());
-        assert!(!ui.app.quit);
-        assert!(ui.app.unsaved());
-        assert_eq!(modules(&ui.app), before);
+        assert!(ui.app().overlays.question.is_none());
+        assert!(!ui.app().quit);
+        assert!(ui.app().unsaved());
+        assert_eq!(modules(ui.app()), before);
     }
 }
 
@@ -129,7 +129,7 @@ fn save_writes_then_continues() {
     answer(&mut ui, Answer::Save);
     fake::answer_save(None);
     assert!(path.is_file());
-    assert!(ui.app.quit);
+    assert!(ui.app().quit);
 }
 
 /// A cancelled Save dialog stays, with nothing lost.
@@ -139,9 +139,9 @@ fn a_cancelled_save_stays() {
     let mut ui = changed();
     ui.send(AppMessage::File(FileAction::Close));
     answer(&mut ui, Answer::Save);
-    assert!(!ui.app.quit);
-    assert!(ui.app.unsaved());
-    assert!(ui.app.overlays.question.is_none());
+    assert!(!ui.app().quit);
+    assert!(ui.app().unsaved());
+    assert!(ui.app().overlays.question.is_none());
 }
 
 /// A failed save stays and says why, with nothing lost.
@@ -155,18 +155,18 @@ fn a_failed_save_stays_and_says_why() {
     ui.send(AppMessage::File(FileAction::Close));
     answer(&mut ui, Answer::Save);
     fake::answer_save(None);
-    assert!(!ui.app.quit);
-    assert!(ui.app.unsaved());
+    assert!(!ui.app().quit);
+    assert!(ui.app().unsaved());
     let error = model(&ui);
     assert!(error.text.starts_with("Could not save"), "{}", error.text);
     assert_eq!(error.buttons, ["ok"]);
     assert_eq!(error.highlight, "ok");
-    assert_eq!(ui.app.alerts.status(), error.text, "the status bar repeats it");
+    assert_eq!(ui.app().alerts.status(), error.text, "the status bar repeats it");
 
     // OK closes it. Escape would too, and neither quits.
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.overlays.question.is_none());
-    assert!(!ui.app.quit);
+    assert!(ui.app().overlays.question.is_none());
+    assert!(!ui.app().quit);
 }
 
 /// A window on an untitled patch with changes, closing, having answered Save
@@ -187,7 +187,7 @@ fn asked_to_replace(dir: &TempDir) -> Ui {
 fn replace_writes_then_continues() {
     let dir = TempDir::new("question-replace");
     let mut ui = asked_to_replace(&dir);
-    assert!(!ui.app.quit, "it waits for the answer");
+    assert!(!ui.app().quit, "it waits for the answer");
     let question = model(&ui);
     assert_eq!(question.title, "Replace \"foo.ron\"?");
     assert_eq!(question.buttons, ["replace", "cancel"]);
@@ -196,7 +196,7 @@ fn replace_writes_then_continues() {
 
     answer(&mut ui, Answer::Replace);
     assert_ne!(std::fs::read_to_string(dir.0.join("foo.ron")).unwrap(), "theirs");
-    assert!(ui.app.quit);
+    assert!(ui.app().quit);
 }
 
 /// Cancel in Replace leaves the file, the unsaved mark, and the app.
@@ -205,10 +205,10 @@ fn cancelling_replace_keeps_everything() {
     let dir = TempDir::new("question-keep");
     let mut ui = asked_to_replace(&dir);
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.overlays.question.is_none());
+    assert!(ui.app().overlays.question.is_none());
     assert_eq!(std::fs::read_to_string(dir.0.join("foo.ron")).unwrap(), "theirs");
-    assert!(ui.app.unsaved());
-    assert!(!ui.app.quit);
+    assert!(ui.app().unsaved());
+    assert!(!ui.app().quit);
 }
 
 /// The toolbar's Save As asks about Replace too, with nothing to go on to.
@@ -221,9 +221,9 @@ fn save_as_asks_about_replace_and_goes_no_further() {
     ui.send(AppMessage::File(FileAction::SaveAs));
     fake::answer_save(None);
     answer(&mut ui, Answer::Replace);
-    assert!(!ui.app.unsaved());
-    assert!(!ui.app.quit);
-    assert_eq!(ui.app.session.document.file(), Some(dir.0.join("foo.ron").as_path()));
+    assert!(!ui.app().unsaved());
+    assert!(!ui.app().quit);
+    assert_eq!(ui.app().session.document.file(), Some(dir.0.join("foo.ron").as_path()));
 }
 
 /// Tab and the arrow keys move the highlight and wrap around, Enter gives it,
@@ -244,7 +244,7 @@ fn the_keys_move_and_give_the_highlight() {
     ui.tap(Key::Named(Named::ArrowLeft), Modifiers::empty());
     assert_eq!(model(&ui).highlight, "dont-save");
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.quit, "Enter gave Don't Save");
+    assert!(ui.app().quit, "Enter gave Don't Save");
 }
 
 /// A held Enter repeats, and a repeat answers nothing, so one press cannot
@@ -279,15 +279,15 @@ fn a_focused_field_gets_nothing() {
     let mut ui = changed();
     ui.focus(&crate::patch_info::tags_part());
     ui.typewrite("a");
-    let draft = ui.app.session.patch_info.tag_draft.clone();
+    let draft = ui.app().session.patch_info.tag_draft.clone();
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     ui.typewrite("drone");
-    assert_eq!(ui.app.session.patch_info.tag_draft, draft);
-    assert!(ui.app.overlays.question.is_some());
+    assert_eq!(ui.app().session.patch_info.tag_draft, draft);
+    assert!(ui.app().overlays.question.is_some());
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    assert!(ui.app.overlays.question.is_none(), "Enter answered the question");
-    assert!(ui.app.session.document.info().tags.is_empty(), "and added no tag");
+    assert!(ui.app().overlays.question.is_none(), "Enter answered the question");
+    assert!(ui.app().session.document.info().tags.is_empty(), "and added no tag");
 }
 
 /// What would change the patch or open something behind the question does
@@ -296,21 +296,21 @@ fn a_focused_field_gets_nothing() {
 fn shortcuts_do_nothing_behind_the_question() {
     let mut ui = changed();
     select_a_module(&mut ui);
-    let count = modules(&ui.app);
-    let steps = ui.app.session.edits.history.len();
+    let count = modules(ui.app());
+    let steps = ui.app().session.edits.history.len();
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     let before = model(&ui);
     ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
-    assert_eq!(modules(&ui.app), count, "undo did nothing");
-    assert_eq!(ui.app.session.edits.history.len(), steps);
+    assert_eq!(modules(ui.app()), count, "undo did nothing");
+    assert_eq!(ui.app().session.edits.history.len(), steps);
     ui.tap(Key::Character("n".into()), Modifiers::COMMAND);
-    assert_eq!(modules(&ui.app), count, "New did nothing");
+    assert_eq!(modules(ui.app()), count, "New did nothing");
     ui.tap(Key::Named(Named::Backspace), Modifiers::empty());
-    assert_eq!(modules(&ui.app), count, "Delete did nothing");
+    assert_eq!(modules(ui.app()), count, "Delete did nothing");
     ui.tap(Key::Named(Named::Space), Modifiers::empty());
     ui.tap(Key::Named(Named::F1), Modifiers::empty());
-    assert!(ui.app.overlays.help.is_none(), "help stays closed");
+    assert!(ui.app().overlays.help.is_none(), "help stays closed");
     assert_eq!(model(&ui), before, "the question stays as it was");
 }
 
@@ -321,12 +321,12 @@ fn escape_leaves_help_open_under_the_question() {
     let mut ui = changed();
     select_a_module(&mut ui);
     ui.tap(Key::Named(Named::F1), Modifiers::empty());
-    assert!(ui.app.overlays.help.is_some());
+    assert!(ui.app().overlays.help.is_some());
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert!(ui.app.overlays.question.is_none());
-    assert!(ui.app.overlays.help.is_some(), "help is still open");
+    assert!(ui.app().overlays.question.is_none());
+    assert!(ui.app().overlays.help.is_some(), "help is still open");
 }
 
 /// A second close request is ignored, and the question stays as it was.
@@ -337,7 +337,7 @@ fn a_second_close_is_ignored() {
     ui.tap(Key::Named(Named::Tab), Modifiers::empty());
     ui.send(AppMessage::File(FileAction::Close));
     assert_eq!(model(&ui).highlight, "dont-save");
-    assert!(!ui.app.quit);
+    assert!(!ui.app().quit);
 }
 
 /// The Panic key works over the question, which stays open.
@@ -348,11 +348,11 @@ fn the_panic_key_works_over_the_question() {
     ui.redraw();
     ui.tap(Key::Character(".".into()), Modifiers::COMMAND);
     assert!(
-        ui.app.alerts.status().starts_with("Panic"),
+        ui.app().alerts.status().starts_with("Panic"),
         "{}",
-        ui.app.alerts.status()
+        ui.app().alerts.status()
     );
-    assert!(ui.app.overlays.question.is_some());
+    assert!(ui.app().overlays.question.is_some());
 }
 
 /// The gate lets through what keeps the music going, and what the canvas sends

@@ -23,7 +23,7 @@ pub(crate) const OWNERS: [InputOwner; 10] = [
 
 /// Selects the first module, which help and the clipboard keys need.
 pub(crate) fn select_first_module(ui: &mut Ui) {
-    let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
+    let (id, _) = ui.app().session.controller.graph().nodes().next().expect("a module");
     ui.send(Message::Canvas(CanvasEvent::Select(vec![id.0])));
     ui.redraw();
 }
@@ -33,7 +33,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
     let area = Rect::new(Point::ORIGIN, Size::new(1000.0, 800.0));
     match owner {
         InputOwner::Question => {
-            ui.app.edit(|app| {
+            ui.app_mut().edit(|app| {
                 app.session.controller.add_module("loom.osc.sine").unwrap();
                 app.commit();
             });
@@ -43,13 +43,16 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
         InputOwner::Chooser => ui.send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence)),
         InputOwner::Patches => {
             let browser = patches::PatchBrowser::open(1, std::env::temp_dir().join("no-such-folder")).0;
-            ui.app.overlays.open(crate::overlays::Overlay::Patches(browser));
+            ui.app_mut().overlays.open(crate::overlays::Overlay::Patches(browser));
         }
         InputOwner::Preferences => ui.send(Message::Preferences(settings::Message::Open)),
         InputOwner::Browser => ui.send(Message::OpenBrowser),
-        InputOwner::RecentList => ui.app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new())),
+        InputOwner::RecentList => ui
+            .app_mut()
+            .overlays
+            .open(crate::overlays::Overlay::RecentList(Vec::new())),
         InputOwner::ProbeMenu => {
-            let (from, _) = ui.app.session.controller.graph().cables().next().expect("a cable");
+            let (from, _) = ui.app().session.controller.graph().cables().next().expect("a cable");
             let output = PortRef {
                 module: from.module.0,
                 output: true,
@@ -63,7 +66,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
             }));
         }
         InputOwner::TileMenu => {
-            let (id, _) = ui.app.session.controller.graph().nodes().next().expect("a module");
+            let (id, _) = ui.app().session.controller.graph().nodes().next().expect("a module");
             ui.send(Message::Canvas(CanvasEvent::TileMenu {
                 module: id.0,
                 at: Point::new(100.0, 100.0),
@@ -74,7 +77,7 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
         InputOwner::Canvas => {}
     }
     ui.redraw();
-    assert_eq!(ui.app.input_owner(), owner, "the overlay opened");
+    assert_eq!(ui.app().input_owner(), owner, "the overlay opened");
 }
 
 /// The listener passes what a row reads, and nothing else, so that moving the
@@ -108,11 +111,11 @@ fn each_overlay_has_the_input_while_it_is_open() {
         select_first_module(&mut ui);
         open_overlay(&mut ui, owner);
         assert_eq!(
-            ui.app.no_overlay(),
+            ui.app().no_overlay(),
             matches!(owner, InputOwner::Canvas | InputOwner::ProbeMenu | InputOwner::TileMenu),
             "{owner:?}"
         );
-        let policy = ui.app.canvas_focus_policy();
+        let policy = ui.app().canvas_focus_policy();
         assert_eq!(policy.interactive, owner == InputOwner::Canvas, "{owner:?}");
         assert!(
             !policy.matrix_keyboard && !policy.matrix_escape,
@@ -127,16 +130,16 @@ fn each_overlay_has_the_input_while_it_is_open() {
 #[test]
 fn the_canvas_policy_follows_the_matrix() {
     let mut ui = Ui::open("subtractive.ron");
-    let idle = ui.app.canvas_focus_policy();
+    let idle = ui.app().canvas_focus_policy();
     assert_eq!(
         idle,
         loom_canvas::CanvasFocusPolicy::default(),
         "the canvas has the keys"
     );
 
-    ui.app.right_tab = crate::matrix::Tab::Matrix;
-    ui.app.session.matrix.focused = true;
-    let matrix = ui.app.canvas_focus_policy();
+    ui.app_mut().right_tab = crate::matrix::Tab::Matrix;
+    ui.app_mut().session.matrix.focused = true;
+    let matrix = ui.app().canvas_focus_policy();
     assert!(matrix.interactive && matrix.matrix_keyboard && matrix.matrix_escape);
     assert!(!matrix.text_field_keys);
 }
@@ -257,10 +260,10 @@ fn identity(subscription: iced::Subscription<Message>) -> u64 {
 #[test]
 fn only_the_input_listener_restarts_when_who_is_listening_changes() {
     let mut ui = Ui::open("subtractive.ron");
-    let input = identity(ui.app.input_subscription());
+    let input = identity(ui.app().input_subscription());
     let always = identity(crate::subscriptions::always_subscription());
     open_overlay(&mut ui, InputOwner::Browser);
-    assert_ne!(identity(ui.app.input_subscription()), input);
+    assert_ne!(identity(ui.app().input_subscription()), input);
     assert_eq!(identity(crate::subscriptions::always_subscription()), always);
 }
 
@@ -277,7 +280,7 @@ fn help_is_on_top_of_a_dialog_and_closes_alone() {
         let mut ui = Ui::open("subtractive.ron");
         open_overlay(&mut ui, owner);
         ui.tap(Key::Named(Named::F1), Modifiers::empty());
-        assert_eq!(ui.app.input_owner(), InputOwner::Help, "{owner:?}: F1 opened help");
+        assert_eq!(ui.app().input_owner(), InputOwner::Help, "{owner:?}: F1 opened help");
         if close == "escape" {
             ui.tap(Key::Named(Named::Escape), Modifiers::empty());
         } else {
@@ -285,8 +288,8 @@ fn help_is_on_top_of_a_dialog_and_closes_alone() {
             ui.press();
             ui.release();
         }
-        assert!(ui.app.overlays.help.is_none(), "{owner:?}, {close}: help closed");
-        assert_eq!(ui.app.input_owner(), owner, "{owner:?}, {close}: the dialog stayed");
+        assert!(ui.app().overlays.help.is_none(), "{owner:?}, {close}: help closed");
+        assert_eq!(ui.app().input_owner(), owner, "{owner:?}, {close}: the dialog stayed");
     }
 }
 
@@ -298,13 +301,13 @@ fn help_opens_over_a_chooser_opened_from_preferences() {
     ui.send(Message::Preferences(settings::Message::Open));
     ui.send(Message::Preferences(settings::Message::ChooseLicence));
     ui.redraw();
-    assert_eq!(ui.app.input_owner(), InputOwner::Chooser);
+    assert_eq!(ui.app().input_owner(), InputOwner::Chooser);
     ui.tap(Key::Named(Named::F1), Modifiers::empty());
-    assert_eq!(ui.app.input_owner(), InputOwner::Help);
+    assert_eq!(ui.app().input_owner(), InputOwner::Help);
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert_eq!(ui.app.input_owner(), InputOwner::Chooser, "help closed");
+    assert_eq!(ui.app().input_owner(), InputOwner::Chooser, "help closed");
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    assert_eq!(ui.app.input_owner(), InputOwner::Preferences, "the chooser closed");
+    assert_eq!(ui.app().input_owner(), InputOwner::Preferences, "the chooser closed");
 }
 
 /// While help is on top, the patch list behind it hears no keys.
@@ -325,7 +328,7 @@ fn up_and_down_leave_the_patch_list_alone_behind_help() {
 /// Taps Cmd with a character, and returns the number of modules after it.
 fn tap_command(ui: &mut Ui, c: &str) -> usize {
     ui.tap(Key::Character(c.into()), Modifiers::COMMAND);
-    ui.app.session.controller.graph().nodes().count()
+    ui.app().session.controller.graph().nodes().count()
 }
 
 /// #581: with an overlay open and no text field in focus, Cmd+X and Cmd+D leave
@@ -339,7 +342,7 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
             let mut ui = Ui::open("subtractive.ron");
             select_first_module(&mut ui);
             open_overlay(&mut ui, owner);
-            let modules = ui.app.session.controller.graph().nodes().count();
+            let modules = ui.app().session.controller.graph().nodes().count();
             let _ = ui.run_task(crate::iced_bridge::focus_moves(
                 &loom_ui::effect::FocusTarget::Nothing,
                 loom_ui::effect::Selection::Keep,
@@ -362,7 +365,7 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
 fn duplicate_does_nothing_from_a_focused_search_field() {
     let mut ui = Ui::open("subtractive.ron");
     select_first_module(&mut ui);
-    let modules = ui.app.session.controller.graph().nodes().count();
+    let modules = ui.app().session.controller.graph().nodes().count();
     open_overlay(&mut ui, InputOwner::Patches);
     ui.focus(&patches::text_fields()[0]);
     assert!(ui.text_field_focused());
@@ -374,12 +377,12 @@ fn duplicate_does_nothing_from_a_focused_search_field() {
 fn clipboard_keys_work_with_no_overlay() {
     let mut ui = Ui::open("subtractive.ron");
     select_first_module(&mut ui);
-    let modules = ui.app.session.controller.graph().nodes().count();
+    let modules = ui.app().session.controller.graph().nodes().count();
     assert_eq!(tap_command(&mut ui, "d"), modules + 1, "Cmd+D duplicates");
     ui.clipboard.0 = None;
     ui.tap(Key::Character("c".into()), Modifiers::COMMAND);
     assert!(ui.clipboard.0.is_some(), "Cmd+C copies");
-    let before = ui.app.session.controller.graph().nodes().count();
+    let before = ui.app().session.controller.graph().nodes().count();
     assert!(tap_command(&mut ui, "x") < before, "Cmd+X cuts");
 }
 
@@ -415,7 +418,7 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
         ),
         interaction(escape, Status::Ignored),
     ];
-    let mut recipes = into_recipes(ui.app.input_subscription());
+    let mut recipes = into_recipes(ui.app().input_subscription());
     assert_eq!(recipes.len(), 1, "one recipe for the input listener");
     let recipe = recipes.remove(0);
     let messages: Vec<Message> = block_on(recipe.stream(stream::iter(events).boxed()).collect());
@@ -429,7 +432,7 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
     else {
         panic!("only the key comes out: {messages:?}");
     };
-    assert_eq!(*listening, ui.app.listening());
+    assert_eq!(*listening, ui.app().listening());
     let routed = listening.route(event.clone(), *status);
     assert!(
         matches!(
@@ -459,14 +462,14 @@ fn the_injector_and_the_subscription_agree_for_each_overlay() {
         let mut ui = Ui::open("subtractive.ron");
         open_overlay(&mut ui, owner);
 
-        let injected = heard_messages(&escape, Status::Ignored, ui.app.listening());
+        let injected = heard_messages(&escape, Status::Ignored, ui.app().listening());
 
         let runtime = Runtime::Interaction {
             window: window::Id::unique(),
             event: escape.clone(),
             status: Status::Ignored,
         };
-        let recipe = into_recipes(ui.app.input_subscription()).remove(0);
+        let recipe = into_recipes(ui.app().input_subscription()).remove(0);
         let heard: Vec<Message> = block_on(recipe.stream(stream::iter(vec![runtime]).boxed()).collect());
         assert_eq!(format!("{injected:?}"), format!("{heard:?}"), "{owner:?}");
     }

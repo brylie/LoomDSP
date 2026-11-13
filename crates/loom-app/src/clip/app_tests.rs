@@ -9,9 +9,15 @@ use loom_ui_core::Point;
 /// A patch with one Level Meter, with its display on screen.
 fn with_meter() -> (Ui, u32) {
     let mut ui = Ui::open("sine.ron");
-    let meter = ui.app.session.controller.add_module("loom.display.meter").unwrap().0;
-    ui.app.session.positions.insert(meter, (600.0, 0.0));
-    ui.app.commit();
+    let meter = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("loom.display.meter")
+        .unwrap()
+        .0;
+    ui.app_mut().session.positions.insert(meter, (600.0, 0.0));
+    ui.app_mut().commit();
     ui.redraw();
     show(&mut ui, meter);
     (ui, meter)
@@ -19,25 +25,27 @@ fn with_meter() -> (Ui, u32) {
 
 /// Tells the app that only this module's displays are on screen.
 fn show(ui: &mut Ui, module: u32) {
-    let _ = ui.app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![module])));
+    let _ = ui
+        .app_mut()
+        .send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![module])));
 }
 
 /// Sends a peak on the meter's current probe, as the telemetry thread does.
 fn send_peak(ui: &mut Ui, meter: u32, peak: f32) {
     let probe = ui
-        .app
+        .app()
         .session
         .engine
         .live
         .probe(output(ui, meter))
         .expect("a probe while on screen");
-    let after = ui.app.peak_resets().get(&probe).copied().unwrap_or(0);
+    let after = ui.app().peak_resets().get(&probe).copied().unwrap_or(0);
     let news = PeakNews {
         peak,
         bad: false,
         after,
     };
-    let _ = ui.app.send(Message::Telemetry(Update {
+    let _ = ui.app_mut().send(Message::Telemetry(Update {
         peaks: vec![(probe, news)],
         ..Update::default()
     }));
@@ -46,18 +54,18 @@ fn send_peak(ui: &mut Ui, meter: u32, peak: f32) {
 
 /// The Level Meter's output.
 fn output(ui: &Ui, meter: u32) -> loom_core::OutputRef {
-    ui.app.session.controller.output_ref(ModuleId(meter), "out").unwrap()
+    ui.app().session.controller.output_ref(ModuleId(meter), "out").unwrap()
 }
 
 /// What the meter draws: the light, the readout.
 fn drawn(ui: &Ui, meter: u32) -> (bool, String) {
-    let value = ui.app.session.values.get(meter, 0).unwrap();
+    let value = ui.app().session.values.get(meter, 0).unwrap();
     (value.clip, value.hold.clone())
 }
 
 /// A window point in the clip light, and one in the bar.
 fn targets(ui: &mut Ui, meter: u32) -> (Point, Point) {
-    let rect = ui.app.session.scene.module(meter).unwrap().widget_bounds(0).unwrap();
+    let rect = ui.app().session.scene.module(meter).unwrap().widget_bounds(0).unwrap();
     let view = ui.canvas();
     (
         view.to_window(Point::new(rect.center_x(), rect.y + 4.0)),
@@ -91,7 +99,7 @@ fn a_peak_of_one_lights_the_light() {
     send_peak(&mut ui, meter, 2.0);
     send_peak(&mut ui, meter, 0.25);
     assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()), "the highest stays");
-    let text = &ui.app.session.values.get(meter, 0).unwrap().text;
+    let text = &ui.app().session.values.get(meter, 0).unwrap().text;
     assert!(text.contains("Would clip at the output"), "{text}");
 }
 
@@ -114,10 +122,10 @@ fn a_click_clears_the_light_on_release() {
 fn a_drag_from_the_light_moves_the_tile_and_leaves_it_lit() {
     let (mut ui, meter) = with_meter();
     send_peak(&mut ui, meter, 2.0);
-    let before = ui.app.session.positions[&meter];
+    let before = ui.app().session.positions[&meter];
     let (light, _) = targets(&mut ui, meter);
     ui.drag(light, Point::new(light.x + 60.0, light.y + 60.0), 4);
-    assert_ne!(ui.app.session.positions[&meter], before, "the tile moved");
+    assert_ne!(ui.app().session.positions[&meter], before, "the tile moved");
     assert!(drawn(&ui, meter).0, "still lit");
 }
 
@@ -129,7 +137,7 @@ fn a_click_on_the_bar_clears_nothing() {
     let (_, bar) = targets(&mut ui, meter);
     click(&mut ui, bar);
     assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()));
-    assert_eq!(ui.app.session.selection, [meter].into());
+    assert_eq!(ui.app().session.selection, [meter].into());
 }
 
 /// A double-click on the meter resets the light and the readout.
@@ -149,10 +157,12 @@ fn a_double_click_resets_both() {
 fn the_state_survives_panning_away() {
     let (mut ui, meter) = with_meter();
     send_peak(&mut ui, meter, 2.0);
-    let first = ui.app.session.engine.live.probe(output(&ui, meter)).unwrap();
-    let _ = ui.app.send(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
+    let first = ui.app().session.engine.live.probe(output(&ui, meter)).unwrap();
+    let _ = ui
+        .app_mut()
+        .send(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
     show(&mut ui, meter);
-    let second = ui.app.session.engine.live.probe(output(&ui, meter)).unwrap();
+    let second = ui.app().session.engine.live.probe(output(&ui, meter)).unwrap();
     assert_ne!(first, second, "a new probe");
     ui.redraw();
     assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()));
@@ -169,20 +179,20 @@ fn the_state_survives_panning_away() {
 #[test]
 fn a_peak_from_before_a_reset_is_dropped() {
     let (mut ui, meter) = with_meter();
-    let probe = ui.app.session.engine.live.probe(output(&ui, meter)).unwrap();
+    let probe = ui.app().session.engine.live.probe(output(&ui, meter)).unwrap();
     let old = PeakNews {
         peak: 2.0,
         bad: false,
-        after: ui.app.peak_resets()[&probe],
+        after: ui.app().peak_resets()[&probe],
     };
-    ui.app.reset_clip((meter, 0), true);
-    let _ = ui.app.send(Message::Telemetry(Update {
+    ui.app_mut().reset_clip((meter, 0), true);
+    let _ = ui.app_mut().send(Message::Telemetry(Update {
         peaks: vec![(probe, old)],
         ..Update::default()
     }));
     assert_eq!(drawn(&ui, meter), (false, "--".to_string()));
     assert_eq!(
-        ui.app.session.engine.monitor.watched().peak_resets[&probe],
+        ui.app().session.engine.monitor.watched().peak_resets[&probe],
         1,
         "the thread is told"
     );
@@ -192,10 +202,16 @@ fn a_peak_from_before_a_reset_is_dropped() {
 #[test]
 fn a_meter_on_a_display_value_has_neither() {
     let mut ui = Ui::open("sine.ron");
-    let dynamics = ui.app.session.controller.add_module("loom.dyn.dynamics").unwrap().0;
-    ui.app.commit();
+    let dynamics = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("loom.dyn.dynamics")
+        .unwrap()
+        .0;
+    ui.app_mut().commit();
     ui.redraw();
-    let module = ui.app.session.scene.module(dynamics).unwrap();
+    let module = ui.app().session.scene.module(dynamics).unwrap();
     let index = module
         .panel
         .widgets
@@ -206,7 +222,7 @@ fn a_meter_on_a_display_value_has_neither() {
         module.panel.widgets[index].kind,
         loom_canvas::WidgetViewKind::Meter { clips: false, .. }
     ));
-    assert_eq!(ui.app.session.values.get(dynamics, index).unwrap().hold, "");
+    assert_eq!(ui.app().session.values.get(dynamics, index).unwrap().hold, "");
 }
 
 /// A keyboard user resets it from the inspector.
@@ -226,7 +242,7 @@ fn the_inspector_resets_it() {
 #[test]
 fn other_modules_have_no_reset_button() {
     let mut ui = Ui::open("sine.ron");
-    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![3])));
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![3])));
     ui.redraw();
     assert!(ui.text("Reset clip").is_none());
 }
@@ -236,10 +252,10 @@ fn other_modules_have_no_reset_button() {
 fn a_removed_module_forgets_its_state() {
     let (mut ui, meter) = with_meter();
     send_peak(&mut ui, meter, 2.0);
-    ui.app.session.controller.remove_module(ModuleId(meter)).unwrap();
-    ui.app.commit();
+    ui.app_mut().session.controller.remove_module(ModuleId(meter)).unwrap();
+    ui.app_mut().commit();
     show(&mut ui, 3);
-    assert_eq!(ui.app.session.clip_holds.get((meter, 0)), Hold::default());
+    assert_eq!(ui.app().session.clip_holds.get((meter, 0)), Hold::default());
 }
 
 /// News for one meter, sent before another meter's reset, still counts, because
@@ -247,21 +263,27 @@ fn a_removed_module_forgets_its_state() {
 #[test]
 fn a_reset_of_one_meter_keeps_a_clip_on_another() {
     let (mut ui, first) = with_meter();
-    let second = ui.app.session.controller.add_module("loom.display.meter").unwrap().0;
-    ui.app.session.positions.insert(second, (900.0, 0.0));
-    ui.app.commit();
+    let second = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("loom.display.meter")
+        .unwrap()
+        .0;
+    ui.app_mut().session.positions.insert(second, (900.0, 0.0));
+    ui.app_mut().commit();
     ui.redraw();
     let _ = ui
-        .app
+        .app_mut()
         .send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![first, second])));
-    let probe = ui.app.session.engine.live.probe(output(&ui, second)).unwrap();
+    let probe = ui.app().session.engine.live.probe(output(&ui, second)).unwrap();
     let news = PeakNews {
         peak: 2.0,
         bad: false,
-        after: ui.app.peak_resets()[&probe],
+        after: ui.app().peak_resets()[&probe],
     };
-    ui.app.reset_clip((first, 0), false);
-    let _ = ui.app.send(Message::Telemetry(Update {
+    ui.app_mut().reset_clip((first, 0), false);
+    let _ = ui.app_mut().send(Message::Telemetry(Update {
         peaks: vec![(probe, news)],
         ..Update::default()
     }));
@@ -286,7 +308,7 @@ fn far_zoom_clicks_clear_nothing() {
     assert!(ui.canvas().camera.zoom < 0.35, "far out: {}", ui.canvas().camera.zoom);
     let (light, bar) = targets(&mut ui, meter);
     click(&mut ui, light);
-    assert_eq!(ui.app.session.selection, [meter].into());
+    assert_eq!(ui.app().session.selection, [meter].into());
     assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()), "a click");
     click(&mut ui, bar);
     click(&mut ui, bar);

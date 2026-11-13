@@ -396,13 +396,13 @@ fn the_list_scrolls_the_highlighted_row_just_into_view() {
     let mut ui = crate::ui_test::Ui::with_app(app);
     ui.send(AppMessage::File(FileAction::Browse));
     let _ = ui.redraw();
-    let rows = ui.app.overlays.patches().unwrap().model().rows.len();
+    let rows = ui.app().overlays.patches().unwrap().model().rows.len();
     assert_eq!(rows, 25);
     // Where the highlighted row is in the window, and what the list shows.
     let step = |ui: &mut crate::ui_test::Ui, by: i32| {
         ui.send(AppMessage::Patches(Message::Step(by)));
         let _ = ui.redraw();
-        let browser = ui.app.overlays.patches().unwrap();
+        let browser = ui.app().overlays.patches().unwrap();
         let row = browser.model().rows[browser.highlight].id.clone();
         let place = ui.places().of(&row).expect("the window drew the row");
         let list = place.clip.expect("the row is in the list");
@@ -425,7 +425,7 @@ fn the_list_scrolls_the_highlighted_row_just_into_view() {
     let (_, _, after) = step(&mut ui, 1);
     assert!(near(before, after), "a row already in view scrolls nothing");
     let (row, list, _) = step(&mut ui, 100);
-    assert_eq!(ui.app.overlays.patches().unwrap().highlight, rows - 1, "the last row");
+    assert_eq!(ui.app().overlays.patches().unwrap().highlight, rows - 1, "the last row");
     assert!(
         near(row.y + row.height, list.y + list.height),
         "the end of the list shows"
