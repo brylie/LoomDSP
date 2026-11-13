@@ -1,24 +1,38 @@
 //! What `loom-ui` may depend on and name (docs/design/ui-layer.md,
 //! section 1, rule 1, and section 2, rule 9).
 //!
-//! 1. **Its only dependency is `loom-ui-core`.** No LoomDSP crate and no
-//!    window toolkit. The winit shell arrives in plan step 2.2; this test
-//!    then names the one module that may use it.
-//! 2. **No source file names a window toolkit,** `winit` or Iced, test
-//!    files included.
+//! 1. **Its one required dependency is `loom-ui-core`.** No LoomDSP crate.
+//!    The window shell's `winit`, `wgpu`, and `pollster` are optional, and
+//!    only the `shell` feature turns them on, so a build without it has no
+//!    window toolkit (plan step 2.2).
+//! 2. **No source file names a window toolkit** (`winit`, `wgpu`, or Iced),
+//!    test files included, except the window shell: `shell.rs` and the
+//!    files under `shell/`. Iced is named nowhere.
 //! 3. **No source file reads the clock,** test files aside. Every call
 //!    takes the moment from its driver, so a test chooses the time. Tests
-//!    read it once to have a starting moment, and examples may read it,
-//!    since they are drivers.
+//!    read it once to have a starting moment, and the shell and examples
+//!    may read it, since they are drivers.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The dependencies users of the crate get.
-const ALLOWED: [&str; 1] = ["dependencies.loom-ui-core.workspace"];
+/// The dependencies users of the crate get: the one required, then the
+/// shell's.
+const ALLOWED: [&str; 4] = [
+    "dependencies.loom-ui-core.workspace",
+    "dependencies.winit",
+    "dependencies.wgpu",
+    "dependencies.pollster",
+];
 
-/// A path into a window toolkit.
-const TOOLKITS: [&str; 3] = ["winit", "iced::", "iced_"];
+/// The shell's dependencies, each optional and turned on only by `shell`.
+const SHELL_DEPENDENCIES: [&str; 3] = ["winit", "wgpu", "pollster"];
+
+/// A path into a window toolkit or the GPU.
+const TOOLKITS: [&str; 4] = ["winit", "wgpu", "iced::", "iced_"];
+
+/// Iced, which no file names, the shell included.
+const ICED: [&str; 2] = ["iced::", "iced_"];
 
 /// The ways to read the clock.
 const CLOCK: [&str; 3] = ["Instant::now", "SystemTime", ".elapsed("];
@@ -112,24 +126,54 @@ fn scan(names: &[&'static str], applies: impl Fn(&Path) -> bool) -> (usize, Vec<
     (files.len(), found)
 }
 
-/// The crate depends on `loom-ui-core` and nothing else.
-#[test]
-fn the_only_dependency_is_loom_ui_core() {
-    assert_eq!(user_dependencies(include_str!("../Cargo.toml")), ALLOWED);
+/// True for the window shell's files: `shell.rs` and those under `shell/`.
+fn is_shell(path: &Path) -> bool {
+    path == Path::new("shell.rs") || path.starts_with("shell")
 }
 
-/// No source file names a window toolkit.
+/// The line in `manifest` that declares `name` as a dependency.
+fn dependency_line<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
+    manifest
+        .lines()
+        .map(str::trim)
+        .find(|line| line.split('=').next().is_some_and(|key| key.trim() == name))
+}
+
+/// The crate depends on `loom-ui-core`, and on the shell's crates only
+/// as optional ones that the `shell` feature turns on.
+#[test]
+fn the_only_required_dependency_is_loom_ui_core() {
+    let manifest = include_str!("../Cargo.toml");
+    assert_eq!(user_dependencies(manifest), ALLOWED);
+    for name in SHELL_DEPENDENCIES {
+        let line = dependency_line(manifest, name).expect("the shell's dependency is declared");
+        assert!(line.contains("optional = true"), "{name} is optional: {line}");
+    }
+    let shell = dependency_line(manifest, "shell").expect("the shell feature is declared");
+    for name in SHELL_DEPENDENCIES {
+        assert!(
+            shell.contains(&format!("\"dep:{name}\"")),
+            "`shell` turns on {name}: {shell}"
+        );
+    }
+}
+
+/// No source file names a window toolkit, except the shell, which names
+/// winit and wgpu and never Iced.
 #[test]
 fn no_source_file_names_a_window_toolkit() {
-    let (scanned, found) = scan(&TOOLKITS, |_| true);
+    let (scanned, found) = scan(&TOOLKITS, |path| !is_shell(path));
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
+    assert_eq!(found, Vec::<String>::new());
+    let (shell, found) = scan(&ICED, is_shell);
+    assert!(shell >= 1, "the scan found the shell's files, not {shell}");
     assert_eq!(found, Vec::<String>::new());
 }
 
-/// No source file reads the clock, test files aside.
+/// No source file reads the clock, test files and the shell aside.
 #[test]
 fn no_source_file_reads_the_clock() {
-    let (scanned, found) = scan(&CLOCK, |path| !is_test_file(path));
+    let (scanned, found) = scan(&CLOCK, |path| !is_test_file(path) && !is_shell(path));
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
 }
@@ -169,4 +213,18 @@ let due = now + delay;
     ] {
         assert_eq!(is_test_file(Path::new(path)), test, "{path}");
     }
+
+    for (path, shell) in [
+        ("shell.rs", true),
+        ("shell/gpu.rs", true),
+        ("shell/events/tests.rs", true),
+        ("shellfish.rs", false),
+        ("runtime.rs", false),
+    ] {
+        assert_eq!(is_shell(Path::new(path)), shell, "{path}");
+    }
+    assert_eq!(
+        dependency_line("winit = { workspace = true, optional = true }", "winit"),
+        Some("winit = { workspace = true, optional = true }")
+    );
 }

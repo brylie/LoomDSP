@@ -126,6 +126,7 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 | Spelling | Typos in code and docs | `mise run typos` |
 | ADR status | Every ADR has one allowed status that matches the index, and none is Proposed. Agent instruction files (`AGENTS.md`, `CLAUDE.md`, and the skills under `.claude/`) cite no superseded or missing ADR | `mise run adr-status` |
 | Test placement | Tests are in their own files, not inline in code modules ([Where tests live](#where-tests-live)) | `mise run test-placement` |
+| UI runtime without a toolkit | `loom-ui` builds and passes its tests without its window shell, so the runtime needs no window toolkit | `mise run ui-no-toolkit` |
 
 To change a check, change its task in `mise.toml`. The hooks and CI both pick it up.
 

@@ -79,6 +79,11 @@ iced_wgpu = "0.14"
 # (docs/dev/leaving-iced-plan.md). No features of our own: Iced turns on what
 # the desktop needs.
 wgpu = { version = "27", default-features = false }
+# The window for loom-ui's shell (docs/dev/leaving-iced-plan.md, step 2.2).
+# The one copy Iced uses too, with the window systems it turns on.
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland"] }
+# Waits for the shell's one GPU adapter request, which wgpu makes async.
+pollster = "0.4"
 # Builds the app view headlessly in loom-app tests (#189). Same version as Iced.
 iced_runtime = "0.14"
 bytemuck = { version = "1", features = ["derive"] }

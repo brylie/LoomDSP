@@ -396,6 +396,17 @@ jobs:
       - uses: jdx/mise-action@v5
       - run: mise run portable
 
+  ui-no-toolkit:
+    name: UI runtime without a toolkit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v5
+      - uses: Swatinem/rust-cache@v2
+      - run: mise run ui-no-toolkit
+
   # Code metrics for the architecture review skill: sizes, cognitive
   # complexity per function (rust-code-analysis), churn, and the rule checks.
   # Informational: the report goes to the job summary and an artifact, and
