@@ -137,9 +137,11 @@ pub(super) fn save_screenshot(
             "width": region.width as f32 / scale,
             "height": region.height as f32 / scale,
         }));
-        crop(&shot, region)
+        std::borrow::Cow::Owned(crop(&shot, region))
     } else {
-        shot.rgba().to_vec()
+        // The whole window is saved as it came: no second copy of a frame
+        // that can be tens of megabytes.
+        std::borrow::Cow::Borrowed(shot.rgba())
     };
     crate::screenshot::write_png(path, iced::Size::new(width, height), &rgba)?;
     let mut reply = fields(json!({

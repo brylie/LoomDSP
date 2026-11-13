@@ -297,30 +297,84 @@ impl loom_ui::Target<Message> for IcedTarget {
 /// around it moves just enough, on both axes (`Rect::reveal`). A part the
 /// window does not show, or that is in no scrolling area, scrolls nothing.
 ///
-/// Two walks of the window: the first finds the part and its area with
-/// `places::Collect`, the walk the accessibility tree and `locate` read;
-/// the second counts the scrolling areas to the same one and scrolls it.
-/// Nothing changes the window between the two, so they meet the same
-/// areas in the same order.
+/// One Iced action with two walks of the window: [`Reveal`] finds the part
+/// and its area with `places::Collect`, the walk the accessibility tree and
+/// `locate` read, and its `finish` chains [`ScrollBy`], which counts the
+/// scrolling areas to the same one and scrolls it. Iced runs a chained
+/// operation at once, on the same window, before any message or rebuild,
+/// so both walks meet the same areas in the same order and the move is
+/// worked out from the layout it is applied to. Joined by `Task::then`
+/// instead, the second walk would be a new action, and the window could
+/// change between them.
 pub(crate) fn scroll_into_view<T: Send + 'static>(id: &UiId) -> Task<T> {
-    let id = id.clone();
-    iced::advanced::widget::operate(crate::places::Collect::default()).then(move |places| {
-        let Some((area, by)) = places
-            .of(&id)
-            .and_then(|place| Some((place.area?, place.area?.bounds.reveal(place.rect))))
-        else {
-            return Task::none();
-        };
-        if by == loom_ui_core::Vector::new(0.0, 0.0) {
-            return Task::none();
-        }
-        iced::advanced::widget::operate(ScrollBy {
+    iced::advanced::widget::operate(Reveal {
+        target: id.clone(),
+        parts: crate::places::Collect::default(),
+    })
+    .discard()
+}
+
+/// Finds a part and its nearest scrolling area, then chains the scroll
+/// that brings the part into view.
+struct Reveal {
+    /// The part to show.
+    target: UiId,
+    /// The walk that finds it.
+    parts: crate::places::Collect,
+}
+
+impl Reveal {
+    /// The scroll that shows the part, or `None` when there is nothing to
+    /// move: the window does not show it, it is in no scrolling area, or
+    /// it is in view already.
+    fn scroll(&self) -> Option<ScrollBy> {
+        let place = self.parts.places().of(&self.target)?;
+        let area = place.area?;
+        let by = area.bounds.reveal(place.rect);
+        (by != loom_ui_core::Vector::new(0.0, 0.0)).then_some(ScrollBy {
             area: area.index,
             met: 0,
             by,
         })
-        .discard()
-    })
+    }
+}
+
+impl iced::advanced::widget::Operation<()> for Reveal {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<()>)) {
+        let outside = self.parts.enter();
+        operate(self);
+        self.parts.leave(outside);
+    }
+
+    fn container(&mut self, id: Option<&iced::advanced::widget::Id>, bounds: iced::Rectangle) {
+        iced::advanced::widget::Operation::<crate::places::Places>::container(&mut self.parts, id, bounds);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        bounds: iced::Rectangle,
+        content_bounds: iced::Rectangle,
+        translation: iced::Vector,
+        state: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        iced::advanced::widget::Operation::<crate::places::Places>::scrollable(
+            &mut self.parts,
+            id,
+            bounds,
+            content_bounds,
+            translation,
+            state,
+        );
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<()> {
+        use iced::advanced::widget::operation::Outcome;
+        match self.scroll() {
+            Some(scroll) => Outcome::Chain(Box::new(scroll)),
+            None => Outcome::None,
+        }
+    }
 }
 
 /// Scrolls the scrolling area a walk meets in place `area` by `by`.

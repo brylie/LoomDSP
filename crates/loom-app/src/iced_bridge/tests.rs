@@ -180,3 +180,56 @@ fn a_capture_becomes_an_iced_task() {
     assert_eq!(driver.tasks.len(), 1);
     assert!(inbox.try_recv().is_err(), "the answer waits for Iced");
 }
+
+/// The scroll is one action: walking the window finds the part in the
+/// second of two scrolling areas, and `finish` chains the scroll of that
+/// area alone, by the least move that shows the part. A part already in
+/// view chains nothing.
+#[test]
+fn a_reveal_finds_its_part_and_chains_one_scroll() {
+    use iced::advanced::widget::Operation;
+    use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset};
+    use iced::advanced::widget::operation::{Outcome, Scrollable};
+    /// Records each move it is given.
+    #[derive(Default)]
+    struct Area(Vec<(f32, f32)>);
+    impl Scrollable for Area {
+        fn snap_to(&mut self, _: RelativeOffset<Option<f32>>) {}
+        fn scroll_to(&mut self, _: AbsoluteOffset<Option<f32>>) {}
+        fn scroll_by(&mut self, by: AbsoluteOffset, _: iced::Rectangle, _: iced::Rectangle) {
+            self.0.push((by.x, by.y));
+        }
+    }
+    let rect = |y: f32, height: f32| iced::Rectangle::new(iced::Point::new(0.0, y), iced::Size::new(100.0, height));
+    let row = UiId::panel("browser").with("module").with("loom.osc.sine");
+    // Two lists, each 100 tall; the row is 40 below the second one's view.
+    let walk = |operation: &mut dyn Operation<()>, row_y: f32, areas: &mut [Area; 2]| {
+        let [first, second] = areas;
+        operation.scrollable(None, rect(0.0, 100.0), rect(0.0, 400.0), iced::Vector::ZERO, first);
+        operation.traverse(&mut |_| {});
+        operation.scrollable(None, rect(200.0, 100.0), rect(200.0, 400.0), iced::Vector::ZERO, second);
+        operation.traverse(&mut |inside| {
+            inside.container(Some(&widget_id(&row)), rect(row_y, 20.0));
+            inside.traverse(&mut |_| {});
+        });
+    };
+    let mut areas = [Area::default(), Area::default()];
+    let mut reveal = Reveal {
+        target: row.clone(),
+        parts: crate::places::Collect::default(),
+    };
+    walk(&mut reveal, 320.0, &mut areas);
+    let Outcome::Chain(mut scroll) = reveal.finish() else {
+        panic!("a part out of view chains a scroll");
+    };
+    walk(scroll.as_mut(), 320.0, &mut areas);
+    assert!(areas[0].0.is_empty(), "the other list stays");
+    assert_eq!(areas[1].0, [(0.0, 40.0)], "its bottom meets the view's");
+
+    let mut reveal = Reveal {
+        target: row.clone(),
+        parts: crate::places::Collect::default(),
+    };
+    walk(&mut reveal, 230.0, &mut [Area::default(), Area::default()]);
+    assert!(matches!(reveal.finish(), Outcome::None), "in view: nothing to chain");
+}
