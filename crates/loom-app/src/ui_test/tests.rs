@@ -2511,12 +2511,12 @@ fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
     ui.release();
     ui.tap(Key::Named(Named::ArrowUp), Modifiers::default());
     let width = |ui: &Ui| {
-        let c = &ui.app.session.controller;
+        let c = &ui.app().session.controller;
         c.last_report().width(c.output_ref(source, "out").unwrap()).voices
     };
     assert_eq!(width(&ui), 2);
     assert!(
-        ui.app.session.scene.module(source.0).unwrap().outputs[0]
+        ui.app().session.scene.module(source.0).unwrap().outputs[0]
             .hover
             .description
             .contains("2 voices")
@@ -2528,13 +2528,13 @@ fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
     ui.send(Message::Learn(crate::learn::Message::Toggle));
     let index = test_modules_voice_index();
     ui.send(Message::Learn(crate::learn::Message::Arm((source.0, index))));
-    assert!(!ui.app.session.learn.is_armed((source.0, index)));
+    assert!(!ui.app().session.learn.is_armed((source.0, index)));
     assert!(
-        !crate::matrix::targets(ui.app.session.controller.graph())
+        !crate::matrix::targets(ui.app().session.controller.graph())
             .iter()
             .any(|target| target.module == source && target.param == index)
     );
-    assert!(!ui.app.session.scene.is_live_control(source.0, 0));
+    assert!(!ui.app().session.scene.is_live_control(source.0, 0));
 }
 
 /// Descriptor lookup keeps the test independent of parameter ordering.
@@ -2549,12 +2549,12 @@ fn a_button_only_row_keeps_existing_modulation_removable() {
     let mut ui = Ui::open("subtractive.ron");
     let button = select_new(&mut ui, "loom.ui.button");
     let assignment = ui
-        .app
+        .app_mut()
         .session
         .controller
         .add_assignment_named(ModuleId(7), "out", button, "on", 0.25)
         .unwrap();
-    ui.app.commit();
+    ui.app_mut().commit();
     inspector_row(&mut ui, button.0, "On");
     let row = ids::row(button.0, ids::Kind::Param, "on");
     let remove = ids::part(&ids::assignment(&row, assignment.0), "remove");
@@ -2564,13 +2564,13 @@ fn a_button_only_row_keeps_existing_modulation_removable() {
         .of(&remove)
         .expect("existing assignment's remove action stays visible");
     assert!(places.of(&add).is_none(), "the row offers no add action");
-    let accessible = crate::inspector::access::items(&ui.app.inspector_model());
+    let accessible = crate::inspector::access::items(&ui.app().inspector_model());
     assert!(crate::a11y::items::find(&accessible, &remove).is_some());
     assert!(crate::a11y::items::find(&accessible, &add).is_none());
     ui.move_to(at.rect.center());
     ui.press();
     ui.release();
-    assert!(ui.app.session.controller.graph().assignment(assignment).is_none());
+    assert!(ui.app().session.controller.graph().assignment(assignment).is_none());
 }
 
 /// Cmd+Z straight after a click into a text field, with nothing between,

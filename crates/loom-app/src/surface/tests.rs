@@ -381,11 +381,11 @@ fn an_exposed_voice_count_cannot_be_learned() {
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert!(ui.app.session.learn.armed().is_none());
-    assert!(!ui.app.session.scene.is_live_control(1, 0));
-    let target = ui.app.control_target(1, 0, ControlPart::Main).unwrap();
+    assert!(ui.app().session.learn.armed().is_none());
+    assert!(!ui.app().session.scene.is_live_control(1, 0));
+    let target = ui.app().control_target(1, 0, ControlPart::Main).unwrap();
     assert!(
-        ui.app
+        ui.app_mut()
             .session
             .controller
             .map_midi(
