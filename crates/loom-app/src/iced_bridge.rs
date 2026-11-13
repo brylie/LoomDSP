@@ -233,7 +233,9 @@ impl<D: BridgeDriver> Bridge<D> {
     /// The bridge around `app`, and the tasks to run first: the
     /// accessibility adapter's attach, where one exists, and the first turn.
     pub(crate) fn start(app: App) -> (Self, Task<Bridged>) {
-        let (bridge, task) = Self::new(app);
+        let (mut bridge, _) = Self::new(app);
+        // The window is open: the watchers start on this turn.
+        let task = bridge.update(Bridged::App(Message::StartWatching));
         #[cfg(target_os = "macos")]
         let attach = crate::a11y::attach().map(|event| Bridged::App(Message::A11y(event)));
         #[cfg(not(target_os = "macos"))]

@@ -10,9 +10,8 @@ use crate::clip::{PeakNews, Peaks};
 use crate::history::LevelHistory;
 use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
 use crate::spectrum::SpectrumAnalyser;
+use crate::watcher::Outlet;
 use crate::xy::XyTrace;
-use iced::futures::Stream;
-use iced::futures::channel::mpsc;
 use loom_core::{MeterReading, PairChunk, ProbeId, ScopeChunk, Telemetry};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -382,7 +381,7 @@ pub struct Monitor {
 
 impl Monitor {
     /// `generation` counts the engines the app has built. Opening a patch
-    /// builds a new one, and the subscription must restart to take its
+    /// builds a new one, and the watcher must restart to take its
     /// `Telemetry`. `sample_rate` is the engine's, for scope windows.
     pub fn new(telemetry: Telemetry, sample_rate: f32, generation: u64) -> Self {
         Self {
@@ -447,7 +446,7 @@ impl Monitor {
 }
 
 impl Hash for Monitor {
-    // One monitor per engine: the subscription restarts with a new engine.
+    // One monitor per engine: the watcher restarts with a new engine.
     fn hash<H: Hasher>(&self, state: &mut H) {
         "loom-app telemetry monitor".hash(state);
         self.generation.hash(state);
@@ -491,12 +490,10 @@ pub fn changed(shown: &HashMap<ProbeId, MeterSteps>, levels: &[(ProbeId, Level)]
 /// Drains the queues every [`INTERVAL`], or [`SCOPE_INTERVAL`] while a
 /// scope or a spectrum is on screen, and yields what changed on screen. The thread stops
 /// when the app closes.
-pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
-    let (mut tx, rx) = mpsc::channel(1);
+pub fn run(monitor: &Monitor, tx: Outlet<Update>) {
     let telemetry = monitor.telemetry.lock().ok().and_then(|mut t| t.take());
-    let monitor = monitor.clone();
     if let Some(mut telemetry) = telemetry {
-        std::thread::spawn(move || {
+        {
             let mut watcher = Watcher::default();
             while !tx.is_closed() {
                 let watch = monitor.watched();
@@ -526,9 +523,8 @@ pub fn stream(monitor: &Monitor) -> impl Stream<Item = Update> + use<> {
                     },
                 );
             }
-        });
+        }
     }
-    rx
 }
 
 #[cfg(test)]

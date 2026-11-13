@@ -274,7 +274,6 @@ fn watched_list() -> Result<Vec<MidiInputInfo>, String> {
 /// the fake does not, so tests poll from the UI as before.
 #[test]
 fn the_midi_watch_wakes_the_ui_only_on_a_change() {
-    use iced::futures::StreamExt;
     assert!(System.midi_lister().is_some());
     assert!(fake::NoMidi.midi_lister().is_none());
     let watch = MidiWatch {
@@ -282,11 +281,11 @@ fn the_midi_watch_wakes_the_ui_only_on_a_change() {
         seen: watched_list().unwrap(),
         generation: 0,
     };
-    let mut rx = midi_stream(&watch);
+    let rx = crate::watcher::run_for_test(1, move |outlet| watch_midi(&watch, outlet));
     std::thread::sleep(MIDI_POLL * 3);
-    assert!(rx.try_recv().is_err(), "no change, so nothing was sent");
+    assert!(rx.try_recv().is_none(), "no change, so nothing was sent");
     PLUGGED.store(true, std::sync::atomic::Ordering::Relaxed);
-    assert_eq!(iced::futures::executor::block_on(rx.next()), Some(()));
+    assert_eq!(rx.recv(), Some(()));
     std::thread::sleep(MIDI_POLL * 3);
-    assert!(rx.try_recv().is_err(), "sent once per change");
+    assert!(rx.try_recv().is_none(), "sent once per change");
 }

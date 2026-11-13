@@ -86,6 +86,8 @@ mod toolbar;
 pub mod ui_test;
 mod undo;
 mod view;
+mod watcher;
+mod watching;
 mod window_question;
 mod xy;
 
@@ -368,6 +370,9 @@ enum Message {
     BenchDone,
     /// A command from the control channel.
     Control(control::Call),
+    /// The window is open: start the watcher threads (`watching.rs`). The
+    /// bridge sends it once, as it starts.
+    StartWatching,
     /// Follows a control command's UI messages in the queue: they have run,
     /// so its answer can be read (`control/run.rs`).
     ControlReply,
@@ -542,6 +547,7 @@ impl Message {
                 | Self::FocusMoved(_)
                 | Self::AskRecovery
                 | Self::ControlReply
+                | Self::StartWatching
         )
     }
 
@@ -567,6 +573,7 @@ impl Message {
             | Self::BenchDone
             | Self::Control(_)
             | Self::ControlReply
+            | Self::StartWatching
             | Self::ControlFrame(_)
             | Self::Located { .. }
             | Self::Captured { .. }
@@ -756,6 +763,10 @@ struct App {
     window_questions: std::cell::RefCell<Vec<window_question::WindowQuestion>>,
     /// Control commands whose UI messages are on their way (`control/run.rs`).
     control_replies: control::Replies,
+    /// True once the window is open and watchers may run (`watching.rs`).
+    watching: bool,
+    /// The watcher threads that outlive a patch (`watching.rs`).
+    watchers: watching::AppWatchers,
     /// What waits for a native dialog's answer (`dialogs.rs`). It belongs
     /// to the window: a dialog's answer can open another patch.
     waiting: Option<dialogs::Pending>,
@@ -1327,6 +1338,8 @@ impl App {
         // As one batch for the next turn, which the runtime queues itself,
         // so no other thread's message lands between a command's steps and
         // its reply, or a step and its release.
+        // The watchers follow what this update changed.
+        self.sync_watchers(&cx.waker());
         let posted = std::mem::take(&mut self.posted);
         self.effect(loom_ui::Effects::next_turn(posted));
         std::mem::take(&mut self.effects)
@@ -1345,6 +1358,8 @@ impl App {
     /// window questions it asks in `self.window_questions`.
     fn apply(&mut self, message: Message) {
         use loom_canvas::stats::FrameCause;
+        // First, before anything can return: a watcher's message is taken.
+        self.watched_message_taken(&message);
         let cause = match &message {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
@@ -1459,6 +1474,7 @@ impl App {
             }
             Message::Control(call) => self.control(call),
             Message::ControlReply => self.control_reply(),
+            Message::StartWatching => self.watching = true,
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
@@ -1701,6 +1717,7 @@ impl App {
             | Message::Input { .. }
             | Message::Control(_)
             | Message::ControlReply
+            | Message::StartWatching
             | Message::ControlFrame(_)
             | Message::TextFieldTab
             | Message::TabFrom { .. }

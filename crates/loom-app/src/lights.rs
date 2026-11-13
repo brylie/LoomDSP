@@ -13,8 +13,7 @@
 //! values, because a read takes them (`docs/design/panels.md`, Lights for
 //! one-sample triggers). It sends while a light fades, then nothing.
 
-use iced::futures::Stream;
-use iced::futures::channel::mpsc;
+use crate::watcher::Outlet;
 use loom_core::{DisplayKind, DisplayRange, DisplayReader, DisplaySource, ModuleDescriptor, Widget, WidgetKind};
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
@@ -49,7 +48,7 @@ pub struct Watch {
 }
 
 impl Hash for Watch {
-    // The subscription restarts when the set of lights changes, or when the
+    // The watcher restarts when the set of lights changes, or when the
     // engine does.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.generation.hash(state);
@@ -213,11 +212,9 @@ pub fn hold_readouts(
 
 /// Reads the lights every [`INTERVAL`] and yields their values when one
 /// changes. The first reading is always sent. The thread stops when the
-/// subscription ends.
-pub fn stream(watch: &Watch) -> impl Stream<Item = Vec<(Light, f32)>> + use<> {
-    let (mut tx, rx) = mpsc::channel(1);
-    let watch = watch.clone();
-    std::thread::spawn(move || {
+/// watcher handle drops.
+pub fn run(watch: &Watch, tx: Outlet<Vec<(Light, f32)>>) {
+    {
         let mut last = vec![None; watch.lights.len()];
         let mut fades = vec![Fade::default(); watch.lights.len()];
         let mut holds = vec![ReadoutHold::default(); watch.lights.len()];
@@ -237,8 +234,7 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Vec<(Light, f32)>> + use<> {
             }
             std::thread::sleep(INTERVAL);
         }
-    });
-    rx
+    }
 }
 
 #[cfg(test)]

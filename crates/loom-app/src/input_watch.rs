@@ -1,6 +1,6 @@
 //! Watches input stream health and drift counters without an idle UI timer.
 
-use iced::futures::{Stream, channel::mpsc};
+use crate::watcher::Outlet;
 use loom_core::{EngineStats, audio_input::InputStatus};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, atomic::Ordering};
@@ -28,7 +28,7 @@ pub struct Watch {
     pub status: InputStatus,
     /// The engine's counters.
     pub stats: Arc<EngineStats>,
-    /// Drift history shared by subscriptions for this input stream.
+    /// Drift history shared by the watchers of this input stream.
     pub tracker: Arc<Tracker>,
     /// The device this stream opened.
     pub device: String,
@@ -202,15 +202,16 @@ fn check_failure(
     }
 }
 
-/// Samples the host and the stream until the subscription ends.
-fn run(watch: &Watch, mut tx: mpsc::Sender<Event>) {
+/// Samples the host and the stream until the watcher stops, and sends only
+/// when the counts, warning visibility, or stream health change.
+pub fn run(watch: &Watch, tx: Outlet<Event>) {
     let counts = || {
         (
             watch.stats.input_underruns.load(Ordering::Relaxed),
             watch.stats.input_overruns.load(Ordering::Relaxed),
         )
     };
-    // The first read always reaches the UI, even after a subscription
+    // The first read always reaches the UI, even after a watcher
     // restart, so it can clear a warning that expired while restarting.
     let mut sent = None;
     let mut health = Health::new(watch.status.callbacks(), Instant::now(), watch.list.is_some());
@@ -235,14 +236,6 @@ fn run(watch: &Watch, mut tx: mpsc::Sender<Event>) {
         }
         std::thread::sleep(POLL);
     }
-}
-
-/// Emits only when the counts, warning visibility, or stream health change.
-pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
-    let (tx, rx) = mpsc::channel(4);
-    let watch = watch.clone();
-    std::thread::spawn(move || run(&watch, tx));
-    rx
 }
 
 #[cfg(test)]

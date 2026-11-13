@@ -133,6 +133,11 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // The control channel's: a command that sent `new` is still
         // answered in the new patch.
         control_replies: _,
+        // The window's: watchers start once, when it opens.
+        watching: _,
+        // Outlive a patch: the control channel, the MIDI ports, the bench
+        // report (`watching.rs`).
+        watchers: _,
         // The window's: a dialog's answer may itself replace the patch, and
         // what waited is taken before it does (`dialogs.rs`).
         waiting: _,
@@ -184,6 +189,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         midi,
         holding,
         control_seen,
+        // Read the old engine, so they go with it (`watching.rs`).
+        watchers,
     } = engine;
 
     // A new patch: only its Transport, at the top level.
@@ -221,6 +228,10 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(drops.is_empty());
     assert_eq!(meter.stats().fps, 0.0, "the frame meter starts again");
     assert!(control_seen.is_none());
+    assert!(
+        watchers.none_running(),
+        "the new engine's watchers start on the next update"
+    );
     assert!(!learn.is_on());
     assert!(edits.history.undo_step().is_none());
     assert_eq!(

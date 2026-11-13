@@ -2,8 +2,7 @@
 //! tiles, and a watcher that wakes the UI when MIDI control changes arrive.
 //! Spec: `docs/design/midi-learn.md`.
 
-use iced::futures::Stream;
-use iced::futures::channel::mpsc;
+use crate::watcher::Outlet;
 use loom_canvas::{ControlPart, LearnView};
 use loom_core::{Controller, MidiMapping, MidiReader, MidiWaiting, ModuleId};
 use loom_patch::{Hierarchy, ModulePath};
@@ -116,7 +115,7 @@ pub struct Watch {
 }
 
 impl Hash for Watch {
-    // The reader is the same for one engine, so the subscription restarts
+    // The reader is the same for one engine, so the watcher restarts
     // only with a new engine.
     fn hash<H: Hasher>(&self, state: &mut H) {
         "midi-learn".hash(state);
@@ -126,11 +125,10 @@ impl Hash for Watch {
 
 /// Yields the serial of each new control change, checked every
 /// [`INTERVAL`]. Several changes between checks give one message. The thread
-/// stops when the subscription ends.
-pub fn stream(watch: &Watch) -> impl Stream<Item = u32> + use<> {
-    let (mut tx, rx) = mpsc::channel(1);
+/// stops when its watcher handle drops.
+pub fn run(watch: &Watch, tx: Outlet<u32>) {
     let reader = watch.reader.clone();
-    std::thread::spawn(move || {
+    {
         // Start from "nothing seen", so a control change that arrives while
         // the thread starts is still reported. The app ignores any that came
         // before a parameter was armed.
@@ -150,8 +148,7 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = u32> + use<> {
             }
             std::thread::sleep(INTERVAL);
         }
-    });
-    rx
+    }
 }
 
 /// What the player asks of learn mode and of a parameter's MIDI mapping.

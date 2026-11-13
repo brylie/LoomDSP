@@ -198,6 +198,18 @@ pub(super) fn run_line(
     (id, send(command, tx), vars, false)
 }
 
+/// The control channel's watcher: runs the listener and hands each call to
+/// the app through `outlet`, waiting for room, since every call must
+/// arrive. One call is in flight at a time anyway: the listener waits for
+/// each answer before it reads the next line (rule 5).
+pub fn watch(listener: &Listener, outlet: crate::watcher::Outlet<Call>) {
+    for call in iced::futures::executor::block_on_stream(stream(listener)) {
+        if !outlet.send(call) {
+            return;
+        }
+    }
+}
+
 /// Has the app run one command and waits for its answer.
 pub(super) fn send(command: Command, tx: &mut mpsc::Sender<Call>) -> Answer {
     if let Command::Wait { ms } = command {

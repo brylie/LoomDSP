@@ -8,8 +8,7 @@
 //! with a final line. The method and results are in
 //! `docs/benchmarks/p1-canvas.md`.
 
-use iced::futures::Stream;
-use iced::futures::channel::mpsc;
+use crate::watcher::Outlet;
 use loom_canvas::stats::{self, FrameCauses, RenderCounts};
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -155,11 +154,10 @@ impl Hash for Reporter {
 }
 
 /// Runs the report. Yields once, when `--bench-seconds` have passed.
-pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
-    let (mut tx, rx) = mpsc::channel(1);
+pub fn run(reporter: &Reporter, tx: Outlet<()>) {
     let seconds = reporter.seconds;
     let tree = reporter.tree;
-    std::thread::spawn(move || {
+    {
         let start = Instant::now();
         let first = RenderCounts::process();
         let first_causes = FrameCauses::process();
@@ -197,8 +195,7 @@ pub fn stream(reporter: &Reporter) -> impl Stream<Item = ()> + use<> {
             last = (now, counts, cpu);
             next += Duration::from_secs(1);
         }
-    });
-    rx
+    }
 }
 
 /// The end of a line with `--measure-tree`: how many times the

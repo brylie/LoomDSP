@@ -1,15 +1,17 @@
-//! What the app listens to: timers, keys, MIDI, the control channel, and
-//! the watcher threads that wake it.
+//! What Iced still runs for the app: timers, frames, keys, and the window's
+//! events. The watcher threads are in `watching.rs`.
 
-use crate::{
-    App, FileAction, Message, audio_watch, bench, browser, control, devices, input_watch, learn, lights, monitor,
-    preferences, recovery,
-};
+use crate::{App, FileAction, Message, browser, devices, learn, lights, recovery};
 use iced::Subscription;
 use loom_core::ModuleId;
 use std::time::Duration;
 
 impl App {
+    /// What Iced still runs for the app: timers, frames, and the window's
+    /// own events. The watcher threads run on the runtime's waker instead
+    /// (`watching.rs`); the timers and frames become deadlines and effects
+    /// next (plan step 2.1, item 3), and the window's events go with the
+    /// `winit` shell (step 2.2).
     pub(crate) fn subscription(&self) -> Subscription<Message> {
         let main = if self.measuring {
             // Redraw every frame, so the counter measures real render cost.
@@ -21,52 +23,6 @@ impl App {
         } else {
             Subscription::none()
         };
-        // The audio numbers and stalled callbacks are read on a thread,
-        // which wakes the UI only when the stats bar changes (#90).
-        let audio_watch = match self.session.engine.stream.stats() {
-            Some(stats) => Subscription::run_with(
-                audio_watch::Watch {
-                    stats: stats.clone(),
-                    engine: self.session.controller.stats().clone(),
-                },
-                audio_watch::stream,
-            )
-            .map(Message::Audio),
-            None => Subscription::none(),
-        };
-        let input_watch = self.rig.input.open().map(|(input, tracker)| {
-            let stats = self.session.controller.stats().clone();
-            let tracker = tracker.clone();
-            Subscription::run_with(
-                input_watch::Watch {
-                    status: input.status(),
-                    stats,
-                    tracker,
-                    device: input.name().to_string(),
-                    system_default: self.rig.flags.input.is_none()
-                        && matches!(
-                            self.rig.store.saved().audio.input,
-                            preferences::InputChoice::SystemDefault
-                        ),
-                    list: self.rig.host.audio_input_lister(),
-                    permission_denied: self.rig.host.audio_input_permission_checker(),
-                    active: self
-                        .session
-                        .controller
-                        .graph()
-                        .nodes()
-                        .filter_map(|(id, node)| {
-                            (node.descriptor.id == "loom.io.audio-in")
-                                .then(|| self.session.controller.display_source(id, 0))
-                                .flatten()
-                        })
-                        .collect(),
-                    displays: self.session.controller.display_reader(),
-                },
-                input_watch::stream,
-            )
-            .map(Message::InputAudio)
-        });
         // Live modulated values move every block, so a patch with an
         // assignment that is on follows them every frame.
         // Without audio the engine does not run, so nothing moves.
@@ -78,19 +34,12 @@ impl App {
         } else {
             Subscription::none()
         };
-        let telemetry =
-            Subscription::run_with(self.session.engine.monitor.clone(), monitor::stream).map(Message::Telemetry);
         let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
+        // Frames only while a command waits to be drawn, so an idle app
+        // stays idle.
         let control = self
-            .control
-            .iter()
-            .map(|listener| Subscription::run_with(listener.clone(), control::stream).map(Message::Control))
-            // Frames only while a command waits to be drawn, so an idle app
-            // stays idle.
-            .chain(
-                self.control_waiting()
-                    .then(|| iced::window::frames().map(Message::ControlFrame)),
-            );
+            .control_waiting()
+            .then(|| iced::window::frames().map(Message::ControlFrame));
         // The autosave timer runs only while a copy may be due: once the
         // copy matches the patch, an idle app ticks no more (#90).
         let autosave = if self.run_files.autosave_due(&self.session.document) {
@@ -100,24 +49,14 @@ impl App {
         };
         // MIDI inputs plugged in and out are found by polling four times a
         // second: the systems offer no portable callback (device-changes.md).
-        // With a real host the list is read on a thread, which wakes the
-        // UI only when it changes. A test host is polled from the UI.
-        let midi_poll = if self.rig.midi_in.is_some() && !self.rig.flags.no_midi {
-            match self.rig.host.midi_lister() {
-                Some(list) => Subscription::run_with(
-                    devices::MidiWatch {
-                        list,
-                        seen: self.rig.seen_midi.clone(),
-                        generation: self.generation,
-                    },
-                    devices::midi_stream,
-                )
-                .map(|()| Message::MidiPoll),
-                None => iced::time::every(devices::MIDI_POLL).map(|_| Message::MidiPoll),
-            }
-        } else {
-            Subscription::none()
-        };
+        // A real host's list is read by a watcher thread (`watching.rs`); a
+        // test host is polled from the UI.
+        let midi_poll =
+            if self.rig.midi_in.is_some() && !self.rig.flags.no_midi && self.rig.host.midi_lister().is_none() {
+                iced::time::every(devices::MIDI_POLL).map(|_| Message::MidiPoll)
+            } else {
+                Subscription::none()
+            };
         // While audio plays, the audio watcher reports stalled callbacks.
         // Once a device is lost, reconnection is tried by polling four
         // times a second (device-changes.md, Audio device loss).
@@ -130,43 +69,17 @@ impl App {
         } else {
             Subscription::none()
         };
-        let report = match &self.reporter {
-            Some(reporter) => Subscription::run_with(reporter.clone(), bench::stream).map(|()| Message::BenchDone),
-            None => Subscription::none(),
-        };
         Subscription::batch(
-            [
-                main,
-                audio_watch,
-                live,
-                self.light_watch(),
-                telemetry,
-                self.midi_watch(),
-                close,
-                report,
-                autosave,
-                midi_poll,
-                audio_poll,
-            ]
-            .into_iter()
-            .chain(control)
-            .chain(input_watch)
-            .chain(std::iter::once(self.a11y_subscription().map(Message::A11y))),
+            [main, live, self.midi_watch(), close, autosave, midi_poll, audio_poll]
+                .into_iter()
+                .chain(control)
+                .chain(std::iter::once(self.a11y_subscription().map(Message::A11y))),
         )
     }
 
-    /// Wakes the UI when control changes arrive, while there is something to
-    /// update: mapped parameters to follow, or learn mode waiting for MIDI.
-    /// Also the app's input listeners.
+    /// The timers for MIDI learn's ghost marks and for collecting dropped
+    /// files, and the app's input listeners.
     pub(crate) fn midi_watch(&self) -> Subscription<Message> {
-        let mapped = self.session.controller.graph().midi_mappings().next().is_some();
-        let watch = (mapped || self.session.learn.is_on() || self.rig.panic_learn.is_some()).then(|| {
-            let watch = learn::Watch {
-                reader: self.session.controller.midi_reader(),
-                generation: self.generation,
-            };
-            Subscription::run_with(watch, learn::stream).map(|_| Message::Midi)
-        });
         // Runs only while a ghost mark shows, so an idle app stays idle.
         let ghosts = (!self.session.learn.ghosts().shown().is_empty())
             .then(|| iced::time::every(learn::GHOST_CHECK).map(|_| Message::MidiGhosts));
@@ -175,7 +88,7 @@ impl App {
         // app stays idle.
         let drops_done = (!self.drops.is_empty())
             .then(|| iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::DropsDone));
-        Subscription::batch(watch.into_iter().chain(ghosts).chain(input).chain(drops_done))
+        Subscription::batch(ghosts.into_iter().chain(input).chain(drops_done))
     }
 
     /// The listener for input that depends on who has it. Its messages say who
@@ -184,15 +97,6 @@ impl App {
         iced::event::listen_with(crate::input_owner::input_event)
             .with(self.listening())
             .map(|(listening, heard)| heard.message(listening))
-    }
-
-    /// Watches the lights on screen, and sends a message only when one
-    /// visibly changes. No lights on screen: no watcher.
-    pub(crate) fn light_watch(&self) -> Subscription<Message> {
-        match self.watched_lights() {
-            Some(watch) => Subscription::run_with(watch, lights::stream).map(Message::Lights),
-            None => Subscription::none(),
-        }
     }
 
     /// The lights on screen and where their values live, or `None` when
