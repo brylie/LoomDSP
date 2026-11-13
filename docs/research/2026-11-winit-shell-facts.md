@@ -5,6 +5,8 @@
 - **Related decisions:** [ADR-0041](../adr/0041-own-ui-layer.md) (our own UI layer), ADR-0006 (permissive dependencies), ADR-0018 (clean room: these are dependencies, so their source may be read).
 - **Related:** [plan](../dev/leaving-iced-plan.md) step 2.2, and its list of facts marked †; [the AccessKit note](2026-11-accesskit-macos-gaps.md#what-accesskit_winit-brings), whose "not checked" list this answers.
 
+Here "the shell" means our window code. Which crate holds which part (the `winit` shell in `loom-ui`, the Iced half in `loom-app`'s bridge) is the plan's decision, in step 2.2.
+
 It is a dated snapshot. Do not update it to follow later releases; write a new snapshot instead.
 
 ## Questions
@@ -16,7 +18,7 @@ It is a dated snapshot. Do not update it to follow later releases; write a new s
 
 1. **Iced's integration example exists at tag 0.14.0 and uses our versions' API** (the plan's † fact). One part of the plan's wording is wrong: Iced does not draw into our render pass. `iced_wgpu::Renderer::present` makes its own encoder and passes and submits them itself. A frame is two submissions on one queue: ours (clear, canvas), then Iced's, which loads what we drew.
 2. **For the same pixels, the shell must choose the surface as Iced does today:** a format that is not sRGB, because the workspace turns on Iced's `web-colors`, and a clear colour in raw components. The example chooses sRGB, which would change every pixel.
-3. **Some of Iced's per-frame work lives in a private module of `iced_winit`, so the shell must do it:** the redraw event and the updates that follow it, a redraw request for a later time, the cursor icon, and the input method. Iced's inline preedit text has no public API.
+3. **Some of Iced's per-frame work lives in a private module of `iced_winit`, so our code must do it:** the redraw event and the updates that follow it, a redraw request for a later time, the cursor icon, and the input method. Iced's inline preedit text has no public API.
 4. **A `UserInterface` has no public hit test.** Iced decides which layer gets the pointer inside its tree. Keeping overlays above the canvas needs something in the canvas's place in that tree.
 5. **winit 0.30 has `resumed`, not `can_create_surfaces`** (that is 0.31). `accesskit_winit` 0.34.2 must be created before the window is shown, and it panics if the window is visible.
 6. **The Linux screen reader:** three "unmaintained" advisories, RUSTSEC-2026-0370, -0371, and -0372, on `zvariant`, `zbus_names`, and `zvariant_derive`. Their authors merged them into `zbus` 6 and flagged the old names; none is a vulnerability. `atspi`, and so `accesskit_unix`, is still on `zbus` 5, and no feature avoids them. AccessKit ignores the same three IDs in its own `deny.toml`.
@@ -58,18 +60,18 @@ The canvas renderer must be built for the same format.
 
 ### The renderer type
 
-`iced::Renderer` in our build is the fallback enum of `iced_wgpu` and `iced_tiny_skia`, because the workspace turns on `tiny-skia` (`iced_renderer` `lib.rs` 25 to 32). The shell builds `iced::Renderer::Primary(iced_wgpu::Renderer::new(..))` and matches `Primary` to present. When step 2.3 drops `tiny-skia`, the match goes. `Engine::new` takes the antialiasing setting; today's app turns it off, so `None`. `iced` does not re-export `iced_winit`, so `iced_winit` and `winit` become direct dependencies. Both are in the lock already, one `winit`, with no fork.
+`iced::Renderer` in our build is the fallback enum of `iced_wgpu` and `iced_tiny_skia`, because the workspace turns on `tiny-skia` (`iced_renderer` `lib.rs` 25 to 32). Whatever builds the `UserInterface` builds `iced::Renderer::Primary(iced_wgpu::Renderer::new(..))` and matches `Primary` to present. Where that code lives is the plan's decision (step 2.2). When step 2.3 drops `tiny-skia`, the match goes. `Engine::new` takes the antialiasing setting; today's app turns it off, so `None`. `iced` does not re-export `iced_winit`, so `iced_winit` and `winit` become direct dependencies of whichever crate uses them. Both are in the lock already, one `winit`, with no fork.
 
 ### Building, updating, and the cache
 
 `iced_runtime` `user_interface.rs`: `build` (93), `update` with a batch of events, giving one status per event (184), `draw` (482), `operate` (539), `relayout` (582), and `into_cache` (588). The view borrows the app, so a `UserInterface` cannot live across an `update`: build, use, keep the cache, rebuild after messages, as `ui_test.rs` does today. The cache keeps the widget tree, which owns the text paragraphs, so taking the cache before `present` is safe.
 
-### Iced's per-frame work that the shell must do
+### Iced's per-frame work that our code must do
 
 `iced_winit`'s event loop (`lib.rs`) does this, partly in a private module (`mod window`, `window.rs` 199 to 275):
 
 1. It collects events until `AboutToWait`, then runs one `update` with all of them (1135 to 1165).
-2. It hands each event and its status to the subscriptions (1188 to 1199). Our input listeners are plain functions of an event, a status, and a window, so the shell calls them with the statuses `update` gave. `listen_with` leaves out `RedrawRequested` (`iced_futures` `event.rs` 35 to 40); keep that.
+2. It hands each event and its status to the subscriptions (1188 to 1199). Our input listeners are plain functions of an event, a status, and a window, so our code calls them with the statuses `update` gave. `listen_with` leaves out `RedrawRequested` (`iced_futures` `event.rs` 35 to 40); keep that.
 3. On a redraw: it relays out if the size changed, then runs `update` with `RedrawRequested`, up to three times while that gives messages or moves the layout, running the app's update between (815 to 860). The canvas reads that event, and buttons choose their look during it (#460). The example throws these messages away; the shell must not.
 4. After the draw, it applies the redraw request (`NextFrame` now, `At(t)` later, as a text field's caret uses), the input method, and the cursor icon (962 to 966). Public pieces: `conversion::mouse_interaction`, `conversion::ime_purpose`, and winit's `set_ime_allowed`, `set_ime_cursor_area`, `set_cursor`. The inline preedit overlay has no public API.
 
@@ -77,9 +79,9 @@ Events convert with `conversion::window_event(event, scale, modifiers)` (`conver
 
 ### Widget operations, tasks, and subscriptions
 
-- Focus, scroll into view, and the `places` walk run on the shell's `UserInterface` through `operate`, with `black_box` for an operation with an answer, and a loop while `finish` returns `Outcome::Chain`, as `ui_test.rs` does today. No `Task` is needed.
+- Focus, scroll into view, and the `places` walk run on our own `UserInterface` through `operate`, with `black_box` for an operation with an answer, and a loop while `finish` returns `Outcome::Chain`, as `ui_test.rs` does today. No `Task` is needed.
 - A `Task` can still be run without the application (`iced_runtime` `task.rs` 489), but window actions (screenshot, exit) have no runner outside `iced_winit`. The bridge's remaining uses all have direct replacements.
-- Subscriptions need `iced_futures::Runtime`, and window frames, close requests, and `listen_with` are fed by `iced_winit`'s own broadcasts, which the shell would have to make. Plan step 2.1b part (d) replaces them with event sources that wake the loop.
+- Subscriptions need `iced_futures::Runtime`, and window frames, close requests, and `listen_with` are fed by `iced_winit`'s own broadcasts, which we would have to make. Plan step 2.1b part (d) replaces them with event sources that wake the loop.
 
 ### Hit testing
 
@@ -100,7 +102,7 @@ Events convert with `conversion::window_event(event, scale, modifiers)` (`conver
 ### `accesskit_winit`
 
 - 0.34.2 is the release for `accesskit` 0.25, `accesskit_macos` 0.27, and `winit` 0.30 (it needs 0.30.5 or later). It is also the latest release.
-- **It must be created before the window is shown.** All three constructors say so, and `with_direct_handlers` panics if the window reports it is visible (`lib.rs` 114 to 181). On X11 and Wayland winit cannot tell, so there the check never fires.
+- **It must be created before the window is shown.** All three constructors say so (`lib.rs` 149 to 250), and `with_direct_handlers`, which the other two call, panics if the window reports it is visible (197). winit's docs say `is_visible` is not implemented on X11, but its code is: `platform_impl/linux/x11/window.rs` 1158 to 1160 returns the real visibility. Only Wayland returns `None`. So the check fires on macOS, Windows, and X11, and never on Wayland.
 - Built with the event loop proxy, it sends `accesskit_winit::Event` values to `user_event`: the initial tree asked for, an action asked for, or the screen reader left. So the shell's user event is one enum, with a `From` for AccessKit's event. `with_mixed_handlers` can answer the first request at once with the last tree, and keeps the proxy for actions.
 - Every window event goes to `adapter.process_event` first.
 - On macOS it uses `accesskit_macos::SubclassingAdapter`, the adapter `a11y/macos.rs` uses today, and ignores the deactivation handler.
