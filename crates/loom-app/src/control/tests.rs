@@ -2629,3 +2629,21 @@ fn a_command_answers_after_its_messages_ran() {
     let answer = receiver.try_recv().expect("answered once drawn").unwrap();
     assert!((answer["value"].as_f64().unwrap() - 800.0).abs() < 1.0, "{answer:?}");
 }
+
+/// The control channel's watcher hands each call from a script to the app
+/// and waits for its answer before the next line, as the listener does.
+#[test]
+fn the_control_watcher_hands_each_call_to_the_app() {
+    let dir = crate::recovery::tests::TempDir::new("control-watch");
+    let script = dir.0.join("one.jsonl");
+    std::fs::write(&script, "{\"cmd\": \"snapshot\"}\n").unwrap();
+    let listener = Listener::Script(script);
+    let calls = crate::watcher::run_for_test(1, move |outlet| watch(&listener, outlet));
+    let call = calls.recv().expect("the script's one command");
+    assert!(matches!(call.command, Command::Snapshot));
+    call.answer(Ok(Map::new()));
+    assert!(
+        calls.recv_timeout(Duration::from_millis(200)).is_none(),
+        "one line, one call"
+    );
+}

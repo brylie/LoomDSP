@@ -300,3 +300,13 @@ fn input_never_reaches_update() {
         &cx,
     );
 }
+
+/// The bridge's start opens the window, so the watchers start on its first
+/// turn. `Bridge::new`, which the harness uses, starts none.
+#[test]
+fn the_bridge_start_starts_the_watchers() {
+    let (bridge, _) = AppBridge::start(app());
+    assert!(bridge.app().watching);
+    let (bridge, _) = AppBridge::new(app());
+    assert!(!bridge.app().watching);
+}

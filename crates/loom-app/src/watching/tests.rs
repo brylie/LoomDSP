@@ -122,3 +122,78 @@ fn a_stale_message_leaves_the_new_watcher_alone() {
     app.watched_message_taken(&fresh);
     assert_eq!(new.in_flight(), 0, "its own message frees it");
 }
+
+/// With something for each to read, every watcher starts: the audio stats
+/// and the input on a fake device, the lights on screen, the monitor, MIDI
+/// learn, the MIDI port list, the bench report, and the control channel.
+/// Each kind of message frees its own sender.
+#[test]
+fn every_watcher_starts_from_what_it_reads() {
+    use crate::devices::fake::{self, Fake, Shared};
+    let dir = crate::recovery::tests::TempDir::new("watching-all");
+    let script = dir.0.join("empty.jsonl");
+    std::fs::write(&script, "").unwrap();
+    let fake = std::rc::Rc::new(Fake {
+        midi_lister: Some(|| Ok(Vec::new())),
+        ..Fake::new(&[fake::device("Fake A")], &["Pad"])
+    });
+    *fake.audio_inputs.borrow_mut() = crate::devices::Inputs {
+        default: Some("Mic".to_string()),
+        devices: vec!["Mic".to_string()],
+    };
+    let args = crate::Args {
+        no_audio: false,
+        no_recovery: true,
+        ..crate::tests::app_args()
+    };
+    let mut app = crate::App::boot_with(args, std::rc::Rc::new(Shared(fake.clone())));
+    // An audio input in the patch opens the input; learn mode reads MIDI.
+    let audio_in = loom_modules::registry().resolve("loom.io.audio-in").unwrap();
+    app.add_module(audio_in, loom_ui_core::Point::new(100.0, 100.0));
+    app.sync_audio_input();
+    app.session.learn.start();
+    app.reporter = crate::bench::Options {
+        measure_idle: true,
+        ..crate::bench::Options::default()
+    }
+    .reporter();
+    app.control = vec![crate::control::Listener::Script(script)];
+
+    let (sender, _queue) = mpsc::channel();
+    let waker = Waker::new(sender, Arc::new(|| {}));
+    app.watching = true;
+    app.sync_watchers(&waker);
+    let engine = &app.session.engine.watchers;
+    assert!(
+        engine.audio.is_some(),
+        "the fake device plays, so its stats are watched"
+    );
+    assert!(engine.input.is_some(), "the input is open");
+    assert!(engine.monitor.is_some());
+    assert!(engine.learn.is_some(), "learn mode waits for MIDI");
+    assert!(app.watchers.midi_ports.is_some(), "the host lists MIDI from any thread");
+    assert!(app.watchers.bench.is_some());
+    assert_eq!(app.watchers.control.len(), 1);
+    // A second sync with nothing changed restarts none.
+    let keys = |app: &crate::App| {
+        let engine = &app.session.engine.watchers;
+        [&engine.audio, &engine.input, &engine.monitor, &engine.learn].map(|watcher| watcher.as_ref().map(Watcher::key))
+    };
+    let before = keys(&app);
+    app.sync_watchers(&waker);
+    assert_eq!(keys(&app), before);
+    // Every kind of watched message goes to its own ledger, and a message
+    // no watcher sent frees nothing.
+    for message in [
+        Message::Audio(crate::audio_watch::Event::Stalled {
+            callbacks: 0,
+            advanced: std::time::Instant::now(),
+        }),
+        Message::Midi,
+        Message::MidiPoll,
+        Message::BenchDone,
+        Message::Lights(Vec::new()),
+    ] {
+        app.watched_message_taken(&message);
+    }
+}

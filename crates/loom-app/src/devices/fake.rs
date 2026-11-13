@@ -61,6 +61,10 @@ pub struct Fake {
     pub stalls: Vec<String>,
     /// The tape the stalling devices play on. Tests leave it alone.
     pub stall_tape: loom_host_desktop::Tape,
+    /// Lists the MIDI inputs from any thread, as a real host's lister does,
+    /// so the app watches the list on a thread (`watching.rs`). `None`, the
+    /// default, has the UI poll the list, as for any test host.
+    pub midi_lister: Option<crate::devices::MidiLister>,
 }
 
 /// Callbacks a stalling device makes before it stops.
@@ -255,6 +259,10 @@ pub struct Shared(pub Rc<Fake>);
 impl Host for Shared {
     fn outputs(&self) -> Result<Outputs, String> {
         Ok(self.0.outputs.borrow().clone())
+    }
+
+    fn midi_lister(&self) -> Option<crate::devices::MidiLister> {
+        self.0.midi_lister
     }
 
     fn audio_inputs(&self) -> Result<Inputs, String> {
