@@ -215,3 +215,17 @@ fn the_first_row_shows_after_a_short_list_grows_again() {
         "the browser's offset {ours} is the list's {shown}"
     );
 }
+
+/// An offset left from a longer list is clamped to the shorter list's
+/// range, as the list shows it, so a library row's menu opens at its row.
+#[test]
+fn an_offset_past_a_short_list_is_clamped_to_it() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.send(crate::Message::OpenBrowser);
+    let _ = ui.redraw();
+    ui.send(crate::Message::Browser(Message::Query("saw".into())));
+    let rows = ui.app.overlays.browser().unwrap().model().rows.len();
+    assert!(rows < ROWS, "a list short enough to fit: {rows} rows");
+    ui.send(crate::Message::Browser(Message::Scrolled(500.0)));
+    assert_eq!(ui.app.overlays.browser().unwrap().scroll, 0.0);
+}
