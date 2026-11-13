@@ -25,7 +25,8 @@ test = false
 
 [features]
 # The headless `Ui` harness, for the tests in `tests/`. It changes no behaviour.
-test-ui = []
+# It needs loom-ui's test driver access to the app (`Runtime::app_mut`).
+test-ui = ["loom-ui/test-driver"]
 
 [dependencies]
 loom-core.workspace = true

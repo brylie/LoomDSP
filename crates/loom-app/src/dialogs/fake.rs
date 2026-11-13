@@ -22,26 +22,35 @@ pub(crate) fn answer_question(choice: Choice) {
     QUESTION_ANSWER.with(|answer| answer.set(choice));
 }
 
+/// The fake answer to a file dialog: from `files::fake`.
+pub(crate) fn file_answer(request: &loom_ui::effect::FileRequest) -> Option<std::path::PathBuf> {
+    match request.action {
+        FileAction::Open => files_fake::open_answer(),
+        FileAction::Save => files_fake::save_answer(),
+    }
+}
+
+/// The fake answer to a native question: the credit question, known by its
+/// first button, from `files::fake`, and any other from [`answer_question`].
+pub(crate) fn question_answer(question: &loom_ui::effect::Question) -> Choice {
+    if question.buttons.first().map(String::as_str) == Some(crate::files::ADD_MY_NAME) {
+        files_fake::add_author_choice()
+    } else {
+        QUESTION_ANSWER.with(Cell::get)
+    }
+}
+
 /// Answers a dialog `effect` from the fakes, sending its reply's message
-/// through `waker`: a file dialog from `files::fake`, the credit question
-/// too, and any other question from [`answer_question`]. Gives back any
+/// through `waker` ([`file_answer`], [`question_answer`]). Gives back any
 /// effect that is not a dialog.
-pub(crate) fn answer(app: &App, effect: Effect<Message>, waker: &Waker<Message>) -> Option<Effect<Message>> {
+pub(crate) fn answer(effect: Effect<Message>, waker: &Waker<Message>) -> Option<Effect<Message>> {
     match effect {
         Effect::FileDialog { request, reply } => {
-            let path = match request.action {
-                FileAction::Open => files_fake::open_answer(),
-                FileAction::Save => files_fake::save_answer(),
-            };
-            waker.send(reply.give(path));
+            waker.send(reply.give(file_answer(&request)));
             None
         }
-        Effect::Ask { reply, .. } => {
-            let choice = match app.waiting() {
-                Some(Waiting::Credit { .. }) => files_fake::add_author_choice(),
-                _ => QUESTION_ANSWER.with(Cell::get),
-            };
-            waker.send(reply.give(choice));
+        Effect::Ask { question, reply } => {
+            waker.send(reply.give(question_answer(&question)));
             None
         }
         other => Some(other),
@@ -73,7 +82,7 @@ impl App {
             let effects = self.update(message, &cx);
             drop(self.take_window_questions());
             for effect in effects {
-                match answer(self, effect, &waker) {
+                match answer(effect, &waker) {
                     Some(Effect::Work(job)) => job.run(&waker),
                     Some(other) => unrun.push(other),
                     None => {}

@@ -9,7 +9,7 @@ use loom_ui::Target as _;
 /// for it.
 #[test]
 fn a_message_from_iced_is_one_turn_with_no_wake_up() {
-    let (mut bridge, _) = Bridge::start(app());
+    let (mut bridge, _) = AppBridge::start(app());
     let before = bridge.runtime.counts();
     let _ = bridge.update(Bridged::App(Message::ShowHelp));
     let after = bridge.runtime.counts();
@@ -30,7 +30,7 @@ fn a_message_from_iced_is_one_turn_with_no_wake_up() {
 /// its message.
 #[test]
 fn a_waker_wakes_iced_and_the_next_turn_takes_its_message() {
-    let (mut bridge, _) = Bridge::start(app());
+    let (mut bridge, _) = AppBridge::start(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -45,7 +45,7 @@ fn a_waker_wakes_iced_and_the_next_turn_takes_its_message() {
 /// nothing more runs.
 #[test]
 fn the_first_turn_reads_the_deadline() {
-    let (bridge, _) = Bridge::start(app());
+    let (bridge, _) = AppBridge::start(app());
     assert_eq!(bridge.runtime.counts().turns, 1);
     assert!(bridge.app().next_deadline().is_none());
 }
@@ -85,7 +85,7 @@ fn a_dialog_result_names_its_button() {
 /// The hosted app's window spec carries the title Iced shows.
 #[test]
 fn the_hosted_app_describes_its_window() {
-    let hosted = Hosted(app());
+    let hosted = Hosted(app(), None);
     let spec = loom_ui::App::window(&hosted);
     assert_eq!(spec.title, hosted.0.title());
 }
@@ -130,7 +130,7 @@ fn a_scroll_to_a_missing_part_does_nothing() {
     let _ = ui.redraw();
     let before = ui.scroll_translation("module-browser-list");
     let missing = UiId::panel("browser").with("module").with("nothing-by-this-name");
-    let messages = ui.run_task(scroll_into_view(&missing));
+    let messages = ui.scroll_to(&missing);
     assert!(messages.is_empty());
     assert_eq!(ui.scroll_translation("module-browser-list"), before);
 }
@@ -221,7 +221,7 @@ fn a_reveal_finds_its_part_and_chains_one_scroll() {
 /// debug build of the app, if it did.
 #[test]
 fn a_queued_message_runs_before_a_focus_answer() {
-    let (mut bridge, _) = Bridge::start(app());
+    let (mut bridge, _) = AppBridge::start(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -256,7 +256,7 @@ fn escape() -> iced::Event {
 /// (ui-layer.md, section 2, rule 5).
 #[test]
 fn an_input_event_is_routed_into_updates_after_what_waits() {
-    let (mut bridge, _) = Bridge::start(app());
+    let (mut bridge, _) = AppBridge::start(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()

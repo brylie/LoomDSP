@@ -27,11 +27,10 @@ const BRIDGE_ONLY: [&str; 7] = [
     "rfd",
 ];
 
-/// Files under `src/` that still name them, until each is ported. Each
-/// pull request of step 2.1, item 2 takes some off. `a11y/macos.rs` stays
-/// until the `winit` shell replaces it at step 2.2; `ui_test.rs` until the
-/// harness runs on the runtime (part d, its second pull request).
-const NOT_YET_PORTED: [&str; 2] = ["a11y/macos.rs", "ui_test.rs"];
+/// Files under `src/` that still name them, until each is ported. The list
+/// only shrinks. `a11y/macos.rs` stays until the `winit` shell replaces it
+/// at step 2.2.
+const NOT_YET_PORTED: [&str; 1] = ["a11y/macos.rs"];
 
 /// True for a file that holds tests: `tests.rs`, a name ending in
 /// `_tests.rs`, or any file under a `tests` folder.

@@ -135,6 +135,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         &self.app
     }
 
+    /// The app, to change, for a test driver that sets up state between
+    /// turns. The queue, the deadline, and the messages waiting for a draw
+    /// stay as they are. Only with the `test-driver` feature: a real driver
+    /// changes the app only through `update` (section 2, rule 1).
+    #[cfg(feature = "test-driver")]
+    pub fn app_mut(&mut self) -> &mut A {
+        &mut self.app
+    }
+
     /// The routing target, to read.
     pub fn target(&self) -> &T {
         &self.target

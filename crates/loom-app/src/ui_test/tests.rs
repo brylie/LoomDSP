@@ -163,7 +163,7 @@ fn empty_outside_and_learn_mode_make_no_inspector_assignment() {
     ui.move_to(from);
     ui.press();
     ui.move_to(row);
-    ui.cursor = mouse::Cursor::Unavailable;
+    ui.set_cursor(mouse::Cursor::Unavailable);
     ui.step(&[Event::Mouse(mouse::Event::CursorLeft)]);
     ui.move_to(Point::new(WINDOW.width + 20.0, WINDOW.height + 20.0));
     assert!(
@@ -388,7 +388,7 @@ fn copy_and_paste_go_through_the_clipboard() {
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
 
     ui.tap(keyboard::Key::Character("c".into()), keyboard::Modifiers::COMMAND);
-    assert!(ui.clipboard.0.is_some(), "copy wrote the clipboard");
+    assert!(ui.clipboard().is_some(), "copy wrote the clipboard");
     ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
 
     assert_eq!(ui.app().session.controller.graph().nodes().count(), modules + 1);
@@ -2365,7 +2365,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     // Over the canvas, with the module selected, Backspace would delete it
     // and `a` would open the browser. The field has the keys all the same.
     let tile = ui.control(id.0, "level");
-    ui.cursor = mouse::Cursor::Available(tile.to_iced());
+    ui.set_cursor(mouse::Cursor::Available(tile.to_iced()));
     ui.tap(keyboard::Key::Named(Named::Backspace), none);
     assert!(
         ui.app().session.controller.graph().node(id).is_some(),
@@ -2546,4 +2546,73 @@ fn undo_right_after_a_click_into_a_field_leaves_the_patch() {
     );
     assert_eq!(ui.app().session.edits.history.len(), steps, "no step was undone");
     assert!(ui.text_field_focused(), "the field still has focus");
+}
+
+/// A message a watcher thread sends through the runtime's waker reaches the
+/// app: the harness hears the wake-up, as the bridge's subscription does,
+/// and runs the turn that takes it.
+#[test]
+fn a_message_from_another_thread_reaches_the_app() {
+    let mut ui = Ui::open("subtractive.ron");
+    assert!(ui.app().overlays.help.is_none());
+    let waker = ui.waker();
+    std::thread::spawn(move || waker.send(Message::ShowHelp))
+        .join()
+        .unwrap();
+    let log = ui.redraw();
+    assert!(
+        log.iter().any(|message| matches!(message, Message::ShowHelp)),
+        "{log:?}"
+    );
+    assert!(ui.app().overlays.help.is_some(), "the turn took it");
+}
+
+/// The clipboard effects use the driver's clipboard, the one a test sets
+/// and reads: a paste on the canvas reads the text the test put there.
+/// The widgets' own clipboard is a copy of it for each frame
+/// (`Ui::step`). Iced's text fields take no Cmd+V from these events, which
+/// carry no physical key, so the canvas takes it here.
+#[test]
+fn a_paste_reads_the_clipboard_the_test_set() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.set_clipboard(Some("drums".to_string()));
+    let canvas = ui.canvas();
+    ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
+    let log = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+    assert!(
+        log.iter()
+            .any(|message| matches!(message, Message::Pasted { text: Some(text), .. } if text == "drums")),
+        "{log:?}"
+    );
+}
+
+/// A capture in the harness draws the view offscreen: on wgpu an image of
+/// the window's size at scale 1; on tiny-skia, which cannot draw the
+/// canvas, the answer that there is no GPU (ui-layer.md, effects table).
+/// With `LOOM_REQUIRE_GPU=1`, as on CI's macOS, Windows, and coverage jobs
+/// (Mesa's software Vulkan), the image is required.
+#[test]
+fn a_capture_draws_the_view_offscreen() {
+    use std::sync::{Arc, Mutex};
+    let mut ui = Ui::open("subtractive.ron");
+    if std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1") {
+        assert!(
+            ui.draws_the_canvas(),
+            "LOOM_REQUIRE_GPU=1, but the renderer is not wgpu"
+        );
+    }
+    let seen = Arc::new(Mutex::new(None));
+    let got = seen.clone();
+    // Asked as `update` would ask it, and returned by the next one.
+    ui.app_mut().effect(loom_ui::Effects::capture(move |image| {
+        *got.lock().unwrap() = Some(image.map(|image| (image.width(), image.height(), image.scale())));
+        Message::Tick
+    }));
+    let _ = ui.deliver(Message::Tick);
+    let answer = seen.lock().unwrap().take().expect("the capture was answered");
+    if ui.draws_the_canvas() {
+        assert_eq!(answer, Ok((WINDOW.width as u32, WINDOW.height as u32, 1.0)));
+    } else {
+        assert_eq!(answer, Err(loom_ui::effect::NoGpu));
+    }
 }

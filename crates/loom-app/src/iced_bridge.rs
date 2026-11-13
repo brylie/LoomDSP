@@ -181,12 +181,17 @@ pub(crate) fn focus_moves<T: Send + 'static>(target: &FocusTarget, select: Selec
 /// `view` (the Iced views) and the trait's `view` (panel models, phase 3)
 /// never share a name on one type. It goes at 2.2, when the app
 /// implements the trait itself.
-pub(crate) struct Hosted(pub(crate) App);
+// The second field logs each message `update` gets, for the `Ui` harness,
+// whose tests read what ran. `None` in the app, so nothing is copied.
+pub(crate) struct Hosted(pub(crate) App, pub(crate) Option<Vec<Message>>);
 
 impl loom_ui::App for Hosted {
     type Message = Message;
 
     fn update(&mut self, message: Message, cx: &Context<'_, Message>) -> Effects<Message> {
+        if let Some(log) = &mut self.1 {
+            log.push(message.clone());
+        }
         self.0.update(message, cx)
     }
 
@@ -205,19 +210,40 @@ impl loom_ui::App for Hosted {
     }
 }
 
-/// Iced's state: our runtime, holding the app.
-pub(crate) struct Bridge {
+/// A driver for the bridge: it carries out effects, and gives the Iced
+/// tasks they need after each turn. [`IcedDriver`] in the app; the `Ui`
+/// harness's own in tests (`iced_bridge/headless.rs`).
+pub(crate) trait BridgeDriver: loom_ui::Driver<Message> + Default {
+    /// The Iced tasks the effects of the turn just run need.
+    fn take_tasks(&mut self) -> Vec<Task<Bridged>>;
+}
+
+/// Iced's state: our runtime, holding the app, and the driver that
+/// carries out its effects.
+pub(crate) struct Bridge<D: BridgeDriver = IcedDriver> {
     runtime: Runtime<Hosted, IcedTarget>,
+    driver: D,
     /// Set while the bridge itself puts a message from Iced into the
     /// queue: that turn runs at once, so it needs no wake-up.
     quiet: Arc<AtomicBool>,
     wakes: WakeSource,
 }
 
-impl Bridge {
+impl<D: BridgeDriver> Bridge<D> {
     /// The bridge around `app`, and the tasks to run first: the
     /// accessibility adapter's attach, where one exists, and the first turn.
     pub(crate) fn start(app: App) -> (Self, Task<Bridged>) {
+        let (bridge, task) = Self::new(app);
+        #[cfg(target_os = "macos")]
+        let attach = crate::a11y::attach().map(|event| Bridged::App(Message::A11y(event)));
+        #[cfg(not(target_os = "macos"))]
+        let attach = Task::none();
+        (bridge, Task::batch([attach, task]))
+    }
+
+    /// The bridge around `app` with no window to attach to, and its first
+    /// turn's tasks. The `Ui` harness starts here.
+    pub(crate) fn new(app: App) -> (Self, Task<Bridged>) {
         let (sender, receiver) = mpsc::unbounded();
         let quiet = Arc::new(AtomicBool::new(false));
         let wake = {
@@ -230,18 +256,15 @@ impl Bridge {
         };
         let window = WindowState::new(loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height));
         let mut bridge = Self {
-            runtime: Runtime::new(Hosted(app), IcedTarget::default(), window, wake),
+            runtime: Runtime::new(Hosted(app, None), IcedTarget::default(), window, wake),
+            driver: D::default(),
             quiet,
             wakes: WakeSource(Arc::new(Mutex::new(Some(receiver)))),
         };
         // The first turn builds the view and reads the first deadline, such
         // as the crash recovery question (autosave.md, Crash recovery).
         let task = bridge.turn(DriverEvent::Woken);
-        #[cfg(target_os = "macos")]
-        let attach = crate::a11y::attach().map(|event| Bridged::App(Message::A11y(event)));
-        #[cfg(not(target_os = "macos"))]
-        let attach = Task::none();
-        (bridge, Task::batch([attach, task]))
+        (bridge, task)
     }
 
     /// Iced's update: one turn of our runtime.
@@ -287,12 +310,11 @@ impl Bridge {
     /// Runs one turn by `run`, and returns what Iced must do for it.
     fn step(
         &mut self,
-        run: impl FnOnce(&mut Runtime<Hosted, IcedTarget>, Instant, &mut IcedDriver) -> loom_ui::Next,
+        run: impl FnOnce(&mut Runtime<Hosted, IcedTarget>, Instant, &mut D) -> loom_ui::Next,
     ) -> Task<Bridged> {
-        let mut driver = IcedDriver::default();
         let now = Instant::now();
-        let next = run(&mut self.runtime, now, &mut driver);
-        let mut tasks = driver.tasks;
+        let next = run(&mut self.runtime, now, &mut self.driver);
+        let mut tasks = self.driver.take_tasks();
         tasks.extend(self.runtime.target_mut().take_tasks());
         // What only Iced's widgets know, asked in order.
         tasks.extend(
@@ -318,6 +340,59 @@ impl Bridge {
     /// The app, to read.
     pub(crate) fn app(&self) -> &App {
         &self.runtime.app().0
+    }
+
+    /// The app, for the `Ui` harness to set up state between turns
+    /// (loom-ui's `test-driver` feature).
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn app_mut(&mut self) -> &mut App {
+        &mut self.runtime.app_mut().0
+    }
+
+    /// Starts logging each message `update` gets, for [`Bridge::take_log`].
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn log_messages(&mut self) {
+        self.runtime.app_mut().1 = Some(Vec::new());
+    }
+
+    /// The messages `update` got since the last call, in order.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn take_log(&mut self) -> Vec<Message> {
+        self.runtime
+            .app_mut()
+            .1
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// A waker into the runtime's queue.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn waker(&self) -> Waker<Message> {
+        self.runtime.waker()
+    }
+
+    /// The driver, to read.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn driver(&self) -> &D {
+        &self.driver
+    }
+
+    /// The driver, for the `Ui` harness to answer what waits on it.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn driver_mut(&mut self) -> &mut D {
+        &mut self.driver
+    }
+
+    /// The wake-ups waiting, for a harness that has no Iced subscription
+    /// to hear them. Each is one `Bridged::Woken`.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn take_wakes(&self) -> usize {
+        let mut slot = self.wakes.0.lock().expect("the wake receiver");
+        let Some(receiver) = slot.as_mut() else {
+            return 0;
+        };
+        std::iter::from_fn(|| receiver.try_recv().ok()).count()
     }
 
     /// Iced's view: the app's views, with their messages wrapped.
@@ -532,11 +607,20 @@ impl iced::advanced::widget::Operation<()> for ScrollBy {
     }
 }
 
+/// The bridge the app runs on.
+pub(crate) type AppBridge = Bridge<IcedDriver>;
+
 /// The driver: the effects that reach outside the app, as Iced tasks or as
 /// calls Iced cannot make for us.
 #[derive(Default)]
-struct IcedDriver {
+pub(crate) struct IcedDriver {
     tasks: Vec<Task<Bridged>>,
+}
+
+impl BridgeDriver for IcedDriver {
+    fn take_tasks(&mut self) -> Vec<Task<Bridged>> {
+        std::mem::take(&mut self.tasks)
+    }
 }
 
 impl loom_ui::Driver<Message> for IcedDriver {
@@ -659,5 +743,7 @@ fn choice(buttons: &[String], result: rfd::MessageDialogResult) -> Choice {
     }
 }
 
+#[cfg(any(test, feature = "test-ui"))]
+pub(crate) mod headless;
 #[cfg(test)]
 mod tests;

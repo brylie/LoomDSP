@@ -166,7 +166,7 @@ fn a_key_press_counts_one_input_cause() {
 /// widget used, and that no row reads, is such a route.
 #[test]
 fn an_empty_route_counts_as_input() {
-    let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
+    let mut app = crate::ui_test::open_app("subtractive.ron");
     let before = requests_this_thread(FrameCause::Input);
     let released = keyboard::Event::KeyReleased {
         key: Key::Character("q".into()),
@@ -191,7 +191,7 @@ fn an_empty_route_counts_as_input() {
 /// a patch with unsaved changes from the search field discarded them at once.
 #[test]
 fn a_route_reads_who_was_listening_before_the_event() {
-    let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
+    let mut app = crate::ui_test::open_app("subtractive.ron");
     let before = app.listening();
     app.edit(|app| {
         app.session.controller.add_module("loom.osc.sine").unwrap();
@@ -343,15 +343,12 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
             select_first_module(&mut ui);
             open_overlay(&mut ui, owner);
             let modules = ui.app().session.controller.graph().nodes().count();
-            let _ = ui.run_task(crate::iced_bridge::focus_moves(
-                &loom_ui::effect::FocusTarget::Nothing,
-                loom_ui::effect::Selection::Keep,
-            ));
+            let _ = ui.unfocus_all();
             ui.redraw();
             assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
-            ui.clipboard.0 = Some("before".to_string());
+            ui.set_clipboard(Some("before".to_string()));
             let after = tap_command(&mut ui, c);
-            if after != modules || ui.clipboard.0.as_deref() != Some("before") {
+            if after != modules || ui.clipboard() != Some("before") {
                 leaks.push(format!("{owner:?} Cmd+{c}"));
             }
         }
@@ -379,9 +376,9 @@ fn clipboard_keys_work_with_no_overlay() {
     select_first_module(&mut ui);
     let modules = ui.app().session.controller.graph().nodes().count();
     assert_eq!(tap_command(&mut ui, "d"), modules + 1, "Cmd+D duplicates");
-    ui.clipboard.0 = None;
+    ui.set_clipboard(None);
     ui.tap(Key::Character("c".into()), Modifiers::COMMAND);
-    assert!(ui.clipboard.0.is_some(), "Cmd+C copies");
+    assert!(ui.clipboard().is_some(), "Cmd+C copies");
     let before = ui.app().session.controller.graph().nodes().count();
     assert!(tap_command(&mut ui, "x") < before, "Cmd+X cuts");
 }

@@ -453,9 +453,9 @@ Phase 1:
 
 Phase 2:
 
-- [ ] A test runs an effect the harness cannot run and checks that it panics with the effect's name.
-- [ ] A test checks that one message calls `update` once, even when its effects produce more messages.
-- [ ] A test checks that background work runs inline in the harness and its messages arrive in order.
+- [x] A test runs an effect the harness cannot run and checks that it panics with the effect's name. Tests `a_file_dialog_with_no_answer_panics_naming_it` (`loom-ui`, `headless/tests.rs`) and, through the app's `Ui` harness on the same driver, `a_dialog_with_no_answer_panics_naming_it` (`crates/loom-app/tests/ui_smoke.rs`).
+- [x] A test checks that one message calls `update` once, even when its effects produce more messages. Test `one_message_gives_one_update_and_effect_messages_wait` (`loom-ui`, `runtime/tests.rs`); the app's `Ui` harness runs that runtime through the bridge, and `a_message_from_iced_is_one_turn_with_no_wake_up` (`iced_bridge/tests.rs`) checks one Iced message is one turn with one update.
+- [x] A test checks that background work runs inline in the harness and its messages arrive in order. Test `work_runs_inline_and_its_messages_arrive_in_order` (`loom-ui`, `runtime/tests.rs`); the app's `Ui` harness runs work through the same headless driver (`iced_bridge/headless.rs`).
 - [ ] With the app idle for 10 seconds, `--measure-idle` reports no redraws, no panel rebuilds, and no animation frames, while the periodic deadlines of section 2, rule 8 still run.
 - [ ] Moving the window to a display with another scale factor resends every node's bounds.
 - [ ] The tree is exposed on macOS, Windows, and Linux. Narrator and Orca checks are recorded, or listed as not checked.

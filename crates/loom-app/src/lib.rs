@@ -252,12 +252,12 @@ pub fn run() -> iced::Result {
     let start = move || {
         let mut app = App::new(args.clone());
         app.remember_opened_at_start(&args);
-        iced_bridge::Bridge::start(app)
+        iced_bridge::AppBridge::start(app)
     };
-    let result = iced::application(start, iced_bridge::Bridge::update, iced_bridge::Bridge::view)
-        .title(iced_bridge::Bridge::title)
-        .theme(iced_bridge::Bridge::theme)
-        .subscription(iced_bridge::Bridge::subscription)
+    let result = iced::application(start, iced_bridge::AppBridge::update, iced_bridge::AppBridge::view)
+        .title(iced_bridge::AppBridge::title)
+        .theme(iced_bridge::AppBridge::theme)
+        .subscription(iced_bridge::AppBridge::subscription)
         .exit_on_close_request(false)
         .window_size(WINDOW)
         .antialiasing(false)
@@ -857,6 +857,13 @@ impl App {
     /// asks the window where focus is.
     pub(crate) fn take_focus_question(&self) -> bool {
         self.focus_question.replace(false)
+    }
+
+    /// True while the window waits to be asked where focus is, for a harness
+    /// that runs a turn so the bridge asks.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn focus_question_waits(&self) -> bool {
+        self.focus_question.get()
     }
 
     fn title(&self) -> String {

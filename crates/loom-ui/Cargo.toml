@@ -17,5 +17,11 @@ categories = ["gui"]
 [dependencies]
 loom-ui-core.workspace = true
 
+[features]
+# `Runtime::app_mut`, for a test driver that sets up the app's state between
+# turns. A real driver never changes the app outside `update` (section 2,
+# rule 1), so nothing turns this on outside tests.
+test-driver = []
+
 [lints]
 workspace = true

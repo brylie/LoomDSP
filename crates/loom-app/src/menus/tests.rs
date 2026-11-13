@@ -23,7 +23,7 @@ fn a_menu_step_wraps_and_goes_to_the_ends() {
 /// rule 5): it is not applied inside the key's update.
 #[test]
 fn enter_on_an_item_sends_its_message_as_its_own_update() {
-    let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
+    let mut app = crate::ui_test::open_app("subtractive.ron");
     let area = loom_ui_core::Rect::new(
         loom_ui_core::Point::new(0.0, 0.0),
         loom_ui_core::Size::new(800.0, 600.0),

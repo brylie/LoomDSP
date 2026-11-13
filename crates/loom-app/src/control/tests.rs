@@ -2555,12 +2555,15 @@ fn a_crop_takes_the_pixels_of_its_region() {
 }
 
 /// A `screenshot` asks for a capture as an effect, and its answer comes
-/// back as `Message::Captured`, which saves and replies. The harness draws
-/// no window, so it answers that there is nothing to capture, and the
-/// reply says so: for the whole window, an area, and a target's area.
+/// back as `Message::Captured`, which saves and replies: for the whole
+/// window, an area, and a target's area. The harness draws the view
+/// offscreen on wgpu, so the file is written. On tiny-skia, which cannot
+/// draw the canvas, it answers that there is nothing to capture, and the
+/// reply says so.
 #[test]
 fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
     let mut ui = pointer_ui();
+    let drawn = ui.draws_the_canvas();
     // Built as JSON, so a Windows path's backslashes are escaped.
     let path = std::env::temp_dir().join(format!("loom-capture-effect-{}.png", std::process::id()));
     let path = path.display().to_string();
@@ -2571,11 +2574,17 @@ fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
     ]
     .map(|command| command.to_string())
     {
+        let _ = std::fs::remove_file(&path);
         let (answer, messages) = drive(&mut ui, &line);
-        assert!(
-            answer.unwrap_err().contains("no window to capture"),
-            "{line}: the harness has no window"
-        );
+        if drawn {
+            assert!(answer.is_ok(), "{line}: {answer:?}");
+            assert!(std::path::Path::new(&path).is_file(), "{line}: the image is saved");
+        } else {
+            assert!(
+                answer.unwrap_err().contains("no window to capture"),
+                "{line}: tiny-skia cannot draw the canvas"
+            );
+        }
         assert!(
             messages
                 .iter()
@@ -2583,6 +2592,7 @@ fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
             "{line}: the capture's answer is a message"
         );
     }
+    let _ = std::fs::remove_file(&path);
 }
 
 /// A command's UI messages are their own updates on the next turn, and its
@@ -2591,7 +2601,7 @@ fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
 /// nothing has changed and nothing is answered.
 #[test]
 fn a_command_answers_after_its_messages_ran() {
-    let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
+    let mut app = crate::ui_test::open_app("subtractive.ron");
     let cutoff = |app: &App| {
         let node = app.session.controller.graph().node(ModuleId(4)).unwrap();
         node.params[node.descriptor.param_index("cutoff").unwrap()]
