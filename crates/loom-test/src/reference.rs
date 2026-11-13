@@ -31,7 +31,9 @@ impl<'a> Channels<'a> {
     pub(crate) fn of(render: &'a Render) -> Self {
         Self {
             id: render.descriptor.id,
-            names: render.descriptor.outputs.iter().map(|o| o.name).collect(),
+            names: (0..render.outputs.len())
+                .map(|channel| render.descriptor.outputs[render.layout.port_of(channel)].name)
+                .collect(),
             samples: &render.outputs,
             sample_rate: render.sample_rate,
         }
@@ -124,7 +126,7 @@ pub(crate) fn compare(channels: &Channels<'_>, path: &Path, tolerance: f32) {
                 "{id}: output `{}` differs from {} at frame {frame}: expected {expected}, got {actual}. \
                  Largest difference {largest}, tolerance {tolerance}.\n\
                  If the change is intended, update it with `{UPDATE_VAR}=1 cargo test`, listen to it, and commit it.",
-                channels.names[port],
+                channels.names.get(port).copied().unwrap_or("bundle channel"),
                 path.display(),
             );
         }

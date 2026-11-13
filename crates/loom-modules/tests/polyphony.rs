@@ -768,6 +768,22 @@ fn loading_polyphonic_sources_commits_once() {
         ..EngineConfig::default()
     });
     patch.load_into(&mut parts.controller).unwrap();
+    for id in 1..=3 {
+        let node = parts
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(id))
+            .expect("loaded source");
+        assert_eq!(node.params[node.descriptor.param_index("voices").unwrap()], 8.0);
+        assert_eq!(
+            parts
+                .controller
+                .last_report()
+                .width(parts.controller.output_ref(loom_core::ModuleId(id), "out").unwrap())
+                .voices,
+            8
+        );
+    }
     render(&mut parts);
     assert_eq!(parts.controller.stats().schedule_swaps.load(Ordering::Relaxed), 1);
 }

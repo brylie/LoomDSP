@@ -947,7 +947,7 @@ impl Harness {
                                 self.descriptor.id,
                                 spec.name,
                                 start + BAD_FRAMES - 1,
-                                self.descriptor.outputs[output].name,
+                                self.descriptor.outputs[render.layout.port_of(output)].name,
                                 samples[frame],
                             );
                         }
@@ -1059,7 +1059,7 @@ impl Harness {
                 let what = |output: usize| {
                     format!(
                         "{id}: after {extreme:e} then {flipped:e} on {name}, output `{}`",
-                        self.descriptor.outputs[output].name
+                        self.descriptor.outputs[render.layout.port_of(output)].name
                     )
                 };
                 for (output, (samples, clean)) in render.outputs.iter().zip(&clean.outputs).enumerate() {
@@ -1071,7 +1071,7 @@ impl Harness {
                     }
                     let peak = clean.iter().fold(1.0f32, |peak, value| peak.max(value.abs()));
                     if level == ExtremeLevel::Recovers {
-                        let phase = self.descriptor.outputs[output].signal == SignalType::Phase;
+                        let phase = self.descriptor.outputs[render.layout.port_of(output)].signal == SignalType::Phase;
                         let frame = (compare_from..EXTREME_NEXT_EDGE).find(|&frame| {
                             if phase {
                                 // A captured value may rightly leave a phase at

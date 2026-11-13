@@ -160,3 +160,28 @@ fn bundle_ports_address_every_channel_without_searching() {
     );
     assert_eq!(outputs, inputs);
 }
+
+/// Channel ownership accounts for primary ports, extra voices, and stereo sides.
+#[test]
+fn bundle_layout_maps_flattened_channels_back_to_ports() {
+    let layout = testing::BundleLayout::new(vec![
+        crate::Width { voices: 2, sides: 1 },
+        crate::Width::MONO,
+        crate::Width { voices: 3, sides: 2 },
+        crate::Width::STEREO,
+    ]);
+    assert_eq!(
+        (0..layout.channels())
+            .map(|channel| layout.port_of(channel))
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3, 0, 2, 2, 2, 2, 2, 3]
+    );
+    for port in 0..layout.ports() {
+        let width = layout.width(port);
+        for voice in 0..width.voices {
+            for side in 0..width.sides {
+                assert_eq!(layout.port_of(layout.index(port, voice, side)), port);
+            }
+        }
+    }
+}

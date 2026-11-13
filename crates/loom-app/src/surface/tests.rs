@@ -419,3 +419,39 @@ fn an_exposed_voice_count_cannot_take_modulation() {
     );
     assert!(!app.session.scene.is_live_control(1, 0));
 }
+
+/// Sub-patch output hovers retain their description and expose the compiled stereo bundle width.
+#[test]
+fn sub_patch_outputs_show_the_underlying_bundle_width() {
+    let patch = Patch::from_ron(
+        r#"Patch(version: 1,
+        subpatches: {"v": SubPatch(modules: [
+            (id: 1, kind: "test.voices@1", params: {"voices": 8.0}),
+            (id: 2, kind: "loom.mix.join@1"),
+            (id: 3, kind: "loom.struct.output@1", label: Some("poly"))],
+            cables: [(from: (1, "out"), to: (2, "left")),
+                     (from: (1, "out"), to: (2, "right")),
+                     (from: (2, "out"), to: (3, "in"))])},
+        modules: [(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"))])"#,
+    )
+    .unwrap();
+    let mut registry = loom_core::Registry::new();
+    loom_modules::register_all(&mut registry).unwrap();
+    loom_modules::test_modules::register(&mut registry).unwrap();
+    let EngineParts { mut controller, .. } = create_engine(std::sync::Arc::new(registry), EngineConfig::default());
+    let mut ids = loom_patch::FlatIds::new();
+    patch.load_with_ids(&mut controller, &mut ids).unwrap();
+    let hierarchy = Hierarchy::from_patch(&patch, controller.graph(), ids, controller.registry()).unwrap();
+    let top = scene_of(&controller, &hierarchy, &BTreeMap::new(), &ModulePath::root());
+    let hover = &top.module(1).unwrap().outputs[0].hover.description;
+    assert_eq!(hover, "An output of the sub-patch. 8 voices, stereo.");
+    let level = ModulePath::top(1);
+    let inner = scene_of(&controller, &hierarchy, &BTreeMap::new(), &level);
+    let output = hierarchy.id_at(&level, 3).unwrap();
+    assert!(
+        inner.module(output.0).unwrap().inputs[0]
+            .hover
+            .description
+            .ends_with("8 voices, stereo.")
+    );
+}

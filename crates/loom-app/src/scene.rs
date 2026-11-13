@@ -49,6 +49,19 @@ fn port_view(spec: &PortSpec, width: loom_core::Width) -> PortView {
         &format!("{} Usually {min} to {max}.", spec.description),
         spec.name,
     );
+    append_width(&mut hover, width);
+    PortView {
+        label: spec.label.to_string(),
+        hover,
+        colour: signal_colour(spec.signal),
+        shape: signal_shape(spec.signal),
+        badge: 0,
+        follows_transport: None,
+    }
+}
+
+/// Adds the same width hint to direct and sub-patch output ports.
+fn append_width(hover: &mut HoverText, width: loom_core::Width) {
     if width.voices > 1 {
         hover.description.push_str(&format!(
             " {} voices{}.",
@@ -57,14 +70,6 @@ fn port_view(spec: &PortSpec, width: loom_core::Width) -> PortView {
         ));
     } else if width.sides == 2 {
         hover.description.push_str(" Stereo.");
-    }
-    PortView {
-        label: spec.label.to_string(),
-        hover,
-        colour: signal_colour(spec.signal),
-        shape: signal_shape(spec.signal),
-        badge: 0,
-        follows_transport: None,
     }
 }
 
@@ -1118,6 +1123,7 @@ pub fn build(
         })
         .collect();
 
+    let level_cables = hierarchy.level_cables(graph, level);
     // The sub-patch and port tiles of the level. A port is coloured by the
     // signal behind it: the inner input it feeds, or the output behind it.
     let signal_into = |end: &End| -> SignalType {
@@ -1147,6 +1153,20 @@ pub fn build(
         badge: 0,
         follows_transport: None,
     };
+    let output_port = |name: &str, end: &End, description: &str| {
+        let mut port = tile_port(name, signal_from(end), description);
+        let width = hierarchy
+            .source_behind(graph, level, end)
+            .and_then(|(id, name)| {
+                Some(controller.last_report().width(OutputRef {
+                    module: id,
+                    port: graph.node(id)?.output_index(&name)?,
+                }))
+            })
+            .unwrap_or_default();
+        append_width(&mut port.hover, width);
+        port
+    };
     let place = |id: ModuleId| positions.get(&id.0).map_or(Point::ORIGIN, |&(x, y)| Point::new(x, y));
     let structure = family_colour(loom_core::Family::Interface);
     for (id, tile) in hierarchy.structural_tiles(level) {
@@ -1175,9 +1195,7 @@ pub fn build(
                         .collect(),
                     outputs: outputs
                         .iter()
-                        .map(|(_, port)| {
-                            tile_port(port, signal_from(&(lid, port.clone())), "An output of the sub-patch.")
-                        })
+                        .map(|(_, port)| output_port(port, &(lid, port.clone()), "An output of the sub-patch."))
                         .collect(),
                     panel: crate::surface::surface_panel(graph, hierarchy, id),
                 }
@@ -1194,7 +1212,15 @@ pub fn build(
                         vec![tile_port("out", signal_into(&(lid, "out".to_string())), description)],
                     ),
                     Direction::Output => (
-                        vec![tile_port("in", signal_from(&(lid, "in".to_string())), description)],
+                        vec![
+                            level_cables
+                                .iter()
+                                .find(|cable| cable.to == (lid, "in".to_string()))
+                                .map_or_else(
+                                    || tile_port("in", SignalType::Modulation, description),
+                                    |cable| output_port("in", &cable.from, description),
+                                ),
+                        ],
                         Vec::new(),
                     ),
                 };
@@ -1355,8 +1381,7 @@ pub fn build(
             Tile::Module => None,
         }
     };
-    let cables = hierarchy
-        .level_cables(graph, level)
+    let cables = level_cables
         .into_iter()
         .filter_map(|cable| {
             let (from_id, from_index, from_signal) = port_of(&cable.from, false)?;

@@ -712,6 +712,23 @@ pub mod testing {
             self.widths[port]
         }
 
+        /// Descriptor port owning a flattened channel (primary channels come first).
+        /// Panics when the channel is outside this layout.
+        pub fn port_of(&self, channel: usize) -> usize {
+            if channel < self.ports() {
+                return channel;
+            }
+            let mut extra = channel - self.ports();
+            for (port, width) in self.widths.iter().enumerate() {
+                let count = width.voices * width.sides - 1;
+                if extra < count {
+                    return port;
+                }
+                extra -= count;
+            }
+            panic!("bundle channel index out of range");
+        }
+
         /// Flattened buffer of a zero-based voice and side.
         pub fn index(&self, port: usize, voice: usize, side: usize) -> usize {
             let width = self.widths[port];

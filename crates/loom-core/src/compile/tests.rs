@@ -722,6 +722,12 @@ fn mono_voice_stereo_downmixes_are_shared() {
             48_000.0,
             64,
         );
+        let voices: Vec<_> = schedule.ops.iter().filter(|op| op.voices == 16).collect();
+        assert_eq!(voices.len(), 16, "every target voice must be scheduled");
+        assert_eq!(
+            voices.iter().map(|op| op.voice).collect::<BTreeSet<_>>(),
+            (0..16).collect()
+        );
         assert_eq!(schedule.downmixes.len(), 1);
         let shared = schedule.downmixes[0].output as *const f32;
         if assignment {
