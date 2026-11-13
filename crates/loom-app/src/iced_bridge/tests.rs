@@ -9,7 +9,7 @@ use loom_ui::Target as _;
 /// for it.
 #[test]
 fn a_message_from_iced_is_one_turn_with_no_wake_up() {
-    let (mut bridge, _) = Bridge::start(app(), Task::none());
+    let (mut bridge, _) = Bridge::start(app());
     let before = bridge.runtime.counts();
     let _ = bridge.update(Bridged::App(Message::ShowHelp));
     let after = bridge.runtime.counts();
@@ -30,7 +30,7 @@ fn a_message_from_iced_is_one_turn_with_no_wake_up() {
 /// its message.
 #[test]
 fn a_waker_wakes_iced_and_the_next_turn_takes_its_message() {
-    let (mut bridge, _) = Bridge::start(app(), Task::none());
+    let (mut bridge, _) = Bridge::start(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -45,21 +45,9 @@ fn a_waker_wakes_iced_and_the_next_turn_takes_its_message() {
 /// nothing more runs.
 #[test]
 fn the_first_turn_reads_the_deadline() {
-    let (bridge, _) = Bridge::start(app(), Task::none());
+    let (bridge, _) = Bridge::start(app());
     assert_eq!(bridge.runtime.counts().turns, 1);
     assert!(bridge.app().next_deadline().is_none());
-}
-
-/// The outbox keeps tasks that do something, and drops empty ones.
-#[test]
-fn the_outbox_keeps_only_tasks_with_work() {
-    let outbox = Outbox::default();
-    outbox.push(Task::none());
-    assert_eq!(outbox.len(), 0);
-    outbox.push(Task::done(Message::ShowHelp));
-    assert_eq!(outbox.len(), 1);
-    assert_eq!(outbox.take().len(), 1);
-    assert_eq!(outbox.len(), 0);
 }
 
 /// A focus effect becomes an Iced widget operation; until the focus pull
@@ -233,7 +221,7 @@ fn a_reveal_finds_its_part_and_chains_one_scroll() {
 /// debug build of the app, if it did.
 #[test]
 fn a_queued_message_runs_before_a_focus_answer() {
-    let (mut bridge, _) = Bridge::start(app(), Task::none());
+    let (mut bridge, _) = Bridge::start(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -247,4 +235,68 @@ fn a_queued_message_runs_before_a_focus_answer() {
     assert!(bridge.app().overlays.help.is_some(), "the queued message ran");
     assert_eq!(bridge.app().focus, Some(field.clone()), "the app heard of the focus");
     assert_eq!(bridge.runtime.target().focused, Some(field));
+}
+
+/// An Escape press, as Iced's listener hears it.
+fn escape() -> iced::Event {
+    use iced::keyboard::{Event, Key, Location, Modifiers, key};
+    iced::Event::Keyboard(Event::KeyPressed {
+        key: Key::Named(key::Named::Escape),
+        modified_key: Key::Named(key::Named::Escape),
+        physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+        location: Location::Standard,
+        modifiers: Modifiers::empty(),
+        text: None,
+        repeat: false,
+    })
+}
+
+/// An input event is routed before `update`: each message it becomes is
+/// its own update, in the same turn, after a message already waiting
+/// (ui-layer.md, section 2, rule 5).
+#[test]
+fn an_input_event_is_routed_into_updates_after_what_waits() {
+    let (mut bridge, _) = Bridge::start(app());
+    let waker = bridge.runtime.waker();
+    std::thread::spawn(move || waker.send(Message::ShowHelp))
+        .join()
+        .unwrap();
+    let listening = bridge.app().listening();
+    let status = iced::event::Status::Ignored;
+    let routed = listening.route(escape(), status);
+    assert!(!routed.is_empty(), "Escape is heard");
+    let before = bridge.runtime.counts();
+    let _ = bridge.update(Bridged::App(Message::Input {
+        event: escape(),
+        status,
+        listening,
+    }));
+    let after = bridge.runtime.counts();
+    assert_eq!(after.turns - before.turns, 1, "one turn");
+    assert_eq!(
+        after.updates - before.updates,
+        1 + routed.len() as u64,
+        "the waiting message, then one update per routed message"
+    );
+}
+
+/// Input never reaches `update` itself: a debug build says so.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "input is routed before update")]
+fn input_never_reaches_update() {
+    let mut app = app();
+    let listening = app.listening();
+    let (sender, _queue) = std::sync::mpsc::channel();
+    let waker = Waker::new(sender, Arc::new(|| {}));
+    let window = WindowState::new(loom_ui_core::Size::new(800.0, 600.0));
+    let cx = Context::new(Instant::now(), &waker, None, window);
+    let _ = app.update(
+        Message::Input {
+            event: escape(),
+            status: iced::event::Status::Ignored,
+            listening,
+        },
+        &cx,
+    );
 }

@@ -9,7 +9,7 @@ fn run(app: &mut App, line: &str) -> Answer {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     // As the window would: answers wait for the change to be drawn, and
     // a `cc` for the engine to take it. Frames come about 60 a second.
     for _ in 0..u32::from(FRAMES_BEFORE_ANSWER) + u32::from(FRAMES_FOR_ENGINE) {
@@ -119,7 +119,7 @@ fn serve_script(app: &mut App, script: &'static str, vars: &'static [(&'static s
     // The app's side: take each call and draw frames until it is answered.
     while !client.is_finished() {
         if let Ok(call) = rx.try_recv() {
-            let _ = app.control(call);
+            let _ = app.send(Message::Control(call));
         }
         let _ = app.send(Message::ControlFrame(Instant::now()));
         std::thread::sleep(Duration::from_millis(1));
@@ -723,7 +723,7 @@ fn removing_the_sampled_module_ends_the_sample() {
         },
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     for _ in 0..=FRAMES_BEFORE_ANSWER {
         let _ = app.send(Message::ControlFrame(Instant::now()));
     }
@@ -769,7 +769,7 @@ fn run_playing(app: &mut App, line: &str) -> Answer {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     let sound = (app.session.controller.config().sample_rate * TEST_FRAME.as_secs_f32()).round() as usize;
     let mut now = Instant::now();
     // Enough frames for the longest `sample` in these tests.
@@ -846,7 +846,7 @@ fn opening_a_patch_ends_a_running_sample() {
         },
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     for _ in 0..=FRAMES_BEFORE_ANSWER {
         let _ = app.send(Message::ControlFrame(Instant::now()));
     }
@@ -955,7 +955,7 @@ fn opening_a_patch_keeps_waiting_answers() {
         command: Command::Select { modules: Vec::new() },
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     assert!(app.control_waiting());
     let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/sine.ron");
     assert!(app.replace(crate::Source::File(&patch)));
@@ -1039,8 +1039,7 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let task = ui.app.control(call);
-    let mut messages = ui.run_task(task);
+    let mut messages = ui.deliver(Message::Control(call));
     for _ in 0..200 {
         if let Ok(answer) = receiver.try_recv() {
             return (answer, messages);
@@ -1225,7 +1224,7 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
             .unwrap(),
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = ui.app.control(call);
+    let _ = ui.deliver(Message::Control(call));
     // The press, then two moves.
     for _ in 0..3 {
         ui.redraw();
@@ -1307,7 +1306,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(Some(sender)))),
         };
-        let _ = ui.app.located(call, target, &found, then);
+        ui.app.located(call, target, &found, then);
         receiver.try_recv()
     };
     let answer = ask(&mut ui, "4:cutoff", AfterSearch::Locate).unwrap().unwrap();
@@ -1320,7 +1319,9 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
     assert!(error.contains("`nope`"), "{error}");
     // A target that is there waits for the window capture.
     assert!(ask(&mut ui, "4:cutoff", then).is_err(), "not answered yet");
-    let _ = search(
+    // A search is a question for the window, asked after the turn.
+    search(
+        &ui.app,
         Call {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(None))),
@@ -1328,6 +1329,8 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
         "4".to_string(),
         AfterSearch::Locate,
     );
+    let asked = ui.app.take_window_questions();
+    assert!(matches!(asked.as_slice(), [crate::window_question::WindowQuestion::Find { text, .. }] if text == "4"));
 }
 
 /// The snapshot names a tile under a light, a knob turn, a tile move,
@@ -2472,11 +2475,7 @@ fn a_part_scrolled_out_of_view_is_not_located() {
         width: 100.0,
         height: 20.0,
     };
-    let mut find = Find {
-        text: String::new(),
-        found: Found::default(),
-        parts: crate::places::Collect::default(),
-    };
+    let mut find = Find::new(String::new());
     find.scrollable(None, area, area, iced::Vector::new(0.0, 0.0), &mut Still);
     find.traverse(&mut |inside| {
         inside.container(Some(&"inspector/4/param/cutoff".into()), row(10.0));
@@ -2560,4 +2559,39 @@ fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
             "{line}: the capture's answer is a message"
         );
     }
+}
+
+/// A command's UI messages are their own updates on the next turn, and its
+/// answer is read only once they have run (ui-layer.md, section 2, rule 5):
+/// `set` answers with the value its messages stored. Before they run,
+/// nothing has changed and nothing is answered.
+#[test]
+fn a_command_answers_after_its_messages_ran() {
+    let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
+    let cutoff = |app: &App| {
+        let node = app.session.controller.graph().node(ModuleId(4)).unwrap();
+        node.params[node.descriptor.param_index("cutoff").unwrap()]
+    };
+    let before = cutoff(&app);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "set", "module": 4, "param": "cutoff", "value": 800}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    app.control(call);
+    let posted = app.take_posted();
+    assert!(
+        matches!(posted.as_slice(), [_, Message::SliderReleased, Message::ControlReply]),
+        "{posted:?}"
+    );
+    assert_eq!(cutoff(&app), before, "the change waits for its own update");
+    assert!(receiver.try_recv().is_err(), "and so does the answer");
+    for message in posted {
+        let _ = app.send(message);
+    }
+    for _ in 0..FRAMES_BEFORE_ANSWER {
+        let _ = app.send(Message::ControlFrame(Instant::now()));
+    }
+    let answer = receiver.try_recv().expect("answered once drawn").unwrap();
+    assert!((answer["value"].as_f64().unwrap() - 800.0).abs() < 1.0, "{answer:?}");
 }

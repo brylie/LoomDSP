@@ -522,27 +522,22 @@ pub fn parse_depth(input: &str) -> Option<f32> {
 }
 
 impl App {
-    /// Handles a matrix event, and returns what the view must do after it:
+    /// Handles a matrix event, and asks for what the view must do after it:
     /// focus the depth field when an edit opens it, or scroll the selected
     /// card into view when the order or filter changes.
-    pub(crate) fn matrix_message(&mut self, event: Event) -> iced::Task<Message> {
+    pub(crate) fn matrix_message(&mut self, event: Event) {
         let reveal = matches!(
             event,
             Event::SortBy(_) | Event::ReverseSort | Event::Filter(_) | Event::SelectedOnly(_)
         );
-        let task = match event {
-            Event::Edit(id, Column::Depth) => {
-                self.effect(loom_ui::Effects::focus(access::cell(id, Column::Depth)));
-                iced::Task::none()
-            }
-            _ => iced::Task::none(),
-        };
+        if let Event::Edit(id, Column::Depth) = event {
+            self.effect(loom_ui::Effects::focus(access::cell(id, Column::Depth)));
+        }
         self.matrix_event(event);
         if reveal {
             let effects = self.reveal_selected();
             self.effect(effects);
         }
-        task
     }
 
     /// Scrolls the selected assignment's card into view, then its chosen
@@ -568,7 +563,7 @@ impl App {
 
     /// Handles a key while the matrix has focus. Keeps the selected card in
     /// view, and focuses the depth field when Enter opens it.
-    pub(crate) fn matrix_key_message(&mut self, key: keyboard::Event) -> iced::Task<Message> {
+    pub(crate) fn matrix_key_message(&mut self, key: keyboard::Event) {
         let open_depth = matches!(
             key,
             keyboard::Event::KeyPressed {
@@ -586,7 +581,6 @@ impl App {
             let depth = access::cell(edit.id, Column::Depth);
             self.effect(loom_ui::Effects::focus(depth));
         }
-        iced::Task::none()
     }
 
     /// Which one matrix assignment the canvas should show without pinning.

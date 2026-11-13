@@ -13,11 +13,17 @@
 //! - a message sent from another thread through the runtime's waker wakes
 //!   Iced through one subscription, and the next turn takes it.
 //!
-//! This is the only module that may name Iced's `Task` once a file is
-//! ported (`tests/purity.rs`). Files not yet ported push theirs into the
-//! [`Outbox`], which the bridge drains after each turn; the outbox goes
-//! when the last of them is ported.
+//! - an input event from Iced's listener is routed before `update`
+//!   (`input_owner::route`), and each message it becomes is its own update
+//!   in one turn;
+//! - what only Iced's widgets know (focus, where a part is) the app asks
+//!   as window questions (`window_question.rs`), which the bridge turns
+//!   into widget operations after the turn.
+//!
+//! This is the only module that may name Iced's `Task`, apart from the
+//! macOS accessibility adapter until step 2.2 (`tests/purity.rs`).
 
+use crate::window_question::WindowQuestion;
 use crate::{App, Message};
 use iced::futures::channel::mpsc;
 use iced::futures::{Stream, StreamExt};
@@ -27,7 +33,6 @@ use loom_ui::effect::{
 };
 use loom_ui::{Context, Deadline, DriverEvent, Effects, Runtime, Waker, WindowSpec, WindowState};
 use loom_ui_core::UiId;
-use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -79,7 +84,7 @@ pub(crate) fn unnamed_field() -> UiId {
 /// focus moves, and a press can move it, so the bridge asks after a turn
 /// that may have moved it (`App::take_focus_question`) and after every
 /// focus effect.
-pub(crate) fn focus_query<T: Send + 'static>(reply: impl Fn(FocusAnswer) -> T + Send + 'static) -> Task<T> {
+pub(crate) fn focus_query<T: Send + 'static>(reply: impl FnMut(FocusAnswer) -> T + Send + 'static) -> Task<T> {
     iced::advanced::widget::operate(FindFocus::default()).map(reply)
 }
 
@@ -112,22 +117,29 @@ impl iced::advanced::widget::Operation<FocusAnswer> for FindFocus {
     }
 }
 
-/// Asks Iced whether a text field has focus, then gives the app `reply`'s
-/// message. Undo and redo keep this round trip until phase 3: Cmd+Z right
-/// after a click into a field must see the click's focus, and only Iced's
-/// widgets know it by then (ui_test/tests.rs,
-/// `undo_right_after_a_click_into_a_field_leaves_the_patch`).
-pub(crate) fn after_focus_read(reply: impl Fn(bool) -> Message + Send + 'static) -> Task<Message> {
-    focus_query(move |answer| reply(answer.any))
-}
-
-/// Asks Iced which part has focus, then gives the app `reply`'s message.
-/// Tab between a view's fields keeps this round trip until phase 3, as
-/// undo does: a field can take focus with no message (a search field
-/// focused as its browser opens), and the key must not wait for the app
-/// to hear of it.
-pub(crate) fn after_focus_part(reply: impl Fn(Option<UiId>) -> Message + Send + 'static) -> Task<Message> {
-    focus_query(move |answer| reply(answer.part()))
+/// The Iced task that asks a window question and hands its answer to the
+/// app on a later turn, in the order asked. Shared by the bridge and the
+/// `Ui` harness.
+pub(crate) fn question_task(question: WindowQuestion) -> Task<Message> {
+    // Each operation gives one answer; the reply runs once.
+    fn once<T, M>(reply: Box<dyn FnOnce(T) -> M + Send>) -> impl FnMut(T) -> M + Send + 'static
+    where
+        T: 'static,
+        M: 'static,
+    {
+        let mut reply = Some(reply);
+        move |answer| (reply.take().expect("one answer per question"))(answer)
+    }
+    match question {
+        WindowQuestion::Focus(reply) => {
+            let mut reply = once(reply);
+            focus_query(move |answer| reply(answer.part()))
+        }
+        WindowQuestion::Find { text, reply } => {
+            iced_runtime::task::widget(crate::control::Find::new(text)).map(once(reply))
+        }
+        WindowQuestion::Places(reply) => iced_runtime::task::widget(crate::places::Collect::default()).map(once(reply)),
+    }
 }
 
 /// The Iced task that carries out a focus effect: the field's widget for
@@ -162,37 +174,6 @@ pub(crate) fn focus_moves<T: Send + 'static>(target: &FocusTarget, select: Selec
         FocusTarget::Nothing => iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::focus(
             iced::advanced::widget::Id::unique(),
         )),
-    }
-}
-
-/// Tasks from code not yet ported, drained by the bridge after each turn.
-/// Interior, so a view-time read of the app never needs `&mut`.
-#[derive(Default)]
-pub(crate) struct Outbox(RefCell<Vec<Task<Message>>>);
-
-impl Outbox {
-    /// Queues `task` for Iced to run after this turn.
-    pub(crate) fn push(&self, task: Task<Message>) {
-        if task.units() > 0 {
-            self.0.borrow_mut().push(task);
-        }
-    }
-
-    /// Takes every task queued so far.
-    pub(crate) fn take(&self) -> Vec<Task<Message>> {
-        std::mem::take(&mut *self.0.borrow_mut())
-    }
-
-    /// How many tasks wait.
-    #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
-        self.0.borrow().len()
-    }
-}
-
-impl std::fmt::Debug for Outbox {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Outbox({} tasks)", self.0.borrow().len())
     }
 }
 
@@ -234,8 +215,9 @@ pub(crate) struct Bridge {
 }
 
 impl Bridge {
-    /// The bridge around `app`, and the tasks to run first.
-    pub(crate) fn start(app: App, first: Task<Message>) -> (Self, Task<Bridged>) {
+    /// The bridge around `app`, and the tasks to run first: the
+    /// accessibility adapter's attach, where one exists, and the first turn.
+    pub(crate) fn start(app: App) -> (Self, Task<Bridged>) {
         let (sender, receiver) = mpsc::unbounded();
         let quiet = Arc::new(AtomicBool::new(false));
         let wake = {
@@ -255,15 +237,24 @@ impl Bridge {
         // The first turn builds the view and reads the first deadline, such
         // as the crash recovery question (autosave.md, Crash recovery).
         let task = bridge.turn(DriverEvent::Woken);
-        (bridge, Task::batch([first.map(Bridged::App), task]))
+        #[cfg(target_os = "macos")]
+        let attach = crate::a11y::attach().map(|event| Bridged::App(Message::A11y(event)));
+        #[cfg(not(target_os = "macos"))]
+        let attach = Task::none();
+        (bridge, Task::batch([attach, task]))
     }
 
     /// Iced's update: one turn of our runtime.
     pub(crate) fn update(&mut self, message: Bridged) -> Task<Bridged> {
         match message {
+            // An input event is routed here, before `update`: each message
+            // it becomes is its own update in this turn, after what was
+            // already waiting (ui-layer.md, section 2, rule 5).
             Bridged::App(message) => {
                 self.quiet.store(true, Ordering::SeqCst);
-                self.runtime.waker().send(message);
+                // One batch, so no watcher thread's message lands between
+                // the messages of one event.
+                self.runtime.waker().send_all(crate::input_owner::route(message));
                 self.quiet.store(false, Ordering::SeqCst);
                 self.turn(DriverEvent::Woken)
             }
@@ -302,20 +293,19 @@ impl Bridge {
         let now = Instant::now();
         let next = run(&mut self.runtime, now, &mut driver);
         let mut tasks = driver.tasks;
-        tasks.extend(self.runtime.target_mut().take_tasks());
-        tasks.extend(
-            self.runtime
-                .app()
-                .0
-                .outbox
-                .take()
-                .into_iter()
-                .map(|t| t.map(Bridged::App)),
-        );
-        // A message that may have moved focus: ask Iced where it is now.
-        if self.runtime.app().0.take_focus_question() {
-            tasks.push(focus_query(Bridged::Focus));
+        // The window's work, one after another: focus and scroll first,
+        // then what only Iced's widgets know, in the order asked, then where
+        // focus is after a message that may have moved it. Iced runs a
+        // batch's tasks side by side, so a question batched beside a scroll
+        // could read the window from before it.
+        let mut window = Task::batch(self.runtime.target_mut().take_tasks());
+        for question in self.runtime.app().0.take_window_questions() {
+            window = window.chain(question_task(question).map(Bridged::App));
         }
+        if self.runtime.app().0.take_focus_question() {
+            window = window.chain(focus_query(Bridged::Focus));
+        }
+        tasks.push(window);
         // A deadline already due runs next. Later deadlines wait for item 3,
         // when timers become deadlines.
         if next.deadline.is_some_and(|at| at <= now) {

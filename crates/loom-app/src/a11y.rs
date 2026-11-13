@@ -26,7 +26,7 @@
 
 use crate::places::Places;
 use accesskit::{ActionRequest, TreeUpdate};
-use iced::{Subscription, Task};
+use iced::Subscription;
 use loom_core::ModuleId;
 use loom_ui_core::IdTable;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -44,18 +44,18 @@ mod tests;
 #[cfg(target_os = "macos")]
 use macos as platform;
 
+/// Attaches the adapter to the window at start, for the bridge to run
+/// (`iced_bridge.rs`). Only macOS has one before step 2.2.
+#[cfg(target_os = "macos")]
+pub(crate) use macos::attach;
+
 /// Where no adapter exists yet: nothing attaches, nothing listens, and a
 /// tree goes nowhere.
 #[cfg(not(target_os = "macos"))]
 mod platform {
     use super::Event;
     use accesskit::TreeUpdate;
-    use iced::{Subscription, Task};
-
-    /// No adapter to attach.
-    pub(super) fn attach() -> Task<Event> {
-        Task::none()
-    }
+    use iced::Subscription;
 
     /// No adapter, so no events.
     pub(super) fn events() -> Subscription<Event> {
@@ -158,6 +158,9 @@ pub(crate) enum Event {
     Deactivated,
     /// Live values changed a while ago: time to send them.
     LiveTick,
+    /// The messages an action sent have run: the step's release, after
+    /// them in the queue (`App::post`).
+    Applied,
     /// Where the canvas and the window's named parts are, for a rebuild.
     Located(Places),
     /// A screen reader asked for an action.
@@ -304,17 +307,6 @@ impl Access {
     }
 }
 
-/// The task that attaches the accessibility layer to the app's window at
-/// start. Nothing where no adapter exists yet.
-pub(crate) fn attach() -> Task<Event> {
-    platform::attach()
-}
-
-/// Asks the window where the canvas and its named parts are.
-fn locate() -> Task<Event> {
-    iced_runtime::task::widget(crate::places::Collect::default()).map(Event::Located)
-}
-
 /// The window's new scale factor, from a window event.
 fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Event> {
     match event {
@@ -344,18 +336,15 @@ impl crate::App {
     /// Notes a message the app just handled. Live values wait for the
     /// timer. Anything else asks for a rebuild now, unless one is on its
     /// way. With no screen reader this does nothing.
-    pub(crate) fn a11y_after(&mut self, touch: Touch) -> Task<Event> {
+    pub(crate) fn a11y_after(&mut self, touch: Touch) {
         if !self.a11y.active {
-            return Task::none();
+            return;
         }
         match touch {
-            Touch::Own => Task::none(),
-            Touch::Live => {
-                self.a11y.live_dirty = true;
-                Task::none()
-            }
+            Touch::Own => {}
+            Touch::Live => self.a11y.live_dirty = true,
             Touch::Changed => self.a11y_rebuild(),
-            Touch::Poll(before) if before == Some(self.a11y_poll_key()) => Task::none(),
+            Touch::Poll(before) if before == Some(self.a11y_poll_key()) => {}
             Touch::Poll(_) => self.a11y_rebuild(),
         }
     }
@@ -401,12 +390,14 @@ impl crate::App {
 
     /// Asks the window where the canvas is, to rebuild the tree when the
     /// answer comes. One request at a time.
-    fn a11y_rebuild(&mut self) -> Task<Event> {
+    fn a11y_rebuild(&mut self) {
         if !self.a11y.active || self.a11y.locating {
-            return Task::none();
+            return;
         }
         self.a11y.locating = true;
-        locate()
+        self.ask_window(crate::window_question::WindowQuestion::places(|places| {
+            crate::Message::A11y(Event::Located(places))
+        }));
     }
 
     /// Builds the tree and gives what the screen reader must be sent: the
@@ -603,11 +594,7 @@ impl crate::App {
     /// SetValue, Increment, and Decrement on a slider join the screen
     /// reader's undo group, as on the canvas. Any other action ends the
     /// group first, also when it changes nothing (section 7, rule 6).
-    fn a11y_panel_action(
-        &mut self,
-        request: &ActionRequest,
-        at: std::time::Instant,
-    ) -> Option<Vec<Task<crate::Message>>> {
+    fn a11y_panel_action(&mut self, request: &ActionRequest, at: std::time::Instant) -> Option<Vec<crate::Message>> {
         use crate::edits::ReaderEvent;
         let id = self.a11y.ids.id(request.target_node.0)?.clone();
         let frames = self.a11y_frames();
@@ -657,9 +644,7 @@ impl crate::App {
         if matrix {
             self.matrix_reader_select(&id);
         }
-        let tasks = messages.into_iter().map(|message| self.update_iced(message)).collect();
-        self.reader_event(ReaderEvent::Applied);
-        Some(tasks)
+        Some(messages)
     }
 
     /// The message for a Click on a part of the window outside the canvas:
@@ -691,13 +676,15 @@ impl crate::App {
         }
     }
 
-    /// Applies a screen reader's request that arrived at `at`, and gives
-    /// the tasks its messages made.
+    /// The messages a screen reader's request that arrived at `at` sends,
+    /// for `a11y_act` to post: each is its own update, on the next turn, and
+    /// a step's release follows them ([`Event::Applied`]), so its edit joins
+    /// the open group. It applies none of them itself.
     ///
     /// A SetValue, Increment, or Decrement joins the screen reader's undo
     /// group, or opens one. Any other action that changes something ends
     /// the group first and is a step of its own.
-    pub(crate) fn a11y_action(&mut self, request: &ActionRequest, at: std::time::Instant) -> Vec<Task<crate::Message>> {
+    pub(crate) fn a11y_action(&mut self, request: &ActionRequest, at: std::time::Instant) -> Vec<crate::Message> {
         use crate::edits::ReaderEvent;
         // A held arrow key owns the edit in progress, and may step again.
         // A second owner would share its undo step, so the action waits:
@@ -707,8 +694,8 @@ impl crate::App {
         }
         // A part of the open panel, or of the overlay that owns the input,
         // acts as its item says.
-        if let Some(tasks) = self.a11y_panel_action(request, at) {
-            return tasks;
+        if let Some(messages) = self.a11y_panel_action(request, at) {
+            return messages;
         }
         // An open panel owns input, as it does for the pointer: the
         // canvas behind it does not change.
@@ -736,7 +723,7 @@ impl crate::App {
                 by_key: true,
             };
             self.reader_event(ReaderEvent::Close);
-            return vec![self.update_iced(crate::Message::Canvas(event))];
+            return vec![crate::Message::Canvas(event)];
         }
         if request.action == accesskit::Action::Focus {
             // Focus on a control moves the canvas's keyboard focus there.
@@ -781,48 +768,58 @@ impl crate::App {
         } else {
             ReaderEvent::Close
         });
-        let tasks = messages.into_iter().map(|message| self.update_iced(message)).collect();
-        // The step's release, at once: the group now waits for the next.
-        self.reader_event(ReaderEvent::Applied);
-        tasks
+        messages
+    }
+
+    /// Carries out a screen reader's action that arrived at `at`: its
+    /// messages are posted, each its own update on the next turn, and the
+    /// step's release follows them ([`Event::Applied`]), so its edit joins
+    /// the open group. With no message, the tree shows what changed at once.
+    /// True when the action sent a message.
+    pub(crate) fn a11y_act(&mut self, request: &ActionRequest, at: std::time::Instant) -> bool {
+        let messages = self.a11y_action(request, at);
+        if messages.is_empty() {
+            self.a11y_rebuild();
+            return false;
+        }
+        for message in messages {
+            self.post(message);
+        }
+        self.post(crate::Message::A11y(Event::Applied));
+        true
     }
 
     /// Handles the accessibility layer's events. Actions go through the same
     /// messages as the pointer, so undo, MIDI feedback, and autosave see
     /// them as ordinary edits.
-    pub(crate) fn a11y_event(&mut self, event: Event) -> Task<crate::Message> {
-        use crate::Message;
+    pub(crate) fn a11y_event(&mut self, event: Event) {
         match event {
-            Event::Attached(Ok(())) => Task::none(),
+            Event::Attached(Ok(())) => {}
             Event::Attached(Err(e)) => {
                 eprintln!("loom-app: no accessibility tree for screen readers: {e}");
-                Task::none()
             }
             Event::ScaleFactor(scale) => {
                 // Every node's bounds change with it, so all are sent again.
                 let changed = self.a11y.scale != scale;
                 self.a11y.scale = scale;
                 if changed {
-                    self.a11y_rebuild().map(Message::A11y)
-                } else {
-                    Task::none()
+                    self.a11y_rebuild();
                 }
             }
             Event::Activated => {
                 self.a11y.active = true;
                 // The screen reader has nothing yet: send the whole tree.
                 self.a11y.sent.clear();
-                self.a11y_rebuild().map(Message::A11y)
+                self.a11y_rebuild();
             }
             Event::Deactivated => {
                 self.a11y.active = false;
                 self.a11y.live_dirty = false;
                 self.a11y.sent.clear();
-                Task::none()
             }
             Event::LiveTick => {
                 self.a11y.flush_live = true;
-                self.a11y_rebuild().map(Message::A11y)
+                self.a11y_rebuild();
             }
             Event::Located(places) => {
                 self.a11y.locating = false;
@@ -834,13 +831,15 @@ impl crate::App {
                     }
                     platform::push(whole, changes);
                 }
-                Task::none()
             }
             Event::Action(request) => {
-                let mut tasks = self.a11y_action(&request, std::time::Instant::now());
-                // Show the new value at once.
-                tasks.push(self.a11y_rebuild().map(Message::A11y));
-                Task::batch(tasks)
+                self.a11y_act(&request, std::time::Instant::now());
+            }
+            Event::Applied => {
+                // The step's release, at once: the group now waits for the
+                // next. Then the new value is shown.
+                self.reader_event(crate::edits::ReaderEvent::Applied);
+                self.a11y_rebuild();
             }
         }
     }

@@ -126,8 +126,13 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         a11y: _,
         // Filled and taken within one `update` (`App::effect`).
         effects: _,
+        // Filled and taken within one `update` (`App::post`).
+        posted: _,
         // Filled and taken within one turn, by the bridge.
-        outbox: _,
+        window_questions: _,
+        // The control channel's: a command that sent `new` is still
+        // answered in the new patch.
+        control_replies: _,
         // The window's: a dialog's answer may itself replace the patch, and
         // what waited is taken before it does (`dialogs.rs`).
         waiting: _,

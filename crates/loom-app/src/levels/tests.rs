@@ -986,7 +986,7 @@ fn an_exposed_range_clamps_writes_from_both_sides() {
     let dragged = cutoff_of(&ui, svf, cutoff);
     assert!(dragged > 200.0 && dragged <= 2000.0, "{dragged}");
     // Set from the inspector row.
-    let _ = ui.app.inspector_message(crate::inspector::Message::ParamValue {
+    ui.app.inspector_message(crate::inspector::Message::ParamValue {
         module: svf.0,
         index: cutoff,
         value: 10000.0,
@@ -1525,7 +1525,7 @@ fn the_range_note_names_the_surface_that_sets_the_span() {
 fn renaming_a_sub_patch_in_the_inspector() {
     let mut app = nested_app();
     app.session.selection = [2].into_iter().collect();
-    let _ = app.inspector_message(crate::inspector::Message::SubPatchNameDraft {
+    app.inspector_message(crate::inspector::Message::SubPatchNameDraft {
         module: 2,
         value: "Lead".to_string(),
     });
@@ -1534,7 +1534,7 @@ fn renaming_a_sub_patch_in_the_inspector() {
         other => panic!("{other:?}"),
     }
     assert_eq!(app.session.hierarchy.tile_name(ModuleId(2)), Some("Voice".to_string()));
-    let _ = app.inspector_message(crate::inspector::Message::SubPatchNameApply { module: 2 });
+    app.inspector_message(crate::inspector::Message::SubPatchNameApply { module: 2 });
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("rename sub-patch"));
     assert!(titles(&app).iter().any(|t| t == "Lead"));
     assert_eq!(app.session.hierarchy.path_names(&voice()), ["Lead"]);

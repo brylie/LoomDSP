@@ -86,10 +86,11 @@ mod toolbar;
 pub mod ui_test;
 mod undo;
 mod view;
+mod window_question;
 mod xy;
 
 use clap::Parser;
-use iced::{Color, Size, Task, Theme};
+use iced::{Color, Size, Theme};
 use loom_canvas::CanvasEvent;
 use loom_core::{Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId};
 use loom_patch::Patch;
@@ -251,7 +252,7 @@ pub fn run() -> iced::Result {
     let start = move || {
         let mut app = App::new(args.clone());
         app.remember_opened_at_start(&args);
-        iced_bridge::Bridge::start(app, App::start_task())
+        iced_bridge::Bridge::start(app)
     };
     let result = iced::application(start, iced_bridge::Bridge::update, iced_bridge::Bridge::view)
         .title(iced_bridge::Bridge::title)
@@ -367,6 +368,9 @@ enum Message {
     BenchDone,
     /// A command from the control channel.
     Control(control::Call),
+    /// Follows a control command's UI messages in the queue: they have run,
+    /// so its answer can be read (`control/run.rs`).
+    ControlReply,
     /// A frame while control commands wait to be drawn, or sample it.
     ControlFrame(Instant),
     /// The window was searched for a `locate` command.
@@ -442,7 +446,7 @@ enum Message {
     /// Tab was pressed. It closes a text field on the main view.
     TextFieldTab,
     /// Tab between a view's fields, from the part the window says has
-    /// focus (`iced_bridge::after_focus_part`).
+    /// focus (`window_question.rs`).
     TabFrom {
         from: Option<loom_ui_core::UiId>,
         backwards: bool,
@@ -537,6 +541,7 @@ impl Message {
                 | Self::TextFocusCheck
                 | Self::FocusMoved(_)
                 | Self::AskRecovery
+                | Self::ControlReply
         )
     }
 
@@ -561,6 +566,7 @@ impl Message {
             | Self::InputAudio(_)
             | Self::BenchDone
             | Self::Control(_)
+            | Self::ControlReply
             | Self::ControlFrame(_)
             | Self::Located { .. }
             | Self::Captured { .. }
@@ -740,9 +746,15 @@ struct App {
     /// The effects this update returns, from code deep in a call chain
     /// (`App::effect`). Empty between updates.
     effects: loom_ui::Effects<Message>,
-    /// Iced tasks from code not yet ported, for the bridge to run
-    /// (`iced_bridge.rs`). Empty between turns.
-    outbox: iced_bridge::Outbox,
+    /// Messages for the next turn, each its own update, in order
+    /// (`App::post`). Sent through the waker at the end of `update`.
+    posted: Vec<Message>,
+    /// What only the window's widgets can answer, for the bridge to ask
+    /// after the turn (`window_question.rs`). Interior, so a call that only
+    /// reads the app can ask.
+    window_questions: std::cell::RefCell<Vec<window_question::WindowQuestion>>,
+    /// Control commands whose UI messages are on their way (`control/run.rs`).
+    control_replies: control::Replies,
     /// What waits for a native dialog's answer (`dialogs.rs`). It belongs
     /// to the window: a dialog's answer can open another patch.
     waiting: Option<dialogs::Pending>,
@@ -1285,41 +1297,50 @@ impl App {
     /// 5. Runs the idle engine, and retries a commit that waited for room.
     /// 6. Quits cleanly when asked, or focuses the browser when it opens.
     ///
-    /// A window event from the input listener goes first to `Listening::route`,
-    /// and each message it becomes comes back here.
+    /// A window event from the input listener never comes here: the bridge
+    /// routes it first (`Listening::route`), and each message it becomes is
+    /// its own update.
     ///
     /// One message, from the runtime (`iced_bridge.rs`), and its effects
-    /// (ui-layer.md, section 2). Code not yet ported still returns an Iced
-    /// task, which goes to the bridge's outbox.
+    /// (ui-layer.md, section 2). Messages the app posts for the next turn
+    /// (`App::post`) go through the waker, in order, once it has run.
     pub(crate) fn update(&mut self, message: Message, cx: &loom_ui::Context<'_, Message>) -> loom_ui::Effects<Message> {
         // The copy of focus follows the runtime's; `FocusMoved` is how it
         // catches up, so it alone may arrive with the two apart.
         if !matches!(message, Message::FocusMoved(_)) {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
         }
-        let task = self.update_iced(message);
-        self.outbox.push(task);
+        debug_assert!(
+            !matches!(message, Message::Input { .. }),
+            "input is routed before update (iced_bridge.rs)"
+        );
+        self.apply(message);
+        // Together, so no other thread's message lands between a command's
+        // steps and its reply, or a step and its release.
+        if !self.posted.is_empty() {
+            cx.waker().send_all(std::mem::take(&mut self.posted));
+        }
         std::mem::take(&mut self.effects)
     }
 
-    /// A workflow returns the `Task` it needs; this joins them.
-    fn update_iced(&mut self, message: Message) -> Task<Message> {
+    /// Queues `message` for the next turn, as its own update, after the
+    /// messages posted before it (ui-layer.md, section 2, rule 5). For what
+    /// the player does through another part: an open menu's Enter, a
+    /// screen reader's action, a control command.
+    pub(crate) fn post(&mut self, message: Message) {
+        self.posted.push(message);
+    }
+
+    /// Applies one message. Its effects collect in `self.effects`, and the
+    /// window questions it asks in `self.window_questions`.
+    fn apply(&mut self, message: Message) {
         use loom_canvas::stats::FrameCause;
-        // Above the steps below: each message it routes to takes them, so
-        // one event counts once.
-        let message = match message {
-            Message::Input {
-                event,
-                status,
-                listening,
-            } => return self.input_message(event, status, listening),
-            message => message,
-        };
         let cause = match &message {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
             Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
             Message::Control(_)
+            | Message::ControlReply
             | Message::ControlFrame(_)
             | Message::Located { .. }
             | Message::Captured { .. }
@@ -1330,7 +1351,7 @@ impl App {
         };
         loom_canvas::stats::request_frame(cause);
         if self.overlays.question.is_some() && !message.allowed_during_question() {
-            return Task::none();
+            return;
         }
         // What this message means for a screen reader's tree.
         let touch = match (&message, cause) {
@@ -1368,12 +1389,11 @@ impl App {
         }
         let was_open = self.overlays.browser().is_some();
         let was_help_open = self.overlays.help.is_some();
-        let task = match message {
+        match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Patches(message) => self.patches_message(message),
             Message::Question(message) => {
                 self.question_message(message);
-                Task::none()
             }
             Message::File(FileAction::Browse) => self.open_patches(),
             // An open menu has its own keys (`menus.rs`): Enter sends what its
@@ -1403,12 +1423,16 @@ impl App {
                 modifiers,
                 ..
             }) if !modifiers.command() && !modifiers.alt() && !self.tab_fields().is_empty() => {
+                // Only the window's widgets know in time where focus is: a
+                // field can take it with no message (window_question.rs).
                 let backwards = modifiers.shift();
-                iced_bridge::after_focus_part(move |from| Message::TabFrom { from, backwards })
+                self.ask_window(window_question::WindowQuestion::focus(move |from| Message::TabFrom {
+                    from,
+                    backwards,
+                }));
             }
             Message::TabFrom { from, backwards } => {
                 self.tab_between_fields(from.as_ref(), backwards);
-                Task::none()
             }
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
@@ -1417,24 +1441,22 @@ impl App {
                     text,
                     generation,
                 }));
-                Task::none()
             }
             // The library folder is read for the browser's list as it opens.
             Message::Canvas(CanvasEvent::OpenBrowser { world, at, area }) => {
                 self.canvas_event(CanvasEvent::OpenBrowser { world, at, area });
-                self.read_library_for_browser()
+                self.read_library_for_browser();
             }
             Message::Control(call) => self.control(call),
+            Message::ControlReply => self.control_reply(),
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
             Message::TextFieldTab => {
                 self.text_field_tab(self.focus.clone().as_ref());
-                Task::none()
             }
             Message::FocusMoved(focus) => {
                 self.focus_moved(focus);
-                Task::none()
             }
             Message::Inspector(message) => self.inspector_message(message),
             Message::Located {
@@ -1450,50 +1472,43 @@ impl App {
                 image,
             } => {
                 self.captured(&call, &path, area, image);
-                Task::none()
             }
             Message::TypeFocus { call, text, focused } => {
                 self.type_after_focus_check(call, &text, focused);
-                Task::none()
             }
             Message::A11y(event) => self.a11y_event(event),
             Message::Dialog(answer) => {
                 self.dialog_answered(answer);
-                Task::none()
             }
             Message::AskRecovery => {
                 self.ask_recovery();
-                Task::none()
             }
             message if self.clipboard_key(&message).is_some() => {
                 self.clipboard_command(&message);
-                Task::none()
             }
             message => {
                 self.handle(message);
-                Task::none()
             }
-        };
+        }
         // The bridge asks the window where focus is after this turn.
         if ask_focus {
             self.focus_question.set(true);
         }
         // An undo or redo shortcut asks the window whether a text field has
         // focus first, so Cmd+Z right after a click into a field undoes the
-        // typing, not the patch (iced_bridge::after_focus_read).
-        let task = match self.history_key.take() {
-            Some(redo) => Task::batch([
-                task,
-                iced_bridge::after_focus_read(move |typing| Message::HistoryKey { redo, typing }),
-            ]),
-            None => task,
-        };
+        // typing, not the patch (window_question.rs).
+        if let Some(redo) = self.history_key.take() {
+            self.ask_window(window_question::WindowQuestion::focus(move |part| {
+                Message::HistoryKey {
+                    redo,
+                    typing: part.is_some(),
+                }
+            }));
+        }
         // A screen reader's tree follows what this message changed.
-        let task = if self.a11y.is_active() {
-            Task::batch([task, self.a11y_after(touch).map(Message::A11y)])
-        } else {
-            task
-        };
+        if self.a11y.is_active() {
+            self.a11y_after(touch);
+        }
         self.drain_idle_engine();
         // The audio callback, or the idle engine above, makes room for the
         // staged modules. Tick messages keep this retry moving even without
@@ -1511,18 +1526,14 @@ impl App {
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
             self.run_files.finish();
             self.effect(loom_ui::Effects::quit());
-            task
         } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
             self.effect(loom_ui::Effects::focus(browser::search_id()));
-            task
-        } else {
-            task
         }
     }
 
     /// Opens your patches browser over the library folder, which is read
     /// on a thread (patch-metadata.md, Your patches browser).
-    fn open_patches(&mut self) -> Task<Message> {
+    fn open_patches(&mut self) {
         // The folder is made on first use, so a new player's library
         // starts empty rather than missing.
         let Some(folder) = self.library_folder() else {
@@ -1530,7 +1541,7 @@ impl App {
                 self.alerts
                     .warn("No library folder: set `library` in the preferences file.".to_string());
             }
-            return Task::none();
+            return;
         };
         self.patches_open += 1;
         let (browser, read) = patches::PatchBrowser::open(self.patches_open, folder);
@@ -1538,14 +1549,13 @@ impl App {
         self.effect(read);
         let [search, _] = patches::text_fields();
         self.effect(loom_ui::Effects::focus(search));
-        Task::none()
     }
 
     /// Handles a patches browser message: keep it open, close it, or open
     /// a patch, asking about unsaved changes first.
-    fn patches_message(&mut self, message: patches::Message) -> Task<Message> {
+    fn patches_message(&mut self, message: patches::Message) {
         let Some(open) = self.overlays.patches_mut() else {
-            return Task::none();
+            return;
         };
         let (outcome, effects) = open.update(message);
         self.effect(effects);
@@ -1557,17 +1567,16 @@ impl App {
                 self.after_discard(question::AfterDiscard::OpenPath(path));
             }
         }
-        Task::none()
     }
 
     /// Handles a browser message: keep it open, close it, or add a module.
-    fn browser_message(&mut self, message: browser::Message) -> Task<Message> {
+    fn browser_message(&mut self, message: browser::Message) {
         // The folder's items serve the slots' Swap lists too.
         if let browser::Message::Library(items) = &message {
             self.library = items.clone();
         }
         let Some(open) = self.overlays.browser_mut() else {
-            return Task::none();
+            return;
         };
         let (outcome, effects) = open.update(message);
         self.effect(effects);
@@ -1583,22 +1592,17 @@ impl App {
                 self.insert_library_item(&item, linked, world);
             }
         }
-        Task::none()
     }
 
     /// Starts reading the library folder for the open browser's list of
     /// sub-patches (sub-patches.md, Library). With no folder, the list
     /// holds modules only.
-    fn read_library_for_browser(&mut self) -> Task<Message> {
+    fn read_library_for_browser(&mut self) {
         if self.overlays.browser().is_none() {
-            return Task::none();
+            return;
         }
-        match self.rig.store.saved().library_folder() {
-            Some(folder) => {
-                self.effect(browser::read_library(folder));
-                Task::none()
-            }
-            None => Task::none(),
+        if let Some(folder) = self.rig.store.saved().library_folder() {
+            self.effect(browser::read_library(folder));
         }
     }
 
@@ -1676,16 +1680,17 @@ impl App {
         self.session.step_name = None;
     }
 
-    /// The messages that return no task. Called from [`update`](Self::update),
+    /// The messages with no handler of their own. Called from `apply`,
     /// which has done the shared work first.
     fn handle(&mut self, message: Message) {
         match message {
-            // `update` runs these: they return tasks.
+            // `apply` gives these to their own handlers.
             Message::Dialog(_)
             | Message::AskRecovery
             | Message::Browser(_)
             | Message::Input { .. }
             | Message::Control(_)
+            | Message::ControlReply
             | Message::ControlFrame(_)
             | Message::TextFieldTab
             | Message::TabFrom { .. }

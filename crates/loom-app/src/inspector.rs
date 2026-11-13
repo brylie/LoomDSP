@@ -13,7 +13,7 @@ use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, stack, text, text_input,
     tooltip,
 };
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Theme};
 use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, ParamSpec, WidgetKind};
 use loom_ui_core::UiId;
 use serde::Serialize;
@@ -484,14 +484,11 @@ pub struct DrivesLine {
 }
 
 impl App {
-    /// Handles a message from the inspector. Only a submitted value returns a
-    /// task, which moves focus.
-    pub(crate) fn inspector_message(&mut self, message: Message) -> Task<AppMessage> {
+    /// Handles a message from the inspector. A submitted value also moves
+    /// focus, as an effect.
+    pub(crate) fn inspector_message(&mut self, message: Message) {
         match message {
-            Message::ValueSubmit { module, index } => {
-                self.value_submit(module, index);
-                return Task::none();
-            }
+            Message::ValueSubmit { module, index } => self.value_submit(module, index),
             Message::UnknownLabelDraft { module, value } => self.session.gestures.draft_label(module, value),
             Message::UnknownLabelApply { module } => {
                 if let Some(value) = self.session.gestures.take_label(module) {
@@ -566,7 +563,6 @@ impl App {
                 }
             }
         }
-        Task::none()
     }
 }
 

@@ -56,20 +56,22 @@ impl App {
     ///   question too; any other question from [`answer_question`].
     /// - Work runs inline, to its end, and its messages follow in order.
     /// - Every other effect is returned, unrun, for the test to read.
-    /// - Iced tasks from code not yet ported are dropped, as the one that
-    ///   `update` returned was dropped before the port.
+    /// - An input event is routed first, as the bridge routes it, and each
+    ///   message it becomes is applied in turn.
+    /// - Window questions are dropped: there is no window to ask
+    ///   (`window_question.rs`). The `Ui` harness answers them.
     pub(crate) fn send(&mut self, message: Message) -> Effects<Message> {
         let (sender, queue) = mpsc::channel();
         let waker = Waker::new(sender, Arc::new(|| {}));
         let window = WindowState::new(loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height));
         let mut unrun = Effects::none();
-        let mut pending = VecDeque::from([message]);
+        let mut pending = VecDeque::from(crate::input_owner::route(message));
         while let Some(message) = pending.pop_front() {
             // No window here: the app's own copy stands in for the
             // runtime's record of focus, as `FocusMoved` keeps it.
             let cx = Context::new(Instant::now(), &waker, self.focus.clone(), window);
             let effects = self.update(message, &cx);
-            drop(self.outbox.take());
+            drop(self.take_window_questions());
             for effect in effects {
                 match answer(self, effect, &waker) {
                     Some(Effect::Work(job)) => job.run(&waker),
@@ -77,9 +79,23 @@ impl App {
                     None => {}
                 }
             }
-            pending.extend(queue.try_iter());
+            pending.extend(queue.try_iter().flat_map(crate::input_owner::route));
         }
         unrun
+    }
+
+    /// Applies the messages posted outside an update, as the next turn
+    /// would: for a test that calls a handler such as `a11y_act` directly.
+    pub(crate) fn run_posted(&mut self) {
+        for message in std::mem::take(&mut self.posted) {
+            self.send(message);
+        }
+    }
+
+    /// The messages posted outside an update, for the `Ui` harness to
+    /// deliver as the next turn would.
+    pub(crate) fn take_posted(&mut self) -> Vec<Message> {
+        std::mem::take(&mut self.posted)
     }
 
     /// Answers the crash recovery question with `prompt`, through the turns

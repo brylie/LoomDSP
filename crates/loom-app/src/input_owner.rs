@@ -10,7 +10,6 @@
 
 use crate::{App, Message, panic, patches, question, recent, settings};
 use crate::{controls, matrix, subscriptions};
-use iced::Task;
 use iced::event::Status;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{mouse, window};
@@ -224,17 +223,6 @@ impl App {
         }
     }
 
-    /// Applies the messages an event becomes, one after the other. A route with
-    /// no message still redraws, so it counts as input for `--measure-idle`.
-    pub(crate) fn input_message(&mut self, event: iced::Event, status: Status, listening: Listening) -> Task<Message> {
-        let messages = listening.route(event, status);
-        if messages.is_empty() {
-            loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
-            return Task::none();
-        }
-        Task::batch(messages.into_iter().map(|message| self.update_iced(message)))
-    }
-
     /// A key no widget used while an overlay has the input. An overlay's keys
     /// stop here, so none reaches the canvas or a window behind it.
     pub(crate) fn overlay_key(&mut self, event: &keyboard::Event) {
@@ -261,6 +249,27 @@ impl App {
                 _ => {}
             },
         }
+    }
+}
+
+/// The messages an input event becomes, routed before `update` by whoever
+/// runs the app (the bridge, the `Ui` harness, `App::send`): each is its
+/// own update, in order (ui-layer.md, section 2, rule 5). A route with no
+/// message still redraws, so it counts as input for `--measure-idle`.
+pub(crate) fn route(message: Message) -> Vec<Message> {
+    match message {
+        Message::Input {
+            event,
+            status,
+            listening,
+        } => {
+            let messages = listening.route(event, status);
+            if messages.is_empty() {
+                loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
+            }
+            messages
+        }
+        message => vec![message],
     }
 }
 

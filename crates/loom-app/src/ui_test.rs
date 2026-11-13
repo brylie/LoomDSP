@@ -242,27 +242,31 @@ impl Ui {
     /// messages an input message routes to.
     fn drain(&mut self, mut queue: VecDeque<Message>, log: &mut Vec<Message>) {
         while let Some(message) = queue.pop_front() {
-            if let Message::Input {
-                event,
-                status,
-                listening,
-            } = &message
-            {
-                // Logged for the test to read. `update` applies them all, and
-                // only then do their tasks run, as in the app.
-                log.extend(listening.route(event.clone(), *status));
+            // An input event is routed before `update`, as the bridge
+            // routes it: each message it becomes is its own update, and the
+            // test reads them in the log.
+            if matches!(message, Message::Input { .. }) {
+                let routed = crate::input_owner::route(message);
+                log.extend(routed.iter().cloned());
+                for (at, message) in routed.into_iter().enumerate() {
+                    queue.insert(at, message);
+                }
+                continue;
             }
-            let replies = self.turn(message, &mut queue, log);
+            let replies = self.turn(message);
             log.extend(replies.iter().cloned());
             queue.extend(replies);
         }
     }
 
-    /// One message through `update`, as the runtime runs it: tasks from
-    /// code not yet ported run as Iced's would, and effects as a driver
-    /// carries them out. Messages from tasks go to `queue` and `log`; the
-    /// messages effects send back (a dialog's answer, work's results) are
-    /// returned, for the caller to apply.
+    /// One message through `update`, as the runtime runs it, with its
+    /// effects carried out as a driver carries them out, and the window's
+    /// answers in the bridge's order. The messages that come of it are
+    /// returned, for the caller to apply: first what the update posted and
+    /// what effects sent back at once (a dialog's answer, work's results),
+    /// then the answers from widget operations (window questions), then the
+    /// focus answer. The bridge gives that order: what an update posts is
+    /// already in the runtime's queue when Iced hands an answer back.
     ///
     /// Work runs inline, the clipboard is the harness's own, a scroll runs
     /// the bridge's scroll on the harness's window, a capture answers that
@@ -270,7 +274,7 @@ impl Ui {
     /// answered from the fake dialogs in a unit test; in a test under
     /// `tests/`, where they are off, it panics, naming it (ui-layer.md,
     /// section 2, rule 3), as an effect it cannot run does.
-    fn turn(&mut self, message: Message, queue: &mut VecDeque<Message>, log: &mut Vec<Message>) -> Vec<Message> {
+    fn turn(&mut self, message: Message) -> Vec<Message> {
         let (sender, inbox) = std::sync::mpsc::channel();
         let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
         let window = loom_ui::WindowState::new(loom_ui_core::Size::new(WINDOW.width, WINDOW.height));
@@ -281,9 +285,9 @@ impl Ui {
         }
         let cx = loom_ui::Context::new(Instant::now(), &waker, self.focused.clone(), window);
         let effects = self.app.update(message, &cx);
-        for task in self.app.outbox.take() {
-            self.run(task, queue, log);
-        }
+        // The widget operations run now, on the view as this update left
+        // it, but their answers wait behind what the update posted.
+        let (mut answers, mut unlogged) = (VecDeque::new(), Vec::new());
         let mut moved_focus = false;
         for effect in effects {
             #[cfg(test)]
@@ -298,12 +302,16 @@ impl Ui {
                 }
                 loom_ui::Effect::Quit => self.exited = true,
                 loom_ui::Effect::Focus { target, select } => {
-                    self.run(crate::iced_bridge::focus_moves(&target, select), queue, log);
+                    self.run(
+                        crate::iced_bridge::focus_moves(&target, select),
+                        &mut answers,
+                        &mut unlogged,
+                    );
                     moved_focus = true;
                 }
                 // The bridge's own scroll, run on the harness's window.
                 loom_ui::Effect::ScrollIntoView(id) => {
-                    self.run(crate::iced_bridge::scroll_into_view(&id), queue, log);
+                    self.run(crate::iced_bridge::scroll_into_view(&id), &mut answers, &mut unlogged);
                 }
                 // The effects table (ui-layer.md, section 2) says the harness
                 // draws offscreen when a GPU adapter exists. That is not built
@@ -314,7 +322,13 @@ impl Ui {
                 other => panic!("Ui: the harness cannot run the effect `{}`", other.name()),
             }
         }
+        // What only the widgets know, asked as the bridge asks Iced: after
+        // the focus and scroll tasks, in the order asked.
+        for question in self.app.take_window_questions() {
+            self.run(crate::iced_bridge::question_task(question), &mut answers, &mut unlogged);
+        }
         let mut replies: Vec<Message> = inbox.try_iter().collect();
+        replies.extend(answers);
         // As the bridge does: after a message that may have moved focus, or a
         // focus effect, ask the widgets. The answer comes after what is
         // already queued, which runs under the old focus.
@@ -431,14 +445,12 @@ impl Ui {
         messages
     }
 
-    /// Sends one message and runs its widget operations as the runtime does.
-    /// A dialog's answer and the results of work are applied too, as the
-    /// runtime would on the next turns; messages from tasks are not.
+    /// Sends one message and applies everything that comes of it, in the
+    /// runtime's order: [`Ui::deliver`], through the same queue, with no
+    /// log. A message one reply posts waits behind the replies already
+    /// queued, and an input event is routed first.
     pub(crate) fn send(&mut self, message: Message) {
-        let replies = self.turn(message, &mut VecDeque::new(), &mut Vec::new());
-        for reply in replies {
-            self.send(reply);
-        }
+        let _ = self.deliver(message);
     }
 
     /// Gives keyboard focus to the text field of `part`, as a click on it

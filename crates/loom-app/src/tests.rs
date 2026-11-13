@@ -2904,11 +2904,3 @@ fn tab_steps_forward_and_shift_tab_back() {
     assert_eq!(step("one", true), Some(field("three")), "backward wraps");
     assert_eq!(step("other", false), None, "a field not listed moves nothing");
 }
-
-/// Where no accessibility adapter exists yet, opening the window starts no
-/// task. On macOS it attaches the adapter to the window.
-#[cfg(not(target_os = "macos"))]
-#[test]
-fn start_task_is_empty_without_an_adapter() {
-    assert_eq!(App::start_task().units(), 0);
-}

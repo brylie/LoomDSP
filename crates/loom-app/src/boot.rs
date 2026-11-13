@@ -223,7 +223,9 @@ impl App {
                 crate::a11y::Access::default()
             },
             effects: loom_ui::Effects::none(),
-            outbox: crate::iced_bridge::Outbox::default(),
+            posted: Vec::new(),
+            window_questions: std::cell::RefCell::default(),
+            control_replies: crate::control::Replies::new(),
             waiting: None,
             recovery_offer: None,
         };

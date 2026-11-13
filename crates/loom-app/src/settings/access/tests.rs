@@ -197,7 +197,7 @@ fn preferences_with_audio_playing_rebuilds_only_on_a_change() {
         Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]),
     );
     assert!(app.session.engine.stream.is_playing());
-    let _ = app.a11y_event(crate::a11y::Event::Activated);
+    app.a11y_event(crate::a11y::Event::Activated);
     let places = crate::places::Places::default();
     let _ = app.a11y_changes(&places);
     let key = app.a11y_poll_key();

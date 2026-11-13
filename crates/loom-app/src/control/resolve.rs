@@ -55,11 +55,22 @@ pub struct Found {
 }
 
 /// Finds the canvas, and the first text widget that reads `text`.
-pub(super) struct Find {
-    pub(super) text: String,
-    pub(super) found: Found,
+pub(crate) struct Find {
+    text: String,
+    found: Found,
     /// Collects the window's named parts on the same walk.
-    pub(super) parts: Collect,
+    parts: Collect,
+}
+
+impl Find {
+    /// The search for `text`, for the bridge to run on the window.
+    pub(crate) fn new(text: String) -> Self {
+        Self {
+            text,
+            found: Found::default(),
+            parts: Collect::default(),
+        }
+    }
 }
 
 impl Operation<Found> for Find {

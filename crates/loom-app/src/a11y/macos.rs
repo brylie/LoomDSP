@@ -89,7 +89,7 @@ impl ActionHandler for Actions {
 
 /// The task that attaches the adapter to the app's window at start, and
 /// reads the window's scale factor.
-pub(super) fn attach() -> Task<Event> {
+pub(crate) fn attach() -> Task<Event> {
     iced::window::latest().then(|id| match id {
         Some(id) => Task::batch([
             iced::window::run(id, attach_to).map(Event::Attached),
