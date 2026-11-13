@@ -1,48 +1,63 @@
-//! Works out which cables carry stereo (ADR-0020).
+//! Voice and stereo width inference (ADR-0020 and ADR-0038).
 //!
-//! Runs on the control thread when the graph compiles, so it may allocate.
-//! Spec: `docs/design/stereo.md`, rules 6 to 9.
-//!
-//! A module runs as two copies, one per channel, when it has no `Stereo`
-//! port and a stereo cable reaches one of its `PerChannel` inputs. A
-//! `PerChannel` output is stereo when its module runs as two copies, and a
-//! `Stereo` output always is. Inside a feedback loop these depend on each
-//! other, so the widths are found with a work queue: a module goes from
-//! mono to stereo at most once, so it is queued at most once, and each
-//! cable is followed at most once. Starting from mono means a loop is
-//! stereo only if stereo enters it.
+//! A control-thread work queue propagates increasing widths to a fixed point.
+//! Modulation assignments never widen a module. Spec: `docs/design/polyphony.md`.
 
 use crate::descriptor::{Channels, ModuleDescriptor, ModuleRole};
 use crate::graph::{Graph, InputRef, ModuleId, OutputRef};
+use crate::names::ModuleNames;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// How many channels a cable carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Width {
-    /// One channel.
-    #[default]
-    Mono,
-    /// Two channels, left and right.
-    Stereo,
+/// Voice count and stereo side count of an output cable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Width {
+    /// Number of voices, from 1 to 16.
+    pub voices: usize,
+    /// One for mono, two for stereo inside each voice.
+    pub sides: usize,
 }
 
-/// The widths of one graph.
+impl Default for Width {
+    fn default() -> Self {
+        Self::MONO
+    }
+}
+
+impl Width {
+    /// One mono voice.
+    pub const MONO: Self = Self { voices: 1, sides: 1 };
+    /// One stereo voice.
+    pub const STEREO: Self = Self { voices: 1, sides: 2 };
+}
+
+/// Widths and copy counts of one graph.
 #[derive(Debug, Default)]
 pub(crate) struct Widths {
-    /// Modules that run as two copies.
+    /// Modules copied per stereo side, within each voice.
     pub per_channel: BTreeSet<ModuleId>,
-    /// Outputs that carry stereo.
+    /// Outputs with two sides per voice.
     pub stereo_outputs: BTreeSet<OutputRef>,
-    /// How many modules the queue handled. Tests use it to check that each
-    /// module is handled at most once.
+    /// Voice copies per module; bundle-aware modules have one.
+    pub voices: BTreeMap<ModuleId, usize>,
+    /// Width of every output.
+    pub outputs: BTreeMap<OutputRef, Width>,
+    /// Number of modules handled by the work queue.
     pub visited: usize,
 }
 
-/// True when the engine may run this module as two copies. Only modules the
-/// engine runs per channel qualify (the audio output has no outputs to pass
-/// stereo on), and a module that handles stereo itself is never copied.
+/// Bundle-aware modules read every voice and side in one instance.
+fn bundles(descriptor: &ModuleDescriptor) -> bool {
+    descriptor
+        .inputs
+        .iter()
+        .chain(descriptor.outputs)
+        .any(|port| port.channels == Channels::Voices)
+}
+
+/// Only ordinary DSP and delay modules can be copied per stereo side.
 fn can_copy(descriptor: &ModuleDescriptor) -> bool {
     matches!(descriptor.role, ModuleRole::Dsp(_) | ModuleRole::UnitDelay)
+        && !bundles(descriptor)
         && !descriptor
             .inputs
             .iter()
@@ -50,61 +65,120 @@ fn can_copy(descriptor: &ModuleDescriptor) -> bool {
             .any(|port| port.channels == Channels::Stereo)
 }
 
-fn output_width(descriptor: &ModuleDescriptor, port: usize, copied: bool) -> Width {
-    match descriptor.outputs.get(port).map(|spec| spec.channels) {
-        Some(Channels::Stereo) => Width::Stereo,
-        Some(Channels::PerChannel) if copied => Width::Stereo,
-        _ => Width::Mono,
-    }
+/// Computes output widths from this module's current input and copy widths.
+fn outputs(graph: &Graph, widths: &Widths, id: ModuleId) -> Vec<Width> {
+    let node = graph.node(id).expect("queued modules exist");
+    let declared = node
+        .descriptor
+        .param_index("voices")
+        .map_or(1, |i| node.params[i].round().clamp(1.0, 16.0) as usize);
+    let bundle_sides = if bundles(node.descriptor) {
+        node.descriptor
+            .inputs
+            .iter()
+            .enumerate()
+            .filter(|(_, port)| port.channels == Channels::Voices)
+            .filter_map(|(port, _)| graph.source_of(InputRef { module: id, port }))
+            .map(|from| widths.outputs.get(&from).copied().unwrap_or_default().sides)
+            .max()
+            .unwrap_or(1)
+    } else {
+        1
+    };
+    (0..node.output_count())
+        .map(|index| {
+            let channels = node
+                .descriptor
+                .outputs
+                .get(index)
+                .map_or(Channels::PerChannel, |port| port.channels);
+            Width {
+                voices: if channels == Channels::Voices {
+                    declared
+                } else {
+                    widths.voices[&id]
+                },
+                sides: if channels == Channels::Stereo
+                    || widths.per_channel.contains(&id)
+                    || channels == Channels::PerChannel && bundle_sides == 2
+                {
+                    2
+                } else {
+                    1
+                },
+            }
+        })
+        .collect()
 }
 
-/// Finds the width of every output in `graph`. Modulation assignments are
-/// not followed: they never make a module run per channel (rule 17).
+/// Finds every output's width. Mono graphs retain the existing schedule shape.
 pub(crate) fn infer(graph: &Graph) -> Widths {
-    // Cables by the module they leave, so the queue finds them directly.
     let mut leaving: BTreeMap<ModuleId, Vec<(usize, InputRef)>> = BTreeMap::new();
     for (from, to) in graph.cables() {
         leaving.entry(from.module).or_default().push((from.port, to));
     }
-
     let mut widths = Widths::default();
-    let mut queue: VecDeque<ModuleId> = graph
+    for (id, node) in graph.nodes() {
+        widths.voices.insert(id, 1);
+        for port in 0..node.output_count() {
+            widths.outputs.insert(OutputRef { module: id, port }, Width::MONO);
+        }
+    }
+    let mut queue: VecDeque<_> = graph
         .nodes()
         .filter(|(_, node)| {
             node.descriptor
                 .outputs
                 .iter()
-                .any(|port| port.channels == Channels::Stereo)
+                .any(|port| matches!(port.channels, Channels::Stereo | Channels::Voices))
         })
         .map(|(id, _)| id)
         .collect();
-
+    let mut queued: BTreeSet<_> = queue.iter().copied().collect();
     while let Some(id) = queue.pop_front() {
+        queued.remove(&id);
         widths.visited += 1;
-        let Some(node) = graph.node(id) else { continue };
-        let copied = widths.per_channel.contains(&id);
+        for (port, width) in outputs(graph, &widths, id).into_iter().enumerate() {
+            widths.outputs.insert(OutputRef { module: id, port }, width);
+        }
         for &(port, to) in leaving.get(&id).into_iter().flatten() {
-            if output_width(node.descriptor, port, copied) == Width::Mono {
-                continue;
-            }
+            let from_width = widths.outputs[&OutputRef { module: id, port }];
             let Some(target) = graph.node(to.module) else { continue };
-            let widens = target
-                .descriptor
-                .inputs
-                .get(to.port)
-                .is_some_and(|spec| spec.channels == Channels::PerChannel);
-            if widens && can_copy(target.descriptor) && widths.per_channel.insert(to.module) {
+            let Some(spec) = target.descriptor.inputs.get(to.port) else {
+                continue;
+            };
+            let mut changed = false;
+            if !bundles(target.descriptor)
+                && !matches!(target.descriptor.role, ModuleRole::AudioOutput)
+                && from_width.voices > widths.voices[&to.module]
+            {
+                widths.voices.insert(to.module, from_width.voices);
+                changed = true;
+            }
+            if spec.channels == Channels::PerChannel && from_width.sides == 2 && can_copy(target.descriptor) {
+                changed |= widths.per_channel.insert(to.module);
+            }
+            // A consumer such as Voice merge owns its sides and emits a stereo
+            // result when its bundle input is stereo, without stereo copies.
+            if spec.channels == Channels::Voices && from_width.sides == 2 {
+                changed |= outputs(graph, &widths, to.module)
+                    .iter()
+                    .enumerate()
+                    .any(|(port, width)| {
+                        widths.outputs.get(&OutputRef {
+                            module: to.module,
+                            port,
+                        }) != Some(width)
+                    });
+            }
+            if changed && queued.insert(to.module) {
                 queue.push_back(to.module);
             }
         }
     }
-
-    for (id, node) in graph.nodes() {
-        let copied = widths.per_channel.contains(&id);
-        for port in 0..node.descriptor.outputs.len() {
-            if output_width(node.descriptor, port, copied) == Width::Stereo {
-                widths.stereo_outputs.insert(OutputRef { module: id, port });
-            }
+    for (&output, width) in &widths.outputs {
+        if width.sides == 2 {
+            widths.stereo_outputs.insert(output);
         }
     }
     widths

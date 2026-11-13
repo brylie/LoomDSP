@@ -56,7 +56,7 @@ mod steps;
 use build::Builder;
 use inputs::{CompiledAssignment, DefaultKey, DownmixSpec, Inputs, compile_assignments};
 use midi_maps::compile_midi_maps;
-pub(crate) use order::partner;
+pub(crate) use order::{partner, partners};
 use order::{reaches_a_root, tarjan};
 pub(crate) use schedule::{
     AssignmentRuntime, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, PairOp, ParamFill, ProbeOp, Schedule,
@@ -120,17 +120,15 @@ pub struct CompileReport {
     pub per_channel: BTreeSet<ModuleId>,
     /// Outputs that carry stereo. Every other output is mono.
     pub stereo_outputs: BTreeSet<OutputRef>,
+    /// Voice count and stereo sides of every output.
+    pub widths: BTreeMap<OutputRef, Width>,
 }
 
 impl CompileReport {
     /// How many channels an output carries, for drawing its cables and for
     /// hover text (stereo spec, rules 19 and 23).
     pub fn width(&self, output: OutputRef) -> Width {
-        if self.stereo_outputs.contains(&output) {
-            Width::Stereo
-        } else {
-            Width::Mono
-        }
+        self.widths.get(&output).copied().unwrap_or_default()
     }
 
     /// True when the engine runs `module` as two copies, one per channel.
@@ -155,9 +153,9 @@ fn previous_spec(old: &Schedule, j: usize) -> Option<(f32, f32)> {
     Some((fill.spec.min, fill.spec.max))
 }
 
-/// [`RIGHT_TAP`] for the right channel, nothing for the left.
-fn right_tap(ch: usize) -> u64 {
-    if ch == 1 { RIGHT_TAP } else { 0 }
+/// Non-overlapping voice (bits 56 to 59) and stereo side (bit 61) in a tap key.
+fn copy_tap(ch: usize) -> u64 {
+    (if ch % 2 == 1 { RIGHT_TAP } else { 0 }) | ((ch / 2) as u64) << 56
 }
 
 /// Hands out buffer indices in order. The last step allocates them all.
@@ -186,6 +184,10 @@ struct Layout<'a> {
     out_buf: Vec<Vec<usize>>,
     /// The right-channel buffer of each stereo output port.
     right_buf: Vec<Vec<Option<usize>>>,
+    /// Buffers beyond voice 1, keyed by output and canonical voice/side index.
+    voice_buf: BTreeMap<(OutputRef, usize), usize>,
+    /// Silence for a modulation source narrower than its target, only in poly graphs.
+    padding_zero: Option<usize>,
 }
 
 impl<'a> Layout<'a> {
@@ -217,6 +219,19 @@ impl<'a> Layout<'a> {
                     .collect()
             })
             .collect();
+        let mut voice_buf = BTreeMap::new();
+        for (&output, width) in &widths.outputs {
+            for voice in 1..width.voices {
+                for side in 0..width.sides {
+                    voice_buf.insert((output, voice * 2 + side), buffers.add());
+                }
+            }
+        }
+        let padding_zero = widths
+            .outputs
+            .values()
+            .any(|width| width.voices > 1)
+            .then(|| buffers.add());
         Self {
             graph,
             ids,
@@ -226,6 +241,8 @@ impl<'a> Layout<'a> {
             copied,
             out_buf,
             right_buf,
+            voice_buf,
+            padding_zero,
         }
     }
 
@@ -246,17 +263,34 @@ impl<'a> Layout<'a> {
 
     /// How many copies of the module at `v` run.
     fn channels(&self, v: usize) -> usize {
+        self.widths.voices[&self.ids[v]] * self.sides(v)
+    }
+
+    /// Number of independently processed stereo sides in one voice.
+    fn sides(&self, v: usize) -> usize {
         if self.copied[v] { 2 } else { 1 }
     }
 
+    /// Canonical channel index: two positions per voice, even for mono voices.
+    fn copy_channel(&self, v: usize, copy: usize) -> usize {
+        (copy / self.sides(v)) * 2 + copy % self.sides(v)
+    }
+
     /// How many channels `from` carries.
-    fn output_channels(&self, from: OutputRef) -> usize {
-        if self.is_stereo(from) { 2 } else { 1 }
+    fn output_channels(&self, from: OutputRef) -> impl Iterator<Item = usize> {
+        let width = self.widths.outputs.get(&from).copied().unwrap_or_default();
+        (0..width.voices).flat_map(move |voice| (0..width.sides).map(move |side| voice * 2 + side))
     }
 
     /// The buffer that channel `ch` of a cable from `from` carries. A mono
     /// output carries the same buffer on both channels.
     fn channel_buffer(&self, from: OutputRef, ch: usize) -> usize {
+        let width = self.widths.outputs.get(&from).copied().unwrap_or_default();
+        let voice = if width.voices == 1 { 0 } else { ch / 2 };
+        let ch = voice * 2 + if width.sides == 2 { ch % 2 } else { 0 };
+        if ch >= 2 {
+            return self.voice_buf[&(from, ch)];
+        }
         let v = self.index(from.module);
         self.right_buf[v][from.port]
             .filter(|_| ch == 1)
@@ -326,6 +360,7 @@ pub(crate) fn compile(
         without_live_value: 0,
         per_channel: layout.widths.per_channel.clone(),
         stereo_outputs: layout.widths.stereo_outputs.clone(),
+        widths: layout.widths.outputs.clone(),
     };
     let schedule = Builder::new(&layout, &plan, &inputs, buffers, max_block, sample_rate).finish(
         &compiled,

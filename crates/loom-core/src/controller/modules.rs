@@ -145,7 +145,7 @@ impl Controller {
         if let Some(slot) = node.slot {
             self.slots.release(slot);
         }
-        if let Some(copy) = node.copy_slot {
+        for copy in node.copy_slots.into_values() {
             self.slots.retire(copy);
         }
         self.mark_dirty();

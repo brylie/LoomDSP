@@ -175,6 +175,8 @@ struct Selector {
     /// assignment is active, otherwise the base.
     active: u32,
     rng: Rng,
+    /// Voice identity; stereo sides deliberately share a stream.
+    voice: usize,
     /// The input chosen now, from 0.
     current: usize,
     /// True after a start or a reset, until the next `step`, which stays on
@@ -202,7 +204,8 @@ impl Selector {
             allow_repeats: false,
             seed: 1,
             active: 1,
-            rng: Self::stream_from(1),
+            rng: Self::stream_from(1, 0),
+            voice: 0,
             current: 0,
             waiting: true,
             gains: Self::on_input_one(),
@@ -221,8 +224,8 @@ impl Selector {
 
     /// The random stream for `seed`. The stereo channel stays out of it, so both
     /// sides of a stereo signal make the same picks (ADR-0036).
-    fn stream_from(seed: u32) -> Rng {
-        stream(seed, 0, 0)
+    fn stream_from(seed: u32, voice: usize) -> Rng {
+        stream(seed, voice * 2, 0)
     }
 
     /// A count from a value of the `count` parameter.
@@ -251,7 +254,11 @@ impl Module for Selector {
         loom_core::copy_state(self, other)
     }
 
-    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        if self.voice != ctx.voice() - 1 {
+            self.voice = ctx.voice() - 1;
+            self.rng = Self::stream_from(self.active, self.voice);
+        }
         let (mode_param, count_param) = (io.param(Self::MODE), io.param(Self::COUNT));
         let (fade_param, repeats_param) = (io.param(Self::FADE), io.param(Self::REPEATS));
         let seed_param = io.param(Self::SEED);
@@ -261,14 +268,14 @@ impl Module for Selector {
             let next = seed_param.map_or(i, self.seed, seed_from);
             if next != self.active {
                 self.active = next;
-                self.rng = Self::stream_from(next);
+                self.rng = Self::stream_from(next, self.voice);
             }
             let mode = mode_param.map_or(i, self.mode, Mode::from_value);
             let count = count_param.map_or(i, self.count, Self::count_from);
             // A reset comes before a step on the same frame, so the step is the
             // one that finds the wait, or takes the first random pick.
             if self.reset.rising(reset[i]) {
-                self.rng = Self::stream_from(self.active);
+                self.rng = Self::stream_from(self.active, self.voice);
                 self.current = 0;
                 self.waiting = true;
             }
@@ -325,7 +332,7 @@ impl Module for Selector {
             Self::SEED => {
                 self.seed = seed_from(value);
                 self.active = self.seed;
-                self.rng = Self::stream_from(self.seed);
+                self.rng = Self::stream_from(self.seed, self.voice);
             }
             _ => {}
         }
@@ -338,7 +345,7 @@ impl Module for Selector {
         self.current = 0;
         self.waiting = true;
         self.gains = Self::on_input_one();
-        self.rng = Self::stream_from(self.active);
+        self.rng = Self::stream_from(self.active, self.voice);
     }
 }
 

@@ -6,6 +6,14 @@ use crate::transport::TimeSignature;
 /// Errors from the control side of the engine.
 #[derive(Debug, thiserror::Error)]
 pub enum LoomError {
+    /// Structural parameters cannot be driven on the audio thread.
+    #[error("parameter {module}:{param} changes the graph and cannot take modulation or a MIDI mapping")]
+    StructuralParam {
+        /// Target module.
+        module: ModuleId,
+        /// Target parameter name.
+        param: String,
+    },
     /// A kind string could not be parsed.
     #[error("invalid module kind `{0}` (expected `id@version`)")]
     InvalidKind(String),

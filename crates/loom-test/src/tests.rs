@@ -1221,3 +1221,130 @@ fn a_repeatable_check_needs_a_copy() {
         .frames(200)
         .check_copy_state_repeatable(100);
 }
+
+/// A bundle consumer's explicit Stereo output has both sides with mono inputs.
+#[test]
+fn bundle_consumers_keep_explicit_stereo_outputs() {
+    /// Writes different values to the two sides of an explicit stereo output.
+    struct Stereo;
+    impl Stereo {
+        const OUT: usize = STEREO.output_index("out").unwrap();
+    }
+    impl Module for Stereo {
+        fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+            let [left, right] = io.stereo_output(Self::OUT);
+            left.fill(0.25);
+            right.fill(0.75);
+        }
+    }
+    static STEREO: ModuleDescriptor = ModuleDescriptor {
+        inputs: &[port("in", SignalType::Audio).with_channels(Channels::Voices)],
+        outputs: &[port("out", SignalType::Audio).with_channels(Channels::Stereo)],
+        params: &[],
+        role: ModuleRole::Dsp(|_| Box::new(Stereo)),
+        ..ECHO
+    };
+    let rendered = Harness::new(&STEREO)
+        .frames(1024)
+        .input("in", Signal::constant(0.0))
+        .check_block_sizes();
+    assert_eq!(rendered.voice_output("out", 0, 0), &[0.25; 1024]);
+    assert_eq!(rendered.voice_output("out", 0, 1), &[0.75; 1024]);
+}
+
+/// A fixture with a scalar output before a polyphonic phase output.
+static BUNDLE_PHASE: ModuleDescriptor = ModuleDescriptor {
+    id: "test.bundle-phase",
+    inputs: &[port("in", SignalType::Phase).with_channels(Channels::Downmix)],
+    outputs: &[
+        port("value", SignalType::Modulation),
+        port("phase", SignalType::Phase).with_channels(Channels::Voices),
+    ],
+    params: &[
+        param("voices", 1.0, 16.0, 2.0, "").integer().shapes_graph(),
+        param("poison", 0.0, 1.0, 0.0, "").integer(),
+    ],
+    role: ModuleRole::Dsp(|_| {
+        Box::new(BundlePhase {
+            offset: 0.0,
+            poison: false,
+            bad: false,
+        })
+    }),
+    ..ECHO
+};
+
+/// Extra voices can acquire a harmless phase offset, or deliberately retain bad input.
+struct BundlePhase {
+    offset: f32,
+    poison: bool,
+    bad: bool,
+}
+
+impl BundlePhase {
+    const SIGNAL_IN: usize = BUNDLE_PHASE.input_index("in").unwrap();
+    const VALUE_OUT: usize = BUNDLE_PHASE.output_index("value").unwrap();
+    const PHASE_OUT: usize = BUNDLE_PHASE.output_index("phase").unwrap();
+    const POISON: usize = BUNDLE_PHASE.param_index("poison").unwrap();
+}
+
+impl Module for BundlePhase {
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == Self::POISON {
+            self.poison = value > 0.5;
+        }
+    }
+    fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let input = io.voice_input(Self::SIGNAL_IN, 0, 0);
+        io.output(Self::VALUE_OUT).fill(0.0);
+        io.voice_output(Self::PHASE_OUT, 0, 0).fill(0.0);
+        for voice in 1..io.output_width(Self::PHASE_OUT).voices {
+            for (out, &value) in io.voice_output(Self::PHASE_OUT, voice, 0).iter_mut().zip(input) {
+                if value.is_finite() && value.abs() > 1.0 {
+                    self.offset = 0.25;
+                }
+                self.bad |= self.poison && !value.is_finite();
+                *out = if self.bad {
+                    f32::NAN
+                } else if value.is_finite() {
+                    (value.rem_euclid(1.0) + self.offset).fract()
+                } else {
+                    0.0
+                };
+            }
+        }
+    }
+}
+
+/// A shifted extra phase channel recovers by speed, even though its value differs.
+#[test]
+fn bundle_phase_channels_pass_extreme_recovery_by_their_port_type() {
+    Harness::new(&BUNDLE_PHASE)
+        .frames(EXTREME_RENDER)
+        .input("in", Signal::extreme_busy())
+        .check_extreme_recovery();
+}
+
+/// A bad extra channel reports its output instead of panicking on a descriptor index.
+#[test]
+#[should_panic(expected = "output `phase` is still NaN")]
+fn bundle_non_finite_failures_name_the_parent_port() {
+    Harness::new(&BUNDLE_PHASE)
+        .frames(EXTREME_RENDER)
+        .param("poison", 1.0)
+        .input("in", Signal::non_finite_busy())
+        .check_non_finite_recovery();
+}
+
+/// Reference mismatches on extra voices report the owning port's name.
+#[test]
+#[should_panic(expected = "output `phase` differs from")]
+fn bundle_reference_mismatches_name_the_parent_port() {
+    let file = temp_reference("bundle-mismatch");
+    let harness = Harness::new(&BUNDLE_PHASE).frames(100);
+    let mut rendered = harness.render();
+    harness.compare_or_update(&rendered, &file, true);
+    let channel = rendered.layout.index(BundlePhase::PHASE_OUT, 1, 0);
+    rendered.outputs[channel][0] = 0.25;
+    harness.compare_or_update(&rendered, &file, false);
+}

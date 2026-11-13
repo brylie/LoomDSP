@@ -42,16 +42,14 @@ pub fn family_colour(family: loom_core::Family) -> Color {
     loom_canvas::Palette::default().families[family.index()]
 }
 
-fn port_view(spec: &PortSpec, stereo: bool) -> PortView {
+fn port_view(spec: &PortSpec, width: loom_core::Width) -> PortView {
     let (min, max) = spec.nominal_range();
     let mut hover = HoverText::new(
         spec.label,
         &format!("{} Usually {min} to {max}.", spec.description),
         spec.name,
     );
-    if stereo {
-        hover.description.push_str(" Stereo.");
-    }
+    append_width(&mut hover, width);
     PortView {
         label: spec.label.to_string(),
         hover,
@@ -59,6 +57,19 @@ fn port_view(spec: &PortSpec, stereo: bool) -> PortView {
         shape: signal_shape(spec.signal),
         badge: 0,
         follows_transport: None,
+    }
+}
+
+/// Adds the same width hint to direct and sub-patch output ports.
+fn append_width(hover: &mut HoverText, width: loom_core::Width) {
+    if width.voices > 1 {
+        hover.description.push_str(&format!(
+            " {} voices{}.",
+            width.voices,
+            if width.sides == 2 { ", stereo" } else { "" }
+        ));
+    } else if width.sides == 2 {
+        hover.description.push_str(" Stereo.");
     }
 }
 
@@ -335,7 +346,10 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
     let mut key = Vec::new();
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
-        for p in d.params {
+        for (index, p) in d.params.iter().enumerate() {
+            if p.options.shapes_graph {
+                key.push((id.0, index, node.params[index].round() as i64));
+            }
             if let Some(when) = p.options.shown_when
                 && let Some(mode) = d.param_index(when.param)
             {
@@ -1030,7 +1044,7 @@ pub fn build(
                         spec,
                         graph
                             .source_of(InputRef { module: id, port })
-                            .is_some_and(|source| controller.last_report().width(source) == loom_core::Width::Stereo),
+                            .map_or(loom_core::Width::MONO, |source| controller.last_report().width(source)),
                     )
                 })
                 .collect();
@@ -1040,10 +1054,7 @@ pub fn build(
                 .enumerate()
                 .map(|(port, spec)| PortView {
                     badge: badges.get(&OutputRef { module: id, port }).copied().unwrap_or(0),
-                    ..port_view(
-                        spec,
-                        controller.last_report().width(OutputRef { module: id, port }) == loom_core::Width::Stereo,
-                    )
+                    ..port_view(spec, controller.last_report().width(OutputRef { module: id, port }))
                 })
                 .collect();
             if let Some(unknown) = &node.unknown {
@@ -1112,6 +1123,7 @@ pub fn build(
         })
         .collect();
 
+    let level_cables = hierarchy.level_cables(graph, level);
     // The sub-patch and port tiles of the level. A port is coloured by the
     // signal behind it: the inner input it feeds, or the output behind it.
     let signal_into = |end: &End| -> SignalType {
@@ -1141,6 +1153,20 @@ pub fn build(
         badge: 0,
         follows_transport: None,
     };
+    let output_port = |name: &str, end: &End, description: &str| {
+        let mut port = tile_port(name, signal_from(end), description);
+        let width = hierarchy
+            .source_behind(graph, level, end)
+            .and_then(|(id, name)| {
+                Some(controller.last_report().width(OutputRef {
+                    module: id,
+                    port: graph.node(id)?.output_index(&name)?,
+                }))
+            })
+            .unwrap_or_default();
+        append_width(&mut port.hover, width);
+        port
+    };
     let place = |id: ModuleId| positions.get(&id.0).map_or(Point::ORIGIN, |&(x, y)| Point::new(x, y));
     let structure = family_colour(loom_core::Family::Interface);
     for (id, tile) in hierarchy.structural_tiles(level) {
@@ -1169,9 +1195,7 @@ pub fn build(
                         .collect(),
                     outputs: outputs
                         .iter()
-                        .map(|(_, port)| {
-                            tile_port(port, signal_from(&(lid, port.clone())), "An output of the sub-patch.")
-                        })
+                        .map(|(_, port)| output_port(port, &(lid, port.clone()), "An output of the sub-patch."))
                         .collect(),
                     panel: crate::surface::surface_panel(graph, hierarchy, id),
                 }
@@ -1188,7 +1212,15 @@ pub fn build(
                         vec![tile_port("out", signal_into(&(lid, "out".to_string())), description)],
                     ),
                     Direction::Output => (
-                        vec![tile_port("in", signal_from(&(lid, "in".to_string())), description)],
+                        vec![
+                            level_cables
+                                .iter()
+                                .find(|cable| cable.to == (lid, "in".to_string()))
+                                .map_or_else(
+                                    || tile_port("in", SignalType::Modulation, description),
+                                    |cable| output_port("in", &cable.from, description),
+                                ),
+                        ],
                         Vec::new(),
                     ),
                 };
@@ -1349,8 +1381,7 @@ pub fn build(
             Tile::Module => None,
         }
     };
-    let cables = hierarchy
-        .level_cables(graph, level)
+    let cables = level_cables
         .into_iter()
         .filter_map(|cable| {
             let (from_id, from_index, from_signal) = port_of(&cable.from, false)?;
@@ -1412,7 +1443,26 @@ pub fn build(
         })
         .collect();
 
-    Scene::new(modules, cables).with_modulations(modulations)
+    let non_live: Vec<_> = modules
+        .iter()
+        .flat_map(|module| {
+            (0..module.panel.widgets.len())
+                .filter_map(|widget| {
+                    let target = crate::surface::control_target(
+                        graph,
+                        hierarchy,
+                        module.id,
+                        widget,
+                        loom_canvas::ControlPart::Main,
+                    )?;
+                    target.spec.options.shapes_graph.then_some((module.id, widget))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    Scene::new(modules, cables)
+        .with_modulations(modulations)
+        .with_non_live_controls(non_live)
 }
 
 #[cfg(test)]

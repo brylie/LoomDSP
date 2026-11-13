@@ -610,13 +610,21 @@ impl Flat {
             )?;
         }
         for assignment in &self.modulation {
-            let id = controller.add_assignment_named(
-                map(ModuleId(assignment.source.0)),
-                &assignment.source.1,
-                map(ModuleId(assignment.target.0)),
-                &assignment.target.1,
-                assignment.depth,
-            )?;
+            let id = controller
+                .add_assignment_named(
+                    map(ModuleId(assignment.source.0)),
+                    &assignment.source.1,
+                    map(ModuleId(assignment.target.0)),
+                    &assignment.target.1,
+                    assignment.depth,
+                )
+                .map_err(|error| match error {
+                    LoomError::StructuralParam { .. } => PatchError::StructuralModulationTarget {
+                        module: assignment.target.0,
+                        param: assignment.target.1.clone(),
+                    },
+                    other => PatchError::Engine(other),
+                })?;
             if let Some(polarity) = assignment.polarity {
                 controller.set_assignment_polarity(id, Some(polarity.into()))?;
             }
@@ -640,6 +648,12 @@ impl Flat {
                     LoomError::NoSuchParam { .. } => PatchError::UnknownParam {
                         module: mapping.target.0,
                         param: mapping.target.1.clone(),
+                    },
+                    LoomError::StructuralParam { .. } => PatchError::StructuralMidiMapping {
+                        module: mapping.target.0,
+                        param: mapping.target.1.clone(),
+                        controller: mapping.controller,
+                        channel: mapping.channel,
                     },
                     LoomError::InvalidMidiOptions(reason) => PatchError::InvalidMidiMapping {
                         module: mapping.target.0,

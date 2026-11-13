@@ -37,7 +37,7 @@ mod transport;
 pub(crate) use resolve::Find;
 use resolve::*;
 pub use resolve::{Found, locate};
-pub use transport::{Listener, close, exit_status, stream};
+pub use transport::{Listener, close, exit_status, watch};
 
 /// Command-line options for the control channel.
 #[derive(clap::Args, Debug, Clone, Default)]

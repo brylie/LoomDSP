@@ -106,14 +106,14 @@ pub(super) struct DownmixSpec {
 /// What each module reads besides its cables, by buffer index.
 pub(super) struct Inputs {
     /// Fills per module and copy.
-    pub(super) fills_of: Vec<[Vec<FillSpec>; 2]>,
+    pub(super) fills_of: Vec<Vec<Vec<FillSpec>>>,
     /// Downmixes each module fills before it runs.
     pub(super) downmixes: Vec<Vec<DownmixSpec>>,
     /// Downmixes for the audio output, which run before the outputs are
     /// summed.
     pub(super) output_downmixes: Vec<DownmixSpec>,
     /// The downmix buffer an input reads instead of its stereo cable.
-    pub(super) downmixed: BTreeMap<InputRef, usize>,
+    pub(super) downmixed: BTreeMap<(InputRef, usize), usize>,
     /// One buffer per distinct default that an unconnected input reads.
     pub(super) defaults: BTreeMap<DefaultKey, usize>,
 }
@@ -128,7 +128,9 @@ impl Inputs {
     ) -> Self {
         let n = layout.ids.len();
         let mut inputs = Self {
-            fills_of: (0..n).map(|_| [Vec::new(), Vec::new()]).collect(),
+            fills_of: (0..n)
+                .map(|v| (0..layout.channels(v)).map(|_| Vec::new()).collect())
+                .collect(),
             downmixes: (0..n).map(|_| Vec::new()).collect(),
             output_downmixes: Vec::new(),
             downmixed: BTreeMap::new(),
@@ -157,6 +159,7 @@ impl Inputs {
                 groups.entry((v, assignment.param)).or_default().push(i);
             }
         }
+        let mut means = BTreeMap::new();
         for ((node, param), sources) in groups {
             for ch in 0..layout.channels(node) {
                 let buffer = buffers.add();
@@ -165,19 +168,24 @@ impl Inputs {
                     .map(|&i| {
                         let assignment = &compiled[i];
                         let buffer = if !layout.is_stereo(assignment.source) || layout.copied[node] {
-                            plan.assignment_buffer(layout, assignment, ch)
+                            plan.assignment_buffer(layout, assignment, layout.copy_channel(node, ch))
                         } else {
                             // A stereo source into a module that runs as one
                             // gives the mean, because a parameter has no signal
                             // type (stereo spec, rule 17).
-                            let output = buffers.add();
-                            self.downmixes[node].push(DownmixSpec {
-                                kind: DownmixKind::Mean,
-                                left: plan.assignment_buffer(layout, assignment, 0),
-                                right: plan.assignment_buffer(layout, assignment, 1),
-                                output,
-                            });
-                            output
+                            let channel = layout.copy_channel(node, ch) / 2 * 2;
+                            let left = plan.assignment_buffer(layout, assignment, channel);
+                            let right = plan.assignment_buffer(layout, assignment, channel + 1);
+                            *means.entry((node, left, right)).or_insert_with(|| {
+                                let output = buffers.add();
+                                self.downmixes[node].push(DownmixSpec {
+                                    kind: DownmixKind::Mean,
+                                    left,
+                                    right,
+                                    output,
+                                });
+                                output
+                            })
                         };
                         SourceSpec { assignment: i, buffer }
                     })
@@ -203,21 +211,36 @@ impl Inputs {
                 if !layout.is_stereo(from) || spec.channels == Channels::Stereo {
                     continue;
                 }
-                let output = buffers.add();
-                let downmix = DownmixSpec {
-                    kind: DownmixKind::of(spec.signal),
-                    left: plan.input_buffer(layout, input, 0).expect("connected"),
-                    right: plan.input_buffer(layout, input, 1).expect("connected"),
-                    output,
-                };
-                match layout.nodes[v].descriptor.role {
-                    ModuleRole::Dsp(_) => self.downmixes[v].push(downmix),
-                    ModuleRole::AudioOutput => self.output_downmixes.push(downmix),
-                    // A unit delay's input is `PerChannel`, so stereo there
-                    // always copies it.
-                    ModuleRole::UnitDelay => continue,
+                if spec.channels == Channels::Voices {
+                    continue;
                 }
-                self.downmixed.insert(input, output);
+                for voice in 0..layout.widths.voices[&layout.ids[v]] {
+                    if voice > 0 && layout.widths.outputs[&from].voices == 1 {
+                        let shared = self.downmixed[&(input, 0)];
+                        self.downmixed.insert((input, voice), shared);
+                        continue;
+                    }
+                    // Missing voices read defaults, rather than downmixing other voices.
+                    let Some(left) = plan.input_buffer(layout, input, voice * 2) else {
+                        continue;
+                    };
+                    let Some(right) = plan.input_buffer(layout, input, voice * 2 + 1) else {
+                        continue;
+                    };
+                    let output = buffers.add();
+                    let downmix = DownmixSpec {
+                        kind: DownmixKind::of(spec.signal),
+                        left,
+                        right,
+                        output,
+                    };
+                    match layout.nodes[v].descriptor.role {
+                        ModuleRole::Dsp(_) => self.downmixes[v].push(downmix),
+                        ModuleRole::AudioOutput => self.output_downmixes.push(downmix),
+                        ModuleRole::UnitDelay => continue,
+                    }
+                    self.downmixed.insert((input, voice), output);
+                }
             }
         }
     }
@@ -234,8 +257,11 @@ impl Inputs {
                     module: layout.ids[v],
                     port,
                 };
-                if layout.graph.cables.contains_key(&input) {
-                    continue;
+                if let Some(from) = layout.graph.source_of(input) {
+                    let width = layout.widths.outputs.get(&from).copied().unwrap_or_default();
+                    if width.voices == 1 || width.voices >= layout.widths.voices[&layout.ids[v]] {
+                        continue;
+                    }
                 }
                 if let Some(key) = DefaultKey::of(layout.default_of(input)) {
                     self.defaults.entry(key).or_insert_with(|| buffers.add());

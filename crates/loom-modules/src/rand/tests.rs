@@ -43,3 +43,21 @@ fn samples_on_the_edge_and_tracks_while_high() {
         assert_eq!(process(1.0, &input, &trigger, block), tracked, "track, block {block}");
     }
 }
+
+/// Voice bits never collide with stream number or stereo side, and voice 1 is unchanged.
+#[test]
+fn voice_streams_have_distinct_identity_bits() {
+    assert_eq!(stream(42, 0, 0), Rng::new(42));
+    assert_eq!(stream(42, 1, 3), Rng::new(42 | 1 << 16 | 3 << 17));
+    assert_ne!(stream(42, 2, 0), stream(42, 0, 1));
+    let mut streams = Vec::new();
+    for voice in 0..16 {
+        for side in 0..2 {
+            for number in 0..4 {
+                let next = stream(42, voice * 2 + side, number);
+                assert!(!streams.contains(&next));
+                streams.push(next);
+            }
+        }
+    }
+}

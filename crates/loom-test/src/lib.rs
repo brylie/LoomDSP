@@ -151,6 +151,7 @@ pub struct Harness {
     sample_rate: f32,
     length: Length,
     inputs: Vec<Option<Signal>>,
+    bundle_inputs: std::collections::BTreeMap<usize, (loom_core::Width, Vec<Signal>)>,
     params: Vec<(usize, f32)>,
     midi: Vec<MidiEvent>,
     transport: TransportSettings,
@@ -196,6 +197,7 @@ impl Harness {
             sample_rate: DEFAULT_SAMPLE_RATE,
             length: Length::Seconds(0.1),
             inputs: descriptor.inputs.iter().map(|_| None).collect(),
+            bundle_inputs: std::collections::BTreeMap::new(),
             params: Vec::new(),
             midi: Vec::new(),
             transport: TransportSettings {
@@ -247,8 +249,104 @@ impl Harness {
                 self.descriptor.inputs.iter().map(|port| port.name).collect::<Vec<_>>()
             );
         };
+        self.bundle_inputs.remove(&index);
         self.inputs[index] = Some(signal);
         self
+    }
+
+    /// Connects one mono signal per voice to a Voices input.
+    pub fn bundle_input(self, name: &str, voices: Vec<Signal>) -> Self {
+        let width = loom_core::Width {
+            voices: voices.len(),
+            sides: 1,
+        };
+        self.bundle_signals(name, width, voices)
+    }
+
+    /// Connects a left/right signal pair per voice to a Voices input.
+    pub fn stereo_bundle_input(self, name: &str, voices: Vec<[Signal; 2]>) -> Self {
+        let width = loom_core::Width {
+            voices: voices.len(),
+            sides: 2,
+        };
+        self.bundle_signals(name, width, voices.into_iter().flatten().collect())
+    }
+
+    /// Validates and stores a bundle's signals in voice/side order.
+    fn bundle_signals(mut self, name: &str, width: loom_core::Width, signals: Vec<Signal>) -> Self {
+        assert!((1..=16).contains(&width.voices));
+        let port = self.descriptor.input_index(name).expect("bundle input exists");
+        assert_eq!(self.descriptor.inputs[port].channels, loom_core::Channels::Voices);
+        self.inputs[port] = None;
+        self.bundle_inputs.insert(port, (width, signals));
+        self
+    }
+
+    /// Layout of rendered input buffers, including explicit bundle signals.
+    fn input_layout(&self) -> testing::BundleLayout {
+        testing::BundleLayout::new(
+            (0..self.descriptor.inputs.len())
+                .map(|port| {
+                    self.bundle_inputs
+                        .get(&port)
+                        .map_or(loom_core::Width::MONO, |(width, _)| *width)
+                })
+                .collect(),
+        )
+    }
+
+    /// Output layout at a frame, or maximum capacity across a scripted render.
+    fn output_layout(&self, frame: Option<usize>) -> testing::BundleLayout {
+        let mut voices = 1;
+        if let Some(index) = self.descriptor.param_index("voices") {
+            let mut count = self.descriptor.params[index].default;
+            for &(param, value) in &self.params {
+                if param == index {
+                    count = value;
+                }
+            }
+            voices = count.round().clamp(1.0, 16.0) as usize;
+            for (at, param, value) in self.scheduled_params() {
+                if param == index && frame.is_none_or(|frame| at <= frame) {
+                    let next = value.round().clamp(1.0, 16.0) as usize;
+                    voices = if frame.is_none() { voices.max(next) } else { next };
+                }
+            }
+        }
+        let bundle_aware = self
+            .descriptor
+            .inputs
+            .iter()
+            .chain(self.descriptor.outputs)
+            .any(|port| port.channels == loom_core::Channels::Voices);
+        let sides = self
+            .bundle_inputs
+            .values()
+            .map(|(width, _)| width.sides)
+            .max()
+            .unwrap_or(1);
+        testing::BundleLayout::new(
+            self.descriptor
+                .outputs
+                .iter()
+                .map(|port| {
+                    if port.channels == loom_core::Channels::Voices {
+                        loom_core::Width { voices, sides: 1 }
+                    } else if bundle_aware {
+                        let sides = if port.channels == loom_core::Channels::Stereo
+                            || (port.channels == loom_core::Channels::PerChannel && sides == 2)
+                        {
+                            2
+                        } else {
+                            1
+                        };
+                        loom_core::Width { voices: 1, sides }
+                    } else {
+                        loom_core::Width::MONO
+                    }
+                })
+                .collect(),
+        )
     }
 
     /// Sets parameter `name`, clamped to its range as
@@ -367,7 +465,7 @@ impl Harness {
     fn input_buffers(&self) -> (Vec<Vec<f32>>, Vec<bool>) {
         let frames = self.frame_count();
         let transport = self.transport_spans();
-        let inputs = self
+        let mut inputs: Vec<Vec<f32>> = self
             .descriptor
             .inputs
             .iter()
@@ -377,7 +475,22 @@ impl Harness {
                 None => default_signal(port.default, &transport, frames),
             })
             .collect();
-        let connected = self.inputs.iter().map(Option::is_some).collect();
+        let layout = self.input_layout();
+        inputs.resize_with(layout.channels(), || vec![0.0; frames]);
+        for (&port, (width, signals)) in &self.bundle_inputs {
+            for voice in 0..width.voices {
+                for side in 0..width.sides {
+                    inputs[layout.index(port, voice, side)] =
+                        signals[voice * width.sides + side].render(frames, self.sample_rate);
+                }
+            }
+        }
+        let connected = self
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(port, signal)| signal.is_some() || self.bundle_inputs.contains_key(&port))
+            .collect();
         (inputs, connected)
     }
 
@@ -481,7 +594,13 @@ impl Harness {
                     "{}: output `{}` at frame {frame} is {} on a new instance, but {} after a render and `reset()`. \
                      `reset()` must snap smoothing to its targets and clear the state that `process` changes \
                      (docs/design/module-test-harness.md, Reset returns a module to its start).",
-                    self.descriptor.id, self.descriptor.outputs[port].name, a[frame], b[frame],
+                    self.descriptor.id,
+                    self.descriptor
+                        .outputs
+                        .get(port)
+                        .map_or("bundle channel", |port| port.name),
+                    a[frame],
+                    b[frame],
                 );
             }
         }
@@ -528,12 +647,13 @@ impl Harness {
                 descriptor.id
             );
         }
-        let mut outputs = vec![vec![0.0; frames]; descriptor.outputs.len()];
+        let mut outputs = vec![vec![0.0; frames]; self.output_layout(None).channels()];
         self.run_span(module, block, inputs, connected, 0..frames, &mut outputs);
         Render {
             descriptor,
             sample_rate: self.sample_rate,
             outputs,
+            layout: self.output_layout(None),
         }
     }
 
@@ -580,16 +700,54 @@ impl Harness {
                     }),
             );
             let block_inputs: Vec<&[f32]> = inputs.iter().map(|input| &input[start..end]).collect();
-            let mut block_outputs: Vec<&mut [f32]> = outputs.iter_mut().map(|output| &mut output[start..end]).collect();
-            testing::run_with_transport(
-                module,
-                self.sample_rate,
-                transport_at_frame(&transport, start),
-                &block_inputs,
-                connected,
-                &mut block_outputs,
-                &block_midi,
-            );
+            if self
+                .descriptor
+                .inputs
+                .iter()
+                .chain(self.descriptor.outputs)
+                .any(|port| port.channels == loom_core::Channels::Voices)
+            {
+                let maximum = self.output_layout(None);
+                let active = self.output_layout(Some(start));
+                let mut wanted = vec![false; maximum.channels()];
+                for port in 0..active.ports() {
+                    let width = active.width(port);
+                    for voice in 0..width.voices {
+                        for side in 0..width.sides {
+                            wanted[maximum.index(port, voice, side)] = true;
+                        }
+                    }
+                }
+                let mut block_outputs: Vec<&mut [f32]> = outputs
+                    .iter_mut()
+                    .enumerate()
+                    .filter(|(index, _)| wanted[*index])
+                    .map(|(_, output)| &mut output[start..end])
+                    .collect();
+                let ctx = loom_core::ProcessContext::new(self.sample_rate, len, &block_midi)
+                    .with_transport(transport_at_frame(&transport, start));
+                testing::run_bundles(
+                    module,
+                    &ctx,
+                    &self.input_layout(),
+                    &block_inputs,
+                    connected,
+                    &active,
+                    &mut block_outputs,
+                );
+            } else {
+                let mut block_outputs: Vec<&mut [f32]> =
+                    outputs.iter_mut().map(|output| &mut output[start..end]).collect();
+                testing::run_with_transport(
+                    module,
+                    self.sample_rate,
+                    transport_at_frame(&transport, start),
+                    &block_inputs,
+                    connected,
+                    &mut block_outputs,
+                    &block_midi,
+                );
+            }
             start = end;
         }
     }
@@ -609,7 +767,7 @@ impl Harness {
             self.descriptor.id
         );
         let (inputs, connected) = self.input_buffers();
-        let outputs = || vec![vec![0.0; frames]; self.descriptor.outputs.len()];
+        let outputs = || vec![vec![0.0; frames]; self.output_layout(None).channels()];
         let mut running = self.build();
         let mut first = outputs();
         self.run_span(running.as_mut(), block, &inputs, &connected, 0..at, &mut first);
@@ -657,7 +815,10 @@ impl Harness {
                          state (block size {block}, `copy_state_from` returned {copied}). A module with state must \
                          copy all of it (docs/design/stereo.md, rules 25 and 26).",
                         self.descriptor.id,
-                        self.descriptor.outputs[port].name,
+                        self.descriptor
+                            .outputs
+                            .get(port)
+                            .map_or("bundle channel", |port| port.name),
                         at + frame,
                         a[frame],
                         b[frame],
@@ -701,7 +862,13 @@ impl Harness {
                     panic!(
                         "{}: output `{}` at frame {frame} is {} with block size {block}, but {} with block size \
                          {MAX_BLOCK}. A module must give identical output for any block size (AGENTS.md hard rule 2).",
-                        self.descriptor.id, self.descriptor.outputs[port].name, a[frame], b[frame],
+                        self.descriptor.id,
+                        self.descriptor
+                            .outputs
+                            .get(port)
+                            .map_or("bundle channel", |port| port.name),
+                        a[frame],
+                        b[frame],
                     );
                 }
             }
@@ -780,7 +947,7 @@ impl Harness {
                                 self.descriptor.id,
                                 spec.name,
                                 start + BAD_FRAMES - 1,
-                                self.descriptor.outputs[output].name,
+                                self.descriptor.outputs[render.layout.port_of(output)].name,
                                 samples[frame],
                             );
                         }
@@ -892,7 +1059,7 @@ impl Harness {
                 let what = |output: usize| {
                     format!(
                         "{id}: after {extreme:e} then {flipped:e} on {name}, output `{}`",
-                        self.descriptor.outputs[output].name
+                        self.descriptor.outputs[render.layout.port_of(output)].name
                     )
                 };
                 for (output, (samples, clean)) in render.outputs.iter().zip(&clean.outputs).enumerate() {
@@ -904,7 +1071,7 @@ impl Harness {
                     }
                     let peak = clean.iter().fold(1.0f32, |peak, value| peak.max(value.abs()));
                     if level == ExtremeLevel::Recovers {
-                        let phase = self.descriptor.outputs[output].signal == SignalType::Phase;
+                        let phase = self.descriptor.outputs[render.layout.port_of(output)].signal == SignalType::Phase;
                         let frame = (compare_from..EXTREME_NEXT_EDGE).find(|&frame| {
                             if phase {
                                 // A captured value may rightly leave a phase at
@@ -983,6 +1150,7 @@ pub struct Render {
     descriptor: &'static ModuleDescriptor,
     sample_rate: f32,
     outputs: Vec<Vec<f32>>,
+    layout: testing::BundleLayout,
 }
 
 impl Render {
@@ -995,7 +1163,14 @@ impl Render {
         &self.outputs[index]
     }
 
-    /// Every output, in descriptor order.
+    /// One zero-based voice and side of an output bundle.
+    pub fn voice_output(&self, name: &str, voice: usize, side: usize) -> &[f32] {
+        let port = self.descriptor.output_index(name).expect("output exists");
+        &self.outputs[self.layout.index(port, voice, side)]
+    }
+
+    /// Primary outputs in descriptor order, followed by extra voices/sides
+    /// grouped by port. Use `voice_output` to address a particular channel.
     pub fn outputs(&self) -> &[Vec<f32>] {
         &self.outputs
     }
@@ -1016,7 +1191,12 @@ impl Render {
             if let Some(frame) = output.iter().position(|value| !value.is_finite()) {
                 panic!(
                     "{}: output `{}` is {} at frame {frame} (block size {block})",
-                    self.descriptor.id, self.descriptor.outputs[port].name, output[frame]
+                    self.descriptor.id,
+                    self.descriptor
+                        .outputs
+                        .get(port)
+                        .map_or("bundle channel", |port| port.name),
+                    output[frame]
                 );
             }
         }

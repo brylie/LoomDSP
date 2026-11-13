@@ -515,7 +515,15 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
                 });
             }
             mapping(module, index, p, ui, &mut parts);
-            modulation(module, index, assignments, adding.as_deref(), ui, &mut parts);
+            modulation(
+                module,
+                index,
+                assignments,
+                adding.as_deref(),
+                p.accepts_drop,
+                ui,
+                &mut parts,
+            );
         }
     }
     Item {
@@ -724,13 +732,14 @@ fn mapping_options(module: u32, index: usize, row: &MappingRow, ui: &UiId) -> Ve
     parts
 }
 
-/// The modulation assignments on a row, each a card keyed by its
-/// assignment, then **Add modulation** and the sources it offers.
+/// Existing assignments stay readable and removable on every row. Only rows
+/// that accept new assignments offer **Add modulation** and its sources.
 fn modulation(
     module: u32,
     index: usize,
     assignments: &[AssignmentRow],
     adding: Option<&[SourceRow]>,
+    allow_add: bool,
     ui: &UiId,
     parts: &mut Vec<Item>,
 ) {
@@ -796,6 +805,9 @@ fn modulation(
                 ),
             ],
         ));
+    }
+    if !allow_add {
+        return;
     }
     parts.push(Item::button(
         ids::part(ui, "add"),

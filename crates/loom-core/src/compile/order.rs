@@ -10,6 +10,15 @@ pub(crate) fn partner(copies: &[(u32, u32)], slot: usize) -> Option<usize> {
     Some(copies[index].1 as usize)
 }
 
+/// Every extra voice and side belonging to an original module slot.
+pub(crate) fn partners(copies: &[(u32, u32)], slot: usize) -> impl Iterator<Item = usize> + '_ {
+    let start = copies.partition_point(|&(left, _)| (left as usize) < slot);
+    copies[start..]
+        .iter()
+        .take_while(move |&&(left, _)| left as usize == slot)
+        .map(|&(_, right)| right as usize)
+}
+
 /// True for each module that the user can hear or see, or that feeds one
 /// over cables and assignments (FR-GRAPH-09). `succ` lists each module's
 /// successors. The roots are:

@@ -589,3 +589,84 @@ fn member_follows_its_member_in_every_copy_of_a_stack() {
     );
     assert_eq!((member(&app, &copy0), member(&app, &copy1)), (1.0, 1.0));
 }
+
+/// A stack's structural edit either widens every copy once or changes none.
+#[test]
+fn structural_stack_edits_are_atomic_and_compile_once() {
+    use std::sync::atomic::Ordering;
+    let patch = loom_patch::Patch::from_ron(
+        r#"Patch(version: 1,
+        subpatches: {"voice": SubPatch(
+            modules: [(id: 1, kind: "test.voices@1"),
+                      (id: 2, kind: "loom.math.add@1"),
+                      (id: 3, kind: "loom.struct.output@1", label: Some("out"))],
+            cables: [(from: (1, "out"), to: (2, "a")),
+                     (from: (2, "out"), to: (3, "in"))])},
+        modules: [(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+                  (id: 3, kind: "loom.io.audio-out@1")],
+        cables: [(from: (2, "out"), to: (3, "in"))])"#,
+    )
+    .unwrap();
+    let loaded = Loaded::read(
+        EngineConfig {
+            max_modules: 32,
+            ..EngineConfig::default()
+        },
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    let mut app = App::assemble(
+        Err("test".into()),
+        48_000.0,
+        loaded,
+        1,
+        &crate::tests::app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    );
+    mode(
+        &mut app,
+        Message::SetMode {
+            tile: 2,
+            mode: Mode::Stack,
+        },
+    );
+    mode(&mut app, Message::SetCopies { tile: 2, copies: 2 });
+    app.process(512);
+    let source = at(&app, &[2, 1]).unwrap();
+    let copy = at(&app, &[2, COPY_STEP + 1, 1]).unwrap();
+    let index = app
+        .session
+        .controller
+        .graph()
+        .node(source)
+        .unwrap()
+        .descriptor
+        .param_index("voices")
+        .unwrap();
+    let revision = app.session.controller.revision();
+    let swaps = app.session.controller.stats().schedule_swaps.load(Ordering::Relaxed);
+    app.set_param(source.0, index, 16.0);
+    app.process(512);
+    for module in [source, copy] {
+        assert_eq!(app.session.controller.graph().node(module).unwrap().params[index], 1.0);
+    }
+    assert_eq!(app.session.controller.revision(), revision);
+    assert_eq!(
+        app.session.controller.stats().schedule_swaps.load(Ordering::Relaxed),
+        swaps
+    );
+    assert!(app.alerts.status().contains("32"), "{}", app.alerts.status());
+    app.set_param(source.0, index, 4.0);
+    app.process(512);
+    for module in [source, copy] {
+        assert_eq!(app.session.controller.graph().node(module).unwrap().params[index], 4.0);
+    }
+    assert_eq!(app.session.controller.revision(), revision + 1);
+    assert_eq!(
+        app.session.controller.stats().schedule_swaps.load(Ordering::Relaxed),
+        swaps + 1
+    );
+}

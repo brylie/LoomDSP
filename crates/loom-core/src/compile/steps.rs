@@ -105,28 +105,35 @@ impl Plan {
     /// The buffer channel `ch` of `input` reads: a delay's if the compiler
     /// broke its cable, otherwise the cable's. `None` when unconnected.
     pub(super) fn input_buffer(&self, layout: &Layout, input: InputRef, ch: usize) -> Option<usize> {
-        if let Some(&buffer) = self
-            .overrides
-            .get(&(input, ch))
-            .or_else(|| self.overrides.get(&(input, 0)))
-        {
-            return Some(buffer);
+        let from = *layout.graph.cables.get(&input)?;
+        let width = layout.widths.outputs.get(&from).copied().unwrap_or_default();
+        if width.voices > 1 && ch / 2 >= width.voices {
+            return None;
         }
-        layout
-            .graph
-            .cables
-            .get(&input)
-            .map(|&from| layout.channel_buffer(from, ch))
+        let channel = (if width.voices == 1 { 0 } else { ch / 2 }) * 2 + if width.sides == 2 { ch % 2 } else { 0 };
+        self.overrides
+            .get(&(input, channel))
+            .copied()
+            .or_else(|| Some(layout.channel_buffer(from, channel)))
     }
 
-    /// The buffer channel `ch` of an assignment's source gives, through its
-    /// delay if the assignment was broken.
+    /// A modulation source's voice and side, through a delay when needed.
     pub(super) fn assignment_buffer(&self, layout: &Layout, assignment: &CompiledAssignment, ch: usize) -> usize {
-        self.delayed
-            .get(&(assignment.id, ch))
-            .or_else(|| self.delayed.get(&(assignment.id, 0)))
+        let width = layout
+            .widths
+            .outputs
+            .get(&assignment.source)
             .copied()
-            .unwrap_or_else(|| layout.channel_buffer(assignment.source, ch))
+            .unwrap_or_default();
+        if width.voices > 1 && ch / 2 >= width.voices {
+            return layout.padding_zero.expect("poly graphs have padding silence");
+        }
+        // Assignments never widen a target; a missing source voice is silent.
+        let channel = (if width.voices == 1 { 0 } else { ch / 2 }) * 2 + if width.sides == 2 { ch % 2 } else { 0 };
+        self.delayed
+            .get(&(assignment.id, channel))
+            .copied()
+            .unwrap_or_else(|| layout.channel_buffer(assignment.source, channel))
     }
 
     /// Adds a tap and returns its index.
@@ -206,10 +213,10 @@ impl Plan {
             if assignments_left && !order.cable_cycle_left() {
                 let v = order.fewest_assignments();
                 for (id, from) in order.pending_assignments(v) {
-                    for ch in 0..layout.output_channels(from) {
+                    for ch in layout.output_channels(from) {
                         let output = buffers.add();
                         loop_taps.push(self.push_tap(TapSpec {
-                            key: ASSIGN_TAP | u64::from(id.0) | right_tap(ch),
+                            key: ASSIGN_TAP | u64::from(id.0) | copy_tap(ch),
                             source: Some(from),
                             channel: ch,
                             input: Some(layout.channel_buffer(from, ch)),
@@ -230,13 +237,10 @@ impl Plan {
             // no cable is delayed where an assignment delay would do.
             let v = order.fewest_inputs(assignments_left);
             for (input, from) in order.cables_to_break(v, assignments_left) {
-                for ch in 0..layout.output_channels(from) {
+                for ch in layout.output_channels(from) {
                     let output = buffers.add();
                     loop_taps.push(self.push_tap(TapSpec {
-                        key: AUTO_TAP
-                            | (u64::from(input.module.0) << 16)
-                            | (input.port as u64 & 0xFFFF)
-                            | right_tap(ch),
+                        key: AUTO_TAP | (u64::from(input.module.0) << 16) | (input.port as u64 & 0xFFFF) | copy_tap(ch),
                         source: Some(from),
                         channel: ch,
                         input: Some(layout.channel_buffer(from, ch)),
@@ -268,21 +272,24 @@ impl Plan {
 
 /// One tap per channel of a unit delay. The right channel's key is marked,
 /// so each channel's state carries across swaps on its own.
-fn user_tap(layout: &Layout, v: usize, ch: usize) -> TapSpec {
+fn user_tap(layout: &Layout, v: usize, copy: usize) -> TapSpec {
+    let ch = layout.copy_channel(v, copy);
     let source = layout.graph.source_of(InputRef {
         module: layout.ids[v],
         port: 0,
     });
     TapSpec {
-        key: u64::from(layout.ids[v].0) | right_tap(ch),
+        key: u64::from(layout.ids[v].0) | copy_tap(ch),
         source,
         channel: ch,
         input: source.map(|from| layout.channel_buffer(from, ch)),
-        output: if ch == 1 {
-            layout.right_buf[v][0].expect("a copied unit delay has a stereo output")
-        } else {
-            layout.out_buf[v][0]
-        },
+        output: layout.channel_buffer(
+            OutputRef {
+                module: layout.ids[v],
+                port: 0,
+            },
+            ch,
+        ),
     }
 }
 

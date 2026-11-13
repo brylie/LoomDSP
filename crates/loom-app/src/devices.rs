@@ -212,10 +212,9 @@ impl std::hash::Hash for MidiWatch {
 /// Reads the MIDI input list every [`MIDI_POLL`] on a thread, and yields
 /// once each time it changes. The UI then runs its usual poll. A failed
 /// read is not a change: the UI's poll skips those too.
-pub fn midi_stream(watch: &MidiWatch) -> iced::futures::channel::mpsc::Receiver<()> {
-    let (mut tx, rx) = iced::futures::channel::mpsc::channel(1);
+pub fn watch_midi(watch: &MidiWatch, tx: crate::watcher::Outlet<()>) {
     let (list, mut seen) = (watch.list, watch.seen.clone());
-    std::thread::spawn(move || {
+    {
         while !tx.is_closed() {
             if let Ok(now) = list()
                 && now != seen
@@ -230,8 +229,7 @@ pub fn midi_stream(watch: &MidiWatch) -> iced::futures::channel::mpsc::Receiver<
             }
             std::thread::sleep(MIDI_POLL);
         }
-    });
-    rx
+    }
 }
 
 /// The real devices, through `cpal` and `midir`.

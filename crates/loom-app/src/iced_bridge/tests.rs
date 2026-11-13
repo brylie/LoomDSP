@@ -9,7 +9,7 @@ use loom_ui::Target as _;
 /// for it.
 #[test]
 fn a_message_from_iced_is_one_turn_with_no_wake_up() {
-    let (mut bridge, _) = AppBridge::start(app());
+    let (mut bridge, _) = AppBridge::new(app());
     let before = bridge.runtime.counts();
     let _ = bridge.update(Bridged::App(Message::ShowHelp));
     let after = bridge.runtime.counts();
@@ -30,7 +30,7 @@ fn a_message_from_iced_is_one_turn_with_no_wake_up() {
 /// its message.
 #[test]
 fn a_waker_wakes_iced_and_the_next_turn_takes_its_message() {
-    let (mut bridge, _) = AppBridge::start(app());
+    let (mut bridge, _) = AppBridge::new(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -45,7 +45,7 @@ fn a_waker_wakes_iced_and_the_next_turn_takes_its_message() {
 /// nothing more runs.
 #[test]
 fn the_first_turn_reads_the_deadline() {
-    let (bridge, _) = AppBridge::start(app());
+    let (bridge, _) = AppBridge::new(app());
     assert_eq!(bridge.runtime.counts().turns, 1);
     assert!(bridge.app().next_deadline().is_none());
 }
@@ -221,7 +221,7 @@ fn a_reveal_finds_its_part_and_chains_one_scroll() {
 /// debug build of the app, if it did.
 #[test]
 fn a_queued_message_runs_before_a_focus_answer() {
-    let (mut bridge, _) = AppBridge::start(app());
+    let (mut bridge, _) = AppBridge::new(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -256,7 +256,7 @@ fn escape() -> iced::Event {
 /// (ui-layer.md, section 2, rule 5).
 #[test]
 fn an_input_event_is_routed_into_updates_after_what_waits() {
-    let (mut bridge, _) = AppBridge::start(app());
+    let (mut bridge, _) = AppBridge::new(app());
     let waker = bridge.runtime.waker();
     std::thread::spawn(move || waker.send(Message::ShowHelp))
         .join()
@@ -299,4 +299,14 @@ fn input_never_reaches_update() {
         },
         &cx,
     );
+}
+
+/// The bridge's start opens the window, so the watchers start on its first
+/// turn. `Bridge::new`, which the harness uses, starts none.
+#[test]
+fn the_bridge_start_starts_the_watchers() {
+    let (bridge, _) = AppBridge::start(app());
+    assert!(bridge.app().watching);
+    let (bridge, _) = AppBridge::new(app());
+    assert!(!bridge.app().watching);
 }

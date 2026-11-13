@@ -801,7 +801,11 @@ impl CanvasModel<'_> {
             state.focus.clear();
         }
         match hit {
-            Hit::Widget { module, widget } if self.learn.is_some() && self.is_control(module, widget) => {
+            Hit::Widget { module, widget }
+                if self.learn.is_some()
+                    && self.is_control(module, widget)
+                    && self.scene.is_live_control(module, widget) =>
+            {
                 self.select_for_edit(module, out);
                 // The clicked control takes the keyboard focus, so Space or
                 // Enter acts on it next, not on a control focused earlier.

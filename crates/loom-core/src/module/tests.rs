@@ -13,7 +13,7 @@ fn with_three_outputs(check: impl FnOnce(&mut PortIo<'_>)) -> [[f32; 3]; 4] {
     }];
     // SAFETY: each buffer holds `offset + frames` = 3 floats and outlives `io`,
     // and all four are distinct.
-    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, 0, 1, 2) };
+    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, &[], 0, 1, 2) };
     check(&mut io);
     buffers
 }
@@ -91,7 +91,7 @@ fn stereo_output_refuses_an_aliased_right_buffer() {
     // SAFETY: the buffer holds `offset + frames` = 2 floats and outlives `io`.
     // The right pointer breaks the aliasing rule on purpose, and the check
     // under test panics before anything reads or writes through it.
-    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, 0, 0, 2) };
+    let mut io = unsafe { PortIo::new(&[], &outputs, &[], &right, &[], 0, 0, 2) };
     io.stereo_output(0);
 }
 
@@ -105,7 +105,7 @@ fn param_falls_back_to_the_base() {
     let params = [(1u16, modulated.as_ptr())];
     // SAFETY: each buffer holds `offset + frames` = 4 floats and outlives
     // `io`; the one output does not alias the parameter buffer.
-    let mut io = unsafe { PortIo::new(&[], &outputs, &params, &[], 0, 1, 3) };
+    let mut io = unsafe { PortIo::new(&[], &outputs, &params, &[], &[], 0, 1, 3) };
     let (plain, swept) = (io.param(0), io.param(1));
     assert!(!plain.is_modulated());
     assert!(swept.is_modulated());
@@ -118,4 +118,70 @@ fn param_falls_back_to_the_base() {
     assert_eq!(out, &[5.1, 5.2, 5.3]);
     assert_eq!(swept.map_or(2, 0u8, |v| (v * 10.0).round() as u8), 3);
     assert_eq!(plain.map_or(2, 7u8, |_| 0), 7);
+}
+
+/// Direct bundle lookups keep ports, voices, stereo sides, and mono fan-out distinct.
+#[test]
+fn bundle_ports_address_every_channel_without_searching() {
+    /// Echoes two ports while checking their independent widths.
+    struct Echo;
+    impl Module for Echo {
+        fn process(&mut self, _: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+            assert_eq!(io.input_width(0), crate::Width { voices: 2, sides: 1 });
+            assert_eq!(io.input_width(1), crate::Width { voices: 2, sides: 2 });
+            for port in 0..2 {
+                let width = io.output_width(port);
+                for voice in 0..width.voices {
+                    if port == 0 {
+                        assert_eq!(io.voice_input(port, voice, 0), io.voice_input(port, voice, 1));
+                    }
+                    for side in 0..width.sides {
+                        let input = io.voice_input(port, voice, side);
+                        io.voice_output(port, voice, side).copy_from_slice(input);
+                    }
+                }
+            }
+        }
+    }
+    let layout = testing::BundleLayout::new(vec![
+        crate::Width { voices: 2, sides: 1 },
+        crate::Width { voices: 2, sides: 2 },
+    ]);
+    let inputs: Vec<_> = (0..layout.channels()).map(|channel| vec![channel as f32; 3]).collect();
+    let mut outputs = vec![vec![0.0; 3]; layout.channels()];
+    testing::run_bundles(
+        &mut Echo,
+        &ProcessContext::new(48_000.0, 3, &[]),
+        &layout,
+        &inputs.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+        &[true; 2],
+        &layout,
+        &mut outputs.iter_mut().map(Vec::as_mut_slice).collect::<Vec<_>>(),
+    );
+    assert_eq!(outputs, inputs);
+}
+
+/// Channel ownership accounts for primary ports, extra voices, and stereo sides.
+#[test]
+fn bundle_layout_maps_flattened_channels_back_to_ports() {
+    let layout = testing::BundleLayout::new(vec![
+        crate::Width { voices: 2, sides: 1 },
+        crate::Width::MONO,
+        crate::Width { voices: 3, sides: 2 },
+        crate::Width::STEREO,
+    ]);
+    assert_eq!(
+        (0..layout.channels())
+            .map(|channel| layout.port_of(channel))
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3, 0, 2, 2, 2, 2, 2, 3]
+    );
+    for port in 0..layout.ports() {
+        let width = layout.width(port);
+        for voice in 0..width.voices {
+            for side in 0..width.sides {
+                assert_eq!(layout.port_of(layout.index(port, voice, side)), port);
+            }
+        }
+    }
 }

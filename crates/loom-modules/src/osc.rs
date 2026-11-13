@@ -381,7 +381,12 @@ impl Noise {
 
     /// `seed` with the channel mixed in, so stereo sides differ.
     fn channel_seed(&self, seed: u32) -> u32 {
-        if self.channel == 0 { seed } else { seed ^ 0x85EB_CA6B }
+        let word = seed | ((self.channel / 2) as u32) << 17;
+        if self.channel.is_multiple_of(2) {
+            word
+        } else {
+            word ^ 0x85EB_CA6B
+        }
     }
 
     /// Starts every stream again from `seed`.
@@ -424,8 +429,8 @@ impl Module for Noise {
     }
 
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        if self.channel != ctx.channel() {
-            self.channel = ctx.channel();
+        if self.channel != (ctx.voice() - 1) * 2 + ctx.channel() {
+            self.channel = (ctx.voice() - 1) * 2 + ctx.channel();
             self.restart_keeping_brown(self.active);
         }
         let (seed, colour_mod) = (io.param(Self::SEED), io.param(Self::COLOUR));

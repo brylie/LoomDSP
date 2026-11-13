@@ -175,22 +175,19 @@ fn permission_denial_fails_the_stream() {
 /// callbacks flowing so that only the device list can fail the stream.
 #[test]
 fn the_worker_reports_a_missing_device() {
-    use iced::futures::StreamExt;
     let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
     let mut watch = watch_of(&writer, &parts);
     watch.list = Some(|| inputs(&["Other"]));
+    let events = crate::watcher::run_for_test(4, move |outlet| run(&watch, outlet));
     let (send, receive) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut events = Box::pin(stream(&watch));
-        iced::futures::executor::block_on(async {
-            while let Some(event) = events.next().await {
-                if event.failed {
-                    let _ = send.send(());
-                    break;
-                }
+        while let Some(event) = events.recv_timeout(Duration::from_secs(10)) {
+            if event.failed {
+                let _ = send.send(());
+                break;
             }
-        });
+        }
     });
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut failed = false;
@@ -205,22 +202,19 @@ fn the_worker_reports_a_missing_device() {
 /// The real worker checks the permission after the stream has started.
 #[test]
 fn the_worker_reports_a_late_permission_denial() {
-    use iced::futures::StreamExt;
     let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
     let mut watch = watch_of(&writer, &parts);
     watch.permission_denied = Some(|| true);
+    let events = crate::watcher::run_for_test(4, move |outlet| run(&watch, outlet));
     let (send, receive) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut events = Box::pin(stream(&watch));
-        iced::futures::executor::block_on(async {
-            while let Some(event) = events.next().await {
-                if event.failed {
-                    let _ = send.send(());
-                    break;
-                }
+        while let Some(event) = events.recv_timeout(Duration::from_secs(10)) {
+            if event.failed {
+                let _ = send.send(());
+                break;
             }
-        });
+        }
     });
     receive
         .recv_timeout(Duration::from_secs(4))
@@ -232,23 +226,20 @@ fn the_worker_reports_a_late_permission_denial() {
 /// still shows the device, so only the stall can be the cause.
 #[test]
 fn the_worker_reports_a_stall() {
-    use iced::futures::StreamExt;
     let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
     writer.callback_received();
     let mut watch = watch_of(&writer, &parts);
     watch.list = Some(|| inputs(&["Test input"]));
+    let events = crate::watcher::run_for_test(4, move |outlet| run(&watch, outlet));
     let (send, receive) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut events = Box::pin(stream(&watch));
-        iced::futures::executor::block_on(async {
-            while let Some(event) = events.next().await {
-                if event.failed {
-                    let _ = send.send(());
-                    break;
-                }
+        while let Some(event) = events.recv_timeout(Duration::from_secs(10)) {
+            if event.failed {
+                let _ = send.send(());
+                break;
             }
-        });
+        }
     });
     receive
         .recv_timeout(Duration::from_secs(4))
@@ -256,19 +247,20 @@ fn the_worker_reports_a_stall() {
     assert!(!writer.status().is_live());
 }
 
-/// The worker ends when its subscription ends, so no thread outlives it.
+/// The worker ends when its watcher's handle drops, so no thread outlives it.
 #[test]
-fn the_worker_stops_with_its_subscription() {
+fn the_worker_stops_with_its_watcher() {
     let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
     let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
     let watch = watch_of(&writer, &parts);
-    let (tx, rx) = mpsc::channel(4);
+    let (outlet, inlet) = crate::watcher::channel(4);
     let (done, finished) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        run(&watch, tx);
+        run(&watch, outlet);
         let _ = done.send(());
     });
-    drop(rx);
+    // As the app drops the watcher's handle.
+    inlet.close();
     finished
         .recv_timeout(Duration::from_secs(2))
         .expect("the worker stopped");
@@ -301,7 +293,6 @@ fn drift_warning_survives_a_watcher_restart() {
 /// A restarted stream sends its current warning state on its first read.
 #[test]
 fn restarted_stream_reports_the_current_warning() {
-    use iced::futures::StreamExt;
     for (age, shown) in [(2, true), (12, false)] {
         let parts = loom_core::create_engine(loom_modules::registry(), loom_core::EngineConfig::default());
         let (writer, _reader) = loom_core::audio_input::input_ring(32, 2);
@@ -310,16 +301,10 @@ fn restarted_stream_reports_the_current_warning() {
         parts.controller.stats().input_underruns.store(1, Ordering::Relaxed);
         let mut watch = watch_of(&writer, &parts);
         watch.tracker = tracker;
-        let (send, receive) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let mut events = Box::pin(stream(&watch));
-            let event = iced::futures::executor::block_on(events.next());
-            let _ = send.send(event);
-        });
-        let event = receive
+        let events = crate::watcher::run_for_test(4, move |outlet| run(&watch, outlet));
+        let event = events
             .recv_timeout(Duration::from_secs(3))
-            .expect("watcher sends its first state")
-            .unwrap();
+            .expect("watcher sends its first state");
         assert_eq!((event.underruns, event.overruns, event.show), (1, 0, shown));
     }
 }

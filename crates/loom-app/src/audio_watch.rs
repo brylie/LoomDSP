@@ -9,8 +9,7 @@
 //! (`docs/design/device-changes.md`, Audio device loss).
 
 use crate::alerts::{GrowthAlarm, Severity};
-use iced::futures::Stream;
-use iced::futures::channel::mpsc;
+use crate::watcher::Outlet;
 use loom_core::EngineStats;
 use loom_host_desktop::{CallbackStats, StatsSnapshot};
 use std::collections::VecDeque;
@@ -218,7 +217,7 @@ impl Watcher {
 }
 
 /// The stats to watch: one audio stream's and the engine's. A new stream
-/// has new stats, so the subscription restarts with it.
+/// has new stats, so the watcher restarts with it.
 #[derive(Clone)]
 pub struct Watch {
     /// The audio stream's callback stats.
@@ -236,13 +235,11 @@ impl Hash for Watch {
 }
 
 /// Reads the stats every [`INTERVAL`] and yields the events the UI must
-/// hear. The thread stops when the subscription ends. The end of the
+/// hear. The thread stops when its watcher handle drops. The end of the
 /// dropout alarm ([`crate::alerts::DROPOUT_ALARM`]) is an event too, so the
 /// bar turns back from red without a timer on the UI thread.
-pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
-    let (mut tx, rx) = mpsc::channel(4);
-    let watch = watch.clone();
-    std::thread::spawn(move || {
+pub fn run(watch: &Watch, tx: Outlet<Event>) {
+    {
         let mut watcher = Watcher::new(Instant::now());
         while !tx.is_closed() {
             let peak = if (watcher.reads + 1).is_multiple_of(LOAD_EVERY) {
@@ -271,8 +268,7 @@ pub fn stream(watch: &Watch) -> impl Stream<Item = Event> + use<> {
             }
             std::thread::sleep(INTERVAL);
         }
-    });
-    rx
+    }
 }
 
 #[cfg(test)]

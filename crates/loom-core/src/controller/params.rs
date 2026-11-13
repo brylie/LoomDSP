@@ -1,11 +1,13 @@
 //! Parameters: one group of [`Controller`]'s methods.
 
 use super::*;
+use std::collections::BTreeSet;
 
 /// # Parameters
 ///
-/// Setting parameter values and ranges. These take effect at the next
-/// buffer, without a recompile.
+/// Ordinary parameter values take effect at the next buffer without a
+/// recompile. Graph-shaping values prepare and publish a new schedule on
+/// the control thread, so its buffers and copies agree with the new value.
 impl Controller {
     /// Sets several parameters of one module, or none of them.
     ///
@@ -23,6 +25,17 @@ impl Controller {
                 param: index.to_string(),
             })?;
             clamped.push((index, spec.clamp(value)));
+        }
+        if clamped
+            .iter()
+            .any(|&(index, _)| node.spec(index).is_some_and(|spec| spec.options.shapes_graph))
+        {
+            return self.set_params_across(
+                &clamped
+                    .iter()
+                    .map(|&(index, value)| (module, index, value))
+                    .collect::<Vec<_>>(),
+            );
         }
         // Mapped parameters carry an edit token, as in `set_param`.
         let mappings: Vec<_> = clamped
@@ -75,6 +88,14 @@ impl Controller {
     /// Sets a parameter by index. Takes effect at the next buffer.
     /// The value is clamped to the parameter's range.
     pub fn set_param(&mut self, module: ModuleId, index: usize, value: f32) -> Result<f32, LoomError> {
+        if self
+            .node(module)?
+            .spec(index)
+            .is_some_and(|spec| spec.options.shapes_graph)
+        {
+            self.set_params(module, &[(index, value)])?;
+            return Ok(self.node(module)?.params[index]);
+        }
         // On a mapped parameter, the edit carries a token, so `sync_midi`
         // can tell whether a control change came before or after it in the
         // engine (MIDI learn, rule 2).
@@ -118,6 +139,155 @@ impl Controller {
             self.midi.record_edit(id);
         }
         Ok(value)
+    }
+
+    /// Sets parameters across modules as one transaction, or changes none.
+    ///
+    /// Values are clamped; the last entry for a target wins. A changed
+    /// graph-shaping value prepares one schedule for the whole group. If
+    /// structural values are unchanged, only ordinary commands are sent.
+    /// Fresh modules and already-dirty graphs remain staged until `commit`;
+    /// their initial parameters are applied before their first reset. Otherwise
+    /// capacity errors leave all graph values and the running schedule intact.
+    pub fn set_params_across(&mut self, changes: &[(ModuleId, usize, f32)]) -> Result<(), LoomError> {
+        let mut targets = BTreeMap::new();
+        for &(module, index, value) in changes {
+            let spec = self.node(module)?.spec(index).ok_or_else(|| LoomError::NoSuchParam {
+                module,
+                param: index.to_string(),
+            })?;
+            targets.insert((module, index), (spec.clamp(value), spec.options.shapes_graph));
+        }
+        // Reconcile older MIDI feedback before staging any screen values.
+        // The immediate commit below must not import feedback a second time.
+        self.collect_garbage();
+        self.sync_midi();
+        let fresh: BTreeSet<_> = targets
+            .keys()
+            .filter_map(|&(module, _)| {
+                self.graph.nodes[&module]
+                    .slot
+                    .filter(|&slot| self.slots.fresh_mut(slot).is_some())
+                    .map(|_| module)
+            })
+            .collect();
+        let structural_changed = targets.iter().any(|(&(module, index), &(value, structural))| {
+            structural && self.graph.nodes[&module].params[index] != value
+        });
+        let mut ordinary: BTreeMap<ModuleId, Vec<(usize, f32)>> = BTreeMap::new();
+        for (&(module, index), &(value, structural)) in &targets {
+            if !structural {
+                ordinary.entry(module).or_default().push((index, value));
+            }
+        }
+        let ordinary_commands: usize = ordinary
+            .iter()
+            .map(|(module, changes)| {
+                if self.graph.nodes[module].slot.is_some() && !fresh.contains(module) {
+                    changes.len()
+                } else {
+                    0
+                }
+            })
+            .sum();
+        let live_structural = targets.iter().any(|(&(module, _), &(_, structural))| {
+            structural && self.graph.nodes[&module].slot.is_some() && !fresh.contains(&module)
+        });
+        let defer = structural_changed && (self.dirty || !live_structural);
+        if !structural_changed || defer {
+            if self.commands.slots() < ordinary_commands {
+                return Err(LoomError::QueueFull);
+            }
+            if defer {
+                for (&(module, index), &(value, structural)) in &targets {
+                    if structural {
+                        self.graph.nodes.get_mut(&module).expect("validated module").params[index] = value;
+                        if let Some(instance) = self.graph.nodes[&module]
+                            .slot
+                            .and_then(|slot| self.slots.fresh_mut(slot))
+                        {
+                            instance.module.set_param(index, value);
+                        }
+                    }
+                }
+                self.mark_dirty();
+            }
+            for (module, changes) in ordinary {
+                self.set_params(module, &changes)?;
+            }
+            return Ok(());
+        }
+        let mut before = BTreeMap::new();
+        for (&(module, index), &(value, _)) in &targets {
+            let node = self.graph.nodes.get_mut(&module).expect("validated module");
+            before.entry(module).or_insert_with(|| node.params.clone());
+            node.params[index] = value;
+        }
+        let was_dirty = self.dirty;
+        let widths = width::infer(&self.graph);
+        let mut starting = 0;
+        let mut stopping = 0;
+        for (&id, node) in &self.graph.nodes {
+            if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+                continue;
+            }
+            let sides = if widths.per_channel.contains(&id) { 2 } else { 1 };
+            starting += (0..widths.voices[&id])
+                .flat_map(|voice| (0..sides).map(move |side| (voice, side)))
+                .filter(|&key| key != (0, 0) && !node.copy_slots.contains_key(&key))
+                .count();
+            stopping += node
+                .copy_slots
+                .keys()
+                .filter(|&&(voice, side)| voice >= widths.voices[&id] || side >= sides)
+                .count();
+        }
+        let needed = self.slots.waiting() + starting + stopping + self.slots.retiring().len() + 1 + ordinary_commands;
+        let error = if self.slots.free_count() < starting {
+            Some(LoomError::TooManyModules(self.config.max_modules))
+        } else if self.commands.slots() < needed {
+            Some(LoomError::QueueFull)
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            for (module, params) in before {
+                self.graph.nodes.get_mut(&module).expect("validated module").params = params;
+            }
+            return Err(error);
+        }
+        // Fresh targets get every initial value before reset and insertion.
+        for (&(module, index), &(value, _)) in &targets {
+            if let Some(instance) = self.graph.nodes[&module]
+                .slot
+                .and_then(|slot| self.slots.fresh_mut(slot))
+            {
+                instance.module.set_param(index, value);
+            }
+        }
+        self.dirty = true;
+        if let Err(error) = self.commit_synced() {
+            for &(module, index) in targets.keys() {
+                if let Some(instance) = self.graph.nodes[&module]
+                    .slot
+                    .and_then(|slot| self.slots.fresh_mut(slot))
+                {
+                    instance.module.set_param(index, before[&module][index]);
+                }
+            }
+            for (module, params) in before {
+                self.graph.nodes.get_mut(&module).expect("validated module").params = params;
+            }
+            self.dirty = was_dirty;
+            return Err(error);
+        }
+        self.revision = self.revision.wrapping_add(1);
+        for (module, changes) in ordinary {
+            if !fresh.contains(&module) {
+                self.set_params(module, &changes)?;
+            }
+        }
+        Ok(())
     }
 
     /// Sets a parameter by name.

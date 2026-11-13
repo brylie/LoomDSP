@@ -4,7 +4,6 @@ use super::*;
 /// timer, and the update names only the watched probe.
 #[test]
 fn telemetry_stream_reports_a_watched_meter() {
-    use iced::futures::StreamExt;
     use loom_core::{EngineConfig, ModuleId, ProbeKind, create_engine};
     let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/patches/sine.ron");
@@ -25,8 +24,9 @@ fn telemetry_stream_reports_a_watched_meter() {
         meters: HashSet::from([probe]),
         ..WatchList::default()
     });
-    let mut updates = stream(&monitor);
-    let update = iced::futures::executor::block_on(updates.next()).unwrap();
+    let watched = monitor.clone();
+    let updates = crate::watcher::run_for_test(1, move |outlet| run(&watched, outlet));
+    let update = updates.recv().unwrap();
     assert_eq!(update.levels.len(), 1);
     assert_eq!(update.levels[0].0, probe);
     assert!(update.levels[0].1.peak > 0.0);

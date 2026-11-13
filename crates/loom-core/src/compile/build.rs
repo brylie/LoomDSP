@@ -17,7 +17,7 @@ pub(super) struct Builder<'l, 'a> {
     ptrs: Vec<*mut f32>,
     zero: *const f32,
     /// The operation of each module and copy, once made.
-    op_of_node: Vec<[u32; 2]>,
+    op_of_node: Vec<Vec<u32>>,
 }
 
 impl<'l, 'a> Builder<'l, 'a> {
@@ -51,7 +51,9 @@ impl<'l, 'a> Builder<'l, 'a> {
             schedule,
             ptrs,
             zero,
-            op_of_node: vec![[u32::MAX; 2]; layout.ids.len()],
+            op_of_node: (0..layout.ids.len())
+                .map(|v| vec![u32::MAX; layout.channels(v)])
+                .collect(),
         }
     }
 
@@ -82,15 +84,43 @@ impl<'l, 'a> Builder<'l, 'a> {
         let mut fill_order: Vec<u32> = (0..fills.len() as u32).collect();
         fill_order.sort_unstable_by_key(|&i| fills[i as usize].key);
         self.schedule.fill_order = fill_order;
-        let mut copies: Vec<(u32, u32)> = (0..layout.ids.len())
-            .filter(|&v| layout.copied[v] && layout.is_dsp(v))
-            .map(|v| {
-                let slot = |slot: Option<usize>| slot.expect("copied DSP modules have both slots") as u32;
-                (slot(layout.nodes[v].slot), slot(layout.nodes[v].copy_slot))
-            })
-            .collect();
+        let mut copies = Vec::new();
+        let mut stereo_copies = Vec::new();
+        for (v, node) in layout.nodes.iter().enumerate() {
+            if let Some(original) = node.slot {
+                let id = layout.ids[v];
+                let sides = if layout.widths.per_channel.contains(&id) { 2 } else { 1 };
+                for (&(voice, side), &slot) in &node.copy_slots {
+                    if voice >= layout.widths.voices[&id] || side >= sides {
+                        continue;
+                    }
+                    copies.push((original as u32, slot as u32));
+                    if side == 1 {
+                        let left = if voice == 0 {
+                            original
+                        } else {
+                            node.copy_slots[&(voice, 0)]
+                        };
+                        stereo_copies.push((left as u32, slot as u32));
+                    }
+                }
+            }
+        }
         copies.sort_unstable();
+        stereo_copies.sort_unstable();
         self.schedule.copies = copies;
+        self.schedule.stereo_copies = stereo_copies;
+        for node in &layout.nodes {
+            if let Some(slot) = node.slot {
+                for (index, spec) in node.descriptor.params.iter().enumerate() {
+                    if spec.options.shapes_graph {
+                        self.schedule
+                            .structural_params
+                            .push((slot as u32, index as u16, node.params[index]));
+                    }
+                }
+            }
+        }
         self.schedule.assignments = compiled
             .iter()
             .map(|assignment| AssignmentRuntime {
@@ -147,14 +177,14 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// plugged into it.
     fn resolve_input(&self, input: InputRef, ch: usize) -> (*const f32, bool) {
         let connected = self.layout.graph.cables.contains_key(&input);
-        if let Some(&buf) = self.inputs.downmixed.get(&input) {
+        if let Some(&buf) = self.inputs.downmixed.get(&(input, ch / 2)) {
             (self.ptr(buf), connected)
         } else if let Some(buf) = self.plan.input_buffer(self.layout, input, ch) {
             (self.ptr(buf), connected)
         } else if let Some(key) = DefaultKey::of(self.layout.default_of(input)) {
-            (self.ptr(self.inputs.defaults[&key]), false)
+            (self.ptr(self.inputs.defaults[&key]), connected)
         } else {
-            (self.zero, false)
+            (self.zero, connected)
         }
     }
 
@@ -164,11 +194,13 @@ impl<'l, 'a> Builder<'l, 'a> {
             return self.op_of_node[v][ch];
         }
         let node = self.layout.nodes[v];
+        let channel = self.layout.copy_channel(v, ch);
+        let bundle_start = self.schedule.bundle_ports.len() as u32;
         let in_start = self.schedule.input_ptrs.len() as u32;
         let right_start = self.schedule.right_ptrs.len() as u32;
-        let connected = self.add_inputs(v, ch);
+        let (connected, defaulted) = self.add_inputs(v, channel);
         let out_start = self.schedule.output_ptrs.len() as u32;
-        self.add_outputs(v, ch);
+        self.add_outputs(v, channel);
         // Only a module that runs as one has downmixes (rules 11 and 17).
         let downmix_start = self.schedule.downmixes.len() as u32;
         if ch == 0 {
@@ -177,11 +209,10 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.schedule.downmixes.push(downmix);
             }
         }
-        let slot = if ch == 1 {
-            node.copy_slot
-                .expect("the controller gives every copied DSP module a copy slot")
-        } else {
+        let slot = if channel == 0 {
             node.slot.expect("DSP modules have a slot")
+        } else {
+            node.copy_slots[&(channel / 2, channel % 2)]
         } as u32;
         let fill_start = self.schedule.fills.len() as u32;
         let param_start = self.schedule.param_ptrs.len() as u32;
@@ -192,11 +223,15 @@ impl<'l, 'a> Builder<'l, 'a> {
             inputs: (in_start, s.input_ptrs.len() as u32),
             outputs: (out_start, s.output_ptrs.len() as u32),
             connected,
+            defaulted,
             fills: (fill_start, s.fills.len() as u32),
             params: (param_start, s.param_ptrs.len() as u32),
             downmixes: (downmix_start, s.downmixes.len() as u32),
             right: (right_start, s.right_ptrs.len() as u32),
-            channel: ch as u8,
+            channel: (channel % 2) as u8,
+            voice: (channel / 2) as u8,
+            voices: self.layout.widths.voices[&self.layout.ids[v]] as u8,
+            bundles: (bundle_start, s.bundle_ports.len() as u32),
         });
         self.op_of_node[v][ch] = (s.ops.len() - 1) as u32;
         self.op_of_node[v][ch]
@@ -204,17 +239,53 @@ impl<'l, 'a> Builder<'l, 'a> {
 
     /// Adds the input pointers of copy `ch` of the module at `v`. Returns a
     /// bit for each input with a cable.
-    fn add_inputs(&mut self, v: usize, ch: usize) -> u64 {
+    fn add_inputs(&mut self, v: usize, ch: usize) -> (u64, u64) {
         let layout = self.layout;
         let node = layout.nodes[v];
         let mut connected = 0u64;
+        let mut defaulted = 0u64;
         for port in 0..node.input_count() {
             let input = InputRef {
                 module: layout.ids[v],
                 port,
             };
             let (ptr, is_connected) = self.resolve_input(input, ch);
+            if self.plan.input_buffer(layout, input, ch).is_none() {
+                defaulted |= 1 << port;
+            }
             self.schedule.input_ptrs.push(ptr);
+            if node
+                .descriptor
+                .inputs
+                .iter()
+                .chain(node.descriptor.outputs)
+                .any(|spec| spec.channels == Channels::Voices)
+            {
+                let width = if node.descriptor.inputs[port].channels == Channels::Voices {
+                    layout
+                        .graph
+                        .source_of(input)
+                        .and_then(|from| layout.widths.outputs.get(&from).copied())
+                        .unwrap_or_default()
+                } else {
+                    Width::MONO
+                };
+                let mut channels = Vec::with_capacity(width.voices * width.sides);
+                for voice in 0..width.voices {
+                    for side in 0..width.sides {
+                        let channel = if node.descriptor.inputs[port].channels == Channels::Voices {
+                            voice * 2 + side
+                        } else {
+                            ch
+                        };
+                        channels.push(self.resolve_input(input, channel).0 as *mut f32);
+                    }
+                }
+                self.schedule.bundle_ports.push(crate::module::BundlePort {
+                    width,
+                    channels: channels.into_boxed_slice(),
+                });
+            }
             if is_connected {
                 connected |= 1 << port;
             }
@@ -231,16 +302,15 @@ impl<'l, 'a> Builder<'l, 'a> {
                     .get(&input)
                     .is_some_and(|&from| layout.is_stereo(from))
             {
-                let right = self.plan.input_buffer(layout, input, 1).expect("connected");
-                let ptr = self.ptr(right);
+                let (ptr, _) = self.resolve_input(input, ch / 2 * 2 + 1);
                 self.schedule.right_ptrs.push(RightPtr {
                     port: port as u16,
                     output: false,
-                    ptr,
+                    ptr: ptr as *mut f32,
                 });
             }
         }
-        connected
+        (connected, defaulted)
     }
 
     /// Adds the output pointers of copy `ch` of the module at `v`.
@@ -248,21 +318,37 @@ impl<'l, 'a> Builder<'l, 'a> {
         let layout = self.layout;
         let node = layout.nodes[v];
         for port in 0..node.output_count() {
-            let right = layout.right_buf[v][port];
-            let buffer = if ch == 1 {
-                right.expect("a copied module's outputs are stereo")
-            } else {
-                layout.out_buf[v][port]
+            let from = OutputRef {
+                module: layout.ids[v],
+                port,
             };
+            let buffer = layout.channel_buffer(from, ch);
             let ptr = self.ptr(buffer);
             self.schedule.output_ptrs.push(ptr);
+            if node
+                .descriptor
+                .inputs
+                .iter()
+                .chain(node.descriptor.outputs)
+                .any(|spec| spec.channels == Channels::Voices)
+            {
+                let width = layout.widths.outputs[&from];
+                let channels = layout
+                    .output_channels(from)
+                    .map(|channel| self.ptr(layout.channel_buffer(from, channel)))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                self.schedule
+                    .bundle_ports
+                    .push(crate::module::BundlePort { width, channels });
+            }
             if node
                 .descriptor
                 .outputs
                 .get(port)
                 .is_some_and(|spec| spec.channels == Channels::Stereo)
             {
-                let ptr = self.ptr(right.expect("a Stereo output is stereo"));
+                let ptr = self.ptr(layout.channel_buffer(from, ch / 2 * 2 + 1));
                 self.schedule.right_ptrs.push(RightPtr {
                     port: port as u16,
                     output: true,
@@ -297,7 +383,14 @@ impl<'l, 'a> Builder<'l, 'a> {
             let buffer = self.ptr(spec.buffer);
             self.schedule.param_ptrs.push((spec.param as u16, buffer as *const f32));
             self.schedule.fills.push(ParamFill {
-                key: (u64::from(layout.ids[v].0) << 32) | (spec.param as u64) | if ch == 1 { RIGHT_FILL } else { 0 },
+                key: (u64::from(layout.ids[v].0) << 32)
+                    | (spec.param as u64)
+                    | ((layout.copy_channel(v, ch) / 2) as u64) << 24
+                    | if layout.copy_channel(v, ch) % 2 == 1 {
+                        RIGHT_FILL
+                    } else {
+                        0
+                    },
                 slot,
                 param: spec.param as u16,
                 spec: param_spec,
@@ -325,12 +418,12 @@ impl<'l, 'a> Builder<'l, 'a> {
             .map(|&i| Tap {
                 key: taps[i].key,
                 source: taps[i].source.map_or(NO_SOURCE, |source| {
+                    let width = self.layout.widths.outputs.get(&source).copied().unwrap_or_default();
                     output_key(source)
-                        | if taps[i].channel == 1 && self.layout.is_stereo(source) {
-                            RIGHT_TAP
-                        } else {
-                            0
-                        }
+                        | copy_tap(
+                            (if width.voices == 1 { 0 } else { taps[i].channel / 2 }) * 2
+                                + if width.sides == 2 { taps[i].channel % 2 } else { 0 },
+                        )
                 }),
                 input: taps[i].input.map_or(self.zero, |b| self.ptr(b) as *const f32),
                 output: self.ptr(taps[i].output),
@@ -377,20 +470,23 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// What each audio output module plays, from the cable into it.
     fn outputs(&self) -> Vec<OutputOp> {
         let layout = self.layout;
-        self.plan
-            .output_nodes
-            .iter()
-            .filter_map(|&v| {
-                let from = *layout.graph.cables.get(&InputRef {
-                    module: layout.ids[v],
-                    port: 0,
-                })?;
-                Some(OutputOp {
-                    left: self.ptr(layout.channel_buffer(from, 0)) as *const f32,
-                    right: self.ptr(layout.channel_buffer(from, 1)) as *const f32,
-                })
-            })
-            .collect()
+        let mut outputs = Vec::new();
+        for &v in &self.plan.output_nodes {
+            let Some(from) = layout.graph.source_of(InputRef {
+                module: layout.ids[v],
+                port: 0,
+            }) else {
+                continue;
+            };
+            let width = layout.widths.outputs.get(&from).copied().unwrap_or_default();
+            for voice in 0..width.voices {
+                outputs.push(OutputOp {
+                    left: self.ptr(layout.channel_buffer(from, voice * 2)) as *const f32,
+                    right: self.ptr(layout.channel_buffer(from, voice * 2 + 1)) as *const f32,
+                });
+            }
+        }
+        outputs
     }
 
     /// The probes on outputs that exist.
@@ -473,6 +569,9 @@ impl<'l, 'a> Builder<'l, 'a> {
                     sources.push((key | RIGHT_TAP, self.ptr(*buffer) as *const f32));
                 }
             }
+        }
+        for (&(from, channel), &buffer) in &layout.voice_buf {
+            sources.push((output_key(from) | copy_tap(channel), self.ptr(buffer) as *const f32));
         }
         sources.sort_unstable_by_key(|&(key, _)| key);
         sources

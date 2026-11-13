@@ -67,14 +67,13 @@ fn report_only_with_a_flag() {
 /// A measured run reports a settled interval and then ends on time.
 #[test]
 fn measured_run_reports_and_finishes() {
-    use iced::futures::StreamExt;
     let reporter = Reporter {
         seconds: Some(Duration::from_millis(2_100)),
         tree: true,
     };
     let started = Instant::now();
-    let mut updates = stream(&reporter);
-    assert_eq!(iced::futures::executor::block_on(updates.next()), Some(()));
+    let updates = crate::watcher::run_for_test(1, move |outlet| run(&reporter, outlet));
+    assert_eq!(updates.recv_timeout(Duration::from_secs(5)), Some(()));
     assert!(started.elapsed() >= Duration::from_secs(2));
 }
 

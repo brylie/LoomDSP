@@ -95,7 +95,7 @@ fn followers(count: u32) -> Graph {
                 slot: Some(i as usize),
                 ranges: Vec::new(),
                 limits: Vec::new(),
-                copy_slot: None,
+                copy_slots: BTreeMap::new(),
             },
         );
     }
@@ -329,7 +329,7 @@ fn add(graph: &mut Graph, id: u32, descriptor: &'static crate::ModuleDescriptor)
         label: None,
         params: descriptor.default_params(),
         slot: Some(id as usize),
-        copy_slot: None,
+        copy_slots: BTreeMap::new(),
         ranges: vec![None; descriptor.params.len()],
         limits: vec![None; descriptor.params.len()],
     };
@@ -606,4 +606,138 @@ fn smooth_state_carries_over_by_key_across_many_shuffled_fills() {
     }
     assert_eq!(calls.get(), expected_new);
     assert!(expected_new > 0 && expected_new < new.fills.len());
+}
+
+/// A new right side inherits its own voice's delay; new voices never inherit voice 1.
+#[test]
+fn delay_state_keys_keep_voices_and_sides_separate() {
+    let mut old = Schedule::empty();
+    for voice in 0..4 {
+        old.taps.push(Tap {
+            key: AUTO_TAP | 42 | copy_tap(voice * 2),
+            source: NO_SOURCE,
+            input: std::ptr::null(),
+            output: std::ptr::null_mut(),
+            state: voice as f32 + 0.25,
+        });
+    }
+    let mut next = Schedule::empty();
+    for voice in 0..8 {
+        for side in 0..2 {
+            next.taps.push(Tap {
+                key: AUTO_TAP | 42 | copy_tap(voice * 2 + side),
+                source: NO_SOURCE,
+                input: std::ptr::null(),
+                output: std::ptr::null_mut(),
+                state: 0.0,
+            });
+        }
+    }
+    next.taps.sort_by_key(|tap| tap.key);
+    assert_eq!(next.taps.iter().map(|tap| tap.key).collect::<BTreeSet<_>>().len(), 16);
+    next.take_tap_state_from(&old, 0);
+    for tap in &next.taps {
+        let voice = (tap.key >> 56 & 15) as usize;
+        assert_eq!(tap.state, if voice < 4 { voice as f32 + 0.25 } else { 0.0 });
+    }
+}
+
+/// One mono-voice stereo cable shares its downmix across every copied voice.
+#[test]
+fn mono_voice_stereo_downmixes_are_shared() {
+    static BUNDLE: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        inputs: &[],
+        outputs: &[port("out", crate::SignalType::Modulation).with_channels(Channels::Voices)],
+        params: &[ParamSpec {
+            name: "voices",
+            label: "Voices",
+            description: "Test capacity.",
+            min: 1.0,
+            max: 16.0,
+            default: 16.0,
+            unit: "",
+            options: crate::ParamOptions::DEFAULT,
+        }
+        .integer()
+        .shapes_graph()],
+        ..FOLLOWER
+    };
+    static STEREO: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        inputs: &[],
+        outputs: &[port("out", crate::SignalType::Modulation).with_channels(Channels::Stereo)],
+        params: &[],
+        ..FOLLOWER
+    };
+    static TARGET: crate::ModuleDescriptor = crate::ModuleDescriptor {
+        inputs: &[
+            port("in", crate::SignalType::Modulation),
+            port("control", crate::SignalType::Modulation).with_channels(Channels::Downmix),
+        ],
+        outputs: &[port("out", crate::SignalType::Modulation)],
+        params: &[ParamSpec {
+            name: "gain",
+            label: "Gain",
+            description: "Test gain.",
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            unit: "",
+            options: crate::ParamOptions::DEFAULT,
+        }],
+        ..FOLLOWER
+    };
+    for assignment in [false, true] {
+        let mut graph = followers(3);
+        graph.nodes.get_mut(&ModuleId(1)).unwrap().descriptor = &BUNDLE;
+        graph.nodes.get_mut(&ModuleId(1)).unwrap().params = vec![16.0];
+        graph.nodes.get_mut(&ModuleId(2)).unwrap().descriptor = &STEREO;
+        let target = graph.nodes.get_mut(&ModuleId(3)).unwrap();
+        target.descriptor = &TARGET;
+        target.params = vec![0.0];
+        target.copy_slots = (1..16).map(|voice| ((voice, 0), voice + 3)).collect();
+        cable(&mut graph, 1, 3, 0);
+        if assignment {
+            graph.assignments.insert(
+                AssignmentId(1),
+                crate::Assignment {
+                    source: OutputRef {
+                        module: ModuleId(2),
+                        port: 0,
+                    },
+                    target: ModuleId(3),
+                    param: 0,
+                    depth: 1.0,
+                    polarity: None,
+                    enabled: true,
+                },
+            );
+        } else {
+            cable(&mut graph, 2, 3, 1);
+        }
+        let (schedule, _) = compile(
+            &graph,
+            &probes_on([3]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            48_000.0,
+            64,
+        );
+        let voices: Vec<_> = schedule.ops.iter().filter(|op| op.voices == 16).collect();
+        assert_eq!(voices.len(), 16, "every target voice must be scheduled");
+        assert_eq!(
+            voices.iter().map(|op| op.voice).collect::<BTreeSet<_>>(),
+            (0..16).collect()
+        );
+        assert_eq!(schedule.downmixes.len(), 1);
+        let shared = schedule.downmixes[0].output as *const f32;
+        if assignment {
+            assert_eq!(schedule.fills.len(), 16);
+            assert!(schedule.fills.iter().all(|fill| fill.sources[0].buffer == shared));
+        } else {
+            for (op, module) in schedule.ops.iter().enumerate().filter(|(_, op)| op.voices == 16) {
+                assert_eq!(module.voices, 16);
+                assert_eq!(input_ptr(&schedule, op, 1), shared);
+            }
+        }
+    }
 }

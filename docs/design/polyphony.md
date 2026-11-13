@@ -3,14 +3,14 @@
 How a cable carries one value per voice, how notes are given to voices, which modules make, merge, and spread voices, and what a module author has to do to become polyphonic (nothing, in most cases).
 
 - **Kind:** living specification.
-- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator is implemented in `loom-dsp`; bundles and source modules are not built yet.
+- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator and bundle engine are implemented. Note input and the voice modules remain pending.
 - **Decision behind it:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md) (per-voice signals, bundle as inferred width), refining [ADR-0020](../adr/0020-inferred-channel-count.md) (inferred channel count) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (every cable is `f32`). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of a new copy. [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md) for the allocator's panel.
 - **Use case and requirements:** UC10 (sequence chords and note clips), UC2 (live play). FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-MIDI-03 (MPE), FR-LIB-13, FR-LIB-20, NFR-RT-01, NFR-PERF-01, NFR-PERF-03.
 - **Builds on:** [Stereo cables](stereo.md) (widths, copies, downmix), [Changing a running patch](live-patching.md) (schedule swaps), [Sub-patches](sub-patches.md) (stack mode is not voices), [Module data](module-data.md) (stored notes and chords), [Scale and tuning](scale-and-tuning.md) (chords as scale steps), [Arrangement](arrangement.md) (the note cycle).
 - **Background:** [Voices and polyphony](../learn/voices-and-polyphony.md): what a voice is, why stealing exists, why a bundle is inferred, and why a gate carries the timing.
 - **Prior art:** per-voice signals are how a modular grid such as Bitwig's Grid carries polyphony. Hardware polysynths settled oldest-note and quietest-note stealing decades ago. Named only to explain the ideas; the rules and modules below are our own.
 - **Issues:** [#665](https://github.com/brylie/LoomDSP/issues/665) (this spec), [#666](https://github.com/brylie/LoomDSP/issues/666) (the note model). Users: [#510](https://github.com/brylie/LoomDSP/issues/510) (MIDI out), [#307](https://github.com/brylie/LoomDSP/issues/307) (multi-lane sequencer), [#50](https://github.com/brylie/LoomDSP/issues/50) (stored notes).
-- **Code:** `crates/loom-dsp/src/voice.rs` (shared allocator). Bundle and module work will extend `crates/loom-core/src/width.rs` and `compile.rs` (widths and copies), `crates/loom-modules/src/midi.rs` (Note input), using the allocator in `loom-dsp` (ADR-0035).
+- **Code:** `crates/loom-dsp/src/voice.rs` (allocator); `crates/loom-core/src/width.rs` and `compile.rs` (bundles and copies). `crates/loom-modules/src/test_modules.rs` supplies the bundle test source. Note input integration in `midi.rs` remains pending.
 
 ## Goal
 
@@ -55,15 +55,15 @@ What the player sees.
    | Value | On an input | On an output |
    |---|---|---|
    | `Channels::PerChannel`, `Channels::Downmix`, `Channels::Stereo` | A bundle arriving here makes the module run once per voice. Inside each voice the stereo meaning is unchanged: `PerChannel` copies per side, `Downmix` reads one value from the two sides, `Stereo` reads both sides of its voice. | As many voices as the module runs; sides as the stereo rules say. |
-   | `Channels::Voices` | The module reads every voice of the bundle itself, and is not copied per voice. | The output has as many voices as the module's `voices` parameter says. The module is a source. A module may have both: it then runs as one instance (Voice assigner). |
+   | `Channels::Voices` | The module reads every voice of the bundle itself, and is not copied per voice. | The output has as many voices as the module's `voices` parameter says. The module is a source and is never copied. A module may have both: it then runs as one instance (Voice assigner). |
 
    *Why voices do not follow the stereo split:* the stereo rules make control inputs `Downmix` so a stereo patch does not pay twice for a control signal that is the same on both sides ([stereo](stereo.md), rule 4). A voice's pitch and gate are the opposite case: they differ per voice by definition, and an envelope that read the maximum of eight gates could not play eight notes. The oscillators, Phase generator, Envelope, and Amplifier keep their `Downmix` control inputs and become polyphonic with no change. *Why one name for both sides of `Voices`:* it mirrors `Stereo`, which also means "reads both" on an input and "writes both" on an output.
 
-4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with a `Voices` input never runs per voice, whatever its other inputs receive. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
+4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with any `Voices` port never runs per voice, whatever its other inputs receive. Its inputs must all be `Voices` or `Downmix`; the registry refuses other input declarations. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
 
 5. **Output widths.** A `Voices` output has the module's voice count. Any other output has as many voices as its module runs. A `Stereo` output is stereo per voice. So a module with no inputs is one voice wide unless it declares a `Voices` output, and voices flow only from sources, as stereo flows only from stereo sources ([stereo](stereo.md), rule 7).
 
-6. **A narrower cable into a wider module is padded with the port's default.** Copies past the cable's last voice read the input's default: zero for a gate, the default pitch for a pitch. *Why:* a voice no source is playing should be silent, and the default is what an unconnected input reads already. Mono cables are the common case: a mono cable into a polyphonic module feeds every copy, as it feeds both stereo sides. That is the fan-out FR-VOICE-03 asks for, and it costs no module.
+6. **A narrower cable into a wider module is padded with the port's default.** Copies past the cable's last voice read the input's default: zero for a gate, the default pitch for a pitch. Padded value inputs keep their declared default and still report that a cable exists. When an input chooses an alternate source, its missing voice uses that source: OwnPhase runs its phase, Dynamics keys from its own signal, and Chance follows the lane above. These fallbacks use `uses_default`, while `is_connected` remains cable-only. *Why:* missing value inputs should not invent a playing signal; alternate-source inputs already define what replaces a missing source. Mono cables are the common case: a mono cable into a polyphonic module feeds every copy, as it feeds both stereo sides. That is the fan-out FR-VOICE-03 asks for, and it costs no module.
 
 7. **Voices are never downmixed by the engine.** A module that wants one signal from a bundle has a `Voices` input, or sits after a Voice merge, which offers sum, average, last, lowest, and highest. Audio Out is the one exception (rule 9). *Why:* the stereo downmix exists so that a mono module can sit on a stereo cable without a thought. There is no one right way to fold eight voices into one, and an averaged pitch is never what a player meant, so the choice stays with the player.
 
@@ -90,6 +90,42 @@ What the player sees.
 16. **Every copy gets every `set_param` call,** and keeps its own smoothing ([stereo](stereo.md), rule 14). A seeded module mixes its voice index into its seed, as it mixes its stereo side ([stereo](stereo.md), rule 27), so eight voices of noise differ. *Why:* one set of controls, whatever the width; and copies of a random module that played the same numbers would be mono in disguise.
 
 17. **The copy index and the voice count are given to the module.** `ProcessContext` names the copy's voice (1 to V), its side, and the module's voice count V, so a module such as Voice spread can act on its place among the copies without any other input. *Why:* the index is the only thing that differs between copies before any cable does, and an even spread needs to know how many there are.
+
+### Structural parameter edits (implemented, #672)
+
+- A parameter marked `ParamOptions::shapes_graph` must be an integer and cannot
+  be transient. Only DSP modules may own `Voices` ports; engine-handled roles
+  follow ordinary ports' inferred widths. A `Voices` output requires a structural
+  `voices` parameter with bounds 1 to 16. The registry checks these rules.
+- Editing a structural parameter stages the graph value, prepares a schedule
+  and copy slots on the control thread, then publishes the schedule. Structural
+  values reach every module copy as part of the schedule swap. Failure
+  keeps the old graph value and running schedule. Ordinary parameters still
+  use the next-buffer command path. `Controller::set_params_across` stages edits
+  to multiple modules together, including every copy of a stack. One capacity
+  check and one compile publish a live edit, or all values stay unchanged.
+  Fresh modules and a graph with pending structural edits keep the values staged
+  until the caller commits the whole graph. Initial values reach fresh instances
+  before reset. MIDI feedback is reconciled before staging values and is not
+  imported again while compiling that snapshot. Writing
+  an unchanged rounded structural value does not compile or change the graph
+  revision; ordinary values in that group still take effect. A count edit is
+  one undo step.
+- Structural values are saved and may be exposed on sub-patch surfaces. Their
+  controls remain editable, but MIDI learn and modulation cannot target them,
+  including through an exposed name. A patch file with a MIDI mapping on such
+  a value is refused; its error names the controller and parameter.
+- A source reads its authoritative capacity from `PortIo::output_width`, not
+  from an independently delivered parameter. `PortIo::voice_input` and
+  `voice_output` address a zero-based voice and side. `ProcessContext::voice`
+  is one-based; `voice_count` names the module's copy count, and `channel` still
+  names its zero-based stereo side. `PortIo::uses_default` identifies unconnected
+  and padded inputs without changing `is_connected`'s cable-only meaning. This
+  lets padded `OwnPhase` inputs run their own phase rather than hold at zero.
+- Copy slots and delay state are keyed by voice and side separately. New voices
+  start reset; a new right side copies its own voice's left side. Seed words
+  reserve separate bits for voice, stereo side, and stream number. Voice 1
+  keeps its previous sequences; routing randomness stays matched across sides.
 
 ### Allocation
 
@@ -254,18 +290,18 @@ A MIDI note output module has `pitch`, `gate`, and `velocity` inputs on `Channel
 
 Bundles and copies:
 
-- [ ] Given Note input at 8 voices into the chain of [the first source](#a-keyboard-into-an-8-voice-synth-m2), with today's descriptors unchanged, when 8 notes play, then the five modules run as 8 copies each, Voice merge runs as one, and the output is bit-identical to 8 mono chains fed one note each and summed (test).
-- [ ] Given a mono LFO into a modulation input of a copied module, then every copy reads the same values (test).
-- [ ] Given a 4-voice pitch and an 8-voice gate into one oscillator, then it runs as 8 copies and copies 5 to 8 read the pitch input's default (test).
-- [ ] Given a bundle into a `Downmix` or `Stereo` input, then the module runs per voice and no voice is averaged or dropped; given a stereo cable inside one voice into that `Downmix` input, then the stereo downmix of the two sides still applies (test).
-- [ ] Given a bundle into Audio Out, then the output is the sum of the voices on each side (test).
+- [ ] Given Note input at 8 voices into the chain of [the first source](#a-keyboard-into-an-8-voice-synth-m2), with today's descriptors unchanged, when 8 notes play, then the four modules run as 8 copies each, Voice merge runs as one, and the output is bit-identical to 8 mono chains fed one note each and summed (test).
+- [x] Given a mono LFO into a modulation input of a copied module, then every copy reads the same values (test).
+- [x] Given a 4-voice pitch and an 8-voice gate into one oscillator, then it runs as 8 copies and copies 5 to 8 read the pitch input's default (test).
+- [x] Given a bundle into a `Downmix` or `Stereo` input, then the module runs per voice and no voice is averaged or dropped; given a stereo cable inside one voice into that `Downmix` input, then the stereo downmix of the two sides still applies (test).
+- [x] Given a bundle into Audio Out, then the output is the sum of the voices on each side (test).
 - [ ] Given a stereo source inside an 8-voice chain, then the chain runs as 16 copies, and each side of each voice is bit-identical to a mono chain fed that side (test).
-- [ ] Given a bundle through a feedback loop, then every module in the loop runs per voice, and the inserted delay has state per voice (test).
-- [ ] Given a patch with no source wider than one voice, then it compiles to the same schedule as before: the same operations, buffers, and instances (test).
-- [ ] Given a count raised from 4 to 8 while 4 notes play, then voices 1 to 4 keep their state and voices 5 to 8 start from reset; given a count lowered from 8 to 4, then four copies are returned to the control thread; neither allocates on the audio thread (`no_alloc` test).
-- [ ] Given a seeded module running as 8 voices, then no two voices play the same sequence (test).
-- [ ] Given a descriptor with `Voices` inputs and `Voices` outputs (Voice assigner), then the registry accepts it and the module runs as one instance with its outputs at its `voices` count; given `Downmix` on an output, then the registry rejects it, as it does today (test).
-- [ ] Given a port with an 8-voice cable, then its hover text says `8 voices` (`Ui` harness).
+- [x] Given a bundle through a feedback loop, then every module in the loop runs per voice, and the inserted delay has state per voice (test).
+- [x] Given a patch with no source wider than one voice, then it compiles to the same schedule as before: the same operations, buffers, and instances (test).
+- [x] **Engine:** Given a count raised from 4 to 8 while 4 voices run, then voices 1 to 4 keep their state and voices 5 to 8 start from reset; given a count lowered from 8 to 4, then four copies are returned to the control thread; neither allocates on the audio thread (`no_alloc` test).
+- [x] Given a seeded module running as 8 voices, then no two voices play the same sequence (test).
+- [x] Given a descriptor with `Voices` inputs and `Voices` outputs (Voice assigner), then the registry accepts it and the module runs as one instance with its outputs at its `voices` count; given `Downmix` on an output, then the registry rejects it, as it does today (test).
+- [x] Given a port with an 8-voice cable, then its hover text says `8 voices` (`Ui` harness).
 
 Allocation, at block sizes 1, 77, and 512 with scripted events:
 

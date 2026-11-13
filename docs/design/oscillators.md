@@ -74,3 +74,12 @@ Pulse also keeps its `width` knob. Its panel shows Tune, Octave, and Width, in t
 - **A phase output** on the oscillator. Phase gives one when a patch needs to share a phase.
 - **A mark on the port for own phase.** Inputs that follow the transport show a clock mark, because they follow something outside the module ([panels](panels.md#clock-mark-on-transport-inputs)). An oscillator making its own phase is what an oscillator is expected to do, so the hover text is enough.
 - **Smoothing on `tune` and `octave`.** Rule 4 says why it is not needed.
+
+### Phase defaults in a bundle
+
+A phase cable narrower than the oscillator's voice count supplies only its own
+voices. Later voices read `OwnPhase`, as the bundle padding rule requires.
+`PortIo::uses_default` distinguishes this case from a cable supplying a phase
+value. `is_connected` still reports whether a cable exists. The shared own-phase
+helper uses `uses_default`, so an unpatched voice and a padded voice both run
+their own phase, while a real cable of zeros still holds its phase at zero.

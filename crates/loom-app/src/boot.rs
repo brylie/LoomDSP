@@ -226,6 +226,8 @@ impl App {
             posted: Vec::new(),
             window_questions: std::cell::RefCell::default(),
             control_replies: crate::control::Replies::new(),
+            watching: false,
+            watchers: crate::watching::AppWatchers::default(),
             waiting: None,
             recovery_offer: None,
         };

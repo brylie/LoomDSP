@@ -222,6 +222,7 @@ pub fn targets(graph: &Graph) -> Vec<TargetPick> {
                 .enumerate()
                 .filter_map(move |(param, spec)| {
                     let eligible = !spec.options.transient
+                        && !spec.options.shapes_graph
                         && node
                             .descriptor
                             .panel

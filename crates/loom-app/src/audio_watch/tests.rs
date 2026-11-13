@@ -4,7 +4,6 @@ use super::*;
 /// new stream gets a distinct subscription identity.
 #[test]
 fn stream_reports_a_stopped_device() {
-    use iced::futures::StreamExt;
     use std::collections::hash_map::DefaultHasher;
     let watch = Watch {
         stats: Arc::new(CallbackStats::default()),
@@ -23,10 +22,11 @@ fn stream_reports_a_stopped_device() {
             engine: watch.engine.clone(),
         })
     );
-    let mut updates = stream(&watch);
-    let first = iced::futures::executor::block_on(updates.next());
+    let watched = watch.clone();
+    let updates = crate::watcher::run_for_test(4, move |outlet| run(&watched, outlet));
+    let first = updates.recv();
     assert!(matches!(first, Some(Event::Stalled { callbacks: 0, .. })));
-    let second = iced::futures::executor::block_on(updates.next());
+    let second = updates.recv();
     assert!(matches!(second, Some(Event::Stalled { callbacks: 0, .. })));
 }
 

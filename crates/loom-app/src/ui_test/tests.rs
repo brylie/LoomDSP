@@ -2499,6 +2499,80 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     assert_eq!(node.params[0], 7.0, "a press edits nothing");
 }
 
+/// A structural number edit changes width in one undo step, including the hover text.
+#[test]
+fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = Ui::open("sine.ron");
+    let source = select_new(&mut ui, "test.voices");
+    let control = ui.control(source.0, "voices");
+    ui.move_to(control);
+    ui.press();
+    ui.release();
+    ui.tap(Key::Named(Named::ArrowUp), Modifiers::default());
+    let width = |ui: &Ui| {
+        let c = &ui.app.session.controller;
+        c.last_report().width(c.output_ref(source, "out").unwrap()).voices
+    };
+    assert_eq!(width(&ui), 2);
+    assert!(
+        ui.app.session.scene.module(source.0).unwrap().outputs[0]
+            .hover
+            .description
+            .contains("2 voices")
+    );
+    ui.send(Message::Undo);
+    assert_eq!(width(&ui), 1);
+    ui.send(Message::Redo);
+    assert_eq!(width(&ui), 2);
+    ui.send(Message::Learn(crate::learn::Message::Toggle));
+    let index = test_modules_voice_index();
+    ui.send(Message::Learn(crate::learn::Message::Arm((source.0, index))));
+    assert!(!ui.app.session.learn.is_armed((source.0, index)));
+    assert!(
+        !crate::matrix::targets(ui.app.session.controller.graph())
+            .iter()
+            .any(|target| target.module == source && target.param == index)
+    );
+    assert!(!ui.app.session.scene.is_live_control(source.0, 0));
+}
+
+/// Descriptor lookup keeps the test independent of parameter ordering.
+fn test_modules_voice_index() -> usize {
+    loom_modules::test_modules::VOICES.param_index("voices").unwrap()
+}
+
+/// Button-only rows retain existing assignments and removal without offering new modulation.
+#[test]
+fn a_button_only_row_keeps_existing_modulation_removable() {
+    use crate::inspector::ids;
+    let mut ui = Ui::open("subtractive.ron");
+    let button = select_new(&mut ui, "loom.ui.button");
+    let assignment = ui
+        .app
+        .session
+        .controller
+        .add_assignment_named(ModuleId(7), "out", button, "on", 0.25)
+        .unwrap();
+    ui.app.commit();
+    inspector_row(&mut ui, button.0, "On");
+    let row = ids::row(button.0, ids::Kind::Param, "on");
+    let remove = ids::part(&ids::assignment(&row, assignment.0), "remove");
+    let add = ids::part(&row, "add");
+    let places = ui.places();
+    let at = places
+        .of(&remove)
+        .expect("existing assignment's remove action stays visible");
+    assert!(places.of(&add).is_none(), "the row offers no add action");
+    let accessible = crate::inspector::access::items(&ui.app.inspector_model());
+    assert!(crate::a11y::items::find(&accessible, &remove).is_some());
+    assert!(crate::a11y::items::find(&accessible, &add).is_none());
+    ui.move_to(at.rect.center());
+    ui.press();
+    ui.release();
+    assert!(ui.app.session.controller.graph().assignment(assignment).is_none());
+}
+
 /// Cmd+Z straight after a click into a text field, with nothing between,
 /// undoes the field's typing and never the patch: the click's focus is
 /// known by the time the key arrives (undo.md, Gestures). Written before the

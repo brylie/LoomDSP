@@ -10,11 +10,12 @@ use loom_core::{FillsRole, roles};
 use loom_dsp::random::Rng;
 use loom_rt::Smoothed;
 
-/// The stream for this seed, stereo `channel`, and stream `number`. Seed is 1
-/// to 65535. The three fit side by side in one word, so different streams never
-/// start from the same state.
+/// The stream for a seed, canonical voice/side `channel`, and stream number.
+/// Seed uses bits 0 to 15, side 16, stream 17 to 23, and voice 24 to 27.
+/// Voice 1 retains its existing sequences; voices cannot collide with lanes.
 pub(crate) fn stream(seed: u32, channel: usize, number: u32) -> Rng {
-    Rng::new(seed | (channel as u32) << 16 | number << 17)
+    debug_assert!(channel < 32 && number < 128);
+    Rng::new(seed | ((channel as u32 & 1) << 16) | number << 17 | (channel as u32 >> 1) << 24)
 }
 
 /// The `seed` parameter of every random module (M2 modules, rule 1).
@@ -320,8 +321,8 @@ impl Module for Random {
     }
 
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        if self.channel != ctx.channel() {
-            self.channel = ctx.channel();
+        if self.channel != (ctx.voice() - 1) * 2 + ctx.channel() {
+            self.channel = (ctx.voice() - 1) * 2 + ctx.channel();
             self.restart(self.active);
         }
         let (mode, low, high) = (io.param(Self::MODE), io.param(Self::LOW), io.param(Self::HIGH));
@@ -618,13 +619,13 @@ impl Module for Chance {
     }
 
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        if self.channel != ctx.channel() {
-            self.channel = ctx.channel();
+        if self.channel != (ctx.voice() - 1) * 2 + ctx.channel() {
+            self.channel = (ctx.voice() - 1) * 2 + ctx.channel();
             self.restart(self.active);
         }
         let seed = io.param(Self::SEED);
         let chances: [_; CHANCE_LANES] = std::array::from_fn(|n| io.param(Self::CHANCE1 + n));
-        let connected: [bool; CHANCE_LANES] = std::array::from_fn(|n| io.is_connected(Self::TRIGGER1_IN + n));
+        let connected: [bool; CHANCE_LANES] = std::array::from_fn(|n| !io.uses_default(Self::TRIGGER1_IN + n));
         let ([trigger1, trigger2, trigger3, trigger4, reset], [a1, a2, a3, a4, b1, b2, b3, b4]) = io.split::<5, 8>();
         // A lane with no cable reads the lane above.
         let mut inputs = [trigger1, trigger2, trigger3, trigger4];

@@ -334,6 +334,28 @@ impl From<PatchPolarity> for Polarity {
 /// Patch loading and saving errors.
 #[derive(Debug, thiserror::Error)]
 pub enum PatchError {
+    /// A hand-edited file mapped an audio-thread control onto a structural value.
+    #[error(
+        "MIDI mapping CC {controller} on channel {channel} targets graph-shaping parameter `{param}` of module {module}"
+    )]
+    StructuralMidiMapping {
+        /// Mapped module.
+        module: u32,
+        /// Mapped parameter or exposed name.
+        param: String,
+        /// Wire channel, from 0 to 15.
+        channel: u8,
+        /// Controller number.
+        controller: u8,
+    },
+    /// A hand-edited file modulated a graph-shaping parameter.
+    #[error("modulation targets graph-shaping parameter `{param}` of module {module}")]
+    StructuralModulationTarget {
+        /// Module named by the patch.
+        module: u32,
+        /// Parameter or exposed name named by the patch.
+        param: String,
+    },
     /// The text is not a valid patch.
     #[error("invalid patch: {0}")]
     Parse(#[from] ron::error::SpannedError),

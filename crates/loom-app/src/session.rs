@@ -128,6 +128,9 @@ pub(crate) struct EngineLink {
     /// The stream and its callback count at the last control `snapshot`,
     /// for its `advanced` field.
     pub(crate) control_seen: Option<(Arc<CallbackStats>, u64)>,
+    /// The watcher threads that read this engine (`watching.rs`). Dropped
+    /// with the engine, which stops them.
+    pub(crate) watchers: crate::watching::EngineWatchers,
 }
 
 /// A session just built, and what `App::settle_session` needs to finish it.
@@ -250,6 +253,7 @@ impl PatchSession {
                 midi,
                 holding: false,
                 control_seen: None,
+                watchers: crate::watching::EngineWatchers::default(),
             },
         };
         Started {
