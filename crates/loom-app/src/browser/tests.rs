@@ -226,10 +226,10 @@ fn an_offset_past_a_short_list_is_clamped_to_it() {
     ui.send(crate::Message::OpenBrowser);
     let _ = ui.redraw();
     ui.send(crate::Message::Browser(Message::Query("saw".into())));
-    let rows = ui.app.overlays.browser().unwrap().model().rows.len();
+    let rows = ui.app().overlays.browser().unwrap().model().rows.len();
     assert!(rows < ROWS, "a list short enough to fit: {rows} rows");
     ui.send(crate::Message::Browser(Message::Scrolled(500.0)));
-    assert_eq!(ui.app.overlays.browser().unwrap().scroll, 0.0);
+    assert_eq!(ui.app().overlays.browser().unwrap().scroll, 0.0);
 }
 
 /// `count` library items, named so a search for "zz-lib" finds only them.
@@ -289,7 +289,7 @@ fn offsets_after_regrowing(back_to: usize) -> (f32, f32) {
     library(&mut ui, 12);
     ui.send(crate::Message::Browser(Message::Query("zz-lib".into())));
     let _ = ui.redraw();
-    assert_eq!(ui.app.overlays.browser().unwrap().model().rows.len(), 12);
+    assert_eq!(ui.app().overlays.browser().unwrap().model().rows.len(), 12);
     for _ in 0..11 {
         let _ = ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
     }
@@ -299,7 +299,7 @@ fn offsets_after_regrowing(back_to: usize) -> (f32, f32) {
     library(&mut ui, back_to);
     let _ = ui.redraw();
     let shown = ui.scroll_translation(LIST).unwrap().y;
-    (shown, ui.app.overlays.browser().unwrap().scroll)
+    (shown, ui.app().overlays.browser().unwrap().scroll)
 }
 
 /// Grown back to a length the list has not reported before, the list
