@@ -220,8 +220,9 @@ pub struct Browser {
     /// its row. The toolkit reports it after the wheel or a drag, but not
     /// after the app scrolls the list itself (`on_scroll` does not fire
     /// then), so [`Browser::reveal`] moves it by the same rule the window
-    /// scrolls by, from the fixed row height. Our own scroll state replaces
-    /// it in phase 3.
+    /// scrolls by, from the fixed row height. `update` clamps it to the
+    /// list's rows after every message, as the list shows it. Our own
+    /// scroll state replaces it in phase 3.
     scroll: f32,
 }
 
