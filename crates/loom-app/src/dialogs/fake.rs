@@ -84,6 +84,11 @@ impl App {
             for effect in effects {
                 match answer(effect, &waker) {
                     Some(Effect::Work(job)) => job.run(&waker),
+                    // As the runtime does: after what was sent so far.
+                    Some(Effect::NextTurn(messages)) => {
+                        pending.extend(queue.try_iter().flat_map(crate::input_owner::route));
+                        pending.extend(messages);
+                    }
                     Some(other) => unrun.push(other),
                     None => {}
                 }

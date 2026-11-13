@@ -15,7 +15,7 @@
 //!
 //! | Effect | Carried out by |
 //! |---|---|
-//! | [`Effect::Redraw`], [`Effect::AfterDraw`], [`Effect::Quit`] | The runtime, the same under every driver |
+//! | [`Effect::NextTurn`], [`Effect::Redraw`], [`Effect::AfterDraw`], [`Effect::Quit`] | The runtime, the same under every driver |
 //! | [`Effect::Focus`], [`Effect::ScrollIntoView`] | The routing target that holds the element |
 //! | The rest | The driver: a window shell, or the headless driver |
 
@@ -45,6 +45,8 @@ pub mod names {
     pub const CAPTURE: &str = "window capture";
     /// [`super::Effect::AfterDraw`].
     pub const AFTER_DRAW: &str = "after draw";
+    /// [`super::Effect::NextTurn`].
+    pub const NEXT_TURN: &str = "next turn";
     /// [`super::Effect::Redraw`].
     pub const REDRAW: &str = "redraw";
     /// [`super::Effect::Quit`].
@@ -273,6 +275,12 @@ pub enum Effect<M> {
     Capture(Reply<Result<Image, NoGpu>, M>),
     /// Queue this message once the next frame has been drawn and shown.
     AfterDraw(M),
+    /// Queue these messages for the next turn, together and in order, each
+    /// its own update there. For what the player chose through another part
+    /// that names a message of its own, such as Enter on a menu item: a
+    /// click on the part would send the same message. The runtime queues
+    /// them itself, so nothing another thread sends lands among them.
+    NextTurn(Vec<M>),
     /// Draw the window again although no panel model changed: a request
     /// handed to a custom element that it applies when it draws.
     Redraw,
@@ -293,6 +301,7 @@ impl<M> Effect<M> {
             Self::Work(_) => names::WORK,
             Self::Capture(_) => names::CAPTURE,
             Self::AfterDraw(_) => names::AFTER_DRAW,
+            Self::NextTurn(_) => names::NEXT_TURN,
             Self::Redraw => names::REDRAW,
             Self::Quit => names::QUIT,
         }
@@ -315,6 +324,7 @@ impl<M> fmt::Debug for Effect<M> {
             Self::Work(_) => f.write_str("Work"),
             Self::Capture(_) => f.write_str("Capture"),
             Self::AfterDraw(_) => f.write_str("AfterDraw"),
+            Self::NextTurn(messages) => write!(f, "NextTurn({} messages)", messages.len()),
             Self::Redraw => f.write_str("Redraw"),
             Self::Quit => f.write_str("Quit"),
         }
@@ -450,6 +460,16 @@ impl<M> Effects<M> {
     /// Queue `message` once the next frame has been drawn and shown.
     pub fn after_draw(message: M) -> Self {
         Self::one(Effect::AfterDraw(message))
+    }
+
+    /// Queue `messages` for the next turn, together and in order. Nothing
+    /// when there are none.
+    pub fn next_turn(messages: impl IntoIterator<Item = M>) -> Self {
+        let messages: Vec<M> = messages.into_iter().collect();
+        if messages.is_empty() {
+            return Self::none();
+        }
+        Self::one(Effect::NextTurn(messages))
     }
 
     /// Draw the window again although no panel model changed.

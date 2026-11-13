@@ -46,9 +46,10 @@ impl<M> Waker<M> {
 
     /// Queues `messages` for the next turn together and in order, with no
     /// other sender's message between them, then wakes the loop once.
-    /// Returns false when the runtime is gone. For an app that hands the
-    /// loop several messages that belong together, such as a command's
-    /// steps and its reply.
+    /// Returns false when the runtime is gone. For a driver or a thread
+    /// that hands the loop several messages that belong together from
+    /// outside a turn, such as the messages one input event becomes. Inside
+    /// `update`, the next-turn effect does this.
     pub fn send_all(&self, messages: impl IntoIterator<Item = M>) -> bool {
         {
             // A poisoned lock guards nothing but order, so it is used as is.

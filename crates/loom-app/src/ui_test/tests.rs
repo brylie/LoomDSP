@@ -2616,3 +2616,21 @@ fn a_capture_draws_the_view_offscreen() {
         assert_eq!(answer, Err(loom_ui::effect::NoGpu));
     }
 }
+
+/// A posted message is a next-turn effect, which the runtime queues itself
+/// and no waker announces: the bridge sees that messages wait and runs the
+/// next turn, where it applies.
+#[test]
+fn a_posted_message_runs_on_the_next_turn() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().post(Message::ShowHelp);
+    let log = ui.deliver(Message::Tick);
+    let at = |wanted: fn(&Message) -> bool| log.iter().position(wanted);
+    let tick = at(|message| matches!(message, Message::Tick));
+    let help = at(|message| matches!(message, Message::ShowHelp));
+    assert!(
+        matches!((tick, help), (Some(tick), Some(help)) if tick < help),
+        "{log:?}"
+    );
+    assert!(ui.app().overlays.help.is_some());
+}

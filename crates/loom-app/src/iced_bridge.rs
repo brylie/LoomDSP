@@ -329,6 +329,11 @@ impl<D: BridgeDriver> Bridge<D> {
         if self.runtime.app().0.take_focus_question() {
             tasks.push(focus_query(Bridged::Focus));
         }
+        // Messages wait in the runtime, such as those an update queued for
+        // the next turn, which no waker announced: run that turn.
+        if next.again {
+            tasks.push(Task::done(Bridged::Woken));
+        }
         // A deadline already due runs next. Later deadlines wait for item 3,
         // when timers become deadlines.
         if next.deadline.is_some_and(|at| at <= now) {

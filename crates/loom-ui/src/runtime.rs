@@ -327,6 +327,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     self.after_draw.push(message);
                     redraw = true;
                 }
+                // After what wakers have sent so far, and before anything
+                // they send later: `pending` is the runtime's own, so the
+                // batch stays whole.
+                Effect::NextTurn(messages) => {
+                    self.drain_queue();
+                    self.pending.extend(messages);
+                }
                 Effect::Redraw => redraw = true,
                 Effect::Quit => {
                     self.exited = true;

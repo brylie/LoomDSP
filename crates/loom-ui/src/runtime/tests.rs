@@ -59,6 +59,9 @@ enum Msg {
     Title(&'static str),
     /// Quits.
     Quit,
+    /// Asks for `Add(1)`, `Add(2)`, and `Add(3)` on the next turn, as one
+    /// batch, and for a redraw.
+    Post,
 }
 
 /// An app that does what its messages say and records each one.
@@ -127,6 +130,7 @@ impl App for TestApp {
             Msg::Spin(on) => self.animating = on,
             Msg::Title(title) => self.title = title,
             Msg::Quit => return Effects::quit(),
+            Msg::Post => return Effects::next_turn([Msg::Add(1), Msg::Add(2), Msg::Add(3)]).and(Effects::redraw()),
         }
         Effects::none()
     }
@@ -650,4 +654,64 @@ fn deliver_keeps_the_rules_of_a_turn() {
     let next = runtime.deliver(Msg::Add(5), start, &mut driver);
     assert!(next.draw, "a delivered change draws too");
     assert_eq!(runtime.app().count, 8);
+}
+
+/// Section 2, "Not effects" and the effects table: messages for the next
+/// turn run there, not in this one, in order, each its own update, after
+/// the effects of this turn are carried out (the redraw it asked for).
+#[test]
+fn next_turn_messages_run_next_turn_in_order() {
+    let mut runtime = Runtime::new(
+        TestApp::default(),
+        NoTarget,
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    let now = Instant::now();
+    runtime.waker().send(Msg::Post);
+    let next = runtime.handle(DriverEvent::Woken, now, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Post], "only Post ran in its turn");
+    assert!(next.draw, "its own effect ran in its turn");
+    assert!(next.again, "the batch waits for the next turn");
+    let next = runtime.handle(DriverEvent::Woken, now, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Post, Msg::Add(1), Msg::Add(2), Msg::Add(3)]);
+    assert_eq!(runtime.counts().updates, 4, "one update each");
+    assert!(!next.again);
+    assert_eq!(Effects::<Msg>::next_turn([]).len(), 0, "an empty batch is no effect");
+}
+
+/// A batch for the next turn stays whole while another thread sends: the
+/// runtime queues it itself, so no message from a waker lands inside it.
+#[test]
+fn nothing_from_another_thread_lands_in_a_next_turn_batch() {
+    let mut runtime = Runtime::new(
+        TestApp::default(),
+        NoTarget,
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    let other = runtime.waker();
+    let watcher = std::thread::spawn(move || {
+        for _ in 0..2000 {
+            other.send(Msg::Noop);
+        }
+    });
+    for _ in 0..50 {
+        runtime.waker().send(Msg::Post);
+        while runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).again {}
+    }
+    watcher.join().expect("the watcher ends");
+    while runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).again {}
+    let seen = &runtime.app().seen;
+    let starts: Vec<usize> = (0..seen.len()).filter(|&at| seen[at] == Msg::Add(1)).collect();
+    assert_eq!(starts.len(), 50);
+    for at in starts {
+        assert_eq!(
+            &seen[at..at + 3],
+            [Msg::Add(1), Msg::Add(2), Msg::Add(3)],
+            "a batch was split"
+        );
+    }
 }
