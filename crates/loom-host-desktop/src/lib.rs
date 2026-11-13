@@ -845,7 +845,7 @@ impl Drop for StreamHandle {
 }
 
 /// What keeps audio playing. Never read: dropping it stops audio.
-#[allow(dead_code)]
+#[expect(dead_code, reason = "kept alive until RunningAudio drops")]
 enum Player {
     Device(StreamHandle),
     Clock(Clock),

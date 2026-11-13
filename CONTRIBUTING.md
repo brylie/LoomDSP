@@ -28,7 +28,7 @@ Comment on an issue before you start, so two people do not do the same work.
 
 ## Build and test
 
-You need Rust 1.99 or newer. On Linux, install the ALSA development package (`libasound2-dev`).
+You need Rust 1.100 or newer. On Linux, install the ALSA development package (`libasound2-dev`).
 
 The tools come from [mise](https://mise.jdx.dev), at the versions in `mise.toml`. CI installs them the same way, so your machine and CI run the same versions. Once per clone:
 
@@ -119,7 +119,7 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 | Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile | `mise run test` (on your OS) |
 | Coverage | Line coverage of all tests (run with [nextest](https://nexte.st)), at least the minimum. Sends coverage and test results to Codecov, and coverage to GitHub | `mise run coverage` |
 | Docs | API docs build without warnings | `mise run docs` |
-| MSRV | Still builds with Rust 1.99 | `mise run msrv` |
+| MSRV | Still builds with Rust 1.100 | `mise run msrv` |
 | WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `mise run wasm` |
 | Licences | Only permissive licences, no banned crates, only crates.io as a source | `mise run deny-policy` |
 | Security advisories | No dependency has a RustSec advisory. On a pull request, only when it changes `Cargo.toml`, `Cargo.lock`, or `deny.toml`; always on `main` and in the weekly run | `mise run deny-advisories` |

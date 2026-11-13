@@ -220,8 +220,9 @@ pub struct Browser {
     /// its row. The toolkit reports it after the wheel or a drag, but not
     /// after the app scrolls the list itself (`on_scroll` does not fire
     /// then), so [`Browser::reveal`] moves it by the same rule the window
-    /// scrolls by, from the fixed row height. Our own scroll state replaces
-    /// it in phase 3.
+    /// scrolls by, from the fixed row height. `update` clamps it to the
+    /// list's rows after every message, as the list shows it. Our own
+    /// scroll state replaces it in phase 3.
     scroll: f32,
 }
 
@@ -368,8 +369,17 @@ impl Browser {
                 Outcome::Stay
             }
         };
+        // The list shows its offset clamped to its rows. Clamping ours the
+        // same way after every message keeps a library row's menu at its
+        // row when the list gets shorter without a reveal.
+        self.scroll = self.scroll.clamp(0.0, self.max_scroll());
         let effects = if follow { self.reveal() } else { Effects::none() };
         (outcome, effects)
+    }
+
+    /// The largest offset the list can show: zero while its rows fit.
+    fn max_scroll(&self) -> f32 {
+        (self.model.rows.len() as f32 * ROW_HEIGHT - LIST_HEIGHT).max(0.0)
     }
 
     /// The modules the list shows, best first, with the library items

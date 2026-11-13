@@ -520,7 +520,7 @@ impl Module for Memory {
             match mode {
                 0 | 1 if rise_b => self.out = false, // reset wins a tie
                 0 if rise_a => self.out = true,
-                1 if rise_a => self.out = !self.out,
+                1 if rise_a => self.out.toggle(),
                 2 if rise_b => self.out = gate_is_high(a[i]),
                 _ => {}
             }

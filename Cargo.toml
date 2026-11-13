@@ -25,7 +25,7 @@ exclude = ["fuzz", "examples/accesskit-macos-repro", "examples/text-font-probe"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.100"
 license = "Apache-2.0"
 repository = "https://github.com/brylie/LoomDSP"
 authors = ["LoomDSP contributors"]
@@ -107,6 +107,9 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_debug_implementations = "allow"
+
+[workspace.lints.cargo]
+unused_dependencies = "warn"
 
 # Clippy lint groups, set explicitly so the policy is visible and versioned.
 # Groups use priority -1 so single lints below can override them.
