@@ -1867,7 +1867,7 @@ impl App {
             Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {
                 if let Some(midi) = &self.session.engine.midi {
-                    self.session.engine.holding = !self.session.engine.holding;
+                    self.session.engine.holding.toggle();
                     loom_host_desktop::send_midi(
                         midi,
                         if self.session.engine.holding {

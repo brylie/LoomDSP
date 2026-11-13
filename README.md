@@ -92,7 +92,7 @@ Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard fi
 
 If there is no download for your system, or you want the newest changes, build LoomDSP on your own computer. It takes three steps and no coding.
 
-1. **Install Rust**, the free tool that builds the app. Get it from [rustup.rs](https://rustup.rs) (version 1.99 or newer). On Linux, also install the ALSA development package (`libasound2-dev` on Debian and Ubuntu).
+1. **Install Rust**, the free tool that builds the app. Get it from [rustup.rs](https://rustup.rs) (version 1.100 or newer). On Linux, also install the ALSA development package (`libasound2-dev` on Debian and Ubuntu).
 2. **Download LoomDSP.** Either run `git clone https://github.com/brylie/LoomDSP`, or press **Code**, then **Download ZIP**, at the top of this page and unzip it. This gives you a folder named `LoomDSP` (or `LoomDSP-main` from the ZIP).
 3. **Build and open it.** In a terminal, go into that folder and run:
 

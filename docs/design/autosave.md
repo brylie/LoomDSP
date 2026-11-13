@@ -65,7 +65,7 @@ Inside it, one `scan.lock` file that instances lock briefly at start (see How th
 
 | File | Content |
 |---|---|
-| `lock` | Empty. The session holds an exclusive OS file lock on it for its whole run, through `std::fs::File::try_lock` (Rust 1.89 and later; the workspace needs 1.99). |
+| `lock` | Empty. The session holds an exclusive OS file lock on it for its whole run, through `std::fs::File::try_lock` (Rust 1.89 and later; the workspace needs 1.100). |
 | `patch.ron` | The recovery copy. An ordinary patch file: Open can load it by hand. Present only while there are unsaved changes. |
 | `info.ron` | Facts about the copy (below). |
 

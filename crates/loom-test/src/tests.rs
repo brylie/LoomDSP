@@ -158,18 +158,11 @@ impl Module for NanAtTen {
 
 /// A reference file in the temp folder, removed when the test ends, also
 /// when it panics.
-struct TempReference(PathBuf);
-
-impl TempReference {
-    fn new(name: &str) -> Self {
-        Self(std::env::temp_dir().join(format!("loom-test-{}-{name}.wav", std::process::id())))
-    }
-}
-
-impl Drop for TempReference {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
+fn temp_reference(name: &str) -> std::mem::DropGuard<PathBuf, fn(PathBuf)> {
+    let path = std::env::temp_dir().join(format!("loom-test-{}-{name}.wav", std::process::id()));
+    std::mem::DropGuard::new(path, |path| {
+        let _ = std::fs::remove_file(path);
+    })
 }
 
 fn ramp(offset: f32) -> Harness {
@@ -271,14 +264,14 @@ fn non_finite_output_fails() {
 
 #[test]
 fn a_written_reference_matches() {
-    let file = TempReference::new("matches");
+    let file = temp_reference("matches");
     let harness = ramp(0.0);
     let render = harness.render();
-    harness.compare_or_update(&render, &file.0, true);
-    harness.compare_or_update(&render, &file.0, false);
+    harness.compare_or_update(&render, &file, true);
+    harness.compare_or_update(&render, &file, false);
 
     // One channel per output, at the render's sample rate.
-    let spec = hound::WavReader::open(&file.0).expect("written").spec();
+    let spec = hound::WavReader::open(&*file).expect("written").spec();
     assert_eq!(usize::from(spec.channels), ECHO.outputs.len());
     assert_eq!(spec.sample_rate, 1_000);
     assert_eq!(spec.sample_format, hound::SampleFormat::Float);
@@ -286,69 +279,69 @@ fn a_written_reference_matches() {
 
 #[test]
 fn differences_within_the_tolerance_pass() {
-    let file = TempReference::new("within");
+    let file = temp_reference("within");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, true);
+    harness.compare_or_update(&harness.render(), &file, true);
     let close = ramp(5e-6);
-    close.compare_or_update(&close.render(), &file.0, false);
+    close.compare_or_update(&close.render(), &file, false);
 }
 
 #[test]
 #[should_panic(expected = "test.echo: output `a` differs from")]
 fn differences_beyond_the_tolerance_fail() {
-    let file = TempReference::new("beyond");
+    let file = temp_reference("beyond");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, true);
+    harness.compare_or_update(&harness.render(), &file, true);
     let changed = ramp(1e-3);
-    changed.compare_or_update(&changed.render(), &file.0, false);
+    changed.compare_or_update(&changed.render(), &file, false);
 }
 
 #[test]
 fn the_tolerance_can_be_set() {
-    let file = TempReference::new("tolerance");
+    let file = temp_reference("tolerance");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, true);
+    harness.compare_or_update(&harness.render(), &file, true);
     let changed = ramp(1e-3).tolerance(1e-2);
-    changed.compare_or_update(&changed.render(), &file.0, false);
+    changed.compare_or_update(&changed.render(), &file, false);
 }
 
 #[test]
 fn updating_overwrites_a_different_reference() {
-    let file = TempReference::new("update");
+    let file = temp_reference("update");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, true);
+    harness.compare_or_update(&harness.render(), &file, true);
     let changed = ramp(1.0);
     let render = changed.render();
-    changed.compare_or_update(&render, &file.0, true);
-    changed.compare_or_update(&render, &file.0, false);
+    changed.compare_or_update(&render, &file, true);
+    changed.compare_or_update(&render, &file, false);
 }
 
 #[test]
 #[should_panic(expected = "Create it with `LOOM_UPDATE_REFERENCES=1 cargo test`")]
 fn a_missing_reference_fails() {
-    let file = TempReference::new("missing");
+    let file = temp_reference("missing");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, false);
+    harness.compare_or_update(&harness.render(), &file, false);
 }
 
 #[test]
 #[should_panic(expected = "300 frames long; the render has 8 outputs at 1000 Hz, 200 frames long")]
 fn a_reference_of_another_length_fails() {
-    let file = TempReference::new("length");
+    let file = temp_reference("length");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, true);
+    harness.compare_or_update(&harness.render(), &file, true);
     let shorter = ramp(0.0).frames(200);
-    shorter.compare_or_update(&shorter.render(), &file.0, false);
+    shorter.compare_or_update(&shorter.render(), &file, false);
 }
 
 #[test]
 #[should_panic(expected = "at 1000 Hz, 300 frames long; the render has 8 outputs at 2000 Hz")]
 fn a_reference_at_another_sample_rate_fails() {
-    let file = TempReference::new("rate");
+    let file = temp_reference("rate");
     let harness = ramp(0.0);
-    harness.compare_or_update(&harness.render(), &file.0, true);
+    harness.compare_or_update(&harness.render(), &file, true);
     let faster = ramp(0.0).sample_rate(2_000.0);
-    faster.compare_or_update(&faster.render(), &file.0, false);
+    faster.compare_or_update(&faster.render(), &file, false);
 }
 
 #[test]
@@ -527,7 +520,7 @@ fn stereo(offset: f32) -> Vec<Vec<f32>> {
 /// samples (#93).
 #[test]
 fn check_channels_matches_its_own_file() {
-    let file = TempReference::new("stereo");
+    let file = temp_reference("stereo");
     let samples = stereo(0.0);
     let channels = reference::Channels {
         id: "test.ron",
@@ -535,13 +528,13 @@ fn check_channels_matches_its_own_file() {
         samples: &samples,
         sample_rate: 1_000.0,
     };
-    reference::write(&channels, &file.0);
+    reference::write(&channels, &file);
     check_channels(
         "test.ron",
         &["left", "right"],
         &samples,
         1_000.0,
-        &file.0,
+        &file,
         DEFAULT_TOLERANCE,
     );
 }
@@ -550,7 +543,7 @@ fn check_channels_matches_its_own_file() {
 #[test]
 #[should_panic(expected = "test.ron: output `right` differs from")]
 fn a_channel_that_differs_is_named() {
-    let file = TempReference::new("stereo-differs");
+    let file = temp_reference("stereo-differs");
     let (before, after) = (stereo(0.0), stereo(0.5));
     let channels = |samples| reference::Channels {
         id: "test.ron",
@@ -558,8 +551,8 @@ fn a_channel_that_differs_is_named() {
         samples,
         sample_rate: 1_000.0,
     };
-    reference::write(&channels(&before), &file.0);
-    reference::compare(&channels(&after), &file.0, DEFAULT_TOLERANCE);
+    reference::write(&channels(&before), &file);
+    reference::compare(&channels(&after), &file, DEFAULT_TOLERANCE);
 }
 
 /// Counts frames. `copies` says whether it hands the count over. Its gain
@@ -1027,7 +1020,7 @@ struct WrongRouteOnCopy {
 impl Module for WrongRouteOnCopy {
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         let copied = loom_core::copy_state(self, other);
-        self.second = !self.second;
+        self.second.toggle();
         copied
     }
 

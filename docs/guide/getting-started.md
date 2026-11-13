@@ -22,7 +22,7 @@ Each download also has a `README.txt` with these steps. To check a download, com
 
 ### Build from source
 
-If there is no download for your system, or you want the newest changes, you need [Rust](https://rustup.rs) 1.99 or newer.
+If there is no download for your system, or you want the newest changes, you need [Rust](https://rustup.rs) 1.100 or newer.
 
 ```sh
 git clone https://github.com/brylie/LoomDSP

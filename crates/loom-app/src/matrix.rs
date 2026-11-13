@@ -622,7 +622,7 @@ impl App {
             }
             Event::ReverseSort => {
                 if let Some((_, reverse)) = &mut self.session.matrix.sort {
-                    *reverse = !*reverse;
+                    reverse.toggle();
                 }
             }
             Event::Filter(filter) => {
