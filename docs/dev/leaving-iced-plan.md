@@ -225,21 +225,40 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
 ### 2.2 The winit shell
 
-1. Replace `iced::application` in `lib.rs::run` with a `winit` 0.30 `ApplicationHandler` that:
-   - creates the window hidden;
-   - creates the AccessKit adapter through `accesskit_winit` (all three platforms), then shows the window. This fixes the spike's attach order;
-   - decides first how the Linux adapter comes in. With its default features, `accesskit_winit` brings `accesskit_unix` and a D-Bus stack that fails `cargo deny check` on three "unmaintained" advisories; without that feature the check passes, and Linux has no screen reader support ([research note](../research/2026-11-accesskit-macos-gaps.md#what-accesskit_winit-brings)). Either add ignore entries to `deny.toml` with reasons, or leave the Linux adapter out at first and say so;
-   - creates the `wgpu` surface;
-   - sends winit events to the runtime and redraws only when the runtime asks.
-2. Draw each frame in this order:
-   1. clear;
-   2. the canvas, through the phase 1.3 API, straight into the frame;
-   3. the Iced `UserInterface` for the rest of the window, drawn with `iced_wgpu`, the same way `ui_test.rs` and `screenshot.rs` build it today.
+Checked against the dependencies' source at the versions we pin, in the [research note](../research/2026-11-winit-shell-facts.md) (2026-11-13). Four pull requests. 2.2b, 2.2c, and 2.2d start after step 2.1b part (d), because the shell needs an app that gives no `Task`, no outbox, and subscriptions mapped to event sources.
 
-   Iced's own repository has an integration example for this pattern †. Read it; it is a dependency.
-3. Route events: overlays and panels go through Iced's `UserInterface`; the canvas area goes to `CanvasInput` directly. Keep the hit-testing order the same as today (overlays above the canvas).
-4. Delete `a11y/macos.rs`. The tree now goes through `accesskit_winit`.
-5. Keep the window size, title, minimum size, high-DPI behaviour, file drop, and close confirmation exactly as they are. List each in the pull request as checked.
+- **2.2a:** this text, the research note, and the decisions below. Docs only.
+- **2.2b:** the shell, with Iced still drawing everything, the canvas included. Same pixels, a new owner of the window.
+- **2.2c:** our pass draws the canvas.
+- **2.2d:** `accesskit_winit`. 2.2c and 2.2d do not depend on each other.
+
+1. Replace `iced::application` in `lib.rs::run` with a `winit` 0.30 `ApplicationHandler` (2.2b) that:
+   - makes the window, the surface, and the device in `resumed`, and keeps them if `resumed` comes again (winit 0.30 has no `can_create_surfaces`; that is 0.31);
+   - creates the window hidden, and shows it after the first build;
+   - chooses the surface as `iced_wgpu` does today, so the pixels stay the same: a format that is not sRGB (the workspace turns on Iced's `web-colors`), the clear colour in raw components, frame latency 1, and PostMultiplied alpha first. Iced's integration example chooses sRGB, which would change every pixel;
+   - wraps its `EventLoopProxy` in the runtime's waker, waits with `ControlFlow::WaitUntil` for the earliest deadline, and exits after the turn whose driver asked it to;
+   - sends winit events to the runtime and redraws only when the runtime, Iced's `RedrawRequest`, or a resize asks. Until the panels leave Iced, every turn with an update asks (section 2, rule 10 of the spec);
+   - does the per-frame work `iced_winit` does in a private module: Iced's `RedrawRequested` event and the up to three updates after it, keeping their messages; `RedrawRequest::At` as a deadline; the cursor icon; and the input method;
+   - draws the input method's preedit text with an overlay of its own (decided 2026-11-13, spec section 2). Iced's text field already turns winit's `Ime::Preedit` into the `InputMethod` that `UserInterface::update` reports: the cursor's area, the text, the selected range, and the text size. After Iced draws, the shell draws that text in a box at the cursor's area, kept inside the window, above every layer, at the reported size (or the field's size token), underlined, with the selected range marked. About 100 lines in the shell. If it needs more than that report, or grows past about 200 lines, it stops for a decision;
+   - shows file dialogs and questions as today, blocking and modal. Sheets on macOS (`rfd`'s `set_parent`) are a later pull request, since the runtime's dialogs already take two turns.
+2. Draw each frame in this order. Iced cannot draw into our render pass: `iced_wgpu::Renderer::present` makes its own encoder and passes and submits them. So a frame is two submissions on one queue:
+   1. ours: clear; from 2.2c, the canvas through the phase 1.3 API, with the viewport and scissor `iced_wgpu` sets for it today (its bounds times the scale, cut to the window);
+   2. Iced's: `present` with no clear colour, on the same texture view, for the rest of the window;
+   3. then `pre_present_notify` and present the frame.
+
+   A capture draws the same frame into an offscreen texture and reads it back, since `iced::window::screenshot` goes.
+3. Route events through one `UserInterface::update` per batch, then the app's input listeners with each event's status, as `iced_winit` orders them today. The canvas keeps a stand-in widget in Iced's tree until phase 3 (2.2c): it takes the canvas's input and hands it to `CanvasInput`, and draws nothing. *Why:* a `UserInterface` has no public hit test; Iced decides inside its tree which layer gets the pointer, so the stand-in keeps overlays above the canvas exactly as today. Routing the canvas area outside Iced waits for our own layout (phase 3).
+4. Delete `a11y/macos.rs` (2.2d). The tree goes through `accesskit_winit` 0.34, created before the window is shown (it panics on a visible window), with its events through the proxy. On Linux it brings `accesskit_unix` and `zbus` 5, which fail `cargo deny check` on three advisories that only say the crates are unmaintained: RUSTSEC-2026-0370, -0371, and -0372. *Decided 2026-11-13:* ignore the three in `deny.toml`, each with its reason, so Linux has a screen reader from the start, and track their removal in an issue for when `accesskit_unix` moves to `zbus` 6 (spec section 7).
+5. Keep the window size, title, minimum size, high-DPI behaviour, file drop, and close confirmation exactly as they are. List each in the pull request as checked by hand. Cmd+Q quits without asking, today and after; that is its own issue, not part of this step.
+
+Gates for 2.2b and 2.2c, with main as the base:
+- every test passes unedited;
+- `--dump-ui` and `--screenshot-window` are byte-identical on the seven example patches;
+- a control script with `--fake-audio` gives the same replies, and byte-identical target and rect images. The whole window differs only as two runs of main differ from each other;
+- four runs each of `--measure-idle`, `--generate 300 --bench`, and `--generate 300 --measure` stay within the runs' spread;
+- `--fake-audio --record`, then `loom-cli analyze`, passes the same checks.
+
+2.2d's gate is VoiceOver: the tree attaches at start, and its actions work.
 
 ### 2.3 The headless harness on the same runtime
 
@@ -359,6 +378,6 @@ Stop and ask the maintainer if any of these happen:
 
 ## Unverified facts
 
-Entries marked † were not checked against source or release notes when this plan was written. Check each before relying on it: Iced's integration example, `taffy`, `pulldown-cmark`, and `arboard`, including their licences and the versions that match `wgpu` 27 and `winit` 0.30.
+Entries marked † were not checked against source or release notes when this plan was written. Iced's integration example is checked ([research note](../research/2026-11-winit-shell-facts.md)), and step 2.2 is written from it. Check each before relying on it: `taffy`, `pulldown-cmark`, and `arboard`, including their licences and the versions that match `wgpu` 27 and `winit` 0.30.
 
 Checked in step 2.4a ([research note](../research/2026-11-text-crate-choice.md)): `glyphon` (MIT OR Apache-2.0 OR Zlib; no release for `wgpu` 27), and the spec's two Parley claims in section 8, rule 8. Parley's AccessKit text properties existed up to 0.11.1 and were removed in 0.12.0. Its editor does track IME composition.
