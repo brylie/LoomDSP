@@ -3,7 +3,7 @@
 //! buttons, and the list box of patches (ui-layer.md, section 7, rule 27).
 //! Built from the browser's model, which its view draws too.
 
-use super::{AUTHOR, Message, Model, SEARCH, licence_id, part_id, patches_id, tag_id};
+use super::{Message, Model, licence_id, part_id, patches_id, tag_id};
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, SetText};
 
@@ -12,11 +12,11 @@ use crate::a11y::items::{Item, Kind, SetText};
 pub(crate) fn items(model: &Model) -> Item {
     let patches = |message: Message| AppMessage::Patches(message);
     let highlighted = model.highlight.and_then(|at| model.rows.get(at));
-    let field = |name: &'static str, label: &str, text: &str, set: SetText, widget: &'static str| Item {
+    let field = |name: &'static str, label: &str, text: &str, set: SetText| Item {
         label: Some(label.to_string()),
         value: Some(text.to_string()),
         set_text: Some(set),
-        focus: Some(iced::advanced::widget::Id::new(widget)),
+        focus: Some(crate::places::field_widget_id(&part_id(name))),
         active: highlighted.map(|row| row.id.clone()),
         ..Item::new(part_id(name), Kind::Field)
     };
@@ -27,9 +27,8 @@ pub(crate) fn items(model: &Model) -> Item {
             "Search names, descriptions, and tags",
             &model.search,
             SetText::PatchesSearch,
-            SEARCH,
         ),
-        field("author", "Author", &model.author, SetText::PatchesAuthor, AUTHOR),
+        field("author", "Author", &model.author, SetText::PatchesAuthor),
     ];
     parts.extend(model.licences.iter().map(|licence| Item {
         label: Some(licence.label.to_string()),

@@ -4,9 +4,9 @@
 //! rule 27).
 //!
 //! Only the overlay that owns the input is reported. What it covers, the
-//! window and any overlay under it, stays hidden (rule 24). Slice 4a
-//! reports the small overlays: the question, help, and the menus. The
-//! browsers, Preferences, and the licence chooser follow.
+//! window and any overlay under it, stays hidden (rule 24). Every overlay
+//! is reported: the question, help, the menus, the browsers, Preferences,
+//! and the licence chooser.
 
 use crate::a11y::items::{Item, Kind};
 use crate::input_owner::InputOwner;
@@ -68,7 +68,23 @@ impl App {
                 Some(open) => (vec![crate::patches::access::items(open.model())], None),
                 None => (Vec::new(), None),
             },
-            InputOwner::Canvas | InputOwner::Preferences | InputOwner::Chooser => (Vec::new(), None),
+            // No part of these has the keys until a field does, so the
+            // dialog itself has the focus, as help does.
+            InputOwner::Preferences => match self.preferences_model() {
+                Some(model) => (
+                    vec![crate::settings::access::items(&model)],
+                    Some(crate::settings::access::preferences_id()),
+                ),
+                None => (Vec::new(), None),
+            },
+            InputOwner::Chooser => match &self.overlays.chooser {
+                Some(open) => (
+                    vec![crate::licence_chooser::access::items(&open.model())],
+                    Some(crate::licence_chooser::access::licence_id()),
+                ),
+                None => (Vec::new(), None),
+            },
+            InputOwner::Canvas => (Vec::new(), None),
         }
     }
 }

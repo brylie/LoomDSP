@@ -986,7 +986,7 @@ fn an_exposed_range_clamps_writes_from_both_sides() {
     let dragged = cutoff_of(&ui, svf, cutoff);
     assert!(dragged > 200.0 && dragged <= 2000.0, "{dragged}");
     // Set from the inspector row.
-    let _ = ui.app.inspector_message(crate::inspector::Message::ParamValue {
+    ui.app.inspector_message(crate::inspector::Message::ParamValue {
         module: svf.0,
         index: cutoff,
         value: 10000.0,
@@ -1248,7 +1248,7 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, 64])
     ));
     app.process(128);
-    let _ = app.update(Message::Midi);
+    let _ = app.send(Message::Midi);
     let (_, mapping) = app
         .session
         .controller
@@ -1266,7 +1266,7 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     for (value, expected) in [(127, 2000.0), (0, 200.0)] {
         assert!(send_cc(&midi, value));
         app.process(128);
-        let _ = app.update(Message::Midi);
+        let _ = app.send(Message::Midi);
         let cutoff_now = app.session.controller.graph().node(svf).unwrap().params[cutoff];
         assert!((cutoff_now - expected).abs() < 1e-2, "CC {value}: {cutoff_now}");
     }
@@ -1319,7 +1319,7 @@ fn waiting_pickup_at(app: &mut App, value: u8) {
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value])
     ));
     app.process(128);
-    let _ = app.update(Message::Midi);
+    let _ = app.send(Message::Midi);
     assert_eq!(app.session.controller.midi_waiting().len(), 1, "the pickup waits");
 }
 
@@ -1525,7 +1525,7 @@ fn the_range_note_names_the_surface_that_sets_the_span() {
 fn renaming_a_sub_patch_in_the_inspector() {
     let mut app = nested_app();
     app.session.selection = [2].into_iter().collect();
-    let _ = app.inspector_message(crate::inspector::Message::SubPatchNameDraft {
+    app.inspector_message(crate::inspector::Message::SubPatchNameDraft {
         module: 2,
         value: "Lead".to_string(),
     });
@@ -1534,7 +1534,7 @@ fn renaming_a_sub_patch_in_the_inspector() {
         other => panic!("{other:?}"),
     }
     assert_eq!(app.session.hierarchy.tile_name(ModuleId(2)), Some("Voice".to_string()));
-    let _ = app.inspector_message(crate::inspector::Message::SubPatchNameApply { module: 2 });
+    app.inspector_message(crate::inspector::Message::SubPatchNameApply { module: 2 });
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("rename sub-patch"));
     assert!(titles(&app).iter().any(|t| t == "Lead"));
     assert_eq!(app.session.hierarchy.path_names(&voice()), ["Lead"]);
@@ -1747,4 +1747,18 @@ fn a_retarget_onto_an_inner_parameter_keeps_the_matrix_selection() {
     );
     let order: Vec<ModuleId> = graph.assignments().map(|(_, a)| a.source.module).collect();
     assert_eq!(order, [lfo, ModuleId(1)], "inner first, as the file loads them");
+}
+
+/// A sub-patch tile's exposed parameter takes a typed value in the
+/// inspector: the draft is keyed by the inner module, and every key stays in
+/// it until Enter commits it.
+#[test]
+fn an_exposed_value_field_takes_a_typed_value() {
+    let (mut ui, svf, cutoff) = nested_example_ui();
+    ui.app.session.selection = [2].into_iter().collect();
+    ui.redraw();
+    assert!(matches!(ui.app.inspector_model(), Inspector::SubPatch(_)));
+    ui.type_a_value(svf.0, cutoff, "440");
+    let value = ui.app.session.controller.graph().node(svf).unwrap().params[cutoff];
+    assert!((value - 440.0).abs() < 0.5, "{value}");
 }

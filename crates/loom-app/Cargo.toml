@@ -35,6 +35,7 @@ loom-patch.workspace = true
 loom-host-desktop.workspace = true
 loom-canvas.workspace = true
 loom-ui-core.workspace = true
+loom-ui.workspace = true
 iced_wgpu.workspace = true
 png.workspace = true
 serde.workspace = true

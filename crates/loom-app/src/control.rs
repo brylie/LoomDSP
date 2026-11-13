@@ -9,8 +9,8 @@
 //! thread sends nothing, so the window does not redraw (rule 7).
 
 use crate::pointer::{Aim, Step as PointerStep};
+use crate::window_question::WindowQuestion;
 use crate::{App, Message, settings};
-use iced::Task;
 use iced::advanced::widget::operation::Outcome;
 use iced::advanced::widget::{Id, Operation};
 use iced::futures::channel::mpsc;
@@ -34,6 +34,7 @@ mod resolve;
 mod run;
 mod transport;
 
+pub(crate) use resolve::Find;
 use resolve::*;
 pub use resolve::{Found, locate};
 pub use transport::{Listener, close, exit_status, stream};
@@ -265,10 +266,21 @@ const FRAMES_BEFORE_ANSWER: u8 = 2;
 const FRAMES_FOR_ENGINE: u16 = 120;
 
 /// When a command is answered.
-enum Then {
+pub(crate) enum Then {
     Now(Answer),
     AfterDraw(Step),
+    /// Once the UI messages the command sent have run: the answer reads
+    /// what they changed, then waits for the draw as `AfterDraw` does. An
+    /// error is answered at once.
+    AfterMessages(Later),
 }
+
+/// An answer read from the app once a command's UI messages have run.
+pub(crate) type Later = Box<dyn FnOnce(&mut App) -> Answer>;
+
+/// Commands whose UI messages are on their way, oldest first, each
+/// answered by the [`Message::ControlReply`] that follows its messages.
+pub(crate) type Replies = std::collections::VecDeque<(Call, Then)>;
 
 /// What to do once the window has drawn a command's change.
 pub(crate) enum Step {

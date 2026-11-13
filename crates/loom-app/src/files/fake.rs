@@ -8,8 +8,6 @@ pub enum Asked {
     Save(Option<PathBuf>),
     /// The Open dialog, with the folder it would start in.
     Open(Option<PathBuf>),
-    /// An error message, with the text it showed.
-    Error(String),
     /// The question to add the user's name to the authors, with the name.
     AddAuthor(String),
 }
@@ -20,6 +18,18 @@ thread_local! {
     static OPEN_ANSWER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static EXAMPLES: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static ADD_AUTHOR_ANSWER: RefCell<Option<bool>> = const { RefCell::new(Some(false)) };
+    static NO_DIALOGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// From now on, on this thread, the machine can show no native question,
+/// as on Linux without `zenity` or `kdialog`.
+pub fn no_dialogs() {
+    NO_DIALOGS.with(|no| no.set(true));
+}
+
+/// False after [`no_dialogs`].
+pub(super) fn dialogs_available() -> bool {
+    !NO_DIALOGS.with(std::cell::Cell::get)
 }
 
 /// Apps built on this thread from now on find `dir` as their bundled
@@ -57,23 +67,38 @@ pub fn asked() -> Vec<Asked> {
     ASKED.with(|asked| std::mem::take(&mut *asked.borrow_mut()))
 }
 
-pub(super) fn pick_save(current: Option<&Path>) -> Option<Option<PathBuf>> {
+/// Records the Save dialog, asked with `current`.
+pub(super) fn asked_save(current: Option<&Path>) {
     ASKED.with(|asked| asked.borrow_mut().push(Asked::Save(current.map(Path::to_path_buf))));
-    Some(SAVE_ANSWER.with(|answer| answer.borrow().clone()))
 }
 
-pub(super) fn pick_open(start: Option<PathBuf>) -> Option<Option<PathBuf>> {
+/// Records the Open dialog, starting in `start`.
+pub(super) fn asked_open(start: Option<PathBuf>) {
     ASKED.with(|asked| asked.borrow_mut().push(Asked::Open(start)));
-    Some(OPEN_ANSWER.with(|answer| answer.borrow().clone()))
 }
 
-/// Records the error message in place of the dialog.
-pub(super) fn show_error(message: &str) {
-    ASKED.with(|asked| asked.borrow_mut().push(Asked::Error(message.to_string())));
-}
-
-/// Records the question and gives the configured answer.
-pub(super) fn confirm_add_author(name: &str) -> Option<Option<bool>> {
+/// Records the question to add `name`, and says whether it can be shown:
+/// false acts as if no dialog could be.
+pub(super) fn asked_add_author(name: &str) -> bool {
     ASKED.with(|asked| asked.borrow_mut().push(Asked::AddAuthor(name.to_string())));
-    Some(ADD_AUTHOR_ANSWER.with(|answer| *answer.borrow()))
+    ADD_AUTHOR_ANSWER.with(|answer| answer.borrow().is_some())
+}
+
+/// What the Save dialog picks now.
+pub fn save_answer() -> Option<PathBuf> {
+    SAVE_ANSWER.with(|answer| answer.borrow().clone())
+}
+
+/// What the Open dialog picks now.
+pub fn open_answer() -> Option<PathBuf> {
+    OPEN_ANSWER.with(|answer| answer.borrow().clone())
+}
+
+/// The button pressed in the question to add the user's name: the first
+/// adds it, the second declines.
+pub fn add_author_choice() -> loom_ui::effect::Choice {
+    ADD_AUTHOR_ANSWER.with(|answer| match *answer.borrow() {
+        Some(true) => Some(0),
+        _ => Some(1),
+    })
 }

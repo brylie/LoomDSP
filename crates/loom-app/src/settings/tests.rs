@@ -1,7 +1,7 @@
 use super::*;
 use crate::devices::fake::{self, Event, Fake};
 use crate::preferences::FILE_NAME;
-use crate::{Args, Source, recovery};
+use crate::{Args, Source};
 use loom_host_desktop::InputError;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -29,7 +29,7 @@ fn args(dir: &std::path::Path) -> Args {
 }
 
 fn start(args: Args, fake: &Rc<Fake>) -> App {
-    App::boot_with(args, &mut recovery::Dialogs, Rc::new(fake::Shared(fake.clone())))
+    App::boot_with(args, Rc::new(fake::Shared(fake.clone())))
 }
 
 fn write(dir: &std::path::Path, text: &str) -> PathBuf {
@@ -184,7 +184,7 @@ fn failed_audio_input_reopens() {
     app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     fake.input_writer.borrow().as_ref().unwrap().status().fail();
-    let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+    let _ = app.send(crate::Message::InputAudio(crate::input_watch::Event {
         underruns: 0,
         overruns: 0,
         show: false,
@@ -396,7 +396,7 @@ fn audio_input_plays_through_the_fake_host() {
         }
     }
     tape.step(256);
-    let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+    let _ = app.send(crate::Message::InputAudio(crate::input_watch::Event {
         underruns: 0,
         overruns: 0,
         show: false,
@@ -419,7 +419,7 @@ fn audio_input_plays_through_the_fake_host() {
     }
     assert_eq!(tape.left()[1023], 0.25);
     assert_eq!(tape.right()[1023], -0.25);
-    let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+    let _ = app.send(crate::Message::InputAudio(crate::input_watch::Event {
         underruns: 0,
         overruns: 0,
         show: false,
@@ -428,7 +428,7 @@ fn audio_input_plays_through_the_fake_host() {
     }));
     assert!(app.alerts.status().contains("avoid feedback"));
     app.alerts.say("other status");
-    let _ = app.update(crate::Message::InputAudio(crate::input_watch::Event {
+    let _ = app.send(crate::Message::InputAudio(crate::input_watch::Event {
         underruns: 0,
         overruns: 0,
         show: false,
@@ -816,7 +816,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
     app.add_module(constant, loom_ui_core::Point::new(100.0, 100.0));
     let id = *app.session.selection.first().unwrap();
     for i in 0..2_000 {
-        let _ = app.update(crate::Message::Inspector(crate::inspector::Message::Param {
+        let _ = app.send(crate::Message::Inspector(crate::inspector::Message::Param {
             module: id,
             index: 0,
             position: (i % 100) as f32 / 100.0,
@@ -852,7 +852,7 @@ fn open_new_and_quit_fade_out_first() {
     assert_eq!(app.rig.last_stop, Some(true), "New faded out");
     app.rig.last_stop = None;
     app.quit = true;
-    let _ = app.update(crate::Message::Tick);
+    let _ = app.send(crate::Message::Tick);
     assert_eq!(app.rig.last_stop, Some(true), "quit faded out");
 }
 
@@ -938,7 +938,7 @@ fn a_learned_panic_trigger_is_saved_and_runs_panic() {
         }),
         "the control change reached the engine"
     );
-    let _ = app.update(crate::Message::Midi);
+    let _ = app.send(crate::Message::Midi);
     assert_eq!(app.panic_line(), "Channel 1, controller 123");
     let saved = crate::preferences::load(&dir.join(FILE_NAME)).preferences.panic;
     assert_eq!(saved, Some(crate::preferences::PanicPref::Cc(0, 123)));
@@ -1152,7 +1152,7 @@ fn the_panic_section_learns_and_cancels() {
     assert_eq!(app.panic_line(), "None");
     app.preferences(Message::PanicLearn);
     assert!(app.preferences_view().is_some());
-    let _ = app.update(crate::Message::Midi);
+    let _ = app.send(crate::Message::Midi);
     assert_eq!(app.panic_line(), "Waiting for MIDI...", "no MIDI came yet");
     app.preferences(Message::PanicLearn);
     assert!(app.alerts.status().contains("cancelled"), "{}", app.alerts.status());
@@ -1168,7 +1168,7 @@ fn the_panic_section_learns_and_cancels() {
         }),
         "the note reached the engine"
     );
-    let _ = app.update(crate::Message::Midi);
+    let _ = app.send(crate::Message::Midi);
     assert_eq!(app.panic_line(), "Channel 10, note 36");
     assert!(app.preferences_view().is_some());
 
@@ -1280,7 +1280,7 @@ fn the_device_flag_wins_for_this_run_only() {
     assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));
     assert!(app.rig.flags.device.is_some(), "the window shows the flag note");
     app.quit = true;
-    let _ = app.update(crate::Message::Tick);
+    let _ = app.send(crate::Message::Tick);
     assert_eq!(
         std::fs::read_to_string(path).unwrap(),
         "(audio: (device: Named(\"Fake B\")))"
@@ -1345,7 +1345,7 @@ fn the_safety_flag_is_shown_and_never_saved() {
     );
     assert!(app.rig.safety_flag, "with the flag note");
     app.quit = true;
-    let _ = app.update(crate::Message::Tick);
+    let _ = app.send(crate::Message::Tick);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "(output_safety: \"clean\")");
 }
 
@@ -1450,9 +1450,9 @@ fn the_window_opens_and_closes_with_its_shortcut_and_escape() {
             repeat: false,
         })
     };
-    let _ = app.update(press(Key::Character(",".into()), Modifiers::COMMAND));
+    let _ = app.send(press(Key::Character(",".into()), Modifiers::COMMAND));
     assert!(app.overlays.preferences().is_some());
-    let _ = app.update(press(Key::Named(Named::Escape), Modifiers::empty()));
+    let _ = app.send(press(Key::Named(Named::Escape), Modifiers::empty()));
     assert!(app.overlays.preferences().is_none());
 }
 
@@ -1505,7 +1505,7 @@ fn audio_poll_subscription_and_message_handling() {
     let fake = two_devices();
     let mut app = start(args(&dir), &fake);
     let _ = app.subscription();
-    let _ = app.update(crate::Message::AudioPoll);
+    let _ = app.send(crate::Message::AudioPoll);
 }
 
 /// check_audio returns early when no_audio or fake_audio is active.
@@ -1674,7 +1674,7 @@ fn output_warnings_show_until_the_stream_stops() {
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
     let mut app = start(args(&dir), &fake);
     assert!(app.stats_model().playing);
-    let _ = app.update(crate::Message::Audio(crate::audio_watch::Event::Stats {
+    let _ = app.send(crate::Message::Audio(crate::audio_watch::Event::Stats {
         dropouts: 0,
         at: Instant::now(),
         peak: 0.0,
@@ -1709,7 +1709,7 @@ fn the_status_bar_fits_with_everything_on() {
         ],
     ));
     let mut app = start(args(&dir), &fake);
-    let _ = app.update(crate::Message::Learn(crate::learn::Message::Toggle));
+    let _ = app.send(crate::Message::Learn(crate::learn::Message::Toggle));
     app.alerts.set_input_drift(Some((12, 34)));
     app.alerts.set_output_warnings(true, true);
     let long = "a message long enough to fill the whole window ".repeat(8);
@@ -1761,4 +1761,27 @@ fn opening_a_patch_drops_an_input_error_that_is_over() {
     assert!(app.replace(Source::File(&patch)));
     assert!(app.rig.input.port().is_some(), "the stream opened");
     assert!(app.alerts.kept().is_empty(), "{:?}", app.alerts.kept());
+}
+
+/// A Save As answer that arrives after a device change is used: the change
+/// builds a new engine for the same patch, so the engine's generation moves
+/// and the patch's number does not (dialogs.rs, `Pending`).
+#[test]
+fn a_save_as_answer_after_a_device_change_is_used() {
+    let dir = folder("save-as-device");
+    let fake = two_devices();
+    let mut app = start(args(&dir), &fake);
+    let path = dir.join("mine.ron");
+    let (session, generation) = (app.session.id, app.generation);
+    assert!(!app.save_as_then(None), "the dialog waits");
+
+    change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+    assert_ne!(app.generation, generation, "a new engine");
+    assert_eq!(app.session.id, session, "for the same patch");
+
+    let _ = app.send(crate::Message::Dialog(crate::dialogs::DialogAnswer::File(Some(
+        path.clone(),
+    ))));
+    assert!(path.is_file(), "the save happened");
+    let _ = crate::files::fake::asked();
 }

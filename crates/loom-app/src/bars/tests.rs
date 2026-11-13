@@ -6,7 +6,7 @@ use loom_ui_core::UiId;
 #[test]
 fn every_item_has_an_id() {
     let mut app = crate::tests::app();
-    let _ = app.update(crate::Message::Learn(crate::learn::Message::Toggle));
+    let _ = app.send(crate::Message::Learn(crate::learn::Message::Toggle));
     let model = app.bars_model();
     let names: Vec<&str> = model.items.iter().map(|item| item.name).collect();
     for name in ["patch", "audio", "midi", "learning"] {

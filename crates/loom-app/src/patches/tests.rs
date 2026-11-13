@@ -122,17 +122,14 @@ fn browse_opens_patches_in_the_app() {
     let mut preferences = app.rig.store.saved().clone();
     preferences.library = Some(dir.clone());
     let _ = app.rig.store.save(preferences);
-    let _ = app.update(AppMessage::File(FileAction::Browse));
-    assert!(app.overlays.patches().is_some());
-    for path in patch_files(&dir, &AtomicBool::new(false)) {
-        let rows = vec![Row::read(&path)];
-        let _ = app.update(AppMessage::Patches(Message::Found {
-            open: app.patches_open,
-            rows,
-        }));
-    }
-    let _ = app.update(AppMessage::Patches(Message::Search("bass".into())));
-    let _ = app.update(AppMessage::Patches(Message::Submit));
+    let _ = app.send(AppMessage::File(FileAction::Browse));
+    // The reader ran as the browser opened (work runs inline in a test):
+    // every patch file is listed once, with no rows added by hand.
+    let files = patch_files(&dir, &AtomicBool::new(false)).len();
+    let browser = app.overlays.patches().expect("the browser is open");
+    assert_eq!(browser.shown().count(), files, "the reader's rows, each once");
+    let _ = app.send(AppMessage::Patches(Message::Search("bass".into())));
+    let _ = app.send(AppMessage::Patches(Message::Submit));
     assert!(app.overlays.patches().is_none());
     assert_eq!(app.session.document.name(), "Bass");
     assert_eq!(app.session.document.file(), Some(dir.join("live/bass.ron").as_path()));
@@ -163,7 +160,7 @@ fn the_library_folder_is_made_when_first_needed() {
     assert_eq!(dialogs::asked(), [Asked::Save(Some(dir.join("Untitled 2.ron")))]);
 
     std::fs::remove_dir_all(&root).unwrap();
-    let _ = app.update(AppMessage::File(FileAction::Browse));
+    let _ = app.send(AppMessage::File(FileAction::Browse));
     assert!(dir.is_dir(), "Browse made the library folder");
     assert!(app.overlays.patches().is_some());
     let _ = std::fs::remove_dir_all(root);
@@ -229,7 +226,7 @@ fn app_browsing(dir: &Path) -> (App, Arc<AtomicBool>) {
     let mut preferences = app.rig.store.saved().clone();
     preferences.library = Some(dir.to_path_buf());
     let _ = app.rig.store.save(preferences);
-    let _ = app.update(AppMessage::File(FileAction::Browse));
+    let _ = app.send(AppMessage::File(FileAction::Browse));
     let stop = app.overlays.patches().expect("the browser is open").stop.clone();
     assert!(!stop.load(Ordering::Relaxed));
     (app, stop)
@@ -240,7 +237,7 @@ fn app_browsing(dir: &Path) -> (App, Arc<AtomicBool>) {
 fn closing_the_browser_stops_its_reader() {
     let dir = library("close");
     let (mut app, stop) = app_browsing(&dir);
-    let _ = app.update(AppMessage::Patches(Message::Close));
+    let _ = app.send(AppMessage::Patches(Message::Close));
     assert!(app.overlays.patches().is_none());
     assert!(stop.load(Ordering::Relaxed));
     let _ = std::fs::remove_dir_all(dir);
@@ -252,11 +249,10 @@ fn closing_the_browser_stops_its_reader() {
 fn opening_a_patch_stops_the_reader() {
     let dir = library("opened");
     let (mut app, stop) = app_browsing(&dir);
-    let _ = app.update(AppMessage::Patches(Message::Found {
-        open: app.patches_open,
-        rows: vec![Row::read(&dir.join("pad.ron"))],
-    }));
-    let _ = app.update(AppMessage::Patches(Message::Submit));
+    // The reader ran to its end as the browser opened; the search leaves
+    // only the pad.
+    let _ = app.send(AppMessage::Patches(Message::Search("Pad".to_string())));
+    let _ = app.send(AppMessage::Patches(Message::Submit));
     assert!(app.overlays.patches().is_none());
     assert!(stop.load(Ordering::Relaxed));
 
@@ -271,7 +267,7 @@ fn opening_a_patch_stops_the_reader() {
 fn opening_the_browser_again_stops_the_earlier_reader() {
     let dir = library("again");
     let (mut app, first) = app_browsing(&dir);
-    let _ = app.update(AppMessage::File(FileAction::Browse));
+    let _ = app.send(AppMessage::File(FileAction::Browse));
     let second = app.overlays.patches().expect("the browser is open").stop.clone();
     assert!(first.load(Ordering::Relaxed), "the earlier reader stops");
     assert!(!second.load(Ordering::Relaxed), "the new one keeps reading");
@@ -377,4 +373,61 @@ fn a_row_shows_what_it_read() {
     }
     assert_eq!(Row::read(&dir.join("broken.ron")).details, "Could not read");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The list scrolls by the highlighted row's UI ID, just enough, as the
+/// window lays the rows out: nothing while the row shows, until its bottom
+/// meets the list's when it is below, until its top meets the list's when
+/// it is above, and to the end for the last row.
+#[test]
+fn the_list_scrolls_the_highlighted_row_just_into_view() {
+    let dir = crate::recovery::tests::TempDir::new("patches-scroll");
+    for i in 0..25 {
+        std::fs::write(
+            dir.0.join(format!("{i:02}.ron")),
+            format!(r#"Patch(version: 1, metadata: Metadata(name: "Patch {i:02}"))"#),
+        )
+        .unwrap();
+    }
+    let mut app = crate::tests::app();
+    let mut preferences = app.rig.store.saved().clone();
+    preferences.library = Some(dir.0.clone());
+    let _ = app.rig.store.save(preferences);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(AppMessage::File(FileAction::Browse));
+    let _ = ui.redraw();
+    let rows = ui.app.overlays.patches().unwrap().model().rows.len();
+    assert_eq!(rows, 25);
+    // Where the highlighted row is in the window, and what the list shows.
+    let step = |ui: &mut crate::ui_test::Ui, by: i32| {
+        ui.send(AppMessage::Patches(Message::Step(by)));
+        let _ = ui.redraw();
+        let browser = ui.app.overlays.patches().unwrap();
+        let row = browser.model().rows[browser.highlight].id.clone();
+        let place = ui.places().of(&row).expect("the window drew the row");
+        let list = place.clip.expect("the row is in the list");
+        let offset = ui.scroll_translation(LIST).expect("the list scrolls").y;
+        (place.rect, list, offset)
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+    let (_, _, offset) = step(&mut ui, 1);
+    assert!(near(offset, 0.0), "in view: no scroll");
+    let (row, list, offset) = step(&mut ui, 11);
+    assert!(offset > 0.0, "below: it scrolled");
+    assert!(
+        near(row.y + row.height, list.y + list.height),
+        "its bottom meets the list's"
+    );
+    // Rows 3 to 12 show now, so row 2 is above the view.
+    let (row, list, _) = step(&mut ui, -10);
+    assert!(near(row.y, list.y), "above: its top meets the list's");
+    let (_, _, before) = step(&mut ui, 1);
+    let (_, _, after) = step(&mut ui, 1);
+    assert!(near(before, after), "a row already in view scrolls nothing");
+    let (row, list, _) = step(&mut ui, 100);
+    assert_eq!(ui.app.overlays.patches().unwrap().highlight, rows - 1, "the last row");
+    assert!(
+        near(row.y + row.height, list.y + list.height),
+        "the end of the list shows"
+    );
 }

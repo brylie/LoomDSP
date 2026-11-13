@@ -68,7 +68,7 @@ fn app_with(text: &str) -> App {
 
 /// Sends a mode gesture.
 fn mode(app: &mut App, message: Message) {
-    let _ = app.update(AppMessage::Mode(message));
+    let _ = app.send(AppMessage::Mode(message));
 }
 
 /// The flat id at `path`, if any.
@@ -167,7 +167,7 @@ fn an_edit_inside_reaches_every_copy_as_one_step() {
             .filter(|(_, to)| app.session.controller.graph().node(to.module).unwrap().descriptor.id == "loom.math.mul")
             .count()
     };
-    let _ = app.update(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
+    let _ = app.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
         from: loom_canvas::PortRef {
             module: sine.0,
             index: 0,
@@ -282,7 +282,7 @@ fn spread_and_stereo_spread_from_the_inspector() {
             },
         );
     }
-    let _ = app.update(AppMessage::SliderReleased);
+    let _ = app.send(AppMessage::SliderReleased);
     assert_eq!(voice_rows(&mut app).spread[0].amount, 0.3);
     app.undo();
     assert_eq!(voice_rows(&mut app).spread[0].amount, 0.0, "one drag, one step");
@@ -369,7 +369,7 @@ fn a_layer_level_refuses_pastes_of_modules_and_cables() {
     let member_text = app.copy().expect("a member tile copies");
     app.paste(loom_ui_core::Point::new(0.0, 0.0), Some(note));
     assert_eq!(app.alerts.status(), modes::only_members(Mode::Layer));
-    let _ = app.update(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
+    let _ = app.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Connect {
         from: loom_canvas::PortRef {
             module: members[0].0,
             index: 0,
@@ -511,7 +511,7 @@ fn undo_puts_member_back() {
     mode(&mut app, Message::AddMember(2));
     let member = app.session.hierarchy.member_module(&ModulePath::top(2)).unwrap();
     app.turn_param(member.0, 0, 2.0);
-    let _ = app.update(AppMessage::SliderReleased);
+    let _ = app.send(AppMessage::SliderReleased);
     assert_eq!(voice_rows(&mut app).params[0].label, "Member: 2 (Voice 2)");
     app.undo();
     assert_eq!(voice_rows(&mut app).params[0].label, "Member: 1 (Voice)");

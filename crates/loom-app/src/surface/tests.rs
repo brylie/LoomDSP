@@ -357,7 +357,7 @@ fn an_exposed_voice_count_changes_the_inner_bundle_width() {
     let target = app.control_target(1, 0, ControlPart::Main).unwrap();
     assert!(target.spec.options.shapes_graph);
     app.edit(|app| {
-        let _ = app.update(crate::Message::Canvas(loom_canvas::CanvasEvent::TypedValue {
+        let _ = app.send(crate::Message::Canvas(loom_canvas::CanvasEvent::TypedValue {
             module: 1,
             widget: 0,
             text: "8".to_string(),
@@ -366,9 +366,9 @@ fn an_exposed_voice_count_changes_the_inner_bundle_width() {
     let c = &app.session.controller;
     let out = c.output_ref(target.module, "out").unwrap();
     assert_eq!(c.last_report().width(out).voices, 8);
-    let _ = app.update(crate::Message::Undo);
+    let _ = app.send(crate::Message::Undo);
     assert_eq!(app.session.controller.last_report().width(out).voices, 1);
-    let _ = app.update(crate::Message::Redo);
+    let _ = app.send(crate::Message::Redo);
     assert_eq!(app.session.controller.last_report().width(out).voices, 8);
 }
 

@@ -1,4 +1,4 @@
-use super::run::{crop_region, save_screenshot, search};
+use super::run::{Region, crop, crop_region, save_screenshot, search};
 use super::transport::*;
 use super::*;
 
@@ -9,14 +9,14 @@ fn run(app: &mut App, line: &str) -> Answer {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     // As the window would: answers wait for the change to be drawn, and
     // a `cc` for the engine to take it. Frames come about 60 a second.
     for _ in 0..u32::from(FRAMES_BEFORE_ANSWER) + u32::from(FRAMES_FOR_ENGINE) {
         if let Ok(answer) = receiver.try_recv() {
             return answer;
         }
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
         if app.control_waiting() {
             std::thread::sleep(Duration::from_millis(16));
         }
@@ -119,9 +119,9 @@ fn serve_script(app: &mut App, script: &'static str, vars: &'static [(&'static s
     // The app's side: take each call and draw frames until it is answered.
     while !client.is_finished() {
         if let Ok(call) = rx.try_recv() {
-            let _ = app.control(call);
+            let _ = app.send(Message::Control(call));
         }
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
         std::thread::sleep(Duration::from_millis(1));
     }
     String::from_utf8(client.join().unwrap())
@@ -624,7 +624,7 @@ fn sample_follows_a_live_value_frame_by_frame() {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(env),
             port: 0,
@@ -677,7 +677,7 @@ fn sample_reads_the_named_value_of_a_two_value_widget() {
         .spec(node.descriptor.param_index("pad_y").unwrap())
         .unwrap()
         .normalize(1_000.0);
-    let _ = app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(env),
             port: 0,
@@ -723,13 +723,13 @@ fn removing_the_sampled_module_ends_the_sample() {
         },
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     for _ in 0..=FRAMES_BEFORE_ANSWER {
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
     }
     assert!(receiver.try_recv().is_err(), "still sampling");
-    let _ = app.update(Message::Canvas(CanvasEvent::Delete(vec![4])));
-    let _ = app.update(Message::ControlFrame(Instant::now()));
+    let _ = app.send(Message::Canvas(CanvasEvent::Delete(vec![4])));
+    let _ = app.send(Message::ControlFrame(Instant::now()));
     let error = receiver.try_recv().unwrap().unwrap_err();
     assert!(error.contains("removed while sampling"), "{error}");
     assert!(!app.control_waiting());
@@ -769,7 +769,7 @@ fn run_playing(app: &mut App, line: &str) -> Answer {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     let sound = (app.session.controller.config().sample_rate * TEST_FRAME.as_secs_f32()).round() as usize;
     let mut now = Instant::now();
     // Enough frames for the longest `sample` in these tests.
@@ -778,7 +778,7 @@ fn run_playing(app: &mut App, line: &str) -> Answer {
             return answer;
         }
         app.run_engine(sound);
-        let _ = app.update(Message::ControlFrame(now));
+        let _ = app.send(Message::ControlFrame(now));
         now += TEST_FRAME;
     }
     receiver.try_recv().expect("answered")
@@ -846,9 +846,9 @@ fn opening_a_patch_ends_a_running_sample() {
         },
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     for _ in 0..=FRAMES_BEFORE_ANSWER {
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
     }
     assert!(receiver.try_recv().is_err(), "still sampling");
     // Module 4 of this patch also has a `resonance` control.
@@ -955,12 +955,12 @@ fn opening_a_patch_keeps_waiting_answers() {
         command: Command::Select { modules: Vec::new() },
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = app.control(call);
+    let _ = app.send(Message::Control(call));
     assert!(app.control_waiting());
     let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/sine.ron");
     assert!(app.replace(crate::Source::File(&patch)));
     for _ in 0..FRAMES_BEFORE_ANSWER {
-        let _ = app.update(Message::ControlFrame(Instant::now()));
+        let _ = app.send(Message::ControlFrame(Instant::now()));
     }
     assert_eq!(receiver.try_recv(), Ok(Ok(Map::new())));
 }
@@ -1011,7 +1011,7 @@ fn pointer_ui() -> crate::ui_test::Ui {
         .descriptor
         .param_index("resonance")
         .unwrap();
-    let _ = ui.app.update(Message::Modulation(crate::modulation::Message::Assign {
+    let _ = ui.app.send(Message::Modulation(crate::modulation::Message::Assign {
         source: loom_core::OutputRef {
             module: ModuleId(5),
             port: 0,
@@ -1039,15 +1039,13 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let task = ui.app.control(call);
-    let mut messages = ui.run_task(task);
+    let mut messages = ui.deliver(Message::Control(call));
     for _ in 0..200 {
         if let Ok(answer) = receiver.try_recv() {
             return (answer, messages);
         }
         messages.extend(ui.redraw());
-        let task = ui.app.update(Message::ControlFrame(Instant::now()));
-        messages.extend(ui.run_task(task));
+        messages.extend(ui.deliver(Message::ControlFrame(Instant::now())));
     }
     (receiver.try_recv().expect("answered after drawing"), messages)
 }
@@ -1060,7 +1058,7 @@ fn a_script_reads_the_typed_field_from_the_snapshot() {
     ui.app.commit();
     let _ = ui
         .app
-        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let at = ui.control(id.0, "cutoff");
     ui.move_to(at);
@@ -1200,7 +1198,7 @@ fn a_script_drags_an_output_onto_an_inspector_row() {
     let mut ui = pointer_ui();
     let _ = ui
         .app
-        .update(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
     ui.redraw();
     let row = ui.text("Cutoff").expect("inspector Cutoff row").center();
     let before = ui.app.session.controller.graph().assignments().count();
@@ -1226,7 +1224,7 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
             .unwrap(),
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = ui.app.control(call);
+    let _ = ui.deliver(Message::Control(call));
     // The press, then two moves.
     for _ in 0..3 {
         ui.redraw();
@@ -1236,7 +1234,7 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
     let mut answer = None;
     for _ in 0..50 {
         ui.redraw();
-        let _ = ui.app.update(Message::ControlFrame(Instant::now()));
+        let _ = ui.app.send(Message::ControlFrame(Instant::now()));
         if let Ok(a) = receiver.try_recv() {
             answer = Some(a);
             break;
@@ -1267,13 +1265,7 @@ fn a_capture_is_saved_whole_or_cut_to_an_area() {
     let dir = std::env::temp_dir().join(format!("loom-control-shot-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("shot.png");
-    let shot = || {
-        Some(iced::window::Screenshot::new(
-            vec![255u8; 40 * 20 * 4],
-            iced::Size::new(40, 20),
-            2.0,
-        ))
-    };
+    let shot = || Ok(loom_ui::effect::Image::new(40, 20, 2.0, vec![255u8; 40 * 20 * 4]).unwrap());
     let whole = save_screenshot(shot(), &path, None).unwrap();
     assert_eq!(
         (whole["width"].clone(), whole["height"].clone()),
@@ -1290,7 +1282,11 @@ fn a_capture_is_saved_whole_or_cut_to_an_area() {
             .unwrap_err()
             .contains("outside the window")
     );
-    assert!(save_screenshot(None, &path, None).unwrap_err().contains("no window"));
+    assert!(
+        save_screenshot(Err(loom_ui::effect::NoGpu), &path, None)
+            .unwrap_err()
+            .contains("no window")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1310,7 +1306,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(Some(sender)))),
         };
-        let _ = ui.app.located(call, target, &found, then);
+        ui.app.located(call, target, &found, then);
         receiver.try_recv()
     };
     let answer = ask(&mut ui, "4:cutoff", AfterSearch::Locate).unwrap().unwrap();
@@ -1323,7 +1319,9 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
     assert!(error.contains("`nope`"), "{error}");
     // A target that is there waits for the window capture.
     assert!(ask(&mut ui, "4:cutoff", then).is_err(), "not answered yet");
-    let _ = search(
+    // A search is a question for the window, asked after the turn.
+    search(
+        &ui.app,
         Call {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(None))),
@@ -1331,6 +1329,8 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
         "4".to_string(),
         AfterSearch::Locate,
     );
+    let asked = ui.app.take_window_questions();
+    assert!(matches!(asked.as_slice(), [crate::window_question::WindowQuestion::Find { text, .. }] if text == "4"));
 }
 
 /// The snapshot names a tile under a light, a knob turn, a tile move,
@@ -1421,7 +1421,7 @@ fn keys_reach_the_open_browser_and_the_bar_draws_the_clock() {
         ui.text("no device (clock) at 48000 Hz").is_some(),
         "the bar shows the clock"
     );
-    let _ = ui.app.update(Message::OpenBrowser);
+    let _ = ui.app.send(Message::OpenBrowser);
     ui.redraw();
     assert!(ui.app.overlays.browser().is_some());
     run_ui(&mut ui, r#"{"cmd": "key", "key": "escape"}"#).unwrap();
@@ -1443,7 +1443,7 @@ fn typing_ui() -> crate::ui_test::Ui {
 }
 
 /// The variant names of the messages an input became. The channel's own
-/// messages are left out, and so are text focus answers, which come from tasks,
+/// messages are left out, and so are focus answers, which come from tasks,
 /// and a list reporting where it scrolled, which comes from a frame.
 fn routed_names(messages: Vec<Message>) -> Vec<String> {
     messages
@@ -1462,7 +1462,7 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 "Control",
                 "ControlFrame",
                 "Located",
-                "TextFocus",
+                "FocusMoved",
                 "TypeFocus",
                 "Telemetry",
             ]
@@ -1536,9 +1536,9 @@ fn a_scripted_press_routes_as_a_real_one_for_each_overlay() {
 #[test]
 fn type_filters_the_open_browser() {
     let mut ui = typing_ui();
-    let _ = ui.app.update(Message::OpenBrowser);
+    let _ = ui.app.send(Message::OpenBrowser);
     ui.redraw();
-    ui.focus(crate::browser::INPUT);
+    ui.focus(&crate::browser::search_id());
     let before = ui.app.overlays.browser().unwrap().results().len();
 
     assert_eq!(run_type(&mut ui, "osc saw"), Ok(Map::new()));
@@ -1695,13 +1695,12 @@ fn locate_finds_lights_and_meters() {
 /// to the image.
 #[test]
 fn a_screenshot_area_is_scaled_and_cut_to_the_window() {
-    let size = iced::Size::new(200, 100);
     let rect = |x, y, w, h| Rect::new(Point::new(x, y), loom_ui_core::Size::new(w, h));
-    let region = crop_region(size, 2.0, rect(10.0, 5.0, 20.0, 10.0)).unwrap();
+    let region = crop_region(200, 100, 2.0, rect(10.0, 5.0, 20.0, 10.0)).unwrap();
     assert_eq!((region.x, region.y, region.width, region.height), (20, 10, 40, 20));
-    let region = crop_region(size, 1.0, rect(-10.0, 90.0, 30.0, 30.0)).unwrap();
+    let region = crop_region(200, 100, 1.0, rect(-10.0, 90.0, 30.0, 30.0)).unwrap();
     assert_eq!((region.x, region.y, region.width, region.height), (0, 90, 20, 10));
-    assert!(crop_region(size, 1.0, rect(300.0, 0.0, 10.0, 10.0)).is_none());
+    assert!(crop_region(200, 100, 1.0, rect(300.0, 0.0, 10.0, 10.0)).is_none());
 }
 
 /// `screenshot` takes `target` with `margin`, or `rect`, and refuses
@@ -1749,11 +1748,7 @@ fn on_fake_devices(name: &str, fake: &std::rc::Rc<crate::devices::fake::Fake>) -
         },
         ..crate::tests::app_args()
     };
-    App::boot_with(
-        args,
-        &mut crate::recovery::Dialogs,
-        std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())),
-    )
+    App::boot_with(args, std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())))
 }
 
 /// The Preferences commands go through the window's messages: the
@@ -2028,7 +2023,7 @@ fn a_script_types_an_exact_value() {
     ui.step(&[]);
     let _ = ui
         .app
-        .update(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
+        .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));
     ui.redraw();
     let target = format!("{}:cutoff", id.0);
     run_ui(&mut ui, &format!(r#"{{"cmd": "hover", "target": "{target}"}}"#)).unwrap();
@@ -2429,6 +2424,31 @@ fn locate_takes_an_overlay_ui_id() {
     let search = locate(&ui.app, "browser/search", &found).unwrap();
     let browser = locate(&ui.app, "browser", &found).unwrap();
     assert!(browser.contains(search.center()), "the field is in the browser");
+
+    // Preferences' parts, and the chooser's over it, too.
+    let _ = ui.app.send(Message::Browser(crate::browser::Message::Close));
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: None,
+        text: None,
+        places: ui.places(),
+    };
+    let close = locate(&ui.app, "preferences/close", &found).unwrap();
+    let label = ui.text("Close").expect("Preferences shows Close");
+    assert!(close.contains(label.center()), "the button holds its label");
+    let _ = ui
+        .app
+        .send(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: None,
+        text: None,
+        places: ui.places(),
+    };
+    let cancel = locate(&ui.app, "licence/cancel", &found).unwrap();
+    let label = ui.text("Cancel").expect("the chooser shows Cancel");
+    assert!(cancel.contains(label.center()));
 }
 
 /// A part that is scrolled out of view is not located: a pointer sent
@@ -2455,11 +2475,7 @@ fn a_part_scrolled_out_of_view_is_not_located() {
         width: 100.0,
         height: 20.0,
     };
-    let mut find = Find {
-        text: String::new(),
-        found: Found::default(),
-        parts: crate::places::Collect::default(),
-    };
+    let mut find = Find::new(String::new());
     find.scrollable(None, area, area, iced::Vector::new(0.0, 0.0), &mut Still);
     find.traverse(&mut |inside| {
         inside.container(Some(&"inspector/4/param/cutoff".into()), row(10.0));
@@ -2492,4 +2508,90 @@ fn a_canvas_ui_id_is_found_by_the_commands() {
     }
     run_ui(&mut ui, r#"{"cmd": "hover", "target": "canvas/4/param/cutoff"}"#)
         .unwrap_or_else(|why| panic!("hover: {why}"));
+}
+
+/// A crop keeps the pixels inside its region, row by row, and no others.
+#[test]
+fn a_crop_takes_the_pixels_of_its_region() {
+    // A 3 by 2 image whose every pixel says where it is.
+    let rgba = (0..2u8)
+        .flat_map(|y| (0..3u8).flat_map(move |x| [x, y, 0, 255]))
+        .collect();
+    let image = loom_ui::effect::Image::new(3, 2, 1.0, rgba).unwrap();
+    let region = Region {
+        x: 1,
+        y: 0,
+        width: 2,
+        height: 2,
+    };
+    assert_eq!(
+        crop(&image, region),
+        [1, 0, 0, 255, 2, 0, 0, 255, 1, 1, 0, 255, 2, 1, 0, 255]
+    );
+}
+
+/// A `screenshot` asks for a capture as an effect, and its answer comes
+/// back as `Message::Captured`, which saves and replies. The harness draws
+/// no window, so it answers that there is nothing to capture, and the
+/// reply says so: for the whole window, an area, and a target's area.
+#[test]
+fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
+    let mut ui = pointer_ui();
+    // Built as JSON, so a Windows path's backslashes are escaped.
+    let path = std::env::temp_dir().join(format!("loom-capture-effect-{}.png", std::process::id()));
+    let path = path.display().to_string();
+    for line in [
+        json!({"cmd": "screenshot", "path": path}),
+        json!({"cmd": "screenshot", "path": path, "rect": [0, 0, 10, 10]}),
+        json!({"cmd": "screenshot", "path": path, "target": "4:cutoff", "margin": 4}),
+    ]
+    .map(|command| command.to_string())
+    {
+        let (answer, messages) = drive(&mut ui, &line);
+        assert!(
+            answer.unwrap_err().contains("no window to capture"),
+            "{line}: the harness has no window"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| matches!(message, Message::Captured { .. })),
+            "{line}: the capture's answer is a message"
+        );
+    }
+}
+
+/// A command's UI messages are their own updates on the next turn, and its
+/// answer is read only once they have run (ui-layer.md, section 2, rule 5):
+/// `set` answers with the value its messages stored. Before they run,
+/// nothing has changed and nothing is answered.
+#[test]
+fn a_command_answers_after_its_messages_ran() {
+    let mut app = crate::ui_test::Ui::open("subtractive.ron").app;
+    let cutoff = |app: &App| {
+        let node = app.session.controller.graph().node(ModuleId(4)).unwrap();
+        node.params[node.descriptor.param_index("cutoff").unwrap()]
+    };
+    let before = cutoff(&app);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "set", "module": 4, "param": "cutoff", "value": 800}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    app.control(call);
+    let posted = app.take_posted();
+    assert!(
+        matches!(posted.as_slice(), [_, Message::SliderReleased, Message::ControlReply]),
+        "{posted:?}"
+    );
+    assert_eq!(cutoff(&app), before, "the change waits for its own update");
+    assert!(receiver.try_recv().is_err(), "and so does the answer");
+    for message in posted {
+        let _ = app.send(message);
+    }
+    for _ in 0..FRAMES_BEFORE_ANSWER {
+        let _ = app.send(Message::ControlFrame(Instant::now()));
+    }
+    let answer = receiver.try_recv().expect("answered once drawn").unwrap();
+    assert!((answer["value"].as_f64().unwrap() - 800.0).abs() < 1.0, "{answer:?}");
 }

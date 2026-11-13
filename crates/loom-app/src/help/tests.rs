@@ -108,7 +108,7 @@ fn help_from_focused_browser_preserves_search() {
 #[test]
 fn help_from_selected_tile_inspector_and_menu() {
     let mut ui = Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let expected = ui.app.ui_snapshot().help.unwrap();
     // Help names the module's family first (ADR-0029).
@@ -138,7 +138,7 @@ fn help_from_selected_tile_inspector_and_menu() {
 #[test]
 fn help_close_stays_visible_while_scrolling() {
     let mut ui = Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let before = ui.text("Close").expect("close action");
     let scroll_before = ui.scroll_translation("module-help-content").expect("help scroll area");
@@ -160,13 +160,13 @@ fn help_close_stays_visible_while_scrolling() {
 #[test]
 fn example_button_honors_unsaved_changes() {
     let mut ui = Ui::open("sine.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
-    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Param {
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![3])));
+    let _ = ui.app.send(Message::Inspector(crate::inspector::Message::Param {
         module: 5,
         index: 0,
         position: 0.8,
     }));
-    let _ = ui.app.update(Message::SliderReleased);
+    let _ = ui.app.send(Message::SliderReleased);
     assert!(ui.app.unsaved());
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let _ = files::fake::asked();
@@ -175,9 +175,7 @@ fn example_button_honors_unsaved_changes() {
     ui.press();
     ui.release();
     assert!(ui.app.overlays.question.is_some(), "it asks first");
-    let _ = ui
-        .app
-        .update(Message::Question(QuestionMessage::Answer(Answer::Cancel)));
+    let _ = ui.app.send(Message::Question(QuestionMessage::Answer(Answer::Cancel)));
     assert!(ui.app.overlays.help.is_some(), "cancellation keeps the help open");
     assert!(ui.app.unsaved());
 
@@ -186,7 +184,7 @@ fn example_button_honors_unsaved_changes() {
     assert!(ui.app.overlays.question.is_some(), "it asks again");
     let _ = ui
         .app
-        .update(Message::Question(QuestionMessage::Answer(Answer::DontSave)));
+        .send(Message::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(ui.app.overlays.help.is_none());
     assert!(!ui.app.unsaved());
     assert!(ui.app.session.document.file().is_none());
@@ -210,13 +208,13 @@ fn example_button_saves_the_old_patch_when_requested() {
     let mut ui = Ui::open("sine.ron");
     // The test patch is an untitled copy, so saving asks for a path.
     ui.app.session.document.forget_file();
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![3])));
-    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Param {
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![3])));
+    let _ = ui.app.send(Message::Inspector(crate::inspector::Message::Param {
         module: 5,
         index: 0,
         position: 0.8,
     }));
-    let _ = ui.app.update(Message::SliderReleased);
+    let _ = ui.app.send(Message::SliderReleased);
     let value = ui
         .app
         .session
@@ -232,7 +230,7 @@ fn example_button_saves_the_old_patch_when_requested() {
     ui.move_to(at);
     ui.press();
     ui.release();
-    let _ = ui.app.update(Message::Question(QuestionMessage::Answer(Answer::Save)));
+    let _ = ui.app.send(Message::Question(QuestionMessage::Answer(Answer::Save)));
     let saved = crate::patch_file::load(&destination).expect("old patch was saved");
     let gain = saved.modules.iter().find(|module| module.id == 5).unwrap().params["gain"];
     assert_eq!(gain, value);
@@ -249,23 +247,23 @@ fn example_button_saves_the_old_patch_when_requested() {
 #[test]
 fn example_uses_existing_unsaved_changes_flow() {
     let mut ui = Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
-    let _ = ui.app.update(Message::ShowHelp);
-    let _ = ui.app.update(Message::Inspector(crate::inspector::Message::Param {
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::ShowHelp);
+    let _ = ui.app.send(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position: 0.8,
     }));
-    let _ = ui.app.update(Message::SliderReleased);
+    let _ = ui.app.send(Message::SliderReleased);
     assert!(ui.app.unsaved());
     let _ = files::fake::asked();
-    let _ = ui.app.update(Message::HelpExample);
+    let _ = ui.app.send(Message::HelpExample);
     assert!(ui.app.overlays.help.is_some());
     assert!(ui.app.overlays.question.is_some());
     let mut clean = Ui::open("subtractive.ron");
-    let _ = clean.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
-    let _ = clean.app.update(Message::ShowHelp);
-    let _ = clean.app.update(Message::HelpExample);
+    let _ = clean.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = clean.app.send(Message::ShowHelp);
+    let _ = clean.app.send(Message::HelpExample);
     assert!(clean.app.overlays.help.is_none());
     assert!(clean.app.session.document.file().is_none());
 }
@@ -323,7 +321,7 @@ fn help_details_read_as_words_with_units() {
 #[test]
 fn help_wraps_inside_and_closes_from_the_backdrop() {
     let mut ui = Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let close = ui.text("Close").expect("the Close button");
     // The panel ends 20 px right of its Close button.
@@ -351,7 +349,7 @@ fn help_wraps_inside_and_closes_from_the_backdrop() {
 #[test]
 fn inspector_ports_are_one_line_each() {
     let mut ui = Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
     let crate::inspector::Inspector::Module(rows) = ui.app.inspector_model() else {
         panic!("the SVF's rows");
     };

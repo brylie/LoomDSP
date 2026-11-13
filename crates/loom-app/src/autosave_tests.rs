@@ -13,7 +13,6 @@ use std::time::Duration;
 struct Answer {
     choice: Choice,
     asked: Vec<(String, String)>,
-    errors: Vec<String>,
 }
 
 impl Answer {
@@ -21,19 +20,32 @@ impl Answer {
         Self {
             choice,
             asked: Vec::new(),
-            errors: Vec::new(),
         }
     }
+}
+
+/// The error a failed restore shows in the window, which it also keeps in
+/// the status line.
+fn restore_error(app: &App) -> String {
+    let snapshot = app.ui_snapshot();
+    assert!(
+        snapshot.errors.iter().any(|e| e.cause == alerts::Cause::File),
+        "kept as a file error: {:?}",
+        snapshot.errors
+    );
+    let shown = snapshot.question.expect("the error shows in the window");
+    assert!(
+        app.alerts.status().starts_with("Could not restore"),
+        "{}",
+        app.alerts.status()
+    );
+    shown.text
 }
 
 impl Prompt for Answer {
     fn ask(&mut self, orphan: &Orphan) -> Choice {
         self.asked.push(orphan.question());
         self.choice
-    }
-
-    fn error(&mut self, message: &str) {
-        self.errors.push(message.to_string());
     }
 }
 
@@ -88,12 +100,12 @@ fn settle(app: &mut App, now: Instant, mut done: impl FnMut(&App) -> bool) {
 
 /// Turns the filter's cutoff, as a slider would.
 fn turn_knob(app: &mut App, position: f32) {
-    let _ = app.update(Message::Inspector(crate::inspector::Message::Param {
+    let _ = app.send(Message::Inspector(crate::inspector::Message::Param {
         module: 4,
         index: 0,
         position,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
 }
 
 /// Turns a knob to `position` and waits for the copy. Returns the session
@@ -144,9 +156,9 @@ fn selection_and_notes_make_no_copy() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
     let t0 = Instant::now();
-    let _ = app.update(Message::Inspector(crate::inspector::Message::SelectModule(4)));
-    let _ = app.update(Message::HoldNote);
-    let _ = app.update(Message::HoldNote);
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+    let _ = app.send(Message::HoldNote);
+    let _ = app.send(Message::HoldNote);
     for i in 0..40 {
         app.autosave(t0 + recovery::TICK * i);
         std::thread::sleep(Duration::from_millis(1));
@@ -160,12 +172,12 @@ fn saving_or_undoing_deletes_the_copy() {
     let setup = Setup::new("save");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = edit_and_keep(&mut app);
-    let _ = app.update(Message::File(crate::FileAction::Save));
+    let _ = app.send(Message::File(crate::FileAction::Save));
     settle(&mut app, Instant::now(), |_| !dir.join("patch.ron").exists());
     assert!(!dir.join("info.ron").exists());
 
     let dir = edit_and_keep_at(&mut app, 0.3);
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert!(!app.unsaved());
     settle(&mut app, Instant::now() + Duration::from_secs(60), |_| {
         !dir.join("patch.ron").exists()
@@ -178,7 +190,7 @@ fn a_clean_exit_deletes_the_folder() {
     let setup = Setup::new("exit");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let dir = folder(&app);
-    let _ = app.update(Message::File(crate::FileAction::Close));
+    let _ = app.send(Message::File(crate::FileAction::Close));
     assert!(!app.run_files.autosave_on());
     assert!(!dir.exists());
     assert!(sessions(&setup.root()).is_empty());
@@ -234,7 +246,8 @@ fn no_dialog_keeps_the_copy() {
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     let crashed = edit_and_keep(&mut app);
     drop(app);
-    let app = setup.boot(None, &mut Answer::new(Choice::Unavailable));
+    files::fake::no_dialogs();
+    let app = setup.boot(None, &mut Answer::new(Choice::NotNow));
     assert!(crashed.join("patch.ron").exists());
     assert!(
         app.alerts
@@ -324,9 +337,8 @@ fn a_broken_copy_is_kept() {
 
     let mut answer = Answer::new(Choice::Restore);
     let app = setup.boot(Some(setup.file()), &mut answer);
-    let [error] = answer.errors.as_slice() else {
-        panic!("one error: {:?}", answer.errors)
-    };
+    // The window is open by the time it answers, so the error shows in it.
+    let error = restore_error(&app);
     assert!(error.starts_with("Could not restore the unsaved changes: "), "{error}");
     assert!(error.contains("The copy is kept at "), "{error}");
     assert_eq!(
@@ -352,8 +364,7 @@ fn a_copy_that_does_not_load_is_kept() {
 
     let mut answer = Answer::new(Choice::Restore);
     let mut app = setup.boot(None, &mut answer);
-    assert_eq!(answer.errors.len(), 1, "{:?}", answer.errors);
-    assert!(answer.errors[0].starts_with("Could not restore the unsaved changes: "));
+    assert!(restore_error(&app).starts_with("Could not restore the unsaved changes: "));
     assert_eq!(
         app.title(),
         "Untitled - LoomDSP",
@@ -381,14 +392,14 @@ fn restore_reports_unknown_modules() {
     .unwrap();
     let mut answer = Answer::new(Choice::Restore);
     let mut app = setup.boot(None, &mut answer);
-    assert!(answer.errors.is_empty());
+    assert!(app.overlays.question.is_none(), "no error shows");
     assert!(
         app.alerts.status().contains("future.effect@1"),
         "{}",
         app.alerts.status()
     );
     let message = app.alerts.status().to_string();
-    let _ = app.update(Message::Canvas(loom_canvas::CanvasEvent::Move {
+    let _ = app.send(Message::Canvas(loom_canvas::CanvasEvent::Move {
         ids: vec![1],
         delta: loom_ui_core::Vector::new(12.0, 0.0),
     }));
@@ -510,7 +521,7 @@ fn a_failed_autosave_stays_as_a_warning_until_it_works() {
     assert_eq!(snapshot.errors[0].cause, alerts::Cause::Autosave);
     assert_eq!(snapshot.errors[0].severity, alerts::Severity::Warning);
 
-    let _ = app.update(Message::File(FileAction::New));
+    let _ = app.send(Message::File(FileAction::New));
     assert_eq!(app.alerts.kept().len(), 1, "a new patch does not fix the disk");
 
     app.autosave_report(recovery::Report::Works);
@@ -525,7 +536,7 @@ fn a_failed_autosave_can_be_dismissed() {
     let setup = Setup::new("dismiss");
     let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
     app.autosave_report(recovery::Report::Failed("Autosave failed: disk full.".to_string()));
-    let _ = app.update(Message::DismissError(alerts::Cause::Autosave));
+    let _ = app.send(Message::DismissError(alerts::Cause::Autosave));
     assert!(app.alerts.kept().is_empty());
     assert_eq!(app.alerts.status(), "");
 }
@@ -561,4 +572,45 @@ fn autosave_that_is_off_stays_as_a_warning() {
 
     app.alerts.say("Something newer");
     assert_eq!(app.alerts.kept().len(), 1);
+}
+
+/// The recovery question comes once the window is open, not before: the
+/// app starts with an empty patch and a deadline due at once, the question
+/// is an effect of that deadline's turn, and the patch the command line
+/// asked for opens only on the answer (autosave.md, Crash recovery).
+#[test]
+fn the_recovery_question_waits_for_the_window() {
+    use loom_ui::{Context, Effect, Waker, WindowState};
+    let setup = Setup::new("after-window");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    let crashed = edit_and_keep(&mut app);
+    drop(app);
+
+    let mut app = App::new(setup.args(Some(setup.file())));
+    assert!(
+        app.session.document.file().is_none(),
+        "nothing opens while the copy waits"
+    );
+    let deadline = app.next_deadline().expect("the question is due");
+    assert!(deadline.at <= Instant::now());
+    assert!(matches!(deadline.message, Message::AskRecovery));
+
+    let (sender, _queue) = std::sync::mpsc::channel();
+    let waker = Waker::new(sender, std::sync::Arc::new(|| {}));
+    let window = WindowState::new(loom_ui_core::Size::new(800.0, 600.0));
+    let cx = Context::new(Instant::now(), &waker, None, window);
+    let effects: Vec<_> = app.update(Message::AskRecovery, &cx).into_iter().collect();
+    let [Effect::Ask { question, .. }] = effects.as_slice() else {
+        panic!("one question: {effects:?}")
+    };
+    assert_eq!(question.buttons, ["Restore", "Discard", "Not Now"]);
+    assert!(app.next_deadline().is_none(), "asked once");
+
+    let _ = app.update(Message::Dialog(crate::dialogs::DialogAnswer::Choice(Some(2))), &cx);
+    assert_eq!(
+        app.session.document.file(),
+        Some(setup.file().as_path()),
+        "Not Now opens the patch"
+    );
+    assert!(crashed.join("patch.ron").exists(), "the copy is kept");
 }

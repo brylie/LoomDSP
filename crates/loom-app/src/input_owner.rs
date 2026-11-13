@@ -10,7 +10,6 @@
 
 use crate::{App, Message, panic, patches, question, recent, settings};
 use crate::{controls, matrix, subscriptions};
-use iced::Task;
 use iced::event::Status;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{mouse, window};
@@ -208,8 +207,8 @@ impl App {
             interactive: self.input_owner() == InputOwner::Canvas,
             matrix_keyboard: matrix,
             matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
-            text_field_keys: self.text_focus.any,
-            text_field_keeps_tab: self.tab_moves_between_fields(),
+            text_field_keys: self.focus.is_some(),
+            text_field_keeps_tab: self.tab_moves_between_fields(self.focus.as_ref()),
         }
     }
 
@@ -222,17 +221,6 @@ impl App {
             patches: self.input_owner() == InputOwner::Patches,
             value_draft: self.session.value_draft.is_some(),
         }
-    }
-
-    /// Applies the messages an event becomes, one after the other. A route with
-    /// no message still redraws, so it counts as input for `--measure-idle`.
-    pub(crate) fn input_message(&mut self, event: iced::Event, status: Status, listening: Listening) -> Task<Message> {
-        let messages = listening.route(event, status);
-        if messages.is_empty() {
-            loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
-            return Task::none();
-        }
-        Task::batch(messages.into_iter().map(|message| self.update(message)))
     }
 
     /// A key no widget used while an overlay has the input. An overlay's keys
@@ -261,6 +249,27 @@ impl App {
                 _ => {}
             },
         }
+    }
+}
+
+/// The messages an input event becomes, routed before `update` by whoever
+/// runs the app (the bridge, the `Ui` harness, `App::send`): each is its
+/// own update, in order (ui-layer.md, section 2, rule 5). A route with no
+/// message still redraws, so it counts as input for `--measure-idle`.
+pub(crate) fn route(message: Message) -> Vec<Message> {
+    match message {
+        Message::Input {
+            event,
+            status,
+            listening,
+        } => {
+            let messages = listening.route(event, status);
+            if messages.is_empty() {
+                loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
+            }
+            messages
+        }
+        message => vec![message],
     }
 }
 

@@ -10,7 +10,6 @@
 //! pointer has no highlight until a key moves it.
 
 use crate::{App, Message, probe_menu, recent};
-use iced::Task;
 use iced::keyboard::{self, Key, key::Named};
 use loom_ui_core::UiId;
 
@@ -209,27 +208,28 @@ impl App {
 
     /// A key a menu uses ([`is_menu_key`]) while a menu is open. It stops
     /// here, so it reaches neither the canvas nor a window behind the menu.
-    pub(crate) fn menu_key(&mut self, event: &keyboard::Event) -> Task<Message> {
+    pub(crate) fn menu_key(&mut self, event: &keyboard::Event) {
         let keyboard::Event::KeyPressed { key, repeat, .. } = event else {
-            return Task::none();
+            return;
         };
         let Some(menu) = self.menu_model() else {
-            return Task::none();
+            return;
         };
         match key.as_ref() {
             Key::Named(Named::Escape) => {
                 self.close_menu(menu.kind);
-                Task::none()
             }
-            Key::Named(Named::Enter) if !repeat => match menu.highlighted() {
-                Some(item) => self.update(item.message.clone()),
-                None => Task::none(),
-            },
+            // The item's message is its own update, on the next turn, as a
+            // click on the item would send it (ui-layer.md, section 2, rule 5).
+            Key::Named(Named::Enter) if !repeat => {
+                if let Some(item) = menu.highlighted() {
+                    self.post(item.message.clone());
+                }
+            }
             _ => {
                 if let Some(at) = step(menu.highlight, menu.items.len(), key) {
                     self.overlays.set_menu_highlight(Some(at));
                 }
-                Task::none()
             }
         }
     }

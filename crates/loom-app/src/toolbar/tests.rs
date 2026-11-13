@@ -52,20 +52,20 @@ fn a_disabled_button_says_why() {
     assert!(recent.hover.is_some());
 
     assert_eq!(button(&app, "midi_learn").on, Some(false));
-    let _ = app.update(Message::Learn(learn::Message::Toggle));
+    let _ = app.send(Message::Learn(learn::Message::Toggle));
     assert_eq!(button(&app, "midi_learn").on, Some(true));
     assert_eq!(button(&app, "new").on, None);
 
     // One edit: a knob turned and let go.
     let module = app.session.controller.add_module("loom.filter.svf").unwrap().0;
     app.commit();
-    let _ = app.update(Message::Canvas(loom_canvas::CanvasEvent::SetControl {
+    let _ = app.send(Message::Canvas(loom_canvas::CanvasEvent::SetControl {
         module,
         widget: 0,
         position: 0.25,
         part: loom_canvas::ControlPart::Main,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     let undo = button(&app, "undo");
     assert!(undo.enabled);
     assert!(undo.hover.is_some_and(|hover| hover.starts_with("Undo: ")));

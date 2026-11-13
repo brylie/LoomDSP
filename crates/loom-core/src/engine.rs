@@ -185,10 +185,10 @@ pub(crate) enum Command {
 }
 
 pub(crate) enum Garbage {
-    Module(#[allow(dead_code)] Box<dyn Module>),
-    Schedule(#[allow(dead_code)] Box<Schedule>),
-    HeldSet(#[allow(dead_code)] Box<HeldSet>),
-    Input(#[allow(dead_code)] crate::audio_input::InputReader),
+    Module(#[expect(dead_code, reason = "dropped on the control thread")] Box<dyn Module>),
+    Schedule(#[expect(dead_code, reason = "dropped on the control thread")] Box<Schedule>),
+    HeldSet(#[expect(dead_code, reason = "dropped on the control thread")] Box<HeldSet>),
+    Input(#[expect(dead_code, reason = "dropped on the control thread")] crate::audio_input::InputReader),
 }
 
 /// Notes held per tracked MIDI input, and how many inputs hold each note

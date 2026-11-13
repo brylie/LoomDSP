@@ -597,3 +597,57 @@ fn next_says_when_to_draw() {
         "a resize draws through the system's redraw request"
     );
 }
+
+/// `deliver` runs its one message alone: what a waker queued before it
+/// waits for the next turn, and so does a deadline that is due. The bridge
+/// to Iced hands over the window's word on focus this way.
+#[test]
+fn deliver_runs_one_message_alone() {
+    let start = Instant::now();
+    let mut runtime = Runtime::new(
+        TestApp::default(),
+        NoTarget,
+        WindowState::new(Size::new(10.0, 10.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.waker().send(Msg::Add(1));
+    let next = runtime.deliver(Msg::Add(10), start, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Add(10)], "only the delivered message");
+    assert!(next.again, "the queued one is due next");
+    runtime.handle(DriverEvent::Woken, start, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Add(10), Msg::Add(1)]);
+    assert_eq!(runtime.counts().turns, 2);
+}
+
+/// `deliver` keeps the runtime's rules (section 2, rules 5 and 10): one
+/// update, that message's effects right after it, the turn drawing because
+/// a panel changed, and the messages its effects send left for the next
+/// turn.
+#[test]
+fn deliver_keeps_the_rules_of_a_turn() {
+    let start = Instant::now();
+    let mut runtime = Runtime::new(
+        TestApp::default(),
+        NoTarget,
+        WindowState::new(Size::new(10.0, 10.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.handle(DriverEvent::Woken, start, &mut driver);
+
+    // Chain's two pieces of work run inline, and each sends a message.
+    let next = runtime.deliver(Msg::Chain, start, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Chain], "one update");
+    assert_eq!(runtime.counts().updates, 1);
+    assert!(next.again, "what its effects sent waits for the next turn");
+    assert!(!next.draw, "nothing shown changed yet");
+
+    let next = runtime.handle(DriverEvent::Woken, start, &mut driver);
+    assert_eq!(runtime.app().seen, [Msg::Chain, Msg::Add(1), Msg::Add(2)]);
+    assert!(next.draw, "the count's panel changed");
+
+    let next = runtime.deliver(Msg::Add(5), start, &mut driver);
+    assert!(next.draw, "a delivered change draws too");
+    assert_eq!(runtime.app().count, 8);
+}

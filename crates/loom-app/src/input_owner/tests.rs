@@ -175,7 +175,7 @@ fn an_empty_route_counts_as_input() {
     let listening = app.listening();
     let event = iced::Event::Keyboard(released);
     assert!(listening.route(event.clone(), Status::Captured).is_empty());
-    let _ = app.update(Message::Input {
+    let _ = app.send(Message::Input {
         event,
         status: Status::Captured,
         listening,
@@ -194,7 +194,7 @@ fn a_route_reads_who_was_listening_before_the_event() {
         app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
-    let _ = app.update(Message::File(crate::FileAction::New));
+    let _ = app.send(Message::File(crate::FileAction::New));
     assert!(app.overlays.question.is_some());
     let enter = iced::Event::Keyboard(keyboard::Event::KeyPressed {
         key: Key::Named(Named::Enter),
@@ -205,7 +205,7 @@ fn a_route_reads_who_was_listening_before_the_event() {
         text: None,
         repeat: false,
     });
-    let _ = app.update(Message::Input {
+    let _ = app.send(Message::Input {
         event: enter,
         status: Status::Captured,
         listening: before,
@@ -340,7 +340,10 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
             select_first_module(&mut ui);
             open_overlay(&mut ui, owner);
             let modules = ui.app.session.controller.graph().nodes().count();
-            ui.run_task(crate::editing::unfocus_text_fields());
+            let _ = ui.run_task(crate::iced_bridge::focus_moves(
+                &loom_ui::effect::FocusTarget::Nothing,
+                loom_ui::effect::Selection::Keep,
+            ));
             ui.redraw();
             assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
             ui.clipboard.0 = Some("before".to_string());
@@ -361,7 +364,7 @@ fn duplicate_does_nothing_from_a_focused_search_field() {
     select_first_module(&mut ui);
     let modules = ui.app.session.controller.graph().nodes().count();
     open_overlay(&mut ui, InputOwner::Patches);
-    ui.focus(patches::SEARCH);
+    ui.focus(&patches::text_fields()[0]);
     assert!(ui.text_field_focused());
     assert_eq!(tap_command(&mut ui, "d"), modules);
 }

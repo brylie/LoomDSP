@@ -78,6 +78,8 @@ Two questions pick one of the six Creative Commons 4.0 licences. A third answer 
 
 Every licence except `CC0-1.0` requires credit to the authors, which is why the authors field matters. Each answer shows a one-sentence explanation in plain words, and the chooser links to the licence's own page. The app explains; it does not give legal advice.
 
+With a screen reader, the chooser is a dialog named by its title. Each question is a radio group whose answers carry their explanations as descriptions; **Other** is a radio button with its text field after it, and the field's text is typed, not used, since Enter there would use it. What the answers give is read as text, and **Use this licence** is disabled until they give a licence. Opened from Preferences, it hides Preferences until it closes ([UI layer](ui-layer.md), section 7, rule 27).
+
 ### Credit for parts
 
 A sub-patch keeps the authors of the patch it came from ([sub-patches](sub-patches.md#library)). Inserting a library item copies its authors into the sub-patch's definition, and a copy of the tile keeps them.

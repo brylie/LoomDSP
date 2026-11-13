@@ -28,6 +28,12 @@ pub(crate) type UnknownPositions = BTreeMap<u32, (Option<(f32, f32)>, (f32, f32)
 /// The open patch: its graph and layout, its edits, what the canvas shows of
 /// it, and the engine that plays it.
 pub(crate) struct PatchSession {
+    /// Which patch this is: a number no other session of this run has. New,
+    /// Open, and a restore make a new session, and with it a new number; a
+    /// new engine for the same patch (a device change) keeps it. What waits
+    /// on a dialog keeps it, so its answer goes to the patch it was asked
+    /// about (`dialogs::Pending`).
+    pub(crate) id: u64,
     pub(crate) controller: Controller,
     /// The sub-patch hierarchy beside the flat graph (ADR-0039): where
     /// each module sits, the definitions, the instance and port tiles, and
@@ -135,6 +141,9 @@ pub(crate) struct Started {
     pub(crate) fresh: bool,
 }
 
+/// The next session's number.
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 impl PatchSession {
     /// Attaches audio and MIDI to a loaded patch. The only way to build a
     /// session: each field is named here, so a new one must say how it starts.
@@ -199,6 +208,7 @@ impl PatchSession {
         // commit of the app's own (#413 review).
         let run_driven = run_is_driven(&controller);
         let session = Self {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             controller,
             hierarchy,
             level: ModulePath::root(),

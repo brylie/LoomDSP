@@ -71,6 +71,9 @@ pub struct Ui {
     pub(crate) clipboard: Memory,
     /// True once a task asked the app to exit.
     pub(crate) exited: bool,
+    /// The part with focus, as the harness last read it from the widgets:
+    /// what the bridge's target holds in the app.
+    focused: Option<loom_ui_core::UiId>,
 }
 
 /// An in-memory clipboard.
@@ -167,6 +170,7 @@ impl Ui {
             cursor: mouse::Cursor::Unavailable,
             clipboard: Memory::default(),
             exited: false,
+            focused: None,
         };
         // The canvas frames the patch on its first redraw.
         ui.redraw();
@@ -187,7 +191,14 @@ impl Ui {
             }
         });
         self.clipboard = clipboard;
-        let messages = self.apply(messages);
+        let mut messages = self.apply(messages);
+        // Something outside a turn may have asked where focus is, such as a
+        // test replacing the patch directly. The bridge asks after its next
+        // turn; the harness asks here.
+        if self.app.take_focus_question() {
+            let moved = self.focus_answer();
+            messages.extend(self.deliver(moved));
+        }
         let theme = self.app.theme();
         let style = Style {
             text_color: theme.palette().text,
@@ -218,24 +229,130 @@ impl Ui {
         log
     }
 
+    /// Applies `message` as the runtime does, then every message it
+    /// produces and what those produce in turn, and returns them all.
+    pub(crate) fn deliver(&mut self, message: Message) -> Vec<Message> {
+        let mut log = Vec::new();
+        self.drain(VecDeque::from([message]), &mut log);
+        log
+    }
+
     /// Applies queued messages until none is left, through `App::update`, as
     /// the runtime does. Messages that tasks produce go to `log`, and so do the
     /// messages an input message routes to.
     fn drain(&mut self, mut queue: VecDeque<Message>, log: &mut Vec<Message>) {
         while let Some(message) = queue.pop_front() {
-            if let Message::Input {
-                event,
-                status,
-                listening,
-            } = &message
-            {
-                // Logged for the test to read. `update` applies them all, and
-                // only then do their tasks run, as in the app.
-                log.extend(listening.route(event.clone(), *status));
+            // An input event is routed before `update`, as the bridge
+            // routes it: each message it becomes is its own update, and the
+            // test reads them in the log.
+            if matches!(message, Message::Input { .. }) {
+                let routed = crate::input_owner::route(message);
+                log.extend(routed.iter().cloned());
+                for (at, message) in routed.into_iter().enumerate() {
+                    queue.insert(at, message);
+                }
+                continue;
             }
-            let task = self.app.update(message);
-            self.run(task, &mut queue, log);
+            let replies = self.turn(message);
+            log.extend(replies.iter().cloned());
+            queue.extend(replies);
         }
+    }
+
+    /// One message through `update`, as the runtime runs it, with its
+    /// effects carried out as a driver carries them out, and the window's
+    /// answers in the bridge's order. The messages that come of it are
+    /// returned, for the caller to apply: first what the update posted and
+    /// what effects sent back at once (a dialog's answer, work's results),
+    /// then the answers from widget operations (window questions), then the
+    /// focus answer. The bridge gives that order: what an update posts is
+    /// already in the runtime's queue when Iced hands an answer back.
+    ///
+    /// Work runs inline, the clipboard is the harness's own, a scroll runs
+    /// the bridge's scroll on the harness's window, a capture answers that
+    /// there is nothing to draw with, and Quit marks it exited. A dialog is
+    /// answered from the fake dialogs in a unit test; in a test under
+    /// `tests/`, where they are off, it panics, naming it (ui-layer.md,
+    /// section 2, rule 3), as an effect it cannot run does.
+    fn turn(&mut self, message: Message) -> Vec<Message> {
+        let (sender, inbox) = std::sync::mpsc::channel();
+        let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+        let window = loom_ui::WindowState::new(loom_ui_core::Size::new(WINDOW.width, WINDOW.height));
+        // The record takes a focus answer as it is applied, as the bridge's
+        // target does just before it hands `FocusMoved` over.
+        if let Message::FocusMoved(part) = &message {
+            self.focused = part.clone();
+        }
+        let cx = loom_ui::Context::new(Instant::now(), &waker, self.focused.clone(), window);
+        let effects = self.app.update(message, &cx);
+        // The widget operations run now, on the view as this update left
+        // it, but their answers wait behind what the update posted.
+        let (mut answers, mut unlogged) = (VecDeque::new(), Vec::new());
+        let mut moved_focus = false;
+        for effect in effects {
+            #[cfg(test)]
+            let Some(effect) = crate::dialogs::fake::answer(&self.app, effect, &waker) else {
+                continue;
+            };
+            match effect {
+                loom_ui::Effect::Work(job) => job.run(&waker),
+                loom_ui::Effect::ClipboardWrite(text) => self.clipboard.0 = Some(text),
+                loom_ui::Effect::ClipboardRead(reply) => {
+                    waker.send(reply.give(self.clipboard.0.clone()));
+                }
+                loom_ui::Effect::Quit => self.exited = true,
+                loom_ui::Effect::Focus { target, select } => {
+                    self.run(
+                        crate::iced_bridge::focus_moves(&target, select),
+                        &mut answers,
+                        &mut unlogged,
+                    );
+                    moved_focus = true;
+                }
+                // The bridge's own scroll, run on the harness's window.
+                loom_ui::Effect::ScrollIntoView(id) => {
+                    self.run(crate::iced_bridge::scroll_into_view(&id), &mut answers, &mut unlogged);
+                }
+                // The effects table (ui-layer.md, section 2) says the harness
+                // draws offscreen when a GPU adapter exists. That is not built
+                // yet, so until part (d) it answers NoGpu, GPU or not.
+                loom_ui::Effect::Capture(reply) => {
+                    waker.send(reply.give(Err(loom_ui::effect::NoGpu)));
+                }
+                other => panic!("Ui: the harness cannot run the effect `{}`", other.name()),
+            }
+        }
+        // What only the widgets know, asked as the bridge asks Iced: after
+        // the focus and scroll tasks, in the order asked.
+        for question in self.app.take_window_questions() {
+            self.run(crate::iced_bridge::question_task(question), &mut answers, &mut unlogged);
+        }
+        let mut replies: Vec<Message> = inbox.try_iter().collect();
+        replies.extend(answers);
+        // As the bridge does: after a message that may have moved focus, or a
+        // focus effect, ask the widgets. The answer comes after what is
+        // already queued, which runs under the old focus.
+        if self.app.take_focus_question() || moved_focus {
+            replies.push(self.focus_answer());
+        }
+        replies
+    }
+
+    /// Reads focus from the widgets, as the bridge's focus question does,
+    /// and gives the app's message for the answer, changed or not. The
+    /// record takes it when the message is applied (`turn`).
+    fn focus_answer(&mut self) -> Message {
+        Message::FocusMoved(self.read_focus().part())
+    }
+
+    /// What the widgets say has focus now.
+    fn read_focus(&mut self) -> crate::iced_bridge::FocusAnswer {
+        let mut find = crate::iced_bridge::FindFocus::default();
+        {
+            let mut operation = iced::advanced::widget::operation::black_box(&mut find);
+            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        }
+        find.0
     }
 
     /// Runs a task to the end. Messages it produces go to `queue` and to
@@ -328,51 +445,71 @@ impl Ui {
         messages
     }
 
-    /// Sends one message and runs its widget operations as the runtime does.
+    /// Sends one message and applies everything that comes of it, in the
+    /// runtime's order: [`Ui::deliver`], through the same queue, with no
+    /// log. A message one reply posts waits behind the replies already
+    /// queued, and an input event is routed first.
     pub(crate) fn send(&mut self, message: Message) {
-        let task = self.app.update(message);
-        self.run(task, &mut VecDeque::new(), &mut Vec::new());
+        let _ = self.deliver(message);
     }
 
-    /// Gives keyboard focus to the widget with this ID, as a click on it
-    /// would, and draws the frame.
-    pub(crate) fn focus(&mut self, id: &'static str) {
+    /// Gives keyboard focus to the text field of `part`, as a click on it
+    /// would, and draws the frame. It sends no message, as a focus that a
+    /// widget takes itself sends none: the app hears of it on the next turn
+    /// that asks.
+    pub(crate) fn focus(&mut self, part: &loom_ui_core::UiId) {
         let mut operation =
-            iced::advanced::widget::operation::focusable::focus::<()>(iced::advanced::widget::Id::new(id));
+            iced::advanced::widget::operation::focusable::focus::<()>(crate::places::field_widget_id(part));
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
         self.redraw();
     }
 
-    /// True when a named text field has keyboard focus, read from the
-    /// widgets. `ui.focus` moves focus with no message, so `App::text_focus`
-    /// would not know.
+    /// True when a text field has keyboard focus, read from the widgets.
     pub(crate) fn text_field_focused(&mut self) -> bool {
-        self.focused_field().is_some()
+        self.read_focus().any
     }
 
-    /// The ID of the focused field, if it has one, read as a focus step
-    /// reads it.
-    pub(crate) fn focused_field(&mut self) -> Option<iced::advanced::widget::Id> {
-        use iced::advanced::widget::operation::{self, Operation, Outcome};
-        let mut find = operation::focusable::find_focused();
-        {
-            let mut operation = operation::black_box(&mut find);
-            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
-        }
-        match Operation::finish(&find) {
-            Outcome::Some(id) => Some(id),
-            _ => None,
-        }
+    /// The part whose text field has focus, read from the widgets.
+    pub(crate) fn focused_field(&mut self) -> Option<loom_ui_core::UiId> {
+        self.read_focus().part()
+    }
+
+    /// Clicks the inspector's value field for `module`'s parameter `index`,
+    /// types `text` into it, and presses Enter, checking the draft on the
+    /// way: the typed text is the draft until Enter commits it, and the
+    /// field keeps focus after, as it does for a module's own parameters.
+    pub(crate) fn type_a_value(&mut self, module: u32, index: usize, text: &str) {
+        let at = self.value_field(module, index);
+        self.move_to(at);
+        self.press();
+        self.release();
+        self.typewrite(text);
+        let draft = self.app.session.value_draft.as_ref().expect("a draft is typed");
+        assert_eq!(draft.draft.text, text, "every key stays in the draft");
+        self.tap(
+            keyboard::Key::Named(keyboard::key::Named::Enter),
+            keyboard::Modifiers::default(),
+        );
+        assert!(self.app.session.value_draft.is_none(), "Enter commits it");
+        assert_eq!(
+            self.app.focus,
+            self.app.value_field_part(module, index),
+            "the field keeps focus"
+        );
     }
 
     /// Where the inspector's value field for this parameter is in the window.
     pub(crate) fn value_field(&mut self, module: u32, index: usize) -> Point {
-        self.field_by_id(crate::controls::value_field_id(module, index))
+        let part = self
+            .app
+            .value_field_part(module, index)
+            .expect("the inspector shows that value field");
+        self.field(&part)
     }
 
-    /// Where the text field with this ID is in the window, to click on it.
-    pub(crate) fn field(&mut self, id: &'static str) -> Point {
-        self.field_by_id(iced::advanced::widget::Id::new(id))
+    /// Where the text field of `part` is in the window, to click on it.
+    pub(crate) fn field(&mut self, part: &loom_ui_core::UiId) -> Point {
+        self.field_by_id(crate::places::field_widget_id(part))
     }
 
     /// The centre of the focusable widget with this ID.

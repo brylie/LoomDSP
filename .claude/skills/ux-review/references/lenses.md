@@ -34,8 +34,7 @@ Can a person with a disability, or in a hard setting such as a dark stage, do th
 
 **Screen readers**
 
-- ADR-0028 defers the accessibility tree until Iced has AccessKit support, so do not report its absence again.
-- Do check that new view models carry a name, a value with its unit ("800 Hz", not "800"), and a state, because the tree will be built from them (NFR-UX-06). `patch.json` shows them.
+- The app has an AccessKit tree, built from the view models (ADR-0041, `crates/loom-app/src/a11y.rs`). Check that what you looked at is in it, with a name, a value with its unit ("800 Hz", not "800"), and a state (NFR-UX-06). A part missing from the tree is a finding. `patch.json` shows the view models the tree reads.
 
 ## Usability
 

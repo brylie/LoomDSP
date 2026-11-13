@@ -268,32 +268,32 @@ fn both_dialogs_start_in_the_remembered_folder() {
     let mut app = app_with_library(&library);
 
     // First, the library.
-    let _ = app.update(AppMessage::File(FileAction::Open));
+    let _ = app.send(AppMessage::File(FileAction::Open));
     assert_eq!(fake::asked(), [Asked::Open(Some(library.clone()))]);
-    assert!(!app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     assert_eq!(fake::asked(), [Asked::Save(Some(library.join("Untitled.ron")))]);
 
     // A file picked in a dialog makes its folder the last one.
     fake::answer_open(Some(mine.clone()));
-    let _ = app.update(AppMessage::File(FileAction::Open));
+    let _ = app.send(AppMessage::File(FileAction::Open));
     fake::answer_open(None);
     let _ = fake::asked();
     assert_eq!(app.session.document.file(), Some(mine.as_path()));
 
     // With a current file, its folder.
-    let _ = app.update(AppMessage::File(FileAction::Open));
+    let _ = app.send(AppMessage::File(FileAction::Open));
     assert_eq!(fake::asked(), [Asked::Open(Some(project.clone()))]);
 
     // A new patch has none, so the last folder, for both.
-    let _ = app.update(AppMessage::File(FileAction::New));
-    let _ = app.update(AppMessage::File(FileAction::Open));
+    let _ = app.send(AppMessage::File(FileAction::New));
+    let _ = app.send(AppMessage::File(FileAction::Open));
     assert_eq!(fake::asked(), [Asked::Open(Some(project.clone()))]);
-    assert!(!app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     assert_eq!(fake::asked(), [Asked::Save(Some(project.join("Untitled.ron")))]);
 
     // Once that folder is gone, the library again.
     std::fs::remove_dir_all(&project).unwrap();
-    assert!(!app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     assert_eq!(fake::asked(), [Asked::Save(Some(library.join("Untitled.ron")))]);
 }
 
@@ -305,8 +305,9 @@ fn save_as_remembers_its_folder() {
     std::fs::create_dir_all(&project).unwrap();
     let mut app = app_with_library(&dir.0);
     fake::answer_save(Some(project.join("mine.ron")));
-    assert!(app.save_as());
+    let _ = app.send(AppMessage::File(FileAction::SaveAs));
     fake::answer_save(None);
+    assert!(project.join("mine.ron").is_file());
     assert_eq!(app.rig.recent.last_folder(), Some(project.as_path()));
 }
 
@@ -358,9 +359,9 @@ fn a_dropped_file_becomes_a_message() {
 /// moment for collecting them pass.
 fn drop_files(app: &mut App, files: &[PathBuf]) {
     for file in files {
-        let _ = app.update(AppMessage::FileDropped(file.clone()));
+        let _ = app.send(AppMessage::FileDropped(file.clone()));
     }
-    let _ = app.update(AppMessage::DropsDone);
+    let _ = app.send(AppMessage::DropsDone);
 }
 
 /// One patch opens, after the question.
@@ -373,7 +374,7 @@ fn dropping_one_patch_opens_it_after_the_question() {
     drop_files(&mut app, &files);
     assert!(app.overlays.question.is_some());
     assert_eq!(app.session.document.file(), None);
-    let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
+    let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert_eq!(app.session.document.file(), Some(files[0].as_path()));
     assert_eq!(app.rig.recent.files(), &files[..1]);
     assert!(app.alerts.status().starts_with("opened"), "{}", app.alerts.status());
@@ -438,7 +439,7 @@ fn a_drop_during_a_question_is_ignored() {
     let files = patches(&dir.0, 1);
     let mut app = app();
     changed(&mut app);
-    let _ = app.update(AppMessage::File(FileAction::Close));
+    let _ = app.send(AppMessage::File(FileAction::Close));
     let before = app.ui_snapshot().question;
     drop_files(&mut app, &files);
     assert_eq!(app.ui_snapshot().question, before);
@@ -448,7 +449,7 @@ fn a_drop_during_a_question_is_ignored() {
         app.alerts.status()
     );
     assert!(app.drops.is_empty());
-    let _ = app.update(AppMessage::Question(QuestionMessage::Escape));
+    let _ = app.send(AppMessage::Question(QuestionMessage::Escape));
     assert_eq!(app.session.document.file(), None);
 }
 
@@ -458,14 +459,14 @@ fn overlays_stay_open_until_the_patch_opens() {
     let dir = TempDir::new("recent-overlay");
     let files = patches(&dir.0, 1);
     let mut app = app();
-    let _ = app.update(AppMessage::Preferences(crate::settings::Message::Open));
+    let _ = app.send(AppMessage::Preferences(crate::settings::Message::Open));
     assert!(app.overlays.preferences().is_some());
     changed(&mut app);
     drop_files(&mut app, &files);
-    let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::Cancel)));
+    let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::Cancel)));
     assert!(app.overlays.preferences().is_some(), "Cancel changes nothing");
     drop_files(&mut app, &files);
-    let _ = app.update(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
+    let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(app.overlays.preferences().is_none());
 }
 
@@ -523,7 +524,7 @@ fn open_makes_no_library_folder_it_does_not_need() {
     let mut app = app_with_library(&library);
     assert!(app.open_path(&mine));
     let _ = fake::asked();
-    let _ = app.update(AppMessage::File(FileAction::Open));
+    let _ = app.send(AppMessage::File(FileAction::Open));
     assert_eq!(fake::asked(), [Asked::Open(Some(dir.0.clone()))]);
     assert!(!library.exists());
 }

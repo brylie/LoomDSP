@@ -176,9 +176,6 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 deadline: None,
             };
         }
-        self.counts.turns += 1;
-        let mut redraw = false;
-
         // 1. The batch: messages already waiting, then the deadline.
         self.drain_queue();
         let mut batch: Vec<A::Message> = self.pending.drain(..).collect();
@@ -187,6 +184,38 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         {
             batch.push(deadline.message);
         }
+        self.turn(event, batch, now, driver)
+    }
+
+    /// Runs one turn for `message` alone, at `now`. Messages already in the
+    /// queue, and a deadline that is due, wait for the next turn. For a
+    /// driver that must hand a message over at an exact point: the bridge
+    /// to Iced first runs what is queued, then hands over the window's word
+    /// on focus by itself, so no other message sees the new focus before
+    /// the app has heard of it.
+    pub fn deliver(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> Next {
+        if self.exited {
+            return Next {
+                draw: false,
+                again: false,
+                frames: false,
+                deadline: None,
+            };
+        }
+        self.turn(DriverEvent::Woken, vec![message], now, driver)
+    }
+
+    /// One turn: routes `event`, runs `batch` and the messages routing
+    /// adds, one update each, then works out what is next.
+    fn turn(
+        &mut self,
+        event: DriverEvent,
+        mut batch: Vec<A::Message>,
+        now: Instant,
+        driver: &mut impl Driver<A::Message>,
+    ) -> Next {
+        self.counts.turns += 1;
+        let mut redraw = false;
 
         // 2. Route the event.
         match event {

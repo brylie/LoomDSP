@@ -39,3 +39,31 @@ fn a_waker_whose_runtime_is_gone_returns_false() {
     assert_eq!(wakes.load(Ordering::SeqCst), 0);
     assert_eq!(format!("{waker:?}"), "Waker");
 }
+
+/// A batch from `send_all` is queued whole and in order, with no message
+/// from another thread inside it, and wakes the loop once.
+#[test]
+fn a_batch_stays_together_while_another_thread_sends() {
+    let (waker, receiver, wakes) = counted();
+    let other = waker.clone();
+    let spam = std::thread::spawn(move || {
+        for _ in 0..2000 {
+            other.send(0);
+        }
+    });
+    for _ in 0..50 {
+        assert!(waker.send_all([1, 2, 3]));
+    }
+    spam.join().expect("the other thread ends");
+    let queued: Vec<u32> = receiver.try_iter().collect();
+    let batches: Vec<&[u32]> = queued
+        .iter()
+        .enumerate()
+        .filter(|&(_, &m)| m == 1)
+        .map(|(at, _)| &queued[at..at + 3])
+        .collect();
+    assert_eq!(batches.len(), 50);
+    assert!(batches.iter().all(|batch| *batch == [1, 2, 3]), "a batch was split");
+    assert_eq!(queued.len(), 2000 + 150);
+    assert_eq!(wakes.load(Ordering::SeqCst), 2000 + 50, "one wake per send or batch");
+}

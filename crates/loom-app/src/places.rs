@@ -27,6 +27,62 @@ pub(crate) fn widget_id(id: &UiId) -> Id {
     Id::from(id.to_string())
 }
 
+/// What starts the widget ID of a text field: only [`field_widget_id`]
+/// makes such an ID, so [`field_of`] never takes a named container for a
+/// field, whatever its UI ID (the question's sentence is `question/text`).
+const FIELD: &str = "field:";
+
+/// True for the characters a field's widget ID holds as they are. Every
+/// other byte is written `%XX`, so the ID's text needs no escape when Iced
+/// prints it, and [`field_of`] can read it back.
+fn plain(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.')
+}
+
+/// The widget ID of the text field in the part named `part`, such as the
+/// value field `inspector/4/param/cutoff/field`. Focus effects and the view
+/// both use it, and [`field_of`] reads it back.
+pub(crate) fn field_widget_id(part: &UiId) -> Id {
+    let mut text = String::from(FIELD);
+    for byte in part.to_string().bytes() {
+        if plain(byte) {
+            text.push(byte as char);
+        } else {
+            text.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Id::from(text)
+}
+
+/// The part whose text field has the widget ID `id`, or `None` for any ID
+/// [`field_widget_id`] did not make.
+///
+/// Iced gives an ID's text only through `Debug`, which prints
+/// `Id(Custom("..."))`. A field's ID holds only characters that print as
+/// themselves there, so the text between the quotes is the ID itself. The
+/// test `iced_prints_a_field_id_as_it_is` holds that, and this goes with the
+/// bridge at plan step 2.2.
+pub(crate) fn field_of(id: &Id) -> Option<UiId> {
+    let printed = format!("{id:?}");
+    let text = printed.strip_prefix("Id(Custom(\"")?.strip_suffix("\"))")?;
+    let escaped = text.strip_prefix(FIELD)?;
+    let mut bytes = Vec::with_capacity(escaped.len());
+    let mut rest = escaped.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        if byte == b'%' {
+            let hex = std::str::from_utf8(tail.get(..2)?).ok()?;
+            bytes.push(u8::from_str_radix(hex, 16).ok()?);
+            rest = &tail[2..];
+        } else if plain(byte) {
+            bytes.push(byte);
+            rest = tail;
+        } else {
+            return None;
+        }
+    }
+    String::from_utf8(bytes).ok()?.parse().ok()
+}
+
 /// Where one named part is in the window.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Place {
@@ -36,6 +92,19 @@ pub(crate) struct Place {
     /// The bounds of the nearest scrolling area around it, which cuts off
     /// what lies outside. `None` for a part in no scrolling area.
     pub clip: Option<Rect>,
+    /// The nearest scrolling area around it, to scroll the part into view.
+    /// `None` for a part in no scrolling area.
+    pub area: Option<Area>,
+}
+
+/// A scrolling area, as a walk of the window meets it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Area {
+    /// Its place in the order the walk meets scrolling areas, from 0. A
+    /// second walk of the same window counts to the same area.
+    pub index: usize,
+    /// Its own bounds in the window: what it shows.
+    pub bounds: Rect,
 }
 
 impl Place {
@@ -85,6 +154,8 @@ struct Scroll {
     offset: Vector,
     /// The bounds of the nearest one, in the window.
     clip: Option<Rect>,
+    /// The nearest one itself.
+    area: Option<Area>,
 }
 
 /// The widget operation that collects [`Places`].
@@ -102,6 +173,8 @@ pub(crate) struct Collect {
     inside: Scroll,
     /// A scrolling area just reported, which the next `traverse` enters.
     entering: Option<Scroll>,
+    /// How many scrolling areas the walk has met.
+    areas: usize,
 }
 
 /// What [`Collect::enter`] gives back, for [`Collect::leave`].
@@ -153,6 +226,7 @@ impl Operation<Places> for Collect {
             Place {
                 rect,
                 clip: self.inside.clip,
+                area: self.inside.area,
             },
         );
     }
@@ -168,7 +242,13 @@ impl Operation<Places> for Collect {
         // The area's own bounds are in its parent's content, so they move
         // by the parent's offset. Its content moves by both.
         let own = moved(bounds.to_core(), self.inside.offset);
+        let area = Area {
+            index: self.areas,
+            bounds: own,
+        };
+        self.areas += 1;
         self.entering = Some(Scroll {
+            area: Some(area),
             offset: Vector::new(
                 self.inside.offset.x + translation.x,
                 self.inside.offset.y + translation.y,

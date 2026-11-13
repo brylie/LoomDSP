@@ -2,11 +2,8 @@
 //! the engine, and the clipboard commands (`docs/design/undo.md`).
 
 use crate::{App, Message, RightTab, alerts, browser, clipboard, undo};
-use iced::Task;
-use iced::advanced::widget::operation::{self, Focusable, Outcome};
-use iced::advanced::widget::{Id, Operation};
 use loom_core::{LoomError, ModuleId};
-use loom_ui_core::Point;
+use loom_ui_core::{Point, UiId};
 use std::collections::BTreeSet;
 
 /// Why toolbar Undo or Redo is disabled.
@@ -39,143 +36,43 @@ impl HistoryBlock {
     }
 }
 
-/// True when a text field or text box in the window has focus. Iced's
-/// text widgets have no undo of their own, so while one is being edited the
-/// undo shortcuts do nothing rather than change the patch behind it
-/// (undo.md, Gestures).
-pub(crate) fn text_field_focused() -> Task<bool> {
-    text_focus().map(|focus| focus.any)
-}
-
-/// Focuses a text field, then tells the app. A focus task sends no message, and
-/// the canvas must know a text field has the keys (panel-widgets.md, Keys in a
-/// text field). So use this wherever a task focuses a field.
-pub(crate) fn focus_text_field(id: &'static str) -> Task<crate::Message> {
-    iced::widget::operation::focus(id).chain(text_focus().map(crate::Message::TextFocus))
-}
-
-/// Which text field has focus, as the widget tree knows it.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct TextFocus {
-    /// A text field or text box has focus.
-    pub any: bool,
-    /// The ID of the one that has it, if it has one.
-    pub field: Option<iced::advanced::widget::Id>,
-}
-
-/// Asks the widget tree which text field has focus. Iced's text fields do not
-/// say when focus moves, and a press can move it, so the app asks after the
-/// press has reached the widgets.
-pub(crate) fn text_focus() -> Task<TextFocus> {
-    use iced::advanced::widget::operation::{Focusable, Outcome};
-    use iced::advanced::widget::{Id, Operation};
-
-    /// Records the focused widget. Only text fields and text boxes are
-    /// focusable in this app.
-    struct Find(TextFocus);
-
-    impl Operation<TextFocus> for Find {
-        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<TextFocus>)) {
-            operate(self);
-        }
-
-        fn focusable(&mut self, id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
-            if state.is_focused() {
-                self.0 = TextFocus {
-                    any: true,
-                    field: id.cloned(),
-                };
-            }
-        }
-
-        fn finish(&self) -> Outcome<TextFocus> {
-            Outcome::Some(self.0.clone())
-        }
-    }
-
-    iced::advanced::widget::operate(Find(TextFocus::default()))
-}
-
-/// Selects all the text in a field, so what is typed next replaces it.
-pub(crate) fn select_all_text(id: iced::advanced::widget::Id) -> Task<crate::Message> {
-    iced::advanced::widget::operate(iced::advanced::widget::operation::text_input::select_all(id))
-}
-
-/// Takes focus from every text field.
-pub(crate) fn unfocus_text_fields() -> Task<crate::Message> {
-    iced::advanced::widget::operate(iced::advanced::widget::operation::focusable::focus(
-        iced::advanced::widget::Id::unique(),
-    ))
-}
-
-/// The field Tab moves to from `current`, wrapping at the ends, or `current`
-/// when it is not one of `fields`.
-pub(crate) fn field_after(fields: &[&'static str], current: Id, backwards: bool) -> Id {
-    let at = fields.iter().copied().position(|field| Id::new(field) == current);
-    match at {
-        Some(at) => {
-            let step = if backwards { fields.len() - 1 } else { 1 };
-            Id::new(fields[(at + step) % fields.len()])
-        }
-        None => current,
-    }
-}
-
-/// Moves focus to the next or previous of `fields`. With no named field in
-/// focus it changes nothing. Iced's own `focus_next` walks every field in the
-/// window, so it would go behind an open overlay (panels.md).
-pub(crate) struct StepFocus {
-    pub(crate) fields: &'static [&'static str],
-    pub(crate) backwards: bool,
-    pub(crate) current: Option<Id>,
-}
-
-impl Operation for StepFocus {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-        operate(self);
-    }
-
-    fn focusable(&mut self, id: Option<&Id>, _bounds: iced::Rectangle, state: &mut dyn Focusable) {
-        if state.is_focused() {
-            self.current = id.cloned();
-        }
-    }
-
-    fn finish(&self) -> Outcome<()> {
-        match &self.current {
-            Some(current) => Outcome::Chain(Box::new(operation::focusable::focus(field_after(
-                self.fields,
-                current.clone(),
-                self.backwards,
-            )))),
-            None => Outcome::None,
-        }
-    }
+/// The field Tab moves to from `current`, wrapping at the ends, or `None`
+/// when `current` is not one of `fields`. Not the next element anywhere in
+/// the window, as Iced's `focus_next` would give: Tab stays in its view, so
+/// it never goes behind an open overlay (panels.md).
+pub(crate) fn field_after(fields: &[UiId], current: &UiId, backwards: bool) -> Option<UiId> {
+    let at = fields.iter().position(|field| field == current)?;
+    let step = if backwards { fields.len() - 1 } else { 1 };
+    Some(fields[(at + step) % fields.len()].clone())
 }
 
 impl App {
     /// The text fields Tab moves between in the view on top now. None when
     /// that view has fewer than two.
-    pub(crate) fn tab_fields(&self) -> &'static [&'static str] {
+    pub(crate) fn tab_fields(&self) -> Vec<UiId> {
         if self.overlays.patches().is_some() {
-            &crate::patches::TEXT_FIELDS
+            crate::patches::text_fields().to_vec()
         } else if self.no_overlay() && self.right_tab == RightTab::Inspector && self.session.selection.is_empty() {
-            &crate::patch_info::TEXT_FIELDS
+            crate::patch_info::text_fields().to_vec()
         } else {
-            &[]
+            Vec::new()
         }
     }
 
     /// True when the focused text field is one Tab moves on from, to the next
     /// field of its view. Any other field closes on Tab instead
     /// (panel-widgets.md, Typing a value).
-    pub(crate) fn tab_moves_between_fields(&self) -> bool {
-        self.text_focus.field.as_ref().is_some_and(|focused| {
-            self.tab_fields()
-                .iter()
-                .copied()
-                .any(|field| Id::new(field) == *focused)
-        })
+    pub(crate) fn tab_moves_between_fields(&self, focused: Option<&UiId>) -> bool {
+        focused.is_some_and(|focused| self.tab_fields().contains(focused))
+    }
+
+    /// Tab or Shift+Tab between the fields of the view on top: the next one
+    /// takes focus. With no field of the view in focus it changes nothing.
+    pub(crate) fn tab_between_fields(&mut self, focused: Option<&UiId>, backwards: bool) {
+        let next = focused.and_then(|focused| field_after(&self.tab_fields(), focused, backwards));
+        if let Some(next) = next {
+            self.effect(loom_ui::Effects::focus(next));
+        }
     }
 
     /// Starts recording an edit: keeps the patch as it is now. Does nothing
@@ -568,7 +465,7 @@ impl App {
             .find(|k| c.eq_ignore_ascii_case(&k.to_string()))
     }
 
-    pub(crate) fn clipboard_command(&mut self, message: &Message) -> Task<Message> {
+    pub(crate) fn clipboard_command(&mut self, message: &Message) {
         let text = match self.clipboard_key(message) {
             Some('c') => self.copy(),
             Some('x') => self.cut(),
@@ -578,7 +475,9 @@ impl App {
             }
             _ => None,
         };
-        text.map_or_else(Task::none, iced::clipboard::write)
+        if let Some(text) = text {
+            self.effect(loom_ui::Effects::clipboard_write(text));
+        }
     }
 
     /// The selected tiles, or `None` and a status bar note when nothing is

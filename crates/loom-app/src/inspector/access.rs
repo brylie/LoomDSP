@@ -165,7 +165,7 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         Item {
             label: Some("Authors, one per line".to_string()),
             value: Some(rows.authors.join("\n")),
-            focus: Some(iced::advanced::widget::Id::new(crate::patch_info::AUTHORS_INPUT)),
+            focus: Some(crate::places::field_widget_id(&crate::patch_info::authors_part())),
             ..Item::new(ids::part(&panel, "authors"), Kind::Field)
         },
     ];
@@ -182,7 +182,7 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         ));
     }
     parts.push(Item {
-        focus: Some(iced::advanced::widget::Id::new(crate::patch_info::TAG_INPUT)),
+        focus: Some(crate::places::field_widget_id(&crate::patch_info::tags_part())),
         ..field(ids::part(&panel, "tags"), "Tags", &rows.tag_draft, SetText::Tag)
     });
     if let Some(note) = &rows.tag_note {
@@ -473,7 +473,6 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
             if let Some(field_row) = &p.field {
                 parts.push(Item {
                     description: field_row.error.clone(),
-                    focus: Some(crate::controls::value_field_id(module, index)),
                     ..field(
                         ids::part(ui, "field"),
                         &format!("{label} value"),

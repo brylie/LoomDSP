@@ -9,9 +9,10 @@
 use crate::style::{self, button};
 use crate::{DIM, files, recovery};
 use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Theme};
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
+use loom_ui::Effects;
 use loom_ui_core::UiId;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -21,12 +22,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime};
 
-/// The search field's widget ID: typing goes there when the browser opens.
-pub(crate) const SEARCH: &str = "patch-browser-search";
-/// The Author filter's field.
-const AUTHOR: &str = "patch-browser-author";
-/// The browser's text fields, in the order Tab moves between them.
-pub(crate) const TEXT_FIELDS: [&str; 2] = [SEARCH, AUTHOR];
+/// The browser's text fields, in the order Tab moves between them: the
+/// search field, where typing goes when the browser opens, then the Author
+/// filter.
+pub(crate) fn text_fields() -> [UiId; 2] {
+    [part_id("search"), part_id("author")]
+}
 /// The list's widget ID, for keeping the highlight in view.
 const LIST: &str = "patch-browser-list";
 /// Height of one row. Fixed, so the list can scroll to a row.
@@ -207,39 +208,23 @@ fn send_batches(rows: &mpsc::Receiver<Row>, mut now: impl FnMut() -> Instant, mu
     }
 }
 
-/// Reads the patch files in `folder` on one thread and sends the rows in
-/// batches from another, so the window never waits for the disk. The reader
-/// ends when `stop` is set, so a closed browser does not go on reading a large
-/// or slow library. The batcher then ends too, which ends the task. If the
-/// task goes first, the batcher ends, and then the reader.
-#[cfg(not(test))]
-fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
-    let (sender, receiver) = iced::futures::channel::mpsc::unbounded();
-    let (rows_in, rows_out) = mpsc::channel();
-    std::thread::spawn(move || {
-        read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
-    });
-    std::thread::spawn(move || {
-        send_batches(&rows_out, Instant::now, |rows| {
-            sender.unbounded_send(Message::Found { open, rows }).is_ok()
+/// Reads the patch files in `folder` as background work: one thread reads
+/// and the work's own thread sends the rows in batches, so the window never
+/// waits for the disk. The reader ends when `stop` is set, so a closed
+/// browser does not go on reading a large or slow library. The batcher then
+/// ends too, which ends the work. If nothing listens any more, the batcher
+/// ends, and then the reader. Under test the work runs inline, to its end
+/// (ui-layer.md, section 2, rule 4).
+fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> loom_ui::Effects<crate::Message> {
+    loom_ui::Effects::job(move |waker| {
+        let (rows_in, rows_out) = mpsc::channel();
+        std::thread::spawn(move || {
+            read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
         });
-    });
-    Task::run(receiver, |message| message)
-}
-
-/// Reads the patch files at once: the headless test harness runs a task
-/// to its end and cannot wait for a thread.
-#[cfg(test)]
-fn read(open: u64, folder: PathBuf, stop: Arc<AtomicBool>) -> Task<Message> {
-    let (rows_in, rows_out) = mpsc::channel();
-    read_rows(&folder, &stop, Row::read, |row| rows_in.send(row).is_ok());
-    drop(rows_in);
-    let mut tasks = Vec::new();
-    send_batches(&rows_out, Instant::now, |rows| {
-        tasks.push(Task::done(Message::Found { open, rows }));
-        true
-    });
-    Task::batch(tasks)
+        send_batches(&rows_out, Instant::now, |rows| {
+            waker.send(crate::Message::Patches(Message::Found { open, rows }))
+        });
+    })
 }
 
 /// A browser message.
@@ -261,8 +246,6 @@ pub enum Message {
     Pick(usize),
     /// Enter: open the highlighted patch.
     Submit,
-    /// The list scrolled.
-    Scrolled(f32),
     /// Up or Down.
     Step(i32),
     /// Escape, a click outside, or **Close**.
@@ -400,8 +383,6 @@ pub struct PatchBrowser {
     highlight: usize,
     /// What is shown.
     model: Model,
-    /// The list's scroll offset.
-    scroll: f32,
     /// Set when this browser goes, to stop the thread reading its folder.
     stop: Arc<AtomicBool>,
 }
@@ -440,7 +421,6 @@ impl PatchBrowser {
             shown: Vec::new(),
             highlight: 0,
             model,
-            scroll: 0.0,
             stop: Arc::new(AtomicBool::new(false)),
         };
         browser.show_filters();
@@ -504,8 +484,8 @@ impl PatchBrowser {
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
-    /// thread, one message per file. The caller focuses [`SEARCH`].
-    pub fn open(open: u64, folder: PathBuf) -> (Self, Task<Message>) {
+    /// thread, one message per file. The caller focuses its search field.
+    pub fn open(open: u64, folder: PathBuf) -> (Self, loom_ui::Effects<crate::Message>) {
         let browser = Self::new(open, folder.clone());
         let reader = read(open, folder, browser.stop.clone());
         (browser, reader)
@@ -528,9 +508,9 @@ impl PatchBrowser {
         self.tags.iter().map(String::as_str)
     }
 
-    /// Handles a message, and returns what the app should do and a task
+    /// Handles a message, and returns what the app should do and the effect
     /// that keeps the highlighted row in view.
-    pub fn update(&mut self, message: Message) -> (Outcome, Task<Message>) {
+    pub fn update(&mut self, message: Message) -> (Outcome, Effects<crate::Message>) {
         let follow = matches!(message, Message::Step(_));
         let outcome = match message {
             Message::Found { open, rows } => {
@@ -600,10 +580,6 @@ impl PatchBrowser {
                 self.open_highlighted()
             }
             Message::Submit => self.open_highlighted(),
-            Message::Scrolled(offset) => {
-                self.scroll = offset;
-                Outcome::Stay
-            }
             Message::Step(by) => {
                 let last = self.shown.len().saturating_sub(1);
                 self.highlight = self.highlight.saturating_add_signed(by as isize).min(last);
@@ -612,8 +588,8 @@ impl PatchBrowser {
             }
             Message::Close => Outcome::Close,
         };
-        let task = if follow { self.reveal() } else { Task::none() };
-        (outcome, task)
+        let effects = if follow { self.reveal() } else { Effects::none() };
+        (outcome, effects)
     }
 
     /// The highlighted patch to open, if it read.
@@ -642,18 +618,13 @@ impl PatchBrowser {
         self.show_rows();
     }
 
-    /// Scrolls the list just enough to show the highlighted row.
-    fn reveal(&mut self) -> Task<Message> {
-        let top = self.highlight as f32 * ROW_HEIGHT;
-        let offset = if top < self.scroll {
-            top
-        } else if top + ROW_HEIGHT > self.scroll + LIST_HEIGHT {
-            top + ROW_HEIGHT - LIST_HEIGHT
-        } else {
-            return Task::none();
-        };
-        self.scroll = offset;
-        iced::widget::operation::scroll_to(LIST, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: offset })
+    /// Scrolls the list just enough to show the highlighted row. The
+    /// window works out how far, so the browser keeps no offset of its own.
+    fn reveal(&self) -> Effects<crate::Message> {
+        match self.model.rows.get(self.highlight) {
+            Some(row) => Effects::scroll_into_view(row.id.clone()),
+            None => Effects::none(),
+        }
     }
 
     /// The browser, as a panel over the canvas. Drawn from the model alone;
@@ -667,7 +638,7 @@ impl PatchBrowser {
         let search = named(
             &part_id("search"),
             text_input("Search names, descriptions, and tags", &model.search)
-                .id(SEARCH)
+                .id(crate::places::field_widget_id(&part_id("search")))
                 .on_input(Message::Search)
                 .on_submit(Message::Submit)
                 .size(style::CONTROL)
@@ -677,7 +648,7 @@ impl PatchBrowser {
         let author = named(
             &part_id("author"),
             text_input("Author", &model.author)
-                .id(AUTHOR)
+                .id(crate::places::field_widget_id(&part_id("author")))
                 .on_input(Message::Author)
                 .on_submit(Message::Submit)
                 .size(style::CONTROL)
@@ -737,15 +708,9 @@ impl PatchBrowser {
                 .padding(8)
                 .height(LIST_HEIGHT)
                 .into(),
-            None => container(
-                scrollable(column(rows))
-                    .id(LIST)
-                    .spacing(4)
-                    .height(LIST_HEIGHT)
-                    .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y)),
-            )
-            .id(crate::places::widget_id(&part_id("list")))
-            .into(),
+            None => container(scrollable(column(rows)).id(LIST).spacing(4).height(LIST_HEIGHT))
+                .id(crate::places::widget_id(&part_id("list")))
+                .into(),
         };
         let panel = column![
             row![

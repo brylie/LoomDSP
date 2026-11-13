@@ -137,7 +137,7 @@ impl App {
         }
         // Over the Preferences window, which also opens it.
         if let Some(chooser) = &self.overlays.chooser {
-            layers = layers.push(chooser.view());
+            layers = layers.push(crate::licence_chooser::view(chooser.model()));
         }
         // Over the dialogs, because F1 opens it from them (help-pages.md).
         if let Some(help) = &self.overlays.help {

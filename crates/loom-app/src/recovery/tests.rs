@@ -381,7 +381,8 @@ fn info_round_trips() {
     assert!(text.contains("version: 1"), "{text}");
 }
 
-fn orphan_for(root: &Path, file: Option<&Path>) -> Orphan {
+/// An orphan left in `root` by a crashed session, with a copy of `file`.
+pub(crate) fn orphan_for(root: &Path, file: Option<&Path>) -> Orphan {
     let info = Info::new(file, file.and_then(Stamp::of), SystemTime::now());
     crashed_session(root, &patch("copy"), Some(&info));
     start(root).unwrap().orphan.unwrap()

@@ -5,10 +5,11 @@
 
 use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Theme};
 use loom_canvas::GRID;
 use loom_canvas::iced_convert::ToIced as _;
 use loom_core::{Family, ModuleDescriptor};
+use loom_ui::Effects;
 use loom_ui_core::{Point, Rect, UiId};
 use serde::Serialize;
 use std::cmp::Reverse;
@@ -31,7 +32,6 @@ const LIST_HEIGHT: f32 = ROWS as f32 * ROW_HEIGHT;
 /// Width of a library item's menu.
 const MENU_WIDTH: f32 = 140.0;
 
-pub(crate) const INPUT: &str = "module-browser-search";
 const LIST: &str = "module-browser-list";
 
 /// The mark a library item's row shows in place of a module's family.
@@ -216,8 +216,13 @@ pub struct Browser {
     world: Point,
     /// The panel's top-left corner, in window coordinates.
     at: Point,
-    /// The list's scroll offset, so a keyboard move can keep the highlight
-    /// in view.
+    /// The list's scroll offset, which places a library row's menu beside
+    /// its row. The toolkit reports it after the wheel or a drag, but not
+    /// after the app scrolls the list itself (`on_scroll` does not fire
+    /// then), so [`Browser::reveal`] moves it by the same rule the window
+    /// scrolls by, from the fixed row height. `update` clamps it to the
+    /// list's rows after every message, as the list shows it. Our own
+    /// scroll state replaces it in phase 3.
     scroll: f32,
 }
 
@@ -270,9 +275,9 @@ impl Browser {
         self.model.menu_highlight = row.and(highlight);
     }
 
-    /// Handles a message, and returns what the app should do and a task
+    /// Handles a message, and returns what the app should do and the effect
     /// that keeps the highlighted row in view.
-    pub fn update(&mut self, message: Message) -> (Outcome, Task<Message>) {
+    pub fn update(&mut self, message: Message) -> (Outcome, Effects<crate::Message>) {
         // Typing and keys may move the highlight out of view. A pointer is
         // already on a visible row, and must not fight the scroll wheel.
         let follow = matches!(message, Message::Query(_) | Message::Key(_));
@@ -364,8 +369,17 @@ impl Browser {
                 Outcome::Stay
             }
         };
-        let task = if follow { self.reveal() } else { Task::none() };
-        (outcome, task)
+        // The list shows its offset clamped to its rows. Clamping ours the
+        // same way after every message keeps a library row's menu at its
+        // row when the list gets shorter without a reveal.
+        self.scroll = self.scroll.clamp(0.0, self.max_scroll());
+        let effects = if follow { self.reveal() } else { Effects::none() };
+        (outcome, effects)
+    }
+
+    /// The largest offset the list can show: zero while its rows fit.
+    fn max_scroll(&self) -> f32 {
+        (self.model.rows.len() as f32 * ROW_HEIGHT - LIST_HEIGHT).max(0.0)
     }
 
     /// The modules the list shows, best first, with the library items
@@ -468,18 +482,28 @@ impl Browser {
         });
     }
 
-    /// Scrolls the list just enough to show the highlighted row.
-    fn reveal(&mut self) -> Task<Message> {
-        let top = self.highlight() as f32 * ROW_HEIGHT;
-        let offset = if top < self.scroll {
-            top
-        } else if top + ROW_HEIGHT > self.scroll + LIST_HEIGHT {
-            top + ROW_HEIGHT - LIST_HEIGHT
-        } else {
-            return Task::none();
+    /// Scrolls the list just enough to show the highlighted row, and moves
+    /// [`Browser::scroll`] as the window will.
+    fn reveal(&mut self) -> Effects<crate::Message> {
+        let Some(row) = self.model.rows.get(self.highlight()) else {
+            return Effects::none();
         };
-        self.scroll = offset;
-        iced::widget::operation::scroll_to(LIST, scrollable::AbsoluteOffset { x: 0.0, y: offset })
+        let top = self.highlight() as f32 * ROW_HEIGHT;
+        let shown = loom_ui_core::Rect::new(
+            loom_ui_core::Point::new(0.0, self.scroll),
+            loom_ui_core::Size::new(1.0, LIST_HEIGHT),
+        );
+        let part = loom_ui_core::Rect::new(
+            loom_ui_core::Point::new(0.0, top),
+            loom_ui_core::Size::new(1.0, ROW_HEIGHT),
+        );
+        self.scroll += shown.reveal(part).y;
+        // Asked for even when the browser's own offset says the row shows:
+        // the toolkit keeps the offset it last scrolled to, though it
+        // shows it clamped while the list is short, so it can show another
+        // offset once the list grows again. The window knows which, and
+        // scrolls nothing when there is nothing to move.
+        Effects::scroll_into_view(row.id.clone())
     }
 
     /// The panel, placed at its corner, with a library item's menu over it
@@ -490,7 +514,7 @@ impl Browser {
         let model = &self.model;
         let input = container(
             text_input("Search modules", &model.query)
-                .id(INPUT)
+                .id(crate::places::field_widget_id(&search_id()))
                 .on_input(Message::Query)
                 .on_submit(Message::Submit)
                 .size(style::CONTROL)
@@ -755,22 +779,12 @@ pub fn library_items(folder: &Path) -> Vec<LibraryItem> {
     items
 }
 
-/// Reads the library folder for the list, on a thread, so the window never
-/// waits for the disk; the items arrive as one [`Message::Library`].
-#[cfg(not(test))]
-pub fn read_library(folder: PathBuf) -> Task<Message> {
-    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    std::thread::spawn(move || {
-        let _ = sender.send(library_items(&folder));
-    });
-    Task::perform(async move { receiver.await.unwrap_or_default() }, Message::Library)
-}
-
-/// Reads the library folder at once: the headless test harness runs a task
-/// to its end and cannot wait for a thread.
-#[cfg(test)]
-pub fn read_library(folder: PathBuf) -> Task<Message> {
-    Task::done(Message::Library(library_items(&folder)))
+/// Reads the library folder for the list as background work, so the
+/// window never waits for the disk; the items arrive as one
+/// [`Message::Library`]. Under test the work runs inline (ui-layer.md,
+/// section 2, rule 4).
+pub fn read_library(folder: PathBuf) -> loom_ui::Effects<crate::Message> {
+    loom_ui::Effects::work(move || crate::Message::Browser(Message::Library(library_items(&folder))))
 }
 
 /// Snaps a world point to the grid, for a new module's corner.

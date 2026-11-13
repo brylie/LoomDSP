@@ -12,8 +12,8 @@
 //! that handle: there is no list of subscriptions to restart by key.
 
 use std::fmt;
-use std::sync::Arc;
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 /// The driver's wake function: called after each message is queued.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -22,19 +22,42 @@ pub type Wake = Arc<dyn Fn() + Send + Sync>;
 pub struct Waker<M> {
     queue: Sender<M>,
     wake: Wake,
+    /// Shared by every clone, so a batch from [`Waker::send_all`] is queued
+    /// whole: no other thread's message lands inside it. Held only while
+    /// messages go on the queue, never by the audio thread.
+    order: Arc<Mutex<()>>,
 }
 
 impl<M> Waker<M> {
     /// A waker that puts messages on `queue` and calls `wake` after each.
     pub fn new(queue: Sender<M>, wake: Wake) -> Self {
-        Self { queue, wake }
+        Self {
+            queue,
+            wake,
+            order: Arc::default(),
+        }
     }
 
     /// Queues `message` for the next turn and wakes the loop. Returns false
     /// when the runtime is gone, so a watcher can stop.
     pub fn send(&self, message: M) -> bool {
-        if self.queue.send(message).is_err() {
-            return false;
+        self.send_all([message])
+    }
+
+    /// Queues `messages` for the next turn together and in order, with no
+    /// other sender's message between them, then wakes the loop once.
+    /// Returns false when the runtime is gone. For an app that hands the
+    /// loop several messages that belong together, such as a command's
+    /// steps and its reply.
+    pub fn send_all(&self, messages: impl IntoIterator<Item = M>) -> bool {
+        {
+            // A poisoned lock guards nothing but order, so it is used as is.
+            let _order = self.order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            for message in messages {
+                if self.queue.send(message).is_err() {
+                    return false;
+                }
+            }
         }
         (self.wake)();
         true
@@ -46,6 +69,7 @@ impl<M> Clone for Waker<M> {
         Self {
             queue: self.queue.clone(),
             wake: Arc::clone(&self.wake),
+            order: Arc::clone(&self.order),
         }
     }
 }

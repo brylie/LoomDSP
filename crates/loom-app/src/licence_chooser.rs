@@ -12,6 +12,7 @@ use crate::{App, DIM};
 use iced::widget::{column, container, opaque, radio, row, rule, scrollable, space, text, text_input};
 use iced::{Element, Length};
 use loom_patch::metadata::{self, Changes, Choice, Licence};
+use serde::Serialize;
 
 /// What the chosen licence is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +35,7 @@ pub enum Answer {
 }
 
 /// A chooser message.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// An answer to the first question, or **Other**.
     Answer(Answer),
@@ -70,34 +71,45 @@ pub enum Outcome {
     Set(Option<String>),
 }
 
-/// The first question's answers, with their explanations, in table order.
-const CHANGES: [(Answer, &str, &str); 4] = [
+/// The first question's answers, with their keys in UI IDs and their
+/// explanations, in table order.
+const CHANGES: [(Answer, &str, &str, &str); 4] = [
     (
         Answer::Changes(Changes::Yes),
+        "yes",
         "Yes",
         "Others may change it and share their version, as long as they credit you.",
     ),
     (
         Answer::Changes(Changes::ShareAlike),
+        "share-alike",
         "Yes, if they share it under the same licence",
         "Others may change it, but must share their version under this same licence.",
     ),
     (
         Answer::Changes(Changes::No),
+        "no",
         "No, only unchanged copies",
         "Others may share copies, but not a changed version.",
     ),
     (
         Answer::GiveUp,
+        "give-up",
         "I give up all rights: anyone may do anything with it",
         "Anyone may use, change, and share it for any purpose, even without credit.",
     ),
 ];
 
-/// The second question's answers, with their explanations.
-const COMMERCIAL: [(bool, &str, &str); 2] = [
-    (true, "Yes", "Others may use it in work they are paid for or sell."),
-    (false, "No", "Others may use it only when no money is involved."),
+/// The second question's answers, with their keys in UI IDs and their
+/// explanations.
+const COMMERCIAL: [(bool, &str, &str, &str); 2] = [
+    (
+        true,
+        "yes",
+        "Yes",
+        "Others may use it in work they are paid for or sell.",
+    ),
+    (false, "no", "No", "Others may use it only when no money is involved."),
 ];
 
 impl Chooser {
@@ -169,117 +181,272 @@ impl Chooser {
         Outcome::Stay
     }
 
-    /// The chooser, as a panel over the window.
-    pub fn view(&self) -> Element<'_, crate::Message> {
-        let msg = crate::Message::Licence;
-        let note = |line: &'static str| container(text(line).size(style::BODY).color(DIM)).padding([0, 24]);
-        let mut changes =
-            column![text("Allow others to change it and share the result?").size(style::HEADING)].spacing(4);
-        for (answer, label, line) in CHANGES {
-            changes = changes.push(
-                radio(label, answer, self.answer, move |a| msg(Message::Answer(a)))
-                    .size(style::SWITCH)
-                    .text_size(style::CONTROL),
-            );
-            changes = changes.push(note(line));
+    /// What the chooser shows, as plain data (ADR-0021). The view draws
+    /// it, and the accessibility tree reports it.
+    pub(crate) fn model(&self) -> Model {
+        let changes = CHANGES
+            .iter()
+            .map(|&(answer, key, label, note)| Pick {
+                key,
+                label,
+                note,
+                chosen: self.answer == Some(answer),
+                message: Message::Answer(answer),
+            })
+            .collect();
+        let commercial = matches!(self.answer, Some(Answer::Changes(_))).then(|| {
+            COMMERCIAL
+                .iter()
+                .map(|&(value, key, label, note)| Pick {
+                    key,
+                    label,
+                    note,
+                    chosen: self.commercial == Some(value),
+                    message: Message::Commercial(value),
+                })
+                .collect()
+        });
+        let given = match self.result() {
+            Some(Ok(licence)) => match Licence::of(Some(&licence)) {
+                Licence::Known(info) => Given::Licence {
+                    short: info.short.to_string(),
+                    summary: info.summary.to_string(),
+                    url: info.url.map(|url| url.to_string()),
+                },
+                _ => Given::Unlisted,
+            },
+            Some(Err(error)) => Given::Error(error),
+            None => Given::Open,
+        };
+        Model {
+            title: match self.target {
+                Target::Patch => "Choose a licence",
+                Target::Default => "Default licence for new patches",
+            },
+            changes,
+            commercial,
+            other: self.answer == Some(Answer::Other),
+            other_text: self.other.clone(),
+            ready: matches!(self.result(), Some(Ok(_))),
+            given,
+            clear: match self.target {
+                Target::Patch => "No licence",
+                Target::Default => "No default",
+            },
         }
-        let asks_commercial = matches!(self.answer, Some(Answer::Changes(_)));
-        let mut commercial = column![text("Allow commercial use?").size(style::HEADING)].spacing(4);
-        for (value, label, line) in COMMERCIAL {
-            let choice = radio(label, value, self.commercial, move |c| msg(Message::Commercial(c)))
+    }
+}
+
+/// The chooser, as it shows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct Model {
+    /// Its title, which says what the licence is for.
+    pub title: &'static str,
+    /// The first question's answers, without **Other**.
+    pub changes: Vec<Pick>,
+    /// The second question's answers, while it is asked.
+    pub commercial: Option<Vec<Pick>>,
+    /// True while **Other** is chosen.
+    pub other: bool,
+    /// The **Other** field's text.
+    pub other_text: String,
+    /// What the answers give so far.
+    pub given: Given,
+    /// True when **Use this licence** works.
+    pub ready: bool,
+    /// What the clearing button says.
+    pub clear: &'static str,
+}
+
+/// One answer to a question.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct Pick {
+    /// Its key in UI IDs.
+    pub key: &'static str,
+    /// What it says.
+    pub label: &'static str,
+    /// The line that explains it.
+    pub note: &'static str,
+    /// True while it is chosen.
+    pub chosen: bool,
+    /// The message that chooses it.
+    #[serde(skip)]
+    pub message: Message,
+}
+
+/// What the answers give so far.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) enum Given {
+    /// A question is still open.
+    Open,
+    /// A licence, with what it means.
+    Licence {
+        /// Its short name.
+        short: String,
+        /// What it allows, in plain words.
+        summary: String,
+        /// Where its full text is.
+        url: Option<String>,
+    },
+    /// A valid licence the app has no words for: nothing more is shown.
+    Unlisted,
+    /// The **Other** text is not a licence expression.
+    Error(String),
+}
+
+/// The line under every result.
+pub(crate) const DISCLAIMER: &str = "LoomDSP explains each licence in plain words. It does not give legal advice.";
+
+/// The line shown while a question is still open.
+pub(crate) const UNANSWERED: &str = "Answer the questions to pick a licence.";
+
+/// The part of the **Other** field, `licence/other-text`. Its text field's
+/// widget ID comes from it (`places::field_widget_id`), so a screen
+/// reader's Focus reaches it and the window's focus reads back.
+pub(crate) fn other_part() -> loom_ui_core::UiId {
+    access::licence_id().with("other-text")
+}
+
+/// The chooser, as a panel over the window, drawn from its model. Each part
+/// that acts is named by its UI ID, so the window says where it drew it.
+pub(crate) fn view(model: Model) -> Element<'static, crate::Message> {
+    use access::licence_id;
+    let named =
+        |element: Element<'static, crate::Message>, id: loom_ui_core::UiId| -> Element<'static, crate::Message> {
+            container(element).id(crate::places::widget_id(&id)).into()
+        };
+    let msg = crate::Message::Licence;
+    let note = |line: &'static str| container(text(line).size(style::BODY).color(DIM)).padding([0, 24]);
+    let mut answers = column![].spacing(4);
+    let other_answer = model.other.then_some(Answer::Other);
+    for pick in &model.changes {
+        let Message::Answer(answer) = pick.message else {
+            continue;
+        };
+        let chosen = pick.chosen.then_some(answer);
+        answers = answers.push(named(
+            radio(pick.label, answer, chosen, move |a| msg(Message::Answer(a)))
+                .size(style::SWITCH)
+                .text_size(style::CONTROL)
+                .into(),
+            licence_id().with("changes").with(pick.key),
+        ));
+        answers = answers.push(note(pick.note));
+    }
+    let changes = column![
+        text("Allow others to change it and share the result?").size(style::HEADING),
+        named(answers.into(), licence_id().with("changes")),
+    ]
+    .spacing(4);
+    let mut questions = column![changes].spacing(12);
+    if let Some(picks) = &model.commercial {
+        let mut answers = column![].spacing(4);
+        for pick in picks {
+            let Message::Commercial(value) = pick.message else {
+                continue;
+            };
+            let chosen = pick.chosen.then_some(value);
+            let choice = radio(pick.label, value, chosen, move |c| msg(Message::Commercial(c)))
                 .size(style::SWITCH)
                 .text_size(style::CONTROL);
-            commercial = commercial.push(choice).push(note(line));
+            answers = answers
+                .push(named(choice.into(), licence_id().with("commercial").with(pick.key)))
+                .push(note(pick.note));
         }
-        let other = column![
+        questions = questions.push(
+            column![
+                text("Allow commercial use?").size(style::HEADING),
+                named(answers.into(), licence_id().with("commercial")),
+            ]
+            .spacing(4),
+        );
+    }
+    let other = column![
+        named(
             radio(
                 "Other: any SPDX licence expression",
                 Answer::Other,
-                self.answer,
+                other_answer,
                 move |a| { msg(Message::Answer(a)) }
             )
             .size(style::SWITCH)
-            .text_size(style::CONTROL),
-            container(
-                text_input("For example MIT, or CC-BY-4.0 OR MIT", &self.other)
-                    .on_input(move |t| msg(Message::OtherText(t)))
-                    .on_submit(msg(Message::Use))
-                    .size(style::CONTROL)
-            )
-            .padding([0, 24]),
-        ]
-        .spacing(4);
+            .text_size(style::CONTROL)
+            .into(),
+            licence_id().with("other"),
+        ),
+        container(named(
+            text_input("For example MIT, or CC-BY-4.0 OR MIT", &model.other_text)
+                .id(crate::places::field_widget_id(&other_part()))
+                .on_input(move |t| msg(Message::OtherText(t)))
+                .on_submit(msg(Message::Use))
+                .size(style::CONTROL)
+                .into(),
+            licence_id().with("other-text"),
+        ))
+        .padding([0, 24]),
+    ]
+    .spacing(4);
 
-        let mut result = column![].spacing(2);
-        match self.result() {
-            Some(Ok(licence)) => {
-                if let Licence::Known(info) = Licence::of(Some(&licence)) {
-                    result = result.push(text(info.short).size(style::HEADING));
-                    result = result.push(text(info.summary).size(style::BODY));
-                    if let Some(url) = info.url {
-                        result = result.push(text(url).size(style::SMALL).color(DIM));
-                    }
-                }
-            }
-            Some(Err(error)) => result = result.push(text(error).size(style::BODY)),
-            None => {
-                result = result.push(
-                    text("Answer the questions to pick a licence.")
-                        .size(style::BODY)
-                        .color(DIM),
-                );
+    let mut result = column![].spacing(2);
+    match model.given {
+        Given::Licence { short, summary, url } => {
+            result = result.push(text(short).size(style::HEADING));
+            result = result.push(text(summary).size(style::BODY));
+            if let Some(url) = url {
+                result = result.push(text(url).size(style::SMALL).color(DIM));
             }
         }
-        result = result.push(
-            text("LoomDSP explains each licence in plain words. It does not give legal advice.")
-                .size(style::SMALL)
-                .color(DIM),
-        );
+        Given::Error(error) => result = result.push(text(error).size(style::BODY)),
+        Given::Unlisted => {}
+        Given::Open => result = result.push(text(UNANSWERED).size(style::BODY).color(DIM)),
+    }
+    result = result.push(text(DISCLAIMER).size(style::SMALL).color(DIM));
 
-        let ready = matches!(self.result(), Some(Ok(_)));
-        let clear = match self.target {
-            Target::Patch => "No licence",
-            Target::Default => "No default",
-        };
-        let title = match self.target {
-            Target::Patch => "Choose a licence",
-            Target::Default => "Default licence for new patches",
-        };
-        let mut questions = column![changes].spacing(12);
-        if asks_commercial {
-            questions = questions.push(commercial);
-        }
-        let panel = column![
-            text(title).size(style::TITLE),
-            scrollable(
-                column![questions, rule::horizontal(1), other, rule::horizontal(1), result]
-                    .spacing(12)
-                    .padding([0, 12])
+    let panel = column![
+        text(model.title).size(style::TITLE),
+        scrollable(
+            column![questions, rule::horizontal(1), other, rule::horizontal(1), result]
+                .spacing(12)
+                .padding([0, 12])
+        ),
+        row![
+            named(
+                button(text(model.clear).size(style::CONTROL))
+                    .on_press(msg(Message::Clear))
+                    .into(),
+                licence_id().with("clear"),
             ),
-            row![
-                button(text(clear).size(style::CONTROL)).on_press(msg(Message::Clear)),
-                space::horizontal(),
-                button(text("Cancel").size(style::CONTROL)).on_press(msg(Message::Cancel)),
+            space::horizontal(),
+            named(
+                button(text("Cancel").size(style::CONTROL))
+                    .on_press(msg(Message::Cancel))
+                    .into(),
+                licence_id().with("cancel"),
+            ),
+            named(
                 button(text("Use this licence").size(style::CONTROL))
                     .style(style::primary)
-                    .on_press_maybe(ready.then_some(msg(Message::Use))),
-            ]
-            .spacing(8),
+                    .on_press_maybe(model.ready.then_some(msg(Message::Use)))
+                    .into(),
+                licence_id().with("use"),
+            ),
         ]
-        .spacing(12);
-        let panel = container(panel)
-            .padding(16)
-            .width(560)
-            .max_height(720)
-            .style(container::rounded_box);
-        opaque(
-            container(panel)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
-        )
-    }
+        .spacing(8),
+    ]
+    .spacing(12);
+    let panel = container(panel)
+        .padding(16)
+        .width(560)
+        .max_height(720)
+        .style(container::rounded_box)
+        .id(crate::places::widget_id(&licence_id()));
+    opaque(
+        container(panel)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
+    )
 }
 
 impl App {
@@ -306,6 +473,8 @@ impl App {
         }
     }
 }
+
+pub(crate) mod access;
 
 #[cfg(test)]
 mod tests;

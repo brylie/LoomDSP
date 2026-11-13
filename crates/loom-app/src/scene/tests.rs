@@ -554,7 +554,7 @@ fn the_inspector_marks_a_hidden_parameter() {
     let mut app = crate::tests::app();
     let env = app.session.controller.add_module("loom.env.envelope").unwrap();
     app.session.controller.set_param_named(env, "mode", 1.0).unwrap();
-    let _ = app.update(crate::Message::Inspector(crate::inspector::Message::SelectModule(
+    let _ = app.send(crate::Message::Inspector(crate::inspector::Message::SelectModule(
         env.0,
     )));
     let crate::inspector::Inspector::Module(rows) = app.inspector_model() else {

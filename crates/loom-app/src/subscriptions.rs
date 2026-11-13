@@ -5,7 +5,7 @@ use crate::{
     App, FileAction, Message, audio_watch, bench, browser, control, devices, input_watch, learn, lights, monitor,
     preferences, recovery,
 };
-use iced::{Subscription, Task};
+use iced::Subscription;
 use loom_core::ModuleId;
 use std::time::Duration;
 
@@ -266,12 +266,4 @@ pub(crate) fn browser_key(
         _ => return None,
     };
     Some(Message::Browser(browser::Message::Key(nav)))
-}
-
-impl App {
-    /// The task that runs once the window opens: it attaches the
-    /// accessibility layer, where the platform has an adapter for it.
-    pub(crate) fn start_task() -> Task<Message> {
-        crate::a11y::attach().map(Message::A11y)
-    }
 }

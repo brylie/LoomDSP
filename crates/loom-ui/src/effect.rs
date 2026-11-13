@@ -108,6 +108,9 @@ pub enum FocusTarget {
     Next,
     /// The previous element in the focus order.
     Previous,
+    /// No element: focus leaves every element, so a text field that had it
+    /// closes and the keys go to the app's shortcuts (section 6, rule 1).
+    Nothing,
 }
 
 /// What happens to a text field's selection when it takes focus.
@@ -181,21 +184,35 @@ pub struct Question {
 /// `None` when the dialog was closed with no button.
 pub type Choice = Option<usize>;
 
-/// A captured window: its size in physical pixels and its pixels as
-/// 8-bit RGBA, row by row from the top.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A captured window: its size in physical pixels, the scale it was drawn
+/// at, and its pixels as 8-bit RGBA, row by row from the top.
+///
+/// The scale belongs to the capture: it is the window's when the pixels
+/// were taken. Read a turn later, the window could be on another display.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Image {
     width: u32,
     height: u32,
+    scale: f32,
     rgba: Vec<u8>,
 }
 
 impl Image {
-    /// An image, or `None` when `rgba` does not hold exactly four bytes for
-    /// each pixel.
-    pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Option<Self> {
+    /// An image drawn at `scale` physical pixels per logical pixel, or
+    /// `None` when `rgba` does not hold exactly four bytes for each pixel.
+    pub fn new(width: u32, height: u32, scale: f32, rgba: Vec<u8>) -> Option<Self> {
         let expected = usize::try_from(u64::from(width) * u64::from(height) * 4).ok()?;
-        (rgba.len() == expected).then_some(Self { width, height, rgba })
+        (rgba.len() == expected).then_some(Self {
+            width,
+            height,
+            scale,
+            rgba,
+        })
+    }
+
+    /// Physical pixels per logical pixel, when it was drawn.
+    pub fn scale(&self) -> f32 {
+        self.scale
     }
 
     /// Its width in physical pixels.
@@ -369,6 +386,14 @@ impl<M> Effects<M> {
         let target = if back { FocusTarget::Previous } else { FocusTarget::Next };
         Self::one(Effect::Focus {
             target,
+            select: Selection::Keep,
+        })
+    }
+
+    /// Take the focus from every element.
+    pub fn unfocus() -> Self {
+        Self::one(Effect::Focus {
+            target: FocusTarget::Nothing,
             select: Selection::Keep,
         })
     }

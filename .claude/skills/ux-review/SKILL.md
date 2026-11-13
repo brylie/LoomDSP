@@ -103,7 +103,7 @@ Walk through a real task as a person, using `docs/product/personas-and-use-cases
 Now read, for the areas you found problems in:
 
 - The feature's own spec in `docs/design/` first. Then `visual-system.md` for anything visual, and `panels.md` and `panel-widgets.md` when tiles are involved.
-- Decisions in `docs/adr/` (ADR-0025 one design language, ADR-0028 screen readers deferred, ADR-0029 families and palette), and the requirements (`NFR-UX-*`).
+- Decisions in `docs/adr/` (ADR-0025 one design language, ADR-0041 our own UI layer and its accessibility tree, ADR-0029 families and palette), and the requirements (`NFR-UX-*`).
 - Earlier reviews in `docs/research/` matching `*ux*`. A keyword search is enough for a narrow scope.
 - Open issues: `gh issue list --label area:ui --state open --limit 300`, the same for `--label accessibility`, and `gh issue list --search "KEYWORD" --state all` for each finding, because claiming "not filed" needs the whole list.
 

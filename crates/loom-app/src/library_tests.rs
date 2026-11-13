@@ -421,7 +421,7 @@ fn editing_inside_a_linked_instance_unlinks_it_and_leaves_the_other() {
 
     // Unlink, from the tile menu, on the one still linked.
     app.show_level(&ModulePath::root());
-    let _ = app.update(Message::Unlink(second));
+    let _ = app.send(Message::Unlink(second));
     assert_eq!(
         app.ui_snapshot().status,
         "Voice is now a copy. It no longer follows the library."
@@ -464,7 +464,7 @@ fn save_to_library_leaves_the_other_instance_until_the_patch_reloads() {
     fake::answer_save(Some(voice_file.clone()));
     app.show_level(&ModulePath::root());
     let step = app.ui_snapshot().undo;
-    let _ = app.update(Message::SaveToLibrary(first));
+    let _ = app.send(Message::SaveToLibrary(first));
     assert_eq!(
         fake::asked(),
         [Asked::Save(Some(dir.0.join("Voice.ron")))],
@@ -674,9 +674,9 @@ fn save_to_library_inside_a_sub_patch_writes_a_file_that_opens_on_its_own() {
 fn save_to_library_needs_a_sub_patch_and_a_player() {
     let dir = library();
     let mut app = app_with(HOST, &dir.0);
-    let _ = app.update(Message::File(crate::FileAction::SaveToLibrary));
+    let _ = app.send(Message::File(crate::FileAction::SaveToLibrary));
     assert_eq!(app.ui_snapshot().status, crate::file_commands::SAVE_TO_LIBRARY_INSIDE);
-    let _ = app.update(Message::SaveToLibrary(1));
+    let _ = app.send(Message::SaveToLibrary(1));
     assert_eq!(app.ui_snapshot().status, crate::file_commands::SAVE_TO_LIBRARY_INSIDE);
 }
 
@@ -967,7 +967,7 @@ fn save_to_library_asks_before_replacing_a_file_named_without_its_extension() {
     let before = std::fs::read_to_string(&target).unwrap();
     // A fresh name the dialog did not check, with Voice.ron already there.
     fake::answer_save(Some(dir.0.join("Voices").join("Voice")));
-    let _ = app.update(Message::SaveToLibrary(voice));
+    let _ = app.send(Message::SaveToLibrary(voice));
     let question = app.ui_snapshot().question.expect("the replace question");
     assert_eq!(question.title, "Replace \"Voice.ron\"?");
     assert_eq!(question.primary, "cancel");
@@ -1022,7 +1022,7 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 8, 100])
     ));
     app.process(128);
-    let _ = app.update(Message::Midi);
+    let _ = app.send(Message::Midi);
     assert_eq!(
         app.session.hierarchy.library_of(ModuleId(second)),
         Some("Voices/Voice.ron"),
@@ -1033,7 +1033,7 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 7, 100])
     ));
     app.process(128);
-    let _ = app.update(Message::Midi);
+    let _ = app.send(Message::Midi);
     assert_eq!(
         app.ui_snapshot().status,
         "Voice is now a copy. It no longer follows the library."
@@ -1091,7 +1091,7 @@ fn a_library_item_that_declares_the_role_can_fill_a_slot() {
     let labels: Vec<String> = app.tile_menu_items(9).into_iter().map(|(l, _)| l).collect();
     assert!(labels.contains(&"Swap to Comb".to_string()), "{labels:?}");
     assert!(!labels.contains(&"Swap to Voice".to_string()), "Voice declares no role");
-    let _ = app.update(Message::SwapSlot {
+    let _ = app.send(Message::SwapSlot {
         slot: 9,
         to: crate::slots::SwapTarget::Library("Filters/Comb.ron".to_string()),
     });

@@ -3,12 +3,30 @@
 
 use super::tree::{WidgetIds, WidgetKey, canvas_id, tile_id, window_id};
 use super::*;
+
 use crate::places::Places;
 use crate::{App, Message};
 use accesskit::{Action, ActionData, Node, NodeId, Role, TreeId};
 use loom_canvas::{Camera, CanvasEvent, CanvasView, ControlPart};
 use loom_core::ModuleNames as _;
 use loom_ui_core::{Point, Rect, Size, UiId};
+
+/// A screen reader's action at `at`, and the turn after it, where its
+/// messages run. True when it sent any.
+fn act(app: &mut App, request: &ActionRequest, at: std::time::Instant) -> bool {
+    let sent = app.a11y_act(request, at);
+    app.run_posted();
+    sent
+}
+
+/// [`act`] in the `Ui` harness.
+fn ui_act(ui: &mut crate::ui_test::Ui, request: &ActionRequest, at: std::time::Instant) -> bool {
+    let sent = ui.app.a11y_act(request, at);
+    for message in ui.app.take_posted() {
+        let _ = ui.deliver(message);
+    }
+    sent
+}
 
 /// An app with one filter, its module ID, and the panel index of its Cutoff knob.
 fn app_with_filter() -> (App, u32, usize) {
@@ -626,7 +644,7 @@ fn bounds_are_in_physical_pixels() {
     assert!((logical.y1 - f64::from(bottom_right.y)).abs() < 1e-3);
     assert!(logical.x1 > logical.x0 && logical.y1 > logical.y0);
 
-    let _ = app.a11y_event(Event::ScaleFactor(2.0));
+    app.a11y_event(Event::ScaleFactor(2.0));
     let twice = app.a11y_tree(&Places::of_canvas(Some(view)));
     let physical = node(&twice, cutoff).bounds().unwrap();
     assert!((physical.x0 - logical.x0 * 2.0).abs() < 1e-3);
@@ -701,7 +719,7 @@ fn a_replaced_patch_gets_new_node_ids() {
 #[test]
 fn replacing_the_patch_through_the_app_drops_tile_ids() {
     let (mut app, module, _) = app_with_filter();
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let _ = app.a11y_tree(&Places::default());
     let root = node_of(&mut app, &window_id());
     let tile = node_of(&mut app, &tile_id(module));
@@ -723,14 +741,14 @@ fn increment_turns_the_knob_and_can_be_undone() {
     let cutoff = widget_node(&mut app, module, knob);
     let before = position(&app, module, knob);
 
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Increment, cutoff, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Increment, cutoff, None))));
 
     let after = position(&app, module, knob);
     assert!((after - (before + 0.01).min(1.0)).abs() < 1e-4, "{before} -> {after}");
     // The turn is in an open group, and Undo closes the group and takes it.
     assert_eq!(app.undo_hint().unwrap(), "Undo: the screen reader edit");
 
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Decrement, cutoff, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Decrement, cutoff, None))));
     assert!((position(&app, module, knob) - before).abs() < 1e-4);
 }
 
@@ -784,14 +802,14 @@ fn quick_sets_on_one_control_are_one_undo_step() {
     let t = Instant::now();
     for (i, hz) in [200.0, 400.0, 800.0].into_iter().enumerate() {
         let set = request(Action::SetValue, cutoff, Some(ActionData::NumericValue(hz)));
-        let _ = app.a11y_action(&set, t + Duration::from_millis(300 * i as u64));
+        act(&mut app, &set, t + Duration::from_millis(300 * i as u64));
         assert!(app.undo_hint().is_ok(), "Undo is enabled while the group is open");
     }
     assert_eq!(app.session.edits.history.len(), steps, "the group is still open");
     assert_eq!(app.undo_hint().unwrap(), "Undo: the screen reader edit");
 
     // Undo closes the group first, then takes it back as one step.
-    let _ = app.update(Message::Undo);
+    let _ = app.send(Message::Undo);
     assert!((position(&app, module, knob) - before).abs() < 1e-6);
     assert_eq!(app.session.edits.reader_group(), crate::edits::ReaderGroup::Closed);
 }
@@ -820,31 +838,31 @@ fn a_screen_reader_group_ends_as_the_rule_says() {
     let start = steps(&app);
 
     // The deadline: the canvas wakes once and reports it.
-    let _ = app.a11y_action(&up(cutoff), t);
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(499) }));
+    act(&mut app, &up(cutoff), t);
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(499) }));
     assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed, "not yet due");
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(500) }));
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupDue { at: t + ms(500) }));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(steps(&app), start + 1);
 
     // Another control: the first group ends, and a new one opens.
-    let _ = app.a11y_action(&up(cutoff), t + ms(1000));
-    let _ = app.a11y_action(&up(other), t + ms(1100));
+    act(&mut app, &up(cutoff), t + ms(1000));
+    act(&mut app, &up(other), t + ms(1100));
     assert_eq!(steps(&app), start + 2);
     assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed);
 
     // A late action on the same control is a new group too.
-    let _ = app.a11y_action(&up(other), t + ms(1700));
+    act(&mut app, &up(other), t + ms(1700));
     assert_eq!(steps(&app), start + 3);
 
     // A key press or a pointer press on the canvas ends it.
-    let _ = app.update(Message::Canvas(CanvasEvent::EditGroupEnd));
+    let _ = app.send(Message::Canvas(CanvasEvent::EditGroupEnd));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(steps(&app), start + 4);
 
     // An arrow key press does too, before its own group opens.
-    let _ = app.a11y_action(&up(cutoff), t + ms(3000));
-    let _ = app.update(Message::Canvas(CanvasEvent::ArrowPressed { at: t + ms(3100) }));
+    act(&mut app, &up(cutoff), t + ms(3000));
+    let _ = app.send(Message::Canvas(CanvasEvent::ArrowPressed { at: t + ms(3100) }));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(steps(&app), start + 5);
 }
@@ -860,7 +878,7 @@ fn the_canvas_wakes_once_for_an_open_group() {
     assert_eq!(app.session.edits.reader_group().due(), None);
     let cutoff = widget_node(&mut app, module, knob);
     let t = Instant::now();
-    let _ = app.a11y_action(&request(Action::Increment, cutoff, None), t);
+    act(&mut app, &request(Action::Increment, cutoff, None), t);
     assert_eq!(
         app.session.edits.reader_group().due(),
         Some(t + crate::edits::ARROW_GROUP)
@@ -1047,7 +1065,7 @@ fn focus_does_not_change_the_selection() {
 
     assert!(events(&app, &request(Action::Focus, tile, None)).is_empty());
     assert!(events(&app, &request(Action::Focus, cutoff, None)).is_empty());
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Focus, tile, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Focus, tile, None))));
 
     assert_eq!(app.ui_snapshot().selection, before);
     assert!(!app.unsaved(), "no edit was made");
@@ -1070,11 +1088,11 @@ fn click_on_a_tile_selects_it() {
         events(&app, &request(Action::Click, tile, None)),
         vec![CanvasEvent::Select(vec![module])]
     );
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Click, tile, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Click, tile, None))));
     assert_eq!(app.ui_snapshot().selection, vec![module]);
 
     let second = node_of(&mut app, &tile_id(other));
-    let _ = app.update(Message::A11y(Event::Action(request(Action::Click, second, None))));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Click, second, None))));
     assert_eq!(
         app.ui_snapshot().selection,
         vec![other],
@@ -1145,7 +1163,7 @@ fn actions_wait_while_a_panel_owns_input() {
     app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
     assert!(!app.no_overlay(), "the recent list owns input");
     let before = position(&app, module, knob);
-    let _ = app.a11y_event(Event::Action(request(Action::Increment, cutoff, None)));
+    let _ = app.send(Message::A11y(Event::Action(request(Action::Increment, cutoff, None))));
     assert_eq!(before, position(&app, module, knob));
     assert!(!app.unsaved(), "no edit was made");
 }
@@ -1157,19 +1175,19 @@ fn a_screen_reader_turns_the_layer_on() {
     let (mut app, _, _) = app_with_filter();
     assert!(!app.a11y.active);
     let _ = app.a11y_subscription();
-    let _ = app.a11y_event(Event::Attached(Ok(())));
-    let _ = app.a11y_event(Event::Attached(Err("no window".into())));
+    app.a11y_event(Event::Attached(Ok(())));
+    app.a11y_event(Event::Attached(Err("no window".into())));
     assert!(!app.a11y.active, "attaching is not listening");
-    let _ = app.a11y_event(Event::Located(Places::default()));
+    app.a11y_event(Event::Located(Places::default()));
     assert!(app.a11y.ids.is_empty(), "no tree without a screen reader");
-    let _ = app.a11y_after(Touch::Changed);
+    app.a11y_after(Touch::Changed);
     assert!(!app.a11y.locating, "and no rebuild is asked for");
 
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     assert!(app.a11y.active);
     assert!(app.a11y.locating, "the first tree is on its way");
     let _ = app.a11y_subscription();
-    let _ = app.a11y_event(Event::Located(Places::default()));
+    app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating);
     assert!(!app.a11y.ids.is_empty(), "locating the canvas built the tree");
     assert!(!app.unsaved(), "no edit was made");
@@ -1177,8 +1195,8 @@ fn a_screen_reader_turns_the_layer_on() {
 
 /// Makes a screen reader listen, and takes the first whole tree.
 fn listen(app: &mut App) {
-    let _ = app.a11y_event(Event::Activated);
-    let _ = app.a11y_event(Event::Located(Places::default()));
+    app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Located(Places::default()));
 }
 
 /// The node IDs in an update, sorted.
@@ -1194,7 +1212,7 @@ fn sent_ids(update: &TreeUpdate) -> Vec<NodeId> {
 #[test]
 fn only_changed_nodes_are_sent() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let (whole, first) = app.a11y_changes(&Places::default());
     let first = first.expect("the first update is sent");
     assert!(first.tree.is_some(), "it names the root");
@@ -1204,13 +1222,13 @@ fn only_changed_nodes_are_sent() {
     assert!(again.is_none(), "nothing changed, so nothing is sent");
 
     let cutoff = widget_node(&mut app, module, knob);
-    let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+    let _ = app.send(Message::Canvas(CanvasEvent::SetControl {
         module,
         widget: knob,
         position: 0.25,
         part: ControlPart::Main,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     let (_, changes) = app.a11y_changes(&Places::default());
     let changes = changes.expect("the knob changed");
     assert!(changes.tree.is_none(), "the root is named once");
@@ -1231,12 +1249,12 @@ fn only_changed_nodes_are_sent() {
 fn a_message_that_changes_nothing_sends_nothing() {
     let (mut app, module, _) = app_with_filter();
     listen(&mut app);
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
     app.a11y.locating = false;
     let (_, changes) = app.a11y_changes(&Places::default());
     assert!(changes.is_some(), "the inspector now shows the module");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
     assert!(app.a11y.locating, "the message asked for a rebuild");
     app.a11y.locating = false;
     let (_, changes) = app.a11y_changes(&Places::default());
@@ -1249,13 +1267,13 @@ fn a_message_that_changes_nothing_sends_nothing() {
 fn one_rebuild_at_a_time() {
     let (mut app, _, _) = app_with_filter();
     listen(&mut app);
-    let _ = app.a11y_after(Touch::Changed);
+    app.a11y_after(Touch::Changed);
     assert!(app.a11y.locating);
     // Asking again while it waits changes nothing.
-    let _ = app.a11y_after(Touch::Changed);
-    let _ = app.a11y_after(Touch::Own);
+    app.a11y_after(Touch::Changed);
+    app.a11y_after(Touch::Own);
     assert!(app.a11y.locating);
-    let _ = app.a11y_event(Event::Located(Places::default()));
+    app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating);
 }
 
@@ -1263,10 +1281,10 @@ fn one_rebuild_at_a_time() {
 /// the watcher thread does.
 fn move_live_values(app: &mut App) {
     let tiles: Vec<u32> = app.ui_snapshot().tiles.iter().map(|t| t.id).collect();
-    let _ = app.update(Message::Canvas(CanvasEvent::VisibleDisplays(tiles)));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(tiles)));
     let watch = app.watched_lights().expect("the patch shows lights");
     app.process(4_800);
-    let _ = app.update(Message::Lights(watch.read()));
+    let _ = app.send(Message::Lights(watch.read()));
 }
 
 /// The nodes of widgets that only show a value, among `ids`.
@@ -1301,7 +1319,7 @@ fn live_values_wait_for_the_timer() {
     assert!(app.a11y.live_waits());
 
     // The timer fires: the live values are sent, and the timer stops.
-    let _ = app.a11y_event(Event::LiveTick);
+    app.a11y_event(Event::LiveTick);
     assert!(app.a11y.locating, "the timer asks for a rebuild");
     app.a11y.locating = false;
     let (_, changes) = app.a11y_changes(&Places::default());
@@ -1323,13 +1341,13 @@ fn a_new_scale_factor_resends_bounds() {
         bounds: Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0)),
         camera: Camera::default(),
     };
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let _ = app.a11y_changes(&Places::of_canvas(Some(view)));
     app.a11y.locating = false;
 
-    let _ = app.a11y_event(Event::ScaleFactor(1.0));
+    app.a11y_event(Event::ScaleFactor(1.0));
     assert!(!app.a11y.locating, "the same scale factor asks for nothing");
-    let _ = app.a11y_event(Event::ScaleFactor(2.0));
+    app.a11y_event(Event::ScaleFactor(2.0));
     assert!(app.a11y.locating, "a new one asks for a rebuild");
     let (_, changes) = app.a11y_changes(&Places::of_canvas(Some(view)));
     let changed = sent_ids(&changes.expect("bounds changed"));
@@ -1343,13 +1361,13 @@ fn a_new_scale_factor_resends_bounds() {
 fn a_screen_reader_that_leaves_stops_the_tree() {
     let (mut app, _, _) = app_with_filter();
     listen(&mut app);
-    let _ = app.a11y_event(Event::Deactivated);
+    app.a11y_event(Event::Deactivated);
     assert!(!app.a11y.is_active());
-    let _ = app.a11y_after(Touch::Changed);
-    let _ = app.a11y_after(Touch::Live);
+    app.a11y_after(Touch::Changed);
+    app.a11y_after(Touch::Live);
     assert!(!app.a11y.locating && !app.a11y.live_waits());
 
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let (whole, first) = app.a11y_changes(&Places::default());
     assert_eq!(sent_ids(&first.expect("the whole tree again")), sent_ids(&whole));
 }
@@ -1371,12 +1389,12 @@ fn a_rescaled_window_reports_its_scale_factor() {
 #[test]
 fn focus_is_reported_on_the_focused_control() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let (whole, _) = app.a11y_changes(&Places::default());
     let root = node_of(&mut app, &window_id());
     assert_eq!(whole.focus, root);
 
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     let cutoff = widget_node(&mut app, module, knob);
     let (whole, changes) = app.a11y_changes(&Places::default());
     assert_eq!(whole.focus, cutoff);
@@ -1385,7 +1403,7 @@ fn focus_is_reported_on_the_focused_control() {
     let (_, again) = app.a11y_changes(&Places::default());
     assert!(again.is_none(), "the same focus sends nothing");
 
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(None)));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(None)));
     let (whole, changes) = app.a11y_changes(&Places::default());
     assert_eq!(whole.focus, root);
     assert!(changes.is_some());
@@ -1426,22 +1444,22 @@ fn the_focus_action_asks_the_canvas_for_focus() {
     let (key, _) = app.a11y.focus_request();
 
     let target = widget_node(&mut app, module, knob);
-    let _ = app.a11y_action(&request(Action::Focus, target, None), t);
+    act(&mut app, &request(Action::Focus, target, None), t);
     assert_eq!(app.a11y.focus_request(), (key + 1, Some((module, knob))));
     assert_eq!(app.session.selection, selection, "the canvas selects, when it draws");
     assert!(!app.unsaved(), "focus is not an edit");
 
     let (pad_module, pad) = first_of(&app, "xy_pad");
     let y = piece_node(&mut app, pad_module, pad, tree::Piece::Second);
-    let _ = app.a11y_action(&request(Action::Focus, y, None), t);
+    act(&mut app, &request(Action::Focus, y, None), t);
     assert_eq!(app.a11y.focus_request(), (key + 2, Some((pad_module, pad))));
 
     let (light_module, light) = first_of(&app, "light");
     let display = widget_node(&mut app, light_module, light);
-    let _ = app.a11y_action(&request(Action::Focus, display, None), t);
+    act(&mut app, &request(Action::Focus, display, None), t);
     assert_eq!(app.a11y.focus_request().0, key + 2, "a display takes no focus");
     let tile = node_of(&mut app, &tile_id(module));
-    let _ = app.a11y_action(&request(Action::Focus, tile, None), t);
+    act(&mut app, &request(Action::Focus, tile, None), t);
     assert_eq!(app.a11y.focus_request().0, key + 2, "a tile takes no focus");
 }
 
@@ -1454,12 +1472,20 @@ fn focus_ends_the_group_and_a_new_patch_forgets_it() {
     let _ = app.a11y_tree(&Places::default());
     let cutoff = widget_node(&mut app, module, knob);
     let steps = app.session.edits.history.len();
-    let _ = app.a11y_action(&request(Action::Increment, cutoff, None), std::time::Instant::now());
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    act(
+        &mut app,
+        &request(Action::Increment, cutoff, None),
+        std::time::Instant::now(),
+    );
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     assert_eq!(app.session.edits.reader_group(), crate::edits::ReaderGroup::Closed);
     assert_eq!(app.session.edits.history.len(), steps + 1);
 
-    let _ = app.a11y_action(&request(Action::Focus, cutoff, None), std::time::Instant::now());
+    act(
+        &mut app,
+        &request(Action::Focus, cutoff, None),
+        std::time::Instant::now(),
+    );
     assert!(app.a11y.focus_request().1.is_some());
     app.a11y.patch_replaced();
     assert_eq!(app.a11y.focus_request().1, None);
@@ -1474,24 +1500,24 @@ fn focus_ends_the_group_and_a_new_patch_forgets_it() {
 #[test]
 fn tiles_below_a_panel_are_hidden_and_keep_their_values() {
     let (mut app, module, knob) = app_with_filter();
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let (whole, _) = app.a11y_changes(&Places::default());
     let tile = node_of(&mut app, &tile_id(module));
     let cutoff = widget_node(&mut app, module, knob);
     assert!(!node(&whole, tile).is_hidden());
-    let _ = app.update(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
+    let _ = app.send(Message::Canvas(CanvasEvent::FocusChanged(Some((module, knob)))));
     let _ = app.a11y_changes(&Places::default());
 
     app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
     // The patch changes behind the panel, as MIDI or a script can do.
     app.set_param(module, 0, 0.5);
-    let _ = app.update(Message::Canvas(CanvasEvent::SetControl {
+    let _ = app.send(Message::Canvas(CanvasEvent::SetControl {
         module,
         widget: knob,
         position: 0.1,
         part: ControlPart::Main,
     }));
-    let _ = app.update(Message::SliderReleased);
+    let _ = app.send(Message::SliderReleased);
     let (whole, changes) = app.a11y_changes(&Places::default());
     assert!(node(&whole, tile).is_hidden());
     assert_eq!(
@@ -1525,7 +1551,7 @@ fn live_values_off_screen_are_not_sent() {
         bounds: Rect::new(Point::new(-9000.0, -9000.0), Size::new(1.0, 1.0)),
         camera: Camera::default(),
     };
-    let _ = app.a11y_event(Event::Activated);
+    app.a11y_event(Event::Activated);
     let _ = app.a11y_changes(&Places::of_canvas(Some(away)));
     move_live_values(&mut app);
     assert!(app.a11y.live_waits());
@@ -1595,7 +1621,7 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
     let (mut app, module, knob) = app_with_filter();
     let other = app.session.controller.add_module("loom.filter.svf").unwrap().0;
     app.commit();
-    let _ = app.update(Message::Canvas(CanvasEvent::Select(vec![other])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![other])));
     let mut ui = crate::ui_test::Ui::with_app(app);
     // The first frame only notes the request's key.
     let _ = ui.redraw();
@@ -1656,7 +1682,7 @@ fn a_measured_layer_builds_and_times_the_tree() {
     assert!(app.a11y.is_active());
 
     let before = BuildTimes::process();
-    let _ = app.a11y_event(Event::Located(Places::default()));
+    app.a11y_event(Event::Located(Places::default()));
     let after = BuildTimes::process();
     // Other tests build trees too, but only a measured layer counts them.
     assert!(after.count > before.count);
@@ -1682,20 +1708,20 @@ fn a_poll_that_changes_nothing_builds_no_tree() {
             Message::Autosave,
             Message::MidiGhosts,
         ] {
-            let _ = app.update(poll);
+            let _ = app.send(poll);
             assert!(!app.a11y.locating, "a poll that changed nothing asks for no build");
         }
     }
     assert_eq!(app.a11y_poll_key(), before);
 
     // The same poll, after something it reports changed underneath it.
-    let _ = app.a11y_after(Touch::Poll(Some(before)));
+    app.a11y_after(Touch::Poll(Some(before)));
     assert!(!app.a11y.locating);
     app.alerts.say("The audio device is gone");
     assert_ne!(app.a11y_poll_key(), before);
-    let _ = app.a11y_after(Touch::Poll(Some(before)));
+    app.a11y_after(Touch::Poll(Some(before)));
     assert!(app.a11y.locating, "a changed status asks for one build");
-    let _ = app.a11y_after(Touch::Poll(Some(before)));
+    app.a11y_after(Touch::Poll(Some(before)));
     assert!(app.a11y.locating, "and one build is on its way, not two");
 
     // Each part of the key is something the tree reports.
@@ -1768,16 +1794,16 @@ fn a_click_that_changes_nothing_ends_the_group() {
         .into_iter()
         .find(|action| !events(&app, &request(*action, knob_node, None)).is_empty())
         .expect("the knob can move one way");
-    let _ = app.a11y_action(&request(step, knob_node, None), now);
+    act(&mut app, &request(step, knob_node, None), now);
     assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed);
     // A node the window does not show leaves the group open.
     let gone = request(Action::Click, NodeId(u64::MAX), None);
-    assert!(app.a11y_action(&gone, now).is_empty());
+    assert!(!act(&mut app, &gone, now));
     assert_ne!(app.session.edits.reader_group(), ReaderGroup::Closed);
 
     let chosen = position(&app, radio_module, radio).round() as usize;
     let option = piece_node(&mut app, radio_module, radio, tree::Piece::Option(chosen));
-    assert!(app.a11y_action(&request(Action::Click, option, None), now).is_empty());
+    assert!(!act(&mut app, &request(Action::Click, option, None), now));
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(
         app.session.edits.history.len(),
@@ -1786,7 +1812,7 @@ fn a_click_that_changes_nothing_ends_the_group() {
     );
 
     // The next edit on the knob is a step of its own, though it is in time.
-    let _ = app.a11y_action(&request(step, knob_node, None), now);
+    act(&mut app, &request(step, knob_node, None), now);
     app.reader_event(crate::edits::ReaderEvent::Close);
     assert_eq!(app.session.edits.history.len(), steps + 2);
 }
@@ -1804,10 +1830,7 @@ fn an_action_waits_while_an_arrow_key_is_held() {
     assert_eq!(app.session.edits.arrow_group(), ArrowGroup::Held);
     let before = position(&app, module, knob);
 
-    assert!(
-        app.a11y_action(&request(Action::Increment, cutoff, None), now)
-            .is_empty()
-    );
+    assert!(!act(&mut app, &request(Action::Increment, cutoff, None), now));
     assert_eq!(position(&app, module, knob), before);
     assert_eq!(app.session.edits.reader_group(), ReaderGroup::Closed);
     assert_eq!(
@@ -1818,10 +1841,7 @@ fn an_action_waits_while_an_arrow_key_is_held() {
 
     // The key comes up: the action works again.
     app.arrow_event(ArrowEvent::Released(now));
-    assert!(
-        !app.a11y_action(&request(Action::Increment, cutoff, None), now)
-            .is_empty()
-    );
+    assert!(act(&mut app, &request(Action::Increment, cutoff, None), now));
     assert!(position(&app, module, knob) > before);
 }
 
@@ -1835,21 +1855,24 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
     let _ = ui.redraw();
     // A real field with real focus, so each time the app asks, the
     // answer is that a field has it.
-    ui.focus(crate::patch_info::TAG_INPUT);
+    ui.focus(&crate::patch_info::tags_part());
     assert!(ui.text_field_focused(), "the tag field took focus");
-    let _ = ui.app.a11y_event(Event::Activated);
+    let _ = ui.deliver(Message::TextFocusCheck);
+    assert!(ui.app.focus.is_some(), "the app heard of it");
+    ui.app.a11y_event(Event::Activated);
+    // Its rebuild is not asked for here: this test counts the ones that
+    // one message makes.
+    drop(ui.app.take_window_questions());
     ui.app.a11y.locating = false;
-    ui.app.text_focus.any = true;
 
-    let task = ui.app.update(Message::Canvas(CanvasEvent::Select(Vec::new())));
-    let log = ui.run_task(task);
+    let log = ui.deliver(Message::Canvas(CanvasEvent::Select(Vec::new())));
     let rebuilds = log
         .iter()
         .filter(|message| matches!(message, Message::A11y(Event::Located(_))))
         .count();
     let asked = log
         .iter()
-        .filter(|message| matches!(message, Message::TextFocus(_)))
+        .filter(|message| matches!(message, Message::FocusMoved(_)))
         .count();
     assert!(rebuilds <= 2, "{rebuilds} rebuilds for one message");
     assert!(asked <= 1, "focus was asked {asked} times");
@@ -1940,7 +1963,7 @@ fn a_click_on_a_toolbar_button_presses_it() {
     let before = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
     let cutoff = widget_node(&mut app, module, knob);
     let now = std::time::Instant::now();
-    let _ = app.a11y_action(&request(Action::Increment, cutoff, None), now);
+    act(&mut app, &request(Action::Increment, cutoff, None), now);
     let moved = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
     assert!(moved > before);
 
@@ -1950,12 +1973,12 @@ fn a_click_on_a_toolbar_button_presses_it() {
     ));
     assert!(app.a11y_frame_message(&request(Action::Focus, undo, None)).is_none());
     assert!(app.a11y_frame_message(&request(Action::Click, cutoff, None)).is_none());
-    let _ = app.a11y_action(&request(Action::Click, undo, None), now);
+    act(&mut app, &request(Action::Click, undo, None), now);
     let back = app.ui_snapshot().tiles.iter().find(|t| t.id == module).unwrap().widgets[knob].position;
     assert!((back - before).abs() < 1e-6, "Undo took the screen reader's edit back");
 
     let learn = node_of(&mut app, &tree::toolbar_id().with("midi_learn"));
-    let _ = app.a11y_action(&request(Action::Click, learn, None), now);
+    act(&mut app, &request(Action::Click, learn, None), now);
     assert!(app.ui_snapshot().learning);
     let update = app.a11y_tree(&Places::default());
     assert_eq!(node(&update, learn).toggled(), Some(accesskit::Toggled::True));
@@ -1977,7 +2000,11 @@ fn the_right_panel_has_tabs() {
     assert_eq!(node(&update, inspector).is_selected(), Some(true));
     assert_eq!(node(&update, matrix).is_selected(), Some(false));
 
-    let _ = app.a11y_action(&request(Action::Click, matrix, None), std::time::Instant::now());
+    act(
+        &mut app,
+        &request(Action::Click, matrix, None),
+        std::time::Instant::now(),
+    );
     let update = app.a11y_tree(&Places::default());
     assert_eq!(node(&update, matrix).is_selected(), Some(true));
     assert_eq!(node(&update, inspector).is_selected(), Some(false));
@@ -2034,7 +2061,11 @@ fn the_developer_switches_are_switches() {
     assert_eq!(node(&update, measure).role(), Role::Switch);
     assert_eq!(node(&update, measure).label(), Some("Measure"));
     assert_eq!(node(&update, camera).label(), Some("Move camera"));
-    let _ = app.a11y_action(&request(Action::Click, measure, None), std::time::Instant::now());
+    act(
+        &mut app,
+        &request(Action::Click, measure, None),
+        std::time::Instant::now(),
+    );
     assert_eq!(app.measuring, !was);
     assert!(matches!(
         app.a11y_frame_message(&request(Action::Click, camera, None)),
@@ -2165,10 +2196,11 @@ fn frame_nodes_are_hidden_below_a_panel() {
     ] {
         assert!(node(&update, node_of(&mut app, &id)).is_hidden(), "{id}");
     }
-    assert!(
-        app.a11y_action(&request(Action::Click, add, None), std::time::Instant::now())
-            .is_empty()
-    );
+    assert!(!act(
+        &mut app,
+        &request(Action::Click, add, None),
+        std::time::Instant::now()
+    ));
 }
 
 /// The audio watcher's reading is a live value: it asks for no build, and
@@ -2179,7 +2211,7 @@ fn bar_readings_are_live_and_the_frame_is_in_the_poll_key() {
     let (mut app, _, _) = app_with_filter();
     app.a11y = Access::measured();
     app.a11y.locating = false;
-    let _ = app.update(Message::Audio(crate::audio_watch::Event::Stats {
+    let _ = app.send(Message::Audio(crate::audio_watch::Event::Stats {
         dropouts: 0,
         at: std::time::Instant::now(),
         peak: 0.1,
@@ -2191,10 +2223,10 @@ fn bar_readings_are_live_and_the_frame_is_in_the_poll_key() {
     assert!(app.a11y.live_waits(), "it waits for the live timer");
 
     let key = app.a11y_poll_key();
-    let _ = app.update(Message::Learn(crate::learn::Message::Toggle));
+    let _ = app.send(Message::Learn(crate::learn::Message::Toggle));
     assert_ne!(app.a11y_poll_key(), key, "the toolbar and the bar changed");
     let key = app.a11y_poll_key();
-    let _ = app.update(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
+    let _ = app.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     assert_ne!(app.a11y_poll_key(), key, "the open tab changed");
 }
 
@@ -2226,7 +2258,7 @@ fn with_each_panel() -> Vec<(crate::input_owner::InputOwner, crate::ui_test::Ui)
         }),
         open(&|app, _| app.overlays.open(Overlay::RecentList(Vec::new()))),
         open(&|app, _| {
-            let _ = app.update(Message::Preferences(crate::settings::Message::Open));
+            let _ = app.send(Message::Preferences(crate::settings::Message::Open));
         }),
         open(&|app, _| {
             let browser = crate::patches::PatchBrowser::new(1, std::path::PathBuf::from("unread"));
@@ -2314,10 +2346,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
         }
         let knob_node = widget_node(&mut ui.app, module, knob);
         let before = cutoff(&ui);
-        let tasks = ui
-            .app
-            .a11y_action(&request(Action::Increment, knob_node, None), std::time::Instant::now());
-        assert_eq!(!tasks.is_empty(), open, "{owner:?}: Increment on a tile's knob");
+        let sent = ui_act(
+            &mut ui,
+            &request(Action::Increment, knob_node, None),
+            std::time::Instant::now(),
+        );
+        assert_eq!(sent, open, "{owner:?}: Increment on a tile's knob");
         assert_eq!(
             (cutoff(&ui) - before).abs() > 1e-6,
             open,
@@ -2333,10 +2367,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             !open,
             "{owner:?}: the inspector"
         );
-        let clicked = ui
-            .app
-            .a11y_action(&request(Action::Click, shortcuts_node, None), std::time::Instant::now());
-        assert_eq!(!clicked.is_empty(), open, "{owner:?}: a Click in the inspector");
+        let clicked = ui_act(
+            &mut ui,
+            &request(Action::Click, shortcuts_node, None),
+            std::time::Instant::now(),
+        );
+        assert_eq!(clicked, open, "{owner:?}: a Click in the inspector");
         if open {
             // The overlay it opened is closed again, so the knob below is
             // pressed with nothing open.
@@ -2541,8 +2577,8 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
     let before = position(&ui.app);
     let node_id = node_of(&mut ui.app, &slider_id);
     let at = std::time::Instant::now();
-    let _ = ui.app.a11y_action(&request(Action::Increment, node_id, None), at);
-    let _ = ui.app.a11y_action(&request(Action::Increment, node_id, None), at);
+    ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
+    ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
     let step = crate::param::slider_step(&spec);
     assert!(
         (position(&ui.app) - (before + 2.0 * step)).abs() < 1e-5,
@@ -2552,7 +2588,8 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
     assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one undo step");
 
     // SetValue in the parameter's own units.
-    let _ = ui.app.a11y_action(
+    ui_act(
+        &mut ui,
         &request(Action::SetValue, node_id, Some(ActionData::NumericValue(1000.0))),
         at,
     );
@@ -2575,14 +2612,11 @@ fn an_inspector_field_takes_text_and_focus() {
     assert!(found.label().is_some_and(|name| name.contains("value")));
     assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
 
-    let at = std::time::Instant::now();
-    let tasks = ui.app.a11y_action(
-        &request(Action::SetValue, field, Some(ActionData::Value("640".into()))),
-        at,
-    );
-    for task in tasks {
-        let _ = ui.run_task(task);
-    }
+    let _ = ui.deliver(Message::A11y(Event::Action(request(
+        Action::SetValue,
+        field,
+        Some(ActionData::Value("640".into())),
+    ))));
     let index = ui
         .app
         .session
@@ -2596,12 +2630,13 @@ fn an_inspector_field_takes_text_and_focus() {
     assert!((value - 640.0).abs() < 0.5, "{value}");
 
     // Focus moves keyboard focus to the field, and the tree says so.
-    let tasks = ui.app.a11y_action(&request(Action::Focus, field, None), at);
-    assert_eq!(tasks.len(), 1, "one focus request");
-    for task in tasks {
-        let _ = ui.run_task(task);
-    }
-    assert_eq!(ui.focused_field(), Some(crate::controls::value_field_id(module, index)));
+    let _ = ui.deliver(Message::A11y(Event::Action(request(Action::Focus, field, None))));
+    assert_eq!(ui.focused_field(), ui.app.value_field_part(module, index));
+    assert_eq!(
+        ui.app.focus,
+        ui.app.value_field_part(module, index),
+        "the app heard of it"
+    );
     let places = ui.places();
     assert_eq!(ui.app.a11y_tree(&places).focus, field);
 }
@@ -2643,9 +2678,11 @@ fn an_inspector_option_click_chooses_it() {
         .clone();
     let target = node_of(&mut ui.app, &other.id);
     assert_eq!(node(&update, target).role(), Role::RadioButton);
-    let _ = ui
-        .app
-        .a11y_action(&request(Action::Click, target, None), std::time::Instant::now());
+    ui_act(
+        &mut ui,
+        &request(Action::Click, target, None),
+        std::time::Instant::now(),
+    );
     let (_, update, _) = inspector_of(&mut ui, &[module]);
     assert_eq!(node(&update, target).toggled(), Some(accesskit::Toggled::True));
 }
@@ -2769,7 +2806,7 @@ fn a_scroll_moves_the_rows_and_is_a_message_only_while_listening() {
         "no message with no screen reader"
     );
 
-    let _ = ui.app.a11y_event(Event::Activated);
+    ui.app.a11y_event(Event::Activated);
     let _ = ui.redraw();
     let places = ui.places();
     let row = super::items::find(&ui.app.a11y_frames().panel, &crate::inspector::ids::panel(module))
@@ -2809,7 +2846,7 @@ fn a_scroll_moves_the_rows_and_is_a_message_only_while_listening() {
 #[test]
 fn a_scrolling_panel_is_as_tall_as_what_it_shows() {
     let (mut ui, module) = scrolling_inspector();
-    let _ = ui.app.a11y_event(Event::Activated);
+    ui.app.a11y_event(Event::Activated);
     let _ = ui.redraw();
     let places = ui.places();
     let panel = crate::inspector::ids::panel(module);
@@ -2835,16 +2872,11 @@ fn a_covered_field_is_not_focused() {
     let _ = inspector_of(&mut ui, &[module]);
     let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
     let field = node_of(&mut ui.app, &crate::inspector::ids::part(&row, "field"));
-    for task in ui
-        .app
-        .a11y_action(&request(Action::Focus, field, None), std::time::Instant::now())
-    {
-        let _ = ui.run_task(task);
-    }
+    let _ = ui.deliver(Message::A11y(Event::Action(request(Action::Focus, field, None))));
     let places = ui.places();
     assert_eq!(ui.app.a11y_tree(&places).focus, field, "focused while open");
 
-    let _ = ui.app.update(Message::ShowShortcuts);
+    let _ = ui.app.send(Message::ShowShortcuts);
     let update = ui.app.a11y_tree(&places);
     assert!(node(&update, field).is_hidden());
     assert_ne!(update.focus, field, "not focused while covered");
@@ -2941,7 +2973,7 @@ fn the_inspector_slider_steps_a_tenth_of_the_tile_knob_until_phase_3() {
             widget_node(&mut ui.app, module, knob)
         };
         let before = position(&ui.app);
-        let _ = ui.app.a11y_action(&request(Action::Increment, node_id, None), at);
+        ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
         ui.app.reader_event(crate::edits::ReaderEvent::Close);
         moved.push(position(&ui.app) - before);
     }
@@ -3138,7 +3170,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
     let target = node_of(&mut ui.app, &source);
     let at = std::time::Instant::now();
-    let _ = ui.app.a11y_action(&request(Action::Increment, target, None), at);
+    ui_act(&mut ui, &request(Action::Increment, target, None), at);
     let moved = ui
         .app
         .session
@@ -3164,7 +3196,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
         "focus is on the row's source"
     );
     let cell_node = node_of(&mut ui.app, &cell);
-    let _ = ui.app.a11y_action(&request(Action::Decrement, cell_node, None), at);
+    ui_act(&mut ui, &request(Action::Decrement, cell_node, None), at);
     assert_eq!(
         ui.app.session.edits.history.len(),
         steps + 2,
@@ -3199,9 +3231,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
     let _ = matrix_tree(&mut ui);
     let node_id = node_of(&mut ui.app, &source);
-    let _ = ui
-        .app
-        .a11y_action(&request(Action::Decrement, node_id, None), std::time::Instant::now());
+    ui_act(
+        &mut ui,
+        &request(Action::Decrement, node_id, None),
+        std::time::Instant::now(),
+    );
     assert_eq!(ui.app.session.edits.history.len(), steps);
     assert_eq!(ui.app.alerts.status(), status, "nothing is said");
 }
@@ -3225,13 +3259,14 @@ fn a_matrix_depth_is_a_slider_in_percent_that_groups() {
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
     let steps = ui.app.session.edits.history.len();
     let at = std::time::Instant::now();
-    let _ = ui.app.a11y_action(
+    ui_act(
+        &mut ui,
         &request(Action::SetValue, slider, Some(ActionData::NumericValue(40.0))),
         at,
     );
     assert!((depth(&ui.app) - 0.4).abs() < 1e-6);
-    let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
-    let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
+    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(&ui.app) - 0.42).abs() < 1e-5);
     ui.app.reader_event(crate::edits::ReaderEvent::Close);
     assert_eq!(
@@ -3254,7 +3289,8 @@ fn the_matrix_filter_takes_text_and_focus() {
     let found = node(&update, node_id);
     assert_eq!(found.role(), Role::TextInput);
     assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
-    let _ = ui.app.a11y_action(
+    ui_act(
+        &mut ui,
         &request(Action::SetValue, node_id, Some(ActionData::Value("lfo".into()))),
         std::time::Instant::now(),
     );
@@ -3341,7 +3377,10 @@ fn a_matrix_scroll_is_a_message_only_while_listening() {
     let messages = scroll(&mut ui);
     assert_ne!(ui.scroll_translation("matrix-table").unwrap(), before, "it scrolled");
     assert!(!scrolled(&messages), "no message with no screen reader");
-    let _ = ui.app.a11y_event(Event::Activated);
+    ui.app.a11y_event(Event::Activated);
+    // Its rebuild is not asked for here: this test counts the ones that
+    // one message makes.
+    drop(ui.app.take_window_questions());
     ui.app.a11y.locating = false;
     let messages = scroll(&mut ui);
     assert!(scrolled(&messages));
@@ -3423,9 +3462,7 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
         let cell = access::cell(id, Column::Target);
         let node = node_of(&mut ui.app, &cell);
         let action = if forward { Action::Increment } else { Action::Decrement };
-        let _ = ui
-            .app
-            .a11y_action(&request(action, node, None), std::time::Instant::now());
+        ui_act(&mut ui, &request(action, node, None), std::time::Instant::now());
         steps += 1;
         assert_ne!(
             ui.app.alerts.severity(),
@@ -3480,15 +3517,15 @@ fn a_matrix_depth_steps_onto_the_percent_grid() {
     let slider = node_of(&mut ui.app, &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
     let at = std::time::Instant::now();
-    let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(&ui.app) - 0.31).abs() < 1e-6, "{}", depth(&ui.app));
     for _ in 0..19 {
-        let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+        ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     }
     assert!((depth(&ui.app) - 0.50).abs() < 1e-6, "no drift: {}", depth(&ui.app));
     let (_, update) = matrix_tree(&mut ui);
     assert_eq!(node(&update, slider).numeric_value(), Some(50.0));
-    let _ = ui.app.a11y_action(&request(Action::Decrement, slider, None), at);
+    ui_act(&mut ui, &request(Action::Decrement, slider, None), at);
     assert!((depth(&ui.app) - 0.49).abs() < 1e-6);
 }
 
@@ -3522,10 +3559,10 @@ fn an_inspector_depth_steps_onto_the_percent_grid() {
     let slider = node_of(&mut ui.app, &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
     let at = std::time::Instant::now();
-    let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(&ui.app) - 0.31).abs() < 1e-6, "{}", depth(&ui.app));
     for _ in 0..19 {
-        let _ = ui.app.a11y_action(&request(Action::Increment, slider, None), at);
+        ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     }
     assert!((depth(&ui.app) - 0.50).abs() < 1e-6, "no drift: {}", depth(&ui.app));
     let (_, update, _) = inspector_of(&mut ui, &[filter]);
@@ -3584,7 +3621,7 @@ fn with_each_small_overlay() -> Vec<(&'static str, crate::ui_test::Ui)> {
         (
             "help",
             open(&|app| {
-                let _ = app.update(Message::ShowModuleHelp(4));
+                let _ = app.send(Message::ShowModuleHelp(4));
             }),
         ),
         (
@@ -3765,7 +3802,7 @@ fn only_the_overlay_that_owns_the_input_is_reported() {
 fn the_menu_key_opens_no_tile_menu_under_help() {
     use iced::keyboard::{Key, Modifiers, key::Named};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let _ = ui.app.update(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.app.send(Message::Canvas(CanvasEvent::Select(vec![4])));
     let _ = ui.redraw();
     let _ = ui.tap(Key::Named(Named::ContextMenu), Modifiers::empty());
     assert_eq!(ui.app.overlays.tile_menu().map(|(module, _)| module), Some(4));
@@ -3932,7 +3969,7 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     let _ = ui.release();
     let _ = ui.typewrite("1234");
     assert!(ui.app.session.value_draft.is_some(), "a draft is typed");
-    assert!(ui.app.text_focus.any);
+    assert!(ui.app.focus.is_some());
     let cutoff = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[index];
     let before = cutoff(&ui.app);
 
@@ -3940,7 +3977,7 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     let target = widget_node(&mut ui.app, module, knob);
     ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
     let _ = ui.redraw();
-    assert!(!ui.app.text_focus.any, "the field is closed");
+    assert!(!ui.app.focus.is_some(), "the field is closed");
     assert!(ui.app.session.value_draft.is_none(), "its draft is dropped");
     assert_eq!(cutoff(&ui.app), before, "and not submitted");
     let _ = ui.tap(
@@ -4102,7 +4139,7 @@ fn every_inspector_state_is_reported_with_named_parts() {
         .expect("a Patch port tile inside the Voice");
     ui.send(Message::Canvas(CanvasEvent::Select(vec![port])));
     check(&mut ui, "port", |m| matches!(m, Inspector::Port(_)));
-    let _ = ui.app.update(Message::MakeSlot {
+    let _ = ui.app.send(Message::MakeSlot {
         module: svf,
         role: "loom.role.filter".to_string(),
     });
@@ -4225,12 +4262,11 @@ fn a_click_on_a_browser_option_adds_its_module() {
     let before = ui.app.ui_snapshot().tiles.len();
     let _ = ui.places();
     let option = browser_option(&mut ui, 0);
-    for task in ui
-        .app
-        .a11y_action(&request(Action::Click, option, None), std::time::Instant::now())
-    {
-        let _ = ui.run_task(task);
-    }
+    ui_act(
+        &mut ui,
+        &request(Action::Click, option, None),
+        std::time::Instant::now(),
+    );
     assert!(ui.app.overlays.browser().is_none(), "the browser closed");
     assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1);
 }
@@ -4258,7 +4294,8 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
     assert!(!node(&update, module).supports_action(Action::ShowContextMenu));
     let option = browser_option(&mut ui, row);
     assert!(node(&update, option).supports_action(Action::ShowContextMenu));
-    let _ = ui.app.a11y_action(
+    ui_act(
+        &mut ui,
         &request(Action::ShowContextMenu, option, None),
         std::time::Instant::now(),
     );
@@ -4272,12 +4309,7 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
     assert!(places.of(&crate::browser::insert_linked_id(&id)).is_some());
 
     let before = ui.app.ui_snapshot().tiles.len();
-    for task in ui
-        .app
-        .a11y_action(&request(Action::Click, item, None), std::time::Instant::now())
-    {
-        let _ = ui.run_task(task);
-    }
+    ui_act(&mut ui, &request(Action::Click, item, None), std::time::Instant::now());
     assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1, "inserted");
     assert!(ui.app.overlays.browser().is_none());
 }
@@ -4297,9 +4329,11 @@ fn help_over_the_browser_hides_it() {
     let update = ui.app.a11y_tree(&places);
     assert!(update.nodes.iter().all(|(id, _)| *id != option), "not reported");
     let tiles = ui.app.ui_snapshot().tiles.len();
-    let _ = ui
-        .app
-        .a11y_action(&request(Action::Click, option, None), std::time::Instant::now());
+    ui_act(
+        &mut ui,
+        &request(Action::Click, option, None),
+        std::time::Instant::now(),
+    );
     assert_eq!(ui.app.ui_snapshot().tiles.len(), tiles, "inert");
 }
 
@@ -4327,8 +4361,7 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
     let mut ui = crate::ui_test::Ui::with_app(app);
     // Run so the focus the opening asks for is reported back, as the
     // window would report it.
-    let task = ui.app.update(Message::File(crate::FileAction::Browse));
-    let _ = ui.run_task(task);
+    let _ = ui.deliver(Message::File(crate::FileAction::Browse));
     let _ = ui.redraw();
     let open = ui.app.patches_open;
     let field = node_of(&mut ui.app, &crate::patches::part_id("search"));
@@ -4365,4 +4398,313 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
             assert!(places.of(&item.id).is_some(), "the window drew `{}`", item.id);
         }
     }
+}
+
+/// Each view and overlay for task 6's sweep: every state of
+/// [`with_each_panel`], the chooser over Preferences, and the right
+/// panel's two tabs with a tile selected.
+fn with_every_view() -> Vec<(String, crate::ui_test::Ui)> {
+    let mut all: Vec<(String, crate::ui_test::Ui)> = with_each_panel()
+        .into_iter()
+        .map(|(owner, ui)| (format!("{owner:?}"), ui))
+        .collect();
+    let (mut app, module, _) = app_with_filter();
+    let _ = app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = app.send(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    all.push(("chooser over Preferences".to_string(), ui));
+    for tab in [crate::matrix::Tab::Inspector, crate::matrix::Tab::Matrix] {
+        let (mut app, _, _) = app_with_filter();
+        let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+        app.right_tab = tab;
+        let mut ui = crate::ui_test::Ui::with_app(app);
+        let _ = ui.redraw();
+        all.push((format!("{tab:?} tab, a tile selected"), ui));
+    }
+    all
+}
+
+/// Task 6, in every view and overlay: every node that offers an action has
+/// a role, a name, and a place, and every node with bounds lies inside the
+/// window.
+/// A part scrolled out of view keeps its real bounds, under a node that
+/// cuts it off (section 7, rule 7), so what is checked is the part that
+/// shows: its bounds cut by each such node above it.
+#[test]
+fn every_view_names_its_acting_parts_and_keeps_them_in_the_window() {
+    let window = accesskit::Rect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: f64::from(crate::ui_test::WINDOW.width),
+        y1: f64::from(crate::ui_test::WINDOW.height),
+    };
+    let cut = |a: accesskit::Rect, b: accesskit::Rect| accesskit::Rect {
+        x0: a.x0.max(b.x0),
+        y0: a.y0.max(b.y0),
+        x1: a.x1.min(b.x1),
+        y1: a.y1.min(b.y1),
+    };
+    for (name, mut ui) in with_every_view() {
+        let places = ui.places();
+        let update = ui.app.a11y_tree(&places);
+        let parent: std::collections::HashMap<NodeId, NodeId> = update
+            .nodes
+            .iter()
+            .flat_map(|(id, node)| node.children().iter().map(move |child| (*child, *id)))
+            .collect();
+        let of = |id: NodeId| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, node)| node);
+        for (id, node) in &update.nodes {
+            let acts = [
+                Action::Click,
+                Action::Increment,
+                Action::Decrement,
+                Action::SetValue,
+                Action::ShowContextMenu,
+            ]
+            .into_iter()
+            .any(|action| node.supports_action(action));
+            if acts && !node.is_hidden() {
+                assert_ne!(node.role(), Role::Unknown, "{name}: node {id:?}");
+                // A link in help's text is drawn inside one widget, so it
+                // has no place of its own (a phase 1 gap).
+                assert!(
+                    node.bounds().is_some() || node.role() == Role::Link,
+                    "{name}: {:?} {:?} has no place in the window",
+                    ui.app.a11y.ids.id(id.0),
+                    node.role()
+                );
+                assert!(
+                    node.label().is_some_and(|label| !label.is_empty()),
+                    "{name}: {:?} {:?} has a name",
+                    ui.app.a11y.ids.id(id.0),
+                    node.role()
+                );
+            }
+            if let Some(mut bounds) = node.bounds()
+                && !node.is_hidden()
+            {
+                let mut above = parent.get(id).copied();
+                while let Some(up) = above {
+                    if let Some(clip) = of(up).filter(|n| n.clips_children()).and_then(|n| n.bounds()) {
+                        bounds = cut(bounds, clip);
+                    }
+                    above = parent.get(&up).copied();
+                }
+                if bounds.x0 >= bounds.x1 || bounds.y0 >= bounds.y1 {
+                    continue; // scrolled out of view
+                }
+                let inside = bounds.x0 >= window.x0 - 0.5
+                    && bounds.y0 >= window.y0 - 0.5
+                    && bounds.x1 <= window.x1 + 0.5
+                    && bounds.y1 <= window.y1 + 0.5;
+                assert!(
+                    inside,
+                    "{name}: {:?} at {bounds:?} is outside the window",
+                    ui.app.a11y.ids.id(id.0)
+                );
+            }
+        }
+    }
+}
+
+/// Task 6, in every view and overlay: a build with nothing changed sends
+/// nothing, after the first one sent the whole tree.
+#[test]
+fn every_view_sends_nothing_when_nothing_changed() {
+    for (name, mut ui) in with_every_view() {
+        ui.app.a11y_event(Event::Activated);
+        let places = ui.places();
+        let (_, first) = ui.app.a11y_changes(&places);
+        assert!(first.is_some(), "{name}: the first build is sent");
+        let (_, again) = ui.app.a11y_changes(&places);
+        assert!(again.is_none(), "{name}: nothing changed, so nothing is sent");
+    }
+}
+
+/// The licence chooser over Preferences is reported alone: Preferences is
+/// hidden, and its parts do nothing. After Use, Preferences is reported
+/// again with the new default, and has the focus.
+#[test]
+fn the_chooser_over_preferences_hides_it_until_it_closes() {
+    use crate::licence_chooser::access::licence_id;
+    use crate::settings::access::preferences_id;
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.redraw();
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay[0].id, preferences_id());
+    let places = ui.places();
+    let _ = ui.app.a11y_tree(&places);
+    let choose = node_of(&mut ui.app, &preferences_id().with("licence").with("choose"));
+    ui.send(Message::A11y(Event::Action(request(Action::Click, choose, None))));
+    let _ = ui.redraw();
+
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay.len(), 1);
+    assert_eq!(frames.overlay[0].id, licence_id(), "only the chooser");
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    assert_eq!(ui.app.a11y.ids.id(update.focus.0), Some(&licence_id()));
+    let activity = node_of(&mut ui.app, &preferences_id().with("activity"));
+    let before = ui.app.rig.store.saved().show_activity;
+    ui.send(Message::A11y(Event::Action(request(Action::Click, activity, None))));
+    assert_eq!(ui.app.rig.store.saved().show_activity, before, "Preferences is inert");
+
+    for part in [licence_id().with("changes").with("give-up"), licence_id().with("use")] {
+        let places = ui.places();
+        let _ = ui.app.a11y_tree(&places);
+        let target = node_of(&mut ui.app, &part);
+        ui.send(Message::A11y(Event::Action(request(Action::Click, target, None))));
+        let _ = ui.redraw();
+    }
+    assert!(ui.app.overlays.chooser.is_none(), "Use closed it");
+    assert!(ui.app.rig.store.saved().licence.is_some(), "the default is set");
+    let frames = ui.app.a11y_frames();
+    assert_eq!(frames.overlay[0].id, preferences_id(), "Preferences is back");
+    let places = ui.places();
+    let update = ui.app.a11y_tree(&places);
+    assert_eq!(
+        ui.app.a11y.ids.id(update.focus.0),
+        Some(&preferences_id()),
+        "focus is on the window, since Choose is a button and takes none"
+    );
+    let licence = node(&update, node_of(&mut ui.app, &preferences_id().with("licence")));
+    assert_ne!(licence.value(), Some("No default"));
+}
+
+/// The chooser opened from the patch's details sets the patch's licence
+/// and marks the patch unsaved. Patch details are not undo steps
+/// (patch-metadata.md), and a default licence is a preference, so neither
+/// adds one.
+#[test]
+fn a_licence_from_the_chooser_adds_no_undo_step() {
+    use crate::licence_chooser::access::licence_id;
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let before = ui.app.session.document.info().license.clone();
+    let steps = ui.app.session.edits.history.len();
+    let _ = ui
+        .app
+        .send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
+    let _ = ui.redraw();
+    for part in [
+        licence_id().with("changes").with("no"),
+        licence_id().with("commercial").with("yes"),
+        licence_id().with("use"),
+    ] {
+        let places = ui.places();
+        let _ = ui.app.a11y_tree(&places);
+        let target = node_of(&mut ui.app, &part);
+        ui.send(Message::A11y(Event::Action(request(Action::Click, target, None))));
+    }
+    assert_ne!(ui.app.session.document.info().license, before, "the licence is set");
+    assert!(ui.app.session.document.info_unsaved());
+    assert_eq!(ui.app.session.edits.history.len(), steps, "no undo step");
+
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui
+        .app
+        .send(Message::Preferences(crate::settings::Message::ChooseLicence));
+    let _ = ui.app.send(Message::Licence(crate::licence_chooser::Message::Answer(
+        crate::licence_chooser::Answer::GiveUp,
+    )));
+    let _ = ui.app.send(Message::Licence(crate::licence_chooser::Message::Use));
+    assert!(ui.app.rig.store.saved().licence.is_some());
+    assert_eq!(
+        ui.app.session.edits.history.len(),
+        steps,
+        "a preference is not an undo step"
+    );
+}
+
+/// Task 6's round trip: a screen reader's action on an overlay that edits
+/// the patch goes through `App::update` as one undo step, which one Undo
+/// takes back. Here, a Click on the module browser's first option.
+#[test]
+fn an_overlay_edit_is_one_undo_step() {
+    let dir = crate::recovery::tests::TempDir::new("a11y-browser-undo");
+    let mut ui = browser_ui(&dir.0);
+    let before = ui.app.ui_snapshot().tiles.len();
+    let steps = ui.app.session.edits.history.len();
+    let _ = ui.places();
+    let option = browser_option(&mut ui, 0);
+    ui_act(
+        &mut ui,
+        &request(Action::Click, option, None),
+        std::time::Instant::now(),
+    );
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), before + 1);
+    assert_eq!(ui.app.session.edits.history.len(), steps + 1, "one step");
+    let _ = ui.app.send(Message::Undo);
+    assert_eq!(ui.app.ui_snapshot().tiles.len(), before, "one Undo takes it back");
+}
+
+/// Task 6 in Preferences: one change sends the nodes it changed and no
+/// others. Turning activity on changes its check box, and the status line
+/// says so.
+#[test]
+fn one_change_in_preferences_sends_only_what_changed() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.app.send(Message::Preferences(crate::settings::Message::Open));
+    let _ = ui.redraw();
+    ui.app.a11y_event(Event::Activated);
+    let places = ui.places();
+    let _ = ui.app.a11y_changes(&places);
+    let on = ui.app.rig.store.saved().show_activity;
+    let _ = ui
+        .app
+        .send(Message::Preferences(crate::settings::Message::Activity(!on)));
+    let _ = ui.redraw();
+    let places = ui.places();
+    let (_, changes) = ui.app.a11y_changes(&places);
+    let changes = changes.expect("the check box changed");
+    let activity = node_of(&mut ui.app, &crate::settings::access::preferences_id().with("activity"));
+    let status = node_of(&mut ui.app, &UiId::panel("status"));
+    let mut sent = sent_ids(&changes);
+    sent.sort_by_key(|id| id.0);
+    let mut expected = vec![activity, status];
+    expected.sort_by_key(|id| id.0);
+    assert_eq!(
+        sent, expected,
+        "the check box, and the status line that says what changed"
+    );
+}
+
+/// The harness answers a window question after what the same update
+/// posted, as the bridge does: Enter on a menu item, with a screen reader
+/// listening, posts the item's message and asks where the parts are; the
+/// item's message runs first, then the tree reads the window.
+#[test]
+fn a_posted_message_runs_before_the_window_answers() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let area = Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0));
+    ui.send(Message::Canvas(CanvasEvent::TileMenu {
+        module: 4,
+        at: Point::new(100.0, 100.0),
+        area,
+        by_key: true,
+    }));
+    ui.send(Message::A11y(Event::Activated));
+    ui.app.overlays.set_menu_highlight(Some(0));
+    let item = ui.app.menu_model().expect("the tile menu is open").items[0]
+        .message
+        .clone();
+    let log = ui.deliver(Message::Key(iced::keyboard::Event::KeyPressed {
+        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+        modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+        physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::empty(),
+        text: None,
+        repeat: false,
+    }));
+    let item = format!("{item:?}");
+    let posted = log.iter().position(|message| format!("{message:?}") == item);
+    let located = log
+        .iter()
+        .position(|message| matches!(message, Message::A11y(Event::Located(_))));
+    assert!(
+        matches!((posted, located), (Some(posted), Some(located)) if posted < located),
+        "the item's message, then the answer: {posted:?}, {located:?}"
+    );
 }

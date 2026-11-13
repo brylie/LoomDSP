@@ -190,7 +190,6 @@ fn the_kept_model_matches_a_fresh_one_after_every_message() {
         ("Step down", Message::Step(1)),
         ("Hover", Message::Hover(2)),
         ("Step up", Message::Step(-1)),
-        ("Scrolled", Message::Scrolled(30.0)),
         ("Search", Message::Search("bass".into())),
         ("Search cleared", Message::Search(String::new())),
         ("Author", Message::Author("sam".into())),

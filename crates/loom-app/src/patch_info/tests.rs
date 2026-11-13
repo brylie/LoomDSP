@@ -37,7 +37,7 @@ fn rows(app: &App) -> PatchRows {
 
 /// Sends a patch info edit through the app.
 fn send(app: &mut App, message: Message) {
-    let _ = app.update(AppMessage::PatchInfo(message));
+    let _ = app.send(AppMessage::PatchInfo(message));
 }
 
 /// patch-metadata.md, Patch info: with nothing selected, the inspector
@@ -139,7 +139,7 @@ fn a_new_patch_takes_the_defaults() {
     assert_eq!(app.session.document.info().license.as_deref(), Some("CC-BY-4.0"));
     assert_eq!(rows(&app).authors, ["Ada Lovelace"]);
     assert!(!app.unsaved());
-    let _ = app.update(AppMessage::File(FileAction::New));
+    let _ = app.send(AppMessage::File(FileAction::New));
     assert_eq!(app.session.document.info().authors, ["Ada Lovelace"]);
     assert_eq!(app.session.document.info().license.as_deref(), Some("CC-BY-4.0"));
     let _ = std::fs::remove_dir_all(dir);
@@ -147,6 +147,13 @@ fn a_new_patch_takes_the_defaults() {
 
 /// Acceptance and rule 3: opening a patch by others and saving it keeps
 /// every author, and offers once to add the user's name at the end.
+/// Save, as the toolbar sends it, and check that it wrote the file: the
+/// credit question, when asked, is answered on a later turn.
+fn save(app: &mut App) {
+    let _ = app.send(crate::Message::File(crate::FileAction::Save));
+    assert!(!app.unsaved(), "saved");
+}
+
 #[test]
 fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     let dir = folder("credit");
@@ -164,20 +171,20 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
 
     // Declined: every author stays, and the question is not asked again.
     dialogs::answer_add_author(Some(false));
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.metadata.authors, ["Ada Lovelace"]);
     assert_eq!(saved.metadata.tags, ["drone"]);
     assert_eq!(saved.metadata.license.as_deref(), Some("CC-BY-4.0"));
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(dialogs::asked(), []);
 
     // Opened again, it asks again; accepting adds the name at the end.
     app.open_path(&patch);
     dialogs::answer_add_author(Some(true));
     app.session.patch_info.tag_draft = "half-typ".into();
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(
         app.session.patch_info.tag_draft, "half-typ",
         "a tag being typed is kept"
@@ -207,7 +214,7 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
         app.session.document.info().authors,
         ["Ada Lovelace", "Sam Rivera", "Lin"]
     );
-    assert!(app.save());
+    save(&mut app);
 
     // With no dialog to ask, nothing is added, and the next Save asks.
     app.open_path(&patch);
@@ -215,9 +222,9 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
         .document
         .edit_info(|info| info.authors = vec!["Ada Lovelace".into()]);
     dialogs::answer_add_author(None);
-    assert!(app.save());
+    save(&mut app);
     dialogs::answer_add_author(Some(false));
-    assert!(app.save());
+    save(&mut app);
     assert_eq!(dialogs::asked().len(), 2);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -238,7 +245,7 @@ fn metadata_edits_are_saved() {
     let mut app = App::new(args);
     send(&mut app, Message::TagDraft("ambient,".into()));
     assert!(app.unsaved());
-    assert!(app.save());
+    save(&mut app);
     assert!(!app.unsaved());
     let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.metadata.description, "Soft.");
@@ -336,7 +343,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     let count = ui.app.session.controller.graph().nodes().count();
 
     let z = || Key::Character("z".into());
-    ui.focus(TAG_INPUT);
+    ui.focus(&tags_part());
     ui.typewrite("drone");
     ui.tap(z(), Modifiers::COMMAND);
     assert_eq!(
@@ -355,7 +362,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     );
 
     // Redo waits for the field the same way.
-    ui.focus(TAG_INPUT);
+    ui.focus(&tags_part());
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(
         ui.app.session.controller.graph().nodes().count(),
@@ -365,4 +372,66 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(ui.app.session.controller.graph().nodes().count(), count);
+}
+
+/// With no program that draws native questions, Save asks nothing and adds
+/// no name, and the offer is still to come: once a dialog can be shown,
+/// the next Save asks (patch-metadata.md, rule 3).
+#[test]
+fn with_no_dialogs_the_credit_question_waits_for_one() {
+    let dir = folder("credit-no-dialogs");
+    let patch = dir.join("drone.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, metadata: Metadata(name: "Drone", authors: ["Ada Lovelace"]))"#,
+    )
+    .unwrap();
+    let mut args = args_with(&dir, r#"(author: "Sam Rivera")"#);
+    args.patch = Some(patch.clone());
+    let mut app = App::new(args);
+    let _ = dialogs::asked();
+
+    dialogs::no_dialogs();
+    save(&mut app);
+    assert_eq!(dialogs::asked(), [], "nothing was asked");
+    assert_eq!(
+        crate::patch_file::load(&patch).unwrap().metadata.authors,
+        ["Ada Lovelace"]
+    );
+    assert!(
+        app.session.document.should_offer_credit("Sam Rivera"),
+        "the offer is still to come"
+    );
+}
+
+/// While another dialog waits, the credit question cannot be asked, so it
+/// is not marked as offered: the save goes ahead, and a later Save asks.
+#[test]
+fn a_credit_question_that_cannot_be_asked_yet_waits() {
+    let dir = folder("credit-waiting");
+    let patch = dir.join("drone.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, metadata: Metadata(name: "Drone", authors: ["Ada Lovelace"]))"#,
+    )
+    .unwrap();
+    let mut args = args_with(&dir, r#"(author: "Sam Rivera")"#);
+    args.patch = Some(patch.clone());
+    let mut app = App::new(args);
+    let _ = dialogs::asked();
+
+    // An Open dialog waits for its answer.
+    assert!(app.ask_file(crate::dialogs::Waiting::Open, crate::files::open_request(None, None)));
+    assert!(app.write_then(patch.clone(), None), "the save goes ahead");
+    let _ = dialogs::asked();
+
+    // The Open dialog is cancelled; the next Save asks.
+    let _ = app.send(AppMessage::Dialog(crate::dialogs::DialogAnswer::File(None)));
+    dialogs::answer_add_author(Some(false));
+    save(&mut app);
+    assert_eq!(
+        dialogs::asked(),
+        [Asked::AddAuthor("Sam Rivera".into())],
+        "a later Save asks"
+    );
 }

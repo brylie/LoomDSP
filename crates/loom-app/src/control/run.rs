@@ -48,42 +48,49 @@ fn blocked_by_question(command: &Command) -> bool {
     }
 }
 
-/// Searches the live window for a target, then does `then` with what it
-/// found.
-pub(super) fn search(call: Call, target: String, then: AfterSearch) -> Task<Message> {
-    let operation = Find {
-        text: target.clone(),
-        found: Found::default(),
-        parts: crate::places::Collect::default(),
-    };
-    iced_runtime::task::widget(operation).map(move |found| Message::Located {
-        call: call.clone(),
-        target: target.clone(),
+/// Asks the window for a target, then does `then` with what it found.
+pub(super) fn search(app: &App, call: Call, target: String, then: AfterSearch) {
+    app.ask_window(WindowQuestion::find(target.clone(), move |found| Message::Located {
+        call,
+        target,
         found,
-        then: then.clone(),
+        then,
+    }));
+}
+
+/// Asks for the window as it was last drawn, to save all of it, or the
+/// part inside `area` (logical window pixels), once the capture comes.
+pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rect>) -> loom_ui::Effects<Message> {
+    loom_ui::Effects::capture(move |image| Message::Captured {
+        call,
+        path,
+        area,
+        image,
     })
 }
 
-/// Captures the window as it was last drawn, and saves all of it, or the
-/// part inside `area` (logical window pixels).
-pub(super) fn capture(call: Call, path: PathBuf, area: Option<Rect>) -> Task<Message> {
-    iced::window::latest()
-        .then(|id| match id {
-            Some(id) => iced::window::screenshot(id).map(Some),
-            None => Task::done(None),
-        })
-        .map(move |shot| call.answer(save_screenshot(shot, &path, area)))
-        .discard()
+/// A part of a capture, in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Region {
+    /// Its left edge.
+    pub x: u32,
+    /// Its top edge.
+    pub y: u32,
+    /// Its width.
+    pub width: u32,
+    /// Its height.
+    pub height: u32,
 }
 
-/// The part of a capture inside `area`, in physical pixels, cut to the
-/// image. `None` when nothing of it is inside.
-pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rect) -> Option<iced::Rectangle<u32>> {
+/// The part of a `width` by `height` capture inside `area`, in physical
+/// pixels at `scale`, cut to the image. `None` when nothing of it is
+/// inside.
+pub(super) fn crop_region(width: u32, height: u32, scale: f32, area: Rect) -> Option<Region> {
     let x0 = (area.x * scale).floor().max(0.0);
     let y0 = (area.y * scale).floor().max(0.0);
-    let x1 = ((area.x + area.width) * scale).ceil().min(size.width as f32);
-    let y1 = ((area.y + area.height) * scale).ceil().min(size.height as f32);
-    (x1 > x0 && y1 > y0).then_some(iced::Rectangle {
+    let x1 = ((area.x + area.width) * scale).ceil().min(width as f32);
+    let y1 = ((area.y + area.height) * scale).ceil().min(height as f32);
+    (x1 > x0 && y1 > y0).then_some(Region {
         x: x0 as u32,
         y: y0 as u32,
         width: (x1 - x0) as u32,
@@ -91,34 +98,50 @@ pub(super) fn crop_region(size: iced::Size<u32>, scale: f32, area: Rect) -> Opti
     })
 }
 
+/// The pixels of `image` inside `region`, row by row from the top.
+pub(super) fn crop(image: &loom_ui::effect::Image, region: Region) -> Vec<u8> {
+    let row = image.width() as usize * 4;
+    let (left, wide) = (region.x as usize * 4, region.width as usize * 4);
+    (region.y..region.y + region.height)
+        .flat_map(|y| {
+            let start = y as usize * row + left;
+            image.rgba()[start..start + wide].iter().copied()
+        })
+        .collect()
+}
+
 /// Saves a window capture, or the part of it inside `area`, as a PNG file.
 /// The reply has the image size in pixels, the scale factor, and, for an
 /// area, the area saved in logical window pixels.
 pub(super) fn save_screenshot(
-    shot: Option<iced::window::Screenshot>,
+    shot: Result<loom_ui::effect::Image, loom_ui::effect::NoGpu>,
     path: &std::path::Path,
     area: Option<Rect>,
 ) -> Answer {
-    let mut shot = shot.ok_or("no window to capture")?;
+    let shot = shot.map_err(|_| "no window to capture")?;
+    let scale = shot.scale();
+    let (mut width, mut height) = (shot.width(), shot.height());
     let mut saved = None;
-    if let Some(area) = area {
-        let region = crop_region(shot.size, shot.scale_factor, area).ok_or("the area is outside the window")?;
-        shot = shot
-            .crop(region)
-            .map_err(|e| format!("cannot cut the area out: {e:?}"))?;
-        let scale = shot.scale_factor;
+    let rgba = if let Some(area) = area {
+        let region = crop_region(width, height, scale, area).ok_or("the area is outside the window")?;
+        (width, height) = (region.width, region.height);
         saved = Some(json!({
             "x": region.x as f32 / scale,
             "y": region.y as f32 / scale,
             "width": region.width as f32 / scale,
             "height": region.height as f32 / scale,
         }));
-    }
-    crate::screenshot::write_png(path, shot.size, &shot.rgba)?;
+        std::borrow::Cow::Owned(crop(&shot, region))
+    } else {
+        // The whole window is saved as it came: no second copy of a frame
+        // that can be tens of megabytes.
+        std::borrow::Cow::Borrowed(shot.rgba())
+    };
+    crate::screenshot::write_png(path, iced::Size::new(width, height), &rgba)?;
     let mut reply = fields(json!({
-        "width": shot.size.width,
-        "height": shot.size.height,
-        "scale": shot.scale_factor,
+        "width": width,
+        "height": height,
+        "scale": scale,
     }));
     if let Some(saved) = saved {
         reply.insert("area".to_string(), saved);
@@ -127,10 +150,55 @@ pub(super) fn save_screenshot(
 }
 
 impl App {
+    /// Saves a window capture for a `screenshot` command, and answers it.
+    pub(crate) fn captured(
+        &self,
+        call: &Call,
+        path: &std::path::Path,
+        area: Option<Rect>,
+        image: Result<loom_ui::effect::Image, loom_ui::effect::NoGpu>,
+    ) {
+        call.answer(save_screenshot(image, path, area));
+    }
+
     /// Runs a command from the control channel and answers it, now or once
-    /// the task it returns has run.
-    pub(crate) fn control(&mut self, call: Call) -> Task<Message> {
-        let (then, task) = self.run_command(&call);
+    /// it is drawn.
+    ///
+    /// The UI messages a command sends run as their own updates, on the next
+    /// turn (ui-layer.md, section 2, rule 5). [`Message::ControlReply`]
+    /// follows them in the queue, so the answer is read, and waits for the
+    /// draw, only once they have all run. The next command is read only
+    /// after this one's answer (control-channel.md, rule 5), so no other
+    /// command's messages come in between.
+    pub(crate) fn control(&mut self, call: Call) {
+        let (then, sent) = self.run_command(&call);
+        if sent.is_empty() {
+            self.control_then(call, then);
+            return;
+        }
+        for message in sent {
+            self.post(message);
+        }
+        self.control_replies.push_back((call, then));
+        self.post(Message::ControlReply);
+    }
+
+    /// Answers the oldest command whose UI messages have now run.
+    pub(crate) fn control_reply(&mut self) {
+        if let Some((call, then)) = self.control_replies.pop_front() {
+            self.control_then(call, then);
+        }
+    }
+
+    /// Answers `call` now, or queues it to answer once it is drawn.
+    fn control_then(&mut self, call: Call, then: Then) {
+        let then = match then {
+            Then::AfterMessages(read) => match read(self) {
+                Ok(answer) => Then::AfterDraw(Step::Answer(Ok(answer))),
+                Err(error) => Then::Now(Err(error)),
+            },
+            then => then,
+        };
         match then {
             // An error, or a command that changes nothing on screen.
             Then::Now(answer) => call.answer(answer),
@@ -139,14 +207,13 @@ impl App {
                 call,
                 step,
             }),
+            Then::AfterMessages(_) => unreachable!("read above"),
         }
-        task
     }
 
     /// Counts a frame for the commands waiting to be drawn, and finishes
     /// those that are (rule 5).
-    pub(crate) fn control_frame(&mut self, now: Instant) -> Task<Message> {
-        let mut tasks = Vec::new();
+    pub(crate) fn control_frame(&mut self, now: Instant) {
         let mut waiting = Vec::new();
         for mut pending in std::mem::take(&mut self.control_pending) {
             // Pointer events go in one per frame. The answer waits for the
@@ -229,25 +296,22 @@ impl App {
                     };
                     call.answer(answer);
                 }
-                Step::Locate(target) => tasks.push(search(call, target, AfterSearch::Locate)),
-                Step::Type(text) => {
-                    tasks.push(
-                        crate::editing::text_field_focused().map(move |focused| Message::TypeFocus {
-                            call: call.clone(),
-                            text: text.clone(),
-                            focused,
-                        }),
-                    )
-                }
+                Step::Locate(target) => search(self, call, target, AfterSearch::Locate),
+                // Only the window's widgets know in time whether a field has
+                // the keys (`window_question.rs`).
+                Step::Type(text) => self.ask_window(WindowQuestion::focus(move |part| Message::TypeFocus {
+                    call,
+                    text,
+                    focused: part.is_some(),
+                })),
                 Step::Screenshot(path, Area::Target { target, margin }) => {
-                    tasks.push(search(call, target, AfterSearch::Screenshot { path, margin }));
+                    search(self, call, target, AfterSearch::Screenshot { path, margin });
                 }
-                Step::Screenshot(path, Area::Rect(area)) => tasks.push(capture(call, path, Some(area))),
-                Step::Screenshot(path, Area::Window) => tasks.push(capture(call, path, None)),
+                Step::Screenshot(path, Area::Rect(area)) => self.effect(capture(call, path, Some(area))),
+                Step::Screenshot(path, Area::Window) => self.effect(capture(call, path, None)),
             }
         }
         self.control_pending = waiting;
-        Task::batch(tasks)
     }
 
     /// True while a command waits for the window to draw.
@@ -255,19 +319,21 @@ impl App {
         !self.control_pending.is_empty()
     }
 
-    /// What to answer, now or after drawing, and the tasks the UI messages
-    /// returned.
-    pub(super) fn run_command(&mut self, call: &Call) -> (Then, Task<Message>) {
+    /// What to answer, now or after drawing, and the UI messages to send
+    /// first, in order.
+    pub(super) fn run_command(&mut self, call: &Call) -> (Then, Vec<Message>) {
         if let Some(question) = &self.overlays.question
             && blocked_by_question(&call.command)
         {
-            return (Then::Now(Err(question_open_error(question))), Task::none());
+            return (Then::Now(Err(question_open_error(question))), Vec::new());
         }
-        let mut tasks = Vec::new();
-        let mut send = |app: &mut App, message: Message| tasks.push(app.update(message));
+        let mut sent = Vec::new();
+        // An answer that reads what the sent messages changed, read once
+        // they have run.
+        let mut later: Option<Later> = None;
         let answer = match call.command.clone() {
             Command::Select { modules, .. } => self.check_modules(&modules).map(|()| {
-                send(self, Message::Canvas(CanvasEvent::Select(modules)));
+                sent.push(Message::Canvas(CanvasEvent::Select(modules)));
                 Map::new()
             }),
             Command::Set {
@@ -276,10 +342,15 @@ impl App {
                 value,
                 position,
                 ..
-            } => self.set_command(module, &param, value, position, &mut send),
+            } => self
+                .set_command(module, &param, value, position, &mut sent)
+                .map(|read| {
+                    later = Some(read);
+                    Map::new()
+                }),
             Command::Add { kind, at, .. } => self.add_command(&kind, at),
             Command::Remove { modules, .. } => self.check_modules(&modules).map(|()| {
-                send(self, Message::Canvas(CanvasEvent::Delete(modules)));
+                sent.push(Message::Canvas(CanvasEvent::Delete(modules)));
                 Map::new()
             }),
             Command::Connect { from, to, .. } => port(self, &from, true)
@@ -294,23 +365,29 @@ impl App {
                     }) {
                         return Err("Cannot connect to an unknown module".into());
                     }
-                    send(self, Message::Canvas(CanvasEvent::Connect { from, to }));
+                    sent.push(Message::Canvas(CanvasEvent::Connect { from, to }));
                     Ok(Map::new())
                 }),
-            Command::Probe { from, kind, .. } => self.probe_command(&from, &kind, &mut send),
+            Command::Probe { from, kind, .. } => self.probe_command(&from, &kind, &mut sent).map(|read| {
+                later = Some(read);
+                Map::new()
+            }),
             Command::Disconnect { to, .. } => port(self, &to, false).map(|to| {
-                send(self, Message::Canvas(CanvasEvent::Disconnect(to)));
+                sent.push(Message::Canvas(CanvasEvent::Disconnect(to)));
                 Map::new()
             }),
             Command::Panic => {
-                send(self, Message::Panic);
+                sent.push(Message::Panic);
                 Ok(Map::new())
             }
             Command::Undo | Command::Redo => {
                 let undo = matches!(call.command, Command::Undo);
-                send(self, if undo { Message::Undo } else { Message::Redo });
-                let snapshot = self.ui_snapshot();
-                Ok(fields(json!({ "undo": snapshot.undo, "redo": snapshot.redo })))
+                sent.push(if undo { Message::Undo } else { Message::Redo });
+                later = Some(Box::new(|app: &mut App| {
+                    let snapshot = app.ui_snapshot();
+                    Ok(fields(json!({ "undo": snapshot.undo, "redo": snapshot.redo })))
+                }));
+                Ok(Map::new())
             }
             Command::Open { path, .. } => {
                 if self.replace(crate::Source::File(&path)) {
@@ -354,8 +431,8 @@ impl App {
                     frames_left: FRAMES_FOR_ENGINE,
                 };
                 return match self.send_midi(MidiEvent::control_change(0, control.channel, control.controller, value)) {
-                    Ok(_) => (Then::AfterDraw(step), Task::batch(tasks)),
-                    Err(error) => (Then::Now(Err(error)), Task::batch(tasks)),
+                    Ok(_) => (Then::AfterDraw(step), sent),
+                    Err(error) => (Then::Now(Err(error)), sent),
                 };
             }
             Command::Key {
@@ -377,14 +454,14 @@ impl App {
                     }
                     Err(error) => Then::Now(Err(error)),
                 };
-                return (then, Task::batch(tasks));
+                return (then, sent);
             }
             Command::Type { text } => {
                 let then = match type_events(&text) {
                     Ok(_) => Then::AfterDraw(Step::Type(text)),
                     Err(error) => Then::Now(Err(error)),
                 };
-                return (then, Task::batch(tasks));
+                return (then, sent);
             }
             Command::Toolbar { button } => press_message(self, &button).and_then(|message| {
                 // An answer that wrote nothing is an error, because the step
@@ -396,7 +473,7 @@ impl App {
                         return Err(self.alerts.status().to_string());
                     }
                 } else {
-                    send(self, message);
+                    sent.push(message);
                 }
                 Ok(Map::new())
             }),
@@ -426,14 +503,14 @@ impl App {
                     let steps = aim.map(PointerStep::MoveTo).into_iter().chain([click]).collect();
                     Ok(with_modifiers(modifiers, steps))
                 });
-                return (self.pointer_command(steps), Task::none());
+                return (self.pointer_command(steps), Vec::new());
             }
             Command::Hover { target, x, y } => {
                 let steps = aim(target, x, y).and_then(|aim| {
                     aim.map(|aim| vec![PointerStep::MoveTo(aim)])
                         .ok_or_else(|| "give `target`, or `x` and `y`".to_string())
                 });
-                return (self.pointer_command(steps), Task::none());
+                return (self.pointer_command(steps), Vec::new());
             }
             Command::Drag {
                 from,
@@ -459,7 +536,7 @@ impl App {
                     list.push(PointerStep::Release(button));
                     Ok(with_modifiers(modifiers, list))
                 })();
-                return (self.pointer_command(steps), Task::none());
+                return (self.pointer_command(steps), Vec::new());
             }
             Command::Scroll {
                 target,
@@ -478,10 +555,10 @@ impl App {
                     let steps = aim.map(PointerStep::MoveTo).into_iter().chain([wheel]).collect();
                     Ok(with_modifiers(modifiers, steps))
                 });
-                return (self.pointer_command(steps), Task::none());
+                return (self.pointer_command(steps), Vec::new());
             }
             Command::Arm { target } => self.arm_command(&target).map(|message| {
-                send(self, message);
+                sent.push(message);
                 Map::new()
             }),
             Command::MidiOptions {
@@ -494,10 +571,10 @@ impl App {
             } => self
                 .midi_options_command(&target, mode.as_deref(), encoding.as_deref(), (low, high), invert)
                 .map(|message| {
-                    send(self, message);
+                    sent.push(message);
                     Map::new()
                 }),
-            Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), Task::batch(tasks)),
+            Command::Locate { target } => return (Then::AfterDraw(Step::Locate(target)), sent),
             Command::Screenshot {
                 path,
                 target,
@@ -524,19 +601,19 @@ impl App {
                     Ok(area) => Then::AfterDraw(Step::Screenshot(path, area)),
                     Err(error) => Then::Now(Err(error)),
                 };
-                return (then, Task::batch(tasks));
+                return (then, sent);
             }
             Command::Sample { target, ms } => {
                 let then = match self.sample_command(&target, ms) {
                     Ok(sampling) => Then::AfterDraw(Step::Sample(sampling)),
                     Err(error) => Then::Now(Err(error)),
                 };
-                return (then, Task::batch(tasks));
+                return (then, sent);
             }
             Command::Wait { .. } => Ok(Map::new()),
             Command::Quit => {
                 self.quit = true;
-                return (Then::Now(Ok(Map::new())), Task::batch(tasks));
+                return (Then::Now(Ok(Map::new())), sent);
             }
             Command::Snapshot => {
                 let answer = serde_json::to_value(self.ui_snapshot())
@@ -545,7 +622,7 @@ impl App {
                         Map::from_iter([("snapshot".to_string(), snapshot), ("audio".to_string(), audio)])
                     })
                     .map_err(|e| e.to_string());
-                return (Then::Now(answer), Task::none());
+                return (Then::Now(answer), Vec::new());
             }
             Command::OutputSafety { mode } => {
                 let mode = match mode.as_str() {
@@ -554,11 +631,11 @@ impl App {
                     "off" => OutputSafety::Off,
                     _ => {
                         let error = format!("unknown mode `{mode}`; modes: low-latency, clean, off");
-                        return (Then::Now(Err(error)), Task::none());
+                        return (Then::Now(Err(error)), Vec::new());
                     }
                 };
-                send(self, Message::Preferences(settings::Message::Safety(mode)));
-                return (Then::AfterDraw(Step::Report(Report::Safety)), Task::batch(tasks));
+                sent.push(Message::Preferences(settings::Message::Safety(mode)));
+                return (Then::AfterDraw(Step::Report(Report::Safety)), sent);
             }
             Command::Audio { device, rate, buffer } => {
                 let choice = |value: Option<Value>, what: &str| match value {
@@ -576,7 +653,7 @@ impl App {
                     self.control_audio_change(device.as_deref(), rate, buffer)
                 });
                 if let Ok(change) = &change {
-                    send(self, Message::Preferences(settings::Message::Audio(change.clone())));
+                    sent.push(Message::Preferences(settings::Message::Audio(change.clone())));
                 }
                 if read {
                     self.forget_device_lists();
@@ -585,17 +662,17 @@ impl App {
                     Ok(_) => Then::AfterDraw(Step::Report(Report::Audio)),
                     Err(error) => Then::Now(Err(error)),
                 };
-                return (then, Task::batch(tasks));
+                return (then, sent);
             }
             Command::Midi { input, on } => {
                 let then = match self.control_midi_input(&input) {
                     Ok(name) => {
-                        send(self, Message::Preferences(settings::Message::Midi(name, on)));
+                        sent.push(Message::Preferences(settings::Message::Midi(name, on)));
                         Then::AfterDraw(Step::Report(Report::Midi))
                     }
                     Err(error) => Then::Now(Err(error)),
                 };
-                return (then, Task::batch(tasks));
+                return (then, sent);
             }
             Command::New => {
                 if self.replace(crate::Source::Empty) {
@@ -606,11 +683,12 @@ impl App {
                 }
             }
         };
-        let then = match answer {
-            Ok(answer) => Then::AfterDraw(Step::Answer(Ok(answer))),
-            Err(error) => Then::Now(Err(error)),
+        let then = match (answer, later) {
+            (Ok(_), Some(read)) => Then::AfterMessages(read),
+            (Ok(answer), None) => Then::AfterDraw(Step::Answer(Ok(answer))),
+            (Err(error), _) => Then::Now(Err(error)),
         };
-        (then, Task::batch(tasks))
+        (then, sent)
     }
 
     /// Queues a pointer command's events, or refuses it.
@@ -702,8 +780,8 @@ impl App {
         param: &str,
         value: Option<f32>,
         position: Option<f32>,
-        send: &mut impl FnMut(&mut App, Message),
-    ) -> Answer {
+        sent: &mut Vec<Message>,
+    ) -> Result<Later, String> {
         let node = self
             .session
             .controller
@@ -725,16 +803,18 @@ impl App {
             }),
             _ => return Err("give `value` or `position`, not both".to_string()),
         };
-        send(self, message);
-        send(self, Message::SliderReleased);
-        let stored = self
-            .session
-            .controller
-            .graph()
-            .node(ModuleId(module))
-            .map(|n| n.params[index])
-            .unwrap_or_default();
-        Ok(fields(json!({ "value": stored })))
+        sent.push(message);
+        sent.push(Message::SliderReleased);
+        Ok(Box::new(move |app: &mut App| {
+            let stored = app
+                .session
+                .controller
+                .graph()
+                .node(ModuleId(module))
+                .map(|n| n.params[index])
+                .unwrap_or_default();
+            Ok(fields(json!({ "value": stored })))
+        }))
     }
 
     /// The message an inspector row sends in learn mode: it arms the
@@ -920,7 +1000,7 @@ impl App {
     }
 
     /// Adds a scope or a meter fed by an output, as the probe menu does.
-    pub(super) fn probe_command(&mut self, from: &str, kind: &str, send: &mut impl FnMut(&mut App, Message)) -> Answer {
+    pub(super) fn probe_command(&mut self, from: &str, kind: &str, sent: &mut Vec<Message>) -> Result<Later, String> {
         let output = port(self, from, true)?;
         let probe = match kind {
             "scope" => crate::probe_menu::Probe::Scope,
@@ -933,18 +1013,20 @@ impl App {
             .port_position(output)
             .ok_or_else(|| format!("`{from}` is not on the canvas"))?;
         let before: Vec<u32> = self.session.controller.graph().nodes().map(|(id, _)| id.0).collect();
-        send(self, Message::AddProbe { probe, output, world });
-        let added = self
-            .session
-            .controller
-            .graph()
-            .nodes()
-            .map(|(id, _)| id.0)
-            .find(|id| !before.contains(id));
-        match added {
-            Some(module) => Ok(fields(json!({ "module": module }))),
-            None => Err(self.alerts.status().to_string()),
-        }
+        sent.push(Message::AddProbe { probe, output, world });
+        Ok(Box::new(move |app: &mut App| {
+            let added = app
+                .session
+                .controller
+                .graph()
+                .nodes()
+                .map(|(id, _)| id.0)
+                .find(|id| !before.contains(id));
+            match added {
+                Some(module) => Ok(fields(json!({ "module": module }))),
+                None => Err(app.alerts.status().to_string()),
+            }
+        }))
     }
 
     pub(super) fn send_midi(&mut self, event: MidiEvent) -> Answer {
@@ -986,19 +1068,13 @@ impl App {
 
     /// Answers a `locate`, or takes a `screenshot` of the area around the
     /// target, once the window has been searched.
-    pub(crate) fn located(&mut self, call: Call, target: &str, found: &Found, then: AfterSearch) -> Task<Message> {
+    pub(crate) fn located(&mut self, call: Call, target: &str, found: &Found, then: AfterSearch) {
         let rect = locate(self, target, found);
         match then {
-            AfterSearch::Locate => {
-                call.answer(rect.map(rect_fields));
-                Task::none()
-            }
+            AfterSearch::Locate => call.answer(rect.map(rect_fields)),
             AfterSearch::Screenshot { path, margin } => match rect {
-                Ok(rect) => capture(call, path, Some(rect.expand(margin))),
-                Err(error) => {
-                    call.answer(Err(error));
-                    Task::none()
-                }
+                Ok(rect) => self.effect(capture(call, path, Some(rect.expand(margin)))),
+                Err(error) => call.answer(Err(error)),
             },
         }
     }

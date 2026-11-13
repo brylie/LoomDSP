@@ -234,3 +234,44 @@ fn the_union_uses_the_edges_of_a_negative_size_rect() {
     let inverted = rect(30.0, 0.0, -10.0, 10.0);
     assert_eq!(tile.union(inverted), rect(0.0, 0.0, 20.0, 10.0));
 }
+
+/// A part already in view needs no move.
+#[test]
+fn a_part_in_view_is_not_moved_to() {
+    let view = rect(0.0, 100.0, 200.0, 50.0);
+    assert_eq!(view.reveal(rect(10.0, 110.0, 50.0, 20.0)), Vector::new(0.0, 0.0));
+    assert_eq!(view.reveal(view), Vector::new(0.0, 0.0), "a part filling it exactly");
+}
+
+/// A part above the view brings its top to the view's top; one below
+/// brings its bottom to the view's bottom, as the last row does.
+#[test]
+fn a_part_above_or_below_is_moved_to_by_the_least() {
+    let view = rect(0.0, 100.0, 200.0, 50.0);
+    assert_eq!(view.reveal(rect(0.0, 80.0, 200.0, 20.0)), Vector::new(0.0, -20.0));
+    assert_eq!(view.reveal(rect(0.0, 140.0, 200.0, 20.0)), Vector::new(0.0, 10.0));
+    let last = rect(0.0, 480.0, 200.0, 20.0);
+    assert_eq!(
+        view.reveal(last),
+        Vector::new(0.0, 350.0),
+        "its bottom meets the view's"
+    );
+}
+
+/// Each axis moves on its own: a part to the left and below moves the
+/// view left and down at once.
+#[test]
+fn each_axis_moves_on_its_own() {
+    let view = rect(100.0, 100.0, 200.0, 50.0);
+    assert_eq!(view.reveal(rect(80.0, 140.0, 40.0, 20.0)), Vector::new(-20.0, 10.0));
+    assert_eq!(view.reveal(rect(280.0, 90.0, 40.0, 20.0)), Vector::new(20.0, -10.0));
+}
+
+/// A part larger than the view cannot be shown whole, so its top-left
+/// wins: reading begins there.
+#[test]
+fn a_part_larger_than_the_view_shows_its_start() {
+    let view = rect(0.0, 100.0, 200.0, 50.0);
+    assert_eq!(view.reveal(rect(-40.0, 60.0, 400.0, 200.0)), Vector::new(-40.0, -40.0));
+    assert_eq!(view.reveal(rect(20.0, 120.0, 400.0, 200.0)), Vector::new(20.0, 20.0));
+}

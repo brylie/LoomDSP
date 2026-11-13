@@ -3,7 +3,9 @@ use crate::ui_test::Ui;
 use iced::keyboard::key::Named;
 use loom_ui_core::Point;
 
-/// Keyboard navigation keeps every row within the actual table viewport.
+/// Keyboard navigation keeps every row within the actual table viewport:
+/// the matrix asks to show the selected card and cell by their UI IDs, and
+/// the window scrolls just enough.
 #[test]
 fn keyboard_reveals_rows_in_an_overflowing_table() {
     use iced::advanced::widget::{Id, Operation, operation::Scrollable};
@@ -28,20 +30,23 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
             .unwrap();
     }
     ui.app.matrix_event(Event::Tab(Tab::Matrix));
-    /// Captures the table viewport and the selected row from the view.
+    /// Captures the table viewport and the selected row and cell from the
+    /// view, found by their UI IDs as the scroll finds them.
     struct Bounds(
         Option<(iced::Rectangle, iced::Vector)>,
         Option<iced::Rectangle>,
         Option<iced::Rectangle>,
+        Id,
+        Id,
     );
     impl Operation for Bounds {
         fn traverse(&mut self, f: &mut dyn FnMut(&mut dyn Operation)) {
             f(self);
         }
         fn container(&mut self, id: Option<&Id>, bounds: iced::Rectangle) {
-            if id == Some(&Id::new("matrix-selected-row")) {
+            if id == Some(&self.3) {
                 self.1 = Some(bounds);
-            } else if id == Some(&Id::new("matrix-selected-cell")) {
+            } else if id == Some(&self.4) {
                 self.2 = Some(bounds);
             }
         }
@@ -67,7 +72,14 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
         .map(|(id, a)| (id, *a))
         .collect();
     let check = |ui: &mut Ui| {
-        let mut bounds = Bounds(None, None, None);
+        let selected = ui.app.session.matrix.selected.expect("a selected row");
+        let mut bounds = Bounds(
+            None,
+            None,
+            None,
+            crate::places::widget_id(&access::row(selected)),
+            crate::places::widget_id(&access::cell(selected, ui.app.session.matrix.cell)),
+        );
         ui.with_ui(|view, renderer, _| view.operate(renderer, &mut bounds));
         let (viewport, translation) = bounds.0.expect("viewport");
         let row = bounds.1.expect("selected row");
@@ -82,11 +94,16 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
         );
         translation
     };
-    for _ in 0..32 {
+    // The four cases of a scroll into view: in view (none), below, back
+    // above, and the last row.
+    ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
+    assert_eq!(check(&mut ui).y, 0.0, "the second row is in view: no scroll");
+    for _ in 1..32 {
         ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
         check(&mut ui);
     }
-    assert_eq!(ui.app.session.matrix.selected, Some(AssignmentId(32)));
+    assert_eq!(ui.app.session.matrix.selected, Some(AssignmentId(32)), "the last row");
+    assert!(check(&mut ui).y > 0.0, "below: it scrolled");
     // Every cell of a card fits the column, so moving between cells
     // never scrolls sideways (#456).
     for _ in 0..4 {
@@ -835,15 +852,11 @@ fn matrix_with_a_row() -> Ui {
 
 /// Clicks the filter, as a person would.
 fn click_filter(ui: &mut Ui) {
-    let at = ui.field(FILTER);
+    let at = ui.field(&filter_part());
     ui.move_to(at);
     ui.press();
     ui.release();
-    assert_eq!(
-        ui.focused_field(),
-        Some(iced::advanced::widget::Id::new(FILTER)),
-        "the click focused the filter"
-    );
+    assert_eq!(ui.focused_field(), Some(filter_part()), "the click focused the filter");
 }
 
 /// What a key must not change: the row, the cell, any edit, and the patch.
@@ -1013,4 +1026,87 @@ fn the_table_has_the_keys_again_after_an_overlay_closes() {
         ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
         assert_ne!(ui.app.session.matrix.selected, before, "{owner:?}: Down moved the row");
     }
+}
+
+/// A card that a sort moves wholly below the view comes in with its
+/// bottom at the view's bottom, and one moved above with its top at the
+/// view's top: the card's scroll and then its cell's do not add up.
+#[test]
+fn a_card_moved_out_of_view_comes_back_just_inside() {
+    let mut ui = Ui::open("modulation.ron");
+    let assignment = *ui
+        .app
+        .session
+        .controller
+        .graph()
+        .assignment(AssignmentId(1))
+        .expect("assignment");
+    for index in 0..30 {
+        ui.app
+            .session
+            .controller
+            .add_assignment(
+                assignment.source,
+                assignment.target,
+                assignment.param,
+                -0.9 + index as f32 * 0.03,
+            )
+            .unwrap();
+    }
+    ui.app.matrix_event(Event::Tab(Tab::Matrix));
+    let _ = ui.redraw();
+    ui.send(Message::Matrix(Event::Select(AssignmentId(1), Column::Depth)));
+    let _ = ui.redraw();
+    let card = |ui: &mut Ui| {
+        let place = ui
+            .places()
+            .of(&access::row(AssignmentId(1)))
+            .expect("the card is drawn");
+        (place.rect, place.clip.expect("the card is in the table"))
+    };
+    // Within a pixel: the table rounds its offset to whole pixels, while
+    // the cards sit on half pixels. An overshoot would be a card's height.
+    let near = |a: f32, b: f32| (a - b).abs() <= 1.0;
+    let (shown, view) = card(&mut ui);
+    assert!(
+        shown.y >= view.y && shown.y + shown.height <= view.y + view.height,
+        "it starts in view"
+    );
+    // The added assignments' depths run from -0.9 up, so a sort by depth
+    // puts it near one end of the table and a reverse near the other, far
+    // out of view each time. Whichever end is first, the scroll follows.
+    ui.send(Message::Matrix(Event::SortBy(Some(Column::Depth))));
+    let _ = ui.redraw();
+    let order = |ui: &Ui| {
+        let model = ui.app.session.matrix.model(
+            ui.app.session.controller.graph(),
+            &ui.app.session.selection,
+            ui.app.right_tab,
+        );
+        let at = model.rows.iter().position(|row| row.id == 1).expect("its row");
+        (at, model.rows.len())
+    };
+    if order(&ui).0 < 2 {
+        ui.send(Message::Matrix(Event::ReverseSort));
+        let _ = ui.redraw();
+    }
+    let (at, rows) = order(&ui);
+    assert!(at + 2 >= rows, "it is at the end of the table now: {at} of {rows}");
+    let (below, view) = card(&mut ui);
+    assert!(
+        near(below.y + below.height, view.y + view.height),
+        "below: its bottom at the view's bottom, {} against {}",
+        below.y + below.height,
+        view.y + view.height
+    );
+    ui.send(Message::Matrix(Event::ReverseSort));
+    let _ = ui.redraw();
+    assert!(order(&ui).0 < 2, "and at its start now");
+    let (above, view) = card(&mut ui);
+    assert!(
+        near(above.y, view.y),
+        "above: its top at the view's top, {} against {}",
+        above.y,
+        view.y
+    );
 }

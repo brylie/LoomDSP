@@ -68,6 +68,10 @@ pub struct UiSnapshot {
     pub patches: Option<crate::patches::Model>,
     /// The open question, if any (`docs/design/files.md`).
     pub question: Option<crate::question::Model>,
+    /// The Preferences window, while it is open.
+    pub preferences: Option<crate::settings::Model>,
+    /// The licence chooser, while it is open.
+    pub licence: Option<crate::licence_chooser::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
     pub matrix: MatrixModel,
     /// The stats bar's audio numbers.
@@ -474,7 +478,7 @@ impl App {
         // One update, so the levels do not fall with the time the run took.
         let mut levels = Levels::default();
         levels.update(&readings, std::time::Instant::now());
-        let _ = self.update(crate::Message::Meters(levels.all().collect()));
+        self.apply(crate::Message::Meters(levels.all().collect()));
         // An output carries a signal if it peaked above -80 dB at the end
         // of the run.
         let activity = watch
@@ -487,7 +491,7 @@ impl App {
                 (probe, peak > crate::monitor::ACTIVITY_THRESHOLD)
             })
             .collect();
-        let _ = self.update(crate::Message::Telemetry(crate::monitor::Update {
+        self.apply(crate::Message::Telemetry(crate::monitor::Update {
             levels: Vec::new(),
             traces,
             histories: histories
@@ -514,9 +518,9 @@ impl App {
             peaks: peaks.news(),
             activity,
         }));
-        let _ = self.update(crate::Message::LiveFrame);
+        self.apply(crate::Message::LiveFrame);
         if let Some(watch) = self.watched_lights() {
-            let _ = self.update(crate::Message::Lights(watch.read()));
+            self.apply(crate::Message::Lights(watch.read()));
         }
     }
 
@@ -676,6 +680,12 @@ impl App {
             browser: self.overlays.browser().map(|open| open.model().clone()),
             patches: self.overlays.patches().map(|open| open.model().clone()),
             question: self.overlays.question.as_ref().map(crate::question::Question::model),
+            preferences: self.preferences_model(),
+            licence: self
+                .overlays
+                .chooser
+                .as_ref()
+                .map(crate::licence_chooser::Chooser::model),
             matrix: self
                 .session
                 .matrix
