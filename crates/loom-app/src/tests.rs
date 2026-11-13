@@ -2861,19 +2861,18 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
 /// so the key cannot wait for the app to have heard of the focus.
 #[test]
 fn tab_moves_between_the_fields_of_one_view() {
-    use iced::advanced::widget::Id;
     use iced::keyboard::{Key, Modifiers, key::Named};
     let tab = Key::Named(Named::Tab);
-    let [authors, tags] = crate::patch_info::TEXT_FIELDS;
+    let [authors, tags] = crate::patch_info::text_fields();
     let mut ui = typing_in_authors(false);
-    assert_eq!(ui.focused_field(), Some(Id::new(authors)), "the click focused Authors");
+    assert_eq!(ui.focused_field(), Some(authors.clone()), "the click focused Authors");
 
     ui.tap(tab.clone(), Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Tab goes to Tags");
+    assert_eq!(ui.focused_field(), Some(tags.clone()), "Tab goes to Tags");
     ui.tap(tab.clone(), Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(Id::new(authors)), "Tab wraps to Authors");
+    assert_eq!(ui.focused_field(), Some(authors.clone()), "Tab wraps to Authors");
     ui.tap(tab.clone(), Modifiers::SHIFT);
-    assert_eq!(ui.focused_field(), Some(Id::new(tags)), "Shift-Tab wraps back to Tags");
+    assert_eq!(ui.focused_field(), Some(tags), "Shift-Tab wraps back to Tags");
 
     let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
     ui.app
@@ -2883,12 +2882,12 @@ fn tab_moves_between_the_fields_of_one_view() {
             PathBuf::from("unread"),
         )));
     ui.redraw();
-    let [search, author] = crate::patches::TEXT_FIELDS;
-    ui.focus(search);
+    let [search, author] = crate::patches::text_fields();
+    ui.focus(&search);
     ui.tap(tab.clone(), Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(Id::new(author)));
+    assert_eq!(ui.focused_field(), Some(author));
     ui.tap(tab, Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(Id::new(search)), "wrapped inside the browser");
+    assert_eq!(ui.focused_field(), Some(search), "wrapped inside the browser");
 }
 
 /// Tab goes forward and Shift-Tab back, wrapping at both ends. It takes three
@@ -2896,14 +2895,14 @@ fn tab_moves_between_the_fields_of_one_view() {
 #[test]
 fn tab_steps_forward_and_shift_tab_back() {
     use crate::editing::field_after;
-    use iced::advanced::widget::Id;
-    let fields = ["one", "two", "three"];
-    let step = |from: &'static str, backwards| field_after(&fields, Id::new(from), backwards);
-    assert_eq!(step("one", false), Id::new("two"));
-    assert_eq!(step("three", false), Id::new("one"), "forward wraps");
-    assert_eq!(step("two", true), Id::new("one"));
-    assert_eq!(step("one", true), Id::new("three"), "backward wraps");
-    assert_eq!(step("other", false), Id::new("other"), "a field not listed stays");
+    let field = |name: &'static str| loom_ui_core::UiId::panel("form").with(name);
+    let fields = [field("one"), field("two"), field("three")];
+    let step = |from: &'static str, backwards| field_after(&fields, &field(from), backwards);
+    assert_eq!(step("one", false), Some(field("two")));
+    assert_eq!(step("three", false), Some(field("one")), "forward wraps");
+    assert_eq!(step("two", true), Some(field("one")));
+    assert_eq!(step("one", true), Some(field("three")), "backward wraps");
+    assert_eq!(step("other", false), None, "a field not listed moves nothing");
 }
 
 /// Where no accessibility adapter exists yet, opening the window starts no

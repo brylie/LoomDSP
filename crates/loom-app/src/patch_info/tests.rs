@@ -343,7 +343,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     let count = ui.app.session.controller.graph().nodes().count();
 
     let z = || Key::Character("z".into());
-    ui.focus(TAG_INPUT);
+    ui.focus(&tags_part());
     ui.typewrite("drone");
     ui.tap(z(), Modifiers::COMMAND);
     assert_eq!(
@@ -362,7 +362,7 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     );
 
     // Redo waits for the field the same way.
-    ui.focus(TAG_INPUT);
+    ui.focus(&tags_part());
     ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(
         ui.app.session.controller.graph().nodes().count(),
@@ -423,9 +423,15 @@ fn a_credit_question_that_cannot_be_asked_yet_waits() {
     // An Open dialog waits for its answer.
     assert!(app.ask_file(crate::dialogs::Waiting::Open, crate::files::open_request(None, None)));
     assert!(app.write_then(patch.clone(), None), "the save goes ahead");
-    assert!(
-        app.session.document.should_offer_credit("Sam Rivera"),
-        "the offer is still to come"
-    );
     let _ = dialogs::asked();
+
+    // The Open dialog is cancelled; the next Save asks.
+    let _ = app.send(AppMessage::Dialog(crate::dialogs::DialogAnswer::File(None)));
+    dialogs::answer_add_author(Some(false));
+    save(&mut app);
+    assert_eq!(
+        dialogs::asked(),
+        [Asked::AddAuthor("Sam Rivera".into())],
+        "a later Save asks"
+    );
 }

@@ -106,7 +106,7 @@ impl App {
                 label: Some("Filter modules or parameters".to_string()),
                 value: Some(model.filter.clone()),
                 set_text: Some(SetText::MatrixFilter),
-                focus: Some(iced::advanced::widget::Id::new(super::FILTER)),
+                focus: Some(crate::places::field_widget_id(&super::filter_part())),
                 ..Item::new(part("filter"), Kind::Field)
             },
             Item {

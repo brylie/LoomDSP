@@ -65,7 +65,9 @@ impl App {
         let mut unrun = Effects::none();
         let mut pending = VecDeque::from([message]);
         while let Some(message) = pending.pop_front() {
-            let cx = Context::new(Instant::now(), &waker, None, window);
+            // No window here: the app's own copy stands in for the
+            // runtime's record of focus, as `FocusMoved` keeps it.
+            let cx = Context::new(Instant::now(), &waker, self.focus.clone(), window);
             let effects = self.update(message, &cx);
             drop(self.outbox.take());
             for effect in effects {

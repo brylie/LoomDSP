@@ -76,13 +76,6 @@ fn focus_becomes_a_widget_task() {
     assert!(!target.needs_redraw(0), "and not after a turn with none");
 }
 
-/// An element's Iced widget ID is the text of its UI ID.
-#[test]
-fn a_widget_id_is_the_ui_id_text() {
-    let id = UiId::panel("inspector").with("4").with("field");
-    assert_eq!(widget_id(&id), iced::advanced::widget::Id::from(id.to_string()));
-}
-
 /// A dialog's result names its button by label, or by place where the
 /// platform reports a standard one.
 #[test]
@@ -209,7 +202,7 @@ fn a_reveal_finds_its_part_and_chains_one_scroll() {
         operation.traverse(&mut |_| {});
         operation.scrollable(None, rect(200.0, 100.0), rect(200.0, 400.0), iced::Vector::ZERO, second);
         operation.traverse(&mut |inside| {
-            inside.container(Some(&widget_id(&row)), rect(row_y, 20.0));
+            inside.container(Some(&crate::places::widget_id(&row)), rect(row_y, 20.0));
             inside.traverse(&mut |_| {});
         });
     };
@@ -232,4 +225,26 @@ fn a_reveal_finds_its_part_and_chains_one_scroll() {
     };
     walk(&mut reveal, 230.0, &mut [Area::default(), Area::default()]);
     assert!(matches!(reveal.finish(), Outcome::None), "in view: nothing to chain");
+}
+
+/// A message already queued when a focus answer comes runs first, under the
+/// focus it was sent under, and the app's copy never drifts from the
+/// target's: the check at the top of `update` would panic, in a test or a
+/// debug build of the app, if it did.
+#[test]
+fn a_queued_message_runs_before_a_focus_answer() {
+    let (mut bridge, _) = Bridge::start(app(), Task::none());
+    let waker = bridge.runtime.waker();
+    std::thread::spawn(move || waker.send(Message::ShowHelp))
+        .join()
+        .unwrap();
+    let field = crate::browser::search_id();
+    let answer = FocusAnswer {
+        any: true,
+        widget: Some(crate::places::field_widget_id(&field)),
+    };
+    let _ = bridge.update(Bridged::Focus(answer));
+    assert!(bridge.app().overlays.help.is_some(), "the queued message ran");
+    assert_eq!(bridge.app().focus, Some(field.clone()), "the app heard of the focus");
+    assert_eq!(bridge.runtime.target().focused, Some(field));
 }

@@ -22,12 +22,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime};
 
-/// The search field's widget ID: typing goes there when the browser opens.
-pub(crate) const SEARCH: &str = "patch-browser-search";
-/// The Author filter's field.
-const AUTHOR: &str = "patch-browser-author";
-/// The browser's text fields, in the order Tab moves between them.
-pub(crate) const TEXT_FIELDS: [&str; 2] = [SEARCH, AUTHOR];
+/// The browser's text fields, in the order Tab moves between them: the
+/// search field, where typing goes when the browser opens, then the Author
+/// filter.
+pub(crate) fn text_fields() -> [UiId; 2] {
+    [part_id("search"), part_id("author")]
+}
 /// The list's widget ID, for keeping the highlight in view.
 const LIST: &str = "patch-browser-list";
 /// Height of one row. Fixed, so the list can scroll to a row.
@@ -484,7 +484,7 @@ impl PatchBrowser {
     }
 
     /// Opens a browser over `folder` and the task that reads it on a
-    /// thread, one message per file. The caller focuses [`SEARCH`].
+    /// thread, one message per file. The caller focuses its search field.
     pub fn open(open: u64, folder: PathBuf) -> (Self, loom_ui::Effects<crate::Message>) {
         let browser = Self::new(open, folder.clone());
         let reader = read(open, folder, browser.stop.clone());
@@ -638,7 +638,7 @@ impl PatchBrowser {
         let search = named(
             &part_id("search"),
             text_input("Search names, descriptions, and tags", &model.search)
-                .id(SEARCH)
+                .id(crate::places::field_widget_id(&part_id("search")))
                 .on_input(Message::Search)
                 .on_submit(Message::Submit)
                 .size(style::CONTROL)
@@ -648,7 +648,7 @@ impl PatchBrowser {
         let author = named(
             &part_id("author"),
             text_input("Author", &model.author)
-                .id(AUTHOR)
+                .id(crate::places::field_widget_id(&part_id("author")))
                 .on_input(Message::Author)
                 .on_submit(Message::Submit)
                 .size(style::CONTROL)

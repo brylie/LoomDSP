@@ -421,7 +421,8 @@ impl App {
         // whole patch.
         self.frame_key += 1;
         self.meter = bench::FrameMeter::default();
-        self.text_focus = crate::editing::TextFocus::default();
+        // A field can go with the old patch's views: ask the window again.
+        self.focus_question.set(true);
         self.drops.clear();
         self.overlays.close_for_new_patch();
         // Commands waiting to be drawn still get their answer, except a

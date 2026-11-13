@@ -1762,3 +1762,26 @@ fn opening_a_patch_drops_an_input_error_that_is_over() {
     assert!(app.rig.input.port().is_some(), "the stream opened");
     assert!(app.alerts.kept().is_empty(), "{:?}", app.alerts.kept());
 }
+
+/// A Save As answer that arrives after a device change is used: the change
+/// builds a new engine for the same patch, so the engine's generation moves
+/// and the patch's number does not (dialogs.rs, `Pending`).
+#[test]
+fn a_save_as_answer_after_a_device_change_is_used() {
+    let dir = folder("save-as-device");
+    let fake = two_devices();
+    let mut app = start(args(&dir), &fake);
+    let path = dir.join("mine.ron");
+    let (session, generation) = (app.session.id, app.generation);
+    assert!(!app.save_as_then(None), "the dialog waits");
+
+    change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
+    assert_ne!(app.generation, generation, "a new engine");
+    assert_eq!(app.session.id, session, "for the same patch");
+
+    let _ = app.send(crate::Message::Dialog(crate::dialogs::DialogAnswer::File(Some(
+        path.clone(),
+    ))));
+    assert!(path.is_file(), "the save happened");
+    let _ = crate::files::fake::asked();
+}

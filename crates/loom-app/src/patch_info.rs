@@ -16,12 +16,20 @@ use loom_patch::Metadata;
 use loom_patch::metadata::{self, Licence};
 use serde::Serialize;
 
-/// The tag field's widget ID, so a test or a script can find it.
-pub const TAG_INPUT: &str = "patch-info-tag";
-/// The Authors box.
-pub(crate) const AUTHORS_INPUT: &str = "patch-info-authors";
+/// The Authors box's part: `inspector/patch/authors`.
+pub(crate) fn authors_part() -> loom_ui_core::UiId {
+    crate::inspector::ids::part(&crate::inspector::ids::patch(), "authors")
+}
+
+/// The tag field's part: `inspector/patch/tags`.
+pub(crate) fn tags_part() -> loom_ui_core::UiId {
+    crate::inspector::ids::part(&crate::inspector::ids::patch(), "tags")
+}
+
 /// The form's text fields, in the order Tab moves between them.
-pub(crate) const TEXT_FIELDS: [&str; 2] = [AUTHORS_INPUT, TAG_INPUT];
+pub(crate) fn text_fields() -> [loom_ui_core::UiId; 2] {
+    [authors_part(), tags_part()]
+}
 
 /// A patch info edit.
 #[derive(Debug, Clone)]
@@ -206,7 +214,7 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'
         crate::inspector::ids::named(
             &part("authors"),
             text_editor(authors)
-                .id(AUTHORS_INPUT)
+                .id(crate::places::field_widget_id(&authors_part()))
                 .placeholder("Your name")
                 .on_action(move |action| msg(Message::Authors(action)))
                 .size(style::CONTROL)
@@ -217,7 +225,7 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'
         crate::inspector::ids::named(
             &part("tags"),
             text_input("Type a tag, then Enter or comma", &rows.tag_draft)
-                .id(TAG_INPUT)
+                .id(crate::places::field_widget_id(&tags_part()))
                 .on_input(move |value| msg(Message::TagDraft(value)))
                 .on_submit(msg(Message::TagSubmit))
                 .size(style::CONTROL)

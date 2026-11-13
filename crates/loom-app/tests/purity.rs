@@ -30,13 +30,11 @@ const BRIDGE_ONLY: [&str; 7] = [
 /// Files under `src/` that still name them, until each is ported. Each
 /// pull request of step 2.1, item 2 takes some off. `a11y/macos.rs` stays
 /// until the `winit` shell replaces it at step 2.2.
-const NOT_YET_PORTED: [&str; 13] = [
+const NOT_YET_PORTED: [&str; 11] = [
     "a11y.rs",
     "a11y/macos.rs",
     "control.rs",
     "control/run.rs",
-    "controls.rs",
-    "editing.rs",
     "input_owner.rs",
     "inspector.rs",
     "lib.rs",

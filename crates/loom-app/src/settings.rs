@@ -1425,9 +1425,12 @@ impl App {
     }
 }
 
-/// The id of the **Your name** field, so a screen reader's Focus reaches
-/// it. It goes away with Iced's text input in phase 3.
-pub(crate) const AUTHOR_INPUT: &str = "preferences-author";
+/// The part of the **Your name** field, `preferences/author`. Its text
+/// field's widget ID comes from it (`places::field_widget_id`), so a
+/// screen reader's Focus reaches it and the window's focus reads back.
+pub(crate) fn author_part() -> loom_ui_core::UiId {
+    access::preferences_id().with("author")
+}
 
 /// The Preferences window, drawn from its model. Each part is named by its
 /// UI ID, so the window says where it drew each one (`places.rs`).
@@ -1521,7 +1524,7 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
             "Your name",
             named(
                 text_input("Added as author of new patches", &model.author)
-                    .id(iced::widget::Id::new(AUTHOR_INPUT))
+                    .id(crate::places::field_widget_id(&author_part()))
                     .on_input(move |t| msg(Message::Author(t)))
                     .on_submit(msg(Message::SaveAuthor))
                     .size(style::CONTROL),

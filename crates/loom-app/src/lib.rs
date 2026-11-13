@@ -431,12 +431,22 @@ enum Message {
     },
     /// Replay the step undo took back.
     Redo,
-    /// Something may have moved text focus, such as a press. Ask the widgets.
+    /// Something may have moved text focus, such as a press. The bridge asks
+    /// the widgets after it.
     TextFocusCheck,
-    /// Which text field has focus, from the widgets.
-    TextFocus(editing::TextFocus),
+    /// The part with focus, or none, as the window says (`iced_bridge.rs`).
+    /// Every answer is sent, changed or not, as the window's word on focus
+    /// after a press: a press elsewhere ends a draft whose field never had
+    /// focus, which a change alone would miss.
+    FocusMoved(Option<loom_ui_core::UiId>),
     /// Tab was pressed. It closes a text field on the main view.
     TextFieldTab,
+    /// Tab between a view's fields, from the part the window says has
+    /// focus (`iced_bridge::after_focus_part`).
+    TabFrom {
+        from: Option<loom_ui_core::UiId>,
+        backwards: bool,
+    },
     /// An inspector slider was let go.
     SliderReleased,
     /// A change in the session-only modulation matrix.
@@ -525,7 +535,7 @@ impl Message {
                 | Self::BenchDone
                 | Self::Inspector(inspector::Message::UnknownLabelDraft { .. })
                 | Self::TextFocusCheck
-                | Self::TextFocus(_)
+                | Self::FocusMoved(_)
                 | Self::AskRecovery
         )
     }
@@ -564,8 +574,8 @@ impl Message {
             | Self::Telemetry(_)
             | Self::Autosave
             | Self::Midi
-            // The answer to a question asked before this one opened.
-            | Self::TextFocus(_)
+            // Where focus went: the window has already moved it.
+            | Self::FocusMoved(_)
             // A native dialog's answer: what it was asked for is already
             // decided, as a question's answer is.
             | Self::Dialog(_)
@@ -621,6 +631,7 @@ impl Message {
             | Self::Redo
             | Self::TextFocusCheck
             | Self::TextFieldTab
+            | Self::TabFrom { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
             | Self::MatrixKey(_)
@@ -663,10 +674,14 @@ struct App {
     run_files: document::RunFiles,
     /// Which tab the right panel shows. It stays when the patch changes.
     right_tab: RightTab,
-    /// Which text field has focus. While one does, the canvas leaves the keys
-    /// to it. Kept from the widget tree, because a text field does not say when
-    /// it loses focus.
-    text_focus: editing::TextFocus,
+    /// The part with keyboard focus, as `FocusMoved` last said. While a text
+    /// field has it, the canvas leaves the keys to it. A copy for what reads
+    /// focus outside `update` (the view, the input rows, the accessibility
+    /// tree); `update` checks it equals `cx.focused()`.
+    focus: Option<loom_ui_core::UiId>,
+    /// Set when a message may have moved focus: the bridge then asks the
+    /// window where it is, after the turn (`App::take_focus_question`).
+    focus_question: std::cell::Cell<bool>,
     /// Counts the engines built. Background watchers restart when it changes.
     generation: u64,
     /// The `test.` modules are loaded (`--test-modules`).
@@ -824,6 +839,12 @@ impl App {
             }
             recovery::Report::Note(line) => self.alerts.warn(line),
         }
+    }
+
+    /// True once after a message that may have moved focus: the bridge then
+    /// asks the window where focus is.
+    pub(crate) fn take_focus_question(&self) -> bool {
+        self.focus_question.replace(false)
     }
 
     fn title(&self) -> String {
@@ -1270,11 +1291,12 @@ impl App {
     /// One message, from the runtime (`iced_bridge.rs`), and its effects
     /// (ui-layer.md, section 2). Code not yet ported still returns an Iced
     /// task, which goes to the bridge's outbox.
-    pub(crate) fn update(
-        &mut self,
-        message: Message,
-        _cx: &loom_ui::Context<'_, Message>,
-    ) -> loom_ui::Effects<Message> {
+    pub(crate) fn update(&mut self, message: Message, cx: &loom_ui::Context<'_, Message>) -> loom_ui::Effects<Message> {
+        // The copy of focus follows the runtime's; `FocusMoved` is how it
+        // catches up, so it alone may arrive with the two apart.
+        if !matches!(message, Message::FocusMoved(_)) {
+            debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
+        }
         let task = self.update_iced(message);
         self.outbox.push(task);
         std::mem::take(&mut self.effects)
@@ -1332,8 +1354,8 @@ impl App {
         // they asked, the answer would ask for a rebuild, and the rebuild's
         // answer would ask again, for as long as a field has focus.
         let ask_focus = matches!(message, Message::TextFocusCheck)
-            || (self.text_focus.any
-                && !matches!(message, Message::TextFocus(_) | Message::A11y(_))
+            || (self.focus.is_some()
+                && !matches!(message, Message::FocusMoved(_) | Message::A11y(_))
                 && !matches!(
                     cause,
                     FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced
@@ -1381,20 +1403,21 @@ impl App {
                 modifiers,
                 ..
             }) if !modifiers.command() && !modifiers.alt() && !self.tab_fields().is_empty() => {
-                iced::advanced::widget::operate(editing::StepFocus {
-                    fields: self.tab_fields(),
-                    backwards: modifiers.shift(),
-                    current: None,
-                })
-                .discard()
+                let backwards = modifiers.shift();
+                iced_bridge::after_focus_part(move |from| Message::TabFrom { from, backwards })
+            }
+            Message::TabFrom { from, backwards } => {
+                self.tab_between_fields(from.as_ref(), backwards);
+                Task::none()
             }
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
-                iced::clipboard::read().map(move |text| Message::Pasted {
+                self.effect(loom_ui::Effects::clipboard_read(move |text| Message::Pasted {
                     world,
                     text,
                     generation,
-                })
+                }));
+                Task::none()
             }
             // The library folder is read for the browser's list as it opens.
             Message::Canvas(CanvasEvent::OpenBrowser { world, at, area }) => {
@@ -1405,8 +1428,14 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
-            Message::TextFieldTab => self.text_field_tab(),
-            Message::TextFocus(focus) => self.text_focus_changed(focus),
+            Message::TextFieldTab => {
+                self.text_field_tab(self.focus.clone().as_ref());
+                Task::none()
+            }
+            Message::FocusMoved(focus) => {
+                self.focus_moved(focus);
+                Task::none()
+            }
             Message::Inspector(message) => self.inspector_message(message),
             Message::Located {
                 call,
@@ -1436,23 +1465,26 @@ impl App {
                 self.ask_recovery();
                 Task::none()
             }
-            message if self.clipboard_key(&message).is_some() => self.clipboard_command(&message),
+            message if self.clipboard_key(&message).is_some() => {
+                self.clipboard_command(&message);
+                Task::none()
+            }
             message => {
                 self.handle(message);
                 Task::none()
             }
         };
+        // The bridge asks the window where focus is after this turn.
+        if ask_focus {
+            self.focus_question.set(true);
+        }
         // An undo or redo shortcut asks the window whether a text field has
-        // focus first.
-        let task = if ask_focus {
-            Task::batch([task, editing::text_focus().map(Message::TextFocus)])
-        } else {
-            task
-        };
+        // focus first, so Cmd+Z right after a click into a field undoes the
+        // typing, not the patch (iced_bridge::after_focus_read).
         let task = match self.history_key.take() {
             Some(redo) => Task::batch([
                 task,
-                editing::text_field_focused().map(move |typing| Message::HistoryKey { redo, typing }),
+                iced_bridge::after_focus_read(move |typing| Message::HistoryKey { redo, typing }),
             ]),
             None => task,
         };
@@ -1481,7 +1513,8 @@ impl App {
             self.effect(loom_ui::Effects::quit());
             task
         } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
-            Task::batch([task, editing::focus_text_field(browser::INPUT)])
+            self.effect(loom_ui::Effects::focus(browser::search_id()));
+            task
         } else {
             task
         }
@@ -1503,7 +1536,9 @@ impl App {
         let (browser, read) = patches::PatchBrowser::open(self.patches_open, folder);
         self.overlays.open(Overlay::Patches(browser));
         self.effect(read);
-        editing::focus_text_field(patches::SEARCH)
+        let [search, _] = patches::text_fields();
+        self.effect(loom_ui::Effects::focus(search));
+        Task::none()
     }
 
     /// Handles a patches browser message: keep it open, close it, or open
@@ -1653,7 +1688,8 @@ impl App {
             | Message::Control(_)
             | Message::ControlFrame(_)
             | Message::TextFieldTab
-            | Message::TextFocus(_)
+            | Message::TabFrom { .. }
+            | Message::FocusMoved(_)
             | Message::Inspector(_)
             | Message::Located { .. }
             | Message::Captured { .. }

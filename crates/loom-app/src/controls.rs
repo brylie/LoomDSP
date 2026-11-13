@@ -5,6 +5,7 @@
 
 use crate::{App, Message, learn, modulation};
 use loom_core::{MidiMappingOptions, ModuleId, ModuleNames, OutputRef};
+use loom_ui_core::UiId;
 use std::time::Instant;
 
 impl App {
@@ -383,58 +384,88 @@ impl App {
         self.session.value_draft = None;
     }
 
-    /// Records which text field has focus. A draft ends when its own field
-    /// loses focus, even to another field. A value field that has just got
-    /// focus selects its text, so a typed number replaces the value, as Enter
-    /// on a canvas control does (panel-widgets.md, Typing a value).
-    pub(crate) fn text_focus_changed(&mut self, focus: crate::editing::TextFocus) -> iced::Task<Message> {
+    /// Focus moved to `focus`, as the bridge heard it from the window. A
+    /// draft ends when its own field loses focus, even to another field. A
+    /// value field that has just got focus selects its text, so a typed
+    /// number replaces the value, as Enter on a canvas control does
+    /// (panel-widgets.md, Typing a value).
+    pub(crate) fn focus_moved(&mut self, focus: Option<UiId>) {
+        // Only its own field, still shown, keeps a draft: a field that left
+        // the inspector has no part to match.
         if let Some(draft) = &self.session.value_draft
-            && focus.field != Some(value_field_id(draft.module, draft.index))
+            && (focus.is_none() || focus != self.value_field_part(draft.module, draft.index))
         {
             self.session.value_draft = None;
         }
         let gained = focus
-            .field
             .clone()
-            .filter(|field| self.text_focus.field.as_ref() != Some(field) && self.is_value_field(field));
-        self.text_focus = focus;
-        gained.map_or_else(iced::Task::none, crate::editing::select_all_text)
+            .filter(|part| self.focus.as_ref() != Some(part) && self.is_value_field(part));
+        self.focus = focus;
+        if let Some(part) = gained {
+            self.effect(loom_ui::Effects::focus_and_select_all(part));
+        }
     }
 
-    /// True if this widget ID is a value field of the selected module.
-    fn is_value_field(&self, field: &iced::advanced::widget::Id) -> bool {
-        self.session.selection.iter().any(|&module| {
-            let params = self
-                .session
-                .controller
-                .graph()
-                .node(ModuleId(module))
-                .map_or(0, |node| node.descriptor.params.len());
-            (0..params).any(|index| value_field_id(module, index) == *field)
-        })
+    /// Every value field the inspector shows now, as (module, parameter
+    /// index, the field's part): a module's own parameters, a sub-patch
+    /// tile's exposed rows, and a slot's parameters, each under the inner
+    /// module that owns the parameter, as its draft is.
+    fn value_fields(&self) -> Vec<(u32, usize, UiId)> {
+        use crate::inspector::{Inspector, ParamRow, ids};
+        let field = |module: u32, row: &ParamRow| {
+            row.field
+                .is_some()
+                .then(|| (module, row.index, ids::part(&row.ui, "field")))
+        };
+        match self.inspector_model() {
+            Inspector::Module(rows) => rows.params.iter().filter_map(|p| field(rows.id, p)).collect(),
+            Inspector::SubPatch(s) => s.params.iter().filter_map(|e| field(e.module, &e.row)).collect(),
+            Inspector::Slot(s) => s
+                .role_params
+                .iter()
+                .chain(&s.other_params)
+                .filter_map(|(_, module, p)| field(*module, p))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The part of this parameter's value field, as the inspector shows it,
+    /// or `None` when the inspector does not show it.
+    pub(crate) fn value_field_part(&self, module: u32, index: usize) -> Option<UiId> {
+        self.value_fields()
+            .into_iter()
+            .find(|(m, i, _)| (*m, *i) == (module, index))
+            .map(|(_, _, part)| part)
+    }
+
+    /// True if `part` is a value field the inspector shows.
+    fn is_value_field(&self, part: &UiId) -> bool {
+        self.value_fields().iter().any(|(_, _, shown)| shown == part)
     }
 
     /// Enter in an inspector value field. After a commit the field selects its
     /// new text, so the next number replaces it. Bad text stays as it is, to be
     /// corrected.
-    pub(crate) fn value_submit(&mut self, module: u32, index: usize) -> iced::Task<Message> {
+    pub(crate) fn value_submit(&mut self, module: u32, index: usize) {
         self.submit_value_draft(module, index);
         if self.session.value_draft.is_some() {
-            return iced::Task::none();
+            return;
         }
-        crate::editing::select_all_text(value_field_id(module, index))
+        if let Some(part) = self.value_field_part(module, index) {
+            self.effect(loom_ui::Effects::focus_and_select_all(part));
+        }
     }
 
     /// Tab in a text field on the main view: it closes the field, as on the
     /// canvas. The canvas has taken the same key and moved its focus. The matrix
     /// and the windows over the canvas have their own use of the keys.
-    pub(crate) fn text_field_tab(&mut self) -> iced::Task<Message> {
-        if !self.text_focus.any || self.matrix_has_keys() || !self.no_overlay() || self.tab_moves_between_fields() {
-            return iced::Task::none();
+    pub(crate) fn text_field_tab(&mut self, focused: Option<&UiId>) {
+        if focused.is_none() || self.matrix_has_keys() || !self.no_overlay() || self.tab_moves_between_fields(focused) {
+            return;
         }
-        self.text_focus = crate::editing::TextFocus::default();
         self.session.value_draft = None;
-        crate::editing::unfocus_text_fields()
+        self.effect(loom_ui::Effects::unfocus());
     }
 
     /// Typing in an inspector value field keeps the text as a draft, with the
@@ -641,12 +672,6 @@ pub(crate) struct ValueDraft {
     pub index: usize,
     /// The text and why it is not a value yet, as the canvas field keeps it.
     pub draft: loom_canvas::TypedDraft,
-}
-
-/// The widget ID of an inspector value field. Each parameter has its own, so a
-/// draft can tell its own field from another.
-pub(crate) fn value_field_id(module: u32, index: usize) -> iced::advanced::widget::Id {
-    iced::advanced::widget::Id::from(format!("value-{module}-{index}"))
 }
 
 /// The inspector value field's Escape, heard whichever widget used it. It

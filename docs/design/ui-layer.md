@@ -128,7 +128,7 @@ The table covers every use of Iced's `Task`, its widget operations, and `rfd` in
 
 Not effects, because nothing needs them as effects:
 
-- **Which field has focus.** `update` reads it from its `Context`. Iced needed a round trip (`Message::TextFocus`) because it keeps focus inside its widgets.
+- **Which field has focus.** `update` reads it from its `Context`. Iced needed a round trip (`Message::TextFocus`) because it keeps focus inside its widgets. Under the bridge to Iced (plan step 2.1, item 2), the context holds Iced's last answer, and the app hears of each answer as `Message::FocusMoved`. Undo, redo, Tab between a view's fields, and the control channel's `type` keep the round trip until phase 3, when our own elements hold focus and the answer is known in the same turn.
 - **The window's title and limits.** The app describes them in `App::window`, and the runtime passes them on only when they change, as with panel models.
 - **Timers.** Nothing uses a one-shot timer; every periodic check is a deadline from state (rule 8). A timer effect can be added when something needs one.
 - **A message queued for the next turn** (`Task::done`). It makes a chain of updates, which rule 6 rules out. Inline results come from work, and "after this turn is drawn" is the after-draw effect.
@@ -505,6 +505,7 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | How the app runs on Iced until the `winit` shell (2026-11-12) | Inside our own runtime: Iced is only its driver and routing target (`iced_bridge.rs`), so effect order, one update per message, and the redraw rule are the runtime's code from plan step 2.1, item 2 on. Not a converter from effects to Iced tasks | Section 2 |
 | Live modulated values before the live value table (2026-11-12) | A deadline at display rate while modulation moves, running `update` as `LiveFrame` did. The draw-time read waits for rule 7 in phase 3, with the meters | Section 3, rule 8 |
 | Taking focus from every element (2026-11-12) | A focus effect to no element, `FocusTarget::Nothing` | Section 2, effects table |
+| Which field has focus, under the bridge (2026-11-12) | A text field's widget ID is made from its part's UI ID, and only that pair reads back as a field. The bridge asks Iced after a turn that may have moved focus and after each focus effect, and every answer reaches the app as `FocusMoved`. Undo, redo, Tab, and `type` ask first, as before, until phase 3: a key can come before the answer to a click | Section 2, "Not effects" |
 | Hooks for the canvas accessibility spec | Added at the maintainer's request: `controls` relations, focus into a custom element's parts, an app-driven tree, an image with its text alternative elsewhere, and a key between regions | Section 6, rule 7; section 7, rules 12 and 13; section 9, rules 6 and 7 |
 | Which key moves between regions | Ctrl+Tab forward and Ctrl+Shift+Tab back, wrapping, with Ctrl on every platform, and working from a text field. Chosen over F6, which needs Fn on most keyboards | Section 6, rule 7 |
 | Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |

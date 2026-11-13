@@ -1440,7 +1440,7 @@ fn typing_ui() -> crate::ui_test::Ui {
 }
 
 /// The variant names of the messages an input became. The channel's own
-/// messages are left out, and so are text focus answers, which come from tasks,
+/// messages are left out, and so are focus answers, which come from tasks,
 /// and a list reporting where it scrolled, which comes from a frame.
 fn routed_names(messages: Vec<Message>) -> Vec<String> {
     messages
@@ -1459,7 +1459,7 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 "Control",
                 "ControlFrame",
                 "Located",
-                "TextFocus",
+                "FocusMoved",
                 "TypeFocus",
                 "Telemetry",
             ]
@@ -1535,7 +1535,7 @@ fn type_filters_the_open_browser() {
     let mut ui = typing_ui();
     let _ = ui.app.send(Message::OpenBrowser);
     ui.redraw();
-    ui.focus(crate::browser::INPUT);
+    ui.focus(&crate::browser::search_id());
     let before = ui.app.overlays.browser().unwrap().results().len();
 
     assert_eq!(run_type(&mut ui, "osc saw"), Ok(Map::new()));

@@ -277,7 +277,7 @@ fn a_held_enter_answers_nothing() {
 #[test]
 fn a_focused_field_gets_nothing() {
     let mut ui = changed();
-    ui.focus(crate::patch_info::TAG_INPUT);
+    ui.focus(&crate::patch_info::tags_part());
     ui.typewrite("a");
     let draft = ui.app.session.patch_info.tag_draft.clone();
     ui.send(AppMessage::File(FileAction::Close));

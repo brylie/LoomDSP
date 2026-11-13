@@ -208,8 +208,8 @@ impl App {
             interactive: self.input_owner() == InputOwner::Canvas,
             matrix_keyboard: matrix,
             matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
-            text_field_keys: self.text_focus.any,
-            text_field_keeps_tab: self.tab_moves_between_fields(),
+            text_field_keys: self.focus.is_some(),
+            text_field_keeps_tab: self.tab_moves_between_fields(self.focus.as_ref()),
         }
     }
 

@@ -4,7 +4,7 @@
 //! chooser's model, which its view draws too (ui-layer.md, section 7,
 //! rule 27).
 
-use super::{DISCLAIMER, Given, Message, Model, OTHER_INPUT, Pick, UNANSWERED};
+use super::{DISCLAIMER, Given, Message, Model, Pick, UNANSWERED, other_part};
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, SetText};
 use loom_ui_core::UiId;
@@ -50,8 +50,8 @@ pub(crate) fn items(model: &Model) -> Item {
         label: Some("Other licence expression".to_string()),
         value: Some(model.other_text.clone()),
         set_text: Some(SetText::LicenceOther),
-        focus: Some(iced::advanced::widget::Id::new(OTHER_INPUT)),
-        ..Item::new(id.clone().with("other-text"), Kind::Field)
+        focus: Some(crate::places::field_widget_id(&other_part())),
+        ..Item::new(other_part(), Kind::Field)
     });
     let result = id.clone().with("result");
     match &model.given {
