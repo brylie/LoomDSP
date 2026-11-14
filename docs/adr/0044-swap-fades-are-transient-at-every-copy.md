@@ -34,4 +34,4 @@ Option 3.
 - A swap between two parts inside a stack fades in every copy, so unison of a voice with slots is click-free on a swap.
 - `sync` needs one more set, the fading modules, and skips them in both `sync_implied_modules` and `sync_implied_links`.
 - Restoring an undo snapshot and finishing a fade must reserve and forget every copy's paths, not only copy 0's.
-- A swap into or out of an empty slot inside a stack does not fade yet. It steps in every copy until a follow-up designs the wiring for each copy's thru.
+- A swap into or out of an empty slot inside a stack does not fade yet. It steps in every copy until a follow-up designs the wiring for each copy's thru ([#768](https://github.com/brylie/LoomDSP/issues/768)).

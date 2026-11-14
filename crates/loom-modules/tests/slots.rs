@@ -875,3 +875,62 @@ fn a_swap_inside_a_stack_has_no_step_in_any_copy() {
     let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + FADE + 10]);
     assert!(across <= steady * 1.5, "across: {across} against {steady}");
 }
+
+/// A sine through an Amplifier whose `level` an empty Envelope slot feeds:
+/// the slot is a pulled cable, so the Amplifier plays at its normal, open.
+const ENVELOPE_INTO_LEVEL: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Envelope into level"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.level.amp@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.envelope@1"))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (9, "out"), to: (2, "level")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// An empty Envelope slot into an Amplifier's `level` plays the tone at the
+/// Amplifier's normal, fully open (ADR-0043). Swapping an Envelope in is a
+/// cable change on a pulled cable, which steps until live-patching rule 9
+/// is built: the level drops from 1 to the envelope's 0 on one frame. When
+/// #21 lands this test fails, and its step becomes a 5 ms ramp.
+#[test]
+fn a_part_into_an_empty_pulled_cable_slot_steps_until_rule_9() {
+    let (mut thru, _) = load(SINE_PLAIN);
+    let sine = render_edit_at(&mut thru, FRAMES, 1, SWAP_AT, |_| {}, |_, _| {});
+    let (mut parts, hierarchy) = load(ENVELOPE_INTO_LEVEL);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.env.envelope@1")
+                .expect("the envelope fills Envelope");
+            assert_eq!(hierarchy.fading_slots(), [], "a pulled-cable slot does not fade");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, _| {},
+    );
+    assert_eq!(
+        left[..SWAP_AT],
+        sine[..SWAP_AT],
+        "open before the swap: the tone at full level"
+    );
+    assert!(
+        left[SWAP_AT..].iter().all(|v| *v == 0.0),
+        "the envelope, with no gate, closes it at once"
+    );
+}

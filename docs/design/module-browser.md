@@ -3,7 +3,7 @@
 A searchable list of module types that adds the chosen module to the canvas, where the user is looking. It is for everyone who builds a patch, and fastest for users who know what they want.
 
 - **Kind:** living specification.
-- **Status:** Implemented. Built-in abstractions and slot rows are Agreed (2026-11-14, [#700](https://github.com/brylie/LoomDSP/issues/700)); see [Groups](#groups).
+- **Status:** Implemented, with the built-in abstractions and slot rows of [#700](https://github.com/brylie/LoomDSP/issues/700); see [Groups](#groups).
 - **Decision behind it:** [ADR-0010](../adr/0010-own-patch-canvas.md) (fast insertion on our own canvas).
 - **Use case and requirements:** FR-CANVAS-03, FR-CANVAS-06, NFR-UX-01, NFR-UX-05.
 - **Prior art:** many node editors open a search box at the pointer when you press a key on the canvas, and add the chosen node there. We use the idea, not any product's layout or wording.
@@ -45,7 +45,7 @@ The browser is a small floating panel: a search field on top, a list of matches 
 
 ### Groups
 
-Agreed on the plan for [#700](https://github.com/brylie/LoomDSP/issues/700), 2026-11-14.
+Agreed on the plan for [#700](https://github.com/brylie/LoomDSP/issues/700), 2026-11-14, and Implemented.
 
 The list holds four kinds of row, in this order in an empty search:
 

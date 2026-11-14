@@ -44,7 +44,7 @@ Option 3.
 - The Amplifier's `level`, Multiply's `b`, and Divide's `b` declare a default of 1 and lose their `is_connected` fallbacks. They play the same, except that a padded voice of a narrower bundle into them now reads 1, where it read 0.
 - Live-patching rule 9 can ramp from the value the engine actually fed, because that value is now the normal.
 - A new module whose unconnected input does something other than read its default must be added to the switched-input list, with its reason and its spec. The test fails until it is.
-- A future role with an audio path, such as Shaper, can become a thru role by setting one field.
+- A future role with an audio path, such as Shaper, can become a thru role by setting one field ([#767](https://github.com/brylie/LoomDSP/issues/767)).
 
 ## Prior art
 
