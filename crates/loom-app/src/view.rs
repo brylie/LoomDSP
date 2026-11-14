@@ -2,12 +2,13 @@
 //! and the stats bar. Each is drawn from the app's parts; nothing here
 //! changes state.
 
+use crate::Element;
 use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
 use crate::{App, DIM, Message, alerts, browser, inspector, matrix, pointer, probe_menu, recent, style};
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
-use iced::{Color, Element, Length};
+use iced::{Color, Length};
 use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 
@@ -448,7 +449,9 @@ pub(crate) fn remove_button<'a>(what: impl Into<String>, on_press: Message) -> E
 }
 
 /// Stats bar text: one line, never wrapped.
-pub(crate) fn bar_text<'a>(content: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
+pub(crate) fn bar_text<'a>(
+    content: impl text::IntoFragment<'a>,
+) -> iced::widget::Text<'a, iced::Theme, crate::Renderer> {
     text(content).size(style::BODY).wrapping(text::Wrapping::None)
 }
 

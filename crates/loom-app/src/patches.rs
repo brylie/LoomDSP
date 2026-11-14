@@ -6,10 +6,11 @@
 //! appear as files are read. Only the metadata of each file is kept, so a
 //! folder of hundreds of patches never freezes the window.
 
+use crate::Element;
 use crate::style::{self, button};
 use crate::{DIM, files, recovery};
 use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Theme};
+use iced::{Length, Theme};
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
 use loom_ui::Effects;

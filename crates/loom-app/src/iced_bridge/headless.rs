@@ -94,7 +94,7 @@ impl BridgeDriver for UiDriver {
 
 /// The harness's window: the renderer, the widget cache, and the cursor.
 pub(crate) struct Surface {
-    renderer: iced::Renderer,
+    renderer: crate::Renderer,
     cache: Option<Cache>,
     /// Where the pointer is, for events and drawing.
     pub(crate) cursor: mouse::Cursor,
@@ -107,7 +107,7 @@ impl Surface {
     /// fallback, as for Iced's own test crate.
     pub(crate) fn new(size: Size) -> Self {
         let backend = std::env::var("ICED_TEST_BACKEND").ok();
-        let renderer = iced::futures::executor::block_on(<iced::Renderer as iced::advanced::renderer::Headless>::new(
+        let renderer = iced::futures::executor::block_on(<crate::Renderer as iced::advanced::renderer::Headless>::new(
             iced::Font::DEFAULT,
             iced::Pixels(16.0),
             backend.as_deref(),
@@ -131,7 +131,7 @@ impl Surface {
     pub(crate) fn with_ui(
         &mut self,
         app: &App,
-        f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, iced::Renderer>, &mut iced::Renderer, mouse::Cursor),
+        f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, crate::Renderer>, &mut crate::Renderer, mouse::Cursor),
     ) {
         let cache = self.cache.take().expect("the cache is put back after every frame");
         let mut ui = UserInterface::build(app.view(), self.size, cache, &mut self.renderer);

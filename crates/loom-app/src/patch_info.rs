@@ -7,11 +7,12 @@
 //! Edits change the document's metadata at once. They mark the patch
 //! unsaved, but they are not undo steps: each text field has its own undo.
 
+use crate::Element;
 use crate::style::{self, button};
 use crate::view::remove_button;
 use crate::{App, DIM, licence_chooser};
+use iced::Length;
 use iced::widget::{column, container, row, text, text_editor, text_input};
-use iced::{Element, Length};
 use loom_patch::Metadata;
 use loom_patch::metadata::{self, Licence};
 use serde::Serialize;
@@ -50,7 +51,7 @@ pub enum Message {
 pub struct State {
     /// The authors box, one author per line, as the user typed it. The
     /// patch stores the tidied list.
-    pub authors: text_editor::Content,
+    pub authors: text_editor::Content<crate::Renderer>,
     /// The tag being typed.
     pub tag_draft: String,
     /// Why the last tag was not added, until the next one is typed.
@@ -179,7 +180,7 @@ impl App {
 }
 
 /// Patch info, drawn from its rows.
-pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content) -> Element<'a, crate::Message> {
+pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content<crate::Renderer>) -> Element<'a, crate::Message> {
     let msg = crate::Message::PatchInfo;
     let label = |s: &'static str| text(s).size(style::BODY).color(DIM);
     let mut chips: Vec<Element<'a, crate::Message>> = Vec::new();

@@ -292,7 +292,7 @@ impl Ui {
     /// Builds the view, runs `f` on it, and keeps its cache.
     pub(crate) fn with_ui(
         &mut self,
-        f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, iced::Renderer>, &mut iced::Renderer, mouse::Cursor),
+        f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, crate::Renderer>, &mut crate::Renderer, mouse::Cursor),
     ) {
         let Self { bridge, surface } = self;
         surface.with_ui(bridge.app(), f);

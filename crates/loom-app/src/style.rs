@@ -6,9 +6,10 @@
 //! The canvas keeps its own text sizes in world units, because tile text
 //! grows and shrinks with zoom.
 
+use crate::Element;
+use iced::Theme;
 use iced::widget::button as iced_button;
 use iced::widget::markdown as iced_markdown;
-use iced::{Element, Theme};
 
 /// Table cells, row details, and captions in the inspector and matrix.
 pub const SMALL: f32 = 11.0;
@@ -35,7 +36,7 @@ pub const ERROR_TEXT: iced::Color = iced::Color::from_rgb8(0xEB, 0x6B, 0x6B);
 /// A button in the default role, secondary: quiet, so the patch and its
 /// values stand out. Give it another role with `.style(style::primary)`,
 /// `style::danger`, or `style::plain`.
-pub fn button<'a, M>(content: impl Into<Element<'a, M>>) -> iced_button::Button<'a, M> {
+pub fn button<'a, M>(content: impl Into<Element<'a, M>>) -> iced_button::Button<'a, M, Theme, crate::Renderer> {
     iced_button(content).style(secondary)
 }
 

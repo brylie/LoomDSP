@@ -6,16 +6,17 @@
 //! inputs. It outlives every engine: opening a patch or changing the device
 //! builds a new engine and moves the rig over.
 
+use crate::Element;
 use crate::devices::{self, Host, MidiPort, Playing, Wanted};
 use crate::input_session::{Demand, InputSession};
 use crate::overlays::Overlay;
 use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, InputChoice, Preferences, RateChoice, Store};
 use crate::style::{self, button};
 use crate::{App, alerts, undo};
+use iced::Length;
 use iced::widget::{
     checkbox, column, container, opaque, pick_list, radio, row, rule, scrollable, space, text, text_input,
 };
-use iced::{Element, Length};
 use loom_core::{EngineConfig, EngineParts, MidiInputId, OutputSafety, create_engine};
 use loom_host_desktop::{AudioOutput, MidiInputInfo, Outputs, Recorder, STOP_LIMIT, SharedMidi};
 use std::collections::{BTreeMap, BTreeSet};

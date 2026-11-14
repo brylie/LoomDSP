@@ -7,10 +7,11 @@
 //! advice. It never picks a licence by itself (rule 7): nothing is stored
 //! until the user presses **Use this licence**.
 
+use crate::Element;
 use crate::style::{self, button};
 use crate::{App, DIM};
+use iced::Length;
 use iced::widget::{column, container, opaque, radio, row, rule, scrollable, space, text, text_input};
-use iced::{Element, Length};
 use loom_patch::metadata::{self, Changes, Choice, Licence};
 use serde::Serialize;
 

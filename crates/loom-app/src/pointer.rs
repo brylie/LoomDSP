@@ -16,12 +16,13 @@
 //! `pointer` field.
 
 use crate::App;
+use crate::Element;
 use crate::control::Found;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{Id, Operation, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget, overlay};
-use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, keyboard, mouse, window};
+use iced::{Event, Length, Point, Rectangle, Size, Vector, keyboard, mouse, window};
 use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
 use loom_canvas::{CanvasPointer, CanvasTyped, CanvasView, Hit, PointerDrag, PortRef};
 use serde::Serialize;
@@ -366,7 +367,7 @@ impl<'a, Message> Injector<'a, Message> {
         &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
         text: Option<&str>,
     ) -> (Found, Option<CanvasPointer>, Option<CanvasTyped>) {
         let mut op = FindNow {
@@ -387,7 +388,7 @@ impl<'a, Message> Injector<'a, Message> {
         &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
@@ -418,7 +419,7 @@ impl<'a, Message> Injector<'a, Message> {
         &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
         target: &str,
     ) -> Result<Point, String> {
         let (found, _, _) = self.find(tree, layout, renderer, Some(target));
@@ -431,7 +432,7 @@ impl<'a, Message> Injector<'a, Message> {
     }
 }
 
-impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Message> {
+impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Message> {
     fn size(&self) -> Size<Length> {
         self.content.as_widget().size()
     }
@@ -440,7 +441,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
         self.content.as_widget().size_hint()
     }
 
-    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &layout::Limits) -> layout::Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &crate::Renderer, limits: &layout::Limits) -> layout::Node {
         self.content
             .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
@@ -449,7 +450,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
     fn draw(
         &self,
         tree: &Tree,
-        renderer: &mut iced::Renderer,
+        renderer: &mut crate::Renderer,
         theme: &iced::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
@@ -478,7 +479,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
         &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
@@ -492,7 +493,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
@@ -611,7 +612,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
     ) -> mouse::Interaction {
         let cursor = self.pointer.0.borrow().at.map_or(cursor, mouse::Cursor::Available);
         self.content
@@ -623,10 +624,10 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Injector<'_, Mess
         &'b mut self,
         tree: &'b mut Tree,
         layout: Layout<'b>,
-        renderer: &iced::Renderer,
+        renderer: &crate::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, crate::Renderer>> {
         self.content
             .as_widget_mut()
             .overlay(&mut tree.children[0], layout, renderer, viewport, translation)

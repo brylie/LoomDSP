@@ -3,9 +3,10 @@
 //! the sub-patches in the library folder, inserted as a copy, or linked
 //! from the item's menu (`docs/design/sub-patches.md`, Library).
 
+use crate::Element;
 use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
-use iced::{Element, Length, Theme};
+use iced::{Length, Theme};
 use loom_canvas::GRID;
 use loom_canvas::iced_convert::ToIced as _;
 use loom_core::{Family, ModuleDescriptor};

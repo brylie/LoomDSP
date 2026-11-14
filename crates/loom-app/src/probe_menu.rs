@@ -2,9 +2,10 @@
 //! meter places that module next to it, already connected. Spec:
 //! `docs/design/panels.md`, Add scope and Add meter.
 
+use crate::Element;
 use crate::style::{self, button};
 use iced::widget::{column, container, text};
-use iced::{Element, Length, Theme};
+use iced::{Length, Theme};
 use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{GRID, PortRef, tile_size};
 use loom_core::ModuleDescriptor;

@@ -1,6 +1,7 @@
 //! The modulation matrix: a patch-level view of assignments and its
 //! session-only sorting, filtering, selection, and edit state.
 
+use crate::Element;
 use crate::modulation::{self, PolarityChoice};
 use crate::style::{self, button};
 use crate::view::remove_button;
@@ -8,7 +9,7 @@ use crate::{App, DIM, Message};
 use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, row, scrollable, slider, space, text, text_input,
 };
-use iced::{Element, Length, keyboard};
+use iced::{Length, keyboard};
 use loom_core::{AssignmentId, Graph, ModuleId, OutputRef};
 use serde::Serialize;
 use std::fmt;
