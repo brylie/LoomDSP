@@ -73,6 +73,10 @@ pub struct Frame<'a> {
     pub size: Size,
     /// Physical pixels per logical pixel.
     pub scale: f32,
+    /// True for a capture, drawn offscreen for the app; false for the
+    /// window's own frame. A capture shows what the window last showed, so
+    /// layers do no frame work for it: they may draw their last frame again.
+    pub capture: bool,
 }
 
 /// What the layers lend each call: the app to read, the routing target to
@@ -283,6 +287,7 @@ where
         live: None,
         held: Held::default(),
         hidden: false,
+        shown: false,
         pacing: Pacing::default(),
         error: None,
     };
@@ -327,6 +332,8 @@ struct Handler<A: App, T, L, S> {
     held: Held,
     /// The pointer is hidden.
     hidden: bool,
+    /// A frame has been shown in the window, so a capture has one to show.
+    shown: bool,
     /// The redraw rule.
     pacing: Pacing,
     /// What stopped the loop, if anything failed.
@@ -449,7 +456,7 @@ where
         let Some(live) = self.live.as_mut() else {
             return false;
         };
-        for reply in std::mem::take(&mut self.driver.captures) {
+        for reply in due_captures(self.shown, &mut self.driver.captures) {
             let waker = live.runtime.waker();
             let window = live.runtime.window();
             let (app, target) = live.runtime.parts();
@@ -558,6 +565,7 @@ where
             );
         });
         if drawn == Drawn::Shown {
+            self.shown = true;
             self.turn(event_loop, DriverEvent::Presented);
         }
         if self.pacing.frame_ended(drawn)
@@ -691,6 +699,14 @@ where
             Wait::Poll => ControlFlow::Poll,
         });
     }
+}
+
+/// The captures to draw now: all of them once a frame has been `shown`,
+/// none before. A capture is the window as it was last drawn, and before
+/// the first frame there is none, so it waits for the first frame rather
+/// than give a blank image.
+fn due_captures<R>(shown: bool, captures: &mut Vec<R>) -> Vec<R> {
+    if shown { std::mem::take(captures) } else { Vec::new() }
 }
 
 /// Runs one turn with `first`, then a turn for each batch of messages

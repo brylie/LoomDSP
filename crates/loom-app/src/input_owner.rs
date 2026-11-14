@@ -69,6 +69,22 @@ pub(crate) struct Listening {
     value_draft: bool,
 }
 
+#[cfg(test)]
+impl Listening {
+    /// Every combination of who listens, for tests that must hold for all.
+    pub(crate) fn all() -> Vec<Self> {
+        (0..32u8)
+            .map(|bits| Self {
+                open: bits & 1 != 0,
+                matrix: bits & 2 != 0,
+                browser: bits & 4 != 0,
+                patches: bits & 8 != 0,
+                value_draft: bits & 16 != 0,
+            })
+            .collect()
+    }
+}
+
 /// An event the input listener heard, and whether a widget used it.
 #[derive(Debug, Clone)]
 pub(crate) struct Heard {

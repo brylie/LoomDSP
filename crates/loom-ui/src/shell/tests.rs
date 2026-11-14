@@ -228,3 +228,15 @@ fn the_pointer_hides_and_shows_again() {
     );
     assert!(!hidden);
 }
+
+/// A capture asked for before the first frame waits for it, so it never
+/// gives a blank image; once a frame has been shown, every capture waiting
+/// is drawn.
+#[test]
+fn a_capture_waits_for_the_first_frame() {
+    let mut captures = vec![1, 2];
+    assert!(due_captures(false, &mut captures).is_empty());
+    assert_eq!(captures, [1, 2], "still waiting");
+    assert_eq!(due_captures(true, &mut captures), [1, 2]);
+    assert!(captures.is_empty());
+}

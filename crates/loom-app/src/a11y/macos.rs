@@ -1,57 +1,44 @@
-//! Attaches AccessKit to the app's window on macOS, beside Iced.
+//! Attaches AccessKit to the app's window on macOS.
 //!
-//! Temporary: phase 2 of the move off Iced replaces this file with
-//! `accesskit_winit` in our own shell, on every platform
-//! (`docs/dev/leaving-iced-plan.md`, step 2.2). Until then Iced owns the
-//! window, so AccessKit's subclassing adapter attaches to the window's
-//! `NSView` after Iced made it.
+//! Temporary: plan step 2.2d replaces this file with `accesskit_winit` in
+//! our own shell, on every platform (`docs/dev/leaving-iced-plan.md`).
+//! Until then AccessKit's subclassing adapter attaches to the window's
+//! `NSView`, which the window's layers hand it when the window opens,
+//! before it is shown (ui-layer.md, section 7, rule 11).
 //!
 //! - The adapter is not `Send`, so it lives in a thread local on the main
-//!   thread, where Iced runs `update`.
+//!   thread, where the shell runs `update`.
 //! - The adapter's callbacks run on the main thread too, outside `update`.
-//!   They send [`Event`]s through a channel that a subscription reads, so
-//!   every change still goes through `App::update`.
+//!   They send [`Event`]s through the runtime's waker, so every change
+//!   still goes through `App::update`.
 
 use super::Event;
+use crate::Message;
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, TreeUpdate};
 use accesskit_macos::SubclassingAdapter;
-use iced::futures::channel::mpsc;
-use iced::{Subscription, Task};
+use loom_ui::Waker;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
-/// The channel from the adapter's callbacks to the subscription.
-type Channel = (
-    mpsc::UnboundedSender<Event>,
-    Mutex<Option<mpsc::UnboundedReceiver<Event>>>,
-);
+/// Where the adapter's callbacks send their events: the runtime's waker,
+/// once the window has opened. The adapter is attached once.
+static WAKER: Mutex<Option<Waker<Message>>> = Mutex::new(None);
 
-/// One channel for the life of the process: the adapter is attached once.
-static CHANNEL: LazyLock<Channel> = LazyLock::new(|| {
-    let (sender, receiver) = mpsc::unbounded();
-    (sender, Mutex::new(Some(receiver)))
-});
-
-/// Sends an event to the app. A closed channel means the app is quitting.
+/// Sends an event to the app. Before the window opens, nothing listens.
 fn send(event: Event) {
-    let _ = CHANNEL.0.unbounded_send(event);
+    if let Ok(waker) = WAKER.lock()
+        && let Some(waker) = waker.as_ref()
+    {
+        waker.send(Message::A11y(event));
+    }
 }
 
-/// The events from the adapter's callbacks, for `Subscription::run`.
-fn receiver() -> mpsc::UnboundedReceiver<Event> {
-    CHANNEL
-        .1
-        .lock()
-        .ok()
-        .and_then(|mut receiver| receiver.take())
-        // Iced runs this once per subscription; a second run gets an empty stream.
-        .unwrap_or_else(|| mpsc::unbounded().1)
-}
-
-/// The events the adapter's callbacks send.
-pub(super) fn events() -> Subscription<Event> {
-    Subscription::run(receiver)
+/// The adapter's events, in tests that build the app's subscriptions:
+/// they go through the waker now, so the stream is empty.
+#[cfg(test)]
+pub(super) fn events() -> iced::Subscription<Event> {
+    iced::Subscription::none()
 }
 
 /// The adapter and what the callbacks share with it, on the main thread.
@@ -87,27 +74,26 @@ impl ActionHandler for Actions {
     }
 }
 
-/// The task that attaches the adapter to the app's window at start, and
-/// reads the window's scale factor.
-pub(crate) fn attach() -> Task<Event> {
-    iced::window::latest().then(|id| match id {
-        Some(id) => Task::batch([
-            iced::window::run(id, attach_to).map(Event::Attached),
-            iced::window::scale_factor(id).map(Event::ScaleFactor),
-        ]),
-        None => Task::done(Event::Attached(Err("the app has no window".into()))),
-    })
+/// Attaches the adapter to `window`, before it is shown, and sends its
+/// events through `waker` from now on. The app hears whether it attached,
+/// and the window's scale factor.
+pub(crate) fn attach(window: &winit::window::Window, waker: Waker<Message>) {
+    if let Ok(mut slot) = WAKER.lock() {
+        *slot = Some(waker);
+    }
+    send(Event::Attached(attach_to(window)));
+    send(Event::ScaleFactor(window.scale_factor() as f32));
 }
 
 /// Attaches the adapter to the window's content view.
-fn attach_to(window: &dyn iced::window::Window) -> Result<(), String> {
-    use iced_runtime::window::raw_window_handle::RawWindowHandle;
+fn attach_to(window: &winit::window::Window) -> Result<(), String> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let handle = window.window_handle().map_err(|e| e.to_string())?;
     let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
         return Err("not an AppKit window".into());
     };
     let latest = Rc::new(RefCell::new(None));
-    // SAFETY: Iced runs this callback on the main thread with the window
+    // SAFETY: the shell calls this on the main thread with the window
     // alive, and `ns_view` is the window's content view, which lives as long
     // as the window. The adapter retains the view, so the pointer stays valid
     // while the adapter exists.

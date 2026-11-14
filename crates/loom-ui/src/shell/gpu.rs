@@ -218,6 +218,7 @@ impl Gpu {
             format: self.device.format,
             size: logical,
             scale,
+            capture: false,
         });
         window.pre_present_notify();
         texture.present();
@@ -261,6 +262,7 @@ pub(crate) fn capture(
         format: device.format,
         size: Size::new(width as f32 / scale, height as f32 / scale),
         scale,
+        capture: true,
     });
     let row = width as usize * 4;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;

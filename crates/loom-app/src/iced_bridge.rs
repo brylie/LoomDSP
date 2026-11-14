@@ -23,23 +23,23 @@
 //! This is the only module that may name Iced's `Task`, apart from the
 //! macOS accessibility adapter until step 2.2 (`tests/purity.rs`).
 
-use crate::Element;
 use crate::window_question::WindowQuestion;
 use crate::{App, Message};
-use iced::futures::channel::mpsc;
-use iced::futures::{Stream, StreamExt};
-use iced::{Subscription, Task, Theme};
-use loom_ui::effect::{
-    Choice, FileAction, FileRequest, FocusTarget, Image, Job, Level, NoGpu, Question, Reply, Selection,
-};
-use loom_ui::{Context, Deadline, DriverEvent, Effects, Runtime, Waker, WindowSpec, WindowState};
+use iced::Task;
+use loom_ui::effect::{FocusTarget, Selection};
+use loom_ui::{Context, Deadline, Effects, WindowSpec};
 use loom_ui_core::UiId;
-use sleeper::Sleeper;
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
+// The bridge the `Ui` harness runs on, with Iced's runtime gone from the app.
+#[cfg(any(test, feature = "test-ui"))]
+use {
+    iced::futures::channel::mpsc,
+    loom_ui::{DriverEvent, Runtime, Waker, WindowState},
+    sleeper::Sleeper,
+    std::hash::{Hash, Hasher},
+    std::sync::atomic::{AtomicBool, Ordering},
+    std::sync::{Arc, Mutex},
+};
 
 /// What Iced sends the bridge. Nearly every value is an app message, so
 /// boxing it to shrink the two empty wake-ups would allocate for every
@@ -49,11 +49,15 @@ use std::time::Instant;
 pub(crate) enum Bridged {
     /// A message from a view or a subscription.
     App(Message),
-    /// A waker sent a message from another thread.
+    /// A waker sent a message from another thread. The `Ui` harness's
+    /// bridge only, as are the two below: the shell sends its own.
+    #[cfg(any(test, feature = "test-ui"))]
     Woken,
     /// The app's deadline has come.
+    #[cfg(any(test, feature = "test-ui"))]
     Deadline,
-    /// A frame, while a message waits for one to be shown.
+    /// A frame, which the crate's tests send as one shown.
+    #[cfg(test)]
     Presented,
     /// Iced's answer to the focus question (`focus_query`).
     Focus(FocusAnswer),
@@ -214,6 +218,7 @@ impl loom_ui::App for Hosted {
     }
 }
 
+#[cfg(any(test, feature = "test-ui"))]
 /// A driver for the bridge: it carries out effects, and gives the Iced
 /// tasks they need after each turn. [`IcedDriver`] in the app; the `Ui`
 /// harness's own in tests (`iced_bridge/headless.rs`).
@@ -222,9 +227,10 @@ pub(crate) trait BridgeDriver: loom_ui::Driver<Message> + Default {
     fn take_tasks(&mut self) -> Vec<Task<Bridged>>;
 }
 
+#[cfg(any(test, feature = "test-ui"))]
 /// Iced's state: our runtime, holding the app, and the driver that
 /// carries out its effects.
-pub(crate) struct Bridge<D: BridgeDriver = IcedDriver> {
+pub(crate) struct Bridge<D: BridgeDriver> {
     runtime: Runtime<Hosted, IcedTarget>,
     driver: D,
     /// Set while the bridge itself puts a message from Iced into the
@@ -235,20 +241,8 @@ pub(crate) struct Bridge<D: BridgeDriver = IcedDriver> {
     sleeper: Sleeper,
 }
 
+#[cfg(any(test, feature = "test-ui"))]
 impl<D: BridgeDriver> Bridge<D> {
-    /// The bridge around `app`, and the tasks to run first: the
-    /// accessibility adapter's attach, where one exists, and the first turn.
-    pub(crate) fn start(app: App) -> (Self, Task<Bridged>) {
-        let (mut bridge, _) = Self::new(app);
-        // The window is open: the watchers start on this turn.
-        let task = bridge.update(Bridged::App(Message::StartWatching));
-        #[cfg(target_os = "macos")]
-        let attach = crate::a11y::attach().map(|event| Bridged::App(Message::A11y(event)));
-        #[cfg(not(target_os = "macos"))]
-        let attach = Task::none();
-        (bridge, Task::batch([attach, task]))
-    }
-
     /// The bridge around `app` with no window to attach to, and its first
     /// turn's tasks. The `Ui` harness starts here.
     pub(crate) fn new(app: App) -> (Self, Task<Bridged>) {
@@ -300,6 +294,7 @@ impl<D: BridgeDriver> Bridge<D> {
             }
             Bridged::Woken => self.turn(DriverEvent::Woken),
             Bridged::Deadline => self.turn(DriverEvent::DeadlineReached),
+            #[cfg(test)]
             Bridged::Presented => self.turn(DriverEvent::Presented),
             // Every answer reaches the app, changed or not, as the window's
             // word on focus after a press: a press elsewhere ends a draft
@@ -418,61 +413,19 @@ impl<D: BridgeDriver> Bridge<D> {
         };
         std::iter::from_fn(|| receiver.try_recv().ok()).count()
     }
-
-    /// Iced's view: the app's views, with their messages wrapped.
-    pub(crate) fn view(&self) -> Element<'_, Bridged> {
-        self.app().view().map(Bridged::App)
-    }
-
-    /// The window title.
-    pub(crate) fn title(&self) -> String {
-        self.app().title()
-    }
-
-    /// The theme.
-    pub(crate) fn theme(&self) -> Theme {
-        self.app().theme()
-    }
-
-    /// The app's subscriptions, the wake-ups from wakers, and frames while
-    /// a message waits for one to be shown.
-    ///
-    /// Iced says when a frame begins, not when it is on screen, so each
-    /// frame stands in for `DriverEvent::Presented`. It comes just before
-    /// Iced draws, a frame early at most. The `winit` shell sends the exact
-    /// one at step 2.2 (ui-layer.md, section 2, Under the bridge).
-    pub(crate) fn subscription(&self) -> Subscription<Bridged> {
-        let presented = self
-            .runtime
-            .waits_for_draw()
-            .then(|| iced::window::frames().map(|_| Bridged::Presented));
-        Subscription::batch(
-            [
-                self.app().subscription().map(Bridged::App),
-                Subscription::run_with(self.wakes.clone(), wake_stream).map(|()| Bridged::Woken),
-            ]
-            .into_iter()
-            .chain(presented),
-        )
-    }
 }
 
+#[cfg(any(test, feature = "test-ui"))]
 /// The receiving end of the wake-ups, handed to Iced's subscription once.
 #[derive(Clone)]
 struct WakeSource(Arc<Mutex<Option<mpsc::UnboundedReceiver<()>>>>);
 
+#[cfg(any(test, feature = "test-ui"))]
 impl Hash for WakeSource {
     /// One wake source per window, so one subscription.
     fn hash<H: Hasher>(&self, state: &mut H) {
         "loom-bridge-wake".hash(state);
     }
-}
-
-/// The wake-ups as a stream. Iced builds it once while its key stays the
-/// same; a second build finds the receiver taken and gives nothing.
-fn wake_stream(source: &WakeSource) -> impl Stream<Item = ()> + use<> {
-    let receiver = source.0.lock().ok().and_then(|mut slot| slot.take());
-    iced::futures::stream::iter(receiver).flatten()
 }
 
 /// The routing target: Iced holds the elements, so input never comes
@@ -645,148 +598,21 @@ impl iced::advanced::widget::Operation<()> for ScrollBy {
     }
 }
 
-/// The bridge the app runs on.
-pub(crate) type AppBridge = Bridge<IcedDriver>;
-
-/// The driver: the effects that reach outside the app, as Iced tasks or as
-/// calls Iced cannot make for us.
-#[derive(Default)]
-pub(crate) struct IcedDriver {
-    tasks: Vec<Task<Bridged>>,
-}
-
-impl BridgeDriver for IcedDriver {
-    fn take_tasks(&mut self) -> Vec<Task<Bridged>> {
-        std::mem::take(&mut self.tasks)
-    }
-}
-
-impl loom_ui::Driver<Message> for IcedDriver {
-    /// Iced reads the title from the app (`Bridge::title`).
-    fn window(&mut self, _spec: &WindowSpec) {}
-
-    fn clipboard_write(&mut self, text: String) {
-        self.tasks.push(iced::clipboard::write(text));
-    }
-
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, Message>, _waker: &Waker<Message>) {
-        let mut reply = Some(reply);
-        self.tasks
-            .push(iced::clipboard::read().then(move |text| match reply.take() {
-                Some(reply) => Task::done(Bridged::App(reply.give(text))),
-                None => Task::none(),
-            }));
-    }
-
-    /// Shows the dialog now. It still blocks, as before, but outside
-    /// `update`; the answer comes on the next turn. The `winit` shell makes
-    /// it stop blocking at 2.2.
-    fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, Message>, waker: &Waker<Message>) {
-        waker.send(reply.give(show_file_dialog(&request)));
-    }
-
-    fn ask(&mut self, question: Question, reply: Reply<Choice, Message>, waker: &Waker<Message>) {
-        waker.send(reply.give(show_question(&question)));
-    }
-
-    /// Captures the window as Iced last drew it. With no window open, the
-    /// answer says there is nothing to draw with.
-    fn capture(&mut self, reply: Reply<Result<Image, NoGpu>, Message>, _waker: &Waker<Message>) {
-        let mut reply = Some(reply);
-        self.tasks.push(
-            iced::window::latest()
-                .then(|id| match id {
-                    Some(id) => iced::window::screenshot(id).map(Some),
-                    None => Task::done(None),
-                })
-                .then(move |shot| {
-                    let image = shot
-                        .and_then(|shot| {
-                            Image::new(shot.size.width, shot.size.height, shot.scale_factor, shot.rgba.to_vec())
-                        })
-                        .ok_or(NoGpu);
-                    match reply.take() {
-                        Some(reply) => Task::done(Bridged::App(reply.give(image))),
-                        None => Task::none(),
-                    }
-                }),
-        );
-    }
-
-    fn work(&mut self, job: Job<Message>, waker: &Waker<Message>) {
-        let waker = waker.clone();
-        std::thread::spawn(move || job.run(&waker));
-    }
-
-    fn exit(&mut self) {
-        self.tasks.push(iced::exit());
-    }
-}
-
-/// Shows a native file dialog for `request` and waits for it.
-fn show_file_dialog(request: &FileRequest) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new().set_title(&request.title);
-    for filter in &request.filters {
-        dialog = dialog.add_filter(&filter.name, &filter.extensions);
-    }
-    if let Some(folder) = &request.folder {
-        dialog = dialog.set_directory(folder);
-    }
-    if let Some(name) = &request.file_name {
-        dialog = dialog.set_file_name(name);
-    }
-    match request.action {
-        FileAction::Open => dialog.pick_file(),
-        FileAction::Save => dialog.save_file(),
-    }
-}
-
-/// Shows a native question and waits for it. The answer is the index of
-/// the button pressed, or `None` when it closed with none.
-fn show_question(question: &Question) -> Choice {
-    use rfd::{MessageButtons, MessageDialog, MessageLevel};
-    debug_assert!(
-        (1..=3).contains(&question.buttons.len()),
-        "a native question has one to three buttons: {:?}",
-        question.buttons
-    );
-    let buttons = match question.buttons.as_slice() {
-        [] => MessageButtons::Ok,
-        [ok] => MessageButtons::OkCustom(ok.clone()),
-        [ok, cancel] => MessageButtons::OkCancelCustom(ok.clone(), cancel.clone()),
-        [yes, no, cancel, ..] => MessageButtons::YesNoCancelCustom(yes.clone(), no.clone(), cancel.clone()),
-    };
-    let result = MessageDialog::new()
-        .set_level(match question.level {
-            Level::Info => MessageLevel::Info,
-            Level::Warning => MessageLevel::Warning,
-            Level::Error => MessageLevel::Error,
-        })
-        .set_title(&question.title)
-        .set_description(&question.text)
-        .set_buttons(buttons)
-        .show();
-    choice(&question.buttons, result)
-}
-
-/// The button a dialog result names, by its label, or by its place where
-/// the platform reports a standard button instead.
-fn choice(buttons: &[String], result: rfd::MessageDialogResult) -> Choice {
-    use rfd::MessageDialogResult;
-    match result {
-        MessageDialogResult::Custom(label) => buttons.iter().position(|b| *b == label),
-        MessageDialogResult::Ok | MessageDialogResult::Yes => (!buttons.is_empty()).then_some(0),
-        MessageDialogResult::No => (buttons.len() > 2).then_some(1),
-        MessageDialogResult::Cancel => None,
-    }
-}
-
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) mod headless;
-mod sleeper;
-// Only the harness runs tasks itself until the window's layers do, at plan
-// step 2.2b-ii.
+mod services;
 #[cfg(any(test, feature = "test-ui"))]
+mod sleeper;
 mod tasks;
 #[cfg(test)]
 mod tests;
+mod window;
+
+pub(crate) use services::AppServices;
+/// The bridge the crate's tests run on: the `Ui` harness's, the only one
+/// left since the app runs on the shell (`window.rs`).
+#[cfg(test)]
+pub(crate) type AppBridge = Bridge<headless::UiDriver>;
+#[cfg(test)]
+use services::choice;
+pub(crate) use window::{SharedClipboard, WindowLayers};
