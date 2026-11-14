@@ -223,12 +223,12 @@ impl Ui {
     /// in order, with input as the messages it was routed to.
     pub(crate) fn step(&mut self, events: &[Event]) -> Vec<Message> {
         let mut messages = Vec::new();
-        let listening = self.app().listening();
+        let listeners = self.app().listeners();
         let mut clipboard = Memory(self.clipboard().map(str::to_string));
         self.with_ui(|ui, renderer, cursor| {
             let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
             for (event, status) in events.iter().zip(statuses) {
-                messages.extend(crate::input_owner::heard_messages(event, status, listening));
+                messages.extend(listeners.messages(event, status));
             }
         });
         self.set_clipboard(clipboard.0);

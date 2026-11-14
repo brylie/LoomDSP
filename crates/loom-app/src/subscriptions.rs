@@ -2,9 +2,16 @@
 //! input listeners, until the `winit` shell (plan step 2.2). The watcher
 //! threads are in `watching.rs`, and the timers and frames are deadlines
 //! (`timers.rs`).
+//!
+//! [`Listeners`] is the same set of listeners as plain calls, for the paths
+//! that hand events on themselves instead of through Iced's runtime: the
+//! `Ui` harness and the control channel's pointer today, and the window's
+//! layers once the shell drives the app (plan step 2.2b-ii).
 
+use crate::input_owner::Listening;
 use crate::{App, FileAction, Message, browser, lights};
 use iced::Subscription;
+use iced::event::Status;
 use loom_core::ModuleId;
 
 impl App {
@@ -18,6 +25,16 @@ impl App {
             always_subscription(),
             self.a11y_subscription().map(Message::A11y),
         ])
+    }
+
+    /// Who hears the window's events now, for [`Listeners::messages`].
+    /// Take it before a batch of events, as Iced's subscriptions hear a
+    /// batch as the app stood before it.
+    pub(crate) fn listeners(&self) -> Listeners {
+        Listeners {
+            listening: self.listening(),
+            screen_reader: self.a11y.is_active(),
+        }
     }
 
     /// The listener for input that depends on who has it. Its messages say who
@@ -100,3 +117,36 @@ pub(crate) fn browser_key(
     };
     Some(Message::Browser(browser::Message::Key(nav)))
 }
+
+/// The window's listeners as the app stood at one moment: the same ones
+/// [`App::subscription`] gives Iced, as plain calls. The window's own
+/// adapter events (`a11y::platform::events`) are a stream, not a listener,
+/// so they are not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Listeners {
+    /// Who has the input (input_owner.rs).
+    listening: Listening,
+    /// A screen reader listens, so a change of scale is heard.
+    screen_reader: bool,
+}
+
+impl Listeners {
+    /// The messages the listeners send for `event`, which a widget used or
+    /// not as `status` says: the close request, then the input listeners
+    /// (input_owner.rs), then the scale for a screen reader.
+    pub(crate) fn messages(self, event: &iced::Event, status: Status) -> Vec<Message> {
+        let mut messages = Vec::new();
+        if matches!(event, iced::Event::Window(iced::window::Event::CloseRequested)) {
+            messages.push(Message::File(FileAction::Close));
+        }
+        messages.extend(crate::input_owner::heard_messages(event, status, self.listening));
+        if self.screen_reader {
+            let window = iced::window::Id::unique();
+            messages.extend(crate::a11y::rescaled(event.clone(), status, window).map(Message::A11y));
+        }
+        messages
+    }
+}
+
+#[cfg(test)]
+mod tests;

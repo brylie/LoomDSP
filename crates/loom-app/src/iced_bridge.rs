@@ -783,5 +783,9 @@ fn choice(buttons: &[String], result: rfd::MessageDialogResult) -> Choice {
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) mod headless;
 mod sleeper;
+// Only the harness runs tasks itself until the window's layers do, at plan
+// step 2.2b-ii.
+#[cfg(any(test, feature = "test-ui"))]
+mod tasks;
 #[cfg(test)]
 mod tests;
