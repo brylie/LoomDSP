@@ -24,7 +24,7 @@ fn nothing_asked_nothing_drawn() {
     assert!(!pacing.turn(&idle()));
     assert!(!pacing.layers(Redraw::No));
     assert_eq!(pacing.wait(), Wait::Sleep);
-    assert!(!pacing.frame_ended(), "and no frame follows one");
+    assert!(!pacing.frame_ended(Drawn::Shown), "and no frame follows one");
 }
 
 /// Several turns that say to draw before the frame comes ask once, and
@@ -36,7 +36,7 @@ fn many_asks_make_one_frame() {
     assert!(!pacing.turn(&draws()), "the second waits for the same frame");
     assert!(!pacing.layers(Redraw::NextFrame), "and so does the layers' ask");
     assert_eq!(pacing.frame_begins(), FrameKind::Asked);
-    assert!(!pacing.frame_ended());
+    assert!(!pacing.frame_ended(Drawn::Shown));
     assert!(pacing.turn(&draws()), "after the frame, a new ask goes again");
 }
 
@@ -59,10 +59,10 @@ fn animation_asks_a_frame_after_each_frame() {
     let animating = Next { frames: true, ..idle() };
     assert!(pacing.turn(&animating));
     assert_eq!(pacing.frame_begins(), FrameKind::Animation);
-    assert!(pacing.frame_ended(), "the next frame is asked for");
+    assert!(pacing.frame_ended(Drawn::Shown), "the next frame is asked for");
     assert_eq!(pacing.frame_begins(), FrameKind::Animation);
     assert!(!pacing.turn(&idle()), "the turn that stops asks nothing more");
-    assert!(!pacing.frame_ended());
+    assert!(!pacing.frame_ended(Drawn::Shown));
     assert_eq!(pacing.wait(), Wait::Sleep);
 }
 
@@ -82,10 +82,45 @@ fn the_frame_turn_leaves_the_next_frame_to_follow() {
         ..animating
     });
     assert!(pacing.turn(&animating), "the Presented turn asks for the next");
-    assert!(!pacing.frame_ended(), "and only once");
+    assert!(!pacing.frame_ended(Drawn::Shown), "and only once");
     assert_eq!(pacing.frame_begins(), FrameKind::Animation);
     pacing.frame_turn(&animating);
-    assert!(pacing.frame_ended(), "with no frame shown, the end asks");
+    assert!(pacing.frame_ended(Drawn::Shown), "with no Presented turn, the end asks");
+}
+
+/// A window with no size draws nothing, and while the runtime animates,
+/// its frames ask for no more: a minimised window does not spin. The next
+/// event's turn asks again, so the animation resumes.
+#[test]
+fn a_skipped_frame_asks_for_no_other() {
+    let mut pacing = Pacing::default();
+    let animating = Next { frames: true, ..idle() };
+    assert!(pacing.turn(&animating));
+    for _ in 0..3 {
+        pacing.frame_begins();
+        pacing.frame_turn(&animating);
+        assert!(!pacing.frame_ended(Drawn::Skipped));
+    }
+    assert!(pacing.turn(&animating), "a resize's turn asks again");
+}
+
+/// A lost surface is set up again and tried once more. If the retry is
+/// lost too, no more frames are asked for, animation or not, until an
+/// event's turn asks. A frame that is shown allows one retry again.
+#[test]
+fn a_lost_surface_is_tried_again_once() {
+    let mut pacing = Pacing::default();
+    let animating = Next { frames: true, ..idle() };
+    assert!(pacing.turn(&animating));
+    pacing.frame_begins();
+    assert!(pacing.frame_ended(Drawn::Retry), "the first loss retries");
+    pacing.frame_begins();
+    assert!(!pacing.frame_ended(Drawn::Retry), "the second waits");
+    assert!(pacing.turn(&animating), "an event's turn asks again");
+    pacing.frame_begins();
+    assert!(pacing.frame_ended(Drawn::Shown), "a shown frame animates on");
+    pacing.frame_begins();
+    assert!(pacing.frame_ended(Drawn::Retry), "and a later loss retries once again");
 }
 
 /// The frame turn takes the runtime's state: a deadline and waiting
@@ -99,7 +134,7 @@ fn the_frame_turn_takes_the_runtimes_state() {
         ..idle()
     });
     assert_eq!(pacing.wait(), Wait::Until(at));
-    assert!(!pacing.frame_ended(), "no animation, no next frame");
+    assert!(!pacing.frame_ended(Drawn::Shown), "no animation, no next frame");
     pacing.frame_turn(&Next { again: true, ..idle() });
     assert_eq!(pacing.wait(), Wait::Poll);
 }

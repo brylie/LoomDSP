@@ -18,6 +18,7 @@
 //! call draws the window and a capture.
 
 use super::Frame;
+use super::pacing::Drawn;
 use crate::effect::Image;
 use loom_ui_core::Size;
 use std::fmt;
@@ -218,19 +219,6 @@ impl Gpu {
         texture.present();
         Drawn::Shown
     }
-}
-
-/// What came of drawing a frame into the window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Drawn {
-    /// The frame is shown.
-    Shown,
-    /// The surface was out of date or lost, and is set up again: the
-    /// frame can be drawn again at once.
-    Retry,
-    /// No frame, and drawing again now would not help: the window has no
-    /// size (it waits for a resize), or the surface failed another way.
-    Skipped,
 }
 
 /// Draws one frame into a texture of `physical` pixels in the device's

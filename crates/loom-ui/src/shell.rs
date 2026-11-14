@@ -43,9 +43,9 @@ use crate::routing::Target;
 use crate::runtime::{Next, Runtime};
 use crate::waker::Waker;
 use events::Held;
-use gpu::{Drawn, Gpu};
+use gpu::Gpu;
 use loom_ui_core::{Rect, Size};
-use pacing::{FrameKind, Pacing, Wait};
+use pacing::{Drawn, FrameKind, Pacing, Wait};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -225,7 +225,6 @@ where
         options,
         live: None,
         held: Held::default(),
-        retried: false,
         pacing: Pacing::default(),
         error: None,
     };
@@ -270,10 +269,6 @@ struct Handler<A: App, T, L, S> {
     held: Held,
     /// The redraw rule.
     pacing: Pacing,
-    /// The last frame found the surface out of date and asked again; a
-    /// second such frame in a row waits for an event, so a surface that
-    /// stays lost cannot draw in a loop.
-    retried: bool,
     /// What stopped the loop, if anything failed.
     error: Option<Error>,
 }
@@ -439,20 +434,10 @@ where
                 frame,
             );
         });
-        match drawn {
-            Drawn::Shown => {
-                self.retried = false;
-                self.turn(event_loop, DriverEvent::Presented);
-            }
-            Drawn::Retry if !self.retried => {
-                self.retried = true;
-                if self.pacing.layers(Redraw::NextFrame) {
-                    live.window.request_redraw();
-                }
-            }
-            Drawn::Retry | Drawn::Skipped => {}
+        if drawn == Drawn::Shown {
+            self.turn(event_loop, DriverEvent::Presented);
         }
-        if self.pacing.frame_ended()
+        if self.pacing.frame_ended(drawn)
             && let Some(live) = self.live.as_ref()
         {
             live.window.request_redraw();

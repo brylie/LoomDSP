@@ -12,6 +12,11 @@
 //!   window makes the system ask; that frame is sent to the runtime as
 //!   `RedrawRequested`. A frame the shell asked for is drawn without it,
 //!   so the shell cannot turn its own request into a loop of draws.
+//! - **A frame that fails asks for no other.** A frame that was not shown
+//!   asks for no next one, even while the runtime animates, so a lost
+//!   surface or a window with no size cannot draw in a loop. A lost
+//!   surface is set up again and tried once more; after that, and for a
+//!   window with no size, the next event's turn asks again.
 //! - **The earliest time wins.** The runtime's deadline and the time the
 //!   layers want a frame at (a caret's blink) set when the loop wakes.
 
@@ -39,6 +44,19 @@ pub(crate) enum Wait {
     Until(Instant),
     /// Not at all: messages wait, so another turn runs at once.
     Poll,
+}
+
+/// What came of drawing a frame into the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Drawn {
+    /// The frame is shown.
+    Shown,
+    /// The surface was out of date or lost, and is set up again: the
+    /// frame can be drawn again at once.
+    Retry,
+    /// No frame, and drawing again now would not help: the window has no
+    /// size (it waits for a resize), or the surface failed another way.
+    Skipped,
 }
 
 /// What a frame that begins is, for the runtime.
@@ -75,6 +93,9 @@ pub(crate) struct Pacing {
     deadline: Option<Instant>,
     /// When the layers want their next frame.
     layers_at: Option<Instant>,
+    /// The last frame found the surface lost and was tried again, so the
+    /// next that does waits for an event.
+    retried: bool,
 }
 
 impl Pacing {
@@ -134,10 +155,22 @@ impl Pacing {
         kind
     }
 
-    /// The frame is shown. Returns true when the shell must ask for the
-    /// next one at once: while the runtime animates.
-    pub fn frame_ended(&mut self) -> bool {
-        self.ask(self.frames)
+    /// The frame ended as `drawn` says. Returns true when the shell must
+    /// ask for the next one at once: after a shown frame while the
+    /// runtime animates, and once after a lost surface. A frame that was
+    /// not shown otherwise asks for none, animation or not.
+    pub fn frame_ended(&mut self, drawn: Drawn) -> bool {
+        match drawn {
+            Drawn::Shown => {
+                self.retried = false;
+                self.ask(self.frames)
+            }
+            Drawn::Retry if !self.retried => {
+                self.retried = true;
+                self.ask(true)
+            }
+            Drawn::Retry | Drawn::Skipped => false,
+        }
     }
 
     /// The loop woke at `now`: what came due. A time that came due is
