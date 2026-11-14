@@ -400,7 +400,8 @@ fn copies_are_created_and_retired_with_the_width() {
     assert_eq!(parts.controller.free_module_slots(), free + 2);
 }
 
-/// Returning a running chain to mono preserves its left copy's state.
+/// Returning a running chain to mono preserves its left copy's state. Its
+/// pulled input fades from the left side's last value to 0 (rule 9).
 #[test]
 fn returning_to_mono_keeps_the_left_state() {
     for block in BLOCKS {
@@ -425,14 +426,15 @@ fn returning_to_mono_keeps_the_left_state() {
         capture.render(&mut parts, 128, block);
         let mut expected = old_left;
         for frame in 512..640 {
-            expected = lag_step(expected, 0.0, 0.25);
+            expected = lag_step(expected, cable_fade(0.6, 0.0, frame - 512), 0.25);
             assert_eq!(capture.get(0)[frame], expected, "left, frame {frame}, block {block}");
             assert_eq!(capture.get(1)[frame], expected, "right, frame {frame}, block {block}");
         }
     }
 }
 
-/// Checks turning stereo copies the running state.
+/// Checks turning stereo copies the running state. The plugged input fades
+/// in from 0 on both sides together (rule 9).
 #[test]
 fn turning_stereo_copies_the_running_state() {
     let mut parts = engine(64);
@@ -460,8 +462,16 @@ fn turning_stereo_copies_the_running_state() {
     }
     let mut right = left;
     for n in 64..128 {
-        left = lag_step(left, ramp_left(n) + 0.5 * ramp_left(n - 64), 0.25);
-        right = lag_step(right, ramp_left(n) + 0.5 * ramp_right(n - 64), 0.25);
+        left = lag_step(
+            left,
+            ramp_left(n) + 0.5 * cable_fade(0.0, ramp_left(n - 64), n - 64),
+            0.25,
+        );
+        right = lag_step(
+            right,
+            ramp_left(n) + 0.5 * cable_fade(0.0, ramp_right(n - 64), n - 64),
+            0.25,
+        );
         assert_eq!(capture.get(0)[n], left, "left keeps its state, frame {n}");
         assert_eq!(capture.get(1)[n], right, "right takes the running state, frame {n}");
     }

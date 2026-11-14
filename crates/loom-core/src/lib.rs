@@ -17,6 +17,7 @@
 #![warn(missing_docs)]
 
 pub mod audio_input;
+pub mod cable_fade;
 mod compile;
 mod controller;
 mod descriptor;

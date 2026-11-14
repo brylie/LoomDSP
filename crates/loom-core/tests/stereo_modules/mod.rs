@@ -148,6 +148,21 @@ pub static LAG: ModuleDescriptor = descriptor!(
 );
 
 /// One step of [`Lag`].
+/// What an input reads `k` frames after its cable changed, fading from
+/// `held` to `signal` (live patching spec, rule 9). The same arithmetic as
+/// the engine, so tests can compare exactly.
+pub fn cable_fade(held: f32, signal: f32, k: usize) -> f32 {
+    let length = ((SAMPLE_RATE * loom_core::cable_fade::CABLE_FADE_SECONDS).round() as usize).max(1);
+    if k == 0 {
+        held
+    } else if k >= length {
+        signal
+    } else {
+        let t = k as f32 * (1.0 / length as f32);
+        held * (1.0 - t) + signal * t
+    }
+}
+
 pub fn lag_step(y: f32, x: f32, coef: f32) -> f32 {
     y + coef * (x - y)
 }

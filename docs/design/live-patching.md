@@ -65,10 +65,36 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 
 9. **A cable change fades over 5 ms** (FR-GRAPH-05). When a schedule swap changes what feeds an input (a cable added, removed, or moved to another output), the input holds the last value it read before the swap and moves in a straight line to the new signal over 5 ms, sample by sample. The same holds for a modulation assignment that is added or removed: its contribution ramps in or out over 5 ms.
    - **Only audio, modulation, and pitch inputs fade** (by the port's `SignalType`). Gate, trigger, and phase inputs switch on the swap frame. *Why:* a ramped gate crosses 0.5 late and fires late, and a ramped phase passes through values that look like wraps.
-   - **Nothing fades on the first schedule** after a load or a new engine. *Why:* a patch renders the same whether or not it was edited live first; the output fade-in covers the start ([output safety](output-safety.md)).
+   - **Nothing fades on the first schedule** after a load or a new engine, nor on any schedule swapped in before the engine has played its first block. *Why:* a patch renders the same whether or not it was edited live first, and however many commits it took to load; nobody heard a step before the first block. The output fade-in covers the start ([output safety](output-safety.md)). (Widened on 2026-11-14 from "the first schedule", because a load in the editor can commit more than once before it plays.)
    - The fade state is a fixed slot per input, prepared on the control thread with the schedule. The engine adds no allocation, lock, or wait (AGENTS.md rule 1).
    - Fixed at 5 ms, with no setting. *Why:* long enough to soften the step, short enough that nobody hears it as a fade.
    - *Why hold the last value, not crossfade from the old signal:* the old source may be gone, and keeping it running costs CPU for a sound that is leaving. Holding the last value keeps the input continuous, which is all a click needs. The rules above still make the new signal right from its first sample (rules 5 and 6); the fade only softens the step the cable itself makes.
+   - **The ramp.** N = 5 ms of frames, rounded, at least 1 (240 at 48 kHz). On the first frame after the swap the input reads the held value exactly. On frame k it reads `held · (1 − k/N) + signal · k/N`. From frame N on, it reads exactly the same samples as the signal. The ramp never makes a value that is not finite. A held value that is NaN or infinite does not fade: the input switches, because holding it would only spread a broken value into a clean cable (settled 2026-11-14).
+   - **What counts as a cable change** (settled 2026-11-14). The input's cable in the graph: plugged, pulled, or moved to another output. Every channel of that input fades: each copy, the right side of a stereo input, and each voice of a bundle input. These are **not** cable changes and do not fade, because rules 5 and 6 already keep the signal continuous, and a fade would put a short dip into a signal that did not step:
+     - a delay the compiler inserts, or one that moves;
+     - a downmix that appears, or a source that changes width with the same cable.
+   - **New and paused modules.** A new module has nothing to hold, so its inputs read their signals from the first frame (rule 4). A new copy of a running module, such as the right side of a module that turns stereo, fades together with copy 0 on an input whose cable changed. A module that resumes after it was skipped (rule 8) read nothing while paused, so on a changed cable it fades from 0.
+   - **Which inputs fade.** Audio, modulation, and pitch inputs of every module, the Audio Out input (so pulling the cable to the output fades it out), and the Unit Delay input. Gate, trigger, and phase inputs switch.
+   - **The mixers the editor adds** (Sum, Stereo spread sum, Select, and Swap fade; [sub-patches](sub-patches.md)). A mixer's inputs carry any signal, so whether one of its inputs fades follows the first source upstream that is not a mixer. A gate through a Sum switches. An input's own gate, trigger, or phase port always switches. A Select's member input never fades.
+     - **An exact rewire switches.** Moving a cable onto a new mixer that plays the old source alone on its first frame switches. So does moving a cable off a leaving mixer that played the new source alone on its last frame. This covers the start and the finish of a slot swap, Single to Layer of one member, and Single to Select. A running fade on that input goes on toward the new source.
+     - **A Layer that adds members.** When a Layer of one member gets more members, the cable moves onto a new Sum at gain 1. It switches, and each new member fades in from 0, as a new cable does.
+     - **Every other change of mixer fades once.** A stack going from 1 copy to 2, or from 2 to 1, and Layer to Select fade from the held value to the new output, whose own inputs read their signals from the first frame. There is never a fade into a fade. A slot swap during a fade fades too, so the step the first fade had left is softened.
+   - **Modulation assignments** (settled 2026-11-14). The contribution, `depth · source` in the parameter's 0 to 1 range, fades:
+     - **Added:** it ramps in from 0.
+     - **Removed:** its last contribution is held and ramps to 0.
+     - **Moved** to another source: from the held contribution to the new one. **Moved** to another target: it ramps out on the old parameter and in on the new one.
+     - An assignment from a gate or a phase source onto a continuous parameter ramps too. The target is a value, not a gate.
+     - **Exceptions, each with its reason.** A whole-number or choice parameter switches, because a ramp across separate values adds steps instead of softening one. An assignment onto a module that is new in this swap applies from the first frame, so a new part, a paste, or an undo plays its modulated value at once (rule 7). An exact rewire through a mixer switches, as above.
+   - **A swap while a fade runs.** If the cable did not change again, the fade goes on where it was. If it changed again, a new fade starts from the value the input read last, so nothing steps. When two swaps land before one block, the middle schedule never ran. An input that was already fading keeps that fade's held value, an input that read a fixed default holds that value, and anything else holds 0, as for rule 5's delays.
+   - **What still steps.** A player meets these, each for its reason:
+     - gate, trigger, and phase inputs, including a phase cable moved on an oscillator: its audio jumps, because no audio cable changed;
+     - turning an assignment off, or changing its depth or polarity, which is not a schedule swap;
+     - a module that picks another source in its own code when an input has no cable, such as a sidechain;
+     - the extra voices of a bundle that gets narrower, such as lowering a voice count while notes ring;
+     - deleting the Audio Out module itself: the output stops at once;
+     - a Select within 10 ms of a member change, or with a modulated or MIDI-mapped member, during Single to Select and back;
+     - two swaps before one block, for an input that was not already fading;
+     - a choice input, such as a Selector's `select`, passes through the values in between for up to 5 ms, so it can briefly play the inputs between the old and the new choice. Output safety still limits the level.
 
 10. **Staged modules are retried when the queue has room** ([#416](https://github.com/brylie/LoomDSP/issues/416)). When a commit has more new modules than the bounded command queue can hold, the rest are staged on the control side, as today. While anything is staged, a watcher thread reads the queue's free space every 10 ms and wakes the UI when there is room for the next staged module. The UI then commits again. The watcher stops when nothing is staged. *Why a watcher:* the audio thread may not signal a waiting thread, because that takes a lock (AGENTS.md rule 1). Reading a counter from another thread is safe, and the app already wakes this way for audio state and MIDI learn.
     - The longest wait after the engine makes room is one audio buffer plus 10 ms.
@@ -95,7 +121,8 @@ The measurements compare what the engine plays with the ideal continuation: what
 - [ ] A gate, trigger, or phase input switches on the swap frame with no ramp (test, rule 9).
 - [ ] Adding a modulation assignment ramps its contribution in over 5 ms (test, rule 9).
 - [ ] A patch rendered from load has no fades (test: bit-identical to the current reference renders, rule 9).
-- [ ] The fades and the staged retry add no allocation on the audio thread (`no_alloc` test).
+- [ ] The fades add no allocation on the audio thread (`no_alloc` test, rule 9).
+- [ ] The staged retry adds no allocation on the audio thread (`no_alloc` test, rule 10).
 - [ ] With a small command queue and a paste larger than it, every staged module is committed after the engine drains the queue, with no edit and no periodic tick, and the audio matches a commit with enough capacity (app test, rule 10).
 - [ ] A queue that stays full causes no repeated compile (test, rule 10).
 - [ ] Listening check, rule 6: with a resonant filter and a sustained sound, patch a stereo source into the chain. No click is heard. (Manual check, with #23.)

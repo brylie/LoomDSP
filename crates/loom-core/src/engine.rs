@@ -6,7 +6,8 @@
 //! `docs/learn/real-time-safety.md` explains why. Telemetry leaves
 //! through its own queues and is dropped when they are full (NFR-RT-07).
 
-use crate::compile::{AssignmentRuntime, DownmixOp, ModuleOp, ParamFill, Schedule, Step, partner, partners};
+use crate::cable_fade::InputFade;
+use crate::compile::{AssignmentRuntime, DownmixOp, ModSource, ModuleOp, ParamFill, Schedule, Step, partner, partners};
 use crate::descriptor::{MAX_DISPLAYS, Polarity};
 use crate::display::DisplayTable;
 use crate::graph::AssignmentId;
@@ -124,6 +125,10 @@ pub struct EngineStats {
     /// Output samples clipped to -1 to 1, or finite samples above the safety
     /// stage's input limit when they came in. Each sample counts once.
     pub output_clipped: AtomicU64,
+    /// The generation of the latest schedule whose cable fades have all
+    /// ended (live patching spec, rule 9). The controller reads it to know
+    /// when a fade can no longer be running.
+    pub cable_fades_settled: AtomicU64,
 }
 
 pub(crate) enum Command {
@@ -307,6 +312,9 @@ pub struct Engine {
     /// Length of the last block the current schedule ran, so a swap can
     /// read the last value of each of its outputs. 0 before it has run.
     last_frames: usize,
+    /// True once the current schedule's cable fades have all ended and
+    /// [`EngineStats::cable_fades_settled`] says so.
+    fades_settled: bool,
     /// DC blocker, limiter, and fade on the summed output (ADR-0019).
     safety: SafetyStage,
     /// Where a panic is (panic.md).
@@ -351,6 +359,7 @@ impl Engine {
             transport: Transport::new(config.sample_rate),
             frame: 0,
             last_frames: 0,
+            fades_settled: true,
             safety: SafetyStage::new(config.output_safety, config.sample_rate),
             panic: PanicState::Idle,
             panic_trigger: TriggerWatch::default(),
@@ -487,6 +496,7 @@ impl Engine {
             self.publish_live(n);
             self.frame += n as u64;
             self.last_frames = n;
+            self.publish_fades_settled();
             position += n;
             match self.panic {
                 PanicState::Fading(remaining) if remaining == n => self.panic_reset(),
@@ -496,6 +506,17 @@ impl Engine {
             }
         }
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Tells the controller once every cable fade of the current schedule
+    /// has ended. Scans the fades only until then.
+    fn publish_fades_settled(&mut self) {
+        if !self.fades_settled && crate::cable_fade::settled(&self.schedule) {
+            self.fades_settled = true;
+            self.stats
+                .cable_fades_settled
+                .store(self.schedule.generation, Ordering::Relaxed);
+        }
     }
 
     /// Asks the Transport module, if the patch has one, for the changes to
@@ -542,6 +563,11 @@ impl Engine {
                 smooth.reset(smooth.target());
             }
         }
+        // Cable fades end too, so nothing from before the panic reaches the
+        // reset modules (rule 9).
+        crate::cable_fade::finish_all(&mut self.schedule);
+        self.fades_settled = false;
+        self.publish_fades_settled();
         self.input_notes.clear();
         self.safety.panic_reset();
         self.panic = PanicState::Rising;
@@ -654,6 +680,14 @@ impl Engine {
                         }
                     }
                     schedule.take_tap_state_from(&self.schedule, self.last_frames);
+                    crate::cable_fade::take_state_from(&mut schedule, &self.schedule, self.last_frames);
+                    // Before the engine has played a block nobody heard a
+                    // step, so nothing fades: a patch plays the same however
+                    // many commits it took to load (rule 9).
+                    if self.frame == 0 {
+                        crate::cable_fade::finish_all(&mut schedule);
+                    }
+                    self.fades_settled = false;
                     // The new schedule has not run yet, so a second swap
                     // before the next block has no last values to read.
                     self.last_frames = 0;
@@ -674,6 +708,8 @@ impl Engine {
                     }
                     let old = std::mem::replace(&mut self.schedule, schedule);
                     self.discard(Garbage::Schedule(old));
+                    // A schedule with no fades running settles at once.
+                    self.publish_fades_settled();
                     self.seed_midi_maps();
                     self.stats.schedule_swaps.fetch_add(1, Ordering::Relaxed);
                 }
@@ -1016,6 +1052,8 @@ impl Engine {
             output_downmixes,
             right_ptrs,
             bundle_ports,
+            cable_fades,
+            output_fades,
             ..
         } = &mut *self.schedule;
 
@@ -1044,13 +1082,20 @@ impl Engine {
             buffer.fill(if transport.playing() { 1.0 } else { 0.0 });
         }
 
-        let mut run_op = |op: &ModuleOp, offset: usize, len: usize| {
+        let mut run_op = |op: &ModuleOp, offset: usize, len: usize, cable_fades: &mut [InputFade]| {
             for downmix in &downmixes[op.downmixes.0 as usize..op.downmixes.1 as usize] {
                 run_downmix(downmix, offset, len);
             }
             for index in op.fills.0..op.fills.1 {
                 fill_param(&mut fills[index as usize], assignments, offset, len);
             }
+            // Cable fades read what the module would read, so they run
+            // after its downmixes, right before it (rule 9).
+            crate::cable_fade::run(
+                &mut cable_fades[op.cable_fades.0 as usize..op.cable_fades.1 as usize],
+                offset,
+                len,
+            );
             if let Some(module) = slots[op.slot as usize].as_mut() {
                 let ctx = ProcessContext {
                     sample_rate,
@@ -1093,9 +1138,12 @@ impl Engine {
 
         for step in steps.iter() {
             match *step {
-                Step::Module(op) => run_op(&ops[op as usize], 0, frames),
+                Step::Module(op) => run_op(&ops[op as usize], 0, frames, cable_fades),
                 Step::Tap(t) => {
                     let tap = &mut taps[t as usize];
+                    if let Some(fade) = tap.fade {
+                        crate::cable_fade::run(&mut cable_fades[fade as usize..=fade as usize], 0, frames);
+                    }
                     // SAFETY: unit delay buffers are `max_block` long, and the
                     // input and output buffers are distinct.
                     unsafe {
@@ -1121,11 +1169,14 @@ impl Engine {
                         }
                         // ...then the loop's modules run for one sample...
                         for &op in region_ops {
-                            run_op(&ops[op as usize], i, 1);
+                            run_op(&ops[op as usize], i, 1, cable_fades);
                         }
                         // ...then unit delays capture this sample's value.
                         for &t in region_taps {
                             let tap = &mut taps[t as usize];
+                            if let Some(fade) = tap.fade {
+                                crate::cable_fade::run(&mut cable_fades[fade as usize..=fade as usize], i, 1);
+                            }
                             // SAFETY: `i < frames <= max_block`.
                             tap.state = unsafe { *tap.input.add(i) };
                         }
@@ -1137,6 +1188,11 @@ impl Engine {
         for downmix in &downmixes[output_downmixes.0 as usize..output_downmixes.1 as usize] {
             run_downmix(downmix, 0, frames);
         }
+        crate::cable_fade::run(
+            &mut cable_fades[output_fades.0 as usize..output_fades.1 as usize],
+            0,
+            frames,
+        );
         for output in outputs.iter() {
             // SAFETY: output pointers reference schedule buffers of
             // `max_block` floats.
@@ -1244,20 +1300,47 @@ fn fill_param(fill: &mut ParamFill, assignments: &[AssignmentRuntime], offset: u
     for (i, value) in buf.iter_mut().enumerate() {
         let mut added = 0.0;
         let mut contributed = false;
-        for source in &fill.sources {
-            let assignment = &assignments[source.state as usize];
-            if !assignment.enabled || assignment.depth == 0.0 || assignment.silent_source {
-                continue;
+        for source in &mut fill.sources {
+            match source {
+                ModSource::Live {
+                    state, buffer, ramp, ..
+                } => {
+                    let assignment = &assignments[*state as usize];
+                    let silent = !assignment.enabled || assignment.depth == 0.0 || assignment.silent_source;
+                    // A contribution that fades in or moves (rule 9). The
+                    // ramp steps every sample, even while the source adds
+                    // nothing, so it always ends.
+                    let fading = ramp.as_ref().is_some_and(|ramp| !ramp.is_done());
+                    if silent && !fading {
+                        continue;
+                    }
+                    let live = if silent {
+                        0.0
+                    } else {
+                        // SAFETY: `buffer` is an output or delay tap of
+                        // `max_block` floats, and `offset + i < max_block`.
+                        let sample = unsafe { *buffer.add(offset + i) };
+                        let sample = match assignment.polarity {
+                            Some(polarity) => polarity.remap(assignment.source_polarity, sample),
+                            None => sample,
+                        };
+                        assignment.depth * sample
+                    };
+                    added += match ramp {
+                        Some(ramp) => ramp.next(live),
+                        None => live,
+                    };
+                    contributed = true;
+                }
+                // The last contribution of an assignment that left,
+                // ramping to 0. It counts until the ramp ends.
+                ModSource::Leaving { ramp, .. } => {
+                    if !ramp.is_done() {
+                        added += ramp.next(0.0);
+                        contributed = true;
+                    }
+                }
             }
-            // SAFETY: `source.buffer` is an output or delay tap of `max_block`
-            // floats, and `offset + i < max_block`.
-            let sample = unsafe { *source.buffer.add(offset + i) };
-            let sample = match assignment.polarity {
-                Some(polarity) => polarity.remap(assignment.source_polarity, sample),
-                None => sample,
-            };
-            added += assignment.depth * sample;
-            contributed = true;
         }
         let position = if let Some(smooth) = fill.smooth.as_mut() {
             smooth.tick()

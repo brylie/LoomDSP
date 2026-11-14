@@ -124,6 +124,7 @@ impl Inputs {
         compiled: &[CompiledAssignment],
         plan: &Plan,
         live: &[bool],
+        fades: &FadePlan,
         buffers: &mut Buffers,
     ) -> Self {
         let n = layout.ids.len();
@@ -136,27 +137,43 @@ impl Inputs {
             downmixed: BTreeMap::new(),
             defaults: BTreeMap::new(),
         };
-        inputs.add_fills(layout, compiled, plan, live, buffers);
+        inputs.add_fills(layout, compiled, plan, live, fades, buffers);
         inputs.add_downmixes(layout, plan, buffers);
         inputs.add_defaults(layout, live, buffers);
         inputs
     }
 
     /// Step 5: one buffer per modulated parameter and copy. Sources in
-    /// assignment id order.
+    /// assignment id order. A parameter whose last assignment is leaving
+    /// keeps its fill while the contribution ramps out (rule 9).
     fn add_fills(
         &mut self,
         layout: &Layout,
         compiled: &[CompiledAssignment],
         plan: &Plan,
         live: &[bool],
+        fades: &FadePlan,
         buffers: &mut Buffers,
     ) {
         let mut groups: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+        let fillable = |v: usize| live[v] && layout.nodes[v].unknown.is_none() && layout.is_dsp(v);
         for (i, assignment) in compiled.iter().enumerate() {
             let v = assignment.target_node;
-            if live[v] && layout.nodes[v].unknown.is_none() && layout.is_dsp(v) {
+            if fillable(v) {
                 groups.entry((v, assignment.param)).or_default().push(i);
+            }
+        }
+        let leaving = fades.leaving_params().chain(
+            fades
+                .carried_fills()
+                .map(|fill| (ModuleId((fill >> 32) as u32), (fill & 0xFFFF) as usize)),
+        );
+        for (module, param) in leaving {
+            if let Some(&v) = layout.index_of.get(&module)
+                && fillable(v)
+                && param < layout.nodes[v].descriptor.params.len()
+            {
+                groups.entry((v, param)).or_default();
             }
         }
         let mut means = BTreeMap::new();

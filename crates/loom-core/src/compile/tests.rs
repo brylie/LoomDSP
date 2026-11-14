@@ -9,6 +9,7 @@ fn new_right_taps_inherit_mono_history() {
         input: std::ptr::null(),
         output: std::ptr::null_mut(),
         state,
+        fade: None,
     };
     let mut old = Schedule::empty();
     old.taps.push(tap(3, 8, 0.5));
@@ -619,6 +620,7 @@ fn delay_state_keys_keep_voices_and_sides_separate() {
             input: std::ptr::null(),
             output: std::ptr::null_mut(),
             state: voice as f32 + 0.25,
+            fade: None,
         });
     }
     let mut next = Schedule::empty();
@@ -630,6 +632,7 @@ fn delay_state_keys_keep_voices_and_sides_separate() {
                 input: std::ptr::null(),
                 output: std::ptr::null_mut(),
                 state: 0.0,
+                fade: None,
             });
         }
     }
@@ -732,7 +735,9 @@ fn mono_voice_stereo_downmixes_are_shared() {
         let shared = schedule.downmixes[0].output as *const f32;
         if assignment {
             assert_eq!(schedule.fills.len(), 16);
-            assert!(schedule.fills.iter().all(|fill| fill.sources[0].buffer == shared));
+            assert!(schedule.fills.iter().all(
+                |fill| matches!(fill.sources[0], crate::compile::ModSource::Live { buffer, .. } if buffer == shared)
+            ));
         } else {
             for (op, module) in schedule.ops.iter().enumerate().filter(|(_, op)| op.voices == 16) {
                 assert_eq!(module.voices, 16);

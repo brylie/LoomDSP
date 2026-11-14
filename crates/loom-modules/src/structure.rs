@@ -94,7 +94,7 @@ const fn fade_port(name: &'static str, label: &'static str, description: &'stati
 
 /// `loom.struct.fade`: the crossfade of a slot swap. Internal.
 pub static FADE: ModuleDescriptor = ModuleDescriptor {
-    id: "loom.struct.fade",
+    id: loom_core::cable_fade::SWAP_FADE_MODULE,
     version: 1,
     name: "Swap Fade",
     category: "Structure",
