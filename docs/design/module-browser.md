@@ -3,7 +3,7 @@
 A searchable list of module types that adds the chosen module to the canvas, where the user is looking. It is for everyone who builds a patch, and fastest for users who know what they want.
 
 - **Kind:** living specification.
-- **Status:** Implemented
+- **Status:** Implemented. Built-in abstractions and slot rows are Agreed (2026-11-14, [#700](https://github.com/brylie/LoomDSP/issues/700)); see [Groups](#groups).
 - **Decision behind it:** [ADR-0010](../adr/0010-own-patch-canvas.md) (fast insertion on our own canvas).
 - **Use case and requirements:** FR-CANVAS-03, FR-CANVAS-06, NFR-UX-01, NFR-UX-05.
 - **Prior art:** many node editors open a search box at the pointer when you press a key on the canvas, and add the chosen node there. We use the idea, not any product's layout or wording.
@@ -43,6 +43,25 @@ The browser is a small floating panel: a search field on top, a list of matches 
 - The first result is highlighted after each change to the query.
 - Below the list, the highlighted module's one-sentence `description` is shown, so the user can tell what it does before adding it.
 
+### Groups
+
+Agreed on the plan for [#700](https://github.com/brylie/LoomDSP/issues/700), 2026-11-14.
+
+The list holds four kinds of row, in this order in an empty search:
+
+| Group | Row text | Mark | What the area under the list shows | Menu |
+|---|---|---|---|---|
+| **Built-in abstractions** | The abstraction's name, such as `Synth voice` | `Built in` | Its one-sentence description; detail `Built in, inserted as a copy` | None |
+| **Modules** | The module's name | Its family | Its description; detail its ID | None |
+| **Slots** | `Filter slot`: one per role that a registered module or a library item fills | `Slot` | The role's description and `Add an empty slot, then swap a part in from its menu or the inspector.`; detail the role's kind | None |
+| **Library items** | The patch's name | `Sub-patch` | `A sub-patch from your library, inserted as a copy. Right-click it to insert it linked.`; detail its path | Insert linked |
+
+- *Why built-ins first:* a new player should find the Synth voice without scrolling past every module.
+- A query keeps the group order and ranks by name within each group. A built-in matches its name, `sub-patch`, and `built in`; a slot row matches its role's name, `slot`, and the role's kind.
+- Slot rows are worked out again when the library folder has been read, so a Voice row appears once a library item fills Voice. A library item's role kinds are resolved through the registry, and an unknown or newer one adds no row. The highlight stays on the same row (by its UI ID) when the rows change.
+- Row IDs come from what a row shows: `browser/builtin/<file stem>`, `browser/role/<role id>`, `browser/library/<path>`. A screen reader reads a row's name and mark, and leaves the mark out when the name already ends with it (`Filter slot`, not `Filter slot, Slot`).
+- Picking a built-in inserts it as a copy ([sub-patches](sub-patches.md#built-in-abstractions-agreed-2026-11-14)); picking a slot row adds an empty slot ([sub-patches](sub-patches.md#empty-slots-agreed-2026-11-14)). Both become the only selection, as a module does.
+
 ### Keyboard and pointer
 
 | Input | Effect |
@@ -75,7 +94,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 1. **The search field takes keys while the browser is open.** Canvas shortcuts (Delete, Space for Run, F, Tab focus) do not fire while typing. *Why:* typing `f` in a query must not frame the patch, and Backspace must not delete the selected module.
 2. **The module goes where the user opened the browser,** not where auto-layout finds room. *Why:* the user opened it there because that is where they want to patch. A module that appears off screen breaks the flow.
 3. **The pointer position is taken when the browser opens,** not when Enter is pressed. *Why:* the pointer may drift onto the list while the user picks a row.
-4. **Search reads only the registry's descriptors** (`name`, `id`, `category`, `family`, `description`). *Why:* one source of text (ADR-0016). A new module appears in the browser with no extra work.
+4. **Search reads only the registry's descriptors** (`name`, `id`, `category`, `family`, `description`) for modules, and the role descriptors, the built-ins' names, and the library items' names for the other groups. *Why:* one source of text (ADR-0016). A new module or role appears in the browser with no extra work.
 5. **The search code is a plain function with no UI types,** for example `search(registry, query) -> Vec<&ModuleDescriptor>`. *Why:* matching and ranking can then be tested without a window.
 6. **The toolbar drop-down goes away.** *Why:* two ways to add a module that behave differently is confusing; the browser covers both.
 
