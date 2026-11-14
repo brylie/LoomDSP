@@ -59,8 +59,10 @@ fn driven(k: usize) -> Vec<f32> {
 /// Every output of `descriptor` over [`FRAMES`] frames. Every input but
 /// `normal_in` carries a cable with [`driven`], so a fallback on any other
 /// input cannot hide this one. `normal_in` holds its default `value`, on a
-/// cable when `cabled`.
-fn render(descriptor: &ModuleDescriptor, normal_in: usize, value: f32, cabled: bool) -> Vec<Vec<f32>> {
+/// cable when `cabled`. With `moved`, every parameter that does not shape
+/// the graph sits at 70% of its travel instead of its default, so an input
+/// whose depth or amount defaults to 0 still changes the output.
+fn render(descriptor: &ModuleDescriptor, normal_in: usize, value: f32, cabled: bool, moved: bool) -> Vec<Vec<f32>> {
     let ModuleRole::Dsp(create) = descriptor.role else {
         unreachable!("filtered to DSP modules")
     };
@@ -68,6 +70,13 @@ fn render(descriptor: &ModuleDescriptor, normal_in: usize, value: f32, cabled: b
         sample_rate: RATE,
         max_block: FRAMES,
     });
+    if moved {
+        for (index, spec) in descriptor.params.iter().enumerate() {
+            if !spec.options.shapes_graph {
+                module.set_param(index, spec.clamp(spec.denormalize(0.7)));
+            }
+        }
+    }
     module.reset();
     let inputs: Vec<Vec<f32>> = (0..descriptor.inputs.len())
         .map(|k| if k == normal_in { vec![value; FRAMES] } else { driven(k) })
@@ -83,7 +92,8 @@ fn render(descriptor: &ModuleDescriptor, normal_in: usize, value: f32, cabled: b
 }
 
 /// No module plays something other than its declared default on an
-/// unconnected fixed-value input, except the switched inputs.
+/// unconnected fixed-value input, except the switched inputs: at its
+/// default parameters, and again with them moved.
 #[test]
 fn every_unconnected_input_plays_its_declared_normal() {
     let mut checked = 0;
@@ -102,17 +112,24 @@ fn every_unconnected_input_plays_its_declared_normal() {
                 continue;
             }
             checked += 1;
-            let unpatched = render(descriptor, k, value, false);
-            let cabled = render(descriptor, k, value, true);
-            let same = unpatched
-                .iter()
-                .zip(&cabled)
-                .all(|(a, b)| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()));
-            if !same {
-                failed.push(format!(
-                    "{} input `{}`: with no cable it plays something other than its declared default {value}",
-                    descriptor.id, port.name
-                ));
+            for moved in [false, true] {
+                let unpatched = render(descriptor, k, value, false, moved);
+                let cabled = render(descriptor, k, value, true, moved);
+                let same = unpatched
+                    .iter()
+                    .zip(&cabled)
+                    .all(|(a, b)| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()));
+                if !same {
+                    let at = if moved {
+                        "moved parameters"
+                    } else {
+                        "default parameters"
+                    };
+                    failed.push(format!(
+                        "{} input `{}`, at {at}: with no cable it plays something other than its declared default {value}",
+                        descriptor.id, port.name
+                    ));
+                }
             }
         }
     }

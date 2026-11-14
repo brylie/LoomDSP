@@ -168,12 +168,11 @@ fn the_live_frame_runs_only_while_modulation_moves() {
     assert_eq!(idle.timers.due(Timer::LiveFrame), None, "no audio, nothing moves");
 }
 
-/// A slot swap wants the tick until its fade is done, so the fade finishes
-/// and the leaving part goes without a recording running; then the tick
-/// stops, and an idle app stays idle (sub-patches.md, How a swap
-/// crossfades).
+/// A slot swap with no stream wants no tick: the engine is idle, so its
+/// fade cannot end, and an idle app stays idle (#90). Its fade still
+/// finishes on a tick once the engine has run, and the leaving part goes.
 #[test]
-fn a_swap_fade_ticks_until_it_finishes() {
+fn a_swap_fade_with_no_stream_does_not_tick() {
     let mut app = crate::tests::app_with_text(
         r#"Patch(
     version: 1,
@@ -190,20 +189,41 @@ fn a_swap_fade_ticks_until_it_finishes() {
 )"#,
     );
     let _ = app.send(Message::StartWatching);
-    assert_eq!(app.timers.due(Timer::Tick), None, "an idle app does not tick");
+    assert!(!app.session.engine.stream.is_playing());
     let modules = app.session.controller.graph().nodes().count();
     let _ = app.send(Message::SwapSlot {
         slot: 9,
         to: crate::slots::SwapTarget::Empty,
     });
     assert!(app.session.hierarchy.is_fading());
-    let due = app.timers.due(Timer::Tick).expect("the fade wants the tick");
+    assert_eq!(app.timers.due(Timer::Tick), None, "no stream, no tick");
     app.process(600);
-    let _ = app.send(Timer::Tick.message(due));
+    let _ = app.send(Timer::Tick.message(Instant::now()));
     assert!(!app.session.hierarchy.is_fading(), "the fade finished on the tick");
     assert!(
         app.session.controller.graph().nodes().count() < modules,
         "the part is gone"
     );
-    assert_eq!(app.timers.due(Timer::Tick), None, "and the tick stops");
+    assert_eq!(app.timers.due(Timer::Tick), None);
+}
+
+/// While audio plays, a slot swap ticks until its fade is done, so the
+/// leaving part goes without a recording running (sub-patches.md, How a
+/// swap crossfades).
+#[test]
+fn a_swap_fade_ticks_while_audio_plays() {
+    let mut app = playing("effect-chain.ron");
+    assert_eq!(app.timers.due(Timer::Tick), None, "an idle patch does not tick");
+    let slot = app
+        .session
+        .hierarchy
+        .id_at(&loom_patch::ModulePath::top(5), 11)
+        .expect("Effect 2")
+        .0;
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: crate::slots::SwapTarget::Empty,
+    });
+    assert!(app.session.hierarchy.is_fading());
+    assert!(app.timers.due(Timer::Tick).is_some(), "the fade wants the tick");
 }
