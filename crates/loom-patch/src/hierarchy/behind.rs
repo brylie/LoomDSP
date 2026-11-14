@@ -84,9 +84,18 @@ impl<'h> Behind<'h> {
     }
 
     /// The first of what [`Hierarchy::inputs_behind`] gives, in its order.
-    /// A depth-first walk that keeps each end's first input. An end whose
-    /// walk was cut short by a loop keeps no "none", since from another
-    /// start it may find one.
+    /// A depth-first walk that visits each end once, as the plain follow
+    /// does, so one walk costs work in proportion to what it can reach,
+    /// and every walk after it reuses what it kept.
+    ///
+    /// What it keeps: when the walk finds an input, that input for every
+    /// end on its path; when it finds none, a "none" for every end it
+    /// reached, since each of them reaches only ends the start reaches.
+    /// So inside a loop of pass-through ends with more than one way out,
+    /// an end may get another input the loop reaches than the plain
+    /// follow's first: which one depends on the end asked first. Keeping
+    /// the exact first for every end of such a loop would cost a walk per
+    /// end again, for a choice of colour in a crafted loop.
     pub fn first_input(&self, level: &ModulePath, end: &End) -> Option<Flat> {
         let mut firsts = self.firsts.borrow_mut();
         let start: Key = (level.clone(), end.clone());
@@ -94,7 +103,8 @@ impl<'h> Behind<'h> {
             return known.clone();
         }
         /// One end being walked: its ends further on, how many were
-        /// tried, and whether a loop cut one short.
+        /// tried, and whether one was cut short by a loop or by an end
+        /// this walk already met.
         struct Frame {
             key: Key,
             next: Vec<Key>,
@@ -102,7 +112,8 @@ impl<'h> Behind<'h> {
             cut: bool,
         }
         let mut stack: Vec<Frame> = Vec::new();
-        let mut on_path: BTreeSet<Key> = BTreeSet::new();
+        // Every end this walk opened, on the path now or finished.
+        let mut seen: BTreeSet<Key> = BTreeSet::new();
         // The answer of the end just finished, handed to its parent.
         let mut pending: Option<(Option<Flat>, bool)> = None;
         let mut visit = Some(start);
@@ -120,7 +131,7 @@ impl<'h> Behind<'h> {
                             pending = Some((None, false));
                         }
                         InputStep::Next(next) => {
-                            on_path.insert(key.clone());
+                            seen.insert(key.clone());
                             stack.push(Frame {
                                 key,
                                 next,
@@ -132,14 +143,19 @@ impl<'h> Behind<'h> {
                 }
             }
             let Some(top) = stack.last_mut() else {
-                return pending.and_then(|(answer, _)| answer);
+                let answer = pending.and_then(|(answer, _)| answer);
+                if answer.is_none() {
+                    for key in seen {
+                        firsts.insert(key, None);
+                    }
+                }
+                return answer;
             };
             if let Some((answer, cut)) = pending.take() {
                 top.cut |= cut;
                 if answer.is_some() {
                     // The first input found answers every end on the path.
                     while let Some(frame) = stack.pop() {
-                        on_path.remove(&frame.key);
                         firsts.insert(frame.key, answer.clone());
                     }
                     return answer;
@@ -147,7 +163,6 @@ impl<'h> Behind<'h> {
             }
             if top.tried == top.next.len() {
                 let frame = stack.pop().expect("the top frame");
-                on_path.remove(&frame.key);
                 if !frame.cut {
                     firsts.insert(frame.key, None);
                 }
@@ -156,10 +171,10 @@ impl<'h> Behind<'h> {
             }
             let child = top.next[top.tried].clone();
             top.tried += 1;
-            if on_path.contains(&child) {
-                top.cut = true;
-            } else {
+            if firsts.contains_key(&child) || !seen.contains(&child) {
                 visit = Some(child);
+            } else {
+                top.cut = true;
             }
         }
     }

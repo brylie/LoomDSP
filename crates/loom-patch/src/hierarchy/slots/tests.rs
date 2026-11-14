@@ -1413,3 +1413,33 @@ fn a_stacked_modulator_drives_each_copy_through_its_fade() {
     hierarchy.sync(&mut controller).unwrap();
     assert_eq!(onto_amps(&controller), ["loom.mod.lfo"; 4]);
 }
+
+/// Two cables into one input of a slot keep one link, the later, as a flat
+/// patch keeps the later cable, so a crafted file cannot reach an end by
+/// two routes through it.
+#[test]
+fn two_cables_into_one_slot_input_keep_the_later() {
+    let text = r#"Patch(version: 1, modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.osc.noise@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.effect@1"))),
+    ], cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (2, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ])"#;
+    let (_, hierarchy) = load(&Patch::from_ron(text).unwrap());
+    let root = ModulePath::root();
+    let into: Vec<&Link> = hierarchy
+        .links
+        .iter()
+        .filter(|l| l.to == (9, "in".to_string()))
+        .collect();
+    assert_eq!(into.len(), 1, "{into:?}");
+    assert_eq!(into[0].from, (2, "out".to_string()));
+    assert_eq!(
+        hierarchy.links.linked_into(&root, &(9, "in".to_string())),
+        Some(into[0])
+    );
+}

@@ -189,7 +189,9 @@ impl App {
             // Otherwise the window redraws only when something changes
             // (#90). A recording ticks to notice a write error, and a slot
             // swap ticks until its fade is done, so the leaving part is
-            // removed (sub-patches.md, How a swap crossfades).
+            // removed (sub-patches.md, How a swap crossfades). With no
+            // audio device the engine is idle and the fade does not end,
+            // so it ticks at that slow rate until a device starts.
             (
                 Timer::Tick,
                 !self.measuring && (self.rig.recorder.is_some() || self.session.hierarchy.is_fading()),

@@ -4488,3 +4488,27 @@ fn a_focus_request_lands_after_a_level_or_frame_change() {
         assert!(landed.contains(&CanvasEvent::FocusChanged(Some((2, 0)))), "{change}");
     }
 }
+
+/// An arrow key meant for a control that went inert under keyboard focus,
+/// as when an undo empties the slot it is bound to, is used up: it does
+/// not move the tile. The next arrow, with no control focused, moves the
+/// tile as usual (sub-patches.md, Empty slots).
+#[test]
+fn an_arrow_for_a_control_that_went_inert_does_not_move_the_tile() {
+    let mut tile = module(1, 0.0);
+    tile.panel = panel();
+    tile.panel.widgets[0].inert = true;
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput {
+        focus: FocusState::at(1, 0, true, FocusMode::Browse),
+        ..CanvasInput::default()
+    };
+    let moves = |events: &[CanvasEvent]| events.iter().any(|e| matches!(e, CanvasEvent::Move { .. }));
+    let first = host_event(&canvas, &mut state, &key_event(Key::Up, true));
+    assert!(!moves(&first), "{first:?}");
+    assert_eq!(state.focused_control(), None, "the stale focus is cleared");
+    let second = host_event(&canvas, &mut state, &key_event(Key::Up, true));
+    assert!(moves(&second), "{second:?}");
+}

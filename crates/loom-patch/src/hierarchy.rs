@@ -493,6 +493,12 @@ impl Hierarchy {
         }
         for cable in cables {
             if structural.contains(&cable.from.0) || structural.contains(&cable.to.0) {
+                // One link per input, the later of two kept, as a flat
+                // patch keeps the later cable: two would let a crafted
+                // file reach one end by two routes.
+                if let Some(old) = self.links.linked_into(level, &cable.to).cloned() {
+                    self.links.remove(&old);
+                }
                 self.links.insert(Link {
                     level: level.clone(),
                     to: cable.to.clone(),
