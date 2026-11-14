@@ -600,6 +600,7 @@ impl iced::advanced::widget::Operation<()> for ScrollBy {
 
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) mod headless;
+mod preedit;
 mod services;
 #[cfg(any(test, feature = "test-ui"))]
 mod sleeper;

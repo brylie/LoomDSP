@@ -355,7 +355,8 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             return;
         }
         let mut messages = Vec::new();
-        let drawn = self.with_ui(app, size(&parts), |ui, renderer, cursor, clipboard| {
+        let window = size(&parts);
+        let drawn = self.with_ui(app, window, |ui, renderer, cursor, clipboard| {
             let redrawn = [iced::Event::Window(
                 iced::window::Event::RedrawRequested(Instant::now()),
             )];
@@ -371,6 +372,12 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
                 }
             };
             ui.draw(renderer, &theme, &style, cursor);
+            if let State::Updated { input_method, .. } = &state
+                && let Some(composed) = super::preedit::of(input_method)
+                && let iced::advanced::InputMethod::Enabled { cursor: caret, .. } = input_method
+            {
+                super::preedit::draw(renderer, composed, *caret, window, &theme, crate::style::BODY);
+            }
             if let crate::Renderer::Primary(renderer) = renderer {
                 renderer.present(Some(background), frame.format, frame.view, &viewport);
             }
