@@ -310,3 +310,29 @@ fn the_bridge_start_starts_the_watchers() {
     let (bridge, _) = AppBridge::new(app());
     assert!(!bridge.app().watching);
 }
+
+/// A deadline later than now waits on the sleeper, which wakes the loop
+/// when it comes, and that turn runs the deadline's message: here the
+/// timer that collects a drop.
+#[test]
+fn a_future_deadline_wakes_a_turn() {
+    let (mut bridge, _) = AppBridge::new(app());
+    let _ = bridge.update(Bridged::App(Message::StartWatching));
+    bridge.app_mut().drops.push(std::path::PathBuf::from("dropped.ron"));
+    let _ = bridge.update(Bridged::App(Message::Tick));
+    let due = bridge.app().next_deadline().expect("the drop timer").at;
+    assert!(due > Instant::now(), "due later, so the sleeper waits for it");
+    assert_eq!(bridge.take_wakes(), 0, "nothing yet");
+    let mut woken = 0;
+    for _ in 0..200 {
+        woken = bridge.take_wakes();
+        if woken > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(woken, 1, "the sleeper woke the loop once");
+    assert!(Instant::now() >= due);
+    let _ = bridge.update(Bridged::Woken);
+    assert!(bridge.app().drops.is_empty(), "the turn ran the timer's message");
+}

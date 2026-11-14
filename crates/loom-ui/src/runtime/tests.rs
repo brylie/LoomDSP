@@ -463,11 +463,14 @@ fn a_target_can_ask_for_a_draw_after_updates() {
 fn after_draw_waits_for_the_frame_to_be_shown() {
     let mut harness = harness();
     let draws = harness.driver().redraws();
+    assert!(!harness.runtime().waits_for_draw());
     harness.send(Msg::Note);
     assert_eq!(harness.driver().redraws(), draws + 1);
     assert!(!harness.app().seen.contains(&Msg::Drawn));
+    assert!(harness.runtime().waits_for_draw(), "a message waits for the frame");
     harness.step(DriverEvent::Presented);
     assert_eq!(harness.app().seen.last(), Some(&Msg::Drawn));
+    assert!(!harness.runtime().waits_for_draw(), "and nothing once it came");
     harness.step(DriverEvent::Presented);
     assert_eq!(
         harness

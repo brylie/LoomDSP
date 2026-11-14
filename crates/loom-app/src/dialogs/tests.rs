@@ -227,3 +227,27 @@ fn a_recovery_answer_is_used_after_a_replace() {
         "Not Now opened the start patch"
     );
 }
+
+/// The crash recovery question and a timer: the deadline is the one due
+/// first, and the question, due at once, comes before any timer.
+#[test]
+fn the_recovery_question_comes_before_a_timer() {
+    let dir = TempDir::new("dialogs-offer-timer");
+    let mut app = app();
+    let _ = app.send(Message::StartWatching);
+    app.drops.push(PathBuf::from("dropped.ron"));
+    let _ = app.send(Message::Tick);
+    assert!(matches!(
+        app.next_deadline().map(|d| d.message),
+        Some(Message::DropsDone)
+    ));
+    app.recovery_offer = Some(RecoveryOffer {
+        orphan: recovery::tests::orphan_for(&dir.0, None),
+        start: StartPatch::Empty,
+        found: Instant::now(),
+    });
+    assert!(
+        matches!(app.next_deadline().map(|d| d.message), Some(Message::AskRecovery)),
+        "the question is due at once"
+    );
+}

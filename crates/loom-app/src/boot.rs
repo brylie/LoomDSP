@@ -227,6 +227,8 @@ impl App {
             window_questions: std::cell::RefCell::default(),
             control_replies: crate::control::Replies::new(),
             watching: false,
+            timers: crate::timers::Timers::default(),
+            control_frame_asked: false,
             watchers: crate::watching::AppWatchers::default(),
             waiting: None,
             recovery_offer: None,

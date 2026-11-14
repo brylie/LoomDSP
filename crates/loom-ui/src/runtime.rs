@@ -169,6 +169,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.exited
     }
 
+    /// True while a message waits for a frame to be shown
+    /// ([`crate::Effect::AfterDraw`]). A driver that cannot tell when a
+    /// frame is on screen reads this to know when to look for one.
+    pub fn waits_for_draw(&self) -> bool {
+        !self.after_draw.is_empty() || !self.waiting_for_draw.is_empty()
+    }
+
     /// The view built after the last turn that ran an update.
     pub fn view(&self) -> Option<&View> {
         self.view.as_ref()
