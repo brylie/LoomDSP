@@ -8,7 +8,7 @@
 //! The compiler decides which inputs fade (`compile/fades.rs`) and gives
 //! each one a fixed slot and buffer on the control thread. At the swap the
 //! engine fills in the held values from the old schedule
-//! ([`take_state_from`]), and each block it runs the ramps just before
+//! (`take_state_from`), and each block it runs the ramps just before
 //! their readers. Nothing here allocates, locks, or waits.
 //!
 //! Background: `docs/learn/hot-patching.md`.

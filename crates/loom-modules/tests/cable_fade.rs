@@ -647,3 +647,151 @@ fn inputs_that_read_1_unplugged_fade_from_1() {
         );
     }
 }
+
+/// Renders as [`render_changing`] and returns both sides.
+fn render_changing_stereo(
+    parts: &mut EngineParts,
+    frames: usize,
+    at: usize,
+    block: usize,
+    change: impl FnOnce(&mut EngineParts),
+) -> (Vec<f32>, Vec<f32>) {
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    let mut run = |parts: &mut EngineParts, from: usize, to: usize| {
+        let mut position = from;
+        while position < to {
+            let n = block.min(to - position);
+            parts
+                .engine
+                .process(&mut left[position..position + n], &mut right[position..position + n]);
+            position += n;
+        }
+    };
+    run(parts, 0, at);
+    change(parts);
+    parts.controller.commit().unwrap();
+    run(parts, at, frames);
+    (left, right)
+}
+
+/// The right side of a stereo input that loses its stereo cable fades to
+/// what a mono cable gives, the left signal, instead of jumping to it.
+#[test]
+fn a_stereo_input_s_right_side_fades_when_its_stereo_cable_goes() {
+    let frames = 1_000;
+    let at = 500;
+    for block in BLOCKS {
+        let build = || {
+            let mut parts = engine();
+            let left = constant(&mut parts, 0.3);
+            let right = constant(&mut parts, -0.5);
+            let mono = constant(&mut parts, 0.2);
+            let c = &mut parts.controller;
+            let join = c.add_module("loom.mix.join").unwrap();
+            let split = c.add_module("loom.mix.split").unwrap();
+            let rejoin = c.add_module("loom.mix.join").unwrap();
+            let out = c.add_module("loom.io.audio-out").unwrap();
+            c.connect_named(left, "out", join, "left").unwrap();
+            c.connect_named(right, "out", join, "right").unwrap();
+            c.connect_named(join, "out", split, "in").unwrap();
+            c.connect_named(split, "left", rejoin, "left").unwrap();
+            c.connect_named(split, "right", rejoin, "right").unwrap();
+            c.connect_named(rejoin, "out", out, "in").unwrap();
+            c.commit().unwrap();
+            (parts, split, mono)
+        };
+        let (mut parts, split, mono) = build();
+        let (left, right) = render_changing_stereo(&mut parts, frames, at, block, |parts| {
+            parts.controller.connect_named(mono, "out", split, "in").unwrap();
+        });
+        for k in 0..frames - at {
+            assert_eq!(left[at + k], faded(0.3, 0.2, k), "left, frame {k}, block {block}");
+            assert_eq!(right[at + k], faded(-0.5, 0.2, k), "right, frame {k}, block {block}");
+        }
+        let (mut parts, split, _) = build();
+        let input = parts.controller.input_ref(split, "in").unwrap();
+        let (_, right) = render_changing_stereo(&mut parts, frames, at, block, |parts| {
+            parts.controller.disconnect(input).unwrap();
+        });
+        for k in 0..frames - at {
+            assert_eq!(
+                right[at + k],
+                faded(-0.5, 0.0, k),
+                "pulled, right, frame {k}, block {block}"
+            );
+        }
+    }
+}
+
+/// A stereo source with different sides plugged into a running mono
+/// filter: the new right copy takes copy 0's state and its fade, so both
+/// sides move with no step larger than the sound on either side allows.
+#[test]
+fn a_stereo_source_into_a_running_mono_filter_fades_both_sides() {
+    let frames = 4_800;
+    let at = 2_400;
+    for block in BLOCKS {
+        let mut parts = engine();
+        let source = sine(&mut parts);
+        let c = &mut parts.controller;
+        let saw = c.add_module("loom.osc.saw").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        let svf = c.add_module("loom.filter.svf").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(source, "out", join, "left").unwrap();
+        c.connect_named(saw, "out", join, "right").unwrap();
+        c.connect_named(source, "out", svf, "in").unwrap();
+        c.connect_named(svf, "lowpass", out, "in").unwrap();
+        let probe = c.output_ref(join, "out").unwrap();
+        c.add_probe(probe, loom_core::ProbeKind::Meter).unwrap();
+        c.commit().unwrap();
+        let (left, right) = render_changing_stereo(&mut parts, frames, at, block, |parts| {
+            parts.controller.connect_named(join, "out", svf, "in").unwrap();
+        });
+        assert!(parts.controller.last_report().runs_per_channel(svf));
+        let peak = |s: &[f32]| s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        let limit = |s: &[f32]| (largest_step(s) + 2.0 * peak(s) / fade_length() as f32) * 1.1 + 1e-6;
+        for (side, played) in [("left", &left), ("right", &right)] {
+            let bound = limit(&played[at - 1_000..at]).max(limit(&played[frames - 1_000..]));
+            let across = largest_step(&played[at - 1..at + 2 * fade_length()]);
+            assert!(across <= bound, "{side}, block {block}: {across} > {bound}");
+        }
+    }
+}
+
+/// A 4-voice cable into the audio output moved to a mono source: voice 0
+/// fades to the new signal, and the voices only the old cable had fade out
+/// to silence, instead of stopping on one frame.
+#[test]
+fn voices_the_output_loses_fade_out() {
+    let mut registry = loom_core::Registry::new();
+    loom_modules::register_all(&mut registry).unwrap();
+    loom_modules::test_modules::register(&mut registry).unwrap();
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let mut parts = create_engine(std::sync::Arc::new(registry), config);
+    let c = &mut parts.controller;
+    let voices = c.add_module("test.voices").unwrap();
+    c.set_param_named(voices, "voices", 4.0).unwrap();
+    c.set_param_named(voices, "value", 0.1).unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(voices, "out", out, "in").unwrap();
+    let mono = constant(&mut parts, 0.2);
+    parts.controller.commit().unwrap();
+    let played = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+        parts.controller.connect_named(mono, "out", out, "in").unwrap();
+    });
+    let before = played[499];
+    assert!((before - 0.46).abs() < 1e-5, "four voices sum: {before}");
+    for k in 0..500 {
+        let expected = faded(0.1, 0.2, k) + faded(0.11, 0.0, k) + faded(0.12, 0.0, k) + faded(0.13, 0.0, k);
+        assert!(
+            (played[500 + k] - expected).abs() < 1e-6,
+            "frame {k}: {} != {expected}",
+            played[500 + k]
+        );
+    }
+}
