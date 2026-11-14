@@ -597,6 +597,9 @@ impl iced::advanced::widget::Operation<()> for ScrollBy {
 
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) mod headless;
+mod measure;
+pub(crate) mod offscreen;
+pub(crate) use measure::Measure;
 mod preedit;
 mod services;
 #[cfg(any(test, feature = "test-ui"))]

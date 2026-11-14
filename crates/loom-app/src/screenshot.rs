@@ -352,12 +352,7 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     let physical = physical_size(logical, options.scale)?;
     // The window holds Iced's own widgets and the canvas's wgpu primitive,
     // which only the wgpu renderer draws.
-    let mut renderer = iced::futures::executor::block_on(<crate::Renderer as Headless>::new(
-        Font::DEFAULT,
-        Pixels(16.0),
-        Some("wgpu"),
-    ))
-    .ok_or(NO_GPU)?;
+    let mut renderer = crate::iced_bridge::offscreen::renderer().ok_or(NO_GPU)?;
 
     // The camera fits the canvas, not the window, so lay the window out
     // once to find the canvas size.
@@ -409,7 +404,7 @@ fn draw_window(app: &crate::App, renderer: &mut crate::Renderer, logical: Size, 
     ui.draw(renderer, &theme, &style, mouse::Cursor::Unavailable);
     // The renderer holds text paragraphs weakly, and the widget tree owns
     // them, so the tree must live until the frame is drawn.
-    let pixels = Headless::screenshot(renderer, physical, scale, theme.palette().background);
+    let pixels = crate::iced_bridge::offscreen::pixels(renderer, physical, scale, theme.palette().background);
     drop(ui);
     pixels
 }

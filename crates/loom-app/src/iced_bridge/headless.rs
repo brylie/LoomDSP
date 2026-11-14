@@ -16,7 +16,7 @@
 use super::tasks::{self, Sink, Stuck};
 use super::{Bridge, BridgeDriver, Bridged};
 use crate::{App, Message};
-use iced::advanced::renderer::{Headless as _, Style};
+use iced::advanced::renderer::Style;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
 use iced::{Size, Task, mouse};
@@ -92,9 +92,14 @@ impl BridgeDriver for UiDriver {
     }
 }
 
-/// The harness's window: the renderer, the widget cache, and the cursor.
+/// The harness's window: the renderers, the widget cache, and the cursor.
 pub(crate) struct Surface {
+    /// The measure renderer, which events, layout, operations, and frames
+    /// run on, so they need no GPU.
     renderer: crate::Renderer,
+    /// The wgpu renderer for captures, made on the first one: `Ok` once
+    /// made, `Err` when no adapter was found.
+    gpu: Option<Result<crate::Renderer, NoGpu>>,
     cache: Option<Cache>,
     /// Where the pointer is, for events and drawing.
     pub(crate) cursor: mouse::Cursor,
@@ -102,29 +107,52 @@ pub(crate) struct Surface {
 }
 
 impl Surface {
-    /// A window of `size` on Iced's headless renderer: wgpu when an adapter
-    /// is found, else tiny-skia. `ICED_TEST_BACKEND=tiny-skia` forces the
-    /// fallback, as for Iced's own test crate.
+    /// A window of `size` that lays out on the measure renderer, with the
+    /// window's defaults (Iced's default font at 16). No GPU is asked for
+    /// until a capture.
     pub(crate) fn new(size: Size) -> Self {
-        let backend = std::env::var("ICED_TEST_BACKEND").ok();
-        let renderer = iced::futures::executor::block_on(<crate::Renderer as iced::advanced::renderer::Headless>::new(
-            iced::Font::DEFAULT,
-            iced::Pixels(16.0),
-            backend.as_deref(),
-        ))
-        .expect("Iced's headless renderer falls back to tiny-skia without a GPU");
         Self {
-            renderer,
+            renderer: crate::Renderer::Secondary(super::Measure::new(iced::Font::DEFAULT, iced::Pixels(16.0))),
+            gpu: None,
             cache: Some(Cache::default()),
             cursor: mouse::Cursor::Unavailable,
             size,
         }
     }
 
-    /// True when the renderer draws with wgpu, so the canvas's shader draws
-    /// too. Tiny-skia cannot draw it.
-    pub(crate) fn draws_the_canvas(&self) -> bool {
-        self.renderer.name().starts_with("wgpu")
+    /// True when a GPU adapter was found, so a capture draws the view, the
+    /// canvas's shader included. The first call looks for one.
+    pub(crate) fn draws_the_canvas(&mut self) -> bool {
+        self.gpu().is_ok()
+    }
+
+    /// Where every named part and the canvas are when `app`'s view is laid
+    /// out from a fresh cache on the measure renderer, and on the wgpu
+    /// renderer; `None` with no GPU adapter. The two must agree, or event
+    /// tests would aim at places the window does not draw.
+    #[cfg(test)]
+    pub(crate) fn places_on_both(&mut self, app: &App) -> Option<(crate::places::Places, crate::places::Places)> {
+        fn places(app: &App, size: Size, renderer: &mut crate::Renderer) -> crate::places::Places {
+            let mut ui = UserInterface::build(app.view(), size, Cache::default(), renderer);
+            let mut collect = crate::places::Collect::default();
+            ui.operate(
+                renderer,
+                &mut iced::advanced::widget::operation::black_box(&mut collect),
+            );
+            collect.places()
+        }
+        let size = self.size;
+        let measured = places(app, size, &mut self.renderer);
+        let drawn = places(app, size, self.gpu().ok()?);
+        Some((measured, drawn))
+    }
+
+    /// The wgpu renderer for captures, made the first time it is asked for.
+    fn gpu(&mut self) -> Result<&mut crate::Renderer, NoGpu> {
+        self.gpu
+            .get_or_insert_with(|| super::offscreen::renderer().ok_or(NoGpu))
+            .as_mut()
+            .map_err(|NoGpu| NoGpu)
     }
 
     /// Builds `app`'s view, runs `f` on it, and keeps its cache.
@@ -159,26 +187,43 @@ impl Surface {
         }
     }
 
-    /// Draws `app`'s view offscreen and gives its pixels, at scale 1, as the
-    /// window opens. With tiny-skia there is nothing to draw the canvas
-    /// with, so the answer says so (ui-layer.md, section 2, effects table).
+    /// Draws `app`'s view offscreen with wgpu and gives its pixels, at
+    /// scale 1, as the window opens. With no GPU adapter there is nothing to
+    /// draw with, so the answer says so (ui-layer.md, section 2, effects
+    /// table).
     fn capture(&mut self, app: &App) -> Result<Image, NoGpu> {
-        if !self.draws_the_canvas() {
+        let size = self.size;
+        let cursor = self.cursor;
+        let cache = self.cache.take().expect("the cache is put back after every frame");
+        let Ok(renderer) = self.gpu() else {
+            self.cache = Some(cache);
             return Err(NoGpu);
-        }
+        };
         let theme = app.theme();
         let style = Style {
             text_color: theme.palette().text,
         };
-        let physical = Size::new(self.size.width.round() as u32, self.size.height.round() as u32);
-        let mut pixels = Vec::new();
-        self.with_ui(app, |ui, renderer, cursor| {
-            ui.draw(renderer, &theme, &style, cursor);
-            // The tree owns the text the renderer holds weakly, so it
-            // stays until the frame is drawn.
-            pixels =
-                iced::advanced::renderer::Headless::screenshot(renderer, physical, 1.0, theme.palette().background);
-        });
+        let physical = Size::new(size.width.round() as u32, size.height.round() as u32);
+        let mut ui = UserInterface::build(app.view(), size, cache, renderer);
+        // A redraw update first, as before every frame in the window: Iced
+        // 0.14 keeps a button's status (and a field's) on the widget, sets
+        // it only while handling a redraw, and draws a freshly built one as
+        // disabled until then (#460, #776). What the widgets ask for is
+        // dropped: a capture is a still frame, not a turn.
+        let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+        let mut asked = Vec::new();
+        let _ = ui.update(
+            &[redraw],
+            cursor,
+            renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut asked,
+        );
+        ui.draw(renderer, &theme, &style, cursor);
+        // The tree owns the text the renderer holds weakly, so it stays
+        // until the frame is drawn.
+        let pixels = super::offscreen::pixels(renderer, physical, 1.0, theme.palette().background);
+        self.cache = Some(ui.into_cache());
         Image::new(physical.width, physical.height, 1.0, pixels).ok_or(NoGpu)
     }
 }

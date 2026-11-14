@@ -7,10 +7,12 @@
 //! apply the messages it returns with `App::update`, and keep the widget
 //! cache for the next frame, so the canvas remembers a drag in progress.
 //!
-//! The renderer is Iced's headless renderer. It uses wgpu when a GPU
-//! adapter is found and falls back to tiny-skia otherwise, so these tests
-//! run on CI machines without a GPU. Events do not depend on which one runs.
-//! Set `ICED_TEST_BACKEND=tiny-skia` to force the fallback.
+//! The view is laid out on a renderer that only measures
+//! (`iced_bridge/measure.rs`): it lays text out with Iced's own paragraphs,
+//! as the window's wgpu renderer does, and draws nothing, so event tests
+//! need no GPU and never start one. A capture draws with wgpu, made on the
+//! first capture, and answers that there is no GPU where no adapter is
+//! found.
 //!
 //! Tests find things by name, not by pixel: [`Ui::output`], [`Ui::input`],
 //! [`Ui::control`], and [`Ui::text`] return window coordinates from the
@@ -22,8 +24,8 @@
 //! input is routed, each message is one update, and focus, scrolling, and
 //! window questions run as Iced runs them, on the harness's view. Effects
 //! run in memory: the clipboard is a string, work runs inline, a capture
-//! draws the view offscreen on wgpu (and answers that there is no GPU on
-//! tiny-skia), and Quit marks [`Ui::exited`]. A dialog is answered from the
+//! draws the view offscreen on wgpu (and answers that there is no GPU where
+//! no adapter is found), and Quit marks [`Ui::exited`]. A dialog is answered from the
 //! fake dialogs in the crate's tests; in a test under `tests/`, where they
 //! are off, it panics, naming it. A task the harness cannot run, such as a
 //! window command or one that waits on a timer, panics too, so a test never
@@ -177,9 +179,18 @@ impl Ui {
         self.surface.cursor = cursor;
     }
 
-    /// True when the renderer is wgpu, so a capture draws the canvas too.
-    pub(crate) fn draws_the_canvas(&self) -> bool {
+    /// True when a GPU adapter was found, so a capture draws the view, the
+    /// canvas included. Events never need one.
+    pub(crate) fn draws_the_canvas(&mut self) -> bool {
         self.surface.draws_the_canvas()
+    }
+
+    /// The window's places laid out on the measure renderer and on wgpu,
+    /// or `None` with no GPU adapter (`Surface::places_on_both`).
+    #[cfg(test)]
+    pub(crate) fn places_on_both(&mut self) -> Option<(crate::places::Places, crate::places::Places)> {
+        let Self { bridge, surface } = self;
+        surface.places_on_both(bridge.app())
     }
 
     /// A waker into the app's runtime, as a watcher thread holds one.

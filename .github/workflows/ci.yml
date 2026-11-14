@@ -67,18 +67,25 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@v5
+      # Mesa's software Vulkan (lavapipe, on llvmpipe) gives the Ubuntu
+      # runner a GPU adapter, as on the coverage job. It is the only Vulkan
+      # device there, so wgpu picks it with no setting; if a runner ever
+      # has a second, WGPU_ADAPTER_NAME=llvmpipe picks this one.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev mesa-vulkan-drivers
       - uses: Swatinem/rust-cache@v2
       # Debug build on purpose: the no-allocation test (NFR-RT-06) is only
       # active with debug assertions.
       - run: mise run test
         env:
-          # macOS and Windows runners have a GPU adapter (Metal, DX12), so the
-          # canvas smoke test in crates/loom-app/tests/screenshot.rs must draw
-          # there and compile canvas.wgsl for that backend. Ubuntu has none,
-          # so the test skips there (#5).
-          LOOM_REQUIRE_GPU: ${{ runner.os != 'Linux' && '1' || '' }}
+          # Every runner has a GPU adapter: Metal on macOS, DX12 on Windows,
+          # and Mesa's software Vulkan on Ubuntu. So the drawing tests
+          # (crates/loom-app/tests/screenshot.rs, the harness's captures,
+          # and the layout comparison) must draw and compile canvas.wgsl
+          # for that backend, and fail, naming the cause, if no adapter is
+          # found. Event tests need no GPU at all (plan for leaving Iced,
+          # step 2.3).
+          LOOM_REQUIRE_GPU: "1"
       - name: Benchmarks compile
         run: cargo bench -p loom-modules --no-run
 

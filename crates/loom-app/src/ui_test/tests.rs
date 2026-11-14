@@ -2661,8 +2661,8 @@ fn a_paste_reads_the_clipboard_the_test_set() {
 }
 
 /// A capture in the harness draws the view offscreen: on wgpu an image of
-/// the window's size at scale 1; on tiny-skia, which cannot draw the
-/// canvas, the answer that there is no GPU (ui-layer.md, effects table).
+/// the window's size at scale 1; with no GPU adapter, the answer that there
+/// is no GPU (ui-layer.md, effects table).
 /// With `LOOM_REQUIRE_GPU=1`, as on CI's macOS, Windows, and coverage jobs
 /// (Mesa's software Vulkan), the image is required.
 #[test]
@@ -2672,7 +2672,7 @@ fn a_capture_draws_the_view_offscreen() {
     if std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1") {
         assert!(
             ui.draws_the_canvas(),
-            "LOOM_REQUIRE_GPU=1, but the renderer is not wgpu"
+            "LOOM_REQUIRE_GPU=1, but no GPU adapter was found"
         );
     }
     let seen = Arc::new(Mutex::new(None));
@@ -2707,4 +2707,86 @@ fn a_posted_message_runs_on_the_next_turn() {
         "{log:?}"
     );
     assert!(ui.app().overlays.help.is_some());
+}
+
+/// True when `LOOM_REQUIRE_GPU=1`: a missing GPU adapter is then an error.
+fn gpu_required() -> bool {
+    std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1")
+}
+
+/// The harness lays out on a renderer that only measures, and the window
+/// draws with wgpu. Both lay text out with Iced's same paragraphs, so every
+/// named part and the canvas land in the same place on both: with a module
+/// selected, and with the module browser open (plan for leaving Iced, step
+/// 2.3, item 2). Skips with no GPU adapter, unless one is required.
+#[test]
+fn measure_and_wgpu_lay_out_alike() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+    let Some((measured, drawn)) = ui.places_on_both() else {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
+        return;
+    };
+    assert!(measured.len() > 20, "the walk found the window's parts");
+    assert_eq!(measured, drawn, "with module 4 selected");
+
+    ui.send(Message::OpenBrowser);
+    let _ = ui.redraw();
+    let (measured, drawn) = ui.places_on_both().expect("the adapter is still there");
+    assert!(
+        measured.of(&"browser/search".parse().unwrap()).is_some(),
+        "the browser is open"
+    );
+    assert_eq!(measured, drawn, "with the module browser open");
+}
+
+/// A capture runs a redraw update before it draws, as the window does
+/// before every frame: Iced 0.14 sets a button's status only then, and
+/// draws a newly built one as disabled until it has (#460, #776). So an
+/// enabled toolbar button is captured in its enabled colour.
+#[test]
+fn a_capture_draws_enabled_buttons_as_enabled() {
+    use iced::widget::button::Status;
+    use std::sync::{Arc, Mutex};
+    let mut ui = Ui::open("subtractive.ron");
+    if !ui.draws_the_canvas() {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
+        return;
+    }
+    let open = ui
+        .places()
+        .of(&"toolbar/open".parse().unwrap())
+        .expect("the toolbar shows Open")
+        .rect;
+    let seen = Arc::new(Mutex::new(None));
+    let got = seen.clone();
+    ui.app_mut().effect(loom_ui::Effects::capture(move |image| {
+        *got.lock().unwrap() = Some(image);
+        Message::Tick
+    }));
+    let _ = ui.deliver(Message::Tick);
+    let image = seen
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the capture was answered")
+        .expect("a GPU draws it");
+
+    // A pixel inside the button's padding, left of its label.
+    let (x, y) = ((open.x + 3.0) as u32, (open.y + open.height / 2.0) as u32);
+    let at = ((y * image.width() + x) * 4) as usize;
+    let pixel = &image.rgba()[at..at + 3];
+    let theme = ui.app().theme();
+    let colour = |status: Status| match crate::style::secondary(&theme, status).background {
+        Some(iced::Background::Color(color)) => color.into_rgba8(),
+        other => panic!("a secondary button has a plain fill, not {other:?}"),
+    };
+    let near = |want: [u8; 4]| pixel.iter().zip(want).all(|(got, want)| got.abs_diff(want) <= 2);
+    // The disabled fill is this colour at half opacity, so a button drawn
+    // as disabled shows the toolbar through it and does not match.
+    assert!(
+        near(colour(Status::Active)),
+        "{pixel:?} is the enabled fill {:?}",
+        colour(Status::Active)
+    );
 }

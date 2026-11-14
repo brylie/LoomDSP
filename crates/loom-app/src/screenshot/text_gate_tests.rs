@@ -101,11 +101,7 @@ fn window(patch: &std::path::Path) -> Option<(crate::App, CanvasView, Size<u32>,
     let options = &args.view;
     let logical = crate::WINDOW;
     let physical = physical_size(logical, options.scale).expect("a size");
-    let mut renderer = iced::futures::executor::block_on(<crate::Renderer as Headless>::new(
-        Font::DEFAULT,
-        Pixels(16.0),
-        Some("wgpu"),
-    ))?;
+    let mut renderer = crate::iced_bridge::offscreen::renderer()?;
     let mut ui = UserInterface::build(app.view(), logical, Cache::default(), &mut renderer);
     let canvas = canvas_view(&mut ui, &mut renderer).expect("a canvas");
     drop(ui);

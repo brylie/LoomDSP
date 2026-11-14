@@ -116,7 +116,7 @@ impl Place {
 }
 
 /// What one pass over the window found: the canvas, and every named part.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Places {
     /// The patch canvas and its camera.
     pub canvas: Option<CanvasView>,

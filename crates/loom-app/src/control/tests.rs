@@ -2580,9 +2580,8 @@ fn a_crop_takes_the_pixels_of_its_region() {
 /// A `screenshot` asks for a capture as an effect, and its answer comes
 /// back as `Message::Captured`, which saves and replies: for the whole
 /// window, an area, and a target's area. The harness draws the view
-/// offscreen on wgpu, so the file is written. On tiny-skia, which cannot
-/// draw the canvas, it answers that there is nothing to capture, and the
-/// reply says so.
+/// offscreen on wgpu, so the file is written. With no GPU adapter it
+/// answers that there is nothing to capture, and the reply says so.
 #[test]
 fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
     let mut ui = pointer_ui();
@@ -2605,7 +2604,7 @@ fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
         } else {
             assert!(
                 answer.unwrap_err().contains("no window to capture"),
-                "{line}: tiny-skia cannot draw the canvas"
+                "{line}: with no GPU adapter nothing draws the canvas"
             );
         }
         assert!(

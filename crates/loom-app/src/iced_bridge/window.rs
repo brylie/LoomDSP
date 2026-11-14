@@ -41,9 +41,9 @@ pub(crate) type SharedClipboard = Rc<RefCell<Option<iced_winit::Clipboard>>>;
 
 /// Iced's layers in the shell's window.
 pub(crate) struct WindowLayers {
-    /// Iced's renderer, built once the GPU is ready. Always the wgpu one:
-    /// tiny-skia cannot draw into the shell's frames. Step B2 drops the
-    /// fallback wrapper.
+    /// Iced's renderer, built once the GPU is ready. Always the wgpu half
+    /// of the app's renderer type; the other half, the measure renderer,
+    /// is the headless harness's and draws nothing.
     renderer: Option<crate::Renderer>,
     /// The widget tree's state between builds.
     cache: Option<Cache>,
@@ -352,8 +352,8 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             // the shell holds a capture until the first frame is shown. The
             // last frame is at the current size too: after a resize the
             // shell draws before any capture is due.
-            if let Some(crate::Renderer::Primary(renderer)) = self.renderer.as_mut() {
-                renderer.present(Some(background), frame.format, frame.view, &viewport);
+            if let Some(renderer) = self.renderer.as_mut() {
+                wgpu(renderer).present(Some(background), frame.format, frame.view, &viewport);
             }
             return;
         }
@@ -381,9 +381,7 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             {
                 super::preedit::draw(renderer, composed, *caret, window, &theme, crate::style::BODY);
             }
-            if let crate::Renderer::Primary(renderer) = renderer {
-                renderer.present(Some(background), frame.format, frame.view, &viewport);
-            }
+            wgpu(renderer).present(Some(background), frame.format, frame.view, &viewport);
             state
         });
         if let Some(state) = drawn {
@@ -432,6 +430,15 @@ impl Sink for WindowSink<'_> {
         if let Some(clipboard) = self.layers.clipboard.borrow_mut().as_mut() {
             clipboard.write(iced::advanced::clipboard::Kind::Standard, contents);
         }
+    }
+}
+
+/// The wgpu renderer the window draws with. The window only ever makes the
+/// wgpu half of the app's renderer type (see `WindowLayers::renderer`).
+fn wgpu(renderer: &mut crate::Renderer) -> &mut iced_wgpu::Renderer {
+    match renderer {
+        crate::Renderer::Primary(wgpu) => wgpu,
+        crate::Renderer::Secondary(_) => unreachable!("the window draws with wgpu, never the measure renderer"),
     }
 }
 

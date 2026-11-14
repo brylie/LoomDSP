@@ -449,13 +449,13 @@ A custom element is the layer's supported escape hatch. The patch canvas is the 
 
 ## 10. Test harness and control channel
 
-**Status:** Agreed, phase 2. Rule 4 is built (step 2.3, item 4: `ui_test/a11y.rs`); phase 1's tests in `a11y/tests.rs` still read the tree from `a11y/tree.rs` directly.
+**Status:** Agreed, phase 2. Rules 3 and 4 are built (step 2.3, items 2 to 4: `iced_bridge/measure.rs`, `ui_test/a11y.rs`); phase 1's tests in `a11y/tests.rs` still read the tree from `a11y/tree.rs` directly.
 
 ### Rules
 
 1. **One runtime, two drivers.** The window and the headless `Ui` harness run the same code for events, layout, messages, and effects. Only the event source and the drawing target differ. *Why:* a test then checks what the app does, not what a copy of it does.
 2. **The harness's event and query methods keep their meaning:** `headless`, `press`, `release`, `drag`, `move_to`, `hold`, `tap`, `tap_key`, `key_down`, `key_up`, `typewrite`, `click_text`, `control`, `control_bounds`, `field`, `value_field`, `text`, `focus`, `focused_field`, `output`, `input`, and the rest. Their call sites do not change. `run_task(Task<Message>)` becomes `run_effects(Effects<Message>) -> Vec<Message>`, with the same meaning: run until no messages are left, and return them all. Its call sites change mechanically in phase 2, in one commit with no other change. *Why:* every `loom-app` test (1,004 at commit `a781de4`) depends on the harness. Keeping the meaning fixed shows whether behaviour changed; renaming the one method tied to Iced is the only way to leave Iced.
-3. **Event tests need no GPU.** Drawing tests render to an offscreen `wgpu` texture, and skip with `NO_GPU` where there is no adapter. *Why:* CI machines often have no GPU.
+3. **Event tests need no GPU.** The harness lays the view out on a renderer that only measures: it lays text out with the same paragraphs the window's renderer draws, so every part lands where the window draws it, and it draws nothing. Drawing tests and captures render to an offscreen `wgpu` texture, and skip with `NO_GPU` where there is no adapter, or fail where one is required (`LOOM_REQUIRE_GPU=1`, as on every CI test job). *Why:* CI machines often have no GPU, and an event test should not depend on one.
 4. **The harness can read and act on the accessibility tree:** `Ui::a11y_tree()` returns it, and `Ui::a11y_action(target, action)` performs an action on a node found by name. *Why:* a test can check the window the way a screen reader meets it.
    - A name is the node's accessible name, what a screen reader says. Names repeat (every filter tile has a Cutoff knob), so a target is one name, a path of names from the outside in (`["SVF", "Cutoff"]`), or a UI ID. `A11yTree::node(name)`, `path(names)`, and `node_by_id(id)` find nodes the same ways, and a node's own `node(name)` searches inside it.
    - A name that matches no shown node, or more than one, panics and lists what it found: the names there, or each match with the names above it. *Why:* a test never acts on the wrong node, and the panic shows how to scope the name.

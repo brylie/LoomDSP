@@ -3,11 +3,7 @@ use super::*;
 /// The window at its default size, drawn by `draw_window` with the wgpu
 /// renderer. `None` on a machine without a GPU adapter.
 fn render_window(app: &crate::App) -> Option<Vec<u8>> {
-    let mut renderer = iced::futures::executor::block_on(<crate::Renderer as Headless>::new(
-        Font::DEFAULT,
-        Pixels(16.0),
-        Some("wgpu"),
-    ))?;
+    let mut renderer = crate::iced_bridge::offscreen::renderer()?;
     Some(draw_window(app, &mut renderer, crate::WINDOW, 1.0))
 }
 

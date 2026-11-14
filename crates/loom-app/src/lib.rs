@@ -279,11 +279,12 @@ pub fn run() -> Result<(), loom_ui::shell::Error> {
 const WINDOW: Size = Size::new(1440.0, 900.0);
 
 /// The renderer the app's views are built for. Every view, widget, and
-/// element names this alias rather than Iced's own `Renderer`, so the
-/// headless harness can lay out on a renderer that needs no GPU while the
-/// window draws with wgpu (step 2.3, items 2 and 3 of the plan for leaving
-/// Iced). For now it is Iced's renderer.
-pub(crate) type Renderer = iced::Renderer;
+/// element names this alias rather than Iced's own `Renderer`. It is Iced's
+/// fallback renderer over two: the window always draws with the first,
+/// wgpu; the headless harness lays out on the second, which measures text
+/// as wgpu does and draws nothing, so event tests need no GPU (step 2.3,
+/// items 2 and 3 of the plan for leaving Iced).
+pub(crate) type Renderer = iced_renderer::fallback::Renderer<iced_wgpu::Renderer, iced_bridge::Measure>;
 
 /// An element of the app's views, built for [`Renderer`].
 pub(crate) type Element<'a, M = Message> = iced::Element<'a, M, Theme, Renderer>;

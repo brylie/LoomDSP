@@ -66,7 +66,6 @@ assert_no_alloc = "1.1"
 iced = { version = "0.14", default-features = false, features = [
     "advanced",
     "wgpu",
-    "tiny-skia",
     "crisp",
     "web-colors",
     "thread-pool",
@@ -74,6 +73,9 @@ iced = { version = "0.14", default-features = false, features = [
     "wayland",
 ] }
 iced_wgpu = "0.14"
+# The app's renderer type is Iced's fallback renderer: wgpu, or a renderer
+# that only measures, for the headless harness. Same version as Iced's.
+iced_renderer = { version = "0.14", default-features = false, features = ["wgpu-bare"] }
 # The window's event conversion and clipboard for loom-app on the shell
 # (docs/dev/leaving-iced-plan.md, step 2.2b-ii), until phase 3. Iced already
 # builds it; no features of our own.
