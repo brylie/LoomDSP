@@ -29,6 +29,41 @@ fn the_alpha_mode_prefers_post_multiplied() {
     assert_eq!(pick_alpha(&[A::Opaque]), A::Auto);
 }
 
+/// A device with no window, for a capture in a test. `None` when the
+/// machine has no adapter.
+fn headless(format: wgpu::TextureFormat) -> Option<Device> {
+    let adapter = pollster::block_on(instance().request_adapter(&adapter_options(None))).ok()?;
+    let (device, queue) = request_device(&adapter).ok()?;
+    Some(Device { device, queue, format })
+}
+
+/// The capture reads four 8-bit channels in either order, and refuses
+/// wider or packed formats rather than read their bytes as colours.
+#[test]
+fn the_capture_reads_only_eight_bit_formats() {
+    use wgpu::TextureFormat as F;
+    assert_eq!(eight_bit_order(F::Bgra8Unorm), Some(true));
+    assert_eq!(eight_bit_order(F::Bgra8UnormSrgb), Some(true));
+    assert_eq!(eight_bit_order(F::Rgba8Unorm), Some(false));
+    assert_eq!(eight_bit_order(F::Rgba8UnormSrgb), Some(false));
+    assert_eq!(eight_bit_order(F::Rgba16Float), None);
+    assert_eq!(eight_bit_order(F::Rgb10a2Unorm), None);
+}
+
+/// A capture in a format it cannot read gives no image, and draws nothing.
+/// Skipped, with `NO_GPU`, on a machine with no adapter.
+#[test]
+fn a_capture_in_a_wide_format_gives_none() {
+    let Some(device) = headless(wgpu::TextureFormat::Rgba16Float) else {
+        eprintln!("NO_GPU: no adapter, the capture is not checked");
+        return;
+    };
+    let mut drawn = false;
+    let image = capture(&device, PhysicalSize::new(2, 2), 1.0, |_| drawn = true);
+    assert!(image.is_none());
+    assert!(!drawn);
+}
+
 /// Clears `frame` to `colour`, as a layer would.
 fn clear(frame: &Frame<'_>, colour: wgpu::Color) {
     let mut encoder = frame

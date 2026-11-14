@@ -191,20 +191,19 @@ impl Gpu {
 
     /// Draws one frame into the window: `draw` draws everything into the
     /// surface's next texture, then `window` is told and the frame shown.
-    /// Returns false when no frame could be drawn: the window has no size,
-    /// or the surface was out of date and is set up again for the next.
-    pub fn frame(&mut self, logical: Size, scale: f32, window: &Window, draw: impl FnOnce(&Frame<'_>)) -> bool {
+    /// Says whether the frame was shown, or why not.
+    pub fn frame(&mut self, logical: Size, scale: f32, window: &Window, draw: impl FnOnce(&Frame<'_>)) -> Drawn {
         let size = window.inner_size();
         if size.width == 0 || size.height == 0 {
-            return false;
+            return Drawn::Skipped;
         }
         let texture = match self.surface.get_current_texture() {
             Ok(texture) => texture,
             Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
                 self.configure();
-                return false;
+                return Drawn::Retry;
             }
-            Err(_) => return false,
+            Err(_) => return Drawn::Skipped,
         };
         let view = texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
         draw(&Frame {
@@ -217,27 +216,35 @@ impl Gpu {
         });
         window.pre_present_notify();
         texture.present();
-        true
+        Drawn::Shown
     }
 }
 
-/// A device with no window, for a capture in a test. `None` when the
-/// machine has no adapter.
-#[cfg(test)]
-pub(crate) fn headless(format: wgpu::TextureFormat) -> Option<Device> {
-    let adapter = pollster::block_on(instance().request_adapter(&adapter_options(None))).ok()?;
-    let (device, queue) = request_device(&adapter).ok()?;
-    Some(Device { device, queue, format })
+/// What came of drawing a frame into the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Drawn {
+    /// The frame is shown.
+    Shown,
+    /// The surface was out of date or lost, and is set up again: the
+    /// frame can be drawn again at once.
+    Retry,
+    /// No frame, and drawing again now would not help: the window has no
+    /// size (it waits for a resize), or the surface failed another way.
+    Skipped,
 }
 
 /// Draws one frame into a texture of `physical` pixels in the device's
-/// format, reads it back, and gives it in RGBA order.
+/// format, reads it back, and gives it in RGBA order. The layers built
+/// their pipelines for that format, so the capture draws in it too, and
+/// gives `None` for a format it cannot read as 8-bit RGBA or BGRA, or when
+/// the read-back fails.
 pub(crate) fn capture(
     device: &Device,
     physical: PhysicalSize<u32>,
     scale: f32,
     draw: impl FnOnce(&Frame<'_>),
 ) -> Option<Image> {
+    let bgra = eight_bit_order(device.format)?;
     let (width, height) = (physical.width.max(1), physical.height.max(1));
     let extent = wgpu::Extent3d {
         width,
@@ -289,7 +296,10 @@ pub(crate) fn capture(
     );
     let index = device.queue.submit([encoder.finish()]);
     let slice = buffer.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
     device
         .device
         .poll(wgpu::PollType::Wait {
@@ -297,13 +307,16 @@ pub(crate) fn capture(
             timeout: None,
         })
         .ok()?;
+    // The poll waited for the copy, but only the callback says whether
+    // the buffer was mapped; reading an unmapped one panics.
+    receiver.try_recv().ok()?.ok()?;
     let mapped = slice.get_mapped_range();
     let mut rgba = Vec::with_capacity(row * height as usize);
     for line in mapped.chunks(padded) {
         rgba.extend_from_slice(&line[..row]);
     }
     drop(mapped);
-    if is_bgra(device.format) {
+    if bgra {
         for pixel in rgba.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
@@ -311,12 +324,16 @@ pub(crate) fn capture(
     Image::new(width, height, scale, rgba)
 }
 
-/// True for a format whose bytes are blue, green, red, alpha.
-fn is_bgra(format: wgpu::TextureFormat) -> bool {
-    matches!(
-        format,
-        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
-    )
+/// For a format of four 8-bit channels, whether its bytes are blue, green,
+/// red, alpha (true) or red, green, blue, alpha (false). `None` for any
+/// other format: wider channels, or packed ones such as 10-bit colour.
+fn eight_bit_order(format: wgpu::TextureFormat) -> Option<bool> {
+    use wgpu::TextureFormat as F;
+    match format {
+        F::Bgra8Unorm | F::Bgra8UnormSrgb => Some(true),
+        F::Rgba8Unorm | F::Rgba8UnormSrgb => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

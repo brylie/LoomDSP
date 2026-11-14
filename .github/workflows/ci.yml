@@ -437,7 +437,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status, test-placement, portable]
+    needs: [fmt, clippy, test, coverage, loopback, docs, msrv, wasm, deny, advisories, typos, adr-status, test-placement, portable, ui-no-toolkit]
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs passed

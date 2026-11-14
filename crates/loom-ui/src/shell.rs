@@ -43,7 +43,7 @@ use crate::routing::Target;
 use crate::runtime::{Next, Runtime};
 use crate::waker::Waker;
 use events::Held;
-use gpu::Gpu;
+use gpu::{Drawn, Gpu};
 use loom_ui_core::{Rect, Size};
 use pacing::{FrameKind, Pacing, Wait};
 use std::fmt;
@@ -225,6 +225,7 @@ where
         options,
         live: None,
         held: Held::default(),
+        retried: false,
         pacing: Pacing::default(),
         error: None,
     };
@@ -269,6 +270,10 @@ struct Handler<A: App, T, L, S> {
     held: Held,
     /// The redraw rule.
     pacing: Pacing,
+    /// The last frame found the surface out of date and asked again; a
+    /// second such frame in a row waits for an event, so a surface that
+    /// stays lost cannot draw in a loop.
+    retried: bool,
     /// What stopped the loop, if anything failed.
     error: Option<Error>,
 }
@@ -413,10 +418,11 @@ where
             FrameKind::System => Some(DriverEvent::RedrawRequested),
         };
         if let Some(event) = event {
-            // This frame is the one the turn says to draw, so its `draw`
-            // asks for no other.
+            // This frame is the one the turn says to draw, so the turn asks
+            // for no other, and an animation's next frame is asked for
+            // after this one.
             let next = live.runtime.handle(event, Instant::now(), &mut self.driver);
-            self.pacing.turn(&Next { draw: false, ..next });
+            self.pacing.frame_turn(&next);
         }
         let waker = live.runtime.waker();
         let window = live.runtime.window();
@@ -433,8 +439,18 @@ where
                 frame,
             );
         });
-        if drawn {
-            self.turn(event_loop, DriverEvent::Presented);
+        match drawn {
+            Drawn::Shown => {
+                self.retried = false;
+                self.turn(event_loop, DriverEvent::Presented);
+            }
+            Drawn::Retry if !self.retried => {
+                self.retried = true;
+                if self.pacing.layers(Redraw::NextFrame) {
+                    live.window.request_redraw();
+                }
+            }
+            Drawn::Retry | Drawn::Skipped => {}
         }
         if self.pacing.frame_ended()
             && let Some(live) = self.live.as_ref()
@@ -463,6 +479,10 @@ where
                     pointer,
                 },
             );
+        } else {
+            // No turn ran, but the layers heard the event, so what they
+            // report still applies now.
+            self.after(event_loop);
         }
     }
 }
@@ -537,7 +557,14 @@ where
             _ => {}
         }
         let scale = live.window.scale_factor() as f32;
-        for converted in events::driver_events(&event, scale, &mut self.held) {
+        let converted = events::driver_events(&event, scale, &mut self.held);
+        if converted.is_empty() {
+            // No turn runs, but the layers heard the event, so what they
+            // report (a cursor, the input method's area, a redraw) still
+            // applies now.
+            self.after(event_loop);
+        }
+        for converted in converted {
             self.turn(event_loop, converted);
         }
     }

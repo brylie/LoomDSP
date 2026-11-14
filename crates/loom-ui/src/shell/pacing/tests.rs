@@ -66,6 +66,44 @@ fn animation_asks_a_frame_after_each_frame() {
     assert_eq!(pacing.wait(), Wait::Sleep);
 }
 
+/// The turn that begins an animation frame asks nothing itself, so the
+/// next frame is still asked for, once, as the shell draws: after the
+/// `Presented` turn, or at the frame's end when nothing was shown. Taking
+/// it as an ordinary turn left an ask standing, and the animation
+/// stopped after one frame.
+#[test]
+fn the_frame_turn_leaves_the_next_frame_to_follow() {
+    let mut pacing = Pacing::default();
+    let animating = Next { frames: true, ..idle() };
+    assert!(pacing.turn(&animating));
+    assert_eq!(pacing.frame_begins(), FrameKind::Animation);
+    pacing.frame_turn(&Next {
+        draw: true,
+        ..animating
+    });
+    assert!(pacing.turn(&animating), "the Presented turn asks for the next");
+    assert!(!pacing.frame_ended(), "and only once");
+    assert_eq!(pacing.frame_begins(), FrameKind::Animation);
+    pacing.frame_turn(&animating);
+    assert!(pacing.frame_ended(), "with no frame shown, the end asks");
+}
+
+/// The frame turn takes the runtime's state: a deadline and waiting
+/// messages it reports are kept, and an animation that stops stops.
+#[test]
+fn the_frame_turn_takes_the_runtimes_state() {
+    let mut pacing = Pacing::default();
+    let at = Instant::now() + Duration::from_millis(5);
+    pacing.frame_turn(&Next {
+        deadline: Some(at),
+        ..idle()
+    });
+    assert_eq!(pacing.wait(), Wait::Until(at));
+    assert!(!pacing.frame_ended(), "no animation, no next frame");
+    pacing.frame_turn(&Next { again: true, ..idle() });
+    assert_eq!(pacing.wait(), Wait::Poll);
+}
+
 /// The loop wakes at the earlier of the runtime's deadline and the layers'
 /// time.
 #[test]

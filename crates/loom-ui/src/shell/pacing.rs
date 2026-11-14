@@ -87,6 +87,17 @@ impl Pacing {
         self.ask(next.draw || next.frames)
     }
 
+    /// Takes the result of the turn that begins a frame: its `Frame` or
+    /// `RedrawRequested`. That turn's draw is the frame being drawn, and
+    /// an animation's next frame is asked for once this one ends, so it
+    /// asks for nothing now. An ask here would stand until the next
+    /// frame began, and stop [`Pacing::frame_ended`] asking for it.
+    pub fn frame_turn(&mut self, next: &Next) {
+        self.frames = next.frames;
+        self.again = next.again;
+        self.deadline = next.deadline;
+    }
+
     /// Takes what the layers want. Returns true when the shell must ask
     /// the window for a frame now.
     pub fn layers(&mut self, redraw: Redraw) -> bool {
