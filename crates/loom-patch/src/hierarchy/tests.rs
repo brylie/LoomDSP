@@ -3,7 +3,7 @@ use loom_core::{EngineConfig, EngineParts, create_engine};
 use std::path::PathBuf;
 
 /// Loads `patch` into a fresh engine and reads its hierarchy.
-fn load(patch: &Patch) -> (Controller, Hierarchy) {
+pub(super) fn load(patch: &Patch) -> (Controller, Hierarchy) {
     let EngineParts { mut controller, .. } = create_engine(loom_modules::registry(), EngineConfig::default());
     let mut ids = FlatIds::new();
     patch.load_with_ids(&mut controller, &mut ids).expect("the patch loads");

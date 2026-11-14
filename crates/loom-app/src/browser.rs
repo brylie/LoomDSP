@@ -1,7 +1,8 @@
 //! The module browser: search the registry and add a module where the user
 //! opened the browser. Spec: `docs/design/module-browser.md`. It also lists
-//! the sub-patches in the library folder, inserted as a copy, or linked
-//! from the item's menu (`docs/design/sub-patches.md`, Library).
+//! an empty slot for each role a part fills (`docs/design/sub-patches.md`,
+//! Empty slots), and the sub-patches in the library folder, inserted as a
+//! copy, or linked from the item's menu (Library).
 
 use crate::Element;
 use crate::style;
@@ -9,7 +10,7 @@ use iced::widget::{column, container, mouse_area, row, scrollable, space, text, 
 use iced::{Length, Theme};
 use loom_canvas::GRID;
 use loom_canvas::iced_convert::ToIced as _;
-use loom_core::{Family, ModuleDescriptor};
+use loom_core::{Family, ModuleDescriptor, RoleDescriptor};
 use loom_ui::Effects;
 use loom_ui_core::{Point, Rect, UiId};
 use serde::Serialize;
@@ -37,6 +38,11 @@ const LIST: &str = "module-browser-list";
 
 /// The mark a library item's row shows in place of a module's family.
 pub(crate) const LIBRARY_MARK: &str = "Sub-patch";
+/// The mark a built-in abstraction's row shows in place of a module's
+/// family.
+pub(crate) const BUILTIN_MARK: &str = "Built in";
+/// The mark a slot row shows in place of a module's family.
+pub(crate) const SLOT_MARK: &str = "Slot";
 /// The one item on a library item's menu.
 pub(crate) const INSERT_LINKED: &str = "Insert linked";
 
@@ -103,6 +109,11 @@ pub enum Outcome {
     Close,
     /// Close it and add this module at this world point.
     Add(&'static ModuleDescriptor, Point),
+    /// Close it and add an empty slot for this role at this world point.
+    AddSlot(&'static RoleDescriptor, Point),
+    /// Close it and insert this built-in abstraction as a copy at this
+    /// world point.
+    InsertBuiltin(&'static crate::builtin::Builtin, Point),
     /// Close it and insert this library item as a sub-patch at this world
     /// point, as a copy or linked.
     Insert {
@@ -115,7 +126,11 @@ pub enum Outcome {
 /// One row of the list.
 #[derive(Debug, Clone, Copy)]
 enum Entry {
+    /// A built-in abstraction, by its index in the browser's built-ins.
+    Builtin(usize),
     Module(&'static ModuleDescriptor),
+    /// An empty slot for a role.
+    Role(&'static RoleDescriptor),
     /// A library item, by its index in the browser's list.
     Library(usize),
 }
@@ -185,11 +200,14 @@ pub(crate) fn browser_id() -> UiId {
     UiId::panel("browser")
 }
 
-/// The UI ID of a row: a module by its type ID, a library item by its path
-/// in the library folder, each one key (ui-layer.md, section 4).
-fn row_id(entry: Entry, library: &[LibraryItem]) -> UiId {
+/// The UI ID of a row: a module by its type ID, a slot by its role's ID, a
+/// library item by its path in the library folder, each one key
+/// (ui-layer.md, section 4).
+fn row_id(entry: Entry, builtins: &[crate::builtin::Builtin], library: &[LibraryItem]) -> UiId {
     match entry {
+        Entry::Builtin(i) => browser_id().with("builtin").with(builtins[i].stem),
         Entry::Module(d) => browser_id().with("module").with(d.id),
+        Entry::Role(r) => browser_id().with("role").with(r.id),
         Entry::Library(i) => browser_id().with("library").with(library[i].library.as_str()),
     }
 }
@@ -207,6 +225,10 @@ pub(crate) fn insert_linked_id(row: &UiId) -> UiId {
 /// An open browser.
 pub struct Browser {
     modules: Vec<&'static ModuleDescriptor>,
+    /// Every registered role, for the slot rows.
+    roles: Vec<&'static RoleDescriptor>,
+    /// The built-in abstractions, listed first, with their descriptions.
+    builtins: &'static [crate::builtin::Builtin],
     /// The library folder's sub-patches, once read.
     library: Vec<LibraryItem>,
     /// What each row of the model is, by the same index.
@@ -234,6 +256,8 @@ impl Browser {
     pub fn open(modules: Vec<&'static ModuleDescriptor>, world: Point, at: Point, area: Rect) -> Self {
         let mut browser = Self {
             modules,
+            roles: Vec::new(),
+            builtins: &[],
             library: Vec::new(),
             results: Vec::new(),
             model: Model {
@@ -254,6 +278,23 @@ impl Browser {
         browser
     }
 
+    /// Lists `builtins` first (sub-patches.md, Built-in abstractions).
+    pub fn with_builtins(mut self, builtins: &'static [crate::builtin::Builtin]) -> Self {
+        self.builtins = builtins;
+        self.search();
+        self.set_highlight(0);
+        self
+    }
+
+    /// Lists an empty slot for each of `roles` that a module or a library
+    /// item fills (sub-patches.md, Empty slots).
+    pub fn with_roles(mut self, roles: Vec<&'static RoleDescriptor>) -> Self {
+        self.roles = roles;
+        self.search();
+        self.set_highlight(0);
+        self
+    }
+
     /// What the browser shows.
     pub fn model(&self) -> &Model {
         &self.model
@@ -267,7 +308,10 @@ impl Browser {
     /// Highlights `row`, within the list, and says what it is under it.
     fn set_highlight(&mut self, row: usize) {
         self.model.highlight = (!self.results.is_empty()).then(|| row.min(self.results.len() - 1));
-        self.model.about = self.model.highlight.map(|at| about(self.results[at], &self.library));
+        self.model.about = self
+            .model
+            .highlight
+            .map(|at| about(self.results[at], self.builtins, &self.library));
     }
 
     /// Opens the menu of `row`, or closes it with `None`.
@@ -291,9 +335,19 @@ impl Browser {
                 Outcome::Stay
             }
             Message::Library(items) => {
+                // The highlight stays on the same row, by its UI ID: a slot
+                // row a library item fills can appear above it.
+                let kept = self
+                    .model
+                    .highlight
+                    .and_then(|at| self.model.rows.get(at))
+                    .map(|r| r.id.clone());
                 self.library = items;
                 self.search();
-                self.set_highlight(self.highlight());
+                let at = kept
+                    .and_then(|id| self.model.rows.iter().position(|r| r.id == id))
+                    .unwrap_or(self.highlight());
+                self.set_highlight(at);
                 Outcome::Stay
             }
             Message::Hover(row) => {
@@ -391,7 +445,20 @@ impl Browser {
             .iter()
             .filter_map(|entry| match entry {
                 Entry::Module(descriptor) => Some(*descriptor),
-                Entry::Library(_) => None,
+                Entry::Builtin(_) | Entry::Role(_) | Entry::Library(_) => None,
+            })
+            .collect()
+    }
+
+    /// The slot rows the list shows, each with its row and role.
+    #[cfg(test)]
+    pub fn slot_rows(&self) -> Vec<(usize, &'static RoleDescriptor)> {
+        self.results
+            .iter()
+            .enumerate()
+            .filter_map(|(row, entry)| match entry {
+                Entry::Role(role) => Some((row, *role)),
+                Entry::Builtin(_) | Entry::Module(_) | Entry::Library(_) => None,
             })
             .collect()
     }
@@ -404,7 +471,7 @@ impl Browser {
             .enumerate()
             .filter_map(|(row, entry)| match entry {
                 Entry::Library(i) => self.library.get(*i).map(|item| (row, item)),
-                Entry::Module(_) => None,
+                Entry::Builtin(_) | Entry::Module(_) | Entry::Role(_) => None,
             })
             .collect()
     }
@@ -428,8 +495,14 @@ impl Browser {
     /// Fills the list from the query: the modules, then the library items.
     /// The model's rows are built here, once per search, never per frame.
     fn search(&mut self) {
-        self.results = results(&self.modules, &self.library, &self.model.query);
-        self.model.rows = rows(&self.results, &self.library);
+        self.results = results(
+            &self.modules,
+            &self.roles,
+            self.builtins,
+            &self.library,
+            &self.model.query,
+        );
+        self.model.rows = rows(&self.results, self.builtins, &self.library);
         self.model.empty = self.results.is_empty().then_some("No modules match.");
         // The menu belongs to a row that may be gone.
         self.set_menu(None, None);
@@ -441,13 +514,19 @@ impl Browser {
     /// so an update that forgets to change the model fails.
     #[cfg(test)]
     pub(crate) fn fresh_model(&self) -> Model {
-        let results = results(&self.modules, &self.library, &self.model.query);
+        let results = results(
+            &self.modules,
+            &self.roles,
+            self.builtins,
+            &self.library,
+            &self.model.query,
+        );
         let highlight = self.model.highlight.filter(|&at| at < results.len());
         Model {
             query: self.model.query.clone(),
-            rows: rows(&results, &self.library),
+            rows: rows(&results, self.builtins, &self.library),
             highlight,
-            about: highlight.map(|at| about(results[at], &self.library)),
+            about: highlight.map(|at| about(results[at], self.builtins, &self.library)),
             menu: self.model.menu,
             menu_highlight: self.model.menu_highlight,
             empty: results.is_empty().then_some("No modules match."),
@@ -457,6 +536,11 @@ impl Browser {
     fn add(&self, linked: bool) -> Outcome {
         if let Some(descriptor) = self.highlighted() {
             return Outcome::Add(descriptor, self.world);
+        }
+        match self.model.highlight.and_then(|at| self.results.get(at)) {
+            Some(Entry::Role(role)) => return Outcome::AddSlot(role, self.world),
+            Some(Entry::Builtin(i)) => return Outcome::InsertBuiltin(&self.builtins[*i], self.world),
+            _ => {}
         }
         match self.highlighted_item() {
             Some(item) => Outcome::Insert {
@@ -636,24 +720,109 @@ pub(crate) fn about_id() -> UiId {
 }
 
 /// What the list shows for `query`: the modules, then the library items.
-fn results(modules: &[&'static ModuleDescriptor], library: &[LibraryItem], query: &str) -> Vec<Entry> {
-    search(modules, query)
+fn results(
+    modules: &[&'static ModuleDescriptor],
+    roles: &[&'static RoleDescriptor],
+    builtins: &[crate::builtin::Builtin],
+    library: &[LibraryItem],
+    query: &str,
+) -> Vec<Entry> {
+    let slots = slot_roles(modules, roles, library);
+    search_builtins(builtins, query)
         .into_iter()
-        .map(Entry::Module)
+        .map(Entry::Builtin)
+        .chain(search(modules, query).into_iter().map(Entry::Module))
+        .chain(search_roles(&slots, query).into_iter().map(Entry::Role))
         .chain(search_library(library, query).into_iter().map(Entry::Library))
         .collect()
 }
 
+/// The built-in abstractions that match a query, as indices into
+/// [`crate::builtin::ALL`], best first: every word of the query is in the
+/// name, `sub-patch`, or the mark `Built in`, ignoring case, ranked by name
+/// as modules are (module-browser.md, Groups). Indices are into `all`.
+fn search_builtins(all: &[crate::builtin::Builtin], query: &str) -> Vec<usize> {
+    let query = query.trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<usize> = (0..all.len())
+        .filter(|&i| {
+            let text = format!("{} sub-patch {BUILTIN_MARK}", all[i].name).to_lowercase();
+            words.iter().all(|w| text.contains(w))
+        })
+        .collect();
+    if !query.is_empty() {
+        found.sort_by_key(|&i| Reverse(rank(all[i].name, &query)));
+    }
+    found
+}
+
+/// The roles an empty slot can be added for: each of `roles` that a module
+/// in `modules` declares, or that a library item's file declares, once
+/// each, by name. A library item's role kind resolves as a file's does: an
+/// unknown role, or a version newer than the registry's, adds no row
+/// (sub-patches.md, Empty slots).
+fn slot_roles(
+    modules: &[&'static ModuleDescriptor],
+    roles: &[&'static RoleDescriptor],
+    library: &[LibraryItem],
+) -> Vec<&'static RoleDescriptor> {
+    let filled_by_library = |role: &RoleDescriptor| {
+        library.iter().flat_map(|item| &item.roles).any(|kind| {
+            let Some((id, version)) = kind.split_once('@') else {
+                return false;
+            };
+            id == role.id && version.parse::<u32>().is_ok_and(|v| v <= role.version)
+        })
+    };
+    let mut found: Vec<&'static RoleDescriptor> = roles
+        .iter()
+        .copied()
+        .filter(|role| modules.iter().any(|d| d.fills(role.id).is_some()) || filled_by_library(role))
+        .collect();
+    found.sort_by_key(|role| (role.name, role.id));
+    found.dedup_by_key(|role| role.id);
+    found
+}
+
+/// The slot rows that match a query, best first: every word of the query
+/// is in the row's text (`Filter slot`), the mark `Slot`, or the role's
+/// kind, ignoring case, ranked by the row's text as modules are.
+fn search_roles(roles: &[&'static RoleDescriptor], query: &str) -> Vec<&'static RoleDescriptor> {
+    let query = query.trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<&'static RoleDescriptor> = roles
+        .iter()
+        .copied()
+        .filter(|role| {
+            let text = format!("{} slot {} {SLOT_MARK}", role.name, role.kind()).to_lowercase();
+            words.iter().all(|w| text.contains(w))
+        })
+        .collect();
+    if !query.is_empty() {
+        found.sort_by_key(|role| Reverse(rank(&format!("{} slot", role.name), &query)));
+    }
+    found
+}
+
 /// The rows the model shows for `results`, each with its UI ID, made
 /// unique, its text worked out once, and its description.
-fn rows(results: &[Entry], library: &[LibraryItem]) -> Vec<BrowserRow> {
+fn rows(results: &[Entry], builtins: &[crate::builtin::Builtin], library: &[LibraryItem]) -> Vec<BrowserRow> {
     let mut ids = crate::a11y::items::UniqueIds::default();
     results
         .iter()
         .map(|&entry| {
-            let id = ids.take(row_id(entry, library));
+            let id = ids.take(row_id(entry, builtins, library));
             let key = id.to_string();
             match entry {
+                Entry::Builtin(i) => BrowserRow {
+                    id,
+                    key,
+                    name: builtins[i].name.to_string(),
+                    mark: BUILTIN_MARK,
+                    family: Family::Interface,
+                    library: false,
+                    description: builtins[i].description().to_string(),
+                },
                 Entry::Module(d) => BrowserRow {
                     id,
                     key,
@@ -662,6 +831,15 @@ fn rows(results: &[Entry], library: &[LibraryItem]) -> Vec<BrowserRow> {
                     family: d.family,
                     library: false,
                     description: d.description.to_string(),
+                },
+                Entry::Role(r) => BrowserRow {
+                    id,
+                    key,
+                    name: format!("{} slot", r.name),
+                    mark: SLOT_MARK,
+                    family: Family::Interface,
+                    library: false,
+                    description: r.description.to_string(),
                 },
                 Entry::Library(i) => BrowserRow {
                     id,
@@ -678,11 +856,27 @@ fn rows(results: &[Entry], library: &[LibraryItem]) -> Vec<BrowserRow> {
 }
 
 /// What the area under the list says about `entry`.
-fn about(entry: Entry, library: &[LibraryItem]) -> About {
+fn about(entry: Entry, builtins: &[crate::builtin::Builtin], library: &[LibraryItem]) -> About {
     match entry {
+        Entry::Builtin(i) => About {
+            text: builtins[i].description().to_string(),
+            detail: "Built in, inserted as a copy".to_string(),
+        },
         Entry::Module(d) => About {
             text: d.description.to_string(),
             detail: d.id.to_string(),
+        },
+        Entry::Role(r) => About {
+            text: format!(
+                "{} Add an empty slot, then swap a part in from its menu or the inspector.{}",
+                r.description,
+                if r.thru {
+                    " While empty, it passes its input through."
+                } else {
+                    ""
+                }
+            ),
+            detail: r.kind(),
         },
         Entry::Library(i) => About {
             text: "A sub-patch from your library, inserted as a copy. Right-click it to insert it linked.".to_string(),

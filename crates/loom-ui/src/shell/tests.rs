@@ -115,3 +115,128 @@ fn the_rest_goes_to_the_services() {
     );
     assert_eq!(inbox.try_iter().collect::<Vec<_>>(), [3, 4, 5]);
 }
+
+/// An app that keeps each message with the focus it ran under.
+#[derive(Default)]
+struct Log {
+    /// Each message, and the target's focus when it ran.
+    seen: Vec<(u32, Option<loom_ui_core::UiId>)>,
+}
+
+impl App for Log {
+    type Message = u32;
+
+    fn update(&mut self, message: u32, cx: &crate::app::Context<'_, u32>) -> crate::effect::Effects<u32> {
+        self.seen.push((message, cx.focused().cloned()));
+        crate::effect::Effects::none()
+    }
+
+    fn view(&self, _view: &mut crate::view::View) {}
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec {
+            title: "Log".into(),
+            min_size: None,
+        }
+    }
+}
+
+/// A target that only keeps what has focus.
+#[derive(Default)]
+struct Focus(Option<loom_ui_core::UiId>);
+
+impl Target<u32> for Focus {
+    fn input(&mut self, _: &loom_ui_core::Event, _: Option<loom_ui_core::Point>, _: Instant, _: &mut Vec<u32>) {}
+
+    fn focus(&mut self, _: &crate::effect::FocusTarget, _: crate::effect::Selection) {}
+
+    fn scroll_into_view(&mut self, _: &loom_ui_core::UiId) {}
+
+    fn focused(&self) -> Option<loom_ui_core::UiId> {
+        self.0.clone()
+    }
+
+    fn needs_redraw(&mut self, _: usize) -> bool {
+        false
+    }
+}
+
+/// Layers that hold a focus answer: they move the target's focus, then
+/// hand over its message.
+#[derive(Default)]
+struct Answer(Option<(u32, loom_ui_core::UiId)>);
+
+impl Layers<Log, Focus> for Answer {
+    fn draw(&mut self, _: Parts<'_, Log, Focus>, _: &Frame<'_>) {}
+
+    fn alone(&mut self, parts: Parts<'_, Log, Focus>) -> Option<u32> {
+        let (message, part) = self.0.take()?;
+        parts.target.0 = Some(part);
+        Some(message)
+    }
+}
+
+/// A message queued in the same instant as a focus answer runs first, in
+/// its own turn, under the focus it was sent under; the answer's message
+/// runs after, alone, under the new focus. So the app's copy of focus
+/// never drifts from the target's within a turn.
+#[test]
+fn a_queued_message_runs_before_a_focus_answer_alone() {
+    let field = loom_ui_core::UiId::panel("inspector").with("field");
+    let mut runtime = Runtime::new(
+        Log::default(),
+        Focus::default(),
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut layers = Answer(Some((2, field.clone())));
+    runtime.waker().send(1);
+    let nexts = alone_turns(&mut runtime, &mut layers, &mut driver());
+    assert_eq!(nexts.len(), 2);
+    assert_eq!(runtime.counts().turns, 2);
+    assert_eq!(runtime.app().seen, [(1, None), (2, Some(field))]);
+}
+
+/// With no message from the layers, only the queued turn runs.
+#[test]
+fn an_empty_answer_runs_only_the_queue() {
+    let mut runtime = Runtime::new(
+        Log::default(),
+        Focus::default(),
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    runtime.waker().send(1);
+    let nexts = alone_turns(&mut runtime, &mut Answer::default(), &mut driver());
+    assert_eq!(nexts.len(), 1);
+    assert_eq!(runtime.app().seen, [(1, None)]);
+}
+
+/// The pointer is hidden and shown as `iced_winit` does it: hiding sets no
+/// cursor, a second hide does nothing, and the next cursor shows the
+/// pointer again; a cursor while shown only sets the cursor.
+#[test]
+fn the_pointer_hides_and_shows_again() {
+    let mut hidden = false;
+    let arrow = Pointer::Icon(CursorIcon::Default);
+    assert_eq!(pointer_calls(&mut hidden, arrow), (Some(CursorIcon::Default), None));
+    assert_eq!(pointer_calls(&mut hidden, Pointer::Hidden), (None, Some(false)));
+    assert_eq!(pointer_calls(&mut hidden, Pointer::Hidden), (None, None));
+    assert_eq!(
+        pointer_calls(&mut hidden, Pointer::Icon(CursorIcon::Pointer)),
+        (Some(CursorIcon::Pointer), Some(true))
+    );
+    assert!(!hidden);
+}
+
+/// A capture asked for before the first frame waits for it, so it never
+/// gives a blank image; once a frame has been shown, every capture waiting
+/// is drawn.
+#[test]
+fn a_capture_waits_for_the_first_frame() {
+    let mut captures = vec![1, 2];
+    assert!(due_captures(false, &mut captures).is_empty());
+    assert_eq!(captures, [1, 2], "still waiting");
+    assert_eq!(due_captures(true, &mut captures), [1, 2]);
+    assert!(captures.is_empty());
+}

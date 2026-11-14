@@ -2275,6 +2275,7 @@ dependencies = [
  "iced",
  "iced_runtime",
  "iced_wgpu",
+ "iced_winit",
  "jiff",
  "known-folders",
  "libc",
@@ -2294,6 +2295,7 @@ dependencies = [
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
+ "winit",
 ]
 
 [[package]]

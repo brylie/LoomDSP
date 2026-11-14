@@ -1278,3 +1278,149 @@ fn one_gesture_makes_one_schedule_swap() {
     run.play(0.05);
     assert_eq!(swaps(&run), before + 2, "a delete swaps once");
 }
+
+/// The Synth voice tile in `examples/patches/synth-voice.ron`.
+const VOICE_TILE: u32 = 2;
+
+/// Swaps the Synth voice's Filter slot to the Ladder from the voice tile's
+/// menu, `Swap Filter to Ladder`, and checks the swap on the tape: no step
+/// larger than the fade allows, the cables kept, and the cutoff carried.
+fn swap_the_voice_filter(run: &mut Run) {
+    use loom_core::ModuleNames as _;
+    let definition_cables = |app: &App| {
+        let patch = app
+            .session
+            .hierarchy
+            .unflatten(app.session.controller.graph(), |_| Default::default());
+        patch.subpatches["synth voice"].cables.clone()
+    };
+    let cables = definition_cables(&run.app);
+    let slot = run
+        .app
+        .session
+        .hierarchy
+        .id_at(&loom_patch::ModulePath::top(VOICE_TILE), 22)
+        .expect("the Filter slot");
+    let cutoff_of = |app: &App| {
+        let part = app.session.hierarchy.part_of_slot(slot).expect("a part");
+        let node = app.session.controller.graph().node(part).unwrap();
+        (node.descriptor.id, node.params[node.parameter_index("cutoff").unwrap()])
+    };
+    let (svf, cutoff) = cutoff_of(&run.app);
+    assert_eq!(svf, "loom.filter.svf");
+    let swap = run
+        .app
+        .tile_menu_items(VOICE_TILE)
+        .into_iter()
+        .find(|(label, _)| label == "Swap Filter to Ladder")
+        .expect("the voice tile offers the swap")
+        .1;
+    let switch = run.left().len();
+    let _ = run.app.send(swap);
+    run.play(0.1);
+    let _ = run.app.send(Message::Tick);
+    assert!(run.app.session.hierarchy.fading_slots().is_empty(), "the fade finished");
+    let finish = run.left().len();
+    run.play(0.3);
+    let left = run.left();
+    assert!(left.iter().all(|x| x.is_finite()));
+    let before = &left[switch - 4_800..switch];
+    let after = &left[finish + 1024..finish + 1024 + 4_800];
+    let limit = swap_step_limit(before).max(swap_step_limit(after));
+    let across = max_step(&left[switch - 1..finish + 1024]);
+    assert!(across <= limit, "swap step {across} > {limit}");
+    assert_eq!(
+        cutoff_of(&run.app),
+        ("loom.filter.ladder", cutoff),
+        "the cutoff carried across"
+    );
+    assert_eq!(definition_cables(&run.app), cables, "the cables stay");
+}
+
+/// Inserting the Synth voice plays a held note at a sensible level, between
+/// −12 and −1 dBFS, so the output limiter does not work on one note; and
+/// swapping its Filter slot from the voice tile's menu keeps the cables and
+/// the cutoff, with no click (#700; sub-patches.md, Built-in abstractions).
+#[test]
+fn the_synth_voice_plays_and_swaps_its_filter_with_no_click() {
+    let mut run = Setup::new("synth_voice", PatchFrom::Example("synth-voice.ron")).start();
+    run.hold();
+    run.play(0.5);
+    let held = run.left();
+    let note = peak(&held[held.len() - 9_600..]);
+    assert!(note > 0.25 && note < CEILING, "one note peaks at {note}");
+    swap_the_voice_filter(&mut run);
+}
+
+/// The Synth voice stacks for unison: Mode Stack, Copies 4, and a `fine
+/// tune` spread of 0.1 give each copy a spread assignment of `0.1 × o`,
+/// `o` from −1 to 1, on the fine tune factor, whose knob spans 2, on one
+/// semitone: ±20 and ±6.7 cents. It plays, and a filter swap in that state
+/// has no click (#700; unison.md).
+#[test]
+fn the_synth_voice_stacks_for_unison() {
+    let mut run = Setup::new("synth_voice_unison", PatchFrom::Example("synth-voice.ron")).start();
+    let mode = |run: &mut Run, message: crate::modes::Message| {
+        let _ = run.app.send(Message::Mode(message));
+    };
+    mode(
+        &mut run,
+        crate::modes::Message::SetMode {
+            tile: VOICE_TILE,
+            mode: loom_patch::modes::Mode::Stack,
+        },
+    );
+    mode(
+        &mut run,
+        crate::modes::Message::SetCopies {
+            tile: VOICE_TILE,
+            copies: 4,
+        },
+    );
+    mode(
+        &mut run,
+        crate::modes::Message::SetSpread {
+            tile: VOICE_TILE,
+            name: "fine tune".into(),
+            amount: 0.1,
+        },
+    );
+    assert_eq!(
+        run.app
+            .session
+            .hierarchy
+            .modes_of(ModuleId(VOICE_TILE))
+            .unwrap()
+            .copy_count(),
+        4,
+        "{}",
+        run.app.alerts.status()
+    );
+    // Each copy's fine tune factor carries a spread of 0.1 × its offset.
+    let graph = run.app.session.controller.graph();
+    let mut cents: Vec<f32> = graph
+        .assignments()
+        .filter(|(_, a)| {
+            graph
+                .node(a.target)
+                .is_some_and(|n| n.descriptor.id == "loom.level.scale")
+                && run.app.session.hierarchy.path_of(a.target).last() == 5
+        })
+        .map(|(_, a)| {
+            // A share of the factor's knob, which spans 2, on a span of
+            // one semitone.
+            a.depth * 2.0 * 100.0
+        })
+        .collect();
+    cents.sort_by(f32::total_cmp);
+    let expected = [-20.0, -6.667, 6.667, 20.0];
+    assert_eq!(cents.len(), 4, "{cents:?}");
+    for (got, want) in cents.iter().zip(expected) {
+        assert!((got - want).abs() < 0.01, "{cents:?}");
+    }
+    run.hold();
+    run.play(0.5);
+    let held = run.left();
+    assert!(peak(&held[held.len() - 9_600..]) > 0.05, "the stack plays");
+    swap_the_voice_filter(&mut run);
+}

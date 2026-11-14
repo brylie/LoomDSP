@@ -26,6 +26,7 @@
 
 use crate::places::Places;
 use accesskit::{ActionRequest, TreeUpdate};
+#[cfg(test)]
 use iced::Subscription;
 use loom_core::ModuleId;
 use loom_ui_core::IdTable;
@@ -44,8 +45,8 @@ mod tests;
 #[cfg(target_os = "macos")]
 use macos as platform;
 
-/// Attaches the adapter to the window at start, for the bridge to run
-/// (`iced_bridge.rs`). Only macOS has one before step 2.2.
+/// Attaches the adapter to the window when it opens, for the window's
+/// layers (`iced_bridge/window.rs`). Only macOS has one before step 2.2d.
 #[cfg(target_os = "macos")]
 pub(crate) use macos::attach;
 
@@ -53,11 +54,14 @@ pub(crate) use macos::attach;
 /// tree goes nowhere.
 #[cfg(not(target_os = "macos"))]
 mod platform {
+    #[cfg(test)]
     use super::Event;
     use accesskit::TreeUpdate;
+    #[cfg(test)]
     use iced::Subscription;
 
     /// No adapter, so no events.
+    #[cfg(test)]
     pub(super) fn events() -> Subscription<Event> {
         Subscription::none()
     }
@@ -319,6 +323,10 @@ impl crate::App {
     /// Events from the adapter, and while a screen reader listens, the
     /// window's scale factor when it changes. The timer for live values is
     /// a deadline (`timers.rs`). With no screen reader nothing runs.
+    /// Kept for the tests that compare the window's listeners with Iced's
+    /// subscriptions (`subscriptions/tests.rs`); the window hears both
+    /// through `Listeners` and the waker now.
+    #[cfg(test)]
     pub(crate) fn a11y_subscription(&self) -> Subscription<Event> {
         let scale = if self.a11y.is_active() {
             iced::event::listen_with(rescaled)
@@ -510,7 +518,9 @@ impl crate::App {
             let widgets = (0..tile.widgets.len()).map(|index| {
                 // From the panel's description, not from how the widget is
                 // drawn, so the kind agrees with the names `locate` takes.
-                let kind = if !crate::surface::is_control(graph, hierarchy, tile.id, index) {
+                let control = crate::surface::is_control(graph, hierarchy, tile.id, index)
+                    || crate::surface::is_inert(hierarchy, tile.id, index);
+                let kind = if !control {
                     tree::WidgetKey::Display
                 } else if on_module {
                     tree::WidgetKey::Param

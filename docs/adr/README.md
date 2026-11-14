@@ -78,3 +78,5 @@ The status line holds one of these values and nothing else. The date line is the
 | [0040](0040-stack-copies-and-mode-modules-are-implied.md) | Stack copies and the modules a mode adds are implied by the flattener | Accepted |
 | [0041](0041-own-ui-layer.md) | Our own UI layer on winit, wgpu, and AccessKit | Accepted |
 | [0042](0042-unpatched-phase-inputs-are-wired-for-the-player.md) | Unpatched phase inputs are wired for the player | Accepted |
+| [0043](0043-unpatched-means-normalled.md) | Unpatched means normalled | Accepted |
+| [0044](0044-swap-fades-are-transient-at-every-copy.md) | Swap fades are transient at every copy | Accepted |

@@ -28,9 +28,9 @@ const BRIDGE_ONLY: [&str; 7] = [
 ];
 
 /// Files under `src/` that still name them, until each is ported. The list
-/// only shrinks. `a11y/macos.rs` stays until the `winit` shell replaces it
-/// at step 2.2.
-const NOT_YET_PORTED: [&str; 1] = ["a11y/macos.rs"];
+/// only shrinks. It is empty since the app runs on the `winit` shell (step
+/// 2.2b-ii), and stays as the place for one that must name them for a while.
+const NOT_YET_PORTED: [&str; 0] = [];
 
 /// True for a file that holds tests: `tests.rs`, a name ending in
 /// `_tests.rs`, or any file under a `tests` folder.

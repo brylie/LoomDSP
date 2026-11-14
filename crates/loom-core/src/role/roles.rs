@@ -80,6 +80,7 @@ pub static SOURCE: RoleDescriptor = RoleDescriptor {
         optional("tune", "Tune", "st", "Shifts the pitch in semitones."),
         optional("octave", "Octave", "oct", "Shifts the pitch in octaves."),
     ],
+    thru: false,
 };
 
 /// `loom.role.filter`: shapes the spectrum of a signal around a cutoff.
@@ -108,6 +109,7 @@ pub static FILTER: RoleDescriptor = RoleDescriptor {
         optional("resonance", "Resonance", "", "Boosts the frequencies near the cutoff."),
         optional("drive", "Drive", "", "Raises the input level so the filter saturates."),
     ],
+    thru: true,
 };
 
 /// `loom.role.shaper`: distorts a signal.
@@ -127,6 +129,7 @@ pub static SHAPER: RoleDescriptor = RoleDescriptor {
             "0 is the input alone, and 1 is the shaped signal alone.",
         ),
     ],
+    thru: false,
 };
 
 /// `loom.role.envelope`: a level that follows a gate.
@@ -158,6 +161,7 @@ pub static ENVELOPE: RoleDescriptor = RoleDescriptor {
         ),
         optional("sustain", "Sustain", "", "The level held while the gate stays high."),
     ],
+    thru: false,
 };
 
 /// `loom.role.modulator`: a moving level with no input.
@@ -172,6 +176,7 @@ pub static MODULATOR: RoleDescriptor = RoleDescriptor {
         optional("rate", "Rate", "Hz", "How fast the level moves."),
         optional("amount", "Amount", "", "How far the level moves, from 0 to 1."),
     ],
+    thru: false,
 };
 
 /// `loom.role.effect`: processes audio in to audio out.
@@ -188,6 +193,7 @@ pub static EFFECT: RoleDescriptor = RoleDescriptor {
         "",
         "0 is the input alone, and 1 is the processed signal alone.",
     )],
+    thru: true,
 };
 
 /// `loom.role.voice`: plays a note.
@@ -208,6 +214,7 @@ pub static VOICE: RoleDescriptor = RoleDescriptor {
     ],
     outputs: &[port("out", "Out", SignalType::Audio, "The note's sound.")],
     params: &[optional("level", "Level", "", "How loud the voice is, from 0 to 1.")],
+    thru: false,
 };
 
 /// Every initial role.

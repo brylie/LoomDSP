@@ -25,7 +25,7 @@ use crate::{
 use loom_core::SignalType;
 use loom_core::{
     Controller, FillsRole, Graph, LoomError, MidiControl, ModuleId, ModuleNames, ParamRange, Registry, RoleDescriptor,
-    TRANSPORT_MODULE,
+    THRU_IN, THRU_OUT, TRANSPORT_MODULE,
 };
 use loom_dsp::blend;
 use std::collections::BTreeMap;
@@ -967,6 +967,7 @@ fn flatten_level(
         members: &members,
         feeds: &feeds,
         owned: &owned,
+        resolved: Default::default(),
     };
     // Pass 2: links. Inside a definition, two cables into one input are refused: a flat
     // patch keeps the later one, and flattening would not keep that order
@@ -979,7 +980,7 @@ fn flatten_level(
                 port: cable.to.1.clone(),
             });
         }
-        let source = lookup.source_of(&cable.from, &mut Vec::new())?;
+        let source = lookup.source_of(&cable.from, true)?;
         match members.get(&cable.to.0) {
             Some(Member::Output(name)) => {
                 if cable.to.1 != "in" {
@@ -1011,7 +1012,7 @@ fn flatten_level(
     let mut own_modulation = Vec::new();
     let mut own_midi = Vec::new();
     for assignment in level.modulation {
-        let source = match lookup.source_of(&assignment.source, &mut Vec::new())? {
+        let source = match lookup.source_of(&assignment.source, false)? {
             Some(Source::Module(id, output)) => (id.0, output),
             Some(Source::Input(_)) => {
                 return Err(PatchError::AssignmentFromPort {
@@ -1662,6 +1663,14 @@ fn no_such_port(module: u32, direction: &'static str, port: &str) -> PatchError 
     .into()
 }
 
+/// One step of following an output back to what stands behind it.
+enum Step {
+    /// The source, or `None` when nothing stands behind the output.
+    Found(Option<Source>),
+    /// A pass-through: continue from what feeds this input of the level.
+    Through((u32, String)),
+}
+
 /// Name lookups over one level's members, for pass 2.
 struct Lookup<'a> {
     members: &'a BTreeMap<u32, Member>,
@@ -1670,13 +1679,57 @@ struct Lookup<'a> {
     /// Each slot's part, by the part's id: a cable or an assignment on a
     /// role name of one is refused, since it goes through the slot.
     owned: &'a BTreeMap<u32, u32>,
+    /// What a cable from each output this level has followed stands for,
+    /// so a long chain of pass-throughs is walked once, not once per cable.
+    resolved: std::cell::RefCell<BTreeMap<(u32, String), Option<Source>>>,
 }
 
 impl Lookup<'_> {
     /// What stands behind the output `from` of this level, or `None` when
-    /// nothing does. `seen` guards a loop of pass-through ports, which
-    /// carries nothing.
-    fn source_of(&self, from: &(u32, String), seen: &mut Vec<(u32, String)>) -> Result<Option<Source>, PatchError> {
+    /// nothing does. A pass-through instance port, and with `thru` an empty
+    /// thru slot (ADR-0043), continue from whatever feeds them, as a loop,
+    /// so a long chain of them cannot overflow the stack. A loop of them
+    /// carries nothing. `thru` is true for cables only: an assignment from
+    /// an empty slot moves nothing, thru or not (sub-patches.md, Empty
+    /// slots).
+    fn source_of(&self, from: &(u32, String), thru: bool) -> Result<Option<Source>, PatchError> {
+        let mut seen: std::collections::BTreeSet<(u32, String)> = std::collections::BTreeSet::new();
+        // Every output on the way, so each learns the answer at the end.
+        let mut walked: Vec<(u32, String)> = Vec::new();
+        let mut from = from.clone();
+        let source = loop {
+            if thru && let Some(known) = self.resolved.borrow().get(&from) {
+                break known.clone();
+            }
+            walked.push(from.clone());
+            // The input this output continues from, when it is a
+            // pass-through; `None` once the source is found.
+            let next = match self.step_of(&from, thru)? {
+                Step::Found(source) => break source,
+                Step::Through(key) => key,
+            };
+            if !seen.insert(next.clone()) {
+                break None;
+            }
+            match self.feeds.get(&next) {
+                Some(feed) => from = feed.clone(),
+                None => break None,
+            }
+        };
+        // Only cable lookups are kept: an assignment's differs at an empty
+        // thru slot.
+        if thru {
+            let mut resolved = self.resolved.borrow_mut();
+            for output in walked {
+                resolved.insert(output, source.clone());
+            }
+        }
+        Ok(source)
+    }
+
+    /// One step of [`Lookup::source_of`]: what stands behind `from`, or the
+    /// input of this level it passes through from.
+    fn step_of(&self, from: &(u32, String), thru: bool) -> Result<Step, PatchError> {
         let (id, port) = from;
         if let Some(slot) = self.owned.get(id) {
             return Err(PatchError::PartCabledDirectly {
@@ -1692,55 +1745,46 @@ impl Lookup<'_> {
                 match slot.part.and_then(|part| self.members.get(&part)) {
                     Some(Member::Module(flat, resolved)) => {
                         let own = own_name(resolved, slot.role, port, |f, n| f.own_output(n));
-                        Ok(resolved.output_index(&own).map(|_| Source::Module(*flat, own)))
+                        Ok(Step::Found(
+                            resolved.output_index(&own).map(|_| Source::Module(*flat, own)),
+                        ))
                     }
-                    Some(Member::Instance(child)) => match child.outputs.get(port) {
-                        Some(Some(Source::Module(flat, output))) => Ok(Some(Source::Module(*flat, output.clone()))),
-                        Some(Some(Source::Input(input))) => {
-                            let key = (*id, input.clone());
-                            if seen.contains(&key) {
-                                return Ok(None);
-                            }
-                            seen.push(key.clone());
-                            match self.feeds.get(&key) {
-                                Some(feed) => self.source_of(feed, seen),
-                                None => Ok(None),
-                            }
+                    Some(Member::Instance(child)) => Ok(match child.outputs.get(port) {
+                        Some(Some(Source::Module(flat, output))) => {
+                            Step::Found(Some(Source::Module(*flat, output.clone())))
                         }
-                        _ => Ok(None),
-                    },
+                        Some(Some(Source::Input(input))) => Step::Through((*id, input.clone())),
+                        _ => Step::Found(None),
+                    }),
+                    // An empty thru slot passes its `in` to its `out`, for
+                    // cables (ADR-0043).
+                    None if thru && slot.part.is_none() && slot.role.thru && port == THRU_OUT => {
+                        Ok(Step::Through((*id, THRU_IN.to_string())))
+                    }
                     // An empty slot: nothing behind the port.
-                    _ => Ok(None),
+                    _ => Ok(Step::Found(None)),
                 }
             }
             Some(Member::Module(flat, resolved)) => {
                 if resolved.output_index(port).is_none() {
                     return Err(no_such_port(*id, "output", port));
                 }
-                Ok(Some(Source::Module(*flat, port.clone())))
+                Ok(Step::Found(Some(Source::Module(*flat, port.clone()))))
             }
             Some(Member::Input(name)) => {
                 if port != "out" {
                     return Err(no_such_port(*id, "output", port));
                 }
-                Ok(Some(Source::Input(name.clone())))
+                Ok(Step::Found(Some(Source::Input(name.clone()))))
             }
             Some(Member::Instance(child)) => match child.outputs.get(port) {
                 None => Err(no_such_port(*id, "output", port)),
-                Some(None) => Ok(None),
-                Some(Some(Source::Module(flat, output))) => Ok(Some(Source::Module(*flat, output.clone()))),
-                // A pass-through: whatever feeds the instance's input.
-                Some(Some(Source::Input(input))) => {
-                    let key = (*id, input.clone());
-                    if seen.contains(&key) {
-                        return Ok(None);
-                    }
-                    seen.push(key.clone());
-                    match self.feeds.get(&key) {
-                        Some(feed) => self.source_of(feed, seen),
-                        None => Ok(None),
-                    }
+                Some(None) => Ok(Step::Found(None)),
+                Some(Some(Source::Module(flat, output))) => {
+                    Ok(Step::Found(Some(Source::Module(*flat, output.clone()))))
                 }
+                // A pass-through: whatever feeds the instance's input.
+                Some(Some(Source::Input(input))) => Ok(Step::Through((*id, input.clone()))),
             },
             Some(Member::Output(_)) => Err(no_such_port(*id, "output", port)),
             None => Err(LoomError::UnknownModule(ModuleId(*id)).into()),

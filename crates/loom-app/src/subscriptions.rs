@@ -1,22 +1,25 @@
-//! What Iced still runs for the app: the window's own events and the
-//! input listeners, until the `winit` shell (plan step 2.2). The watcher
+//! Who hears the window's events: the close request and the input
+//! listeners, as plain calls ([`Listeners`]). The window's layers on the
+//! `winit` shell (`iced_bridge/window.rs`), the `Ui` harness, and the
+//! control channel's pointer hand each event on through them. The watcher
 //! threads are in `watching.rs`, and the timers and frames are deadlines
 //! (`timers.rs`).
 //!
-//! [`Listeners`] is the same set of listeners as plain calls, for the paths
-//! that hand events on themselves instead of through Iced's runtime: the
-//! `Ui` harness and the control channel's pointer today, and the window's
-//! layers once the shell drives the app (plan step 2.2b-ii).
+//! The same listeners as Iced's subscriptions stay, for tests only, as the
+//! reference the plain calls are checked against (`subscriptions/tests.rs`).
 
 use crate::input_owner::Listening;
 use crate::{App, FileAction, Message, browser, lights};
+#[cfg(test)]
 use iced::Subscription;
 use iced::event::Status;
 use loom_core::ModuleId;
 
 impl App {
-    /// What Iced still runs for the app: the window's own events, which go
-    /// with the `winit` shell (step 2.2).
+    /// What Iced's runtime ran for the app, as subscriptions. The window
+    /// on the shell hears the same through [`Listeners`]; this stays for
+    /// the tests that compare the two, until phase 3.
+    #[cfg(test)]
     pub(crate) fn subscription(&self) -> Subscription<Message> {
         let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
         Subscription::batch([
@@ -39,6 +42,7 @@ impl App {
 
     /// The listener for input that depends on who has it. Its messages say who
     /// was listening before the event (input_owner.rs).
+    #[cfg(test)]
     pub(crate) fn input_subscription(&self) -> Subscription<Message> {
         iced::event::listen_with(crate::input_owner::input_event)
             .with(self.listening())
@@ -77,6 +81,7 @@ impl App {
 
 /// The listener for input that works whoever has it. It reads no app state, so
 /// its identity never changes and it never restarts (input_owner.rs).
+#[cfg(test)]
 pub(crate) fn always_subscription() -> Subscription<Message> {
     iced::event::listen_with(crate::input_owner::always_event)
 }
@@ -119,9 +124,9 @@ pub(crate) fn browser_key(
 }
 
 /// The window's listeners as the app stood at one moment: the same ones
-/// [`App::subscription`] gives Iced, as plain calls. The window's own
-/// adapter events (`a11y::platform::events`) are a stream, not a listener,
-/// so they are not here.
+/// Iced's subscriptions heard (`App::subscription`, kept for the tests), as
+/// plain calls. The screen reader adapter's events are not here: they come
+/// through the runtime's waker (`a11y/macos.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Listeners {
     /// Who has the input (input_owner.rs).

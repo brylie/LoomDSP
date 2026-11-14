@@ -85,8 +85,19 @@ The removal is silent for a plain reason: once the fade is done, its output is `
 
 Bitwig Studio's hybrid devices, such as Polymer, let the player swap one section of a device for another Grid module, and were the prompt for this design. VCV Rack has no slots: a module is a module, and changing one means re-patching by hand, which is also what Eurorack asks of you. Max abstractions and Reaktor macros are reusable boxes, but the contract between a box and what it can be replaced with is left to the person doing the replacing. LoomDSP writes the contract down, so the computer can check it and the swap can be one gesture.
 
+## Swapping control signals: a straight line
+
+The quarter circle is right when the two parts make different sounds. A Modulator or Envelope slot's output is not a sound but a value, such as a filter's cutoff offset. If both parts sit at 0.5 when the swap starts, equal power lifts the output to 0.707 in the middle of the fade, and a pitch output would go sharp for a few milliseconds. So a pitch or modulation output fades in a straight line, `a · (1 − p) + b · p`, whose gains sum to 1: a value both parts share stays put. The swap reads the role output's signal type and sets the fade's law ([sub-patches](../design/sub-patches.md#how-a-swap-crossfades-settled-2026-11-08), point 6).
+
+## Empty slots and the built-ins
+
+A slot can be empty. The module browser lists one empty slot per role a part fills, such as `Filter slot`. An empty slot behaves like a pulled cable: whatever it feeds reads its own unconnected value, its normal ([Normals](normals.md)). An empty Filter or Effect slot is a thru: it passes its input on, as an empty insert on a mixing desk does, so taking an effect out of a chain leaves the chain playing.
+
+A swap into or out of an empty thru slot outside a stack crossfades between the dry signal and the signal through the part, in a straight line, because those two are nearly the same signal and equal power would swell. A swap into or out of any other empty slot, or of a thru slot inside a stack, is a plain cable change, which live-patching rule 9 ramps over 5 ms ([#21](https://github.com/brylie/LoomDSP/issues/21)).
+
+Two abstractions come with LoomDSP. The **Synth voice** holds two oscillators, a filter, and two envelopes, each in a slot. Its tile's menu offers `Swap Filter to Ladder`, because its cutoff and resonance controls are bound to the Filter slot. The **Effect chain** holds three effect slots, each followed by its own mix. That mix is a straight line too: a dry signal and its EQ'd or compressed version are strongly correlated, and the straight blend is the usual dry and wet practice. Insert either one and open it to see how it is built.
+
 ## What is still open
 
-- A slot in the browser, which would make an empty slot from a role, waits for the first abstraction that needs one.
 - A front panel's sub-panel for the parameters only the current part has waits for the panel editor.
 - Undo of a swap fades too, by swapping back. The part that comes back is a new module at its stored values, so its running state, such as a filter's memory, starts from reset, as undo of a delete does.

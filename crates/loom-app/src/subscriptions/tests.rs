@@ -123,3 +123,26 @@ fn the_listeners_are_a_snapshot() {
     assert!(before.messages(&rescaled, Status::Ignored).is_empty());
     assert_eq!(app.listeners().messages(&rescaled, Status::Ignored).len(), 1);
 }
+
+/// No listener hears the redraw event, whoever listens and with or without
+/// a screen reader: Iced's `listen_with` never gave it to them, so the
+/// window's layers pass it to none, and a frame never posts a message that
+/// would ask for the next one.
+#[test]
+fn no_listener_hears_a_redraw() {
+    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+    for listening in Listening::all() {
+        for screen_reader in [false, true] {
+            let listeners = Listeners {
+                listening,
+                screen_reader,
+            };
+            for status in [Status::Ignored, Status::Captured] {
+                assert!(
+                    listeners.messages(&redraw, status).is_empty(),
+                    "{listening:?}, screen reader {screen_reader}, {status:?}"
+                );
+            }
+        }
+    }
+}

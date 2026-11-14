@@ -71,6 +71,7 @@ fn widget(kind: WidgetViewKind, x: u8) -> WidgetView {
         hover: crate::scene::HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     }
 }
 
@@ -95,6 +96,18 @@ fn tab_skips_hidden_controls() {
     assert_eq!(next_focus(&panel, None, false), Some(0));
     assert_eq!(next_focus(&panel, Some(0), false), Some(0), "only the knob is left");
     assert_eq!(focusable(&panel), [0], "Tab within a module walks the same list");
+}
+
+/// Tab skips a control with nothing behind it, such as one bound to an
+/// empty slot: it is drawn, but it is not a control (sub-patches.md,
+/// Empty slots).
+#[test]
+fn tab_skips_inert_controls() {
+    let mut panel = panel();
+    panel.widgets[0].inert = true;
+    assert!(!panel.widgets[0].is_control());
+    assert_eq!(next_focus(&panel, None, false), Some(2));
+    assert_eq!(focusable(&panel), [2]);
 }
 
 #[test]
@@ -177,6 +190,28 @@ fn a_control_focused_by_keyboard_has_a_ring_clear_of_its_caption() {
         ..CanvasInput::default()
     };
     assert_eq!(canvas.overlay(&clicked, &LinesCache::default()).shapes.len(), unfocused);
+}
+
+/// Keyboard focus left on a control that went inert, such as one bound
+/// to a slot whose part was just removed, draws no ring: it is not a
+/// control any more (sub-patches.md, Empty slots).
+#[test]
+fn an_inert_control_under_keyboard_focus_has_no_ring() {
+    let mut m = module(1, 0.0);
+    m.panel = panel();
+    m.panel.widgets[0].inert = true;
+    let scene = Scene::new(vec![m], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let unfocused = canvas
+        .overlay(&CanvasInput::default(), &LinesCache::default())
+        .shapes
+        .len();
+    let tabbed = CanvasInput {
+        focus: FocusState::at(1, 0, true, FocusMode::Browse),
+        ..CanvasInput::default()
+    };
+    assert_eq!(canvas.overlay(&tabbed, &LinesCache::default()).shapes.len(), unfocused);
 }
 
 #[test]
@@ -4452,4 +4487,28 @@ fn a_focus_request_lands_after_a_level_or_frame_change() {
         );
         assert!(landed.contains(&CanvasEvent::FocusChanged(Some((2, 0)))), "{change}");
     }
+}
+
+/// An arrow key meant for a control that went inert under keyboard focus,
+/// as when an undo empties the slot it is bound to, is used up: it does
+/// not move the tile. The next arrow, with no control focused, moves the
+/// tile as usual (sub-patches.md, Empty slots).
+#[test]
+fn an_arrow_for_a_control_that_went_inert_does_not_move_the_tile() {
+    let mut tile = module(1, 0.0);
+    tile.panel = panel();
+    tile.panel.widgets[0].inert = true;
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput {
+        focus: FocusState::at(1, 0, true, FocusMode::Browse),
+        ..CanvasInput::default()
+    };
+    let moves = |events: &[CanvasEvent]| events.iter().any(|e| matches!(e, CanvasEvent::Move { .. }));
+    let first = host_event(&canvas, &mut state, &key_event(Key::Up, true));
+    assert!(!moves(&first), "{first:?}");
+    assert_eq!(state.focused_control(), None, "the stale focus is cleared");
+    let second = host_event(&canvas, &mut state, &key_event(Key::Up, true));
+    assert!(moves(&second), "{second:?}");
 }

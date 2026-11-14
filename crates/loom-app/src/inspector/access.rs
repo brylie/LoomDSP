@@ -98,14 +98,21 @@ pub(crate) fn items(model: &Inspector) -> Vec<Item> {
                 value: Some(
                     current
                         .and_then(|at| s.choices.get(at))
-                        .map_or_else(|| crate::slots::NO_PART.to_string(), |c| c.label.clone()),
+                        .map(|c| c.label.clone())
+                        .or_else(|| s.part.clone())
+                        .unwrap_or_else(|| crate::slots::NO_PART_CHOICE.to_string()),
                 ),
+                // The list starts with No part. A part the list does not
+                // name steps up to the first part listed, or down to none.
                 step: match current {
                     Some(at) => (swap(Some(at + 1)), swap(at.checked_sub(1))),
-                    None => (swap(Some(0)), None),
+                    None => (swap(Some(1)), swap(Some(0))),
                 },
                 ..Item::new(ids::part(&panel, "part"), Kind::Choice)
             });
+            if let Some(note) = &s.note {
+                parts.push(Item::text(ids::part(&panel, "note"), note.clone()));
+            }
             for (label, module, row) in &s.role_params {
                 parts.push(param_row(*module, label, row, None));
             }
@@ -118,11 +125,14 @@ pub(crate) fn items(model: &Inspector) -> Vec<Item> {
                     parts.push(param_row(*module, label, row, None));
                 }
             }
-            parts.push(Item::button(
-                ids::part(&panel, "dissolve"),
-                "Dissolve slot",
-                Some(AppMessage::DissolveSlot(s.id)),
-            ));
+            // An empty slot has no part to put in its place.
+            if s.part.is_some() {
+                parts.push(Item::button(
+                    ids::part(&panel, "dissolve"),
+                    "Dissolve slot",
+                    Some(AppMessage::DissolveSlot(s.id)),
+                ));
+            }
             vec![Item::group(panel, s.name.clone(), parts)]
         }
         Inspector::Port(p) => {

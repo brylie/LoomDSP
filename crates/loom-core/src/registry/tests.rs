@@ -958,6 +958,7 @@ fn two_roles_with_one_id_in_one_descriptor_are_refused() {
         inputs: &[],
         outputs: &[],
         params: &[],
+        thru: false,
     };
     static TWICE: ModuleDescriptor = ModuleDescriptor {
         id: "test.twice",

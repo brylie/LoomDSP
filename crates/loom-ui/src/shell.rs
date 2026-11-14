@@ -73,6 +73,10 @@ pub struct Frame<'a> {
     pub size: Size,
     /// Physical pixels per logical pixel.
     pub scale: f32,
+    /// True for a capture, drawn offscreen for the app; false for the
+    /// window's own frame. A capture shows what the window last showed, so
+    /// layers do no frame work for it: they may draw their last frame again.
+    pub capture: bool,
 }
 
 /// What the layers lend each call: the app to read, the routing target to
@@ -102,19 +106,69 @@ pub enum Ime {
     },
 }
 
+/// The pointer, as the layers want it shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pointer {
+    /// Shown, with this cursor.
+    Icon(CursorIcon),
+    /// Hidden, as while typing in some fields.
+    Hidden,
+}
+
 /// What the layers ask of the window. `None` keeps what it was.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Report {
-    /// The pointer's cursor.
-    pub cursor: Option<CursorIcon>,
+    /// The pointer.
+    pub cursor: Option<Pointer>,
     /// The input method.
     pub ime: Option<Ime>,
     /// When they want a frame.
     pub redraw: Redraw,
+    /// The layers hold a message that must run in a turn of its own, after
+    /// the messages already queued. The shell runs those, then asks
+    /// [`Layers::alone`] for it.
+    pub alone: bool,
+}
+
+/// What the window needs to do to show `pointer`, when it was `hidden`
+/// before: the cursor to set, and whether to show or hide the pointer.
+/// A hidden pointer is shown again only when it leaves `Hidden`, since
+/// setting a cursor does not show it.
+fn pointer_calls(hidden: &mut bool, pointer: Pointer) -> (Option<CursorIcon>, Option<bool>) {
+    match pointer {
+        Pointer::Icon(icon) => {
+            let show = std::mem::replace(hidden, false).then_some(true);
+            (Some(icon), show)
+        }
+        Pointer::Hidden if *hidden => (None, None),
+        Pointer::Hidden => {
+            *hidden = true;
+            (None, Some(false))
+        }
+    }
+}
+
+/// The GPU and window, lent once when the window opens, for layers that
+/// build their renderer or connect to the window's services.
+pub struct Opened<'a> {
+    /// The window.
+    pub window: &'a Arc<Window>,
+    /// The adapter the device came from.
+    pub adapter: &'a wgpu::Adapter,
+    /// The GPU device.
+    pub device: &'a wgpu::Device,
+    /// Its queue.
+    pub queue: &'a wgpu::Queue,
+    /// The format the window's frames are drawn in.
+    pub format: wgpu::TextureFormat,
 }
 
 /// What draws the window: everything the app shows, in order.
 pub trait Layers<A: App, T> {
+    /// The window and its GPU are ready. Called once, before the first
+    /// turn, the first frame, and the window is shown.
+    fn open(&mut self, _parts: Parts<'_, A, T>, _opened: &Opened<'_>) {}
+
     /// A window event, as winit gave it. Called before the shell turns it
     /// into the runtime's events, so the app's side can keep its own copy.
     fn window_event(&mut self, _parts: Parts<'_, A, T>, _event: &WinitEvent) {}
@@ -124,9 +178,16 @@ pub trait Layers<A: App, T> {
     fn draw(&mut self, parts: Parts<'_, A, T>, frame: &Frame<'_>);
 
     /// What the layers want of the window now. Asked after each turn and
-    /// each frame.
-    fn report(&mut self) -> Report {
+    /// each frame, with the parts, so the layers can post what the window's
+    /// events gave them since.
+    fn report(&mut self, _parts: Parts<'_, A, T>) -> Report {
         Report::default()
+    }
+
+    /// The message the last [`Report::alone`] promised, once the messages
+    /// queued before it have run. The layers may change the target first.
+    fn alone(&mut self, _parts: Parts<'_, A, T>) -> Option<A::Message> {
+        None
     }
 }
 
@@ -225,6 +286,8 @@ where
         options,
         live: None,
         held: Held::default(),
+        hidden: false,
+        shown: false,
         pacing: Pacing::default(),
         error: None,
     };
@@ -267,6 +330,10 @@ struct Handler<A: App, T, L, S> {
     live: Option<Live<A, T>>,
     /// The pointer and modifiers, between events.
     held: Held,
+    /// The pointer is hidden.
+    hidden: bool,
+    /// A frame has been shown in the window, so a capture has one to show.
+    shown: bool,
     /// The redraw rule.
     pacing: Pacing,
     /// What stopped the loop, if anything failed.
@@ -306,6 +373,7 @@ where
             size: events::logical(window.inner_size(), scale),
             scale,
             focused: true,
+            frame: monitor_frame(&window),
         };
         let proxy = Mutex::new(self.proxy.clone());
         let wake = Arc::new(move || {
@@ -315,12 +383,32 @@ where
             }
         });
         self.driver.window = Some(window.clone());
-        self.live = Some(Live {
+        let runtime = Runtime::new(app, target, state, wake);
+        let live = self.live.insert(Live {
             window: window.clone(),
             gpu,
-            runtime: Runtime::new(app, target, state, wake),
+            runtime,
         });
-        if let Some(live) = &self.live {
+        {
+            let waker = live.runtime.waker();
+            let state = live.runtime.window();
+            let (app, target) = live.runtime.parts();
+            let opened = Opened {
+                window: &live.window,
+                adapter: &live.gpu.adapter,
+                device: &live.gpu.device.device,
+                queue: &live.gpu.device.queue,
+                format: live.gpu.device.format,
+            };
+            self.layers.open(
+                Parts {
+                    app,
+                    target,
+                    waker: &waker,
+                    window: state,
+                },
+                &opened,
+            );
             let waker = live.runtime.waker();
             for message in std::mem::take(&mut self.options.first) {
                 waker.send(message);
@@ -335,32 +423,40 @@ where
     /// Runs one turn for `event`, and the turns its waiting messages need;
     /// then carries out what they asked.
     fn turn(&mut self, event_loop: &ActiveEventLoop, event: DriverEvent) {
-        let Some(live) = self.live.as_mut() else {
-            return;
-        };
-        let mut next = live.runtime.handle(event, Instant::now(), &mut self.driver);
-        while next.again && !live.runtime.exited() {
-            let more = live
-                .runtime
-                .handle(DriverEvent::Woken, Instant::now(), &mut self.driver);
-            next = Next {
-                draw: next.draw || more.draw,
-                ..more
-            };
-        }
-        if self.pacing.turn(&next) {
-            live.window.request_redraw();
-        }
+        self.run(|runtime, driver| runtime.handle(event, Instant::now(), driver));
         self.after(event_loop);
     }
 
-    /// Captures what was asked, applies the layers' report, and ends the
-    /// loop once the app has quit.
-    fn after(&mut self, event_loop: &ActiveEventLoop) {
+    /// Runs one turn with `first`, and the turns its waiting messages need,
+    /// and asks for the frame they want.
+    fn run(&mut self, first: impl FnOnce(&mut Runtime<A, T>, &mut ShellDriver<A::Message, S>) -> Next) {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        for reply in std::mem::take(&mut self.driver.captures) {
+        let next = settle(&mut live.runtime, &mut self.driver, first);
+        if self.pacing.turn(&next) {
+            live.window.request_redraw();
+        }
+    }
+
+    /// Captures what was asked, applies the layers' report, and ends the
+    /// loop once the app has quit. While the layers hold a message to run
+    /// alone, runs it and asks them again, in a loop, so the stack stays
+    /// flat however many come.
+    fn after(&mut self, event_loop: &ActiveEventLoop) {
+        while self.report(event_loop) {
+            self.alone();
+        }
+    }
+
+    /// One pass of [`after`](Self::after): the captures, then the layers'
+    /// report applied. True when the layers hold a message to run alone
+    /// and the app has not quit.
+    fn report(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
+        };
+        for reply in due_captures(self.shown, &mut self.driver.captures) {
             let waker = live.runtime.waker();
             let window = live.runtime.window();
             let (app, target) = live.runtime.parts();
@@ -378,9 +474,25 @@ where
             });
             waker.send(reply.give(image.ok_or(NoGpu)));
         }
-        let report = self.layers.report();
-        if let Some(cursor) = report.cursor {
-            live.window.set_cursor(cursor);
+        let report = {
+            let waker = live.runtime.waker();
+            let window = live.runtime.window();
+            let (app, target) = live.runtime.parts();
+            self.layers.report(Parts {
+                app,
+                target,
+                waker: &waker,
+                window,
+            })
+        };
+        if let Some(pointer) = report.cursor {
+            let (icon, visible) = pointer_calls(&mut self.hidden, pointer);
+            if let Some(icon) = icon {
+                live.window.set_cursor(icon);
+            }
+            if let Some(visible) = visible {
+                live.window.set_cursor_visible(visible);
+            }
         }
         match report.ime {
             Some(Ime::Off) => live.window.set_ime_allowed(false),
@@ -398,6 +510,24 @@ where
         }
         if self.driver.exit || live.runtime.exited() {
             event_loop.exit();
+            return false;
+        }
+        report.alone
+    }
+
+    /// Runs what is queued, then the layers' message in a turn of its own,
+    /// so no queued message sees what the layers changed for it.
+    fn alone(&mut self) {
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let nexts = alone_turns(&mut live.runtime, &mut self.layers, &mut self.driver);
+        let mut redraw = false;
+        for next in &nexts {
+            redraw |= self.pacing.turn(next);
+        }
+        if redraw {
+            live.window.request_redraw();
         }
     }
 
@@ -435,6 +565,7 @@ where
             );
         });
         if drawn == Drawn::Shown {
+            self.shown = true;
             self.turn(event_loop, DriverEvent::Presented);
         }
         if self.pacing.frame_ended(drawn)
@@ -532,6 +663,13 @@ where
                 return;
             }
             WinitEvent::Resized(size) => live.gpu.resize(*size),
+            // The window may be on another display now, with another rate.
+            WinitEvent::Moved(_) | WinitEvent::ScaleFactorChanged { .. } => {
+                let frame = monitor_frame(&live.window);
+                if frame != live.runtime.window().frame {
+                    live.runtime.set_frame(frame);
+                }
+            }
             WinitEvent::KeyboardInput {
                 event, is_synthetic, ..
             } => {
@@ -561,6 +699,78 @@ where
             Wait::Poll => ControlFlow::Poll,
         });
     }
+}
+
+/// The captures to draw now: all of them once a frame has been `shown`,
+/// none before. A capture is the window as it was last drawn, and before
+/// the first frame there is none, so it waits for the first frame rather
+/// than give a blank image.
+fn due_captures<R>(shown: bool, captures: &mut Vec<R>) -> Vec<R> {
+    if shown { std::mem::take(captures) } else { Vec::new() }
+}
+
+/// Runs one turn with `first`, then a turn for each batch of messages
+/// still waiting, and gives what is next once they have all run. A turn
+/// that drew keeps its draw.
+fn settle<A: App, T: Target<A::Message>, D: Driver<A::Message>>(
+    runtime: &mut Runtime<A, T>,
+    driver: &mut D,
+    first: impl FnOnce(&mut Runtime<A, T>, &mut D) -> Next,
+) -> Next {
+    let mut next = first(runtime, driver);
+    while next.again && !runtime.exited() {
+        let more = runtime.handle(DriverEvent::Woken, Instant::now(), driver);
+        next = Next {
+            draw: next.draw || more.draw,
+            ..more
+        };
+    }
+    next
+}
+
+/// The turns of a [`Report::alone`]: what is queued, then the layers'
+/// message by itself. The layers are asked for it only after the queued
+/// messages have run, so what they change for it (such as the target's
+/// focus) is not seen by those. Gives what each turn said is next.
+fn alone_turns<A, T, L, D>(runtime: &mut Runtime<A, T>, layers: &mut L, driver: &mut D) -> Vec<Next>
+where
+    A: App,
+    T: Target<A::Message>,
+    L: Layers<A, T>,
+    D: Driver<A::Message>,
+{
+    let mut nexts = vec![settle(runtime, driver, |runtime, driver| {
+        runtime.handle(DriverEvent::Woken, Instant::now(), driver)
+    })];
+    if runtime.exited() {
+        return nexts;
+    }
+    let message = {
+        let waker = runtime.waker();
+        let window = runtime.window();
+        let (app, target) = runtime.parts();
+        layers.alone(Parts {
+            app,
+            target,
+            waker: &waker,
+            window,
+        })
+    };
+    if let Some(message) = message {
+        nexts.push(settle(runtime, driver, |runtime, driver| {
+            runtime.deliver(message, Instant::now(), driver)
+        }));
+    }
+    nexts
+}
+
+/// How long one frame lasts on the display `window` is on now.
+fn monitor_frame(window: &Window) -> std::time::Duration {
+    events::frame_period(
+        window
+            .current_monitor()
+            .and_then(|monitor| monitor.refresh_rate_millihertz()),
+    )
 }
 
 /// The runtime's driver in the window: the shell's own effects, and the
