@@ -106,8 +106,8 @@ fn largest_step(signal: &[f32]) -> f32 {
 /// Rule 9's first criterion: a running sine into a filter, its cable
 /// pulled, and the filter's input ramps from the last value to 0 over
 /// 5 ms, the same at every block size. A window on the same cable shows
-/// the input exactly, and the filter's output makes no step larger than
-/// the steady signal's plus the ramp's.
+/// the input exactly, sample by sample. The filter's highpass shows that
+/// the step a pull would make is gone.
 #[test]
 fn pulling_a_sine_from_a_filter_ramps_its_input_to_zero() {
     let frames = 4_800;
@@ -138,29 +138,34 @@ fn pulling_a_sine_from_a_filter_ramps_its_input_to_zero() {
     }
     assert!(renders.windows(2).all(|w| w[0] == w[1]), "the same at every block size");
 
+    // The filter, on its highpass: with no fade, a pull makes the highpass
+    // step by about the held input, because it passes a step whole. With
+    // the fade it passes only the corner where the sine's slope meets the
+    // ramp's, a small fraction of that. The render is the same at every
+    // block size. The held input is the window's, from the same sine.
+    let held = renders[0][at - 1].abs();
+    let mut filtered = Vec::new();
     for block in BLOCKS {
         let mut parts = engine();
         let source = sine(&mut parts);
         let c = &mut parts.controller;
         let svf = c.add_module("loom.filter.svf").unwrap();
-        let out = c.add_module("loom.io.audio-out").unwrap();
+        let audio = c.add_module("loom.io.audio-out").unwrap();
         c.connect_named(source, "out", svf, "in").unwrap();
-        c.connect_named(svf, "lowpass", out, "in").unwrap();
+        c.connect_named(svf, "highpass", audio, "in").unwrap();
         c.commit().unwrap();
         let input = c.input_ref(svf, "in").unwrap();
         let played = render_changing(&mut parts, frames, at, block, |parts| {
             parts.controller.disconnect(input).unwrap();
         });
-        let steady = largest_step(&played[..at]);
-        let ramp = played[at - 1].abs() / fade_length() as f32;
-        // The filter can lift the ramp a little, so a small margin.
-        assert!(
-            largest_step(&played[at - 1..]) <= (steady + ramp) * 1.1,
-            "block {block}: {} > {}",
-            largest_step(&played[at - 1..]),
-            steady + ramp
-        );
+        let across = largest_step(&played[at - 1..]);
+        assert!(across < held / 4.0, "block {block}: {across} against a {held} step");
+        filtered.push(played);
     }
+    assert!(
+        filtered.windows(2).all(|w| w[0] == w[1]),
+        "the filter, the same at every block size"
+    );
 }
 
 /// Plugging a cable fades the input in from what it read, and moving one
@@ -645,6 +650,17 @@ fn inputs_that_read_1_unplugged_fade_from_1() {
             step <= (after - before).abs() / fade_length() as f32 + 1e-6,
             "{kind} {port}: the fade starts from the unplugged value, {before}, not from 0 (step {step})"
         );
+        // Pulled again: back to the unplugged value, in a straight line.
+        let input = parts.controller.input_ref(module, port).unwrap();
+        let pulled = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+            parts.controller.disconnect(input).unwrap();
+        });
+        let step = largest_step(&pulled[499..]);
+        assert!(
+            step <= (pulled[999] - pulled[499]).abs() / fade_length() as f32 + 1e-6,
+            "{kind} {port}: pulling fades back to the unplugged value (step {step})"
+        );
+        assert_eq!(pulled[999], before, "{kind} {port}: the unplugged value");
     }
 }
 
@@ -794,4 +810,420 @@ fn voices_the_output_loses_fade_out() {
             played[500 + k]
         );
     }
+}
+
+/// A gate plugged straight into an input typed for modulation fades, by
+/// the port's own type (rule 9), and a cable moved from a gate to a value
+/// on that input fades too. A gate is a full-scale step there.
+#[test]
+fn a_gate_into_a_modulation_input_fades() {
+    let frames = 1_000;
+    let at = 500;
+    for block in BLOCKS {
+        let mut parts = engine();
+        let seen = window(&mut parts);
+        let high = constant(&mut parts, 1.0);
+        let c = &mut parts.controller;
+        let gate = c.add_module("loom.logic.logic").unwrap();
+        c.set_param_named(gate, "op", 1.0).unwrap();
+        c.connect_named(high, "out", gate, "in1").unwrap();
+        let probe = c.output_ref(gate, "out").unwrap();
+        c.add_probe(probe, loom_core::ProbeKind::Meter).unwrap();
+        c.commit().unwrap();
+        let out = render_changing(&mut parts, frames, at, block, |parts| {
+            parts.controller.connect_named(gate, "out", seen, "a").unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 1, "block {block}");
+        for k in 0..frames - at {
+            assert_eq!(out[at + k], faded(0.0, 1.0, k), "plugged, frame {k}, block {block}");
+        }
+        let low = constant(&mut parts, 0.25);
+        parts.controller.connect_named(low, "out", seen, "a").unwrap();
+        assert_eq!(parts.controller.commit().unwrap().cable_fades, 1, "moved from a gate");
+    }
+}
+
+/// A Divide's B moved across 0 divides by small numbers for a moment: the
+/// output stays finite and, with output safety off, inside full scale,
+/// because the engine clips only the final output (rule 9, What still
+/// steps).
+#[test]
+fn a_divide_moved_across_zero_stays_finite() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let divide = c.add_module("loom.math.div").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(divide, "out", out, "in").unwrap();
+    let source = sine(&mut parts);
+    let plus = constant(&mut parts, 1.0);
+    let minus = constant(&mut parts, -1.0);
+    parts.controller.connect_named(source, "out", divide, "a").unwrap();
+    parts.controller.connect_named(plus, "out", divide, "b").unwrap();
+    parts.controller.commit().unwrap();
+    let played = render_changing(&mut parts, 2_000, 1_000, 64, |parts| {
+        parts.controller.connect_named(minus, "out", divide, "b").unwrap();
+    });
+    assert!(played.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+}
+
+/// A Unit Delay's input fades like any input; the delay plays the ramp one
+/// sample later.
+#[test]
+fn a_unit_delay_input_fades() {
+    for block in BLOCKS {
+        let mut parts = engine();
+        let c = &mut parts.controller;
+        let delay = c.add_module("loom.time.delay1").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(delay, "out", out, "in").unwrap();
+        let source = constant(&mut parts, 0.8);
+        parts.controller.connect_named(source, "out", delay, "in").unwrap();
+        parts.controller.commit().unwrap();
+        let input = parts.controller.input_ref(delay, "in").unwrap();
+        let played = render_changing(&mut parts, 1_000, 500, block, |parts| {
+            parts.controller.disconnect(input).unwrap();
+        });
+        assert_eq!(played[500], 0.8, "the delay's held sample");
+        for k in 0..499 {
+            assert_eq!(played[501 + k], faded(0.8, 0.0, k), "frame {k}, block {block}");
+        }
+    }
+}
+
+/// A module that resumes after it was skipped read nothing while paused,
+/// so a cable plugged into it as it resumes fades from 0.
+#[test]
+fn a_resumed_module_fades_from_zero() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let add = c.add_module("loom.math.add").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    let source = constant(&mut parts, 0.5);
+    let report = parts.controller.commit().unwrap();
+    assert!(report.skipped.contains(&add));
+    let played = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+        parts.controller.connect_named(source, "out", add, "a").unwrap();
+        parts.controller.connect_named(add, "out", out, "in").unwrap();
+    });
+    for k in 0..500 {
+        // Both the Add's input and the output's input fade from 0.
+        assert_eq!(played[500 + k], faded(0.0, faded(0.0, 0.5, k), k), "frame {k}");
+    }
+}
+
+/// A stereo source with different sides pulled from the audio output: each
+/// side fades out from its own value.
+#[test]
+fn a_stereo_source_pulled_from_the_output_fades_each_side() {
+    for block in BLOCKS {
+        let mut parts = engine();
+        let left = constant(&mut parts, 0.3);
+        let right = constant(&mut parts, -0.5);
+        let c = &mut parts.controller;
+        let join = c.add_module("loom.mix.join").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(left, "out", join, "left").unwrap();
+        c.connect_named(right, "out", join, "right").unwrap();
+        c.connect_named(join, "out", out, "in").unwrap();
+        c.commit().unwrap();
+        let input = c.input_ref(out, "in").unwrap();
+        let (l, r) = render_changing_stereo(&mut parts, 1_000, 500, block, |parts| {
+            parts.controller.disconnect(input).unwrap();
+        });
+        for k in 0..500 {
+            assert_eq!(l[500 + k], faded(0.3, 0.0, k), "left, frame {k}, block {block}");
+            assert_eq!(r[500 + k], faded(-0.5, 0.0, k), "right, frame {k}, block {block}");
+        }
+    }
+}
+
+/// A 1-voice cable into the audio output moved to 4 voices: each new voice
+/// fades in from 0, so the first frame plays the held value, not four
+/// times it (rule 9).
+#[test]
+fn voices_the_output_gains_fade_in_from_zero() {
+    let mut registry = loom_core::Registry::new();
+    loom_modules::register_all(&mut registry).unwrap();
+    loom_modules::test_modules::register(&mut registry).unwrap();
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let mut parts = create_engine(std::sync::Arc::new(registry), config);
+    let c = &mut parts.controller;
+    let voices = c.add_module("test.voices").unwrap();
+    c.set_param_named(voices, "voices", 4.0).unwrap();
+    c.set_param_named(voices, "value", 0.1).unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    let mono = constant(&mut parts, 0.2);
+    parts.controller.connect_named(mono, "out", out, "in").unwrap();
+    let probe = parts.controller.output_ref(voices, "out").unwrap();
+    parts.controller.add_probe(probe, loom_core::ProbeKind::Meter).unwrap();
+    parts.controller.commit().unwrap();
+    let played = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+        parts.controller.connect_named(voices, "out", out, "in").unwrap();
+    });
+    assert_eq!(played[500], 0.2, "the held value, not four times it");
+    for k in 0..500 {
+        let expected = faded(0.2, 0.1, k) + faded(0.0, 0.11, k) + faded(0.0, 0.12, k) + faded(0.0, 0.13, k);
+        assert!((played[500 + k] - expected).abs() < 1e-6, "frame {k}");
+    }
+    assert!(largest_step(&played[499..]) <= (0.46 - 0.2) / fade_length() as f32 + 1e-6);
+}
+
+/// The mixers at the graph level, as the flattener wires them (rule 9, The
+/// mixers the editor adds).
+mod mixers {
+    use super::*;
+
+    /// A source, a window on it at the output, and the window's input.
+    fn played_through(parts: &mut EngineParts, value: f32) -> (ModuleId, loom_core::InputRef) {
+        let source = constant(parts, value);
+        let seen = window(parts);
+        parts.controller.connect_named(source, "out", seen, "a").unwrap();
+        let input = parts.controller.input_ref(seen, "a").unwrap();
+        (source, input)
+    }
+
+    /// A Layer that adds a member: the cable moves onto a new Sum at gain 1
+    /// that holds its old source, so it switches, and the new member fades
+    /// in from 0 (rule B).
+    #[test]
+    fn a_layer_adding_a_member_switches_and_fades_the_member_in() {
+        for block in BLOCKS {
+            let mut parts = engine();
+            let (first, input) = played_through(&mut parts, 0.25);
+            let second = constant(&mut parts, 0.5);
+            parts.controller.commit().unwrap();
+            let out = render_changing(&mut parts, 1_000, 500, block, |parts| {
+                let c = &mut parts.controller;
+                let sum = c.add_module("loom.struct.sum").unwrap();
+                c.connect_named(first, "out", sum, "in1").unwrap();
+                c.connect_named(second, "out", sum, "in2").unwrap();
+                c.connect(c.output_ref(sum, "out").unwrap(), input).unwrap();
+            });
+            assert_eq!(
+                parts.controller.last_report().cable_fades,
+                1,
+                "only the new member fades"
+            );
+            for k in 0..500 {
+                assert_eq!(out[500 + k], 0.25 + faded(0.0, 0.5, k), "frame {k}, block {block}");
+            }
+        }
+    }
+
+    /// Layer of one member back to Single, and Select back to Single: the
+    /// mixer that leaves played its source alone, so the cable switches and
+    /// nothing changes (rule A, leaving side).
+    #[test]
+    fn a_mixer_that_played_one_source_alone_leaves_with_no_fade() {
+        for kind in ["loom.struct.sum", "loom.struct.select"] {
+            let mut parts = engine();
+            let (source, input) = played_through(&mut parts, 0.25);
+            let other = constant(&mut parts, -0.5);
+            let c = &mut parts.controller;
+            let mixer = c.add_module(kind).unwrap();
+            c.connect_named(source, "out", mixer, "in1").unwrap();
+            if kind == "loom.struct.select" {
+                c.connect_named(other, "out", mixer, "in2").unwrap();
+                c.set_param_named(mixer, "members", 2.0).unwrap();
+            }
+            c.connect(c.output_ref(mixer, "out").unwrap(), input).unwrap();
+            c.commit().unwrap();
+            let out = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+                parts.controller.remove_module(mixer).unwrap();
+                let from = parts.controller.output_ref(source, "out").unwrap();
+                parts.controller.connect(from, input).unwrap();
+            });
+            assert_eq!(parts.controller.last_report().cable_fades, 0, "{kind}");
+            // From the end of the output's 10 ms fade-in on.
+            assert!(out[480..].iter().all(|&v| v == 0.25), "{kind} changes nothing");
+        }
+    }
+
+    /// A new Select whose Member picks member 3 plays it from its first
+    /// frame: the cable moves from that member onto the Select, so it
+    /// switches, and the Select's member input is never faded.
+    #[test]
+    fn a_new_select_plays_its_chosen_member_from_the_first_frame() {
+        let mut parts = engine();
+        let (third, input) = played_through(&mut parts, 0.75);
+        let first = constant(&mut parts, 0.25);
+        let second = constant(&mut parts, 0.5);
+        parts.controller.commit().unwrap();
+        let out = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+            let c = &mut parts.controller;
+            let select = c.add_module("loom.struct.select").unwrap();
+            let member = c.add_module("loom.struct.member").unwrap();
+            c.set_param_named(select, "members", 3.0).unwrap();
+            c.set_param_named(member, "member", 3.0).unwrap();
+            for (source, port) in [(first, "in1"), (second, "in2"), (third, "in3")] {
+                c.connect_named(source, "out", select, port).unwrap();
+            }
+            c.connect_named(member, "out", select, "member").unwrap();
+            c.connect(c.output_ref(select, "out").unwrap(), input).unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 0);
+        // From the end of the output's 10 ms fade-in on.
+        assert!(out[480..].iter().all(|&v| v == 0.75), "member 3 from the first frame");
+    }
+
+    /// Changes of mixer that change the sound fade the cable once: two
+    /// copies to one (a Sum that played two sources leaves), and Layer to
+    /// Select (a Sum leaves and a Select arrives). The new mixer's own
+    /// inputs are not faded, so there is no fade into a fade.
+    #[test]
+    fn a_real_change_of_mixer_fades_once() {
+        for to_select in [false, true] {
+            let mut parts = engine();
+            let (first, input) = played_through(&mut parts, 0.25);
+            let second = constant(&mut parts, 0.5);
+            let c = &mut parts.controller;
+            let sum = c.add_module("loom.struct.sum").unwrap();
+            c.set_param_named(sum, "gain", std::f32::consts::FRAC_1_SQRT_2).unwrap();
+            c.connect_named(first, "out", sum, "in1").unwrap();
+            c.connect_named(second, "out", sum, "in2").unwrap();
+            c.connect(c.output_ref(sum, "out").unwrap(), input).unwrap();
+            c.commit().unwrap();
+            let out = render_changing(&mut parts, 1_000, 500, 64, |parts| {
+                let c = &mut parts.controller;
+                c.remove_module(sum).unwrap();
+                if to_select {
+                    let select = c.add_module("loom.struct.select").unwrap();
+                    c.set_param_named(select, "members", 2.0).unwrap();
+                    c.connect_named(first, "out", select, "in1").unwrap();
+                    c.connect_named(second, "out", select, "in2").unwrap();
+                    c.connect(c.output_ref(select, "out").unwrap(), input).unwrap();
+                } else {
+                    c.connect(c.output_ref(first, "out").unwrap(), input).unwrap();
+                }
+            });
+            assert_eq!(parts.controller.last_report().cable_fades, 1, "to select: {to_select}");
+            let held = out[499];
+            for k in 0..500 {
+                assert_eq!(out[500 + k], faded(held, 0.25, k), "frame {k}, to select: {to_select}");
+            }
+        }
+    }
+}
+
+/// An assignment moved to another target ramps out on the old parameter
+/// and in on the new one, on the same frames.
+#[test]
+fn an_assignment_moved_to_another_target_ramps_out_and_in() {
+    let mut parts = engine();
+    let source = constant(&mut parts, 1.0);
+    let c = &mut parts.controller;
+    let first = c.add_module("loom.math.add").unwrap();
+    let second = c.add_module("loom.math.add").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(first, "out", join, "left").unwrap();
+    c.connect_named(second, "out", join, "right").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
+    let id = c.add_assignment_named(source, "out", first, "offset", 0.25).unwrap();
+    c.commit().unwrap();
+    let param = loom_modules::math::ADD.param_index("offset").unwrap();
+    let spec = parts.controller.graph().node(first).unwrap().spec(param).unwrap();
+    let offset = |contribution: f32| spec.denormalize(spec.normalize(0.0) + contribution);
+    let from = parts.controller.output_ref(source, "out").unwrap();
+    let (left, right) = render_changing_stereo(&mut parts, 1_000, 500, 64, |parts| {
+        parts.controller.retarget_assignment(id, from, second, param).unwrap();
+    });
+    assert_eq!(
+        parts.controller.last_report().cable_fades,
+        2,
+        "out on one, in on the other"
+    );
+    for k in 1..500 {
+        assert!(
+            (left[500 + k] - offset(faded(0.25, 0.0, k))).abs() <= 1e-6,
+            "out, frame {k}"
+        );
+        assert!(
+            (right[500 + k] - offset(faded(0.0, 0.25, k))).abs() <= 1e-6,
+            "in, frame {k}"
+        );
+    }
+}
+
+/// A removed assignment's ramp goes on across a second swap 2 ms later,
+/// exactly as with no second swap (rule 9, A swap while a fade runs).
+#[test]
+fn a_leaving_contribution_continues_across_a_second_swap() {
+    let build = || {
+        let mut parts = engine();
+        let seen = window(&mut parts);
+        let source = constant(&mut parts, 1.0);
+        let id = parts
+            .controller
+            .add_assignment_named(source, "out", seen, "offset", 0.25)
+            .unwrap();
+        parts.controller.commit().unwrap();
+        (parts, id)
+    };
+    let (mut parts, id) = build();
+    let once = render_changing(&mut parts, 1_000, 500, 32, |parts| {
+        parts.controller.remove_assignment(id).unwrap();
+    });
+    let (mut parts, id) = build();
+    let first = render_changing(&mut parts, 596, 500, 32, |parts| {
+        parts.controller.remove_assignment(id).unwrap();
+    });
+    let rest = render_changing(&mut parts, 404, 0, 32, |parts| {
+        parts.controller.add_module("loom.osc.noise").unwrap();
+    });
+    assert_eq!([&first[..], &rest[..]].concat(), once);
+}
+
+/// A ramp on an assignment that is switched off still ends, so the engine
+/// reports the swap's fades as settled.
+#[test]
+fn a_disabled_assignment_s_ramp_still_ends() {
+    let mut parts = engine();
+    let seen = window(&mut parts);
+    let source = constant(&mut parts, 1.0);
+    parts.controller.commit().unwrap();
+    render(&mut parts, 64, 64, &[]);
+    let id = parts
+        .controller
+        .add_assignment_named(source, "out", seen, "offset", 0.25)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    parts.controller.set_assignment_enabled(id, false).unwrap();
+    render(&mut parts, 512, 64, &[]);
+    let stats = parts.controller.stats();
+    let settled = stats.cable_fades_settled.load(std::sync::atomic::Ordering::Relaxed);
+    let swaps = stats.schedule_swaps.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(settled, swaps, "the last schedule's fades have settled");
+    assert_eq!(
+        parts.controller.cable_fades_in_flight(),
+        0,
+        "the controller keeps no fades"
+    );
+}
+
+/// A panic ends every fade at its silent frame. A cable changed while the
+/// panic fades out would still be fading 5 ms later; the panic's reset ends
+/// it, and the engine reports the fades settled at once.
+#[test]
+fn a_panic_ends_every_fade() {
+    let mut parts = engine();
+    let seen = window(&mut parts);
+    let source = constant(&mut parts, 0.8);
+    parts.controller.commit().unwrap();
+    render(&mut parts, 1_024, 64, &[]);
+    parts.controller.panic().unwrap();
+    // The panic fades the output out over 10 ms, then resets.
+    render(&mut parts, 400, 16, &[]);
+    parts.controller.connect_named(source, "out", seen, "a").unwrap();
+    parts.controller.commit().unwrap();
+    // 160 frames on: past the panic's reset, before the 240-frame fade
+    // would have ended by itself.
+    render(&mut parts, 160, 16, &[]);
+    let stats = parts.controller.stats();
+    let settled = stats.cable_fades_settled.load(std::sync::atomic::Ordering::Relaxed);
+    let swaps = stats.schedule_swaps.load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(settled, swaps, "the panic ended the fade");
 }

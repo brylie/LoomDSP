@@ -130,3 +130,36 @@ fn input_keys_sort_by_module_port_and_channel() {
 fn the_mixers_are_the_four_the_editor_adds() {
     assert_eq!(MIXERS, [SUM_MODULE, SPREAD_SUM_MODULE, SELECT_MODULE, SWAP_FADE_MODULE]);
 }
+
+/// When the old schedule never ran, a fresh fade reads no memory: a fixed
+/// default gives its value, and anything else waits for a lower channel or
+/// starts from 0 (rule 9, two swaps before one block).
+#[test]
+fn a_schedule_that_never_ran_is_read_without_touching_memory() {
+    use crate::compile::Read;
+    let mut old = Schedule::empty();
+    old.reads.push(Read {
+        key: input_key(1, 0, 0),
+        ptr: std::ptr::null(),
+        constant: Some(0.6),
+    });
+    old.reads.push(Read {
+        key: input_key(1, 1, 0),
+        ptr: std::ptr::null(),
+        constant: None,
+    });
+    assert_eq!(last_read(&old, input_key(1, 0, 0), 0), Some(0.6));
+    assert_eq!(last_read(&old, input_key(1, 1, 0), 0), None);
+    assert_eq!(last_read(&old, input_key(2, 0, 0), 0), None);
+}
+
+/// A right side starts from its own voice's left side, a new copy of a
+/// module from copy 0, and a new voice that is summed from nothing.
+#[test]
+fn a_fade_with_nothing_to_read_takes_the_right_start() {
+    assert_eq!(fallback(1, false), Some(0));
+    assert_eq!(fallback(5, true), Some(4));
+    assert_eq!(fallback(4, true), Some(0));
+    assert_eq!(fallback(4, false), None);
+    assert_eq!(fallback(0, true), None);
+}

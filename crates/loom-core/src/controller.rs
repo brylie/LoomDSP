@@ -209,6 +209,13 @@ impl Controller {
         &self.registry
     }
 
+    /// How many fades and contribution ramps of the last schedule sent the
+    /// controller still keeps, because the engine has not said they ended
+    /// (live patching spec, rule 9). For tests and diagnostics.
+    pub fn cable_fades_in_flight(&self) -> usize {
+        self.cable_fades.carried(&self.stats).len()
+    }
+
     /// The current graph (including uncommitted edits).
     pub fn graph(&self) -> &Graph {
         &self.graph
