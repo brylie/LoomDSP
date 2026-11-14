@@ -23,7 +23,9 @@
 //!   a tree of elements keyed by UI ID, and the layout places it, gives each
 //!   keyed element's bounds by UI ID, and finds the element under a point.
 //!   Sizes follow flexbox's defaults. It needs no GPU, and names no taffy
-//!   type in its API. See `examples/layout.rs`.
+//!   type in its API. See `examples/layout.rs`. Panels compose through
+//!   slots ([`Element::slot`]): the runtime keeps each panel's layout, and
+//!   the driver calls [`Runtime::lay_out`] before it draws.
 //! - **Time comes from the driver.** Every call takes the current moment,
 //!   and the runtime never reads the clock, so a test decides what time it
 //!   is.
@@ -52,13 +54,14 @@ mod runtime;
 pub mod shell;
 mod view;
 mod waker;
+mod window;
 
 pub use app::{App, Context, Deadline, WindowSpec};
 pub use driver::Driver;
 pub use effect::{Effect, Effects};
 pub use element::{Align, Element, Length, Padding};
 pub use event::{DriverEvent, WindowEvent, WindowState};
-pub use hit::{Hit, hit_layers};
+pub use hit::Hit;
 pub use layout::Layout;
 pub use routing::{NO_ELEMENTS, NoTarget, Target};
 pub use runtime::{Counts, Next, Runtime};

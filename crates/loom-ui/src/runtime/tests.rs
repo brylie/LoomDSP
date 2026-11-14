@@ -718,3 +718,174 @@ fn nothing_from_another_thread_lands_in_a_next_turn_batch() {
         );
     }
 }
+
+/// An app whose window is one panel with a slot, and a toolbar in it.
+#[derive(Default)]
+struct Composed {
+    /// The toolbar's buttons, each keyed by its name.
+    buttons: Vec<&'static str>,
+}
+
+impl App for Composed {
+    type Message = Vec<&'static str>;
+
+    fn update(&mut self, buttons: Vec<&'static str>, _cx: &Context<'_, Self::Message>) -> Effects<Self::Message> {
+        self.buttons = buttons;
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        /// The window: the toolbar's slot across the top.
+        fn frame(_: &()) -> crate::Element {
+            crate::Element::column([crate::Element::slot(UiId::panel("toolbar"))
+                .width(crate::Length::FILL)
+                .height(crate::Length::Fixed(20.0))])
+            .width(crate::Length::FILL)
+            .height(crate::Length::FILL)
+        }
+        /// The toolbar: a 30-pixel square per button.
+        fn toolbar(buttons: &Vec<&'static str>) -> crate::Element {
+            crate::Element::row(
+                buttons.iter().map(|name| {
+                    crate::Element::space(crate::Length::Fixed(30.0), crate::Length::Fixed(20.0)).key(*name)
+                }),
+            )
+        }
+        view.panel_with(UiId::panel("window"), Layer::Panels, &(), frame);
+        view.panel_with(UiId::panel("toolbar"), Layer::Panels, &self.buttons, toolbar);
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec {
+            title: "Composed".to_string(),
+            min_size: None,
+        }
+    }
+}
+
+/// A runtime for `Composed` in a 200 by 100 window, after its first turn.
+fn composed() -> Runtime<Composed, NoTarget> {
+    let mut runtime = Runtime::new(
+        Composed::default(),
+        NoTarget,
+        WindowState::new(Size::new(200.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
+    runtime
+}
+
+/// Section 5, rule 8: a turn builds elements but lays nothing out; the
+/// driver's `lay_out` does, and counts what it laid out.
+#[test]
+fn a_turn_lays_nothing_out_and_lay_out_does() {
+    let mut runtime = composed();
+    runtime.waker().send(vec!["open", "save"]);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
+    assert_eq!(runtime.counts().panels_laid_out, 0);
+
+    runtime.lay_out(&mut crate::layout::tests::Mono::default());
+    let counts = runtime.counts();
+    assert_eq!(counts.panels_laid_out, 2);
+    // The window's column and slot, and the toolbar's row and buttons.
+    assert_eq!(counts.elements_laid_out, 2 + 3);
+    let save = UiId::panel("toolbar").with("save");
+    assert_eq!(
+        runtime.bounds(&save),
+        Some(Rect::new(Point::new(30.0, 0.0), Size::new(30.0, 20.0)))
+    );
+    match runtime.hit(Point::new(35.0, 5.0)) {
+        Some((Layer::Panels, Hit::Element(id))) => assert_eq!(id, &save),
+        other => panic!("the save button is hit, not {other:?}"),
+    }
+}
+
+/// Section 5, rule 8: a read after a change and before `lay_out` would be
+/// out of date, so it panics in a debug build.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "call Runtime::lay_out first")]
+fn a_read_before_lay_out_panics() {
+    let mut runtime = composed();
+    runtime.lay_out(&mut crate::layout::tests::Mono::default());
+    runtime.waker().send(vec!["open"]);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
+    let _ = runtime.bounds(&UiId::panel("toolbar"));
+}
+
+/// A resize needs a new `lay_out` too, and then the panels fill the new
+/// size.
+#[test]
+fn a_resize_is_laid_out_on_the_next_lay_out() {
+    let mut runtime = composed();
+    runtime.lay_out(&mut crate::layout::tests::Mono::default());
+    runtime.handle(
+        DriverEvent::Window(WindowEvent::Resized(Size::new(400.0, 100.0))),
+        Instant::now(),
+        &mut Headless::new(),
+    );
+    runtime.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(runtime.bounds(&UiId::panel("toolbar")).map(|at| at.width), Some(400.0));
+}
+
+/// Section 4, rule 7: keys a rebuild drops are counted.
+#[test]
+fn dropped_keys_are_counted() {
+    let mut runtime = composed();
+    runtime.panels.allow_mistakes();
+    runtime.waker().send(vec!["open", "open", "open"]);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
+    assert_eq!(runtime.counts().duplicate_keys, 2);
+}
+
+/// Two roots, `a` and `b`, in the order the message gives.
+#[derive(Default)]
+struct Ordered {
+    /// True to list `b` first.
+    flipped: bool,
+}
+
+impl App for Ordered {
+    type Message = bool;
+
+    fn update(&mut self, flipped: bool, _cx: &Context<'_, Self::Message>) -> Effects<Self::Message> {
+        self.flipped = flipped;
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        /// A keyed square.
+        fn square(_: &()) -> crate::Element {
+            crate::Element::space(crate::Length::Fixed(10.0), crate::Length::Fixed(10.0)).key("square")
+        }
+        let keys = if self.flipped { ["b", "a"] } else { ["a", "b"] };
+        for key in keys {
+            view.panel_with(UiId::panel(key), Layer::Panels, &(), square);
+        }
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec {
+            title: "Ordered".to_string(),
+            min_size: None,
+        }
+    }
+}
+
+/// Section 5, rule 8: a new order of panels with the same models changes
+/// what is drawn on top, so the turn draws.
+#[test]
+fn a_new_order_of_panels_draws() {
+    let mut runtime = Runtime::new(
+        Ordered::default(),
+        NoTarget,
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    runtime.waker().send(false);
+    assert!(!runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).draw);
+    runtime.waker().send(true);
+    assert!(runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).draw);
+}

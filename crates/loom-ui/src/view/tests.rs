@@ -71,3 +71,33 @@ fn a_view_lists_its_panels() {
 fn a_key_used_twice_panics() {
     view(&[("toolbar", 1), ("toolbar", 2)]);
 }
+
+/// A panel with a builder is built when it is new or its model or layer
+/// changed, and not when it is the same; a panel with no builder is never
+/// built.
+#[test]
+fn a_panel_is_built_only_when_it_changed() {
+    /// One space per unit of the model.
+    fn build(count: &u32) -> crate::Element {
+        crate::Element::row((0..*count).map(|_| crate::Element::space(crate::Length::Shrink, crate::Length::Shrink)))
+    }
+    let view = |count: u32, layer: Layer| {
+        let mut view = View::new();
+        view.panel_with(UiId::panel("list"), layer, &count, build);
+        view.panel(UiId::panel("drawn elsewhere"), Layer::Panels, &count);
+        view
+    };
+    let built = |now: &View, last: Option<&View>| -> Vec<bool> {
+        now.built(last)
+            .into_iter()
+            .map(|(_, _, element)| element.is_some())
+            .collect()
+    };
+    let first = view(2, Layer::Panels);
+    assert_eq!(built(&first, None), [true]);
+    assert_eq!(built(&view(2, Layer::Panels), Some(&first)), [false]);
+    assert_eq!(built(&view(3, Layer::Panels), Some(&first)), [true]);
+    assert_eq!(built(&view(2, Layer::Overlays), Some(&first)), [true]);
+    let element = first.built(None).remove(0).2.expect("built");
+    assert_eq!(element.children.len(), 2);
+}

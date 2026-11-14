@@ -9,15 +9,18 @@
 //!   hits the nearest keyed element around it.
 //! - **An opaque element takes the point,** so nothing under it is hit,
 //!   even where it holds no keyed element: a panel over the layer below.
+//! - **Across panels,** the window tries each panel in the reverse of
+//!   draw order (`window.rs`).
 //! - **Rectangles are half-open,** so a point on the edge two elements
 //!   share hits exactly one of them, the right or the lower one.
 //! - **No clipping yet.** A child that runs past its parent is hit where it
 //!   is, outside the parent's bounds. That is right while nothing clips;
 //!   when scrolling and clipping come with drawing, a clipped part must
-//!   stop being hit outside its clip.
+//!   stop being hit outside its clip. The same holds for panels: a panel
+//!   wider than its slot is hit outside the slot until panels are clipped
+//!   to their slots, and then it must be hit-tested the same way.
 
 use crate::layout::Layout;
-use crate::view::Layer;
 use loom_ui_core::{Point, UiId};
 
 /// What a point hit.
@@ -52,21 +55,6 @@ impl Layout {
         }
         Some(Hit::Blocked)
     }
-}
-
-/// What is under `point` across several layouts, each placed at the
-/// window's origin. The topmost layer is tried first, and a later layout
-/// in the same layer is over an earlier one; the first that takes the
-/// point answers (section 5, rule 1).
-pub fn hit_layers<'a>(layouts: &[(Layer, &'a Layout)], point: Point) -> Option<(Layer, Hit<'a>)> {
-    let mut order: Vec<usize> = (0..layouts.len()).collect();
-    // A stable sort keeps the given order within a layer; reversed, the
-    // last given is tried first.
-    order.sort_by_key(|index| layouts[*index].0);
-    order.into_iter().rev().find_map(|index| {
-        let (layer, layout) = layouts[index];
-        layout.hit(point).map(|hit| (layer, hit))
-    })
 }
 
 #[cfg(test)]

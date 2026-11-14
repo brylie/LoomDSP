@@ -441,6 +441,7 @@ fn an_unkeyed_wrapper_changes_no_id() {
 
 /// In a debug build, two elements with one UI ID panic, naming it.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "two elements have the UI ID p/a")]
 fn a_duplicate_key_panics_in_a_debug_build() {
     lay_out(
