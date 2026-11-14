@@ -133,10 +133,15 @@ fn timers_run_once_the_window_opens_and_follow_the_state() {
 fn measuring_runs_frames_at_display_rate() {
     let mut app = open_app();
     app.measuring = true;
+    let before = Instant::now();
     let _ = app.send(Message::Tick);
+    let after = Instant::now();
     let due = app.timers.due(Timer::Frame).expect("a frame while measuring");
     assert_eq!(Timer::Frame.period(), FRAME);
-    assert!(due > Instant::now() - FRAME && due <= Instant::now() + FRAME);
+    assert!(
+        before + FRAME <= due && due <= after + FRAME,
+        "a frame after the turn that started it"
+    );
     assert_eq!(app.timers.due(Timer::LiveFrame), None);
     let deadline = app.next_deadline().expect("the frame is the deadline");
     assert!(matches!(deadline.message, Message::Frame(at) if at == due));

@@ -237,14 +237,13 @@ fn the_recovery_question_comes_before_a_timer() {
     let _ = app.send(Message::StartWatching);
     app.drops.push(PathBuf::from("dropped.ron"));
     let _ = app.send(Message::Tick);
-    assert!(matches!(
-        app.next_deadline().map(|d| d.message),
-        Some(Message::DropsDone)
-    ));
+    let timer = app.next_deadline().expect("the drop timer");
+    assert!(matches!(timer.message, Message::DropsDone));
+    // Found before the timer is due, however long writing the copy takes.
     app.recovery_offer = Some(RecoveryOffer {
         orphan: recovery::tests::orphan_for(&dir.0, None),
         start: StartPatch::Empty,
-        found: Instant::now(),
+        found: timer.at - std::time::Duration::from_secs(1),
     });
     assert!(
         matches!(app.next_deadline().map(|d| d.message), Some(Message::AskRecovery)),
