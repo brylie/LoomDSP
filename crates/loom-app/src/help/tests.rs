@@ -373,6 +373,11 @@ fn the_browser_shows_the_id_under_the_description() {
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
     ui.tap(Key::Character("a".into()), Modifiers::default());
+    // The built-ins come first; the first module follows them.
+    ui.send(Message::Browser(crate::browser::Message::Hover(
+        crate::builtin::ALL.len(),
+    )));
+    ui.redraw();
     let first = ui.app().overlays.browser().unwrap().highlighted().unwrap();
     assert!(ui.text(first.id).is_some(), "the highlighted ID");
     assert!(ui.text(first.description).is_some());

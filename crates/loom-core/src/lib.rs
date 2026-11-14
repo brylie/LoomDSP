@@ -60,7 +60,7 @@ pub use module::{AsAny, Module, Param, PortIo, ProcessContext, copy_state, testi
 pub use names::ModuleNames;
 pub use panic::PanicTrigger;
 pub use registry::{ModuleKind, Registry, RegistryNote};
-pub use role::{FillsRole, ParamKind, RoleDescriptor, RoleMismatch, RoleParam, RolePort, roles};
+pub use role::{FillsRole, ParamKind, RoleDescriptor, RoleMismatch, RoleParam, RolePort, THRU_IN, THRU_OUT, roles};
 pub use safety::OutputSafety;
 pub use signal::SignalType;
 pub use telemetry::{MeterReading, PAIR_CHUNK, PairChunk, ProbeId, ProbeKind, SCOPE_CHUNK, ScopeChunk, Telemetry};

@@ -4748,3 +4748,77 @@ fn a_posted_message_runs_before_the_window_answers() {
         "the item's message, then the answer: {posted:?}, {located:?}"
     );
 }
+
+/// A surface control bound to an empty slot is a disabled slider: its
+/// label, the reason as its description, and no actions, so a screen
+/// reader neither moves nor focuses it, and focus left on it goes to its
+/// tile (sub-patches.md, Empty slots).
+#[test]
+fn a_control_bound_to_an_empty_slot_is_disabled_and_says_why() {
+    let mut app = crate::tests::app_with_text(
+        r#"Patch(
+    version: 1,
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1"))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 9, param: "cutoff")],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#,
+    );
+    let snapshot = app.ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|t| t.id == 2).expect("the Voice tile");
+    let reason = tile.widgets[0].inert.clone().expect("the control is inert");
+    let update = app.a11y_tree(&Places::default());
+    let found = node(&update, widget_node(&mut app, 2, 0));
+    assert_eq!(found.role(), Role::Slider);
+    assert_eq!(found.label(), Some("cutoff"));
+    assert_eq!(found.description(), Some(reason.as_str()));
+    assert!(found.is_disabled());
+    for action in [
+        Action::Focus,
+        Action::Increment,
+        Action::Decrement,
+        Action::SetValue,
+        Action::Click,
+    ] {
+        assert!(!found.supports_action(action), "{action:?}");
+    }
+    // Focus the canvas left on it goes to the tile.
+    app.a11y.set_focus(Some((2, 0)));
+    let tile = node_of(&mut app, &tile_id(2));
+    assert_eq!(app.a11y_tree(&Places::default()).focus, tile);
+}
+
+/// An inert control keeps the role a live control of its kind has, so
+/// the role does not change under a screen reader's focus when its slot
+/// fills: a toggle is a switch, a select a combo box (sub-patches.md,
+/// Empty slots).
+#[test]
+fn an_inert_control_keeps_the_role_of_its_kind() {
+    use loom_canvas::WidgetViewKind;
+    let role = super::tree::control_role;
+    assert_eq!(role(&WidgetViewKind::Knob { steps: 0 }), Role::Slider);
+    assert_eq!(role(&WidgetViewKind::Toggle), Role::Switch);
+    assert_eq!(role(&WidgetViewKind::Button), Role::Button);
+    assert_eq!(role(&WidgetViewKind::Select { options: Vec::new() }), Role::ComboBox);
+    assert_eq!(role(&WidgetViewKind::Radio { options: Vec::new() }), Role::RadioGroup);
+}

@@ -241,6 +241,13 @@ pub enum WidgetViewKind {
     },
     /// A large button. Its gesture depends on the mode stored with its value.
     Button,
+    /// A line of text with no control under it, as an empty slot's note:
+    /// its label is the text. Not a control, never focused or hit
+    /// (sub-patches.md, Empty slots).
+    Note {
+        /// Width in grid units.
+        width: u8,
+    },
 }
 
 impl WidgetViewKind {
@@ -301,6 +308,11 @@ pub struct WidgetView {
     /// surface. It gets a small square at its corner, a shape and not only
     /// a colour (sub-patches.md, Exposing; NFR-UX-03).
     pub exposed: bool,
+    /// True for a control with nothing behind it, such as a surface control
+    /// bound to an empty slot's role parameter: it is drawn, but not a
+    /// control, so Tab, the arrow keys, and the pointer pass it by
+    /// (sub-patches.md, Empty slots).
+    pub inert: bool,
 }
 
 impl WidgetView {
@@ -325,23 +337,26 @@ impl WidgetView {
             WidgetViewKind::Radio { options } => (6, options.len() as u8 + 1),
             WidgetViewKind::Select { .. } => (6, 2),
             WidgetViewKind::Segmented { width, .. } => (*width, 2),
+            WidgetViewKind::Note { width } => (*width, 1),
         }
     }
 
-    /// True for widgets the user operates (all but lights, meters, and
-    /// scopes).
+    /// True for widgets the user operates (all but lights, meters, scopes,
+    /// notes, and an inert control).
     pub fn is_control(&self) -> bool {
-        !matches!(
-            self.kind,
-            WidgetViewKind::Light
-                | WidgetViewKind::Readout { .. }
-                | WidgetViewKind::Meter { .. }
-                | WidgetViewKind::Scope
-                | WidgetViewKind::LevelHistory
-                | WidgetViewKind::Spectrum
-                | WidgetViewKind::XyScope
-                | WidgetViewKind::Shape { .. }
-        )
+        !self.inert
+            && !matches!(
+                self.kind,
+                WidgetViewKind::Light
+                    | WidgetViewKind::Readout { .. }
+                    | WidgetViewKind::Meter { .. }
+                    | WidgetViewKind::Scope
+                    | WidgetViewKind::LevelHistory
+                    | WidgetViewKind::Spectrum
+                    | WidgetViewKind::XyScope
+                    | WidgetViewKind::Shape { .. }
+                    | WidgetViewKind::Note { .. }
+            )
     }
 
     /// The whole-number steps of a one-number control (panel-widgets.md, One

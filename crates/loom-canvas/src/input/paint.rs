@@ -140,13 +140,16 @@ impl CanvasModel<'_> {
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values
                         .get(module.id, widget)
                         .filter(|_| {
-                            matches!(
-                                module.panel.widgets[widget].kind,
-                                WidgetViewKind::Knob { .. }
-                                    | WidgetViewKind::Fader { .. }
-                                    | WidgetViewKind::XyPad { .. }
-                                    | WidgetViewKind::Range { .. }
-                            )
+                            // An inert control shows no value, so its
+                            // caption stays.
+                            module.panel.widgets[widget].is_control()
+                                && matches!(
+                                    module.panel.widgets[widget].kind,
+                                    WidgetViewKind::Knob { .. }
+                                        | WidgetViewKind::Fader { .. }
+                                        | WidgetViewKind::XyPad { .. }
+                                        | WidgetViewKind::Range { .. }
+                                )
                         })
                         .map(|v| v.text.as_str()),
                     _ => None,

@@ -264,3 +264,13 @@ fn positions_and_sizes_divide_by_the_scale() {
     assert_eq!(point(PhysicalPosition::new(3.0, 9.0), 1.5), Point::new(2.0, 6.0));
     assert_eq!(logical(PhysicalSize::new(300, 150), 1.5), Size::new(200.0, 100.0));
 }
+
+/// A display's rate in millihertz gives its frame period; a display with
+/// no rate, or zero, keeps the 16 ms default.
+#[test]
+fn a_displays_rate_gives_its_frame() {
+    assert_eq!(frame_period(Some(60_000)), Duration::from_secs_f64(1.0 / 60.0));
+    assert_eq!(frame_period(Some(120_000)), Duration::from_secs_f64(1.0 / 120.0));
+    assert_eq!(frame_period(None), crate::event::WindowState::FRAME);
+    assert_eq!(frame_period(Some(0)), crate::event::WindowState::FRAME);
+}

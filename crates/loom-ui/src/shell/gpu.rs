@@ -64,6 +64,9 @@ pub(crate) struct Device {
 
 /// The window's device and surface.
 pub(crate) struct Gpu {
+    /// The adapter the device came from, for layers that build their
+    /// renderer from it.
+    pub adapter: wgpu::Adapter,
     /// The device, for drawing and for captures.
     pub device: Device,
     /// The window's surface.
@@ -164,6 +167,7 @@ impl Gpu {
             view_formats: Vec::new(),
         };
         let gpu = Self {
+            adapter,
             device: Device { device, queue, format },
             surface,
             config,
@@ -214,6 +218,7 @@ impl Gpu {
             format: self.device.format,
             size: logical,
             scale,
+            capture: false,
         });
         window.pre_present_notify();
         texture.present();
@@ -257,6 +262,7 @@ pub(crate) fn capture(
         format: device.format,
         size: Size::new(width as f32 / scale, height as f32 / scale),
         scale,
+        capture: true,
     });
     let row = width as usize * 4;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;

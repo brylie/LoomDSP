@@ -3,7 +3,21 @@ use crate::gpu::packed;
 use crate::scene::{ModuleView, PanelView, WidgetView};
 
 fn scene() -> Scene {
-    let widget = |kind, x| WidgetView {
+    scene_with(vec![
+        (WidgetViewKind::Knob { steps: 0 }, 0),
+        (WidgetViewKind::Toggle, 3),
+        (
+            WidgetViewKind::Radio {
+                options: vec!["a".into(), "b".into(), "c".into()],
+            },
+            6,
+        ),
+    ])
+}
+
+/// One module whose panel holds `widgets`, each at its grid column.
+fn scene_with(widgets: Vec<(WidgetViewKind, u8)>) -> Scene {
+    let widget = |(kind, x)| WidgetView {
         kind,
         x,
         y: 0,
@@ -11,6 +25,7 @@ fn scene() -> Scene {
         hover: crate::scene::HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     };
     Scene::new(
         vec![ModuleView {
@@ -26,20 +41,66 @@ fn scene() -> Scene {
             panel: PanelView {
                 width: 9,
                 height: 4,
-                widgets: vec![
-                    widget(WidgetViewKind::Knob { steps: 0 }, 0),
-                    widget(WidgetViewKind::Toggle, 3),
-                    widget(
-                        WidgetViewKind::Radio {
-                            options: vec!["a".into(), "b".into(), "c".into()],
-                        },
-                        6,
-                    ),
-                ],
+                widgets: widgets.into_iter().map(widget).collect(),
             },
         }],
         Vec::new(),
     )
+}
+
+/// A control with nothing behind it, such as a surface control bound to
+/// an empty slot, shows no value: a knob keeps its track and body but no
+/// value arc or pointer, and a fader keeps its track but no fill or
+/// handle (sub-patches.md, Empty slots).
+#[test]
+fn a_dimmed_knob_and_fader_show_no_value() {
+    let scene = scene_with(vec![
+        (WidgetViewKind::Knob { steps: 0 }, 0),
+        (
+            WidgetViewKind::Fader {
+                vertical: true,
+                steps: 0,
+            },
+            3,
+        ),
+    ]);
+    let palette = Palette::default();
+    let build = |dimmed: bool| {
+        let mut values = PanelValues::new();
+        for index in 0..2 {
+            values.set(
+                1,
+                index,
+                WidgetValue {
+                    position: 0.7,
+                    dimmed,
+                    ..WidgetValue::default()
+                },
+            );
+        }
+        ControlGeometry::build(&scene, &values, &palette)
+    };
+    let value = packed(palette.control_value);
+    let text = packed(palette.text);
+    let shown = build(false);
+    assert!(
+        shown.arcs.iter().any(|a| a.colour() == value),
+        "a live knob shows its value arc"
+    );
+    assert!(
+        shown.shapes.iter().any(|s| s.fill() == value),
+        "a live fader shows its fill"
+    );
+
+    let dimmed = build(true);
+    assert_eq!(dimmed.arcs.len(), 1, "only the knob's track");
+    assert!(dimmed.arcs.iter().all(|a| a.colour() != value));
+    assert!(dimmed.shapes.iter().all(|s| s.fill() != value), "no fader fill");
+    assert!(dimmed.shapes.iter().all(|s| s.fill() != text), "no knob pointer");
+    // The pointer, the fill, and the handle go; a veil goes over each.
+    let veil = packed(Color { a: 0.6, ..palette.tile });
+    assert_eq!(dimmed.shapes.iter().filter(|s| s.fill() == veil).count(), 2);
+    assert_eq!(shown.shapes.len() - 3 + 2, dimmed.shapes.len());
 }
 
 #[test]
@@ -315,6 +376,7 @@ fn the_peak_line_is_never_below_the_bar() {
                     hover: crate::scene::HoverText::default(),
                     hidden: false,
                     exposed: false,
+                    inert: false,
                 }],
             },
         }],
@@ -370,6 +432,7 @@ fn stereo_meter_draws_two_tracks() {
                     hover: crate::scene::HoverText::default(),
                     hidden: false,
                     exposed: false,
+                    inert: false,
                 }],
             },
         }],
@@ -417,6 +480,7 @@ fn a_result_preview_is_one_joined_line() {
             hover: crate::scene::HoverText::default(),
             hidden: false,
             exposed: false,
+            inert: false,
         }],
     };
     let scene = Scene::new(vec![module], Vec::new());

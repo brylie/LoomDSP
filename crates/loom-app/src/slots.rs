@@ -13,8 +13,9 @@ use serde::Serialize;
 /// (sub-patches.md, Slots). A follow-up carries the slot.
 pub const CANNOT_COPY_SLOT: &str = "Cannot copy a slot yet";
 
-/// The text an empty slot's tile shows in place of a panel.
-pub const NO_PART: &str = "No part. Swap to choose one.";
+/// The inspector's Part choice that empties the slot, and names an empty
+/// slot's part (sub-patches.md, Empty slots).
+pub const NO_PART_CHOICE: &str = "No part";
 
 /// The graph's assignments and MIDI mappings at one moment, so a failed
 /// swap can put back what it moved.
@@ -46,6 +47,10 @@ pub enum SwapTarget {
     Library(String),
     /// A sub-patch the slot held before, by definition key.
     Held(String),
+    /// No part: Remove part empties the slot (sub-patches.md, Empty slots).
+    /// Never in a Swap list; the tile menu's Remove part and the
+    /// inspector's `No part` choice send it.
+    Empty,
 }
 
 /// One entry of a slot's Swap list.
@@ -193,13 +198,6 @@ impl App {
             self.alerts.warn(format!("Cannot make a slot: unknown role {role_id}"));
             return;
         };
-        // A swap's fades are added for one part; copies would each need
-        // their own (sub-patches.md, How modes meet the rest).
-        let level = self.session.hierarchy.level_of(ModuleId(module));
-        if self.session.hierarchy.in_stack(&level) {
-            self.alerts.warn(loom_patch::modes::NO_SLOT_IN_STACK.to_string());
-            return;
-        }
         self.session.step_name = Some(format!("make {} slot", role.name));
         let position = self.session.positions.get(&module).copied();
         let size = self.session.sizes.get(&module).copied();
@@ -222,6 +220,37 @@ impl App {
                 app.session.selection = std::collections::BTreeSet::from([made.slot.0]);
                 if app.commit() {
                     app.alerts.say(hierarchy::made_slot_text(role, &made.removed));
+                }
+            }
+        });
+    }
+
+    /// Adds an empty slot for `role` from the module browser, with its
+    /// top-left corner at `world`, and selects it, as one undo step
+    /// (sub-patches.md, Empty slots).
+    pub(crate) fn add_empty_slot(&mut self, role: &'static RoleDescriptor, world: loom_ui_core::Point) {
+        self.close_slider_gesture();
+        if self.session.edits.gesture_open() {
+            return;
+        }
+        let level = self.session.level.clone();
+        self.session.step_name = Some(format!("add {} slot", role.name));
+        self.edit(|app| {
+            let mut added = None;
+            if app.change_hierarchy("add a slot", |h, _| {
+                added = Some(h.add_empty_slot(&level, role)?);
+                Ok(())
+            }) && let Some(slot) = added
+            {
+                app.session.positions.insert(slot.0, (world.x, world.y));
+                app.session.selection = std::collections::BTreeSet::from([slot.0]);
+                let name = app
+                    .session
+                    .hierarchy
+                    .tile_name(slot)
+                    .unwrap_or_else(|| role.name.to_string());
+                if app.commit() {
+                    app.alerts.say(hierarchy::added_slot_text(&name));
                 }
             }
         });
@@ -304,6 +333,10 @@ impl App {
         // refused swap leaves nothing half done (sub-patches.md, How a swap
         // crossfades, point 5).
         self.finish_all_fades();
+        if to == SwapTarget::Empty {
+            self.remove_part(slot, &name);
+            return;
+        }
         self.session.step_name = Some(format!("swap {name}"));
         self.edit(|app| {
             let result = app.swap_now(slot, &to, file.as_ref());
@@ -315,6 +348,49 @@ impl App {
                     }
                 }
                 Err(why) => app.alerts.warn(format!("Cannot swap {name}: {why}")),
+            }
+        });
+    }
+
+    /// Remove part: empties the slot tile `slot`, named `name`, as one undo
+    /// step (sub-patches.md, Empty slots). A thru slot fades the part out
+    /// to its thru signal; any other lets it go now, removed from the graph
+    /// only once the sync has succeeded. The status names the assignments
+    /// and mappings that had nowhere to go.
+    fn remove_part(&mut self, slot: u32, name: &str) {
+        self.session.step_name = Some(format!("remove part from {name}"));
+        self.edit(|app| {
+            let layout = app.layout_fn_owned();
+            let mut candidate = app.session.hierarchy.clone();
+            let before: std::collections::BTreeSet<ModuleId> =
+                app.session.controller.graph().nodes().map(|(id, _)| id).collect();
+            let links = Links::of(app.session.controller.graph());
+            let emptied = match candidate.swap_to_empty(&mut app.session.controller, &layout, ModuleId(slot)) {
+                Ok(emptied) => emptied,
+                Err(why) => {
+                    app.remove_added_since(&before);
+                    app.restore_links(&links);
+                    app.alerts.warn(format!("Cannot remove the part from {name}: {why}"));
+                    return;
+                }
+            };
+            match candidate.sync_without(&mut app.session.controller, &emptied.gone) {
+                Ok(renamed) => {
+                    for id in &emptied.gone {
+                        let _ = app.session.controller.remove_module(*id);
+                    }
+                    app.session.hierarchy = candidate;
+                    app.assignments_renumbered(&renamed);
+                    if app.commit() {
+                        app.alerts
+                            .say(hierarchy::removed_part_text(name, &emptied.part_name, &emptied.removed));
+                    }
+                }
+                Err(e) => {
+                    app.remove_added_since(&before);
+                    app.restore_links(&links);
+                    app.alerts.warn(format!("Cannot remove the part from {name}: {e}"));
+                }
             }
         });
     }
@@ -337,7 +413,9 @@ impl App {
             SwapTarget::Held(key) => {
                 part.is_some_and(|p| candidate.key_at(&candidate.path_of(p)) == Some(key.as_str()))
             }
-            SwapTarget::Library(_) => false,
+            // Remove part goes through `remove_part`, never here: the swap
+            // below refuses it.
+            SwapTarget::Library(_) | SwapTarget::Empty => false,
         };
         if holds_already {
             return Err("it holds that part already".to_string());
@@ -354,6 +432,7 @@ impl App {
                 let _ = path;
                 candidate.swap_to_subpatch(&mut self.session.controller, &layout, ModuleId(slot), file, None)
             }
+            SwapTarget::Empty => Err("Remove part is not a swap to a part".to_string()),
         };
         let swapped = match swapped {
             Ok(swapped) => swapped,

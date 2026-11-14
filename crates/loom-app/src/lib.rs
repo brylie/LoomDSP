@@ -16,6 +16,7 @@ mod bars;
 mod bench;
 mod boot;
 mod browser;
+mod builtin;
 mod canvas_events;
 mod clip;
 mod clipboard;
@@ -226,7 +227,7 @@ impl Args {
 }
 
 /// Runs the program with the command line it was started with.
-pub fn run() -> iced::Result {
+pub fn run() -> Result<(), loom_ui::shell::Error> {
     let args = Args::parse();
     if let Some(path) = &args.view.screenshot {
         if let Err(e) = screenshot::run(&args, path) {
@@ -252,19 +253,21 @@ pub fn run() -> iced::Result {
         }
         return Ok(());
     }
-    let start = move || {
-        let mut app = App::new(args.clone());
-        app.remember_opened_at_start(&args);
-        iced_bridge::AppBridge::start(app)
-    };
-    let result = iced::application(start, iced_bridge::AppBridge::update, iced_bridge::AppBridge::view)
-        .title(iced_bridge::AppBridge::title)
-        .theme(iced_bridge::AppBridge::theme)
-        .subscription(iced_bridge::AppBridge::subscription)
-        .exit_on_close_request(false)
-        .window_size(WINDOW)
-        .antialiasing(false)
-        .run();
+    let mut app = App::new(args.clone());
+    app.remember_opened_at_start(&args);
+    // The window and its services share the clipboard once it opens.
+    let clipboard = iced_bridge::SharedClipboard::default();
+    let result = loom_ui::shell::run(
+        iced_bridge::Hosted(app, None),
+        iced_bridge::IcedTarget::default(),
+        iced_bridge::WindowLayers::new(clipboard.clone()),
+        iced_bridge::AppServices::new(clipboard),
+        loom_ui::shell::Options {
+            size: loom_ui_core::Size::new(WINDOW.width, WINDOW.height),
+            // The window is open: the watchers start on the first turn.
+            first: vec![Message::StartWatching],
+        },
+    );
     // A control script that stopped early asks for its own status.
     match control::exit_status() {
         0 => result,
@@ -1360,6 +1363,7 @@ impl App {
             "input is routed before update (iced_bridge.rs)"
         );
         let now = cx.now();
+        self.timers.set_frame(cx.window().frame);
         if let Some(timer) = timers::Timer::of(&message) {
             self.timers.taken(timer, now);
         }
@@ -1654,6 +1658,14 @@ impl App {
             browser::Outcome::Insert { item, linked, world } => {
                 self.overlays.close_browser();
                 self.insert_library_item(&item, linked, world);
+            }
+            browser::Outcome::AddSlot(role, world) => {
+                self.overlays.close_browser();
+                self.add_empty_slot(role, world);
+            }
+            browser::Outcome::InsertBuiltin(builtin, world) => {
+                self.overlays.close_browser();
+                self.insert_builtin(builtin, world);
             }
         }
     }

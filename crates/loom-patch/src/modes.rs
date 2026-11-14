@@ -138,20 +138,20 @@ pub fn fills_a_role(name: &str, role: &str) -> String {
     format!("{name} fills {role}; turn that off before changing its mode")
 }
 
-/// `Cannot stack Voice: it holds a slot`.
-pub fn stack_holds_slot(name: &str) -> String {
-    format!("Cannot stack {name}: it holds a slot")
+/// `Cannot make Voice a layer yet: it holds a slot; dissolve the slot
+/// first` (`a select`, `single`): a
+/// change between a mode with members and one without moves the inside,
+/// and a slot with it (sub-patches.md, How modes meet the rest).
+pub fn mode_moves_slot(name: &str, mode: Mode) -> String {
+    let to = match mode {
+        Mode::Single => "single".to_string(),
+        other => format!("a {}", other.word()),
+    };
+    format!("Cannot make {name} {to} yet: it holds a slot; dissolve the slot first")
 }
 
 /// The refusal of a mode change on a tile that is not a sub-patch.
 pub const NOT_A_SUBPATCH: &str = "Only a sub-patch has a mode";
-
-/// The refusal of Make slot inside a stack of more than one copy.
-pub const NO_SLOT_IN_STACK: &str = "Cannot make a slot inside a stack yet";
-
-/// The refusal of a mode change on a sub-patch that holds a slot.
-pub const NO_MODE_WITH_SLOT: &str =
-    "Cannot change the mode of a sub-patch that holds a slot yet; dissolve the slot first";
 
 /// A definition's mode and the fields that go with it, as the editor keeps
 /// them beside the definition (`crate::hierarchy::Definition`).

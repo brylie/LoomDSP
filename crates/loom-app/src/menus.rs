@@ -94,6 +94,7 @@ fn tile_item_id(menu: &UiId, message: &Message) -> UiId {
                 SwapTarget::Module(name) => ("module", name),
                 SwapTarget::Library(name) => ("library", name),
                 SwapTarget::Held(name) => ("held", name),
+                SwapTarget::Empty => return id.with("remove-part").with(*slot),
             };
             id.with("swap").with(*slot).with(kind).with(name.as_str())
         }

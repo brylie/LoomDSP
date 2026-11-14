@@ -32,7 +32,7 @@ use crate::waker::{Wake, Waker};
 use loom_ui_core::Event;
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// What the driver should do after a turn.
 ///
@@ -163,6 +163,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// The window as the runtime knows it.
     pub fn window(&self) -> WindowState {
         self.window
+    }
+
+    /// Sets how long one frame of the window's display lasts, from the
+    /// next update on. The driver calls it when it learns the display's
+    /// rate: at start, and when the window moves to another display. It
+    /// runs no turn, since a new rate changes only when the next frame is
+    /// due.
+    pub fn set_frame(&mut self, frame: Duration) {
+        self.window.frame = frame;
     }
 
     /// What the runtime has done so far.

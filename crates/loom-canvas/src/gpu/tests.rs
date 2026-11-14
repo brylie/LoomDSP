@@ -166,6 +166,7 @@ fn each_zoom_draws_the_bars_for_the_text_it_hides() {
                 hover: crate::scene::HoverText::default(),
                 hidden: false,
                 exposed: false,
+                inert: false,
             }],
         },
     };
@@ -261,6 +262,7 @@ fn a_box_text_bar_has_its_own_range() {
         hover: crate::scene::HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     };
     view.panel = crate::scene::PanelView {
         width: 5,
