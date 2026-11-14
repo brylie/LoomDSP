@@ -1,27 +1,24 @@
-//! The bridge to Iced, until the `winit` shell replaces it at plan step
-//! 2.2 (docs/dev/leaving-iced-plan.md, step 2.1, item 2).
+//! Iced inside our own runtime, until phase 3 (docs/dev/leaving-iced-plan.md,
+//! steps 2.1 and 2.2).
 //!
-//! Iced still owns the event loop and draws every view, but the app no
-//! longer runs inside Iced's own runtime. It runs inside ours,
-//! `loom_ui::Runtime`, and Iced is only its driver and its routing target:
+//! The app runs inside `loom_ui::Runtime` on the `winit` shell
+//! (`loom_ui::shell`). Iced draws every view and holds the widgets, so it is
+//! the runtime's routing target here ([`IcedTarget`]): focus and scrolling
+//! become Iced's widget operations, and what only Iced's widgets know (focus,
+//! where a part is) the app asks as window questions (`window_question.rs`).
 //!
-//! - a message from an Iced view goes into the runtime's queue, and the
-//!   runtime runs one turn: one `update` per message, each with its own
-//!   effects right after it (ui-layer.md, section 2);
-//! - the effects that reach outside the app come back here, to [`loom_ui::Driver`]
-//!   and [`loom_ui::Target`], which turn them into Iced tasks;
-//! - a message sent from another thread through the runtime's waker wakes
-//!   Iced through one subscription, and the next turn takes it.
+//! - `window.rs` is the shell's layers: it turns window events into Iced's,
+//!   runs Iced's updates and draws, posts their messages routed before
+//!   `update` (`input_owner::route`), and runs the turn's widget operations
+//!   through `tasks.rs`.
+//! - `services.rs` gives the shell the dialogs and the clipboard.
+//! - `preedit.rs` draws the text an input method is composing.
+//! - `Bridge` is the runtime with Iced as its driver, for the `Ui` harness
+//!   only (`headless.rs`), until step 2.3.
 //!
-//! - an input event from Iced's listener is routed before `update`
-//!   (`input_owner::route`), and each message it becomes is its own update
-//!   in one turn;
-//! - what only Iced's widgets know (focus, where a part is) the app asks
-//!   as window questions (`window_question.rs`), which the bridge turns
-//!   into widget operations after the turn.
-//!
-//! This is the only module that may name Iced's `Task`, apart from the
-//! macOS accessibility adapter until step 2.2 (`tests/purity.rs`).
+//! Only this module and the files under it may name Iced's `Task` or `rfd`;
+//! `tests/purity.rs` checks that, and its list of files not yet ported is
+//! empty.
 
 use crate::window_question::WindowQuestion;
 use crate::{App, Message};
