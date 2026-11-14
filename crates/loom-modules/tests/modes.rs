@@ -407,3 +407,94 @@ fn a_mapping_on_a_stack_moves_every_copy() {
         left[511]
     );
 }
+
+/// The patch `text` loaded as the editor loads it, with its hierarchy, so
+/// a test can change modes as the editor does.
+fn load_editor(text: &str) -> (EngineParts, loom_patch::Hierarchy) {
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let mut parts = create_engine(loom_modules::registry(), config);
+    let patch = Patch::from_ron(text).expect("the patch parses");
+    let mut ids = FlatIds::new();
+    patch
+        .load_with_ids(&mut parts.controller, &mut ids)
+        .expect("the patch loads");
+    let hierarchy =
+        loom_patch::Hierarchy::from_patch(&patch, parts.controller.graph(), ids, parts.controller.registry())
+            .expect("reads");
+    (parts, hierarchy)
+}
+
+/// Renders `frames` frames in buffers of 64, making `edit` and committing
+/// just before frame `at`. Returns the output and the edit's cable fades.
+fn render_mode_edit(
+    text: &str,
+    frames: usize,
+    at: usize,
+    edit: impl FnOnce(&mut loom_patch::Hierarchy, &mut loom_core::Controller),
+) -> (Vec<f32>, usize) {
+    let (mut parts, mut hierarchy) = load_editor(text);
+    let mut edit = Some(edit);
+    let mut fades = 0;
+    let (left, _) = render_with(&mut parts, frames, 64, &[], |position, parts| {
+        if position == at
+            && let Some(edit) = edit.take()
+        {
+            edit(&mut hierarchy, &mut parts.controller);
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            fades = parts.controller.commit().expect("commits").cable_fades;
+        }
+    });
+    (left, fades)
+}
+
+/// Single to Layer, and Single to Select, only rearrange: the cable to the
+/// output moves onto a mixer that plays its old source alone, so it
+/// switches, and the sound does not change by a single bit (live patching
+/// spec, rule 9, The mixers the editor adds).
+#[test]
+fn single_to_layer_or_select_switches_with_no_fade() {
+    let text = patch(&alone("a", 0.0, 0.5), "", "");
+    let (plain, _) = render_mode_edit(&text, 2_048, 1_024, |_, _| {});
+    for mode in [loom_patch::Mode::Layer, loom_patch::Mode::Select] {
+        let (edited, fades) = render_mode_edit(&text, 2_048, 1_024, |hierarchy, controller| {
+            hierarchy
+                .set_mode(controller.graph(), ModuleId(7), mode, &|name| name.to_string())
+                .expect("the mode changes");
+        });
+        assert_eq!(fades, 0, "{mode:?}");
+        assert_eq!(edited, plain, "{mode:?} does not change the sound");
+    }
+}
+
+/// A stack going from 1 copy to 2 gets a new Sum, which starts at its final
+/// gain, so the output fades once to the whole stack instead of switching:
+/// no step, and a stack of equal values never reads below the copy value
+/// (rule 9, Every other change of mixer fades once).
+#[test]
+fn a_stack_going_from_one_copy_to_two_fades_once() {
+    let at = 1_024;
+    let frames = 2_048;
+    let to_two = |hierarchy: &mut loom_patch::Hierarchy, _: &mut loom_core::Controller| {
+        hierarchy.set_copies(ModuleId(7), 2).expect("copies change");
+    };
+    // Modulation: the copies' mean, 0.2 before and after.
+    let (values, fades) = render_mode_edit(&patch(&stack(""), "", ""), frames, at, to_two);
+    assert!(fades > 0, "the output's cable moved onto a new Sum");
+    assert!(
+        values[at..].iter().all(|&v| (v - 0.2).abs() < 1e-6),
+        "the mean never dips"
+    );
+    // Audio: 0.2 alone, then two copies at 1/√2, reached in a straight line.
+    let (audio, _) = render_mode_edit(&patch(&audio_stack(""), "", ""), frames, at, to_two);
+    let before = audio[at - 1];
+    let after = audio[frames - 1];
+    assert!(after > before, "two copies are louder");
+    let step = audio[at - 1..]
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(step <= (after - before) / 240.0 + 1e-6, "no step: {step}");
+}
