@@ -42,4 +42,11 @@ pub trait Driver<M> {
 
     /// The app asked to quit: end the loop.
     fn exit(&mut self);
+
+    /// Hand the screen reader the accessibility tree (the
+    /// [`Accessibility`](crate::Effect::Accessibility) effect). A driver
+    /// with no screen reader drops it.
+    fn accessibility(&mut self, whole: accesskit::TreeUpdate, changes: Option<accesskit::TreeUpdate>) {
+        let _ = (whole, changes);
+    }
 }

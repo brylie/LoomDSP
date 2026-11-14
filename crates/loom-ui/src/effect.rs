@@ -51,6 +51,8 @@ pub mod names {
     pub const REDRAW: &str = "redraw";
     /// [`super::Effect::Quit`].
     pub const QUIT: &str = "quit";
+    /// [`super::Effect::Accessibility`].
+    pub const ACCESSIBILITY: &str = "accessibility tree";
 }
 
 /// Turns the answer to an effect into one of the app's messages.
@@ -286,6 +288,18 @@ pub enum Effect<M> {
     Redraw,
     /// End the loop.
     Quit,
+    /// Give the screen reader the app's accessibility tree: `whole`, the
+    /// tree as it is now, and `changes`, the nodes that changed since the
+    /// last one sent, when a screen reader has the tree already. The driver
+    /// keeps `whole` for a screen reader that starts later, and sends
+    /// `changes`, or `whole` when the screen reader has none yet (section
+    /// 7, rule 7).
+    Accessibility {
+        /// The whole tree.
+        whole: accesskit::TreeUpdate,
+        /// What changed since the last tree sent, if anything was sent.
+        changes: Option<accesskit::TreeUpdate>,
+    },
 }
 
 impl<M> Effect<M> {
@@ -304,6 +318,7 @@ impl<M> Effect<M> {
             Self::NextTurn(_) => names::NEXT_TURN,
             Self::Redraw => names::REDRAW,
             Self::Quit => names::QUIT,
+            Self::Accessibility { .. } => names::ACCESSIBILITY,
         }
     }
 }
@@ -327,6 +342,11 @@ impl<M> fmt::Debug for Effect<M> {
             Self::NextTurn(messages) => write!(f, "NextTurn({} messages)", messages.len()),
             Self::Redraw => f.write_str("Redraw"),
             Self::Quit => f.write_str("Quit"),
+            Self::Accessibility { whole, changes } => f
+                .debug_struct("Accessibility")
+                .field("nodes", &whole.nodes.len())
+                .field("changed", &changes.as_ref().map(|changes| changes.nodes.len()))
+                .finish(),
         }
     }
 }
@@ -480,6 +500,12 @@ impl<M> Effects<M> {
     /// End the loop.
     pub fn quit() -> Self {
         Self::one(Effect::Quit)
+    }
+
+    /// Give the screen reader the accessibility tree: the `whole` tree, and
+    /// the `changes` since the last one sent, if one was.
+    pub fn accessibility(whole: accesskit::TreeUpdate, changes: Option<accesskit::TreeUpdate>) -> Self {
+        Self::one(Effect::Accessibility { whole, changes })
     }
 }
 

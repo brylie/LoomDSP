@@ -60,7 +60,7 @@ pub use app::{App, Context, Deadline, WindowSpec};
 pub use driver::Driver;
 pub use effect::{Effect, Effects};
 pub use element::{Align, Element, Length, Padding};
-pub use event::{DriverEvent, WindowEvent, WindowState};
+pub use event::{AccessEvent, DriverEvent, WindowEvent, WindowState};
 pub use hit::Hit;
 pub use layout::Layout;
 pub use routing::{NO_ELEMENTS, NoTarget, Target};

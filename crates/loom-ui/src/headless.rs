@@ -43,6 +43,7 @@ pub struct Headless {
     window_changes: usize,
     redraws: usize,
     exited: bool,
+    accessibility: Option<accesskit::TreeUpdate>,
 }
 
 impl Headless {
@@ -58,6 +59,7 @@ impl Headless {
             window: None,
             window_changes: 0,
             redraws: 0,
+            accessibility: None,
             exited: false,
         }
     }
@@ -116,6 +118,11 @@ impl Headless {
     pub fn exited(&self) -> bool {
         self.exited
     }
+
+    /// The last whole accessibility tree the app gave, if any.
+    pub fn accessibility(&self) -> Option<&accesskit::TreeUpdate> {
+        self.accessibility.as_ref()
+    }
 }
 
 impl Default for Headless {
@@ -172,6 +179,11 @@ impl<M> Driver<M> for Headless {
 
     fn exit(&mut self) {
         self.exited = true;
+    }
+
+    /// Keeps the whole tree, as a screen reader would have it.
+    fn accessibility(&mut self, whole: accesskit::TreeUpdate, _changes: Option<accesskit::TreeUpdate>) {
+        self.accessibility = Some(whole);
     }
 }
 

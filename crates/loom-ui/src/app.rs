@@ -1,7 +1,7 @@
 //! The app, as the runtime sees it.
 
 use crate::effect::Effects;
-use crate::event::{WindowEvent, WindowState};
+use crate::event::{AccessEvent, WindowEvent, WindowState};
 use crate::view::View;
 use crate::waker::Waker;
 use loom_ui_core::{Size, UiId};
@@ -37,6 +37,13 @@ pub trait App {
     /// The message for a window event, if the app cares about it: a close
     /// request, a dropped file. It reads state and changes none.
     fn window_event(&self, event: &WindowEvent) -> Option<Self::Message> {
+        let _ = event;
+        None
+    }
+
+    /// The message for something a screen reader did, if the app wants
+    /// one. An app with no accessibility tree wants none.
+    fn accessibility_event(&self, event: &AccessEvent) -> Option<Self::Message> {
         let _ = event;
         None
     }

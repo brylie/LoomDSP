@@ -313,3 +313,30 @@ fn a_future_deadline_wakes_a_turn() {
     let _ = bridge.update(Bridged::Woken);
     assert!(bridge.app().drops.is_empty(), "the turn ran the timer's message");
 }
+
+/// Each thing a screen reader does becomes the accessibility layer's own
+/// event, so its requests go through the same messages as the pointer.
+#[test]
+fn a_screen_readers_events_become_the_apps() {
+    use loom_ui::App as _;
+    let hosted = Hosted(app(), None);
+    let request = accesskit::ActionRequest {
+        action: accesskit::Action::Click,
+        target_tree: accesskit::TreeId::ROOT,
+        target_node: accesskit::NodeId(3),
+        data: None,
+    };
+    let heard = |event| hosted.accessibility_event(&event);
+    assert!(matches!(
+        heard(loom_ui::AccessEvent::Activated),
+        Some(Message::A11y(crate::a11y::Event::Activated))
+    ));
+    assert!(matches!(
+        heard(loom_ui::AccessEvent::Action(request.clone())),
+        Some(Message::A11y(crate::a11y::Event::Action(sent))) if sent == request
+    ));
+    assert!(matches!(
+        heard(loom_ui::AccessEvent::Deactivated),
+        Some(Message::A11y(crate::a11y::Event::Deactivated))
+    ));
+}

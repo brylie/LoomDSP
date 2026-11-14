@@ -61,7 +61,8 @@ assert_no_alloc = "1.1"
 # UI (desktop app only; the engine crates never depend on these).
 # Iced and iced_wgpu are upgraded together (OQ-14).
 # Iced's defaults minus linux-theme-detection: the app uses its own fixed
-# theme, and that feature pulls in mundy and zbus 5 (unmaintained crates).
+# theme, so it has no use for the system's. (zbus 5, which that feature also
+# brings, is in the build anyway through the Linux screen reader adapter.)
 # Recheck this list when Iced is upgraded.
 iced = { version = "0.14", default-features = false, features = [
     "advanced",

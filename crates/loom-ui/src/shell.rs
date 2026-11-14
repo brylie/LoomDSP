@@ -28,6 +28,7 @@
 //! for. The shell is a driver, so it reads the clock and passes the moment
 //! in; the runtime never does.
 
+mod access;
 mod events;
 mod gpu;
 mod pacing;
@@ -38,7 +39,7 @@ pub use pacing::Redraw;
 use crate::app::{App, WindowSpec};
 use crate::driver::Driver;
 use crate::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply};
-use crate::event::{DriverEvent, WindowState};
+use crate::event::{AccessEvent, DriverEvent, WindowState};
 use crate::routing::Target;
 use crate::runtime::{Next, Runtime};
 use crate::waker::Waker;
@@ -278,6 +279,7 @@ where
         layers,
         driver: ShellDriver {
             services,
+            access: None,
             window: None,
             captures: Vec::new(),
             exit: false,
@@ -298,10 +300,24 @@ where
 }
 
 /// What the event loop is woken with from outside it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum ShellEvent {
     /// A waker sent the runtime a message.
     Woken,
+    /// A screen reader started, asked for something, or left.
+    Access(AccessEvent),
+}
+
+impl From<AccessEvent> for ShellEvent {
+    fn from(event: AccessEvent) -> Self {
+        Self::Access(event)
+    }
+}
+
+impl From<accesskit_winit::Event> for ShellEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Access(access::event(event.window_event))
+    }
 }
 
 /// The window and what lives with it, once the event loop resumes.
@@ -384,6 +400,18 @@ where
         });
         self.driver.window = Some(window.clone());
         let runtime = Runtime::new(app, target, state, wake);
+        // The screen reader's adapter, while the window is still hidden, as
+        // AccessKit requires (section 7, rule 11). A screen reader that
+        // starts gets the last whole tree at once; its actions and its
+        // leaving come through the event loop.
+        let tree = access::SharedTree::default();
+        let activation = access::Activation {
+            tree: tree.clone(),
+            proxy: self.proxy.clone(),
+        };
+        let adapter =
+            accesskit_winit::Adapter::with_mixed_handlers(event_loop, &window, activation, self.proxy.clone());
+        self.driver.access = Some((adapter, tree));
         let live = self.live.insert(Live {
             window: window.clone(),
             gpu,
@@ -635,6 +663,7 @@ where
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ShellEvent) {
         match event {
             ShellEvent::Woken => self.turn(event_loop, DriverEvent::Woken),
+            ShellEvent::Access(event) => self.turn(event_loop, DriverEvent::Accessibility(event)),
         }
     }
 
@@ -642,6 +671,11 @@ where
         let Some(live) = self.live.as_mut() else {
             return;
         };
+        // The screen reader's adapter hears every event first, as AccessKit
+        // asks: focus, and on some platforms the window's bounds.
+        if let Some((adapter, _)) = self.driver.access.as_mut() {
+            adapter.process_event(&live.window, &event);
+        }
         {
             let waker = live.runtime.waker();
             let window = live.runtime.window();
@@ -778,6 +812,9 @@ fn monitor_frame(window: &Window) -> std::time::Duration {
 struct ShellDriver<M, S> {
     /// The clipboard and dialogs.
     services: S,
+    /// The screen reader's adapter and the last whole tree, once the window
+    /// exists.
+    access: Option<(accesskit_winit::Adapter, access::SharedTree)>,
     /// The window, for its title and limits.
     window: Option<Arc<Window>>,
     /// Captures asked for in this turn, drawn after it.
@@ -822,6 +859,16 @@ impl<M: Send + 'static, S: Services<M>> Driver<M> for ShellDriver<M, S> {
 
     fn exit(&mut self) {
         self.exit = true;
+    }
+
+    /// Keeps the whole tree for a screen reader that starts later, and
+    /// applies what the adapter is owed, if a screen reader listens.
+    fn accessibility(&mut self, whole: accesskit::TreeUpdate, changes: Option<accesskit::TreeUpdate>) {
+        if let Some((adapter, tree)) = self.access.as_mut()
+            && let Some(update) = tree.hand_over(whole, changes)
+        {
+            adapter.update_if_active(|| update);
+        }
     }
 }
 

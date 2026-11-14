@@ -17,6 +17,14 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "via wgpu-hal/metal; unmaintained, not vulnerable" },
     # ttf-parser: font parsing used by cosmic-text (Iced's text system).
     { id = "RUSTSEC-2026-0192", reason = "via iced_wgpu/cosmic-text; unmaintained, not vulnerable" },
+    # zbus_names, zvariant, and zvariant_derive: zbus 5's D-Bus crates, merged
+    # into zbus 6 by their authors. They come with accesskit_winit's Linux
+    # screen reader adapter (accesskit_unix, AT-SPI), on Linux only. Decided
+    # 2026-11-13 (docs/design/ui-layer.md, decisions): a screen reader on
+    # Linux now, and these three removed when accesskit_unix moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "via accesskit_winit/accesskit_unix/zbus 5 on Linux; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2026-0371", reason = "via accesskit_winit/accesskit_unix/zbus 5 on Linux; unmaintained, not vulnerable" },
+    { id = "RUSTSEC-2026-0372", reason = "via accesskit_winit/accesskit_unix/zbus 5 on Linux; unmaintained, not vulnerable" },
 ]
 
 [licenses]

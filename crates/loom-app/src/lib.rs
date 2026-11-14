@@ -1364,6 +1364,11 @@ impl App {
         );
         let now = cx.now();
         self.timers.set_frame(cx.window().frame);
+        // A screen reader that starts gets bounds at the window's scale
+        // from its first tree; later changes come with `Rescaled`.
+        if matches!(message, Message::A11y(a11y::Event::Activated)) {
+            self.a11y.set_scale(cx.window().scale);
+        }
         if let Some(timer) = timers::Timer::of(&message) {
             self.timers.taken(timer, now);
         }

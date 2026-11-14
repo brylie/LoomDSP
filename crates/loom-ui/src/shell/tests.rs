@@ -23,6 +23,7 @@ fn open_request() -> FileRequest {
 fn driver() -> ShellDriver<u32, NoServices> {
     ShellDriver {
         services: NoServices,
+        access: None,
         window: None,
         captures: Vec::new(),
         exit: false,

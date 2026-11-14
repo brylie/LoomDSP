@@ -11,10 +11,10 @@
 //!   platform code.
 //! - [`actions`] turns an AccessKit `ActionRequest` into messages. No
 //!   platform code.
-//! - `macos` attaches AccessKit's adapter to the window Iced made. It is the
-//!   only platform so far; the other platforms get an adapter when our own
-//!   shell arrives (`docs/dev/leaving-iced-plan.md`, phase 2). Until then
-//!   they build and test the tree, and send it nowhere.
+//! - The platform's adapter is `loom_ui`'s window shell's, on every
+//!   platform: the app hands it the tree as an effect
+//!   (`Effects::accessibility`), and hears the screen reader through
+//!   `Hosted::accessibility_event` (`iced_bridge.rs`).
 //! - This file holds what joins them to the app: the [`Event`]s, the state
 //!   kept between events ([`Access`]), and the Iced glue that finds the
 //!   canvas in the window.
@@ -35,40 +35,10 @@ use std::time::Duration;
 
 pub(crate) mod actions;
 pub(crate) mod items;
-#[cfg(target_os = "macos")]
-mod macos;
 pub(crate) mod tree;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(target_os = "macos")]
-use macos as platform;
-
-/// Attaches the adapter to the window when it opens, for the window's
-/// layers (`iced_bridge/window.rs`). Only macOS has one before step 2.2d.
-#[cfg(target_os = "macos")]
-pub(crate) use macos::attach;
-
-/// Where no adapter exists yet: nothing attaches, nothing listens, and a
-/// tree goes nowhere.
-#[cfg(not(target_os = "macos"))]
-mod platform {
-    #[cfg(test)]
-    use super::Event;
-    use accesskit::TreeUpdate;
-    #[cfg(test)]
-    use iced::Subscription;
-
-    /// No adapter, so no events.
-    #[cfg(test)]
-    pub(super) fn events() -> Subscription<Event> {
-        Subscription::none()
-    }
-
-    /// No adapter to send the tree to.
-    pub(super) fn push(_whole: TreeUpdate, _changes: Option<TreeUpdate>) {}
-}
 
 /// The least time between two updates of a node that shows a live value:
 /// a meter, a light, a readout, a scope.
@@ -138,27 +108,16 @@ pub(crate) struct PollKey {
 }
 
 /// What the accessibility layer tells the app.
-#[cfg_attr(
-    not(target_os = "macos"),
-    allow(
-        dead_code,
-        reason = "only an adapter makes these, and only macOS has one until phase 2"
-    )
-)]
 #[derive(Debug, Clone)]
 pub(crate) enum Event {
-    /// The adapter attached to the window, or why it did not.
-    Attached(Result<(), String>),
     /// The window's scale factor, to turn logical pixels into physical ones.
     ScaleFactor(f32),
-    /// A screen reader started listening.
+    /// A screen reader started listening. `App::update` takes the window's
+    /// scale first, so the tree's bounds are right from the start.
     Activated,
-    /// The screen reader left. No adapter on macOS says so
-    /// (`accesskit_macos` 0.27.2); the adapters of phase 2 do.
-    #[cfg_attr(
-        target_os = "macos",
-        allow(dead_code, reason = "accesskit_macos 0.27.2 never says a screen reader left")
-    )]
+    /// The screen reader left. Windows and Linux say so; macOS does not
+    /// (`accesskit_winit` 0.34.2 drops the event there), so on macOS the
+    /// tree is kept up to date until the app quits.
     Deactivated,
     /// Live values changed a while ago: time to send them.
     LiveTick,
@@ -294,6 +253,12 @@ impl Access {
         self.active
     }
 
+    /// The window's scale, for a screen reader that starts now. The tree
+    /// it is about to get is built whole, so no node is sent again for it.
+    pub(crate) fn set_scale(&mut self, scale: f32) {
+        self.scale = scale;
+    }
+
     /// The layer as `--measure-tree` runs it: building the tree as if a
     /// screen reader were listening from the start, and timing each build.
     /// For measuring only. A normal run starts with [`Access::default`].
@@ -320,20 +285,17 @@ pub(crate) fn rescaled(event: iced::Event, _status: iced::event::Status, _window
 }
 
 impl crate::App {
-    /// Events from the adapter, and while a screen reader listens, the
-    /// window's scale factor when it changes. The timer for live values is
-    /// a deadline (`timers.rs`). With no screen reader nothing runs.
-    /// Kept for the tests that compare the window's listeners with Iced's
-    /// subscriptions (`subscriptions/tests.rs`); the window hears both
-    /// through `Listeners` and the waker now.
+    /// While a screen reader listens, the window's scale factor when it
+    /// changes, as Iced's subscription heard it. Kept for the tests that
+    /// compare the window's listeners with Iced's subscriptions
+    /// (`subscriptions/tests.rs`); the window hears it through `Listeners`.
     #[cfg(test)]
     pub(crate) fn a11y_subscription(&self) -> Subscription<Event> {
-        let scale = if self.a11y.is_active() {
+        if self.a11y.is_active() {
             iced::event::listen_with(rescaled)
         } else {
             Subscription::none()
-        };
-        Subscription::batch([platform::events(), scale])
+        }
     }
 
     /// Notes a message the app just handled. Live values wait for the
@@ -809,10 +771,6 @@ impl crate::App {
     /// them as ordinary edits.
     pub(crate) fn a11y_event(&mut self, event: Event) {
         match event {
-            Event::Attached(Ok(())) => {}
-            Event::Attached(Err(e)) => {
-                eprintln!("loom-app: no accessibility tree for screen readers: {e}");
-            }
             Event::ScaleFactor(scale) => {
                 // Every node's bounds change with it, so all are sent again.
                 let changed = self.a11y.scale != scale;
@@ -844,7 +802,7 @@ impl crate::App {
                     if let Some(start) = start {
                         BuildTimes::record(start.elapsed());
                     }
-                    platform::push(whole, changes);
+                    self.effect(loom_ui::Effects::accessibility(whole, changes));
                 }
             }
             Event::Action(request) => {

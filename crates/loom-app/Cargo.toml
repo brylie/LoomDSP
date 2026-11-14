@@ -62,11 +62,6 @@ accesskit = "0.25"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# Attaches the accessibility tree to the window Iced made, until our own
-# shell does it on every platform (docs/dev/leaving-iced-plan.md, phase 2).
-accesskit_macos = "0.27"
-
 [target.'cfg(windows)'.dependencies]
 # Where Documents really is: OneDrive or the user can move it (#556).
 known-folders = "1"

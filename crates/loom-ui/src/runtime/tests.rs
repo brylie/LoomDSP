@@ -889,3 +889,80 @@ fn a_new_order_of_panels_draws() {
     runtime.waker().send(true);
     assert!(runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).draw);
 }
+
+/// An app with an accessibility tree: a screen reader's action becomes its
+/// message, and that message hands the screen reader a tree.
+#[derive(Default)]
+struct Reader {
+    /// The actions heard, by the node they were on.
+    acted_on: Vec<u64>,
+}
+
+impl App for Reader {
+    type Message = accesskit::ActionRequest;
+
+    fn update(
+        &mut self,
+        request: accesskit::ActionRequest,
+        _cx: &Context<'_, Self::Message>,
+    ) -> Effects<Self::Message> {
+        self.acted_on.push(request.target_node.0);
+        let mut window = accesskit::Node::new(accesskit::Role::Window);
+        window.set_label("Reader");
+        let whole = accesskit::TreeUpdate {
+            nodes: vec![(accesskit::NodeId(1), window)],
+            tree: Some(accesskit::TreeInfo::new(accesskit::NodeId(1))),
+            tree_id: accesskit::TreeId::ROOT,
+            focus: accesskit::NodeId(1),
+        };
+        Effects::accessibility(whole, None)
+    }
+
+    fn view(&self, _view: &mut View) {}
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec {
+            title: "Reader".into(),
+            min_size: None,
+        }
+    }
+
+    fn accessibility_event(&self, event: &crate::AccessEvent) -> Option<accesskit::ActionRequest> {
+        match event {
+            crate::AccessEvent::Action(request) => Some(request.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Section 7, rule 6: a screen reader's action is a driver event whose turn
+/// runs the app's message for it, and the tree the app hands back reaches
+/// the driver as the accessibility effect.
+#[test]
+fn a_screen_readers_action_is_a_message_and_the_tree_reaches_the_driver() {
+    let mut runtime = Runtime::new(
+        Reader::default(),
+        NoTarget,
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    let request = accesskit::ActionRequest {
+        action: accesskit::Action::Click,
+        target_tree: accesskit::TreeId::ROOT,
+        target_node: accesskit::NodeId(7),
+        data: None,
+    };
+    let event = DriverEvent::Accessibility(crate::AccessEvent::Action(request));
+    runtime.handle(event, Instant::now(), &mut driver);
+    assert_eq!(runtime.app().acted_on, [7]);
+    let tree = driver.accessibility().expect("the tree reached the driver");
+    assert_eq!(tree.nodes[0].1.label(), Some("Reader"));
+    let left = DriverEvent::Accessibility(crate::AccessEvent::Deactivated);
+    runtime.handle(left, Instant::now(), &mut driver);
+    assert_eq!(
+        runtime.app().acted_on,
+        [7],
+        "an event the app wants no message for runs none"
+    );
+}

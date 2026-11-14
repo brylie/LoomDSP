@@ -1175,9 +1175,7 @@ fn a_screen_reader_turns_the_layer_on() {
     let (mut app, _, _) = app_with_filter();
     assert!(!app.a11y.active);
     let _ = app.a11y_subscription();
-    app.a11y_event(Event::Attached(Ok(())));
-    app.a11y_event(Event::Attached(Err("no window".into())));
-    assert!(!app.a11y.active, "attaching is not listening");
+    assert!(!app.a11y.active, "listening for the scale is not listening");
     app.a11y_event(Event::Located(Places::default()));
     assert!(app.a11y.ids.is_empty(), "no tree without a screen reader");
     app.a11y_after(Touch::Changed);
@@ -4821,4 +4819,44 @@ fn an_inert_control_keeps_the_role_of_its_kind() {
     assert_eq!(role(&WidgetViewKind::Button), Role::Button);
     assert_eq!(role(&WidgetViewKind::Select { options: Vec::new() }), Role::ComboBox);
     assert_eq!(role(&WidgetViewKind::Radio { options: Vec::new() }), Role::RadioGroup);
+}
+
+/// The tree goes to the shell as an effect, the whole tree with its
+/// changes, and only while a screen reader listens.
+#[test]
+fn the_tree_goes_out_as_an_effect() {
+    let (mut app, _, _) = app_with_filter();
+    let accessibility = |app: &mut App| {
+        std::mem::take(&mut app.effects)
+            .into_iter()
+            .filter_map(|effect| match effect {
+                loom_ui::Effect::Accessibility { whole, changes } => Some((whole, changes)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(accessibility(&mut app).is_empty(), "no screen reader, no tree");
+    listen(&mut app);
+    let sent = accessibility(&mut app);
+    let [(whole, Some(changes))] = sent.as_slice() else {
+        panic!("one tree with its changes: {} sent", sent.len());
+    };
+    assert!(whole.tree.is_some(), "the whole tree has its root");
+    assert!(!changes.nodes.is_empty(), "the first changes are every node");
+}
+
+/// A screen reader that starts takes the window's scale, so the first
+/// tree's bounds are in the window's physical pixels (rule 8).
+#[test]
+fn a_screen_reader_takes_the_windows_scale() {
+    let (mut app, _, _) = app_with_filter();
+    let (sender, _inbox) = std::sync::mpsc::channel();
+    let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+    let mut window = loom_ui::WindowState::new(loom_ui_core::Size::new(1440.0, 900.0));
+    window.scale = 2.0;
+    let cx = loom_ui::Context::new(std::time::Instant::now(), &waker, None, window);
+    let _ = app.update(Message::A11y(Event::Activated), &cx);
+    assert!(app.a11y.is_active());
+    assert_eq!(app.a11y.scale, 2.0);
 }

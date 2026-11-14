@@ -45,6 +45,22 @@ pub enum DriverEvent {
     Woken,
     /// The driver woke at the time the runtime asked for.
     DeadlineReached,
+    /// A screen reader started, asked for something, or left. The turn
+    /// runs the app's message for it (`App::accessibility_event`).
+    Accessibility(AccessEvent),
+}
+
+/// What a screen reader did, as the platform's adapter reports it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AccessEvent {
+    /// A screen reader started listening. The driver has handed it the
+    /// last whole tree, or nothing when there was none yet; the app sends a
+    /// whole tree next.
+    Activated,
+    /// A screen reader asked for an action on a node.
+    Action(accesskit::ActionRequest),
+    /// The screen reader left. Not every platform says so: macOS does not.
+    Deactivated,
 }
 
 /// Something that happened to the window as a whole.

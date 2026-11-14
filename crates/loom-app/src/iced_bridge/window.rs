@@ -208,9 +208,9 @@ fn size(parts: &Parts<'_, Hosted, IcedTarget>) -> iced::Size {
 }
 
 impl Layers<Hosted, IcedTarget> for WindowLayers {
-    /// Builds the renderer, connects the clipboard, and attaches the
-    /// screen reader's adapter, before the window is shown.
-    fn open(&mut self, parts: Parts<'_, Hosted, IcedTarget>, opened: &Opened<'_>) {
+    /// Builds the renderer and connects the clipboard, before the window is
+    /// shown. The screen reader's adapter is the shell's own.
+    fn open(&mut self, _parts: Parts<'_, Hosted, IcedTarget>, opened: &Opened<'_>) {
         let engine = iced_wgpu::Engine::new(
             opened.adapter,
             opened.device.clone(),
@@ -230,10 +230,6 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         )));
         *self.clipboard.borrow_mut() = Some(iced_winit::Clipboard::connect(opened.window.clone()));
         self.scale = opened.window.scale_factor() as f32;
-        #[cfg(target_os = "macos")]
-        crate::a11y::attach(opened.window, parts.waker.clone());
-        #[cfg(not(target_os = "macos"))]
-        let _ = parts;
     }
 
     fn window_event(&mut self, _parts: Parts<'_, Hosted, IcedTarget>, event: &WinitEvent) {

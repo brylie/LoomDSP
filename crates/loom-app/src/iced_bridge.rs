@@ -213,6 +213,17 @@ impl loom_ui::App for Hosted {
     fn next_deadline(&self) -> Option<Deadline<Message>> {
         self.0.next_deadline()
     }
+
+    /// A screen reader's start, request, or departure, as the accessibility
+    /// layer's event. Its requests then go through the same messages as the
+    /// pointer (`a11y/actions.rs`, section 7, rule 6).
+    fn accessibility_event(&self, event: &loom_ui::AccessEvent) -> Option<Message> {
+        Some(Message::A11y(match event {
+            loom_ui::AccessEvent::Activated => crate::a11y::Event::Activated,
+            loom_ui::AccessEvent::Action(request) => crate::a11y::Event::Action(request.clone()),
+            loom_ui::AccessEvent::Deactivated => crate::a11y::Event::Deactivated,
+        }))
+    }
 }
 
 #[cfg(any(test, feature = "test-ui"))]

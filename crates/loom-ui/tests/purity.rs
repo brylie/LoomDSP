@@ -1,15 +1,19 @@
 //! What `loom-ui` may depend on and name (docs/design/ui-layer.md,
 //! section 1, rule 1, and section 2, rule 9).
 //!
-//! 1. **Its required dependencies are `loom-ui-core` and `taffy`,** the
-//!    layout engine. No LoomDSP crate. The window shell's `winit`, `wgpu`,
-//!    and `pollster` are optional, and only the `shell` feature turns them
-//!    on, so a build without it has no window toolkit (plan step 2.2).
+//! 1. **Its required dependencies are `loom-ui-core`, `taffy`, the layout
+//!    engine, and `accesskit`,** the accessibility tree's types, which are
+//!    plain data with no toolkit. No LoomDSP crate. The window shell's
+//!    `winit`, `wgpu`, `pollster`, and `accesskit_winit` are optional, and
+//!    only the `shell` feature turns them on, so a build without it has no
+//!    window toolkit (plan step 2.2).
 //!    Only `layout.rs` names taffy, so no taffy type reaches the crate's
 //!    API (decision of 2026-11-14).
 //! 2. **No source file names a window toolkit** (`winit`, `wgpu`, or Iced),
 //!    test files included, except the window shell: `shell.rs` and the
-//!    files under `shell/`. Iced is named nowhere.
+//!    files under `shell/`. `accesskit_winit` counts as `winit`, so only
+//!    the shell names the screen reader adapter; the tree's types
+//!    (`accesskit`) may be named anywhere. Iced is named nowhere.
 //! 3. **No source file reads the clock,** test files aside. Every call
 //!    takes the moment from its driver, so a test chooses the time. Tests
 //!    read it once to have a starting moment, and the shell and examples
@@ -20,16 +24,18 @@ use std::path::{Path, PathBuf};
 
 /// The dependencies users of the crate get: the required ones, then the
 /// shell's.
-const ALLOWED: [&str; 5] = [
+const ALLOWED: [&str; 7] = [
     "dependencies.loom-ui-core.workspace",
     "dependencies.taffy.workspace",
+    "dependencies.accesskit",
     "dependencies.winit",
     "dependencies.wgpu",
     "dependencies.pollster",
+    "dependencies.accesskit_winit",
 ];
 
 /// The shell's dependencies, each optional and turned on only by `shell`.
-const SHELL_DEPENDENCIES: [&str; 3] = ["winit", "wgpu", "pollster"];
+const SHELL_DEPENDENCIES: [&str; 4] = ["winit", "wgpu", "pollster", "accesskit_winit"];
 
 /// A path into a window toolkit or the GPU.
 const TOOLKITS: [&str; 4] = ["winit", "wgpu", "iced::", "iced_"];
@@ -145,7 +151,7 @@ fn dependency_line<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
         .find(|line| line.split('=').next().is_some_and(|key| key.trim() == name))
 }
 
-/// The crate depends on `loom-ui-core` and `taffy`, and on the shell's
+/// The crate depends on `loom-ui-core`, `taffy`, and `accesskit`, and on the shell's
 /// crates only as optional ones that the `shell` feature turns on.
 #[test]
 fn the_required_dependencies_are_loom_ui_core_and_taffy() {

@@ -313,6 +313,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         match event {
             DriverEvent::Input { event, pointer } => self.target.input(&event, pointer, now, &mut batch),
             DriverEvent::Window(event) => self.window_event(event, now, &mut batch),
+            DriverEvent::Accessibility(event) => batch.extend(self.app.accessibility_event(&event)),
             DriverEvent::RedrawRequested => redraw = true,
             DriverEvent::Frame => {
                 self.counts.frames += 1;
@@ -418,6 +419,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     self.pending.extend(messages);
                 }
                 Effect::Redraw => redraw = true,
+                Effect::Accessibility { whole, changes } => driver.accessibility(whole, changes),
                 Effect::Quit => {
                     self.exited = true;
                     driver.exit();
