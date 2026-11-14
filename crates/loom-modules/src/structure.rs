@@ -16,8 +16,8 @@
 //! registered as internal: never in the browser, never in a file.
 
 use loom_core::{
-    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, PortDefault, PortIo,
-    PortSpec, ProcessContext, SignalType,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleDescriptor, ModuleRole, Panel, ParamOptions,
+    ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType,
 };
 use std::f32::consts::FRAC_PI_2;
 
@@ -99,7 +99,7 @@ pub static FADE: ModuleDescriptor = ModuleDescriptor {
     name: "Swap Fade",
     category: "Structure",
     family: loom_core::Family::Interface,
-    description: "Fades from the part leaving a slot to the part taking its place over 10 ms, equal power. The editor adds and removes it.",
+    description: "Fades from the part leaving a slot to the part taking its place over 10 ms, equal power or linear. The editor adds and removes it.",
     inputs: &[
         fade_port("a", "A", "The output of the part that is leaving."),
         fade_port("b", "B", "The same output of the part that takes its place."),
@@ -109,11 +109,23 @@ pub static FADE: ModuleDescriptor = ModuleDescriptor {
         "Out",
         "A, then a blend, then B alone once the fade is done.",
     )],
-    params: &[],
+    params: &[ParamSpec {
+        name: "law",
+        label: "Law",
+        description: "Equal power for audio, linear for pitch and modulation and for a slot that passes its input through. The swap sets it.",
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()
+    .choices(&["Equal power", "Linear"])],
     role: ModuleRole::Dsp(|config| {
         Box::new(SwapFade {
             length: (SWAP_FADE_SECONDS * config.sample_rate).round().max(1.0) as u32,
             count: 0,
+            linear: false,
         })
     }),
     panel: Panel::EMPTY,
@@ -128,20 +140,26 @@ pub static FADE: ModuleDescriptor = ModuleDescriptor {
 };
 
 /// The swap fade: counts samples from its first processed frame to the
-/// fade length, with gains on a quarter circle, so the sum of their
-/// squares stays 1 and loudness holds through the fade. Per sample, so it
-/// is the same at every block size.
+/// fade length. Under Equal power its gains sit on a quarter circle, so the
+/// sum of their squares stays 1 and the loudness of two different sounds
+/// holds. Under Linear they sum to 1, so a value both sides share stays put
+/// (sub-patches.md, How a swap crossfades, point 6). Per sample, so it is
+/// the same at every block size.
 #[derive(Clone)]
 struct SwapFade {
     /// Frames the fade takes.
     length: u32,
     /// Frames processed so far, up to `length`.
     count: u32,
+    /// True for the Linear law.
+    linear: bool,
 }
 
 impl SwapFade {
     /// The index of the `done` display value.
     pub const DONE: usize = 0;
+    /// The index of the `law` parameter.
+    const LAW: usize = FADE.param_index("law").unwrap();
 
     /// True once the fade has finished.
     fn is_done(&self) -> bool {
@@ -157,8 +175,16 @@ impl Module for SwapFade {
                 out[i] = b[i];
                 continue;
             }
-            let theta = FRAC_PI_2 * self.count as f32 / self.length as f32;
-            let (gain_b, gain_a) = theta.sin_cos();
+            let (gain_a, gain_b) = if self.linear {
+                let p = self.count as f32 / self.length as f32;
+                (1.0 - p, p)
+            } else {
+                // Kept as written before the Linear law, so equal-power
+                // fades stay bit-identical to their references.
+                let theta = FRAC_PI_2 * self.count as f32 / self.length as f32;
+                let (sin, cos) = theta.sin_cos();
+                (cos, sin)
+            };
             out[i] = a[i] * gain_a + b[i] * gain_b;
             self.count += 1;
         }
@@ -166,6 +192,15 @@ impl Module for SwapFade {
 
     fn displays(&self, values: &mut [f32]) {
         values[Self::DONE] = if self.is_done() { 1.0 } else { 0.0 };
+    }
+
+    /// Takes the law: 1 is Linear, and any other value, NaN included,
+    /// Equal power, so a value from a hand-edited file always picks one of
+    /// the two.
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == Self::LAW {
+            self.linear = value.round() as i32 == 1;
+        }
     }
 
     fn reset(&mut self) {

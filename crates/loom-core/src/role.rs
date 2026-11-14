@@ -75,7 +75,19 @@ pub struct RoleDescriptor {
     pub outputs: &'static [RolePort],
     /// Core parameters.
     pub params: &'static [RoleParam],
+    /// True when an empty slot of this role passes its audio `in` to its
+    /// `out` (a thru), as an empty insert does ([ADR-0043]). Only a role
+    /// with a required audio `in` and `out` may set it; the registry
+    /// checks.
+    ///
+    /// [ADR-0043]: ../../../docs/adr/0043-unpatched-means-normalled.md
+    pub thru: bool,
 }
+
+/// The role input an empty thru slot passes on.
+pub const THRU_IN: &str = "in";
+/// The role output an empty thru slot carries its input on.
+pub const THRU_OUT: &str = "out";
 
 impl PartialEq for RoleDescriptor {
     fn eq(&self, other: &Self) -> bool {
@@ -124,6 +136,17 @@ impl ParamKind {
 }
 
 impl RoleDescriptor {
+    /// True when this role may be a thru: it has a required audio input
+    /// `in` and a required audio output `out`.
+    pub fn can_be_thru(&self) -> bool {
+        let has = |ports: &[RolePort], name: &str| {
+            ports
+                .iter()
+                .any(|p| p.name == name && p.required && p.signal == SignalType::Audio)
+        };
+        has(self.inputs, THRU_IN) && has(self.outputs, THRU_OUT)
+    }
+
     /// The `"id@version"` string used in patch files.
     pub fn kind(&self) -> String {
         format!("{}@{}", self.id, self.version)

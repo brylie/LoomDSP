@@ -207,6 +207,7 @@ fn a_surface_wraps_at_twelve_units() {
         hover: HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     };
     let panel = flow_layout((0..5).map(|i| knob(&i.to_string())).collect());
     let places: Vec<(u8, u8)> = panel.widgets.iter().map(|w| (w.x, w.y)).collect();

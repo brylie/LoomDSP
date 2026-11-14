@@ -75,6 +75,12 @@ pub struct Slot {
     /// when empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub held: BTreeMap<PartKey, Held>,
+    /// The role values an empty slot keeps from the part that left it, by
+    /// role parameter name, so the next part swapped in takes them, as a
+    /// swap between two parts carries them (sub-patches.md, Empty slots).
+    /// Omitted when empty; ignored while the slot holds a part.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub values: BTreeMap<String, f32>,
 }
 
 impl Slot {
@@ -84,6 +90,7 @@ impl Slot {
             role: role.kind(),
             part: None,
             held: BTreeMap::new(),
+            values: BTreeMap::new(),
         }
     }
 }

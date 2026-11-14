@@ -39,7 +39,13 @@ pub(crate) fn items(model: &Model) -> (Item, Option<UiId>) {
                     Item {
                         // The mark is in the name, as the row shows it beside
                         // the name: a sub-patch can share a module's name.
-                        label: Some(format!("{}, {}", row.name, row.mark)),
+                        // A name that already ends with its mark (`Filter
+                        // slot`) is not read twice.
+                        label: Some(if row.name.to_lowercase().ends_with(&row.mark.to_lowercase()) {
+                            row.name.clone()
+                        } else {
+                            format!("{}, {}", row.name, row.mark)
+                        }),
                         // Every option has its own, so a reader browsing the
                         // list with its own cursor hears each one, and it
                         // does not change as the highlight moves.

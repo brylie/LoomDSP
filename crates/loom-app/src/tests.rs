@@ -83,6 +83,27 @@ pub(crate) fn app() -> App {
     App::new(app_args())
 }
 
+/// The app with the patch `text` open, no audio.
+pub(crate) fn app_with_text(text: &str) -> App {
+    let patch = loom_patch::Patch::from_ron(text).unwrap();
+    let loaded = crate::Loaded::read(
+        EngineConfig::default(),
+        false,
+        crate::Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    App::assemble(
+        Err("test".to_string()),
+        48_000.0,
+        loaded,
+        1,
+        &app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    )
+}
+
 /// A full live-value table warns on entry into overflow and after a
 /// return below the limit, without repeating on unrelated compiles.
 #[test]

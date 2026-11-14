@@ -30,6 +30,7 @@ use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
     PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, Slot, SubPatch, unique_name,
 };
+use behind::{InputStep, Step};
 use loom_core::{
     AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, Registry, TRANSPORT_MODULE,
 };
@@ -37,10 +38,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod modes;
 pub use modes::{MEMBER_LID, PlayingMember};
+pub mod behind;
+mod links;
 mod slots;
 pub use slots::{
-    Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, expose_role_only_text, made_slot_text,
-    make_slot_label, swapped_text,
+    Emptied, Fading, Hidden, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, added_slot_text,
+    expose_role_only_text, fade_law, fade_law_value, made_slot_text, make_slot_label, no_part_text, removed_part_text,
+    swapped_text,
 };
 
 /// The status bar text when Dissolve is asked for a sub-patch that holds
@@ -275,7 +279,7 @@ pub struct Hierarchy {
     ports: BTreeMap<ModulePath, Port>,
     /// The slot tiles, by path (sub-patches.md, Slots).
     slots: BTreeMap<ModulePath, SlotState>,
-    links: BTreeSet<Link>,
+    links: links::LinkSet,
     /// The flat cables the links imply, as (output, input) in flat ids and
     /// port names, from the last sync or load.
     implied: BTreeSet<(End, End)>,
@@ -314,7 +318,7 @@ impl Hierarchy {
             instances: BTreeMap::new(),
             ports: BTreeMap::new(),
             slots: BTreeMap::new(),
-            links: BTreeSet::new(),
+            links: links::LinkSet::default(),
             implied: BTreeSet::new(),
             copies: BTreeMap::new(),
             added: BTreeMap::new(),
@@ -430,6 +434,18 @@ impl Hierarchy {
                         held: slot.held.clone(),
                         label: module.label.clone(),
                         fading: None,
+                        // Only the role's own parameters carry, and only
+                        // through an empty slot: a name the role does not
+                        // have, from a hand-edited file, is dropped.
+                        values: if slot.part.is_none() {
+                            slot.values
+                                .iter()
+                                .filter(|(name, _)| role.params.iter().any(|p| p.name == name.as_str()))
+                                .map(|(name, value)| (name.clone(), *value))
+                                .collect()
+                        } else {
+                            BTreeMap::new()
+                        },
                     },
                 );
                 // A held sub-patch keeps its definition, whole, since no
@@ -477,6 +493,12 @@ impl Hierarchy {
         }
         for cable in cables {
             if structural.contains(&cable.from.0) || structural.contains(&cable.to.0) {
+                // One link per input, the later of two kept, as a flat
+                // patch keeps the later cable: two would let a crafted
+                // file reach one end by two routes.
+                if let Some(old) = self.links.linked_into(level, &cable.to).cloned() {
+                    self.links.remove(&old);
+                }
                 self.links.insert(Link {
                     level: level.clone(),
                     to: cable.to.clone(),
@@ -574,6 +596,11 @@ impl Hierarchy {
         if self.is_hidden(id) {
             return None;
         }
+        self.shown_tile(graph, id)
+    }
+
+    /// What tile `id` shows, for an id already known not to be hidden.
+    fn shown_tile(&self, graph: &Graph, id: ModuleId) -> Option<Tile> {
         if graph.node(id).is_some() {
             return Some(Tile::Module);
         }
@@ -696,8 +723,9 @@ impl Hierarchy {
     /// of its modules (those the links do not imply), then the links.
     pub fn level_cables(&self, graph: &Graph, level: &ModulePath) -> Vec<LevelCable> {
         let mut cables = Vec::new();
+        let hidden = self.hidden();
         for (from, to) in graph.cables() {
-            if self.is_hidden(from.module) || self.is_hidden(to.module) {
+            if hidden.contains(from.module) || hidden.contains(to.module) {
                 continue;
             }
             let (from_end, to_end) = cable_ends(graph, from, to);
@@ -733,21 +761,26 @@ impl Hierarchy {
     /// output itself, what is behind an instance's output port, or what
     /// feeds a Patch input from outside. `None` when nothing does.
     pub fn source_behind(&self, graph: &Graph, level: &ModulePath, end: &End) -> Option<(ModuleId, String)> {
-        self.source_behind_guarded(graph, level, end, &mut Vec::new())
+        // A loop, not recursion, so a long chain of pass-through ports or
+        // empty thru slots cannot overflow the stack.
+        let mut seen: BTreeSet<(ModulePath, End)> = BTreeSet::new();
+        let (mut level, mut end) = (level.clone(), end.clone());
+        loop {
+            if !seen.insert((level.clone(), end.clone())) {
+                return None;
+            }
+            match self.source_step(graph, &level, &end)? {
+                Step::Found(found) => return Some(found),
+                Step::Next(next_level, next_end) => (level, end) = (next_level, next_end),
+            }
+        }
     }
 
-    fn source_behind_guarded(
-        &self,
-        graph: &Graph,
-        level: &ModulePath,
-        end: &End,
-        seen: &mut Vec<(ModulePath, End)>,
-    ) -> Option<(ModuleId, String)> {
-        let key = (level.clone(), end.clone());
-        if seen.contains(&key) {
-            return None;
-        }
-        seen.push(key);
+    /// One step of [`Hierarchy::source_behind`]: the flat output the end is,
+    /// the end one link further back, or `None` when nothing stands behind
+    /// it. Each end has at most one step back, which is what lets
+    /// [`behind::Behind`] give every end on a chain the chain's answer.
+    pub(crate) fn source_step(&self, graph: &Graph, level: &ModulePath, end: &End) -> Option<Step> {
         let path = level.child(end.0);
         if let Some(port) = self.ports.get(&path) {
             if port.direction != Direction::Input || end.1 != "out" {
@@ -756,107 +789,126 @@ impl Hierarchy {
             // What feeds the instance's port, one level up.
             let parent = level.parent()?;
             let link = self.link_into(&parent, &(level.last(), port.name.clone()))?;
-            return self.source_behind_guarded(graph, &parent, &link.from, seen);
+            return Some(Step::Next(parent, link.from.clone()));
         }
         if self.instances.contains_key(&path) {
             // A mode's sum or select stands behind the port.
             if let Some(added) = self.added_output(&path, &end.1) {
-                return Some((added, "out".to_string()));
+                return Some(Step::Found((added, "out".to_string())));
             }
             // A layer of one member: the member's port.
             if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
                 let member = *modes.members.first()?;
-                return self.source_behind_guarded(graph, &path, &(member, end.1.clone()), seen);
+                return Some(Step::Next(path, (member, end.1.clone())));
             }
             let port_path = self.port_path(&path, Direction::Output, &end.1)?;
             let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
-            return self.source_behind_guarded(graph, &path, &link.from, seen);
+            return Some(Step::Next(path, link.from.clone()));
         }
         if let Some(slot) = self.slots.get(&path) {
             // A slot's role output: the part's own output behind it.
             slot.role.output(&end.1)?;
-            let part = slot.part?;
+            let Some(part) = slot.part else {
+                // An empty thru slot passes on what feeds its `in`
+                // (ADR-0043); any other empty slot has nothing.
+                if slot.role.thru && end.1 == loom_core::THRU_OUT {
+                    let link = self.link_into(level, &(end.0, loom_core::THRU_IN.to_string()))?;
+                    return Some(Step::Next(level.clone(), link.from.clone()));
+                }
+                return None;
+            };
             let own = if self.instances.contains_key(&level.child(part)) {
                 end.1.clone()
             } else {
                 slot.own_output(&end.1)
             };
-            return self.source_behind_guarded(graph, level, &(part, own), seen);
+            return Some(Step::Next(level.clone(), (part, own)));
         }
         let id = self.ids.get(&path)?;
         let node = graph.node(id)?;
         node.output_index(&end.1)?;
-        Some((id, end.1.clone()))
+        Some(Step::Found((id, end.1.clone())))
     }
 
     /// The flat inputs that stand behind an input end of `level`: a
     /// module's input itself, every inner input an instance's port feeds,
-    /// or what a Patch output feeds outside.
+    /// what a Patch output feeds outside, or what an empty thru slot's
+    /// `out` feeds.
     pub fn inputs_behind(&self, graph: &Graph, level: &ModulePath, end: &End) -> Vec<(ModuleId, String)> {
+        // A work stack, not recursion, so a long chain cannot overflow the
+        // stack; an end met twice is followed once.
         let mut found = Vec::new();
-        self.inputs_behind_guarded(graph, level, end, &mut Vec::new(), &mut found);
+        let mut seen: BTreeSet<(ModulePath, End)> = BTreeSet::new();
+        let mut work = vec![(level.clone(), end.clone())];
+        while let Some((level, end)) = work.pop() {
+            if !seen.insert((level.clone(), end.clone())) {
+                continue;
+            }
+            match self.input_step(graph, &level, &end) {
+                InputStep::Found(input) => found.push(input),
+                InputStep::Next(next) => work.extend(next.into_iter().rev()),
+                InputStep::Nothing => {}
+            }
+        }
         found
     }
 
-    fn inputs_behind_guarded(
-        &self,
-        graph: &Graph,
-        level: &ModulePath,
-        end: &End,
-        seen: &mut Vec<(ModulePath, End)>,
-        found: &mut Vec<(ModuleId, String)>,
-    ) {
-        let key = (level.clone(), end.clone());
-        if seen.contains(&key) {
-            return;
-        }
-        seen.push(key);
+    /// One step of [`Hierarchy::inputs_behind`]: the flat input the end is,
+    /// the ends one link further on, in order, or nothing.
+    pub(crate) fn input_step(&self, graph: &Graph, level: &ModulePath, end: &End) -> InputStep {
         let path = level.child(end.0);
+        let next = |at: &ModulePath, from: &End| -> InputStep {
+            InputStep::Next(self.links_from(at, from).map(|l| (at.clone(), l.to.clone())).collect())
+        };
         if let Some(port) = self.ports.get(&path) {
             if port.direction != Direction::Output || end.1 != "in" {
-                return;
+                return InputStep::Nothing;
             }
-            let Some(parent) = level.parent() else { return };
-            let outside = (level.last(), port.name.clone());
-            for link in self.links_from(&parent, &outside) {
-                self.inputs_behind_guarded(graph, &parent, &link.to, seen, found);
-            }
-            return;
+            let Some(parent) = level.parent() else {
+                return InputStep::Nothing;
+            };
+            return next(&parent, &(level.last(), port.name.clone()));
         }
         if self.instances.contains_key(&path) {
             // A layer or select: every member's port of that name.
             if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
-                for member in modes.members.clone() {
-                    self.inputs_behind_guarded(graph, &path, &(member, end.1.clone()), seen, found);
-                }
-                return;
+                return InputStep::Next(
+                    modes
+                        .members
+                        .iter()
+                        .map(|m| (path.clone(), (*m, end.1.clone())))
+                        .collect(),
+                );
             }
             let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
-                return;
+                return InputStep::Nothing;
             };
-            let inside = (port_path.last(), "out".to_string());
-            for link in self.links_from(&path, &inside) {
-                self.inputs_behind_guarded(graph, &path, &link.to, seen, found);
-            }
-            return;
+            return next(&path, &(port_path.last(), "out".to_string()));
         }
         if let Some(slot) = self.slots.get(&path) {
             if slot.role.input(&end.1).is_none() {
-                return;
+                return InputStep::Nothing;
             }
-            let Some(part) = slot.part else { return };
+            let Some(part) = slot.part else {
+                // An empty thru slot passes its `in` on to what its `out`
+                // feeds (ADR-0043).
+                if slot.role.thru && end.1 == loom_core::THRU_IN {
+                    return next(level, &(end.0, loom_core::THRU_OUT.to_string()));
+                }
+                return InputStep::Nothing;
+            };
             let own = if self.instances.contains_key(&level.child(part)) {
                 end.1.clone()
             } else {
                 slot.own_input(&end.1)
             };
-            self.inputs_behind_guarded(graph, level, &(part, own), seen, found);
-            return;
+            return InputStep::Next(vec![(level.clone(), (part, own))]);
         }
-        if let Some(id) = self.ids.get(&path)
-            && graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some())
-        {
-            found.push((id, end.1.clone()));
+        match self.ids.get(&path) {
+            Some(id) if graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some()) => {
+                InputStep::Found((id, end.1.clone()))
+            }
+            _ => InputStep::Nothing,
         }
     }
 
@@ -872,20 +924,18 @@ impl Hierarchy {
     }
 
     /// The links drawn on `level`.
-    fn links_at(&self, level: &ModulePath) -> impl Iterator<Item = &Link> {
-        let level = level.clone();
-        self.links.iter().filter(move |link| link.level == level)
+    fn links_at<'a>(&'a self, level: &ModulePath) -> impl Iterator<Item = &'a Link> + 'a {
+        self.links.at_level(level)
     }
 
-    /// The one link into `to` on `level`.
+    /// The one link into `to` on `level`, by range.
     fn link_into(&self, level: &ModulePath, to: &End) -> Option<&Link> {
-        self.links_at(level).find(|link| link.to == *to)
+        self.links.linked_into(level, to)
     }
 
-    /// The links out of `from` on `level`.
-    fn links_from(&self, level: &ModulePath, from: &End) -> impl Iterator<Item = &Link> {
-        let from = from.clone();
-        self.links_at(level).filter(move |link| link.from == from)
+    /// The links out of `from` on `level`, by range.
+    fn links_from<'a>(&'a self, level: &ModulePath, from: &End) -> impl Iterator<Item = Link> + 'a {
+        self.links.linked_from(level, from)
     }
 
     /// The exposed name of `instance` that stands for the flat parameter
@@ -1070,6 +1120,7 @@ impl Hierarchy {
         direct: bool,
         skip: &BTreeSet<ModuleId>,
     ) -> Patch {
+        let leaving = self.leaving_paths();
         let mut levels: BTreeMap<ModulePath, Level> = BTreeMap::new();
         levels.entry(ModulePath::root()).or_default();
         for path in self.instances.keys() {
@@ -1125,6 +1176,11 @@ impl Hierarchy {
                     role: slot.role.kind(),
                     part: slot.part,
                     held: slot.held.clone(),
+                    values: if slot.part.is_none() {
+                        slot.values.clone()
+                    } else {
+                        BTreeMap::new()
+                    },
                 }),
                 label: slot.label.clone(),
                 params: BTreeMap::new(),
@@ -1136,7 +1192,7 @@ impl Hierarchy {
         // Ports.
         for (path, port) in &self.ports {
             let Some(level) = path.parent() else { continue };
-            if self.is_leaving_path(path) {
+            if leaving.covers(path) {
                 continue;
             }
             let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
@@ -1156,7 +1212,7 @@ impl Hierarchy {
         // is not written; its definition is stored whole instead.
         for (path, instance) in &self.instances {
             let Some(level) = path.parent() else { continue };
-            if self.is_leaving_path(path) {
+            if leaving.covers(path) {
                 continue;
             }
             let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
@@ -1200,7 +1256,7 @@ impl Hierarchy {
             });
         }
         for link in &self.links {
-            if self.is_leaving_path(&link.level.child(0)) && !link.level.is_root() {
+            if leaving.covers(&link.level.child(0)) && !link.level.is_root() {
                 continue;
             }
             levels.entry(link.level.clone()).or_default().cables.push(PatchCable {
@@ -1270,7 +1326,7 @@ impl Hierarchy {
         patch.modulation = top.modulation;
         patch.midi = top.midi;
         for (path, instance) in &self.instances {
-            if self.is_leaving_path(path) {
+            if leaving.covers(path) {
                 continue;
             }
             let Some(definition) = self.definitions.get(&instance.key) else {
@@ -1545,6 +1601,10 @@ impl Hierarchy {
                 desired.insert((fade_out.clone(), to));
             }
         }
+        for (input, fade_out) in &wiring.retarget {
+            desired.retain(|(_, to)| to != input);
+            desired.insert((fade_out.clone(), input.clone()));
+        }
         desired.extend(wiring.add);
         let current = graph_cables(controller.graph());
         for (_, to) in current.difference(&desired) {
@@ -1556,7 +1616,10 @@ impl Hierarchy {
         for (from, to) in desired.difference(&current) {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
-        self.sync_implied_links(controller, &flat)?;
+        // While a slot fades in a stack, a wanted assignment from a copy's
+        // new part comes from that copy's fade (ADR-0044).
+        let through_fade: BTreeMap<End, End> = wiring.reroute.iter().cloned().collect();
+        self.sync_implied_links(controller, &flat, &through_fade)?;
         let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
         // The range MIDI sweeps follows the surfaces: a range that changed
         // or went away reaches the engine with the caller's commit.

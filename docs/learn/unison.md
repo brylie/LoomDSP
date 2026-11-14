@@ -56,6 +56,12 @@ A spread amount of 0.1 means "a tenth of the knob", as a modulation depth does (
 
 The flattener builds spread out of modulation: one hidden constant source of 1.0, and on each copy's parameter an assignment of depth amount × offset. That choice is not only convenient. A MIDI controller sets a parameter's base value on the audio thread, in every copy. If the offsets were written into each copy's value, the first control change would wipe them. As modulation, the offsets sit on top of whatever the base value is, so a knob, MIDI, and outside modulation all move the copies together and keep them apart.
 
+### Unison of the Synth voice
+
+The built-in Synth voice has a `fine tune` control: a factor from −1 to 1 on a span of one semitone, added to the pitch of both oscillators. On one voice it is a fine tune. In a stack, spread it. A spread is a share of the knob, and this knob spans 2, so a spread `s` moves copy *i* by `2 · s · o_i` semitones, where `o_i` runs from −1 to 1. A spread of 0.1 puts the outer copies of four at ±20 cents and the inner ones at ±6.7 cents, a usual unison detune. A spread of 0.25 reaches ±50 cents.
+
+A fresh stack's copies start in phase. For the first moments they add almost as identical copies would, so the onset is louder, until the detune pulls them apart.
+
 ## Spreading across stereo
 
 With stereo spread on, copy k is also panned by its offset: -1 hard left, +1 hard right. The pan uses the **constant-power law**: with θ = (offset + 1)·π/4, the left gain is cos θ and the right gain is sin θ.

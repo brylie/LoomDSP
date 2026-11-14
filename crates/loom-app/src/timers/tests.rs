@@ -193,3 +193,43 @@ fn frames_follow_the_displays_period() {
     );
     assert_eq!(Timer::DropsDone.period(fast), Timer::DropsDone.period(FRAME));
 }
+
+/// A slot swap wants the tick until its fade is done, so the fade finishes
+/// and the leaving part goes without a recording running; then the tick
+/// stops, and an idle app stays idle (sub-patches.md, How a swap
+/// crossfades).
+#[test]
+fn a_swap_fade_ticks_until_it_finishes() {
+    let mut app = crate::tests::app_with_text(
+        r#"Patch(
+    version: 1,
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.filter.svf@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)"#,
+    );
+    let _ = app.send(Message::StartWatching);
+    assert_eq!(app.timers.due(Timer::Tick), None, "an idle app does not tick");
+    let modules = app.session.controller.graph().nodes().count();
+    let _ = app.send(Message::SwapSlot {
+        slot: 9,
+        to: crate::slots::SwapTarget::Empty,
+    });
+    assert!(app.session.hierarchy.is_fading());
+    let due = app.timers.due(Timer::Tick).expect("the fade wants the tick");
+    app.process(600);
+    let _ = app.send(Timer::Tick.message(due));
+    assert!(!app.session.hierarchy.is_fading(), "the fade finished on the tick");
+    assert!(
+        app.session.controller.graph().nodes().count() < modules,
+        "the part is gone"
+    );
+    assert_eq!(app.timers.due(Timer::Tick), None, "and the tick stops");
+}

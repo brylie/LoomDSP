@@ -154,10 +154,14 @@ pub struct SlotRows {
     pub role: String,
     /// The current part's name, or `None` for an empty slot.
     pub part: Option<String>,
+    /// An empty slot's note, such as `No part. Passes its input through.
+    /// Swap to choose one.`; `None` while it holds a part.
+    pub note: Option<String>,
     /// The flat id of the part, whose rows the parameters are.
     pub part_id: Option<u32>,
     /// Every part the slot can take, the current one marked: the **Part**
-    /// list.
+    /// list. `No part` comes first, and is current for an empty slot
+    /// (sub-patches.md, Empty slots).
     pub choices: Vec<crate::slots::SwapChoice>,
     /// The part's parameters that are the role's, as `(label, module, row)`:
     /// the module is the part for a module part, and the inner module an
@@ -855,9 +859,18 @@ impl App {
             id,
             name: state.name(),
             role: state.role.name.to_string(),
+            note: part
+                .is_none()
+                .then(|| loom_patch::hierarchy::no_part_text(state.role).to_string()),
             part: part_name,
             part_id: part.map(|p| p.0),
-            choices: self.swap_choices(id),
+            choices: std::iter::once(crate::slots::SwapChoice {
+                label: crate::slots::NO_PART_CHOICE.to_string(),
+                to: crate::slots::SwapTarget::Empty,
+                current: part.is_none(),
+            })
+            .chain(self.swap_choices(id))
+            .collect(),
             role_params,
             other_params,
         })
@@ -1282,13 +1295,15 @@ pub fn view<'a>(
                                 to: choice.to,
                             }
                         })
-                        .placeholder(crate::slots::NO_PART)
                         .text_size(style::CONTROL)
                     ),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
             );
+            if let Some(note) = &s.note {
+                rows = rows.push(text(note.clone()).size(style::BODY).color(DIM));
+            }
             for (label, module, p) in s.role_params {
                 rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
             }
@@ -1302,10 +1317,13 @@ pub fn view<'a>(
                     rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
                 }
             }
-            rows = rows.push(ids::named(
-                &ids::part(&ids::panel(id), "dissolve"),
-                button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)),
-            ));
+            // An empty slot has no part to put in its place.
+            if s.part.is_some() {
+                rows = rows.push(ids::named(
+                    &ids::part(&ids::panel(id), "dissolve"),
+                    button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)),
+                ));
+            }
             rows.into()
         }
         Inspector::Port(p) => column![

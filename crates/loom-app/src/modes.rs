@@ -64,8 +64,11 @@ pub enum Message {
 }
 
 impl App {
-    /// Handles a mode gesture.
+    /// Handles a mode gesture. A slot swap still fading finishes first, on
+    /// the live session and outside the undo step, so copies that come or
+    /// go never meet a half-done fade (ADR-0044).
     pub(crate) fn mode_message(&mut self, message: Message) {
+        self.finish_all_fades();
         match message {
             Message::SetMode { tile, mode } => self.set_mode(tile, mode),
             Message::AddMember(tile) => self.add_member(tile),

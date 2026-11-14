@@ -22,6 +22,7 @@ fn widget(kind: WidgetViewKind, x: u8, y: u8, label: &str) -> WidgetView {
         hover: HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     }
 }
 

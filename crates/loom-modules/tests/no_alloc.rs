@@ -511,6 +511,55 @@ fn a_slot_swap_never_allocates() {
     parts.controller.collect_garbage();
 }
 
+/// Remove part fades a filter out to the empty slot's thru: the audio
+/// thread runs the part, the dry signal, and the Linear fade with no
+/// allocation, and the finish only swaps a schedule (sub-patches.md, Empty
+/// slots).
+#[test]
+fn remove_part_never_allocates() {
+    use loom_patch::{FlatIds, Hierarchy, Layout, Patch};
+    let text = r#"Patch(
+        version: 1,
+        modules: [
+            PatchModule(id: 1, kind: "loom.osc.noise@1"),
+            PatchModule(id: 2, kind: "loom.filter.svf@1", params: {"cutoff": 300.0}),
+            PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+            PatchModule(id: 4, kind: "loom.clock.transport@1"),
+            PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+        ],
+        cables: [
+            PatchCable(from: (1, "out"), to: (9, "in")),
+            PatchCable(from: (9, "out"), to: (3, "in")),
+        ],
+    )"#;
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let patch = Patch::from_ron(text).unwrap();
+    let mut ids = FlatIds::new();
+    patch.load_with_ids(&mut parts.controller, &mut ids).unwrap();
+    let mut hierarchy =
+        Hierarchy::from_patch(&patch, parts.controller.graph(), ids, parts.controller.registry()).unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    let layout = |_: u32| Layout::default();
+    hierarchy
+        .swap_to_empty(&mut parts.controller, &layout, loom_core::ModuleId(9))
+        .unwrap();
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    hierarchy.finish_all_fades(&mut parts.controller);
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    assert!(left.iter().any(|v| v.abs() > 0.01), "the noise passes through");
+    parts.controller.collect_garbage();
+}
+
 /// A select change crossfades on the audio thread with no allocation, from
 /// a set Member value and from Member modulated at audio rate, and so does
 /// a stack whose copies follow one MIDI mapping (sub-patches.md, Acceptance
@@ -680,4 +729,71 @@ fn cable_fades_never_allocate() {
             > 0,
         "the fades settle"
     );
+}
+
+/// A swap inside a stack of four, with a spread on the slot's cutoff, adds
+/// each copy's part and fade on the control thread: the audio thread
+/// allocates nothing through the fade or the finish (ADR-0044).
+#[test]
+fn a_slot_swap_inside_a_stack_never_allocates() {
+    use loom_patch::{FlatIds, Hierarchy, Layout, ModulePath, Patch};
+    let text = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stacked slot"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            spread: {"cutoff": 0.2},
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 2000.0}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 9, param: "cutoff")],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)
+"#;
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let patch = Patch::from_ron(text).unwrap();
+    let mut ids = FlatIds::new();
+    patch.load_with_ids(&mut parts.controller, &mut ids).unwrap();
+    let mut hierarchy =
+        Hierarchy::from_patch(&patch, parts.controller.graph(), ids, parts.controller.registry()).unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    let layout = |_: u32| Layout::default();
+    let slot = hierarchy.id_at(&ModulePath::top(2), 9).unwrap();
+    hierarchy
+        .swap_to_module(&mut parts.controller, &layout, slot, "loom.filter.ladder@1")
+        .unwrap();
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    hierarchy.finish_all_fades(&mut parts.controller);
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..2 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
 }

@@ -518,7 +518,9 @@ impl crate::App {
             let widgets = (0..tile.widgets.len()).map(|index| {
                 // From the panel's description, not from how the widget is
                 // drawn, so the kind agrees with the names `locate` takes.
-                let kind = if !crate::surface::is_control(graph, hierarchy, tile.id, index) {
+                let control = crate::surface::is_control(graph, hierarchy, tile.id, index)
+                    || crate::surface::is_inert(hierarchy, tile.id, index);
+                let kind = if !control {
                     tree::WidgetKey::Display
                 } else if on_module {
                     tree::WidgetKey::Param

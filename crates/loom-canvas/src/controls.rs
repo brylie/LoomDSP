@@ -115,6 +115,11 @@ pub struct WidgetValue {
     pub ghost: Option<f32>,
     /// Read-only result shape, sampled left to right in the UI thread.
     pub shape: Vec<f32>,
+    /// True for a control with nothing behind it, such as a surface
+    /// control bound to an empty slot's role parameter: it is drawn under
+    /// a veil of the tile's colour, and its hover text says why
+    /// (sub-patches.md, Empty slots).
+    pub dimmed: bool,
     /// The second value of an XY pad or a range. The fields above then hold
     /// the first value, and `text` holds both, as the widget says them.
     pub second: Option<PartValue>,
@@ -257,6 +262,9 @@ impl ControlGeometry {
                     continue;
                 };
                 let position = values.position(module.id, index);
+                // A control with nothing behind it shows no value: its
+                // track and body only (sub-patches.md, Empty slots).
+                let dimmed = values.get(module.id, index).is_some_and(|v| v.dimmed);
                 let modulation = values
                     .get(module.id, index)
                     .map_or(ModulationMark::None, |v| v.modulation);
@@ -280,14 +288,16 @@ impl ControlGeometry {
                         ));
                         // At least a short cap, so a knob at its minimum
                         // still reads as live (visual-system.md, Knobs).
-                        arcs.push(ArcShape::new(
-                            centre,
-                            KNOB_RADIUS,
-                            2.5,
-                            KNOB_START,
-                            KNOB_SWEEP * t.max(KNOB_START_CAP),
-                            palette.control_value,
-                        ));
+                        if !dimmed {
+                            arcs.push(ArcShape::new(
+                                centre,
+                                KNOB_RADIUS,
+                                2.5,
+                                KNOB_START,
+                                KNOB_SWEEP * t.max(KNOB_START_CAP),
+                                palette.control_value,
+                            ));
+                        }
                         if let ModulationMark::Range { low, high } = modulation {
                             arcs.push(ArcShape::new(
                                 centre,
@@ -305,16 +315,20 @@ impl ControlGeometry {
                             shapes.push(ghost_mark(live_dot_centre(centre, ghost), palette));
                         }
                         shapes.push(circle(centre, 6.5, palette.control_body, palette.tile_border, 1.0));
-                        let angle = KNOB_START + KNOB_SWEEP * t;
-                        let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
-                        shapes.push(circle(tip, 1.5, palette.text, Color::TRANSPARENT, 0.0));
+                        if !dimmed {
+                            let angle = KNOB_START + KNOB_SWEEP * t;
+                            let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
+                            shapes.push(circle(tip, 1.5, palette.text, Color::TRANSPARENT, 0.0));
+                        }
                     }
                     WidgetViewKind::Fader { vertical, .. } => {
                         let t = position.clamp(0.0, 1.0);
                         let track = fader_track(rect, *vertical);
                         shapes.push(Shape::new(track, 1.5, palette.control_track, Color::TRANSPARENT, 0.0));
-                        let filled = fader_span(track, *vertical, 0.0, t.max(KNOB_START_CAP));
-                        shapes.push(Shape::new(filled, 1.5, palette.control_value, Color::TRANSPARENT, 0.0));
+                        if !dimmed {
+                            let filled = fader_span(track, *vertical, 0.0, t.max(KNOB_START_CAP));
+                            shapes.push(Shape::new(filled, 1.5, palette.control_value, Color::TRANSPARENT, 0.0));
+                        }
                         if let ModulationMark::Range { low, high } = modulation {
                             shapes.push(Shape::new(
                                 fader_bar(rect, *vertical, low, high),
@@ -331,13 +345,15 @@ impl ControlGeometry {
                         if let Some(ghost) = values.get(module.id, index).and_then(|v| v.ghost) {
                             shapes.push(ghost_mark(fader_bar_point(rect, *vertical, ghost), palette));
                         }
-                        shapes.push(Shape::new(
-                            fader_handle(rect, *vertical, t),
-                            2.0,
-                            palette.control_body,
-                            palette.text,
-                            1.0,
-                        ));
+                        if !dimmed {
+                            shapes.push(Shape::new(
+                                fader_handle(rect, *vertical, t),
+                                2.0,
+                                palette.control_body,
+                                palette.text,
+                                1.0,
+                            ));
+                        }
                     }
                     WidgetViewKind::XyPad { .. } => {
                         let area = xy_area(rect);
@@ -670,6 +686,22 @@ impl ControlGeometry {
                         let samples = values.get(module.id, index).map_or(&[][..], |v| v.shape.as_slice());
                         lines.extend(preview_line(plot, samples, line_colour));
                     }
+                    // A note is text only: its caption is the whole widget.
+                    WidgetViewKind::Note { .. } => {}
+                }
+            }
+        }
+        // A control with nothing behind it goes under a veil of the tile's
+        // colour, drawn after every control shape and arc, so it reads as
+        // out of use (sub-patches.md, Empty slots).
+        for module in scene.modules() {
+            for index in 0..module.panel.widgets.len() {
+                let Some(rect) = module.widget_bounds(index) else {
+                    continue;
+                };
+                if values.get(module.id, index).is_some_and(|v| v.dimmed) {
+                    let veil = Color { a: 0.6, ..palette.tile };
+                    shapes.push(Shape::new(rect, 2.0, veil, Color::TRANSPARENT, 0.0));
                 }
             }
         }
@@ -912,7 +944,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rect) -> (Rect, f32) {
             .expand(1.0),
             4.0,
         ),
-        // Displays never take focus.
+        // Displays and notes never take focus.
         WidgetViewKind::Light
         | WidgetViewKind::Readout { .. }
         | WidgetViewKind::Meter { .. }
@@ -920,7 +952,8 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rect) -> (Rect, f32) {
         | WidgetViewKind::LevelHistory
         | WidgetViewKind::Spectrum
         | WidgetViewKind::XyScope
-        | WidgetViewKind::Shape { .. } => (rect.expand(1.0), 4.0),
+        | WidgetViewKind::Shape { .. }
+        | WidgetViewKind::Note { .. } => (rect.expand(1.0), 4.0),
     }
 }
 

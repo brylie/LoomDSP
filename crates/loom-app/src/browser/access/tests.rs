@@ -264,3 +264,26 @@ fn every_option_has_its_own_description() {
     let bass = &list.children[library_row(&browser, "Bass voice")];
     assert_eq!(bass.description.as_deref(), Some("Voices/Bass voice.ron"));
 }
+
+/// A slot row reads its name once, `Filter slot`, not `Filter slot, Slot`,
+/// with the role's description, and offers no menu; a library row still
+/// does (sub-patches.md, Empty slots).
+#[test]
+fn a_slot_row_reads_its_name_once_and_has_no_menu() {
+    let roles = loom_modules::registry().roles().collect();
+    let modules = loom_modules::registry().iter().collect();
+    let area = Rect::new(Point::new(0.0, 0.0), loom_ui_core::Size::new(2000.0, 2000.0));
+    let mut browser = Browser::open(modules, Point::new(0.0, 0.0), Point::new(10.0, 10.0), area).with_roles(roles);
+    let _ = browser.update(Message::Query("filter slot".into()));
+    let text = format!("{:?}", items(browser.model()));
+    assert!(text.contains("\"Filter slot\""), "{text}");
+    assert!(!text.contains("Filter slot, Slot"), "{text}");
+    assert!(text.contains("Shapes the spectrum"), "{text}");
+    let row = browser
+        .model()
+        .rows
+        .iter()
+        .position(|r| r.name == "Filter slot")
+        .unwrap();
+    assert!(!browser.model().rows[row].library, "no menu, so no ShowContextMenu");
+}

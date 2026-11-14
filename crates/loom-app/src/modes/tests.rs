@@ -235,7 +235,7 @@ fn select_members_and_the_member_control() {
 }
 
 /// A stack's dissolve and Save to library are refused with their texts,
-/// and a slot is refused inside a stack of more than one copy.
+/// and Make slot works inside a stack of more than one copy.
 #[test]
 fn a_stack_refuses_dissolve_library_and_slots() {
     let mut app = app_with(VOICE);
@@ -252,9 +252,11 @@ fn a_stack_refuses_dissolve_library_and_slots() {
     assert_eq!(app.alerts.status(), modes::dissolve_single_only("Voice"));
     assert!(!app.save_to_library(ModuleId(2)));
     assert_eq!(app.alerts.status(), modes::no_library(Mode::Stack));
+    // A slot inside a stack is allowed now: a swap fades in every copy
+    // (ADR-0044).
     let svf = at(&app, &[2, 5]).unwrap();
     app.make_slot(svf.0, "loom.role.filter");
-    assert_eq!(app.alerts.status(), modes::NO_SLOT_IN_STACK);
+    assert_eq!(app.alerts.status(), "Filter slot made.");
 }
 
 /// Stereo spread and a spread slider: the toggle is one step; one slider

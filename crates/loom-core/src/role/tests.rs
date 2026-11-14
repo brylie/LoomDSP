@@ -209,3 +209,37 @@ fn a_map_onto_another_role_names_own_name_is_refused() {
         Err("role loom.role.filter@1 maps two parameters onto `resonance`".to_string())
     );
 }
+
+/// Filter and Effect are thru roles, and no other initial role is: an
+/// empty Filter or Effect slot passes its input through (ADR-0043). Every
+/// thru role has the required audio `in` and `out` a thru needs.
+#[test]
+fn filter_and_effect_are_the_thru_roles() {
+    let thru: Vec<&str> = roles::ALL.iter().filter(|r| r.thru).map(|r| r.id).collect();
+    assert_eq!(thru, ["loom.role.filter", "loom.role.effect"]);
+    for role in roles::ALL {
+        if role.thru {
+            assert!(role.can_be_thru(), "{}", role.id);
+        }
+    }
+    assert!(roles::SHAPER.can_be_thru(), "Shaper could be one later");
+    assert!(!roles::ENVELOPE.can_be_thru());
+}
+
+/// The registry refuses a thru role that has no audio path to pass on.
+#[test]
+fn a_thru_role_without_an_audio_path_is_refused() {
+    static BAD: RoleDescriptor = RoleDescriptor {
+        id: "test.role.bad_thru",
+        version: 1,
+        name: "Bad thru",
+        description: "",
+        inputs: &[],
+        outputs: &[],
+        params: &[],
+        thru: true,
+    };
+    let mut registry = crate::Registry::new();
+    let error = registry.register_role(&BAD).unwrap_err().to_string();
+    assert!(error.contains("thru role"), "{error}");
+}

@@ -4,6 +4,8 @@ use crate::{Loaded, Source};
 use loom_core::{EngineConfig, ModuleNames};
 use loom_patch::{ModulePath, hierarchy};
 
+mod empty;
+
 /// Noise into a Voice sub-patch, out to the audio output. Inside Voice an
 /// SVF has both its lowpass and its highpass cabled to ports, and its
 /// cutoff is exposed on the Voice tile.

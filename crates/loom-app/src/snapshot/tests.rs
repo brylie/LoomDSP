@@ -38,6 +38,7 @@ fn a_cut_label_shows_what_the_tile_draws() {
         hover: loom_canvas::HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     };
     // Two long captions on touching knobs, filling the panel.
     let module = ModuleView {
