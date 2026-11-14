@@ -114,3 +114,33 @@ fn the_sooner_frame_wins() {
     assert_eq!(redraw(iced::window::RedrawRequest::Wait), Redraw::No);
     assert_eq!(pointer(mouse::Interaction::Hidden), Pointer::Hidden);
 }
+
+/// A touch moves the cursor to the finger, in logical pixels, as a mouse
+/// move does, so a tap reaches the widget under it.
+#[test]
+fn a_touch_moves_the_cursor() {
+    let mut runtime = runtime();
+    let mut layers = WindowLayers::new(SharedClipboard::default());
+    layers.scale = 2.0;
+    let touch = WinitEvent::Touch(winit::event::Touch {
+        device_id: winit::event::DeviceId::dummy(),
+        phase: winit::event::TouchPhase::Started,
+        location: winit::dpi::PhysicalPosition::new(200.0, 100.0),
+        force: None,
+        id: 0,
+    });
+    let waker = runtime.waker();
+    let window = runtime.window();
+    let (app, target) = runtime.parts();
+    layers.window_event(
+        Parts {
+            app,
+            target,
+            waker: &waker,
+            window,
+        },
+        &touch,
+    );
+    assert_eq!(layers.cursor, mouse::Cursor::Available(iced::Point::new(100.0, 50.0)));
+    assert_eq!(layers.events.len(), 1, "the touch is kept for Iced");
+}

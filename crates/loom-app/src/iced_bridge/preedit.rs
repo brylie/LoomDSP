@@ -48,6 +48,24 @@ pub(super) fn selected<'a>(content: &'a str, selection: Option<&std::ops::Range<
     Some((content.get(..range.start)?, content.get(..range.end)?))
 }
 
+/// Where the selected range of `content` is drawn at `size`, from the
+/// text's top left: one rectangle a line, from one shaped layout of the
+/// whole text in three spans (before, selected, after). Measuring the two
+/// sides apart would mark the wrong place in right-to-left text, where the
+/// first characters are drawn at the right.
+pub(super) fn marked(content: &str, selection: Option<&std::ops::Range<usize>>, size: f32) -> Vec<Rectangle> {
+    let Some((before, through)) = selected(content, selection) else {
+        return Vec::new();
+    };
+    let spans: [text::Span<'_>; 3] = [
+        text::Span::new(before),
+        text::Span::new(&content[before.len()..through.len()]),
+        text::Span::new(&content[through.len()..]),
+    ];
+    let paragraph = <crate::Renderer as text::Renderer>::Paragraph::with_spans(text(&spans[..], size, Size::INFINITE));
+    paragraph.span_bounds(1)
+}
+
 /// How wide `content` is at `size`.
 fn width(content: &str, size: f32) -> f32 {
     let paragraph = <crate::Renderer as text::Renderer>::Paragraph::with_text(text(content, size, Size::INFINITE));
@@ -107,11 +125,12 @@ pub(super) fn draw(
             },
             palette.background.weak.color,
         );
-        if let Some((before, through)) = selected(&preedit.content, preedit.selection.as_ref()) {
-            let (start, end) = (width(before, size), width(through, size));
-            let marked = Rectangle::new(Point::new(origin.x + start, origin.y), Size::new(end - start, line));
+        for marked in marked(&preedit.content, preedit.selection.as_ref(), size) {
             renderer.fill_quad(
-                quad(marked),
+                quad(Rectangle::new(
+                    Point::new(origin.x + marked.x, origin.y + marked.y),
+                    marked.size(),
+                )),
                 Color {
                     a: 0.4,
                     ..palette.primary.base.color

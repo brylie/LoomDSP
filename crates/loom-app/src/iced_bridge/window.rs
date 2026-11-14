@@ -240,7 +240,10 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         match event {
             WinitEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WinitEvent::ScaleFactorChanged { scale_factor, .. } => self.scale = *scale_factor as f32,
-            WinitEvent::CursorMoved { position, .. } => {
+            // A touch moves the cursor too, as Iced's window did, so a tap
+            // on a field reaches the widget under the finger.
+            WinitEvent::CursorMoved { position, .. }
+            | WinitEvent::Touch(winit::event::Touch { location: position, .. }) => {
                 self.cursor = mouse::Cursor::Available(iced::Point::new(
                     position.x as f32 / self.scale,
                     position.y as f32 / self.scale,

@@ -69,3 +69,19 @@ fn only_composed_text_is_drawn() {
     assert_eq!(of(&enabled(None)), None);
     assert_eq!(of(&InputMethod::Disabled), None);
 }
+
+/// The selection is marked where the shaped text draws it: at the left of
+/// left-to-right text, and at the right of right-to-left text, where the
+/// first characters are drawn.
+#[test]
+fn the_selection_follows_the_shaped_text() {
+    let ltr = marked("abcd", Some(&(0..2)), 12.0);
+    assert_eq!(ltr.len(), 1, "{ltr:?}");
+    assert!(ltr[0].x < 1.0, "{ltr:?}");
+    // Two Hebrew letters of two bytes each, out of four.
+    let rtl = marked("אבגד", Some(&(0..4)), 12.0);
+    assert_eq!(rtl.len(), 1, "{rtl:?}");
+    let whole = width("אבגד", 12.0);
+    assert!(rtl[0].x > whole / 4.0, "{rtl:?} in {whole}");
+    assert!(marked("abcd", None, 12.0).is_empty());
+}
