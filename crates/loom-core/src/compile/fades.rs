@@ -298,9 +298,7 @@ impl FadePlan {
                 if old == new || exact(old, new) {
                     continue;
                 }
-                if input_fades(layout, v, port, new)
-                    && old.is_none_or(|old| input_fades_old(previous, layout, v, port, old))
-                {
+                if input_fades(layout, v, port, new) && old.is_none_or(|old| input_fades_old(layout, v, port, old)) {
                     plan.fresh.insert(input);
                 }
             }
@@ -386,7 +384,7 @@ impl FadePlan {
                     self.live.insert(key, true);
                 }
                 None => {}
-                Some(&(source, old_target, param)) if (old_target, param) != (target, assignment.param) => {
+                Some(&(_, old_target, param)) if (old_target, param) != (target, assignment.param) => {
                     // Moved to another target: out on the old one, even
                     // when the new one is a new part that applies it at
                     // once (a slot swap), and in on the new one.
@@ -396,7 +394,6 @@ impl FadePlan {
                             .or_default()
                             .insert(assignment.id, true);
                     }
-                    let _ = source;
                     if ramps {
                         self.live.insert(key, true);
                     }
@@ -470,16 +467,14 @@ impl FadePlan {
 }
 
 /// True when the old cable `old` into input `port` of the module at `v`
-/// carried a signal that fades, read from the old wiring when its source is
-/// gone.
-fn input_fades_old(previous: &Wiring, layout: &Layout, v: usize, port: usize, old: OutputRef) -> bool {
+/// carried a signal that fades. When its source is gone from the graph,
+/// only the input's own type is left to read.
+fn input_fades_old(layout: &Layout, v: usize, port: usize, old: OutputRef) -> bool {
     if layout.index_of.contains_key(&old.module) {
-        return input_fades(layout, v, port, Some(old));
+        input_fades(layout, v, port, Some(old))
+    } else {
+        input_fades(layout, v, port, None)
     }
-    // The source is gone: only the input's own type is left to read. A
-    // leaving mixer carried what its inputs carried.
-    let _ = previous;
-    input_fades(layout, v, port, None)
 }
 
 impl Wiring {
