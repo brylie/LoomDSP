@@ -21,15 +21,25 @@
 //!    at once, send frames, wake at a time, or sleep.
 //!
 //! The runtime never reads the clock: the driver passes the moment in.
+//!
+//! # Layout
+//!
+//! A turn builds the elements of each panel whose model changed, and no
+//! more. Laying them out waits until the driver asks, with
+//! [`Runtime::lay_out`], before it draws or reads a place: the driver holds
+//! the text that measures. [`Runtime::bounds`] and [`Runtime::hit`] then
+//! read the composed window (ui-layer.md, section 5, rule 8).
 
 use crate::app::{App, Context, Deadline, WindowSpec};
 use crate::driver::Driver;
 use crate::effect::Effect;
 use crate::event::{DriverEvent, WindowEvent, WindowState};
+use crate::hit::Hit;
 use crate::routing::Target;
-use crate::view::View;
+use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
-use loom_ui_core::Event;
+use crate::window::Window;
+use loom_ui_core::{Event, Point, Rect, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
@@ -83,6 +93,13 @@ pub struct Counts {
     pub frames: u64,
     /// Turns that said to draw.
     pub redraws: u64,
+    /// Panels laid out, by [`Runtime::lay_out`].
+    pub panels_laid_out: u64,
+    /// Elements in the panels laid out.
+    pub elements_laid_out: u64,
+    /// Keys dropped from rebuilt panels because an earlier element had the
+    /// same UI ID (ui-layer.md, section 4, rule 7).
+    pub duplicate_keys: u64,
 }
 
 /// The runtime for one app and its routing target.
@@ -94,6 +111,8 @@ pub struct Runtime<A: App, T> {
     pending: VecDeque<A::Message>,
     window: WindowState,
     view: Option<View>,
+    /// The layouts of the panels that have elements.
+    panels: Window,
     spec: Option<WindowSpec>,
     deadline: Option<Deadline<A::Message>>,
     after_draw: Vec<A::Message>,
@@ -116,6 +135,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             pending: VecDeque::new(),
             window,
             view: None,
+            panels: Window::default(),
             spec: None,
             deadline: None,
             after_draw: Vec::new(),
@@ -185,6 +205,47 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// The view built after the last turn that ran an update.
     pub fn view(&self) -> Option<&View> {
         self.view.as_ref()
+    }
+
+    /// Lays out what changed since the last call, in the window's size,
+    /// with `text` measuring text: the panels rebuilt, those whose slot
+    /// changed size, and those whose shrink slot's child changed size. A
+    /// driver calls it before it draws, and before it reads bounds or hits.
+    pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
+        let laid = self.panels.lay_out(self.window.size, text);
+        self.counts.panels_laid_out += laid.panels;
+        self.counts.elements_laid_out += laid.elements;
+    }
+
+    /// Where the element with UI ID `id` is in the window, in logical
+    /// pixels, as last laid out. A panel's own key gives the whole panel.
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, if something changed since the last
+    /// [`Runtime::lay_out`], so the answer would be out of date.
+    pub fn bounds(&self, id: &UiId) -> Option<Rect> {
+        self.check_laid_out();
+        self.panels.bounds(id)
+    }
+
+    /// What is under `point` in the window, and in which layer, as last
+    /// laid out: panels are tried in the reverse of draw order.
+    ///
+    /// # Panics
+    ///
+    /// As [`Runtime::bounds`].
+    pub fn hit(&self, point: Point) -> Option<(Layer, Hit<'_>)> {
+        self.check_laid_out();
+        self.panels.hit(point)
+    }
+
+    /// Panics in a debug build when a read would be out of date.
+    fn check_laid_out(&self) {
+        debug_assert!(
+            self.panels.is_settled(self.window.size),
+            "the window changed since it was last laid out: call Runtime::lay_out first"
+        );
     }
 
     /// Runs one turn for `event` at `now`, with `driver` carrying out the
@@ -370,6 +431,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         };
         self.counts.panels_compared += view.len() as u64;
         self.counts.panels_changed += changed as u64;
+        self.counts.duplicate_keys += self.panels.sync(view.built(self.view.as_ref()));
         self.view = Some(view);
 
         let spec = self.app.window();

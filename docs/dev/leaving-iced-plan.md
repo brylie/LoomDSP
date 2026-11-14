@@ -324,7 +324,9 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
    - **Elements:** a tree built each frame from view models, keyed by stable IDs (ADR-0021 keyed identity).
    - **Layout:** row, column, stack, padding, alignment, fixed and fill sizes, and a wrapping row (the tag chips). Decided 2026-11-14: `taffy`, with flexbox's defaults and its rounding to whole logical pixels ([spec](../design/ui-layer.md), section 5, rules 5 and 6).
 
-     **Done (first part):** elements keyed by UI ID, layout of one panel, and hit-testing (`crates/loom-ui/src/element.rs`, `layout.rs`, `hit.rs`, and `examples/layout.rs`), with `TextStyle`, `Weight`, and `TextMeasure` moved to `loom-ui-core` so layout measures text with Parley's `CanvasText`. Nothing in the app uses them yet. Next: laying out the window's panels together, each in its place.
+     **Done (first part):** elements keyed by UI ID, layout of one panel, and hit-testing (`crates/loom-ui/src/element.rs`, `layout.rs`, `hit.rs`, and `examples/layout.rs`), with `TextStyle`, `Weight`, and `TextMeasure` moved to `loom-ui-core` so layout measures text with Parley's `CanvasText`. Nothing in the app uses them yet.
+
+     **Done (second part):** panels compose (`crates/loom-ui/src/window.rs`, [spec](../design/ui-layer.md), section 5, rule 8): a panel's slot holds another panel, the window is laid out from the roots down when the driver calls `Runtime::lay_out`, each panel keeps its own layout, and `Runtime::bounds` and `Runtime::hit` read the composed window. Still unused by the app. Next: drawing panels.
    - **Drawing:** our instanced rounded-rectangle pipeline (the canvas already has one in `canvas.wgsl`) plus the glyph renderer from 2.4. Clipping by scissor rectangles.
    - **Hit-testing and focus:** a focus order, focus rings, Tab and Shift+Tab, and focus that the accessibility tree reports.
    - **Accessibility:** every widget gives its AccessKit node from the same element, so the tree and the screen cannot disagree.

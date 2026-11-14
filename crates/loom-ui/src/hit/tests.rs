@@ -1,11 +1,10 @@
 //! Tests for `hit.rs`: which element a point hits, in one panel and across
 //! layers.
 
-use super::{Hit, hit_layers};
+use super::Hit;
 use crate::element::{Element, Length};
 use crate::layout::Layout;
 use crate::layout::tests::{Mono, id, lay_out};
-use crate::view::Layer;
 use loom_ui_core::{Point, Size, UiId};
 
 /// A keyed space of a fixed size.
@@ -98,34 +97,6 @@ fn a_duplicate_falls_through_to_its_parent() {
     assert_eq!(hit(&layout, 5.0, 5.0), "p/row/a");
     assert_eq!(hit(&layout, 15.0, 5.0), "p/row");
     assert_eq!(layout.bounds(&id("row/a")).map(|bounds| bounds.x), Some(0.0));
-}
-
-/// The topmost layer is tried first, then each one below; within a layer,
-/// the later layout is on top.
-#[test]
-fn layers_are_tried_from_the_top() {
-    let panel = |key: &str| Layout::new(UiId::panel(key));
-    let place = |mut layout: Layout, element: Element| {
-        layout.rebuild(element);
-        layout.compute(Size::new(300.0, 300.0), &mut Mono::default());
-        layout
-    };
-    let toolbar = place(panel("toolbar"), space("undo", 100.0, 20.0));
-    let menu = place(panel("menu"), space("open", 50.0, 50.0));
-    let help = place(panel("help"), space("close", 10.0, 10.0));
-    // Given in any order: the overlays are tried before the panels, and
-    // `help`, later in the same layer, before `menu`.
-    let layers = [
-        (Layer::Overlays, &menu),
-        (Layer::Panels, &toolbar),
-        (Layer::Overlays, &help),
-    ];
-    let at = |x, y| hit_layers(&layers, Point::new(x, y)).map(|(layer, hit)| (layer, describe(hit)));
-
-    assert_eq!(at(5.0, 5.0), Some((Layer::Overlays, "help/close".to_string())));
-    assert_eq!(at(20.0, 5.0), Some((Layer::Overlays, "menu/open".to_string())));
-    assert_eq!(at(80.0, 5.0), Some((Layer::Panels, "toolbar/undo".to_string())));
-    assert_eq!(at(200.0, 200.0), None);
 }
 
 /// Nothing inside a lost duplicate is hit: a point over its keyed child

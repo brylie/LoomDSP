@@ -71,6 +71,63 @@ pub struct Layout {
     panic_on_duplicate: bool,
     /// The panel's size, after [`Layout::compute`].
     size: Size,
+    /// The slots, in tree order: the panel each names, and its record.
+    slots: Vec<(UiId, usize)>,
+}
+
+/// The space offered along one axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Space {
+    /// At most this many logical pixels.
+    Definite(f32),
+    /// As narrow as the content can be.
+    MinContent,
+    /// As wide as the content wants.
+    MaxContent,
+}
+
+/// The space offered to a panel along both axes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Constraint {
+    /// Across.
+    pub(crate) width: Space,
+    /// Down.
+    pub(crate) height: Space,
+}
+
+impl Constraint {
+    /// Exactly `size`, as a window or a slot gives it.
+    pub(crate) fn within(size: Size) -> Self {
+        Self {
+            width: Space::Definite(size.width),
+            height: Space::Definite(size.height),
+        }
+    }
+}
+
+/// What layout asks for sizes it cannot work out alone: the size of a
+/// text, and the size of the panel in a shrink slot.
+pub(crate) trait Measure {
+    /// The size of `text` in `style`, wrapped at `wrap_width` or on one
+    /// line, as [`TextMeasure::measure`] gives it.
+    fn text(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size;
+    /// The size of the panel keyed `panel`, in a slot of the panel keyed
+    /// `owner`, in `constraint`.
+    fn slot(&mut self, owner: &UiId, panel: &UiId, constraint: Constraint) -> Size;
+}
+
+/// A measure for one panel on its own: text from a [`TextMeasure`], and a
+/// slot has no size, since no other panel is there.
+struct Alone<'a>(&'a mut dyn TextMeasure);
+
+impl Measure for Alone<'_> {
+    fn text(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
+        self.0.measure(text, style, wrap_width)
+    }
+
+    fn slot(&mut self, _owner: &UiId, _panel: &UiId, _constraint: Constraint) -> Size {
+        Size::ZERO
+    }
 }
 
 /// The root element's node and its own sizes, which depend on the space
@@ -94,9 +151,67 @@ pub(crate) struct Record {
     pub(crate) bounds: Rect,
 }
 
+/// What a leaf's node holds: a text, or a slot.
+pub(crate) enum Leaf {
+    /// A text, with what it measured.
+    Text(TextLeaf),
+    /// The place of another panel.
+    Slot {
+        /// The panel's key.
+        panel: UiId,
+        /// Its width shrinks to the panel's, so the panel is asked.
+        shrink_width: bool,
+        /// Its height shrinks to the panel's, so the panel is asked.
+        shrink_height: bool,
+    },
+}
+
+impl Leaf {
+    /// Its size for what taffy asks: a size it must have along an axis, or
+    /// the space it may take.
+    fn size(
+        &mut self,
+        owner: &UiId,
+        known: taffy::Size<Option<f32>>,
+        available: taffy::Size<AvailableSpace>,
+        measure: &mut dyn Measure,
+    ) -> Size {
+        match self {
+            Self::Text(text) => text.size(known, available, measure),
+            // A slot that fills or is fixed is sized by its parent alone:
+            // it has no content, and the panel in it is never asked.
+            Self::Slot {
+                shrink_width: false,
+                shrink_height: false,
+                ..
+            } => Size::ZERO,
+            Self::Slot {
+                panel,
+                shrink_width,
+                shrink_height,
+            } => {
+                let space = |known: Option<f32>, available| match (known, available) {
+                    (Some(size), _) | (None, AvailableSpace::Definite(size)) => Space::Definite(size),
+                    (None, AvailableSpace::MinContent) => Space::MinContent,
+                    (None, AvailableSpace::MaxContent) => Space::MaxContent,
+                };
+                let constraint = Constraint {
+                    width: space(known.width, available.width),
+                    height: space(known.height, available.height),
+                };
+                let size = measure.slot(owner, panel, constraint);
+                Size::new(
+                    if *shrink_width { size.width } else { 0.0 },
+                    if *shrink_height { size.height } else { 0.0 },
+                )
+            }
+        }
+    }
+}
+
 /// The text of a text element, kept in its node, with the sizes measured
 /// since the panel last rebuilt.
-pub(crate) struct Leaf {
+pub(crate) struct TextLeaf {
     text: String,
     style: TextStyle,
     wrap: bool,
@@ -107,19 +222,19 @@ pub(crate) struct Leaf {
     wrapped: [Option<(Option<u32>, Size)>; WRAPPED_SIZES],
 }
 
-impl Leaf {
+impl TextLeaf {
     /// Its size for what taffy asks: a width it must have, or the space it
     /// may take. Measures only on a size not kept yet.
     fn size(
         &mut self,
         known: taffy::Size<Option<f32>>,
         available: taffy::Size<AvailableSpace>,
-        measure: &mut dyn TextMeasure,
+        measure: &mut dyn Measure,
     ) -> Size {
         if !self.wrap {
             return *self
                 .line
-                .get_or_insert_with(|| measure.measure(&self.text, self.style, None));
+                .get_or_insert_with(|| measure.text(&self.text, self.style, None));
         }
         // The narrowest it can be is its longest word, which is what
         // breaking at every space gives.
@@ -132,7 +247,7 @@ impl Leaf {
         if let Some((_, size)) = self.wrapped.iter().flatten().find(|(kept, _)| *kept == key) {
             return *size;
         }
-        let size = measure.measure(&self.text, self.style, width);
+        let size = measure.text(&self.text, self.style, width);
         self.wrapped.rotate_left(1);
         self.wrapped[WRAPPED_SIZES - 1] = Some((key, size));
         size
@@ -163,6 +278,7 @@ impl Layout {
             duplicates: 0,
             panic_on_duplicate: cfg!(debug_assertions),
             size: Size::ZERO,
+            slots: Vec::new(),
         }
     }
 
@@ -177,6 +293,7 @@ impl Layout {
         self.tree.clear();
         self.records.clear();
         self.by_id.clear();
+        self.slots.clear();
         self.duplicates = 0;
         let (width, height) = (root.width, root.height);
         let scope = self.panel.clone();
@@ -185,24 +302,38 @@ impl Layout {
     }
 
     /// Lays the tree out in `available`, the space the panel has. The root
-    /// takes all of it along an axis where its size is [`Length::Fill`].
+    /// takes all of it along an axis where its size is [`Length::Fill`]. A
+    /// slot has no size here: a panel laid out alone has no other panel to
+    /// put in it.
     pub fn compute(&mut self, available: Size, measure: &mut dyn TextMeasure) {
+        self.compute_in(Constraint::within(available), &mut Alone(measure));
+    }
+
+    /// Lays the tree out in `constraint`, with `measure` for text and
+    /// slots.
+    pub(crate) fn compute_in(&mut self, constraint: Constraint, measure: &mut dyn Measure) {
         let Some(root) = &self.root else {
             self.size = Size::ZERO;
             return;
         };
         let mut style = self.tree.style(root.node).expect("the root is in the tree").clone();
         style.size = taffy::Size {
-            width: root_size(root.width, available.width),
-            height: root_size(root.height, available.height),
+            width: root_size(root.width, constraint.width),
+            height: root_size(root.height, constraint.height),
         };
         if *self.tree.style(root.node).expect("the root is in the tree") != style {
             self.tree.set_style(root.node, style).expect("the root is in the tree");
         }
-        let space = taffy::Size {
-            width: AvailableSpace::Definite(available.width),
-            height: AvailableSpace::Definite(available.height),
+        let available = |space| match space {
+            Space::Definite(size) => AvailableSpace::Definite(size),
+            Space::MinContent => AvailableSpace::MinContent,
+            Space::MaxContent => AvailableSpace::MaxContent,
         };
+        let space = taffy::Size {
+            width: available(constraint.width),
+            height: available(constraint.height),
+        };
+        let owner = &self.panel;
         self.tree
             .compute_layout_with_measure(root.node, space, |inputs, _, leaf, style| {
                 taffy::compute_leaf_layout(
@@ -211,7 +342,7 @@ impl Layout {
                     |_, _| 0.0,
                     |known, space| match leaf {
                         Some(leaf) => {
-                            let size = leaf.size(known, space, measure);
+                            let size = leaf.size(owner, known, space, measure);
                             taffy::Size {
                                 width: size.width,
                                 height: size.height,
@@ -269,13 +400,35 @@ impl Layout {
         self.duplicates
     }
 
+    /// Each slot's panel and its place in this panel, in tree order.
+    pub(crate) fn slots(&self) -> impl Iterator<Item = (&UiId, Rect)> {
+        self.slots
+            .iter()
+            .map(|(panel, index)| (panel, self.records[*index].bounds))
+    }
+
+    /// Forgets the layout around the slot for `panel`, whose size changed,
+    /// so the next compute asks it again.
+    pub(crate) fn slot_changed(&mut self, panel: &UiId) {
+        if let Some((_, index)) = self.slots.iter().find(|(named, _)| named == panel) {
+            self.tree
+                .mark_dirty(self.records[*index].node)
+                .expect("every node is in the tree");
+        }
+    }
+
+    /// How many elements the panel has.
+    pub(crate) fn element_count(&self) -> usize {
+        self.records.len()
+    }
+
     /// Every element, in tree order, for hit-testing.
     pub(crate) fn records(&self) -> &[Record] {
         &self.records
     }
 
-    /// Turns off the panic on a duplicate UI ID, as in a release build.
-    #[cfg(test)]
+    /// Turns off the panic on a duplicate UI ID, as in a release build. For
+    /// tests, and for a window whose own checks are off.
     pub(crate) fn allow_duplicates(&mut self) {
         self.panic_on_duplicate = false;
     }
@@ -287,6 +440,7 @@ impl Layout {
     /// name a place inside the earlier element.
     fn add(&mut self, element: Element, parent: Option<usize>, scope: &UiId, around: Parent, lost: bool) -> NodeId {
         let style = style(&element, around);
+        let shrinks = (element.width == Length::Shrink, element.height == Length::Shrink);
         let inside = match element.kind {
             Kind::Row => Parent::Row,
             Kind::Column => Parent::Column,
@@ -305,12 +459,21 @@ impl Layout {
                 style: text_style,
                 wrap,
             } => {
-                let leaf = Leaf {
+                let leaf = Leaf::Text(TextLeaf {
                     text,
                     style: text_style,
                     wrap,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
+                });
+                self.tree.new_leaf_with_context(style, leaf)
+            }
+            Kind::Slot(panel) => {
+                self.slots.push((panel.clone(), self.records.len()));
+                let leaf = Leaf::Slot {
+                    panel,
+                    shrink_width: shrinks.0,
+                    shrink_height: shrinks.1,
                 };
                 self.tree.new_leaf_with_context(style, leaf)
             }
@@ -355,10 +518,14 @@ impl Layout {
     }
 }
 
-/// The root's size along one axis, in `available` space.
-fn root_size(length: Length, available: f32) -> Dimension {
+/// The root's size along one axis, in `space`. A fill root takes a
+/// definite space, and sizes to its content when asked how large it is.
+fn root_size(length: Length, space: Space) -> Dimension {
     match length {
-        Length::Fill(_) => Dimension::length(available),
+        Length::Fill(_) => match space {
+            Space::Definite(size) => Dimension::length(size),
+            Space::MinContent | Space::MaxContent => Dimension::auto(),
+        },
         Length::Shrink => Dimension::auto(),
         Length::Fixed(size) => Dimension::length(size),
     }
@@ -387,7 +554,7 @@ fn style(element: &Element, around: Parent) -> Style {
             style.justify_items = element.align_x.map_or(AlignItems::NORMAL, items);
             style.align_items = element.align_y.map_or(AlignItems::NORMAL, items);
         }
-        Kind::Text { .. } | Kind::Space => {}
+        Kind::Text { .. } | Kind::Space | Kind::Slot(_) => {}
     }
     if element.wrap {
         style.flex_wrap = FlexWrap::Wrap;

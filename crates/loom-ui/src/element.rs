@@ -29,7 +29,7 @@
 //! its widest fixed child). Across a row, an item with no alignment set
 //! stretches to the row's height, as in flexbox.
 
-use loom_ui_core::{IdKey, TextStyle};
+use loom_ui_core::{IdKey, TextStyle, UiId};
 use std::num::NonZeroU16;
 
 /// How large an element is along one axis.
@@ -134,6 +134,8 @@ pub(crate) enum Kind {
     },
     /// Empty space.
     Space,
+    /// The place of another panel, named by its key.
+    Slot(UiId),
 }
 
 /// One node of a panel's tree. Build it with [`Element::row`],
@@ -207,6 +209,15 @@ impl Element {
     /// Empty space, `width` by `height`.
     pub fn space(width: Length, height: Length) -> Self {
         Self::new(Kind::Space, Vec::new()).width(width).height(height)
+    }
+
+    /// The place of the panel keyed `panel`, which is laid out inside it
+    /// (ui-layer.md, section 5, rule 8). Its own sizes size it. Filling or
+    /// fixed, the parent alone sizes it; shrinking, it asks the panel how
+    /// large it is. It has no UI ID of its own: what is in it is the
+    /// other panel's.
+    pub fn slot(panel: UiId) -> Self {
+        Self::new(Kind::Slot(panel), Vec::new())
     }
 
     /// Names the element, so it can be found again across rebuilds.
