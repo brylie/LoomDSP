@@ -753,14 +753,19 @@ fn mono_voice_stereo_downmixes_are_shared() {
 fn fade_pointers_must_lie_inside_the_schedule() {
     use super::Read;
     let mut schedule = Schedule::empty();
+    schedule._zero = vec![0.0; 8].into_boxed_slice();
     schedule._buffers.push(vec![0.0; 8].into_boxed_slice());
     let inside = schedule._buffers[0].as_ptr();
     schedule.reads.push(Read {
         key: 1,
-        ptr: inside.wrapping_add(7),
+        ptr: inside,
         constant: None,
     });
     assert!(schedule.fade_pointers_inside());
+    // A pointer into the middle of a buffer leaves too few floats after it.
+    schedule.reads[0].ptr = inside.wrapping_add(7);
+    assert!(!schedule.fade_pointers_inside());
+    schedule.reads[0].ptr = inside;
     let outside = [0.0f32; 4];
     schedule.reads.push(Read {
         key: 2,

@@ -36,6 +36,10 @@ pub const SELECT_MEMBER_INPUT: &str = "member";
 pub const MEMBER_PARAM: &str = "member";
 /// The parameter of a Sum that scales the sum.
 pub const SUM_GAIN_PARAM: &str = "gain";
+/// The parameter of a Select that counts its members.
+pub const SELECT_MEMBERS_PARAM: &str = "members";
+/// The display value a Swap fade sets to 1 once it plays its new part alone.
+pub const SWAP_FADE_DONE: &str = "done";
 
 /// The mixers the editor adds. Rule 9 treats cables onto and off them
 /// specially, because a mixer that plays one source alone carries that

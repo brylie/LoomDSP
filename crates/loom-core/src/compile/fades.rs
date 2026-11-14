@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::cable_fade::{
-    MEMBER_MODULE, MEMBER_PARAM, SELECT_MEMBER_INPUT, SELECT_MODULE, SPREAD_SUM_MODULE, SUM_GAIN_PARAM, SUM_MODULE,
-    SWAP_FADE_MODULE, input_key,
+    MEMBER_MODULE, MEMBER_PARAM, SELECT_MEMBER_INPUT, SELECT_MEMBERS_PARAM, SELECT_MODULE, SPREAD_SUM_MODULE,
+    SUM_GAIN_PARAM, SUM_MODULE, SWAP_FADE_DONE, SWAP_FADE_MODULE, input_key,
 };
 use crate::display::DisplaySource;
 
@@ -201,8 +201,9 @@ fn mixer_of(graph: &Graph, id: ModuleId, node: &Node) -> Option<Mixer> {
     let done = (kind == MixerKind::SwapFade)
         .then(|| {
             let slot = node.slot?;
-            let spec = node.descriptor.displays.first()?;
-            Some(DisplaySource::new(slot, id.0, 0, spec.kind))
+            let index = node.descriptor.display_index(SWAP_FADE_DONE)?;
+            let spec = node.descriptor.displays.get(index)?;
+            Some(DisplaySource::new(slot, id.0, index, spec.kind))
         })
         .flatten();
     Some(Mixer {
@@ -239,7 +240,7 @@ fn select_choice(graph: &Graph, id: ModuleId, node: &Node, inputs: &[Option<Outp
     };
     let members = node
         .descriptor
-        .param_index("members")
+        .param_index(SELECT_MEMBERS_PARAM)
         .and_then(|i| node.params.get(i).copied())
         .unwrap_or(inputs.len() as f32);
     let pick = value.round().clamp(1.0, members.max(1.0)) as usize;

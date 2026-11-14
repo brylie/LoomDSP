@@ -843,13 +843,18 @@ fn a_gate_into_a_modulation_input_fades() {
     }
 }
 
-/// A Divide's B moved across 0 divides by small numbers for a moment: the
-/// output stays finite and, with output safety off, inside full scale,
-/// because the engine clips only the final output (rule 9, What still
-/// steps).
+/// A Divide's B moved across 0 divides by small numbers for a moment, a
+/// burst of up to a few milliseconds (rule 9, What still steps). Output
+/// safety holds it under the ceiling, the Divide's own output stays
+/// finite, and from 5 ms on it plays exactly `a / b` again.
 #[test]
-fn a_divide_moved_across_zero_stays_finite() {
-    let mut parts = engine();
+fn a_divide_moved_across_zero_stays_under_the_ceiling() {
+    let at = 1_000;
+    let config = EngineConfig {
+        output_safety: OutputSafety::LowLatency,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let mut parts = create_engine(loom_modules::registry(), config);
     let c = &mut parts.controller;
     let divide = c.add_module("loom.math.div").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
@@ -859,11 +864,56 @@ fn a_divide_moved_across_zero_stays_finite() {
     let minus = constant(&mut parts, -1.0);
     parts.controller.connect_named(source, "out", divide, "a").unwrap();
     parts.controller.connect_named(plus, "out", divide, "b").unwrap();
+    let probe = parts.controller.output_ref(divide, "out").unwrap();
+    parts
+        .controller
+        .add_probe(probe, loom_core::ProbeKind::MeterAndScope)
+        .unwrap();
     parts.controller.commit().unwrap();
-    let played = render_changing(&mut parts, 2_000, 1_000, 64, |parts| {
+    let played = render_changing(&mut parts, 2_000, at, 64, |parts| {
         parts.controller.connect_named(minus, "out", divide, "b").unwrap();
     });
-    assert!(played.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+    assert!(played.iter().all(|x| x.abs() <= loom_core::safety::CEILING + 1e-6));
+    let divided: Vec<f32> = parts
+        .telemetry
+        .scope()
+        .flat_map(|chunk| chunk.samples().to_vec())
+        .collect();
+    assert!(
+        divided.iter().all(|x| x.is_finite()),
+        "the Divide holds its output finite"
+    );
+
+    // With safety off, the output is `-a` again from the end of the fade.
+    let mut plain = engine();
+    let c = &mut plain.controller;
+    let divide = c.add_module("loom.math.div").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(divide, "out", out, "in").unwrap();
+    let source = sine(&mut plain);
+    let plus = constant(&mut plain, 1.0);
+    let minus = constant(&mut plain, -1.0);
+    plain.controller.connect_named(source, "out", divide, "a").unwrap();
+    plain.controller.connect_named(plus, "out", divide, "b").unwrap();
+    plain.controller.commit().unwrap();
+    let before = render(&mut engine_with_sine(), 2_000, 64, &[]).0;
+    let played = render_changing(&mut plain, 2_000, at, 64, |parts| {
+        parts.controller.connect_named(minus, "out", divide, "b").unwrap();
+    });
+    for n in at + fade_length()..2_000 {
+        assert_eq!(played[n], -before[n], "frame {n}: back to -a");
+    }
+}
+
+/// A sine through a window to the output, with output safety off: what a
+/// Divide's `a` reads in [`a_divide_moved_across_zero_stays_under_the_ceiling`].
+fn engine_with_sine() -> EngineParts {
+    let mut parts = engine();
+    let source = sine(&mut parts);
+    let seen = window(&mut parts);
+    parts.controller.connect_named(source, "out", seen, "a").unwrap();
+    parts.controller.commit().unwrap();
+    parts
 }
 
 /// A Unit Delay's input fades like any input; the delay plays the ramp one
@@ -987,12 +1037,17 @@ mod mixers {
 
     /// A Layer that adds a member: the cable moves onto a new Sum at gain 1
     /// that holds its old source, so it switches, and the new member fades
-    /// in from 0 (rule B).
+    /// in from 0 (rule B). Member 1 is a sine, so a fade of the whole cable
+    /// would show as a mix with its held value.
     #[test]
     fn a_layer_adding_a_member_switches_and_fades_the_member_in() {
+        let plain = render(&mut engine_with_sine(), 1_000, 64, &[]).0;
         for block in BLOCKS {
             let mut parts = engine();
-            let (first, input) = played_through(&mut parts, 0.25);
+            let first = sine(&mut parts);
+            let seen = window(&mut parts);
+            parts.controller.connect_named(first, "out", seen, "a").unwrap();
+            let input = parts.controller.input_ref(seen, "a").unwrap();
             let second = constant(&mut parts, 0.5);
             parts.controller.commit().unwrap();
             let out = render_changing(&mut parts, 1_000, 500, block, |parts| {
@@ -1008,7 +1063,13 @@ mod mixers {
                 "only the new member fades"
             );
             for k in 0..500 {
-                assert_eq!(out[500 + k], 0.25 + faded(0.0, 0.5, k), "frame {k}, block {block}");
+                // The engine clips only the final output, to -1 to 1.
+                let expected = (plain[500 + k] + faded(0.0, 0.5, k)).clamp(-1.0, 1.0);
+                assert!(
+                    (out[500 + k] - expected).abs() <= 1e-6,
+                    "frame {k}, block {block}: {} != {expected}",
+                    out[500 + k]
+                );
             }
         }
     }
@@ -1254,5 +1315,53 @@ fn a_cable_edit_past_many_shared_mixers_compiles_quickly() {
         started.elapsed() < std::time::Duration::from_secs(2),
         "{:?}",
         started.elapsed()
+    );
+}
+
+/// An assignment onto a module that is new in this swap, as a paste or an
+/// undo makes, applies from the first frame: no ramp (rule 9, Exceptions).
+#[test]
+fn an_assignment_onto_a_new_module_applies_at_once() {
+    let mut parts = engine();
+    let source = constant(&mut parts, 1.0);
+    parts.controller.commit().unwrap();
+    render(&mut parts, 512, 64, &[]);
+    let seen = window(&mut parts);
+    parts
+        .controller
+        .add_assignment_named(source, "out", seen, "offset", 0.25)
+        .unwrap();
+    assert_eq!(parts.controller.commit().unwrap().cable_fades, 0);
+    let (out, _) = render(&mut parts, 512, 64, &[]);
+    let param = loom_modules::math::ADD.param_index("offset").unwrap();
+    let spec = parts.controller.graph().node(seen).unwrap().spec(param).unwrap();
+    let modulated = spec.denormalize(spec.normalize(0.0) + 0.25);
+    // Past the output's own fade-in, which a new output still has.
+    assert!((out[500] - modulated).abs() <= 1e-6, "{} != {modulated}", out[500]);
+}
+
+/// An assignment from a gate source onto a continuous parameter ramps, as
+/// any assignment does: the target is a value, not a gate (rule 9).
+#[test]
+fn an_assignment_from_a_gate_ramps() {
+    let mut parts = engine();
+    let seen = window(&mut parts);
+    let high = constant(&mut parts, 1.0);
+    let c = &mut parts.controller;
+    let gate = c.add_module("loom.logic.logic").unwrap();
+    c.set_param_named(gate, "op", 1.0).unwrap();
+    c.connect_named(high, "out", gate, "in1").unwrap();
+    let probe = c.output_ref(gate, "out").unwrap();
+    c.add_probe(probe, loom_core::ProbeKind::Meter).unwrap();
+    c.commit().unwrap();
+    render(&mut parts, 512, 64, &[]);
+    parts
+        .controller
+        .add_assignment_named(gate, "out", seen, "offset", 0.25)
+        .unwrap();
+    assert_eq!(
+        parts.controller.commit().unwrap().cable_fades,
+        1,
+        "the gate's contribution ramps in"
     );
 }

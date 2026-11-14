@@ -51,7 +51,7 @@ Often that is fine. Say the loop closes into an Add's B input. Before the cable,
 
 A delay that starts at 0 goes wrong when the input did not read 0 before:
 
-- **A Multiply's B input reads 1 when nothing is plugged in.** That 1 is the input's default value, so a cable plugged into B also fades from 1, not from 0 (live patching spec, rule 9). Close a loop into it, and for one sample it reads 0 instead of 1 or the new signal. The Multiply's output drops out for one sample: a click. Measured error: -6 dB.
+- **A Multiply's B input reads 1 when nothing is plugged in.** Close a loop into it, and for one sample it reads 0 instead of 1 or the new signal. The Multiply's output drops out for one sample: a click. Measured error: -6 dB. (That 1 is the input's default value, so a cable plugged into B also fades from 1, not from 0, live patching spec, rule 9.)
 - **The compiler can move its delay.** Add a cable to a running loop, and the compiler may now break the loop on a different cable. The old delay is gone, and the new one started at 0, in the middle of a loop that was already ringing. Both placements make the same loop, so nothing should change. Measured error: -17 dB, for one sample.
 
 The fix is to start a new delay with the value it would hold if it had always been there: the last sample its source wrote before the swap. That is what the cable would carry in hardware. The engine does this now (live patching spec, rule 5), and both cases above are bit-identical to the ideal.

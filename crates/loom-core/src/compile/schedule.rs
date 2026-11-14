@@ -342,16 +342,17 @@ impl Schedule {
     }
 
     /// True when every cable fade's target and buffer, and every pointer in
-    /// `reads`, lies inside one of this schedule's own buffers. The engine
-    /// reads through them at the swap and in each block, so the compiler
-    /// checks this in debug builds (rule 9).
+    /// `reads`, is the start of one of this schedule's own buffers with at
+    /// least `max_block` floats (the zero buffer's length). The engine reads
+    /// up to `max_block` floats through each, at the swap and in each block,
+    /// so the compiler checks this in debug builds (rule 9).
     pub fn fade_pointers_inside(&self) -> bool {
+        let max_block = self._zero.len();
         let inside = |ptr: *const f32| {
             self._buffers
                 .iter()
-                .map(|buffer| buffer.as_ptr_range())
-                .chain(std::iter::once(self._zero.as_ptr_range()))
-                .any(|range| range.contains(&ptr))
+                .chain(std::iter::once(&self._zero))
+                .any(|buffer| std::ptr::eq(buffer.as_ptr(), ptr) && buffer.len() >= max_block)
         };
         self.cable_fades
             .iter()

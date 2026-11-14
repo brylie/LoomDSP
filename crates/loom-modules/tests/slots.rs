@@ -561,7 +561,8 @@ fn pulling_a_slot_s_output_during_its_fade_fades() {
     let hierarchy = std::cell::RefCell::new(hierarchy);
     let layout = |_: u32| Layout::default();
     let mut fades = None;
-    render_edit_at(
+    let pulled_at = SWAP_AT + 128;
+    let left = render_edit_at(
         &mut parts,
         FRAMES,
         64,
@@ -575,7 +576,7 @@ fn pulling_a_slot_s_output_during_its_fade_fades() {
             parts.controller.commit().expect("commits");
         },
         |position, parts| {
-            if position == SWAP_AT + 128 {
+            if position == pulled_at {
                 let input = parts.controller.input_ref(ModuleId(3), "in").unwrap();
                 parts.controller.disconnect(input).unwrap();
                 fades = Some(parts.controller.commit().expect("commits").cable_fades);
@@ -583,4 +584,10 @@ fn pulling_a_slot_s_output_during_its_fade_fades() {
         },
     );
     assert!(fades.expect("pulled") > 0);
+    // The output fades to silence from the blend it played: no step larger
+    // than the swap fade and the cable fade allow.
+    let bound = swap_limit(&left[..SWAP_AT]);
+    let across = largest_step(&left[pulled_at - 1..pulled_at + 2 * FADE]);
+    assert!(across <= bound, "{across} > {bound}");
+    assert_eq!(left[FRAMES - 1], 0.0, "silent once the fade ends");
 }
