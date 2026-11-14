@@ -585,8 +585,15 @@ fn apply_swaps(
             parts.extend(under(from, &level.child(lid)));
         }
         let Some(lid) = target.part else {
-            // The slot empties: the leaving part goes with the rest of the
-            // step, as a plain removal.
+            // The slot empties, as Remove part does: a thru slot fades the
+            // part out to its thru signal, and any other lets it go now
+            // (sub-patches.md, Empty slots).
+            if source.part.is_some() {
+                let emptied = hierarchy.swap_to_empty(controller, layout, slot)?;
+                for id in emptied.gone {
+                    let _ = controller.remove_module(id);
+                }
+            }
             continue;
         };
         let Some(id) = to.ids().get(&level.child(lid)) else {

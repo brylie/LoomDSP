@@ -182,6 +182,9 @@ impl CanvasModel<'_> {
             && self.selection.contains(&module)
             && let Some(m) = self.scene.module(module)
             && let (Some(rect), Some(view)) = (m.widget_bounds(widget), m.panel.widgets.get(widget))
+            // A control that went inert under the focus, such as one bound
+            // to a slot whose part was just removed, gets no ring.
+            && view.is_control()
         {
             let (ring, radius) = focus_ring(&view.kind, rect);
             overlay

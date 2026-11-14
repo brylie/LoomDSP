@@ -259,6 +259,12 @@ pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -
                 Some(name) => format!("Controls {controls}. Exposed as {name}"),
                 None => format!("Controls {controls}"),
             };
+            // Bound to an empty slot's role parameter: it says why it does
+            // nothing (sub-patches.md, Empty slots).
+            let (description, note) = match empty_slot_behind(hierarchy, instance, index) {
+                Some(slot) => (format!("{slot} has no part. Swap one in from the tile's menu."), None),
+                None => (description, Some(note)),
+            };
             WidgetView {
                 kind: view_kind(kind, target.as_ref().map(|t| &t.spec)),
                 x: 0,
@@ -267,14 +273,33 @@ pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -
                 hover: HoverText {
                     description,
                     name: None,
-                    note: Some(note),
+                    note,
                 },
                 hidden: false,
                 exposed: further.is_some(),
+                inert: empty_slot_behind(hierarchy, instance, index).is_some(),
             }
         })
         .collect();
     flow_layout(widgets)
+}
+
+/// True when widget `widget` of the sub-patch tile `tile` is a surface
+/// control bound to an empty slot: drawn, but with nothing behind it
+/// (sub-patches.md, Empty slots). It keeps the key of a control, so its UI
+/// ID does not change while the slot is empty.
+pub fn is_inert(hierarchy: &Hierarchy, tile: u32, widget: usize) -> bool {
+    empty_slot_behind(hierarchy, ModuleId(tile), widget).is_some()
+}
+
+/// The name of the empty slot the surface item `index` of the sub-patch
+/// tile `instance` is bound to, if it is bound to one: its control has
+/// nothing behind it until a part is swapped in.
+fn empty_slot_behind(hierarchy: &Hierarchy, instance: ModuleId, index: usize) -> Option<String> {
+    let exposed = hierarchy.definition_of(instance)?.exposed.get(index)?;
+    let slot = hierarchy.id_at(&hierarchy.path_of(instance), exposed.module)?;
+    let state = hierarchy.slot(slot)?;
+    state.part.is_none().then(|| state.name())
 }
 
 /// A surface with nothing on it: the tile shows its name and ports.
@@ -406,9 +431,15 @@ pub fn surface_values(
         for index in 0..count {
             let slot = hierarchy.slot_of_part(instance);
             let Some(target) = control_target(graph, hierarchy, instance.0, index, ControlPart::Main) else {
-                values.set(instance.0, index, WidgetValue::default());
+                // Bound to an empty slot: drawn dimmed (sub-patches.md,
+                // Empty slots).
+                let nothing = WidgetValue {
+                    dimmed: empty_slot_behind(hierarchy, instance, index).is_some(),
+                    ..WidgetValue::default()
+                };
+                values.set(instance.0, index, nothing.clone());
                 if let Some(slot) = slot {
-                    values.set(slot.0, index, WidgetValue::default());
+                    values.set(slot.0, index, nothing);
                 }
                 continue;
             };

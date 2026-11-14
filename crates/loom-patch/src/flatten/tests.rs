@@ -1,5 +1,6 @@
 use super::*;
 
+mod empty_slots;
 mod modes;
 use crate::{LoadWarning, PatchError};
 use loom_core::{EngineConfig, create_engine};

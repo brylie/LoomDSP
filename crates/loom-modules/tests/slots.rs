@@ -591,3 +591,602 @@ fn pulling_a_slot_s_output_during_its_fade_fades() {
     assert!(across <= bound, "{across} > {bound}");
     assert_eq!(left[FRAMES - 1], 0.0, "silent once the fade ends");
 }
+
+/// A Modulator slot holding a Random whose range is 0.5 to 0.5, so it
+/// outputs a constant 0.5, into the output.
+const HALF_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Half slot"),
+    modules: [
+        PatchModule(id: 2, kind: "loom.rand.random@1", params: {"low": 0.5, "high": 0.5}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.modulator@1", part: Some(2)))),
+    ],
+    cables: [
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// A sub-patch that fills the Modulator role with a constant 0.5.
+const HALF_PART: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Half"),
+    roles: ["loom.role.modulator@1"],
+    modules: [
+        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.5}),
+        PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+    ],
+)
+"#;
+
+/// Swapping a Modulator slot between two parts that both output 0.5 keeps
+/// the output at 0.5 through the whole fade, at block sizes 1, 77, and
+/// 512: a modulation output fades linearly, so a value both parts share
+/// stays put. With equal power it would rise to about 0.707 in the middle
+/// (sub-patches.md, How a swap crossfades, point 6; #698).
+#[test]
+fn a_modulation_output_fades_linearly_so_a_shared_value_stays_put() {
+    for block in [1, 77, 512] {
+        let (mut parts, hierarchy) = load(HALF_SLOT);
+        let hierarchy = std::cell::RefCell::new(hierarchy);
+        let layout = |_: u32| Layout::default();
+        let part = Patch::from_ron(HALF_PART).unwrap();
+        let left = render_edit_at(
+            &mut parts,
+            FRAMES,
+            block,
+            SWAP_AT,
+            |parts| {
+                let mut hierarchy = hierarchy.borrow_mut();
+                hierarchy
+                    .swap_to_subpatch(&mut parts.controller, &layout, ModuleId(9), &part, None)
+                    .expect("the sub-patch fills Modulator");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            },
+            |_, _| {},
+        );
+        // From before the swap to the end, every frame holds 0.5.
+        for (i, value) in left.iter().enumerate().skip(SWAP_AT - 100) {
+            assert!((value - 0.5).abs() < 1e-6, "block {block}, frame {i}: {value}");
+        }
+    }
+}
+
+/// A sine into an empty Filter slot into the output: the slot is a thru
+/// (ADR-0043).
+const SINE_EMPTY: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Sine empty"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1"))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// The same sine with no slot at all.
+const SINE_PLAIN: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Sine"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// Renders [`SINE_EMPTY`] at `block`, swapping its slot to an SVF at
+/// `SWAP_AT`, and, when `remove_at` is given, removing the part again
+/// there, after the first fade has finished.
+fn render_thru(block: usize, remove_at: Option<usize>) -> Vec<f32> {
+    let (mut parts, hierarchy) = load(SINE_EMPTY);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let finish = |parts: &mut EngineParts, hierarchy: &mut Hierarchy| {
+        let fading = hierarchy.fading_slots();
+        let done = !fading.is_empty()
+            && fading
+                .iter()
+                .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+        if done {
+            hierarchy.finish_all_fades(&mut parts.controller);
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        }
+    };
+    render_edit_at(
+        &mut parts,
+        FRAMES,
+        block,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.svf@1")
+                .expect("the SVF fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |position, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            finish(parts, &mut hierarchy);
+            if Some(position) == remove_at {
+                let emptied = hierarchy
+                    .swap_to_empty(&mut parts.controller, &layout, ModuleId(9))
+                    .expect("Remove part");
+                assert!(emptied.gone.is_empty(), "a thru slot fades the part out");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            }
+        },
+    )
+}
+
+/// An empty Filter slot passes the sine through, bit for bit (ADR-0043).
+#[test]
+fn an_empty_filter_slot_passes_its_input_through() {
+    let (mut thru, _) = load(SINE_EMPTY);
+    let (mut plain, _) = load(SINE_PLAIN);
+    let a = render_edit_at(&mut thru, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    let b = render_edit_at(&mut plain, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    assert!(a.iter().any(|v| v.abs() > 0.5), "the sine plays");
+    assert_eq!(a, b);
+}
+
+/// A swap into an empty Filter slot fades the SVF in from the thru signal,
+/// and Remove part fades it back out: neither steps more than the sine
+/// itself does, by a margin a hard switch from a reset filter would break.
+/// The swap-in renders the same at block sizes 1, 77, and 512; the removal
+/// runs at block size 1, so it lands on the frame asked for (sub-patches.md,
+/// Empty slots).
+#[test]
+fn swaps_into_and_out_of_an_empty_thru_slot_fade() {
+    let swapped: Vec<Vec<f32>> = [1, 77, 512].iter().map(|&b| render_thru(b, None)).collect();
+    assert_eq!(swapped[0], swapped[1]);
+    assert_eq!(swapped[0], swapped[2]);
+    let steady = largest_step(&swapped[0][SWAP_AT - 600..SWAP_AT]);
+    let into = largest_step(&swapped[0][SWAP_AT - 1..SWAP_AT + FADE + 10]);
+    assert!(into <= steady * 1.5, "into: {into} against {steady}");
+    let remove = SWAP_AT + 2 * FADE + 300;
+    let left = &render_thru(1, Some(remove));
+    let out = largest_step(&left[remove - 1..remove + FADE + 10]);
+    assert!(out <= steady * 1.5, "out: {out} against {steady}");
+    // After the fade out, the thru plays the sine alone again.
+    let (mut plain, _) = load(SINE_PLAIN);
+    let sine = render_edit_at(&mut plain, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    let tail = remove + FADE + 10..FRAMES;
+    assert_eq!(left[tail.clone()], sine[tail], "the thru is back, bit for bit");
+}
+
+/// A sine into a stack of four copies of a Voice whose Filter slot holds an
+/// SVF, with a spread on the slot's cutoff.
+const STACKED_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stacked slot"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            spread: {"cutoff": 0.2},
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 2000.0}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 9, param: "cutoff")],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// Renders [`STACKED_SLOT`] at `block`, swapping the slot (copy 0's, which
+/// the editor shows) to a Ladder at `SWAP_AT`, and finishing the fade when
+/// copy 0's fade is done.
+fn render_stacked_swap(block: usize) -> Vec<f32> {
+    let (mut parts, hierarchy) = load(STACKED_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let slot = hierarchy
+        .borrow()
+        .id_at(&loom_patch::ModulePath::top(2), 9)
+        .expect("the slot");
+    render_edit_at(
+        &mut parts,
+        FRAMES,
+        block,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, slot, "loom.filter.ladder@1")
+                .expect("the ladder fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            let fading = hierarchy.fading_slots();
+            let done = !fading.is_empty()
+                && fading
+                    .iter()
+                    .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+            if done {
+                hierarchy.finish_all_fades(&mut parts.controller);
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            }
+        },
+    )
+}
+
+/// A swap inside a stack of four fades in every copy: the sum steps no more
+/// than the sine itself does, where copies that switched at once (a Ladder
+/// starting from reset) would step by most of the signal. The same at
+/// block sizes 1, 77, and 512 (ADR-0044).
+#[test]
+fn a_swap_inside_a_stack_has_no_step_in_any_copy() {
+    let renders: Vec<Vec<f32>> = [1, 77, 512].iter().map(|&b| render_stacked_swap(b)).collect();
+    assert_eq!(renders[0], renders[1]);
+    assert_eq!(renders[0], renders[2]);
+    let left = &renders[0];
+    assert!(left.iter().all(|v| v.is_finite()));
+    assert!(
+        left[SWAP_AT + 2 * FADE..].iter().any(|v| v.abs() > 0.05),
+        "the ladders play"
+    );
+    let steady = largest_step(&left[SWAP_AT - 600..SWAP_AT]);
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + FADE + 10]);
+    assert!(across <= steady * 1.5, "across: {across} against {steady}");
+}
+
+/// Remove part inside a stack of four is a cable change in every copy, not
+/// a swap fade: each copy's output moves from its SVF to the slot's thru
+/// source, and live-patching rule 9 ramps that over 5 ms. So the sum steps
+/// no more than the signal on either side plus the ramp's change per
+/// frame, at block sizes 1, 77, and 512, where a switch on one frame would
+/// jump from the filtered sound to the dry one (sub-patches.md, Mode;
+/// ADR-0044).
+#[test]
+fn remove_part_inside_a_stack_ramps_every_copy() {
+    let text = STACKED_SLOT.replace("\"cutoff\": 2000.0", "\"cutoff\": 60.0");
+    let ramp = (SAMPLE_RATE * loom_core::cable_fade::CABLE_FADE_SECONDS).round() as usize;
+    let mut renders = Vec::new();
+    for block in [1, 77, 512] {
+        let (mut parts, hierarchy) = load(&text);
+        let hierarchy = std::cell::RefCell::new(hierarchy);
+        let layout = |_: u32| Layout::default();
+        let slot = hierarchy
+            .borrow()
+            .id_at(&loom_patch::ModulePath::top(2), 9)
+            .expect("the slot");
+        renders.push(render_edit_at(
+            &mut parts,
+            FRAMES,
+            block,
+            SWAP_AT,
+            |parts| {
+                let mut hierarchy = hierarchy.borrow_mut();
+                hierarchy
+                    .swap_to_empty(&mut parts.controller, &layout, slot)
+                    .expect("the part comes out");
+                assert_eq!(hierarchy.fading_slots(), [], "no swap fade inside a stack");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            },
+            |_, _| {},
+        ));
+    }
+    assert_eq!(renders[0], renders[1]);
+    assert_eq!(renders[0], renders[2]);
+    let left = &renders[0];
+    let before = &left[SWAP_AT - 600..SWAP_AT];
+    let after = &left[SWAP_AT + ramp + 100..SWAP_AT + ramp + 700];
+    let peak = |w: &[f32]| w.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(
+        peak(after) > 2.0 * peak(before),
+        "the dry sine is louder than the filtered one"
+    );
+    let limit = largest_step(before).max(largest_step(after)) + peak(after).max(peak(before)) / ramp as f32 + 1e-6;
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + ramp + 4]);
+    assert!(across <= limit, "across: {across} against {limit}");
+}
+
+/// A sine through an Amplifier whose `level` an empty Envelope slot feeds:
+/// the slot is a pulled cable, so the Amplifier plays at its normal, open.
+const ENVELOPE_INTO_LEVEL: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Envelope into level"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.level.amp@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.envelope@1"))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (9, "out"), to: (2, "level")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// An empty Envelope slot into an Amplifier's `level` plays the tone at the
+/// Amplifier's normal, fully open (ADR-0043). Swapping an Envelope in is a
+/// cable change on a pulled cable, so live-patching rule 9 ramps it: the
+/// level falls from 1 to the envelope's 0 over 5 ms, with no step larger
+/// than the tone's own plus the ramp's, and is closed after it.
+#[test]
+fn a_part_into_an_empty_pulled_cable_slot_ramps_over_5_ms() {
+    let (mut thru, _) = load(SINE_PLAIN);
+    let sine = render_edit_at(&mut thru, FRAMES, 1, SWAP_AT, |_| {}, |_, _| {});
+    let (mut parts, hierarchy) = load(ENVELOPE_INTO_LEVEL);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.env.envelope@1")
+                .expect("the envelope fills Envelope");
+            assert_eq!(hierarchy.fading_slots(), [], "a pulled-cable slot does not fade");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, _| {},
+    );
+    assert_eq!(
+        left[..SWAP_AT],
+        sine[..SWAP_AT],
+        "open before the swap: the tone at full level"
+    );
+    let ramp = (SAMPLE_RATE * loom_core::cable_fade::CABLE_FADE_SECONDS).round() as usize;
+    assert!(
+        left[SWAP_AT + ramp + 2..].iter().all(|v| *v == 0.0),
+        "the envelope, with no gate, closes it after the ramp"
+    );
+    assert!(
+        left[SWAP_AT..SWAP_AT + ramp / 2].iter().any(|v| v.abs() > 0.05),
+        "the tone fades, not steps"
+    );
+    let peak = sine.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let limit = largest_step(&sine) + peak / ramp as f32 + 1e-6;
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + ramp + 4]);
+    assert!(across <= limit, "across: {across} against {limit}");
+}
+
+/// An empty Sound source slot into the output is silent: nothing stands
+/// behind its output (ADR-0043).
+#[test]
+fn an_empty_sound_source_slot_is_silent() {
+    let (mut parts, _) = load(
+        r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Empty source"),
+    modules: [
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.source@1"))),
+    ],
+    cables: [PatchCable(from: (9, "out"), to: (3, "in"))],
+)
+"#,
+    );
+    let left = render_edit_at(&mut parts, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    assert!(left.iter().all(|v| *v == 0.0));
+}
+
+/// A sine through a Filter slot holding an SVF into a Voice stacked four
+/// times, which plays its input at a quarter gain. The cutoff is far below
+/// the sine, so the filtered and the dry signal differ, and a copy that
+/// switched between them at once would step.
+const THRU_INTO_STACK: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Thru into a stack"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 2, kind: "loom.level.amp@1", params: {"gain": 0.25}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "in")),
+                PatchCable(from: (2, "out"), to: (4, "in")),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 20.0}),
+        PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 7, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (5, "in")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
+    ],
+)
+"#;
+
+/// Remove part on a thru slot that feeds a stack fades every copy of the
+/// stack to the thru signal, not only copy 0: each copy's input is fed by
+/// the fade, so the sum does not step.
+#[test]
+fn remove_part_before_a_stack_fades_every_copy() {
+    let (mut parts, hierarchy) = load(THRU_INTO_STACK);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_empty(&mut parts.controller, &layout, ModuleId(9))
+                .expect("Remove part");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+            // Every copy's Amp reads the one fade's output.
+            let graph = parts.controller.graph();
+            let of_kind = |kind: &str| -> Vec<ModuleId> {
+                graph
+                    .nodes()
+                    .filter(|(_, n)| n.descriptor.id == kind)
+                    .map(|(id, _)| id)
+                    .collect()
+            };
+            let fades = of_kind("loom.struct.fade");
+            assert_eq!(fades.len(), 1, "one fade for the slot's out");
+            let amps = of_kind("loom.level.amp");
+            assert_eq!(amps.len(), 4, "one Amp per copy");
+            for amp in amps {
+                let input = graph
+                    .node(amp)
+                    .and_then(|n| n.descriptor.input_index("in"))
+                    .expect("an in");
+                let from = graph
+                    .cables()
+                    .find(|(_, to)| to.module == amp && to.port == input)
+                    .map(|(from, _)| from.module);
+                assert_eq!(from, Some(fades[0]), "copy Amp {amp:?} reads the fade");
+            }
+        },
+        |_, _| {},
+    );
+    // The quiet filtered signal before, the dry sine after: either side's
+    // own step, plus the fade's gain change per frame times the peak.
+    let before = &left[SWAP_AT - 600..SWAP_AT];
+    let after = &left[SWAP_AT + FADE + 100..SWAP_AT + FADE + 700];
+    let peak = after.iter().chain(before).fold(0.0f32, |m, v| m.max(v.abs()));
+    let limit = largest_step(before).max(largest_step(after)) + peak / FADE as f32 + 1e-6;
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + FADE + 10]);
+    assert!(across <= limit, "across: {across} against {limit}");
+}
+
+/// The example Effect chain with its saw playing middle C and held open
+/// (nothing on its pitch or on the Amplifier's level), Effect 1 fully
+/// wet, Effect 2 at `effect_2_mix`, and Effect 3 dry: its 0.3 s delay
+/// would leave the short render silent.
+fn open_chain(effect_2_mix: f32) -> String {
+    let mut patch = common::load_patch(&common::patch_path("effect-chain.ron"));
+    patch
+        .cables
+        .retain(|c| c.from.0 != 1 && c.to != (4, "level".to_string()));
+    let instance = patch.modules.iter_mut().find(|m| m.id == 5).expect("the chain tile");
+    for (name, mix) in [
+        ("effect 1 mix", 1.0),
+        ("effect 2 mix", effect_2_mix),
+        ("effect 3 mix", 0.0),
+    ] {
+        instance.params.insert(name.to_string(), mix);
+    }
+    patch.to_ron().expect("writes")
+}
+
+/// The chain of [`open_chain`] at `effect_2_mix`, rendered as it is and
+/// with Remove part on Effect 2 at `SWAP_AT`, the fade finished when it
+/// reports done. Returns both renders.
+fn remove_effect_2(effect_2_mix: f32) -> (Vec<f32>, Vec<f32>) {
+    let text = open_chain(effect_2_mix);
+    let (mut plain_parts, _) = load(&text);
+    let plain = render_edit_at(&mut plain_parts, FRAMES, 64, SWAP_AT, |_| {}, |_, _| {});
+    assert!(plain.iter().any(|v| v.abs() > 0.1), "the saw plays");
+
+    let (mut parts, hierarchy) = load(&text);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let slot = hierarchy
+        .borrow()
+        .id_at(&loom_patch::ModulePath::top(5), 11)
+        .expect("Effect 2");
+    let mut finished = false;
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        64,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_empty(&mut parts.controller, &layout, slot)
+                .expect("Remove part");
+            assert_eq!(hierarchy.fading_slots().len(), 1, "a thru slot fades");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            let fading = hierarchy.fading_slots();
+            let done = !fading.is_empty()
+                && fading
+                    .iter()
+                    .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+            if done {
+                hierarchy.finish_all_fades(&mut parts.controller);
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+                finished = true;
+            }
+        },
+    );
+    assert!(finished, "the fade finished");
+    (plain, left)
+}
+
+/// Remove part on Effect 2 of the Effect chain, with that slot's mix at 0,
+/// changes no sample, through the fade and after it: the mix plays only
+/// the signal before the slot, so what the fade blends in is never heard
+/// (sub-patches.md, The Effect chain and Empty slots). Fully wet, the same
+/// edit is heard, so the render does follow it.
+#[test]
+fn remove_part_from_a_chain_slot_at_mix_0_changes_no_sample() {
+    let (plain, removed) = remove_effect_2(0.0);
+    assert_eq!(removed, plain);
+    let (plain, removed) = remove_effect_2(1.0);
+    assert_ne!(removed, plain, "fully wet, the dynamics leave");
+}

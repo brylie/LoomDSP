@@ -499,18 +499,19 @@ impl CanvasModel<'_> {
         }
         // Focus is only valid on a control of the one selected module.
         let selected = (self.selection.len() == 1).then(|| *self.selection.iter().next().unwrap_or(&0));
-        let hidden = |m: u32, w: usize| {
+        let gone = |m: u32, w: usize| {
             self.scene
                 .module(m)
                 .and_then(|module| module.panel.widgets.get(w))
-                .is_some_and(|widget| widget.hidden)
+                .is_some_and(|widget| widget.hidden || widget.inert)
         };
-        // A mode change (from MIDI, say) can hide the focused control. The
-        // key meant for it is used up, so it never moves the tile instead.
+        // A mode change (from MIDI, say) can hide the focused control, and
+        // emptying a slot (an undo, say) can leave it inert. The key meant
+        // for it is used up, so it never moves the tile instead.
         let lost_to_mode = state
             .focus
             .control()
-            .is_some_and(|(m, w)| Some(m) == selected && hidden(m, w));
+            .is_some_and(|(m, w)| Some(m) == selected && gone(m, w));
         // A hidden or removed select is not drawn, so its list closes too, and
         // so does a field or grab whose control has gone.
         self.reconcile_focus(state);

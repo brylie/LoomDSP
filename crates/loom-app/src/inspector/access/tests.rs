@@ -131,3 +131,86 @@ fn a_range_steps_up_out_of_full() {
     ));
     assert!(range.step.1.is_none(), "nothing below Full");
 }
+
+/// The Part of a slot, the one picked from `item`'s step, as the arrow
+/// keys pick it: up when `up`, down otherwise.
+fn part_step(item: &Item, up: bool) -> Option<crate::slots::SwapTarget> {
+    let step = if up { &item.step.0 } else { &item.step.1 };
+    match step {
+        Some(AppMessage::SwapSlot { to, .. }) => Some(to.clone()),
+        _ => None,
+    }
+}
+
+/// The inspector's Part item for the selected slot `slot`.
+fn part_item(ui: &crate::ui_test::Ui, slot: u32) -> Item {
+    let panel = items(&ui.app().inspector_model());
+    crate::a11y::items::find(&panel, &ids::part(&ids::panel(slot), "part"))
+        .expect("the Part item")
+        .clone()
+}
+
+/// The Part list steps with the arrow keys down to `No part` and back up:
+/// a step down from the first part removes it as one undo step, the item
+/// keeps its UI ID and says `No part`, and a step up from there swaps the
+/// first part in (sub-patches.md, Empty slots).
+#[test]
+fn the_part_list_steps_down_to_no_part_and_back() {
+    let app = crate::tests::app_with_text(
+        r#"Patch(
+    version: 1,
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.noise@1"),
+        PatchModule(id: 2, kind: "loom.filter.ladder@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)"#,
+    );
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![9])));
+    let filled = part_item(&ui, 9);
+    assert_eq!(filled.value.as_deref(), Some("Ladder"));
+    let Inspector::Slot(rows) = ui.app().inspector_model() else {
+        panic!("a slot's inspector");
+    };
+    assert_eq!(
+        rows.choices[0].to,
+        crate::slots::SwapTarget::Empty,
+        "the list starts with No part"
+    );
+    let first_part = rows.choices[1].to.clone();
+    assert_eq!(
+        first_part,
+        crate::slots::SwapTarget::Module("loom.filter.ladder@1".into()),
+        "the Ladder is the first part"
+    );
+    assert_eq!(
+        part_step(&filled, false),
+        Some(crate::slots::SwapTarget::Empty),
+        "down from the first part is No part"
+    );
+
+    ui.send(crate::Message::SwapSlot {
+        slot: 9,
+        to: crate::slots::SwapTarget::Empty,
+    });
+    ui.app_mut().process(600);
+    assert!(
+        ui.app()
+            .session
+            .hierarchy
+            .part_of_slot(loom_core::ModuleId(9))
+            .is_none()
+    );
+    assert_eq!(ui.app().ui_snapshot().undo.as_deref(), Some("remove part from Filter"));
+    let empty = part_item(&ui, 9);
+    assert_eq!(empty.id, filled.id, "the item keeps its UI ID");
+    assert_eq!(empty.value.as_deref(), Some("No part"));
+    assert_eq!(part_step(&empty, false), None, "nothing below No part");
+    assert_eq!(part_step(&empty, true), Some(first_part), "up swaps the first part in");
+}

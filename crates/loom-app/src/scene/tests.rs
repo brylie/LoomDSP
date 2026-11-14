@@ -536,6 +536,7 @@ fn hiding_a_whole_row_shortens_the_panel() {
         hover: HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     };
     let mut panel = PanelView {
         width: 6,
@@ -813,4 +814,98 @@ fn a_meters_number_is_the_one_its_text_says() {
     // Nothing else has one.
     let divide = &loom_modules::logic::DIVIDE;
     assert_eq!(meter_reading(divide, &divide.panel.widgets[2], 0.4, None), None);
+}
+
+/// A chain of 10,000 empty Effect slots loads and its scene builds in a
+/// few seconds: the follows through the chain are kept for the build, and
+/// which modules are hidden or leaving is worked out once per pass, so no
+/// step scans every slot for each module or cable (sub-patches.md, Empty
+/// slots). Without that, a crafted file this long froze the editor for a
+/// minute on load and on every rebuild.
+#[test]
+fn a_long_chain_of_empty_slots_builds_its_scene_quickly() {
+    const SLOTS: u32 = 10_000;
+    let mut modules = String::from(
+        "PatchModule(id: 1, kind: \"loom.osc.sine@1\"), PatchModule(id: 2, kind: \"loom.io.audio-out@1\"),",
+    );
+    let mut cables = String::new();
+    let mut from = 1;
+    for n in 0..SLOTS {
+        let id = 10 + n;
+        modules.push_str(&format!(
+            "PatchModule(id: {id}, kind: \"loom.struct.slot@1\", slot: Some(Slot(role: \"loom.role.effect@1\"))),"
+        ));
+        cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: ({id}, \"in\")),"));
+        from = id;
+    }
+    cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: (2, \"in\")),"));
+    let text =
+        format!("Patch(version: 1, metadata: Metadata(name: \"Chain\"), modules: [{modules}], cables: [{cables}])");
+    let loading = std::time::Instant::now();
+    let app = crate::tests::app_with_text(&text);
+    let loaded = loading.elapsed();
+    assert!(loaded < std::time::Duration::from_secs(5), "the load took {loaded:?}");
+    let session = &app.session;
+    let started = std::time::Instant::now();
+    let scene = build(
+        &session.controller,
+        &session.hierarchy,
+        &loom_patch::ModulePath::root(),
+        &session.positions,
+        &session.sizes,
+    );
+    let took = started.elapsed();
+    assert!(scene.modules().len() as u32 >= SLOTS + 2, "every slot has a tile");
+    assert!(took < std::time::Duration::from_secs(5), "the scene took {took:?}");
+}
+
+/// Crafted loops of empty Effect slots load and build their scene in a
+/// few seconds: a ring of 10,000, and a loop of 20 diamonds, where every
+/// slot is reached by two routes. Each follow visits an end once and keeps
+/// "nothing behind" for every end it reached, so neither costs a walk per
+/// cable (sub-patches.md, Empty slots).
+#[test]
+fn loops_of_empty_slots_build_their_scene_quickly() {
+    let slot = |id: u32| {
+        format!("PatchModule(id: {id}, kind: \"loom.struct.slot@1\", slot: Some(Slot(role: \"loom.role.effect@1\"))),")
+    };
+    let cable = |from: u32, to: u32| format!("PatchCable(from: ({from}, \"out\"), to: ({to}, \"in\")),");
+    let ring: Vec<u32> = (10..10_010).collect();
+    let mut ring_text = (String::new(), String::new());
+    for (n, id) in ring.iter().enumerate() {
+        ring_text.0.push_str(&slot(*id));
+        ring_text.1.push_str(&cable(*id, ring[(n + 1) % ring.len()]));
+    }
+    let mut diamonds = (String::new(), String::new());
+    let levels = 20;
+    let s = |k: u32| 10 + 3 * (k % levels);
+    for k in 0..levels {
+        let (a, b, c) = (s(k), s(k) + 1, s(k) + 2);
+        for id in [a, b, c] {
+            diamonds.0.push_str(&slot(id));
+        }
+        for (from, to) in [(a, b), (a, c), (b, s(k + 1)), (c, s(k + 1))] {
+            diamonds.1.push_str(&cable(from, to));
+        }
+    }
+    for (modules, cables) in [ring_text, diamonds] {
+        let text =
+            format!("Patch(version: 1, metadata: Metadata(name: \"Loop\"), modules: [{modules}], cables: [{cables}])");
+        let started = std::time::Instant::now();
+        let app = crate::tests::app_with_text(&text);
+        let session = &app.session;
+        let scene = build(
+            &session.controller,
+            &session.hierarchy,
+            &loom_patch::ModulePath::root(),
+            &session.positions,
+            &session.sizes,
+        );
+        let took = started.elapsed();
+        assert!(!scene.modules().is_empty());
+        assert!(
+            took < std::time::Duration::from_secs(5),
+            "the load and scene took {took:?}"
+        );
+    }
 }

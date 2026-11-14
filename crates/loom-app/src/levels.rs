@@ -685,8 +685,34 @@ impl App {
                 return;
             }
         };
-        let mut notes = file.refresh_linked(&self.rig.library(), self.session.controller.registry());
+        let notes = file.refresh_linked(&self.rig.library(), self.session.controller.registry());
         let library = linked.then(|| item.library.clone());
+        self.insert_patch(file, library, &item.name, notes, world);
+    }
+
+    /// Inserts a built-in abstraction as a copy at `world` (sub-patches.md,
+    /// Built-in abstractions). It never follows a link into the player's
+    /// library folder: a built-in has no linked definition, which a test
+    /// checks, and no link refresh runs on it.
+    pub(crate) fn insert_builtin(&mut self, builtin: &crate::builtin::Builtin, world: Point) {
+        self.close_slider_gesture();
+        if self.session.edits.gesture_open() {
+            return;
+        }
+        self.insert_patch(builtin.patch(), None, builtin.name, Vec::new(), world);
+    }
+
+    /// Inserts `file` as a sub-patch at `world`, linked to `library` when
+    /// given, as one undo step; `notes` are what loading it said, and
+    /// `shown` is the name a refusal uses.
+    fn insert_patch(
+        &mut self,
+        file: loom_patch::Patch,
+        library: Option<String>,
+        shown: &str,
+        mut notes: Vec<loom_patch::LoadWarning>,
+        world: Point,
+    ) {
         let level = self.session.level.clone();
         let name = file.metadata.name.clone();
         // The open patch may be a library file itself: a link to it, or a
@@ -702,7 +728,7 @@ impl App {
             let error = loom_patch::PatchError::SubPatchLoop {
                 path: vec![self.session.document.name().to_string(), name],
             };
-            self.alerts.warn(format!("Cannot insert {}: {error}", item.name));
+            self.alerts.warn(format!("Cannot insert {shown}: {error}"));
             return;
         }
         self.session.step_name = Some(format!("insert {name}"));
@@ -780,11 +806,13 @@ impl App {
         let own = |label: &str, message: Message| (label.to_string(), message);
         match tile {
             Some(Tile::Instance(_)) => {
-                let mut items = vec![
-                    own("Open", Message::OpenTile(module)),
-                    own("Dissolve sub-patch", Message::DissolveSubPatch(module)),
-                    own("Save to library", Message::SaveToLibrary(module)),
-                ];
+                let mut items = vec![own("Open", Message::OpenTile(module))];
+                // Dissolve is left off while it would be refused: a slot
+                // cannot move out with its part yet (#702).
+                if !session.hierarchy.holds_slot(ModuleId(module)) {
+                    items.push(own("Dissolve sub-patch", Message::DissolveSubPatch(module)));
+                }
+                items.push(own("Save to library", Message::SaveToLibrary(module)));
                 if session.hierarchy.library_of(ModuleId(module)).is_some() {
                     items.push(own("Unlink", Message::Unlink(module)));
                 }
@@ -808,7 +836,18 @@ impl App {
                         )
                     })
                     .collect();
-                items.push(own("Dissolve slot", Message::DissolveSlot(module)));
+                // An empty slot has no part to remove or put in its place
+                // (sub-patches.md, Empty slots).
+                if session.hierarchy.part_of_slot(ModuleId(module)).is_some() {
+                    items.push(own(
+                        "Remove part",
+                        Message::SwapSlot {
+                            slot: module,
+                            to: crate::slots::SwapTarget::Empty,
+                        },
+                    ));
+                    items.push(own("Dissolve slot", Message::DissolveSlot(module)));
+                }
                 items
             }
             _ => {
@@ -831,11 +870,19 @@ impl App {
             return Vec::new();
         };
         let mut slots: Vec<ModuleId> = Vec::new();
-        for index in 0..definition.exposed.len() {
-            let Some(target) = session.hierarchy.exposed_target(ModuleId(instance), index) else {
-                continue;
-            };
-            if let Some(slot) = session.hierarchy.slot_of_part(target.module)
+        let inside = session.hierarchy.path_of(ModuleId(instance));
+        for (index, exposed) in definition.exposed.iter().enumerate() {
+            // A surface item on a slot's role parameter names the slot
+            // itself, so its swaps stay while the slot is empty.
+            let on_slot = session
+                .hierarchy
+                .id_at(&inside, exposed.module)
+                .filter(|id| session.hierarchy.slot(*id).is_some());
+            let slot = on_slot.or_else(|| {
+                let target = session.hierarchy.exposed_target(ModuleId(instance), index)?;
+                session.hierarchy.slot_of_part(target.module)
+            });
+            if let Some(slot) = slot
                 && !slots.contains(&slot)
             {
                 slots.push(slot);

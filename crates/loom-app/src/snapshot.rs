@@ -164,6 +164,12 @@ impl From<loom_ui_core::Rect> for Rect {
 pub struct Tile {
     pub id: u32,
     pub title: String,
+    /// What a screen reader says of the tile beyond its title: a slot's
+    /// hover description, such as `Slot for Filter. No part. …`, so an
+    /// empty slot's note is not only in pointer hover text (sub-patches.md,
+    /// Empty slots). Left out for other tiles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub bounds: Rect,
     /// One per input, from the top.
     pub inputs: Vec<Input>,
@@ -275,6 +281,11 @@ pub struct Widget {
     /// out for other widgets, and for a scope with no trace yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<TraceShown>,
+    /// For a control with nothing behind it, such as one bound to an empty
+    /// slot, why it does nothing: `Filter has no part.`. Left out for every
+    /// other widget (sub-patches.md, Empty slots).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inert: Option<String>,
 }
 
 /// The second value of an XY pad or a range, for the snapshot.
@@ -379,6 +390,7 @@ fn kind_name(kind: &WidgetViewKind) -> &'static str {
         WidgetViewKind::Segmented { .. } => "segmented",
         WidgetViewKind::Light => "light",
         WidgetViewKind::Readout { .. } => "readout",
+        WidgetViewKind::Note { .. } => "note",
         WidgetViewKind::Meter { .. } => "meter",
         WidgetViewKind::Scope => "scope",
         WidgetViewKind::LevelHistory => "level_history",
@@ -563,6 +575,11 @@ impl App {
                 Tile {
                     id: m.id,
                     title: m.title.clone(),
+                    description: self
+                        .session
+                        .hierarchy
+                        .slot(loom_core::ModuleId(m.id))
+                        .map(|_| m.hover.description.clone()),
                     bounds: m.bounds().into(),
                     inputs: m
                         .inputs
@@ -633,6 +650,7 @@ impl App {
                                     live: second.live,
                                 }),
                                 trace: self.session.traces.get(m.id, index).map(TraceShown::from),
+                                inert: w.inert.then(|| w.hover.description.clone()),
                             }
                         })
                         .collect(),
