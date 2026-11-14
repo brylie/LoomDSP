@@ -300,6 +300,7 @@ An unconnected input reads its `default`: a fixed value, a transport signal such
 | Layout and parameter mapping in the app | `crates/loom-app`. |
 | The library and linked sub-patches, as the app meets them, in a temporary library folder | `crates/loom-app/src/library_tests.rs`. |
 | Pointer and key events reaching the right widget in the app view | `crates/loom-app/src/ui_test.rs`: the headless `Ui` harness sends real events to `App::view`, runs the tasks they return, and finds ports, controls, and text by name. A test in `crates/loom-app/tests/` can import it (`loom_app::ui_test::Ui`) through the `test-ui` feature, with what the crate makes public: `Ui::headless`, `tap_key`, and `snapshot_json`. The fake dialogs and folders are off there, so `tap_key` refuses command shortcuts; test those with `Ui::open` in a unit test. |
+| What a screen reader reads and does in the app view | `crates/loom-app/src/ui_test/a11y.rs`: `Ui::a11y_tree()` gives the accessibility tree, with nodes found by accessible name, a path of names, or a UI ID, and `Ui::a11y_action` and `Ui::a11y_set_value` act on a node as a screen reader's request does ([UI layer spec](../design/ui-layer.md), section 10, rule 4). |
 | Engine speed | `cargo bench -p loom-modules`. |
 
 CI runs all of them on Linux, macOS, and Windows. The full list of CI jobs is in CONTRIBUTING.md.

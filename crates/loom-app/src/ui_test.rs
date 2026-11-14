@@ -40,9 +40,12 @@
 //! Not covered: what the operating system and winit deliver, for example
 //! events while the pointer is outside the window.
 
+mod a11y;
+
 use crate::iced_bridge::headless::{Pending, Surface, UiDriver, settle};
 use crate::iced_bridge::{Bridge, Bridged};
 use crate::{App, Args, Message, screenshot};
+pub use a11y::{A11yNode, A11yTarget, A11yTree, A11yValue};
 use iced::advanced::Clipboard;
 use iced::advanced::clipboard::Kind;
 use iced::advanced::widget::Id;
