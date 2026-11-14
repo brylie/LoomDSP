@@ -154,6 +154,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         &mut self.target
     }
 
+    /// The app to read and the target to use, at once: a driver that draws
+    /// the target's views from the app needs both.
+    pub fn parts(&mut self) -> (&A, &mut T) {
+        (&self.app, &mut self.target)
+    }
+
     /// The window as the runtime knows it.
     pub fn window(&self) -> WindowState {
         self.window
