@@ -138,7 +138,8 @@ pub fn fills_a_role(name: &str, role: &str) -> String {
     format!("{name} fills {role}; turn that off before changing its mode")
 }
 
-/// `Cannot make Voice a layer: it holds a slot` (`a select`, `single`): a
+/// `Cannot make Voice a layer yet: it holds a slot; dissolve the slot
+/// first` (`a select`, `single`): a
 /// change between a mode with members and one without moves the inside,
 /// and a slot with it (sub-patches.md, How modes meet the rest).
 pub fn mode_moves_slot(name: &str, mode: Mode) -> String {

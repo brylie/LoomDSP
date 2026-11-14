@@ -413,12 +413,10 @@ impl App {
             SwapTarget::Held(key) => {
                 part.is_some_and(|p| candidate.key_at(&candidate.path_of(p)) == Some(key.as_str()))
             }
-            SwapTarget::Library(_) => false,
-            SwapTarget::Empty => part.is_none(),
+            // Remove part goes through `remove_part`, never here: the swap
+            // below refuses it.
+            SwapTarget::Library(_) | SwapTarget::Empty => false,
         };
-        if holds_already && *to == SwapTarget::Empty {
-            return Err("it holds no part".to_string());
-        }
         if holds_already {
             return Err("it holds that part already".to_string());
         }

@@ -4751,7 +4751,8 @@ fn a_posted_message_runs_before_the_window_answers() {
 
 /// A surface control bound to an empty slot is a disabled slider: its
 /// label, the reason as its description, and no actions, so a screen
-/// reader neither moves nor focuses it (sub-patches.md, Empty slots).
+/// reader neither moves nor focuses it, and focus left on it goes to its
+/// tile (sub-patches.md, Empty slots).
 #[test]
 fn a_control_bound_to_an_empty_slot_is_disabled_and_says_why() {
     let mut app = crate::tests::app_with_text(
@@ -4801,4 +4802,8 @@ fn a_control_bound_to_an_empty_slot_is_disabled_and_says_why() {
     ] {
         assert!(!found.supports_action(action), "{action:?}");
     }
+    // Focus the canvas left on it goes to the tile.
+    app.a11y.set_focus(Some((2, 0)));
+    let tile = node_of(&mut app, &tile_id(2));
+    assert_eq!(app.a11y_tree(&Places::default()).focus, tile);
 }

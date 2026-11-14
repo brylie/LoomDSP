@@ -815,3 +815,46 @@ fn a_meters_number_is_the_one_its_text_says() {
     let divide = &loom_modules::logic::DIVIDE;
     assert_eq!(meter_reading(divide, &divide.panel.widgets[2], 0.4, None), None);
 }
+
+/// A chain of 10,000 empty Effect slots loads and its scene builds in a
+/// few seconds: the follows through the chain are kept for the build, and
+/// which modules are hidden or leaving is worked out once per pass, so no
+/// step scans every slot for each module or cable (sub-patches.md, Empty
+/// slots). Without that, a crafted file this long froze the editor for a
+/// minute on load and on every rebuild.
+#[test]
+fn a_long_chain_of_empty_slots_builds_its_scene_quickly() {
+    const SLOTS: u32 = 10_000;
+    let mut modules = String::from(
+        "PatchModule(id: 1, kind: \"loom.osc.sine@1\"), PatchModule(id: 2, kind: \"loom.io.audio-out@1\"),",
+    );
+    let mut cables = String::new();
+    let mut from = 1;
+    for n in 0..SLOTS {
+        let id = 10 + n;
+        modules.push_str(&format!(
+            "PatchModule(id: {id}, kind: \"loom.struct.slot@1\", slot: Some(Slot(role: \"loom.role.effect@1\"))),"
+        ));
+        cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: ({id}, \"in\")),"));
+        from = id;
+    }
+    cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: (2, \"in\")),"));
+    let text =
+        format!("Patch(version: 1, metadata: Metadata(name: \"Chain\"), modules: [{modules}], cables: [{cables}])");
+    let loading = std::time::Instant::now();
+    let app = crate::tests::app_with_text(&text);
+    let loaded = loading.elapsed();
+    assert!(loaded < std::time::Duration::from_secs(5), "the load took {loaded:?}");
+    let session = &app.session;
+    let started = std::time::Instant::now();
+    let scene = build(
+        &session.controller,
+        &session.hierarchy,
+        &loom_patch::ModulePath::root(),
+        &session.positions,
+        &session.sizes,
+    );
+    let took = started.elapsed();
+    assert!(scene.modules().len() as u32 >= SLOTS + 2, "every slot has a tile");
+    assert!(took < std::time::Duration::from_secs(5), "the scene took {took:?}");
+}

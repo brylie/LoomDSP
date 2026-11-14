@@ -30,6 +30,7 @@ use crate::{
     Exposed, INPUT_KIND, Layout, Metadata, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchMidiMapping,
     PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, Slot, SubPatch, unique_name,
 };
+use behind::{InputStep, Step};
 use loom_core::{
     AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, Registry, TRANSPORT_MODULE,
 };
@@ -37,10 +38,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod modes;
 pub use modes::{MEMBER_LID, PlayingMember};
+pub mod behind;
 mod links;
 mod slots;
 pub use slots::{
-    Emptied, Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, added_slot_text,
+    Emptied, Fading, Hidden, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, added_slot_text,
     expose_role_only_text, fade_law, fade_law_value, made_slot_text, make_slot_label, no_part_text, removed_part_text,
     swapped_text,
 };
@@ -432,8 +434,15 @@ impl Hierarchy {
                         held: slot.held.clone(),
                         label: module.label.clone(),
                         fading: None,
+                        // Only the role's own parameters carry, and only
+                        // through an empty slot: a name the role does not
+                        // have, from a hand-edited file, is dropped.
                         values: if slot.part.is_none() {
-                            slot.values.clone()
+                            slot.values
+                                .iter()
+                                .filter(|(name, _)| role.params.iter().any(|p| p.name == name.as_str()))
+                                .map(|(name, value)| (name.clone(), *value))
+                                .collect()
                         } else {
                             BTreeMap::new()
                         },
@@ -581,6 +590,11 @@ impl Hierarchy {
         if self.is_hidden(id) {
             return None;
         }
+        self.shown_tile(graph, id)
+    }
+
+    /// What tile `id` shows, for an id already known not to be hidden.
+    fn shown_tile(&self, graph: &Graph, id: ModuleId) -> Option<Tile> {
         if graph.node(id).is_some() {
             return Some(Tile::Module);
         }
@@ -703,8 +717,9 @@ impl Hierarchy {
     /// of its modules (those the links do not imply), then the links.
     pub fn level_cables(&self, graph: &Graph, level: &ModulePath) -> Vec<LevelCable> {
         let mut cables = Vec::new();
+        let hidden = self.hidden();
         for (from, to) in graph.cables() {
-            if self.is_hidden(from.module) || self.is_hidden(to.module) {
+            if hidden.contains(from.module) || hidden.contains(to.module) {
                 continue;
             }
             let (from_end, to_end) = cable_ends(graph, from, to);
@@ -748,60 +763,65 @@ impl Hierarchy {
             if !seen.insert((level.clone(), end.clone())) {
                 return None;
             }
-            let path = level.child(end.0);
-            if let Some(port) = self.ports.get(&path) {
-                if port.direction != Direction::Input || end.1 != "out" {
-                    return None;
-                }
-                // What feeds the instance's port, one level up.
-                let parent = level.parent()?;
-                let link = self.link_into(&parent, &(level.last(), port.name.clone()))?;
-                (level, end) = (parent, link.from.clone());
-                continue;
+            match self.source_step(graph, &level, &end)? {
+                Step::Found(found) => return Some(found),
+                Step::Next(next_level, next_end) => (level, end) = (next_level, next_end),
             }
-            if self.instances.contains_key(&path) {
-                // A mode's sum or select stands behind the port.
-                if let Some(added) = self.added_output(&path, &end.1) {
-                    return Some((added, "out".to_string()));
-                }
-                // A layer of one member: the member's port.
-                if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
-                    let member = *modes.members.first()?;
-                    end = (member, end.1.clone());
-                    level = path;
-                    continue;
-                }
-                let port_path = self.port_path(&path, Direction::Output, &end.1)?;
-                let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
-                (level, end) = (path, link.from.clone());
-                continue;
-            }
-            if let Some(slot) = self.slots.get(&path) {
-                // A slot's role output: the part's own output behind it.
-                slot.role.output(&end.1)?;
-                let Some(part) = slot.part else {
-                    // An empty thru slot passes on what feeds its `in`
-                    // (ADR-0043); any other empty slot has nothing.
-                    if slot.role.thru && end.1 == loom_core::THRU_OUT {
-                        let link = self.link_into(&level, &(end.0, loom_core::THRU_IN.to_string()))?;
-                        end = link.from.clone();
-                        continue;
-                    }
-                    return None;
-                };
-                let own = if self.instances.contains_key(&level.child(part)) {
-                    end.1.clone()
-                } else {
-                    slot.own_output(&end.1)
-                };
-                end = (part, own);
-                continue;
-            }
-            let id = self.ids.get(&path)?;
-            let node = graph.node(id)?;
-            node.output_index(&end.1)?;
-            return Some((id, end.1.clone()));
         }
+    }
+
+    /// One step of [`Hierarchy::source_behind`]: the flat output the end is,
+    /// the end one link further back, or `None` when nothing stands behind
+    /// it. Each end has at most one step back, which is what lets
+    /// [`behind::Behind`] give every end on a chain the chain's answer.
+    pub(crate) fn source_step(&self, graph: &Graph, level: &ModulePath, end: &End) -> Option<Step> {
+        let path = level.child(end.0);
+        if let Some(port) = self.ports.get(&path) {
+            if port.direction != Direction::Input || end.1 != "out" {
+                return None;
+            }
+            // What feeds the instance's port, one level up.
+            let parent = level.parent()?;
+            let link = self.link_into(&parent, &(level.last(), port.name.clone()))?;
+            return Some(Step::Next(parent, link.from.clone()));
+        }
+        if self.instances.contains_key(&path) {
+            // A mode's sum or select stands behind the port.
+            if let Some(added) = self.added_output(&path, &end.1) {
+                return Some(Step::Found((added, "out".to_string())));
+            }
+            // A layer of one member: the member's port.
+            if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
+                let member = *modes.members.first()?;
+                return Some(Step::Next(path, (member, end.1.clone())));
+            }
+            let port_path = self.port_path(&path, Direction::Output, &end.1)?;
+            let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
+            return Some(Step::Next(path, link.from.clone()));
+        }
+        if let Some(slot) = self.slots.get(&path) {
+            // A slot's role output: the part's own output behind it.
+            slot.role.output(&end.1)?;
+            let Some(part) = slot.part else {
+                // An empty thru slot passes on what feeds its `in`
+                // (ADR-0043); any other empty slot has nothing.
+                if slot.role.thru && end.1 == loom_core::THRU_OUT {
+                    let link = self.link_into(level, &(end.0, loom_core::THRU_IN.to_string()))?;
+                    return Some(Step::Next(level.clone(), link.from.clone()));
+                }
+                return None;
+            };
+            let own = if self.instances.contains_key(&level.child(part)) {
+                end.1.clone()
+            } else {
+                slot.own_output(&end.1)
+            };
+            return Some(Step::Next(level.clone(), (part, own)));
+        }
+        let id = self.ids.get(&path)?;
+        let node = graph.node(id)?;
+        node.output_index(&end.1)?;
+        Some(Step::Found((id, end.1.clone())))
     }
 
     /// The flat inputs that stand behind an input end of `level`: a
@@ -818,61 +838,72 @@ impl Hierarchy {
             if !seen.insert((level.clone(), end.clone())) {
                 continue;
             }
-            let path = level.child(end.0);
-            if let Some(port) = self.ports.get(&path) {
-                if port.direction != Direction::Output || end.1 != "in" {
-                    continue;
-                }
-                let Some(parent) = level.parent() else { continue };
-                let outside = (level.last(), port.name.clone());
-                let next: Vec<End> = self.links_from(&parent, &outside).map(|l| l.to.clone()).collect();
-                work.extend(next.into_iter().rev().map(|to| (parent.clone(), to)));
-                continue;
-            }
-            if self.instances.contains_key(&path) {
-                // A layer or select: every member's port of that name.
-                if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
-                    let members = modes.members.clone();
-                    work.extend(members.into_iter().rev().map(|m| (path.clone(), (m, end.1.clone()))));
-                    continue;
-                }
-                let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
-                    continue;
-                };
-                let inside = (port_path.last(), "out".to_string());
-                let next: Vec<End> = self.links_from(&path, &inside).map(|l| l.to.clone()).collect();
-                work.extend(next.into_iter().rev().map(|to| (path.clone(), to)));
-                continue;
-            }
-            if let Some(slot) = self.slots.get(&path) {
-                if slot.role.input(&end.1).is_none() {
-                    continue;
-                }
-                let Some(part) = slot.part else {
-                    // An empty thru slot passes its `in` on to what its
-                    // `out` feeds (ADR-0043).
-                    if slot.role.thru && end.1 == loom_core::THRU_IN {
-                        let out = (end.0, loom_core::THRU_OUT.to_string());
-                        let next: Vec<End> = self.links_from(&level, &out).map(|l| l.to.clone()).collect();
-                        work.extend(next.into_iter().rev().map(|to| (level.clone(), to)));
-                    }
-                    continue;
-                };
-                let own = if self.instances.contains_key(&level.child(part)) {
-                    end.1.clone()
-                } else {
-                    slot.own_input(&end.1)
-                };
-                work.push((level, (part, own)));
-                continue;
-            }
-            if let Some(id) = self.ids.get(&path)
-                && graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some())
-            {
-                found.push((id, end.1.clone()));
+            match self.input_step(graph, &level, &end) {
+                InputStep::Found(input) => found.push(input),
+                InputStep::Next(next) => work.extend(next.into_iter().rev()),
+                InputStep::Nothing => {}
             }
         }
         found
+    }
+
+    /// One step of [`Hierarchy::inputs_behind`]: the flat input the end is,
+    /// the ends one link further on, in order, or nothing.
+    pub(crate) fn input_step(&self, graph: &Graph, level: &ModulePath, end: &End) -> InputStep {
+        let path = level.child(end.0);
+        let next = |at: &ModulePath, from: &End| -> InputStep {
+            InputStep::Next(self.links_from(at, from).map(|l| (at.clone(), l.to.clone())).collect())
+        };
+        if let Some(port) = self.ports.get(&path) {
+            if port.direction != Direction::Output || end.1 != "in" {
+                return InputStep::Nothing;
+            }
+            let Some(parent) = level.parent() else {
+                return InputStep::Nothing;
+            };
+            return next(&parent, &(level.last(), port.name.clone()));
+        }
+        if self.instances.contains_key(&path) {
+            // A layer or select: every member's port of that name.
+            if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
+                return InputStep::Next(
+                    modes
+                        .members
+                        .iter()
+                        .map(|m| (path.clone(), (*m, end.1.clone())))
+                        .collect(),
+                );
+            }
+            let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
+                return InputStep::Nothing;
+            };
+            return next(&path, &(port_path.last(), "out".to_string()));
+        }
+        if let Some(slot) = self.slots.get(&path) {
+            if slot.role.input(&end.1).is_none() {
+                return InputStep::Nothing;
+            }
+            let Some(part) = slot.part else {
+                // An empty thru slot passes its `in` on to what its `out`
+                // feeds (ADR-0043).
+                if slot.role.thru && end.1 == loom_core::THRU_IN {
+                    return next(level, &(end.0, loom_core::THRU_OUT.to_string()));
+                }
+                return InputStep::Nothing;
+            };
+            let own = if self.instances.contains_key(&level.child(part)) {
+                end.1.clone()
+            } else {
+                slot.own_input(&end.1)
+            };
+            return InputStep::Next(vec![(level.clone(), (part, own))]);
+        }
+        match self.ids.get(&path) {
+            Some(id) if graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some()) => {
+                InputStep::Found((id, end.1.clone()))
+            }
+            _ => InputStep::Nothing,
+        }
     }
 
     /// The path of the port tile named `name` facing `direction` inside
@@ -1083,6 +1114,7 @@ impl Hierarchy {
         direct: bool,
         skip: &BTreeSet<ModuleId>,
     ) -> Patch {
+        let leaving = self.leaving_paths();
         let mut levels: BTreeMap<ModulePath, Level> = BTreeMap::new();
         levels.entry(ModulePath::root()).or_default();
         for path in self.instances.keys() {
@@ -1154,7 +1186,7 @@ impl Hierarchy {
         // Ports.
         for (path, port) in &self.ports {
             let Some(level) = path.parent() else { continue };
-            if self.is_leaving_path(path) {
+            if leaving.covers(path) {
                 continue;
             }
             let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
@@ -1174,7 +1206,7 @@ impl Hierarchy {
         // is not written; its definition is stored whole instead.
         for (path, instance) in &self.instances {
             let Some(level) = path.parent() else { continue };
-            if self.is_leaving_path(path) {
+            if leaving.covers(path) {
                 continue;
             }
             let Layout { position, size } = self.ids.get(path).map_or_else(Layout::default, |id| layout(id.0));
@@ -1218,7 +1250,7 @@ impl Hierarchy {
             });
         }
         for link in &self.links {
-            if self.is_leaving_path(&link.level.child(0)) && !link.level.is_root() {
+            if leaving.covers(&link.level.child(0)) && !link.level.is_root() {
                 continue;
             }
             levels.entry(link.level.clone()).or_default().cables.push(PatchCable {
@@ -1288,7 +1320,7 @@ impl Hierarchy {
         patch.modulation = top.modulation;
         patch.midi = top.midi;
         for (path, instance) in &self.instances {
-            if self.is_leaving_path(path) {
+            if leaving.covers(path) {
                 continue;
             }
             let Some(definition) = self.definitions.get(&instance.key) else {

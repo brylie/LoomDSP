@@ -192,6 +192,28 @@ fn a_control_focused_by_keyboard_has_a_ring_clear_of_its_caption() {
     assert_eq!(canvas.overlay(&clicked, &LinesCache::default()).shapes.len(), unfocused);
 }
 
+/// Keyboard focus left on a control that went inert, such as one bound
+/// to a slot whose part was just removed, draws no ring: it is not a
+/// control any more (sub-patches.md, Empty slots).
+#[test]
+fn an_inert_control_under_keyboard_focus_has_no_ring() {
+    let mut m = module(1, 0.0);
+    m.panel = panel();
+    m.panel.widgets[0].inert = true;
+    let scene = Scene::new(vec![m], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let unfocused = canvas
+        .overlay(&CanvasInput::default(), &LinesCache::default())
+        .shapes
+        .len();
+    let tabbed = CanvasInput {
+        focus: FocusState::at(1, 0, true, FocusMode::Browse),
+        ..CanvasInput::default()
+    };
+    assert_eq!(canvas.overlay(&tabbed, &LinesCache::default()).shapes.len(), unfocused);
+}
+
 #[test]
 fn hover_text_is_about_the_port_or_control_under_the_pointer() {
     let mut m = module(1, 0.0);

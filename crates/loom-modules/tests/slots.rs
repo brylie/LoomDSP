@@ -1071,6 +1071,30 @@ fn remove_part_before_a_stack_fades_every_copy() {
                 .expect("Remove part");
             hierarchy.sync(&mut parts.controller).expect("syncs");
             parts.controller.commit().expect("commits");
+            // Every copy's Amp reads the one fade's output.
+            let graph = parts.controller.graph();
+            let of_kind = |kind: &str| -> Vec<ModuleId> {
+                graph
+                    .nodes()
+                    .filter(|(_, n)| n.descriptor.id == kind)
+                    .map(|(id, _)| id)
+                    .collect()
+            };
+            let fades = of_kind("loom.struct.fade");
+            assert_eq!(fades.len(), 1, "one fade for the slot's out");
+            let amps = of_kind("loom.level.amp");
+            assert_eq!(amps.len(), 4, "one Amp per copy");
+            for amp in amps {
+                let input = graph
+                    .node(amp)
+                    .and_then(|n| n.descriptor.input_index("in"))
+                    .expect("an in");
+                let from = graph
+                    .cables()
+                    .find(|(_, to)| to.module == amp && to.port == input)
+                    .map(|(from, _)| from.module);
+                assert_eq!(from, Some(fades[0]), "copy Amp {amp:?} reads the fade");
+            }
         },
         |_, _| {},
     );
@@ -1082,4 +1106,87 @@ fn remove_part_before_a_stack_fades_every_copy() {
     let limit = largest_step(before).max(largest_step(after)) + peak / FADE as f32 + 1e-6;
     let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + FADE + 10]);
     assert!(across <= limit, "across: {across} against {limit}");
+}
+
+/// The example Effect chain with its saw playing middle C and held open
+/// (nothing on its pitch or on the Amplifier's level), Effect 1 fully
+/// wet, Effect 2 at `effect_2_mix`, and Effect 3 dry: its 0.3 s delay
+/// would leave the short render silent.
+fn open_chain(effect_2_mix: f32) -> String {
+    let mut patch = common::load_patch(&common::patch_path("effect-chain.ron"));
+    patch
+        .cables
+        .retain(|c| c.from.0 != 1 && c.to != (4, "level".to_string()));
+    let instance = patch.modules.iter_mut().find(|m| m.id == 5).expect("the chain tile");
+    for (name, mix) in [
+        ("effect 1 mix", 1.0),
+        ("effect 2 mix", effect_2_mix),
+        ("effect 3 mix", 0.0),
+    ] {
+        instance.params.insert(name.to_string(), mix);
+    }
+    patch.to_ron().expect("writes")
+}
+
+/// The chain of [`open_chain`] at `effect_2_mix`, rendered as it is and
+/// with Remove part on Effect 2 at `SWAP_AT`, the fade finished when it
+/// reports done. Returns both renders.
+fn remove_effect_2(effect_2_mix: f32) -> (Vec<f32>, Vec<f32>) {
+    let text = open_chain(effect_2_mix);
+    let (mut plain_parts, _) = load(&text);
+    let plain = render_edit_at(&mut plain_parts, FRAMES, 64, SWAP_AT, |_| {}, |_, _| {});
+    assert!(plain.iter().any(|v| v.abs() > 0.1), "the saw plays");
+
+    let (mut parts, hierarchy) = load(&text);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let slot = hierarchy
+        .borrow()
+        .id_at(&loom_patch::ModulePath::top(5), 11)
+        .expect("Effect 2");
+    let mut finished = false;
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        64,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_empty(&mut parts.controller, &layout, slot)
+                .expect("Remove part");
+            assert_eq!(hierarchy.fading_slots().len(), 1, "a thru slot fades");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            let fading = hierarchy.fading_slots();
+            let done = !fading.is_empty()
+                && fading
+                    .iter()
+                    .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+            if done {
+                hierarchy.finish_all_fades(&mut parts.controller);
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+                finished = true;
+            }
+        },
+    );
+    assert!(finished, "the fade finished");
+    (plain, left)
+}
+
+/// Remove part on Effect 2 of the Effect chain, with that slot's mix at 0,
+/// changes no sample, through the fade and after it: the mix plays only
+/// the signal before the slot, so what the fade blends in is never heard
+/// (sub-patches.md, The Effect chain and Empty slots). Fully wet, the same
+/// edit is heard, so the render does follow it.
+#[test]
+fn remove_part_from_a_chain_slot_at_mix_0_changes_no_sample() {
+    let (plain, removed) = remove_effect_2(0.0);
+    assert_eq!(removed, plain);
+    let (plain, removed) = remove_effect_2(1.0);
+    assert_ne!(removed, plain, "fully wet, the dynamics leave");
 }

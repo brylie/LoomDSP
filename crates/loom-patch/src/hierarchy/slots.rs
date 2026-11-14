@@ -16,6 +16,49 @@ use crate::{Held, PartKey};
 use loom_core::{FillsRole, OutputRef, ParamRange, RoleDescriptor};
 use loom_dsp::blend::Law;
 
+/// The modules the editor hides, from [`Hierarchy::hidden`].
+pub struct Hidden<'h> {
+    hierarchy: &'h Hierarchy,
+    /// The paths of every slot's part and every leaving part.
+    parts: BTreeSet<ModulePath>,
+}
+
+impl Hidden<'_> {
+    /// True for a module the editor hides: a stack copy or a module a mode
+    /// adds, anything inside a slot (a swap fade), or a slot's part.
+    pub fn contains(&self, id: ModuleId) -> bool {
+        let Some(path) = self.hierarchy.ids.path_of(id) else {
+            return false;
+        };
+        // Stack copies and the modules a mode adds are never tiles.
+        if path.is_implied() {
+            return true;
+        }
+        let Some(level) = path.parent() else { return false };
+        self.hierarchy.slots.contains_key(&level) || self.parts.contains(path)
+    }
+
+    /// What tile `id` shows, as [`Hierarchy::tile`], with the hidden test
+    /// taken from this set.
+    pub fn tile(&self, graph: &Graph, id: ModuleId) -> Option<Tile> {
+        if self.contains(id) {
+            return None;
+        }
+        self.hierarchy.shown_tile(graph, id)
+    }
+}
+
+/// The paths of every leaving part, from [`Hierarchy::leaving_paths`],
+/// taken once for a pass such as writing the patch.
+pub(super) struct LeavingPaths(BTreeSet<ModulePath>);
+
+impl LeavingPaths {
+    /// True for a leaving part or anything inside one.
+    pub(super) fn covers(&self, path: &ModulePath) -> bool {
+        !self.0.is_empty() && (1..=path.0.len()).any(|n| self.0.contains(&path.prefix(n)))
+    }
+}
+
 /// The status bar text when Make sub-patch is asked for a selection that
 /// holds a slot. Moving a slot into a sub-patch is a follow-up.
 pub const NO_SLOT_IN_COLLAPSE: &str = "Cannot make a sub-patch from a slot yet; dissolve the slot first";
@@ -306,7 +349,8 @@ impl Hierarchy {
     }
 
     /// True for a module the editor hides: a slot's current part, a part
-    /// that is leaving, or a swap fade.
+    /// that is leaving, or a swap fade. For many ids, take [`Hierarchy::hidden`]
+    /// once instead: this scans every slot.
     pub fn is_hidden(&self, id: ModuleId) -> bool {
         let Some(path) = self.ids.path_of(id) else { return false };
         // Stack copies and the modules a mode adds are never tiles.
@@ -317,36 +361,37 @@ impl Hierarchy {
         if self.slots.contains_key(&level) {
             return true;
         }
+        // One scan, with no allocation; a pass over many ids takes
+        // [`Hierarchy::hidden`] once instead.
         self.slots.iter().any(|(p, s)| {
-            p.parent().as_ref() == Some(&level)
-                && (s.part == Some(path.last()) || s.fading.as_ref().is_some_and(|f| f.leaving == Some(path.last())))
+            let leaving = s.fading.as_ref().and_then(|f| f.leaving);
+            p.parent().as_ref() == Some(&level) && (s.part == Some(path.last()) || leaving == Some(path.last()))
         })
+    }
+
+    /// The modules the editor hides, worked out in one scan of the slots,
+    /// for a pass over many ids such as one scene build. Take it again
+    /// after a swap.
+    pub fn hidden(&self) -> Hidden<'_> {
+        let mut parts = BTreeSet::new();
+        for (path, state) in &self.slots {
+            let level = path.parent().unwrap_or_else(ModulePath::root);
+            let leaving = state.fading.as_ref().and_then(|f| f.leaving);
+            for lid in state.part.into_iter().chain(leaving) {
+                parts.insert(level.child(lid));
+            }
+        }
+        Hidden { hierarchy: self, parts }
     }
 
     /// The modules that exist only while a slot fades: every leaving part
     /// and every swap fade, and the implied modules of modes. Left out of
     /// the file and of undo snapshots.
     pub fn transient_ids(&self) -> BTreeSet<ModuleId> {
-        let mut ids = BTreeSet::new();
-        for (path, state) in &self.slots {
-            let Some(fading) = &state.fading else { continue };
-            let level = path.parent().unwrap_or_else(ModulePath::root);
-            if let Some(leaving) = fading.leaving.map(|lid| level.child(lid)) {
-                if let Some(id) = self.ids.get(&leaving) {
-                    ids.insert(id);
-                }
-                for inner in self
-                    .ids
-                    .paths()
-                    .filter(|(p, _)| p.starts_with(&leaving) && **p != leaving)
-                {
-                    ids.insert(inner.1);
-                }
-            }
-            ids.extend(fading.fades.iter().map(|(_, id)| *id));
-        }
         // Implied modules are not written either: the flattener makes them
-        // again from copy 0 (ADR-0040).
+        // again from copy 0 (ADR-0040). They hold every copy's part of a
+        // fade too.
+        let mut ids = self.fading_ids();
         ids.extend(self.implied_ids());
         ids
     }
@@ -402,6 +447,11 @@ impl Hierarchy {
                 Some((self.ids.get(path)?, fading.fades.iter().map(|(_, id)| *id).collect()))
             })
             .collect()
+    }
+
+    /// True while any slot's swap fade runs: a cheap check, with no list.
+    pub fn is_fading(&self) -> bool {
+        self.slots.values().any(|state| state.fading.is_some())
     }
 
     /// The end at `level` a file writes for a parameter: through the slot,
@@ -476,14 +526,18 @@ impl Hierarchy {
         }
     }
 
-    /// True for a path at or under a part that is leaving a slot: what
-    /// exists only while the slot fades.
-    pub(super) fn is_leaving_path(&self, path: &ModulePath) -> bool {
-        (1..=path.0.len()).any(|n| {
-            let prefix = path.prefix(n);
-            let Some(parent) = prefix.parent() else { return false };
-            self.slot_leaving(&parent, prefix.last()).is_some()
-        })
+    /// The paths of the parts leaving a slot: what exists only while the
+    /// slot fades, with everything inside it.
+    pub(super) fn leaving_paths(&self) -> LeavingPaths {
+        LeavingPaths(
+            self.slots
+                .iter()
+                .filter_map(|(path, state)| {
+                    let lid = state.fading.as_ref()?.leaving?;
+                    Some(path.parent().unwrap_or_else(ModulePath::root).child(lid))
+                })
+                .collect(),
+        )
     }
 
     /// The slot at `level` whose leaving part is `lid`.
@@ -543,67 +597,64 @@ impl Hierarchy {
         fading: &Fading,
     ) -> FadeWiring {
         let mut wiring = FadeWiring::default();
-        {
-            let level = slot_path.parent().unwrap_or_else(ModulePath::root);
-            let slot_lid = slot_path.last();
-            // What feeds the slot's role input `name`, at the flat level.
-            let fed = |name: &str| -> Option<(ModuleId, String)> {
-                let link = self.links_at(&level).find(|l| l.to == (slot_lid, name.to_string()))?;
-                self.source_behind(graph, &level, &link.from)
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        let slot_lid = slot_path.last();
+        // What feeds the slot's role input `name`, at the flat level.
+        let fed = |name: &str| -> Option<(ModuleId, String)> {
+            let link = self.link_into(&level, &(slot_lid, name.to_string()))?;
+            self.source_behind(graph, &level, &link.from)
+        };
+        for (role_out, fade) in &fading.fades {
+            // `a`: the leaving part, or the thru signal a part fades in
+            // from (sub-patches.md, Empty slots).
+            let a = match fading.leaving {
+                Some(leaving) => self.part_output(graph, &level, leaving, role_out),
+                None => fed(loom_core::THRU_IN),
             };
-            for (role_out, fade) in &fading.fades {
-                // `a`: the leaving part, or the thru signal a part fades in
-                // from (sub-patches.md, Empty slots).
-                let a = match fading.leaving {
-                    Some(leaving) => self.part_output(graph, &level, leaving, role_out),
-                    None => fed(loom_core::THRU_IN),
-                };
-                if let Some((l, l_out)) = a {
-                    wiring.add.push(((l.0, l_out), (fade.0, "a".to_string())));
-                }
-                match state.part {
-                    Some(part) => {
-                        if let Some((p, p_out)) = self.part_output(graph, &level, part, role_out) {
-                            wiring.add.push(((p.0, p_out.clone()), (fade.0, "b".to_string())));
-                            wiring.reroute.push(((p.0, p_out), (fade.0, "out".to_string())));
-                        }
+            if let Some((l, l_out)) = a {
+                wiring.add.push(((l.0, l_out), (fade.0, "a".to_string())));
+            }
+            match state.part {
+                Some(part) => {
+                    if let Some((p, p_out)) = self.part_output(graph, &level, part, role_out) {
+                        wiring.add.push(((p.0, p_out.clone()), (fade.0, "b".to_string())));
+                        wiring.reroute.push(((p.0, p_out), (fade.0, "out".to_string())));
                     }
-                    None => {
-                        // A part fading out to the thru: `b` is the thru
-                        // signal, and the fade takes over only the inputs
-                        // the slot's output fed, by destination, so other
-                        // inputs the thru source feeds are untouched. With
-                        // nothing on `in`, the part fades to 0.
-                        if let Some((x, x_out)) = fed(loom_core::THRU_IN) {
-                            wiring.add.push(((x.0, x_out), (fade.0, "b".to_string())));
-                        }
-                        let dests: Vec<End> = self
-                            .links_at(&level)
-                            .filter(|l| l.from == (slot_lid, role_out.clone()))
-                            .map(|l| l.to.clone())
-                            .collect();
-                        for dest in dests {
-                            for (to, input) in self.inputs_behind(graph, &level, &dest) {
-                                // A stack downstream runs this input in every
-                                // copy, each fed from the same source, so the
-                                // fade feeds them all (ADR-0044).
-                                for copy in std::iter::once(to).chain(self.copies_of(to).iter().map(|(c, _)| *c)) {
-                                    wiring
-                                        .retarget
-                                        .push(((copy.0, input.clone()), (fade.0, "out".to_string())));
-                                }
+                }
+                None => {
+                    // A part fading out to the thru: `b` is the thru
+                    // signal, and the fade takes over only the inputs
+                    // the slot's output fed, by destination, so other
+                    // inputs the thru source feeds are untouched. With
+                    // nothing on `in`, the part fades to 0.
+                    if let Some((x, x_out)) = fed(loom_core::THRU_IN) {
+                        wiring.add.push(((x.0, x_out), (fade.0, "b".to_string())));
+                    }
+                    let dests: Vec<End> = self
+                        .links_from(&level, &(slot_lid, role_out.clone()))
+                        .map(|l| l.to)
+                        .collect();
+                    for dest in dests {
+                        for (to, input) in self.inputs_behind(graph, &level, &dest) {
+                            // A stack downstream runs this input in every
+                            // copy, each fed from the same source, so the
+                            // fade feeds them all (ADR-0044).
+                            for copy in std::iter::once(to).chain(self.copies_of(to).iter().map(|(c, _)| *c)) {
+                                wiring
+                                    .retarget
+                                    .push(((copy.0, input.clone()), (fade.0, "out".to_string())));
                             }
                         }
                     }
                 }
             }
-            // The leaving part keeps its inputs while it fades.
-            if let Some(leaving) = fading.leaving {
-                for role_in in state.role.inputs {
-                    let Some(src) = fed(role_in.name) else { continue };
-                    for dest in self.part_inputs(graph, &level, leaving, role_in.name) {
-                        wiring.add.push(((src.0.0, src.1.clone()), (dest.0.0, dest.1)));
-                    }
+        }
+        // The leaving part keeps its inputs while it fades.
+        if let Some(leaving) = fading.leaving {
+            for role_in in state.role.inputs {
+                let Some(src) = fed(role_in.name) else { continue };
+                for dest in self.part_inputs(graph, &level, leaving, role_in.name) {
+                    wiring.add.push(((src.0.0, src.1.clone()), (dest.0.0, dest.1)));
                 }
             }
         }
@@ -774,8 +825,9 @@ impl Hierarchy {
 
     /// True when a swap into or out of the empty slot at `slot_path` fades
     /// from or to its thru signal: a thru role, outside a stack of more
-    /// than one copy, whose swaps step until each copy has its own thru
-    /// wiring (sub-patches.md, Empty slots).
+    /// than one copy. Inside a stack the swap is a cable change in every
+    /// copy, which live-patching rule 9 ramps over 5 ms, until each copy
+    /// has its own thru wiring (#768; sub-patches.md, Empty slots).
     fn fades_with_thru(&self, slot_path: &ModulePath) -> bool {
         let level = slot_path.parent().unwrap_or_else(ModulePath::root);
         self.slots.get(slot_path).is_some_and(|s| s.role.thru) && !self.in_stack(&level)

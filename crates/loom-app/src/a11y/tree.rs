@@ -465,6 +465,11 @@ pub(crate) fn tree(
                 if let Some(bounds) = widget.bounds {
                     place(&mut w, bounds);
                 }
+                // Focus the canvas left on it, as when its slot was just
+                // emptied, goes to the tile: a disabled node cannot hold it.
+                if ids.focus == Some((tile.id, index)) && !ids.covered {
+                    focus = Some(id);
+                }
                 kids.push(child);
                 nodes.push((child, w));
                 continue;

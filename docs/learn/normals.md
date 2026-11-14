@@ -58,8 +58,8 @@ A Filter or Effect slot with no part is a **thru**: its `out` carries whatever f
 
 Changing between a normal and a signal is a cable change: the input jumps from one value to another. Live-patching rule 9 ramps every cable change over 5 ms, so it does not click ([Hot patching](hot-patching.md) measures where a step becomes audible). Rule 9 came in with [#21](https://github.com/brylie/LoomDSP/issues/21). One case uses a longer fade of its own:
 
-- A swap into or out of an empty Filter or Effect slot fades over 10 ms with the slot's own swap fade, between the dry sound and the sound through the part. The fade is linear, not equal power, because the two signals are nearly the same: equal power would swell by up to 3 dB in the middle ([Abstraction](abstraction.md#why-equal-power-not-a-straight-line) explains the two laws).
-- Every other change between a normal and a signal ramps over 5 ms by rule 9.
+- A swap into or out of an empty Filter or Effect slot outside a stack fades over 10 ms with the slot's own swap fade, between the dry sound and the sound through the part. The fade is linear, not equal power, because the two signals are nearly the same: equal power would swell by up to 3 dB in the middle ([Abstraction](abstraction.md#why-equal-power-not-a-straight-line) explains the two laws).
+- Every other change between a normal and a signal ramps over 5 ms by rule 9, including that same swap inside a stack.
 
 ## How other systems do it
 

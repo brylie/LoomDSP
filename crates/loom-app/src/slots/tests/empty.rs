@@ -412,3 +412,57 @@ fn remove_part_names_the_modulation_it_removes_and_undo_restores_it() {
     assert_eq!(app.session.controller.graph().assignments().count(), assignments);
     assert_eq!(app.session.controller.graph().midi_mappings().count(), mappings);
 }
+
+/// Undo of a swap inside a stack before its fade is done fades back from
+/// where it is: no module is added twice and no tile appears, each copy
+/// keeps one SVF, one Ladder, and one fade until the fade finishes, and
+/// then only the four SVFs are left (ADR-0044).
+#[test]
+fn undo_during_a_stack_fade_fades_back_without_extra_modules() {
+    let mut app = app_with(STACKED);
+    let slot = inside(&app, 9);
+    let count = |app: &App, kind: &str| {
+        app.session
+            .controller
+            .graph()
+            .nodes()
+            .filter(|(_, n)| n.descriptor.id == kind)
+            .count()
+    };
+    let tiles = app.ui_snapshot().tiles.len();
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".into()),
+    });
+    assert_eq!(
+        (
+            count(&app, "loom.filter.svf"),
+            count(&app, "loom.filter.ladder"),
+            count(&app, "loom.struct.fade")
+        ),
+        (4, 4, 4)
+    );
+    app.process(64);
+    app.undo();
+    assert_eq!(app.session.hierarchy.fading_slots().len(), 1, "undo fades back");
+    assert_eq!(
+        (
+            count(&app, "loom.filter.svf"),
+            count(&app, "loom.filter.ladder"),
+            count(&app, "loom.struct.fade")
+        ),
+        (4, 4, 4),
+        "nothing added twice"
+    );
+    assert_eq!(app.ui_snapshot().tiles.len(), tiles, "no tile appears");
+    app.process(600);
+    assert!(app.session.hierarchy.fading_slots().is_empty(), "the fade finished");
+    assert_eq!(
+        (
+            count(&app, "loom.filter.svf"),
+            count(&app, "loom.filter.ladder"),
+            count(&app, "loom.struct.fade")
+        ),
+        (4, 0, 0)
+    );
+}

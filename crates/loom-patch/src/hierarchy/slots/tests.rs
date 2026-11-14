@@ -1185,6 +1185,22 @@ fn role_values_carry_through_an_empty_slot_and_a_reload() {
     );
 }
 
+/// A slot's `values` keep only the role's own parameters on load: a name
+/// the Filter role does not have, as a hand-edited file might give, is
+/// dropped, so nothing carries it into a part.
+#[test]
+fn slot_values_keep_only_role_parameters_on_load() {
+    let text = EMPTY_SLOTS.replace(
+        r#"Slot(role: "loom.role.filter@1")"#,
+        r#"Slot(role: "loom.role.filter@1", values: {"cutoff": 640.0, "slope": 1.0})"#,
+    );
+    let (_, hierarchy) = load(&Patch::from_ron(&text).unwrap());
+    let filter = hierarchy.id_at(&ModulePath::root(), 9).unwrap();
+    let values = &hierarchy.slot(filter).unwrap().values;
+    assert_eq!(values.get("cutoff"), Some(&640.0));
+    assert_eq!(values.get("slope"), None, "Slope is not a Filter role parameter");
+}
+
 /// A Voice stacked twice inside a Pad stacked twice, the Voice holding a
 /// Filter slot.
 const NESTED_STACKS: &str = r#"Patch(

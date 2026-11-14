@@ -1016,10 +1016,14 @@ pub fn build(
     sizes: &BTreeMap<u32, (u8, u8)>,
 ) -> Scene {
     let graph = controller.graph();
+    // Follows through slots and ports, kept for this build, so a long chain
+    // of empty thru slots is walked once, not once per end on it.
+    let behind = loom_patch::hierarchy::behind::Behind::new(hierarchy, graph);
     let delayed: BTreeSet<InputRef> = controller.last_report().inserted_delays().map(|(_, to)| *to).collect();
     // A slot's part, a part that is leaving, and a swap fade are hidden
     // behind the slot's tile (sub-patches.md, Slots).
-    let on_level = |id: ModuleId| hierarchy.level_of(id) == *level && !hierarchy.is_hidden(id);
+    let hidden = hierarchy.hidden();
+    let on_level = |id: ModuleId| hierarchy.level_of(id) == *level && !hidden.contains(id);
 
     // Assignments each output drives, counting those that are off.
     let mut badges: BTreeMap<OutputRef, u32> = BTreeMap::new();
@@ -1128,18 +1132,17 @@ pub fn build(
     // The sub-patch and port tiles of the level. A port is coloured by the
     // signal behind it: the inner input it feeds, or the output behind it.
     let signal_into = |end: &End| -> SignalType {
-        hierarchy
-            .inputs_behind(graph, level, end)
-            .first()
+        behind
+            .first_input(level, end)
             .and_then(|(id, name)| {
-                let node = graph.node(*id)?;
-                node.input_index(name).and_then(|i| node.descriptor.inputs.get(i))
+                let node = graph.node(id)?;
+                node.input_index(&name).and_then(|i| node.descriptor.inputs.get(i))
             })
             .map_or(SignalType::Modulation, |spec| spec.signal)
     };
     let signal_from = |end: &End| -> SignalType {
-        hierarchy
-            .source_behind(graph, level, end)
+        behind
+            .source(level, end)
             .and_then(|(id, name)| {
                 let node = graph.node(id)?;
                 node.output_index(&name).and_then(|i| node.descriptor.outputs.get(i))
@@ -1156,8 +1159,8 @@ pub fn build(
     };
     let output_port = |name: &str, end: &End, description: &str| {
         let mut port = tile_port(name, signal_from(end), description);
-        let width = hierarchy
-            .source_behind(graph, level, end)
+        let width = behind
+            .source(level, end)
             .and_then(|(id, name)| {
                 Some(controller.last_report().width(OutputRef {
                     module: id,
@@ -1270,8 +1273,8 @@ pub fn build(
                     badge: if into {
                         0
                     } else {
-                        hierarchy
-                            .source_behind(graph, level, &(lid, port.name.to_string()))
+                        behind
+                            .source(level, &(lid, port.name.to_string()))
                             .and_then(|(module, output)| {
                                 let index = graph.node(module)?.output_index(&output)?;
                                 badges.get(&OutputRef { module, port: index }).copied()
@@ -1369,7 +1372,7 @@ pub fn build(
             };
             return Some((id.0, index, signal));
         }
-        match hierarchy.tile(graph, id)? {
+        match hidden.tile(graph, id)? {
             Tile::Instance(_) => {
                 let (inputs, outputs) = hierarchy.instance_ports(id);
                 let list = if input { inputs } else { outputs };
@@ -1406,15 +1409,12 @@ pub fn build(
                     port: to_index,
                 })
             } else {
-                hierarchy
-                    .inputs_behind(graph, level, &cable.to)
-                    .first()
-                    .and_then(|(id, name)| {
-                        graph
-                            .node(*id)?
-                            .input_index(name)
-                            .map(|port| InputRef { module: *id, port })
-                    })
+                behind.first_input(level, &cable.to).and_then(|(id, name)| {
+                    graph
+                        .node(id)?
+                        .input_index(&name)
+                        .map(|port| InputRef { module: id, port })
+                })
             };
             Some(CableView {
                 from: (from_id, from_index),

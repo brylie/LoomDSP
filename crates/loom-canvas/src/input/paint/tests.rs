@@ -206,6 +206,38 @@ fn a_focused_knob_paints_its_value_for_its_caption() {
     assert_eq!(value.colour, model.palette.text);
 }
 
+/// A focused knob that went inert, such as one bound to a slot whose part
+/// was just removed, keeps its caption: it shows no value
+/// (sub-patches.md, Empty slots).
+#[test]
+fn a_focused_inert_knob_keeps_its_caption() {
+    let mut knob = widget(WidgetViewKind::Knob { steps: 0 }, "gain");
+    knob.inert = true;
+    let scene = scene(vec![knob]);
+    let selected = BTreeSet::from([1]);
+    let mut values = PanelValues::new();
+    values.set(
+        1,
+        0,
+        WidgetValue {
+            text: "-6.0 dB".into(),
+            dimmed: true,
+            ..WidgetValue::default()
+        },
+    );
+    let model = CanvasModel::new(&scene, &selected).values(&values);
+    let input = still(
+        &model,
+        Still {
+            focus: Some((1, 0)),
+            ..Still::default()
+        },
+    );
+    let recorder = painted(&model, &input);
+    let texts = recorder.texts();
+    assert!(texts.contains(&"gain") && !texts.contains(&"-6.0 dB"), "{texts:?}");
+}
+
 /// An open choice list is one layer after all tile text: its box, the
 /// highlight under the highlighted row, then each row's text, with a check
 /// mark on the chosen one. The rows need full shaping for the mark.

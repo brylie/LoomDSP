@@ -187,8 +187,13 @@ impl App {
             // engine does not run, so nothing moves.
             (Timer::LiveFrame, !self.measuring && modulating),
             // Otherwise the window redraws only when something changes
-            // (#90). A recording ticks to notice a write error.
-            (Timer::Tick, !self.measuring && self.rig.recorder.is_some()),
+            // (#90). A recording ticks to notice a write error, and a slot
+            // swap ticks until its fade is done, so the leaving part is
+            // removed (sub-patches.md, How a swap crossfades).
+            (
+                Timer::Tick,
+                !self.measuring && (self.rig.recorder.is_some() || self.session.hierarchy.is_fading()),
+            ),
             // Only while a copy may be due: once it matches the patch, an
             // idle app ticks no more (#90).
             (Timer::Autosave, self.run_files.autosave_due(&self.session.document)),

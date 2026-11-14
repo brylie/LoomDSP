@@ -262,6 +262,9 @@ impl ControlGeometry {
                     continue;
                 };
                 let position = values.position(module.id, index);
+                // A control with nothing behind it shows no value: its
+                // track and body only (sub-patches.md, Empty slots).
+                let dimmed = values.get(module.id, index).is_some_and(|v| v.dimmed);
                 let modulation = values
                     .get(module.id, index)
                     .map_or(ModulationMark::None, |v| v.modulation);
@@ -285,14 +288,16 @@ impl ControlGeometry {
                         ));
                         // At least a short cap, so a knob at its minimum
                         // still reads as live (visual-system.md, Knobs).
-                        arcs.push(ArcShape::new(
-                            centre,
-                            KNOB_RADIUS,
-                            2.5,
-                            KNOB_START,
-                            KNOB_SWEEP * t.max(KNOB_START_CAP),
-                            palette.control_value,
-                        ));
+                        if !dimmed {
+                            arcs.push(ArcShape::new(
+                                centre,
+                                KNOB_RADIUS,
+                                2.5,
+                                KNOB_START,
+                                KNOB_SWEEP * t.max(KNOB_START_CAP),
+                                palette.control_value,
+                            ));
+                        }
                         if let ModulationMark::Range { low, high } = modulation {
                             arcs.push(ArcShape::new(
                                 centre,
@@ -310,16 +315,20 @@ impl ControlGeometry {
                             shapes.push(ghost_mark(live_dot_centre(centre, ghost), palette));
                         }
                         shapes.push(circle(centre, 6.5, palette.control_body, palette.tile_border, 1.0));
-                        let angle = KNOB_START + KNOB_SWEEP * t;
-                        let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
-                        shapes.push(circle(tip, 1.5, palette.text, Color::TRANSPARENT, 0.0));
+                        if !dimmed {
+                            let angle = KNOB_START + KNOB_SWEEP * t;
+                            let tip = Point::new(centre.x + 4.0 * angle.sin(), centre.y - 4.0 * angle.cos());
+                            shapes.push(circle(tip, 1.5, palette.text, Color::TRANSPARENT, 0.0));
+                        }
                     }
                     WidgetViewKind::Fader { vertical, .. } => {
                         let t = position.clamp(0.0, 1.0);
                         let track = fader_track(rect, *vertical);
                         shapes.push(Shape::new(track, 1.5, palette.control_track, Color::TRANSPARENT, 0.0));
-                        let filled = fader_span(track, *vertical, 0.0, t.max(KNOB_START_CAP));
-                        shapes.push(Shape::new(filled, 1.5, palette.control_value, Color::TRANSPARENT, 0.0));
+                        if !dimmed {
+                            let filled = fader_span(track, *vertical, 0.0, t.max(KNOB_START_CAP));
+                            shapes.push(Shape::new(filled, 1.5, palette.control_value, Color::TRANSPARENT, 0.0));
+                        }
                         if let ModulationMark::Range { low, high } = modulation {
                             shapes.push(Shape::new(
                                 fader_bar(rect, *vertical, low, high),
@@ -336,13 +345,15 @@ impl ControlGeometry {
                         if let Some(ghost) = values.get(module.id, index).and_then(|v| v.ghost) {
                             shapes.push(ghost_mark(fader_bar_point(rect, *vertical, ghost), palette));
                         }
-                        shapes.push(Shape::new(
-                            fader_handle(rect, *vertical, t),
-                            2.0,
-                            palette.control_body,
-                            palette.text,
-                            1.0,
-                        ));
+                        if !dimmed {
+                            shapes.push(Shape::new(
+                                fader_handle(rect, *vertical, t),
+                                2.0,
+                                palette.control_body,
+                                palette.text,
+                                1.0,
+                            ));
+                        }
                     }
                     WidgetViewKind::XyPad { .. } => {
                         let area = xy_area(rect);
