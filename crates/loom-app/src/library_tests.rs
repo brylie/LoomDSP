@@ -211,17 +211,18 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
         .map(|(row, item)| (row, item.library.clone()))
         .collect();
     let browser = ui.app().overlays.browser().unwrap();
-    let before = browser.results().len() + browser.slot_rows().len();
+    let before = crate::builtin::ALL.len() + browser.results().len() + browser.slot_rows().len();
     assert_eq!(
         rows,
         [
             (before, "Arp.ron".to_string()),
             (before + 1, "Voices/Voice.ron".to_string())
         ],
-        "after the modules and the slot rows, by path"
+        "after the built-ins, the modules, and the slot rows, by path"
     );
-    // A search finds a sub-patch by name, and the mark names what it is.
-    ui.send(Message::Browser(browser::Message::Query("voice".into())));
+    // A search finds a sub-patch by its path, and the mark names what it
+    // is. (`voice` alone would find the built-in Synth voice first.)
+    ui.send(Message::Browser(browser::Message::Query("voices".into())));
     ui.redraw();
     let browser = ui.app().overlays.browser().unwrap();
     assert_eq!(browser.library_rows().len(), 1);

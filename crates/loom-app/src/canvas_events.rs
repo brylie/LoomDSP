@@ -287,7 +287,9 @@ impl App {
                 self.close_slider_gesture();
                 let roles = self.session.controller.registry().roles().collect();
                 self.overlays.open(Overlay::Browser(
-                    browser::Browser::open(self.modules.clone(), world, at, area).with_roles(roles),
+                    browser::Browser::open(self.modules.clone(), world, at, area)
+                        .with_builtins(crate::builtin::ALL)
+                        .with_roles(roles),
                 ));
             }
             CanvasEvent::ClearClip { module, widget } => self.reset_clip((module, widget), false),

@@ -263,6 +263,15 @@ impl Hierarchy {
         self.slots.get(self.ids.path_of(id)?)
     }
 
+    /// True when the sub-patch tile `instance` holds a slot directly, which
+    /// Dissolve sub-patch refuses until slots move with their part (#702).
+    pub fn holds_slot(&self, instance: ModuleId) -> bool {
+        let Some(path) = self.ids.path_of(instance) else {
+            return false;
+        };
+        self.slots.keys().any(|p| p.parent().as_ref() == Some(path))
+    }
+
     /// The slot at `level` whose part is the member `lid`.
     pub(super) fn slot_owning(&self, level: &ModulePath, lid: u32) -> Option<(&ModulePath, &SlotState)> {
         self.slots

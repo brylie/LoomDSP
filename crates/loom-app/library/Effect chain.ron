@@ -1,0 +1,46 @@
+// The Effect chain (MT-STRUCT-04), built into LoomDSP: three effect slots
+// in series, each with its own mix (docs/design/sub-patches.md, Built-in
+// abstractions). Each mix is a Crossfade on the Linear law: the dry signal
+// on A, the slot's output on B. An empty effect slot passes its input
+// through, so taking an effect out leaves the chain playing.
+// examples/patches/effect-chain.ron holds the same definition; a test
+// keeps the two equal.
+Patch(
+    version: 1,
+    metadata: Metadata(
+        name: "Effect chain",
+        description: "Three effects in series, each in a slot you can swap, with a mix of its own that stays with the slot.",
+        authors: ["LoomDSP contributors"],
+        license: "CC0-1.0",
+    ),
+    modules: [
+        PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in"), position: Some((0.0, 0.0))),
+        PatchModule(id: 2, kind: "loom.eq.eq@1", params: {"high_gain": -3.0}, position: Some((192.0, 0.0))),
+        PatchModule(id: 3, kind: "loom.dyn.dynamics@1", params: {"threshold": -12.0, "ratio": 2.0, "output": 3.0}, position: Some((576.0, 0.0))),
+        PatchModule(id: 4, kind: "loom.time.delay@1", params: {"time": 0.3}, position: Some((960.0, 0.0))),
+        PatchModule(id: 5, kind: "loom.mix.crossfade@1", label: Some("Effect 1 mix"), params: {"mix": 1.0, "law": 1.0}, position: Some((384.0, 0.0))),
+        PatchModule(id: 6, kind: "loom.mix.crossfade@1", label: Some("Effect 2 mix"), params: {"mix": 1.0, "law": 1.0}, position: Some((768.0, 0.0))),
+        PatchModule(id: 7, kind: "loom.mix.crossfade@1", label: Some("Effect 3 mix"), params: {"mix": 0.3, "law": 1.0}, position: Some((1152.0, 0.0))),
+        PatchModule(id: 8, kind: "loom.struct.output@1", label: Some("out"), position: Some((1344.0, 0.0))),
+        PatchModule(id: 10, kind: "loom.struct.slot@1", label: Some("Effect 1"), slot: Some(Slot(role: "loom.role.effect@1", part: Some(2))), position: Some((192.0, 0.0))),
+        PatchModule(id: 11, kind: "loom.struct.slot@1", label: Some("Effect 2"), slot: Some(Slot(role: "loom.role.effect@1", part: Some(3))), position: Some((576.0, 0.0))),
+        PatchModule(id: 12, kind: "loom.struct.slot@1", label: Some("Effect 3"), slot: Some(Slot(role: "loom.role.effect@1", part: Some(4))), position: Some((960.0, 0.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (10, "in")),
+        PatchCable(from: (1, "out"), to: (5, "a")),
+        PatchCable(from: (10, "out"), to: (5, "b")),
+        PatchCable(from: (5, "out"), to: (11, "in")),
+        PatchCable(from: (5, "out"), to: (6, "a")),
+        PatchCable(from: (11, "out"), to: (6, "b")),
+        PatchCable(from: (6, "out"), to: (12, "in")),
+        PatchCable(from: (6, "out"), to: (7, "a")),
+        PatchCable(from: (12, "out"), to: (7, "b")),
+        PatchCable(from: (7, "out"), to: (8, "in")),
+    ],
+    exposed: [
+        Exposed(name: "effect 1 mix", module: 5, param: "mix"),
+        Exposed(name: "effect 2 mix", module: 6, param: "mix"),
+        Exposed(name: "effect 3 mix", module: 7, param: "mix"),
+    ],
+)

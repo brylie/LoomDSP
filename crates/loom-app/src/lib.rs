@@ -16,6 +16,7 @@ mod bars;
 mod bench;
 mod boot;
 mod browser;
+mod builtin;
 mod canvas_events;
 mod clip;
 mod clipboard;
@@ -1658,6 +1659,10 @@ impl App {
             browser::Outcome::AddSlot(role, world) => {
                 self.overlays.close_browser();
                 self.add_empty_slot(role, world);
+            }
+            browser::Outcome::InsertBuiltin(builtin, world) => {
+                self.overlays.close_browser();
+                self.insert_builtin(builtin, world);
             }
         }
     }
