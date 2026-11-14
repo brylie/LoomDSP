@@ -25,6 +25,40 @@ pub fn make_slot_label(role: &RoleDescriptor) -> String {
     format!("Make {} slot", role.name)
 }
 
+/// The status bar text after an empty slot is added from the module
+/// browser (sub-patches.md, Empty slots).
+pub fn added_slot_text(name: &str) -> String {
+    format!("Added {name} slot. Swap a part in from its menu or the inspector.")
+}
+
+/// The note an empty slot's tile draws and a screen reader reads: a thru
+/// role says it passes its input through (sub-patches.md, Empty slots).
+pub fn no_part_text(role: &RoleDescriptor) -> &'static str {
+    if role.thru {
+        "No part. Passes its input through. Swap to choose one."
+    } else {
+        "No part. Swap to choose one."
+    }
+}
+
+/// The status bar text after Remove part, naming the parameters whose
+/// assignments or mappings were removed, as a swap does
+/// (sub-patches.md, Empty slots).
+pub fn removed_part_text(slot_name: &str, part_name: &str, removed: &[String]) -> String {
+    let done = format!("Removed {part_name} from {slot_name}.");
+    let mut names: Vec<&str> = Vec::new();
+    for label in removed {
+        if !names.contains(&label.as_str()) {
+            names.push(label);
+        }
+    }
+    match removed.len() {
+        0 => done,
+        1 => format!("{done} 1 modulation on {} was removed.", removed[0]),
+        n => format!("{done} {n} modulations on {} were removed.", names.join(", ")),
+    }
+}
+
 /// The status bar text after Make slot, naming the cables on ports the
 /// role does not have, which were removed.
 pub fn made_slot_text(role: &RoleDescriptor, removed: &[String]) -> String {
@@ -135,8 +169,9 @@ impl SlotState {
 /// A crossfade in progress on a slot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fading {
-    /// The level id of the part that is leaving.
-    pub leaving: u32,
+    /// The level id of the part that is leaving, or `None` when a part
+    /// fades into an empty thru slot from the thru signal.
+    pub leaving: Option<u32>,
     /// One swap fade per role output that both parts have: the role
     /// output's name and the fade's flat id.
     pub fades: Vec<(String, ModuleId)>,
@@ -168,6 +203,19 @@ pub struct Swapped {
     pub removed: Vec<String>,
 }
 
+/// What Remove part did. The caller syncs and commits; it leaves `gone`
+/// out of its sync and removes those modules after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Emptied {
+    /// The display name of the part that left.
+    pub part_name: String,
+    /// The labels of the parameters and outputs whose assignments or
+    /// mappings were removed.
+    pub removed: Vec<String>,
+    /// Modules that go now, with no fade.
+    pub gone: Vec<ModuleId>,
+}
+
 /// A sub-patch a slot holds but does not play: its definition and the
 /// definitions nested in it, as a file keeps them.
 #[derive(Debug, Clone, PartialEq)]
@@ -187,6 +235,10 @@ pub(super) struct FadeWiring {
     /// The new part's outputs whose cables move onto a fade's `out`, as
     /// `(part output, fade output)`.
     pub reroute: Vec<(End, End)>,
+    /// Inputs a fade's `out` feeds in place of whatever the flat graph
+    /// feeds them, as `(input, fade output)`: a part fading out to an
+    /// empty thru slot's signal, by destination.
+    pub retarget: Vec<(End, End)>,
 }
 
 impl Hierarchy {
@@ -238,7 +290,7 @@ impl Hierarchy {
         }
         self.slots.iter().any(|(p, s)| {
             p.parent().as_ref() == Some(&level)
-                && (s.part == Some(path.last()) || s.fading.as_ref().is_some_and(|f| f.leaving == path.last()))
+                && (s.part == Some(path.last()) || s.fading.as_ref().is_some_and(|f| f.leaving == Some(path.last())))
         })
     }
 
@@ -250,15 +302,17 @@ impl Hierarchy {
         for (path, state) in &self.slots {
             let Some(fading) = &state.fading else { continue };
             let level = path.parent().unwrap_or_else(ModulePath::root);
-            if let Some(id) = self.ids.get(&level.child(fading.leaving)) {
-                ids.insert(id);
-            }
-            for inner in self
-                .ids
-                .paths()
-                .filter(|(p, _)| p.starts_with(&level.child(fading.leaving)) && **p != level.child(fading.leaving))
-            {
-                ids.insert(inner.1);
+            if let Some(leaving) = fading.leaving.map(|lid| level.child(lid)) {
+                if let Some(id) = self.ids.get(&leaving) {
+                    ids.insert(id);
+                }
+                for inner in self
+                    .ids
+                    .paths()
+                    .filter(|(p, _)| p.starts_with(&leaving) && **p != leaving)
+                {
+                    ids.insert(inner.1);
+                }
             }
             ids.extend(fading.fades.iter().map(|(_, id)| *id));
         }
@@ -278,9 +332,9 @@ impl Hierarchy {
             // The leaving part and the fades keep their paths and flat ids,
             // which a snapshot taken before them does not have.
             let level = path.parent().unwrap_or_else(ModulePath::root);
-            let leaving = level.child(fading.leaving);
+            let leaving = fading.leaving.map(|lid| level.child(lid));
             for (p, id) in live.ids.paths() {
-                if p.starts_with(&leaving) || p.parent().as_ref() == Some(path) {
+                if leaving.as_ref().is_some_and(|l| p.starts_with(l)) || p.parent().as_ref() == Some(path) {
                     let _ = self.ids.reserve(p.clone(), id);
                 }
             }
@@ -396,7 +450,7 @@ impl Hierarchy {
     /// The slot at `level` whose leaving part is `lid`.
     fn slot_leaving(&self, level: &ModulePath, lid: u32) -> Option<(&ModulePath, &SlotState)> {
         self.slots.iter().find(|(path, state)| {
-            path.parent().as_ref() == Some(level) && state.fading.as_ref().is_some_and(|f| f.leaving == lid)
+            path.parent().as_ref() == Some(level) && state.fading.as_ref().is_some_and(|f| f.leaving == Some(lid))
         })
     }
 
@@ -407,35 +461,143 @@ impl Hierarchy {
     pub(super) fn fade_wiring(&self, graph: &Graph) -> FadeWiring {
         let mut wiring = FadeWiring::default();
         for (slot_path, state) in &self.slots {
-            let (Some(fading), Some(part)) = (&state.fading, state.part) else {
-                continue;
-            };
+            let Some(fading) = &state.fading else { continue };
             let level = slot_path.parent().unwrap_or_else(ModulePath::root);
             let slot_lid = slot_path.last();
+            // What feeds the slot's role input `name`, at the flat level.
+            let fed = |name: &str| -> Option<(ModuleId, String)> {
+                let link = self.links_at(&level).find(|l| l.to == (slot_lid, name.to_string()))?;
+                self.source_behind(graph, &level, &link.from)
+            };
             for (role_out, fade) in &fading.fades {
-                if let Some((l, l_out)) = self.part_output(graph, &level, fading.leaving, role_out) {
+                // `a`: the leaving part, or the thru signal a part fades in
+                // from (sub-patches.md, Empty slots).
+                let a = match fading.leaving {
+                    Some(leaving) => self.part_output(graph, &level, leaving, role_out),
+                    None => fed(loom_core::THRU_IN),
+                };
+                if let Some((l, l_out)) = a {
                     wiring.add.push(((l.0, l_out), (fade.0, "a".to_string())));
                 }
-                if let Some((p, p_out)) = self.part_output(graph, &level, part, role_out) {
-                    wiring.add.push(((p.0, p_out.clone()), (fade.0, "b".to_string())));
-                    wiring.reroute.push(((p.0, p_out), (fade.0, "out".to_string())));
+                match state.part {
+                    Some(part) => {
+                        if let Some((p, p_out)) = self.part_output(graph, &level, part, role_out) {
+                            wiring.add.push(((p.0, p_out.clone()), (fade.0, "b".to_string())));
+                            wiring.reroute.push(((p.0, p_out), (fade.0, "out".to_string())));
+                        }
+                    }
+                    None => {
+                        // A part fading out to the thru: `b` is the thru
+                        // signal, and the fade takes over only the inputs
+                        // the slot's output fed, by destination, so other
+                        // inputs the thru source feeds are untouched. With
+                        // nothing on `in`, the part fades to 0.
+                        if let Some((x, x_out)) = fed(loom_core::THRU_IN) {
+                            wiring.add.push(((x.0, x_out), (fade.0, "b".to_string())));
+                        }
+                        let dests: Vec<End> = self
+                            .links_at(&level)
+                            .filter(|l| l.from == (slot_lid, role_out.clone()))
+                            .map(|l| l.to.clone())
+                            .collect();
+                        for dest in dests {
+                            for (to, input) in self.inputs_behind(graph, &level, &dest) {
+                                wiring.retarget.push(((to.0, input), (fade.0, "out".to_string())));
+                            }
+                        }
+                    }
                 }
             }
-            for role_in in state.role.inputs {
-                for link in self.links_at(&level) {
-                    if link.to != (slot_lid, role_in.name.to_string()) {
-                        continue;
-                    }
-                    let Some(src) = self.source_behind(graph, &level, &link.from) else {
-                        continue;
-                    };
-                    for dest in self.part_inputs(graph, &level, fading.leaving, role_in.name) {
+            // The leaving part keeps its inputs while it fades.
+            if let Some(leaving) = fading.leaving {
+                for role_in in state.role.inputs {
+                    let Some(src) = fed(role_in.name) else { continue };
+                    for dest in self.part_inputs(graph, &level, leaving, role_in.name) {
                         wiring.add.push(((src.0.0, src.1.clone()), (dest.0.0, dest.1)));
                     }
                 }
             }
         }
         wiring
+    }
+
+    /// Adds one swap fade per `(role output, law)` under the slot at
+    /// `slot_path`, with its law set (sub-patches.md, How a swap
+    /// crossfades). Returns them as `(role output, flat id)`.
+    fn add_fades(
+        &mut self,
+        controller: &mut Controller,
+        slot_path: &ModulePath,
+        outputs: Vec<(String, Law)>,
+    ) -> Result<Vec<(String, ModuleId)>, String> {
+        let mut made = Vec::new();
+        for (role_out, law) in outputs {
+            let k = self.next_level_id(slot_path);
+            let fade_path = slot_path.child(k);
+            let fade_id = self.ids.id_of(&fade_path).map_err(|e| e.to_string())?;
+            controller
+                .add_module_with_id(fade_id, FADE_KIND)
+                .map_err(|e| e.to_string())?;
+            made.push((role_out, fade_id));
+            controller
+                .set_param_named(fade_id, "law", fade_law_value(law))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(made)
+    }
+
+    /// True when a swap into or out of the empty slot at `slot_path` fades
+    /// from or to its thru signal: a thru role, outside a stack of more
+    /// than one copy, whose swaps step until each copy has its own thru
+    /// wiring (sub-patches.md, Empty slots).
+    fn fades_with_thru(&self, slot_path: &ModulePath) -> bool {
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        self.slots.get(slot_path).is_some_and(|s| s.role.thru) && !self.in_stack(&level)
+    }
+
+    /// The thru output of the slot at `slot_path` that `part` (a level id)
+    /// has, for a fade between the part and the thru signal: Linear, since
+    /// the dry signal and the signal through the part are nearly the same.
+    fn thru_fade_outputs(&self, graph: &Graph, slot_path: &ModulePath, part: u32) -> Vec<(String, Law)> {
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        let out = loom_core::THRU_OUT;
+        if self.part_output(graph, &level, part, out).is_some() {
+            vec![(out.to_string(), Law::Linear)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Adds an empty slot for `role` at `level`, labelled with the role's
+    /// name made unique among the level's slots ("Filter 2"), as one tile
+    /// with no part (sub-patches.md, Empty slots). Refused at a layer or
+    /// select member level. Nothing is added to the graph: a slot is routed
+    /// through, and an empty one has nothing behind it. The caller syncs
+    /// and commits.
+    pub fn add_empty_slot(&mut self, level: &ModulePath, role: &'static RoleDescriptor) -> Result<ModuleId, String> {
+        if let Some(why) = self.level_refusal(level) {
+            return Err(why);
+        }
+        let taken: BTreeSet<String> = self
+            .slots
+            .iter()
+            .filter(|(path, _)| path.parent().as_ref() == Some(level))
+            .map(|(_, state)| state.name())
+            .collect();
+        let label = crate::unique_name(role.name, |name| taken.contains(name));
+        let (slot_path, slot_id) = self.new_module(level).map_err(|e| e.to_string())?;
+        self.slots.insert(
+            slot_path,
+            SlotState {
+                role,
+                part: None,
+                part_fills: None,
+                held: BTreeMap::new(),
+                label: (label != role.name).then_some(label),
+                fading: None,
+            },
+        );
+        Ok(slot_id)
     }
 
     /// Makes the module or sub-patch tile `member` the part of a new slot
@@ -691,7 +853,10 @@ impl Hierarchy {
             return Vec::new();
         };
         let mut removed: Vec<ModuleId> = fading.fades.iter().map(|(_, id)| *id).collect();
-        let leaving = level.child(fading.leaving);
+        let Some(leaving) = fading.leaving.map(|lid| level.child(lid)) else {
+            // A part faded in from the thru: only the fades go.
+            return removed;
+        };
         if self.instances.contains_key(&leaving) {
             // A leaving sub-patch part: everything under it goes.
             let under: Vec<ModulePath> = self
@@ -948,9 +1113,17 @@ impl Hierarchy {
             removed.append(&mut gone);
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.fading = Some(Fading {
-                leaving: old_part.expect("old_id came from it"),
+                leaving: old_part,
                 fades,
             });
+        } else if self.fades_with_thru(&slot_path) {
+            // Into an empty thru slot: the part fades in from the thru
+            // signal (sub-patches.md, Empty slots).
+            let outputs = self.thru_fade_outputs(controller.graph(), &slot_path, new_path.last());
+            let fades = self.add_fades(controller, &slot_path, outputs)?;
+            added.extend(fades.iter().map(|(_, id)| *id));
+            let record = self.slots.get_mut(&slot_path).expect("checked above");
+            record.fading = Some(Fading { leaving: None, fades });
         }
         Ok(Swapped {
             part: new_id,
@@ -1051,9 +1224,17 @@ impl Hierarchy {
             removed.append(&mut gone);
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.fading = Some(Fading {
-                leaving: old_part.expect("old_id came from it"),
+                leaving: old_part,
                 fades,
             });
+        } else if self.fades_with_thru(&slot_path) {
+            // Into an empty thru slot: the part fades in from the thru
+            // signal (sub-patches.md, Empty slots).
+            let outputs = self.thru_fade_outputs(controller.graph(), &slot_path, new_path.last());
+            let fades = self.add_fades(controller, &slot_path, outputs)?;
+            added.extend(fades.iter().map(|(_, id)| *id));
+            let record = self.slots.get_mut(&slot_path).expect("checked above");
+            record.fading = Some(Fading { leaving: None, fades });
         }
         Ok(Swapped {
             part: new_id,
@@ -1121,6 +1302,116 @@ impl Hierarchy {
             }
         }
         Ok(swapped)
+    }
+
+    /// Remove part: empties the slot tile `slot` (sub-patches.md, Empty
+    /// slots). The leaving part goes into `held`, so swapping it back
+    /// restores its values. Assignments and MIDI mappings on it, and
+    /// assignments from it, have nowhere to go: they are removed, and
+    /// their labels returned for the status text. A thru role outside a
+    /// stack fades the part out to the thru signal, Linear; any other slot
+    /// lets it go at once, and `Emptied::gone` names the modules the caller
+    /// leaves out of its sync and then removes. A fade in progress is
+    /// finished first. Refused on an empty slot.
+    pub fn swap_to_empty(
+        &mut self,
+        controller: &mut Controller,
+        layout: &dyn Fn(u32) -> Layout,
+        slot: ModuleId,
+    ) -> Result<Emptied, String> {
+        let slot_path = self
+            .ids
+            .path_of(slot)
+            .cloned()
+            .ok_or_else(|| "select a slot".to_string())?;
+        let Some(old_lid) = self.slots.get(&slot_path).and_then(|s| s.part) else {
+            return Err("it holds no part".to_string());
+        };
+        self.finish_fade(controller, slot);
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        let old_path = level.child(old_lid);
+        let old_id = self
+            .ids
+            .get(&old_path)
+            .ok_or_else(|| "its part is missing".to_string())?;
+        let part_name = self
+            .tile_name(old_id)
+            .or_else(|| controller.graph().node(old_id).map(|n| n.descriptor.name.to_string()))
+            .unwrap_or_default();
+        // Worked out while the part is still the slot's.
+        let fade_outputs = if self.fades_with_thru(&slot_path) {
+            Some(self.thru_fade_outputs(controller.graph(), &slot_path, old_lid))
+        } else {
+            None
+        };
+        self.hold_part(controller.graph(), controller.registry(), layout, &slot_path);
+        let removed = self.drop_links_under(controller, &old_path);
+        {
+            let record = self.slots.get_mut(&slot_path).expect("checked above");
+            record.part = None;
+            record.part_fills = None;
+        }
+        let gone = match fade_outputs {
+            Some(outputs) => {
+                let fades = self.add_fades(controller, &slot_path, outputs)?;
+                let record = self.slots.get_mut(&slot_path).expect("checked above");
+                record.fading = Some(Fading {
+                    leaving: Some(old_lid),
+                    fades,
+                });
+                Vec::new()
+            }
+            None => {
+                // No fade: the part goes now, as a pulled cable does.
+                let record = self.slots.get_mut(&slot_path).expect("checked above");
+                record.fading = Some(Fading {
+                    leaving: Some(old_lid),
+                    fades: Vec::new(),
+                });
+                self.end_fade(&slot_path)
+            }
+        };
+        Ok(Emptied {
+            part_name,
+            removed,
+            gone,
+        })
+    }
+
+    /// Removes every assignment onto or from a module under `part`, and
+    /// every MIDI mapping onto one, returning their labels as a swap's
+    /// status names them.
+    fn drop_links_under(&self, controller: &mut Controller, part: &ModulePath) -> Vec<String> {
+        let graph = controller.graph();
+        let under = |id: ModuleId| self.ids.path_of(id).is_some_and(|p| p.starts_with(part));
+        let mut labels = Vec::new();
+        let mut drops = Vec::new();
+        for (aid, a) in graph.assignments() {
+            if under(a.target) {
+                let param = crate::param_name(graph, a.target, a.param);
+                labels.push(param_label(graph, a.target, &param));
+                drops.push(aid);
+            } else if under(a.source.module) {
+                labels.push(format!("{} (a modulation source)", crate::port_name(graph, a.source)));
+                drops.push(aid);
+            }
+        }
+        let unmaps: Vec<(ModuleId, usize, String)> = graph
+            .midi_mappings()
+            .filter(|(_, m)| under(m.target))
+            .map(|(_, m)| {
+                let param = crate::param_name(graph, m.target, m.param);
+                (m.target, m.param, param_label(graph, m.target, &param))
+            })
+            .collect();
+        for aid in drops {
+            let _ = controller.remove_assignment(aid);
+        }
+        for (target, param, label) in unmaps {
+            let _ = controller.unmap_midi(target, param);
+            labels.push(label);
+        }
+        labels
     }
 
     /// The flat parameter behind the role parameter `param` of a sub-patch
@@ -1259,29 +1550,20 @@ impl Hierarchy {
                 Some((role_out.clone(), OutputRef { module: id, port }))
             })
             .collect();
-        let mut fades_made = Vec::new();
-        let mut added = Vec::new();
-        for role_out in fade_outputs {
-            let k = self.next_level_id(slot_path);
-            let fade_path = slot_path.child(k);
-            let fade_id = self.ids.id_of(&fade_path).map_err(|e| e.to_string())?;
-            controller
-                .add_module_with_id(fade_id, FADE_KIND)
-                .map_err(|e| e.to_string())?;
-            added.push(fade_id);
-            if let Some(law) = new_state
-                .role
-                .outputs
-                .iter()
-                .find(|o| o.name == role_out)
-                .and_then(fade_law)
-            {
-                controller
-                    .set_param_named(fade_id, "law", fade_law_value(law))
-                    .map_err(|e| e.to_string())?;
-            }
-            fades_made.push((role_out, fade_id));
-        }
+        let with_laws: Vec<(String, Law)> = fade_outputs
+            .into_iter()
+            .filter_map(|role_out| {
+                let law = new_state
+                    .role
+                    .outputs
+                    .iter()
+                    .find(|o| o.name == role_out)
+                    .and_then(fade_law)?;
+                Some((role_out, law))
+            })
+            .collect();
+        let fades_made = self.add_fades(controller, slot_path, with_laws)?;
+        let added: Vec<ModuleId> = fades_made.iter().map(|(_, id)| *id).collect();
         let through_fade: Vec<(OutputRef, ModuleId)> = fades_made
             .iter()
             .filter_map(|(role_out, fade)| {

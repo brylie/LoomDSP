@@ -39,8 +39,9 @@ mod modes;
 pub use modes::{MEMBER_LID, PlayingMember};
 mod slots;
 pub use slots::{
-    Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, expose_role_only_text, made_slot_text,
-    make_slot_label, swapped_text,
+    Emptied, Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, added_slot_text,
+    expose_role_only_text, fade_law, fade_law_value, made_slot_text, make_slot_label, no_part_text, removed_part_text,
+    swapped_text,
 };
 
 /// The status bar text when Dissolve is asked for a sub-patch that holds
@@ -733,131 +734,139 @@ impl Hierarchy {
     /// output itself, what is behind an instance's output port, or what
     /// feeds a Patch input from outside. `None` when nothing does.
     pub fn source_behind(&self, graph: &Graph, level: &ModulePath, end: &End) -> Option<(ModuleId, String)> {
-        self.source_behind_guarded(graph, level, end, &mut Vec::new())
-    }
-
-    fn source_behind_guarded(
-        &self,
-        graph: &Graph,
-        level: &ModulePath,
-        end: &End,
-        seen: &mut Vec<(ModulePath, End)>,
-    ) -> Option<(ModuleId, String)> {
-        let key = (level.clone(), end.clone());
-        if seen.contains(&key) {
-            return None;
-        }
-        seen.push(key);
-        let path = level.child(end.0);
-        if let Some(port) = self.ports.get(&path) {
-            if port.direction != Direction::Input || end.1 != "out" {
+        // A loop, not recursion, so a long chain of pass-through ports or
+        // empty thru slots cannot overflow the stack.
+        let mut seen: BTreeSet<(ModulePath, End)> = BTreeSet::new();
+        let (mut level, mut end) = (level.clone(), end.clone());
+        loop {
+            if !seen.insert((level.clone(), end.clone())) {
                 return None;
             }
-            // What feeds the instance's port, one level up.
-            let parent = level.parent()?;
-            let link = self.link_into(&parent, &(level.last(), port.name.clone()))?;
-            return self.source_behind_guarded(graph, &parent, &link.from, seen);
-        }
-        if self.instances.contains_key(&path) {
-            // A mode's sum or select stands behind the port.
-            if let Some(added) = self.added_output(&path, &end.1) {
-                return Some((added, "out".to_string()));
+            let path = level.child(end.0);
+            if let Some(port) = self.ports.get(&path) {
+                if port.direction != Direction::Input || end.1 != "out" {
+                    return None;
+                }
+                // What feeds the instance's port, one level up.
+                let parent = level.parent()?;
+                let link = self.link_into(&parent, &(level.last(), port.name.clone()))?;
+                (level, end) = (parent, link.from.clone());
+                continue;
             }
-            // A layer of one member: the member's port.
-            if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
-                let member = *modes.members.first()?;
-                return self.source_behind_guarded(graph, &path, &(member, end.1.clone()), seen);
+            if self.instances.contains_key(&path) {
+                // A mode's sum or select stands behind the port.
+                if let Some(added) = self.added_output(&path, &end.1) {
+                    return Some((added, "out".to_string()));
+                }
+                // A layer of one member: the member's port.
+                if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
+                    let member = *modes.members.first()?;
+                    end = (member, end.1.clone());
+                    level = path;
+                    continue;
+                }
+                let port_path = self.port_path(&path, Direction::Output, &end.1)?;
+                let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
+                (level, end) = (path, link.from.clone());
+                continue;
             }
-            let port_path = self.port_path(&path, Direction::Output, &end.1)?;
-            let link = self.link_into(&path, &(port_path.last(), "in".to_string()))?;
-            return self.source_behind_guarded(graph, &path, &link.from, seen);
+            if let Some(slot) = self.slots.get(&path) {
+                // A slot's role output: the part's own output behind it.
+                slot.role.output(&end.1)?;
+                let Some(part) = slot.part else {
+                    // An empty thru slot passes on what feeds its `in`
+                    // (ADR-0043); any other empty slot has nothing.
+                    if slot.role.thru && end.1 == loom_core::THRU_OUT {
+                        let link = self.link_into(&level, &(end.0, loom_core::THRU_IN.to_string()))?;
+                        end = link.from.clone();
+                        continue;
+                    }
+                    return None;
+                };
+                let own = if self.instances.contains_key(&level.child(part)) {
+                    end.1.clone()
+                } else {
+                    slot.own_output(&end.1)
+                };
+                end = (part, own);
+                continue;
+            }
+            let id = self.ids.get(&path)?;
+            let node = graph.node(id)?;
+            node.output_index(&end.1)?;
+            return Some((id, end.1.clone()));
         }
-        if let Some(slot) = self.slots.get(&path) {
-            // A slot's role output: the part's own output behind it.
-            slot.role.output(&end.1)?;
-            let part = slot.part?;
-            let own = if self.instances.contains_key(&level.child(part)) {
-                end.1.clone()
-            } else {
-                slot.own_output(&end.1)
-            };
-            return self.source_behind_guarded(graph, level, &(part, own), seen);
-        }
-        let id = self.ids.get(&path)?;
-        let node = graph.node(id)?;
-        node.output_index(&end.1)?;
-        Some((id, end.1.clone()))
     }
 
     /// The flat inputs that stand behind an input end of `level`: a
     /// module's input itself, every inner input an instance's port feeds,
-    /// or what a Patch output feeds outside.
+    /// what a Patch output feeds outside, or what an empty thru slot's
+    /// `out` feeds.
     pub fn inputs_behind(&self, graph: &Graph, level: &ModulePath, end: &End) -> Vec<(ModuleId, String)> {
+        // A work stack, not recursion, so a long chain cannot overflow the
+        // stack; an end met twice is followed once.
         let mut found = Vec::new();
-        self.inputs_behind_guarded(graph, level, end, &mut Vec::new(), &mut found);
-        found
-    }
-
-    fn inputs_behind_guarded(
-        &self,
-        graph: &Graph,
-        level: &ModulePath,
-        end: &End,
-        seen: &mut Vec<(ModulePath, End)>,
-        found: &mut Vec<(ModuleId, String)>,
-    ) {
-        let key = (level.clone(), end.clone());
-        if seen.contains(&key) {
-            return;
-        }
-        seen.push(key);
-        let path = level.child(end.0);
-        if let Some(port) = self.ports.get(&path) {
-            if port.direction != Direction::Output || end.1 != "in" {
-                return;
+        let mut seen: BTreeSet<(ModulePath, End)> = BTreeSet::new();
+        let mut work = vec![(level.clone(), end.clone())];
+        while let Some((level, end)) = work.pop() {
+            if !seen.insert((level.clone(), end.clone())) {
+                continue;
             }
-            let Some(parent) = level.parent() else { return };
-            let outside = (level.last(), port.name.clone());
-            for link in self.links_from(&parent, &outside) {
-                self.inputs_behind_guarded(graph, &parent, &link.to, seen, found);
-            }
-            return;
-        }
-        if self.instances.contains_key(&path) {
-            // A layer or select: every member's port of that name.
-            if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
-                for member in modes.members.clone() {
-                    self.inputs_behind_guarded(graph, &path, &(member, end.1.clone()), seen, found);
+            let path = level.child(end.0);
+            if let Some(port) = self.ports.get(&path) {
+                if port.direction != Direction::Output || end.1 != "in" {
+                    continue;
                 }
-                return;
+                let Some(parent) = level.parent() else { continue };
+                let outside = (level.last(), port.name.clone());
+                let next: Vec<End> = self.links_from(&parent, &outside).map(|l| l.to.clone()).collect();
+                work.extend(next.into_iter().rev().map(|to| (parent.clone(), to)));
+                continue;
             }
-            let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
-                return;
-            };
-            let inside = (port_path.last(), "out".to_string());
-            for link in self.links_from(&path, &inside) {
-                self.inputs_behind_guarded(graph, &path, &link.to, seen, found);
+            if self.instances.contains_key(&path) {
+                // A layer or select: every member's port of that name.
+                if let Some(modes) = self.modes_at(&path).filter(|m| m.mode.has_members()) {
+                    let members = modes.members.clone();
+                    work.extend(members.into_iter().rev().map(|m| (path.clone(), (m, end.1.clone()))));
+                    continue;
+                }
+                let Some(port_path) = self.port_path(&path, Direction::Input, &end.1) else {
+                    continue;
+                };
+                let inside = (port_path.last(), "out".to_string());
+                let next: Vec<End> = self.links_from(&path, &inside).map(|l| l.to.clone()).collect();
+                work.extend(next.into_iter().rev().map(|to| (path.clone(), to)));
+                continue;
             }
-            return;
-        }
-        if let Some(slot) = self.slots.get(&path) {
-            if slot.role.input(&end.1).is_none() {
-                return;
+            if let Some(slot) = self.slots.get(&path) {
+                if slot.role.input(&end.1).is_none() {
+                    continue;
+                }
+                let Some(part) = slot.part else {
+                    // An empty thru slot passes its `in` on to what its
+                    // `out` feeds (ADR-0043).
+                    if slot.role.thru && end.1 == loom_core::THRU_IN {
+                        let out = (end.0, loom_core::THRU_OUT.to_string());
+                        let next: Vec<End> = self.links_from(&level, &out).map(|l| l.to.clone()).collect();
+                        work.extend(next.into_iter().rev().map(|to| (level.clone(), to)));
+                    }
+                    continue;
+                };
+                let own = if self.instances.contains_key(&level.child(part)) {
+                    end.1.clone()
+                } else {
+                    slot.own_input(&end.1)
+                };
+                work.push((level, (part, own)));
+                continue;
             }
-            let Some(part) = slot.part else { return };
-            let own = if self.instances.contains_key(&level.child(part)) {
-                end.1.clone()
-            } else {
-                slot.own_input(&end.1)
-            };
-            self.inputs_behind_guarded(graph, level, &(part, own), seen, found);
-            return;
+            if let Some(id) = self.ids.get(&path)
+                && graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some())
+            {
+                found.push((id, end.1.clone()));
+            }
         }
-        if let Some(id) = self.ids.get(&path)
-            && graph.node(id).is_some_and(|n| n.input_index(&end.1).is_some())
-        {
-            found.push((id, end.1.clone()));
-        }
+        found
     }
 
     /// The path of the port tile named `name` facing `direction` inside
@@ -1544,6 +1553,10 @@ impl Hierarchy {
                 desired.remove(&(from, to.clone()));
                 desired.insert((fade_out.clone(), to));
             }
+        }
+        for (input, fade_out) in &wiring.retarget {
+            desired.retain(|(_, to)| to != input);
+            desired.insert((fade_out.clone(), input.clone()));
         }
         desired.extend(wiring.add);
         let current = graph_cables(controller.graph());

@@ -771,3 +771,199 @@ fn a_swap_sets_each_fade_law_from_the_output_signal_type() {
     assert_eq!(fade_law_value(loom_dsp::blend::Law::EqualPower), 0.0);
     assert_eq!(fade_law_value(loom_dsp::blend::Law::Linear), 1.0);
 }
+
+/// A sine into an empty Filter slot into the output, and an empty
+/// Envelope slot whose output drives nothing yet.
+const EMPTY_SLOTS: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Empty slots"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1"))),
+        PatchModule(id: 10, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.envelope@1"))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// An empty slot from the browser has no part, takes the role's name made
+/// unique among the level's slots, and adds nothing to the graph
+/// (sub-patches.md, Empty slots).
+#[test]
+fn an_empty_slot_is_named_by_its_role_and_adds_no_module() {
+    let (mut controller, mut hierarchy) = load(&Patch::from_ron(EMPTY_SLOTS).unwrap());
+    let before = controller.graph().nodes().count();
+    let slot = hierarchy
+        .add_empty_slot(&ModulePath::root(), &roles::FILTER)
+        .expect("a slot at the top level");
+    hierarchy.sync(&mut controller).expect("syncs");
+    assert_eq!(
+        controller.graph().nodes().count(),
+        before,
+        "an empty slot is routed through"
+    );
+    let state = hierarchy.slot(slot).expect("a slot");
+    assert_eq!(state.part, None);
+    assert_eq!(
+        state.name(),
+        "Filter 2",
+        "the file's empty Filter slot has the plain name"
+    );
+    let third = hierarchy.add_empty_slot(&ModulePath::root(), &roles::EFFECT).unwrap();
+    assert_eq!(hierarchy.slot(third).unwrap().name(), "Effect");
+}
+
+/// The hierarchy follows an empty thru slot as the flattener does: what
+/// stands behind its `out` is what feeds its `in`, and the inputs behind
+/// its `in` are what its `out` feeds. An empty slot of another role has
+/// nothing behind it.
+#[test]
+fn the_hierarchy_follows_an_empty_thru_slot_as_the_flattener_does() {
+    let (controller, hierarchy) = load(&Patch::from_ron(EMPTY_SLOTS).unwrap());
+    let graph = controller.graph();
+    let root = ModulePath::root();
+    let sine = module_of(&controller, "loom.osc.sine");
+    let out = module_of(&controller, "loom.io.audio-out");
+    assert_eq!(
+        hierarchy.source_behind(graph, &root, &(9, "out".into())),
+        Some((sine, "out".to_string()))
+    );
+    assert_eq!(
+        hierarchy.inputs_behind(graph, &root, &(9, "in".into())),
+        vec![(out, "in".to_string())]
+    );
+    assert!(cables(&controller).contains(&((sine.0, "out".into()), (out.0, "in".into()))));
+    assert_eq!(hierarchy.source_behind(graph, &root, &(10, "out".into())), None);
+}
+
+/// Remove part on a thru slot keeps the part, fading it out to the thru
+/// signal with one Linear fade, and holds its values; on any other slot
+/// the part goes at once (sub-patches.md, Empty slots).
+#[test]
+fn remove_part_fades_a_thru_slot_and_lets_any_other_go_at_once() {
+    let (mut controller, mut hierarchy) = load(&Patch::from_ron(EMPTY_SLOTS).unwrap());
+    let layout = |_: u32| Layout::default();
+    let filter = hierarchy.id_at(&ModulePath::root(), 9).unwrap();
+    let envelope = hierarchy.id_at(&ModulePath::root(), 10).unwrap();
+    hierarchy
+        .swap_to_module(&mut controller, &layout, filter, "loom.filter.svf@1")
+        .expect("into an empty Filter slot");
+    let fading = hierarchy
+        .slot(filter)
+        .unwrap()
+        .fading
+        .clone()
+        .expect("a thru swap-in fades");
+    assert_eq!(fading.leaving, None, "it fades in from the thru signal");
+    assert_eq!(fading.fades.len(), 1);
+    hierarchy.sync(&mut controller).expect("syncs");
+    hierarchy.finish_all_fades(&mut controller);
+    hierarchy.sync(&mut controller).expect("syncs");
+    let svf = hierarchy.part_of_slot(filter).expect("the SVF is in");
+
+    let emptied = hierarchy
+        .swap_to_empty(&mut controller, &layout, filter)
+        .expect("Remove part");
+    assert_eq!(emptied.part_name, "SVF");
+    assert!(emptied.gone.is_empty(), "a thru slot fades the part out");
+    let state = hierarchy.slot(filter).unwrap();
+    assert_eq!(state.part, None);
+    let fading = state.fading.clone().expect("fading out");
+    assert_eq!(fading.leaving, Some(hierarchy.path_of(svf).last()));
+    let law = controller.graph().node(fading.fades[0].1).unwrap().params[0];
+    assert_eq!(law, 1.0, "Linear");
+    assert!(state.held.contains_key(&PartKey::Module("loom.filter.svf@1".into())));
+    assert!(hierarchy.is_hidden(svf), "the leaving part is not a tile");
+    hierarchy.sync(&mut controller).expect("syncs while fading");
+
+    hierarchy
+        .swap_to_module(&mut controller, &layout, envelope, "loom.env.envelope@1")
+        .expect("into an empty Envelope slot");
+    assert_eq!(
+        hierarchy.slot(envelope).unwrap().fading,
+        None,
+        "a pulled cable does not fade"
+    );
+    hierarchy.sync(&mut controller).expect("syncs");
+    let env = hierarchy.part_of_slot(envelope).unwrap();
+    let emptied = hierarchy.swap_to_empty(&mut controller, &layout, envelope).unwrap();
+    assert_eq!(emptied.gone, vec![env], "the envelope goes at once");
+    assert_eq!(hierarchy.slot(envelope).unwrap().fading, None);
+    assert!(
+        hierarchy.swap_to_empty(&mut controller, &layout, envelope).is_err(),
+        "an empty slot has no part to remove"
+    );
+}
+
+/// The status after Remove part names what was removed, once each.
+#[test]
+fn the_remove_part_text_names_what_went() {
+    assert_eq!(
+        removed_part_text("Filter", "Ladder", &[]),
+        "Removed Ladder from Filter."
+    );
+    assert_eq!(
+        removed_part_text("Filter", "Ladder", &["Cutoff".into()]),
+        "Removed Ladder from Filter. 1 modulation on Cutoff was removed."
+    );
+    assert_eq!(
+        removed_part_text("Filter", "Ladder", &["Cutoff".into(), "Cutoff".into()]),
+        "Removed Ladder from Filter. 2 modulations on Cutoff were removed."
+    );
+    assert_eq!(
+        no_part_text(&roles::FILTER),
+        "No part. Passes its input through. Swap to choose one."
+    );
+    assert_eq!(no_part_text(&roles::ENVELOPE), "No part. Swap to choose one.");
+    assert_eq!(
+        added_slot_text("Filter 2"),
+        "Added Filter 2 slot. Swap a part in from its menu or the inspector."
+    );
+}
+
+/// A chain of 2,000 empty Effect slots loads into the hierarchy, and the
+/// hierarchy follows it to its head and its tail on a small stack, since
+/// both follows are loops (sub-patches.md, Empty slots).
+#[test]
+fn the_hierarchy_follows_a_long_chain_of_empty_thru_slots() {
+    const SLOTS: u32 = 2_000;
+    let mut modules = String::from(
+        "PatchModule(id: 1, kind: \"loom.osc.sine@1\"), PatchModule(id: 2, kind: \"loom.io.audio-out@1\"),",
+    );
+    let mut cables = String::new();
+    let mut from = 1;
+    for n in 0..SLOTS {
+        let id = 10 + n;
+        modules.push_str(&format!(
+            "PatchModule(id: {id}, kind: \"loom.struct.slot@1\", slot: Some(Slot(role: \"loom.role.effect@1\"))),"
+        ));
+        cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: ({id}, \"in\")),"));
+        from = id;
+    }
+    cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: (2, \"in\")),"));
+    let text =
+        format!("Patch(version: 1, metadata: Metadata(name: \"Chain\"), modules: [{modules}], cables: [{cables}])");
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let (controller, hierarchy) = load(&Patch::from_ron(&text).unwrap());
+            let graph = controller.graph();
+            let root = ModulePath::root();
+            let sine = module_of(&controller, "loom.osc.sine");
+            let out = module_of(&controller, "loom.io.audio-out");
+            assert_eq!(
+                hierarchy.source_behind(graph, &root, &(from, "out".into())),
+                Some((sine, "out".to_string()))
+            );
+            assert_eq!(
+                hierarchy.inputs_behind(graph, &root, &(10, "in".into())),
+                vec![(out, "in".to_string())]
+            );
+        })
+        .unwrap()
+        .join()
+        .expect("no stack overflow");
+}

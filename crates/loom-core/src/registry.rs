@@ -290,8 +290,15 @@ impl Registry {
 
     /// Adds a role (sub-patches.md, Roles). A role a module declares is
     /// added when the module is. The same descriptor twice is fine; two
-    /// descriptors under one id are refused.
+    /// descriptors under one id are refused, and so is a thru role without
+    /// a required audio `in` and `out` (ADR-0043).
     pub fn register_role(&mut self, role: &'static RoleDescriptor) -> Result<(), LoomError> {
+        if role.thru && !role.can_be_thru() {
+            return Err(LoomError::InvalidDescriptor {
+                id: role.id.to_string(),
+                reason: "a thru role needs a required audio input `in` and output `out`".to_string(),
+            });
+        }
         match self.roles.get(role.id) {
             Some(known) if std::ptr::eq(*known, role) => Ok(()),
             Some(_) => Err(LoomError::InvalidDescriptor {
