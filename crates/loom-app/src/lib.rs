@@ -1655,6 +1655,10 @@ impl App {
                 self.overlays.close_browser();
                 self.insert_library_item(&item, linked, world);
             }
+            browser::Outcome::AddSlot(role, world) => {
+                self.overlays.close_browser();
+                self.add_empty_slot(role, world);
+            }
         }
     }
 

@@ -319,3 +319,110 @@ fn a_library_list_regrown_to_its_old_length_keeps_the_gap() {
     let (shown, ours) = offsets_after_regrowing(12);
     assert_eq!((shown, ours), (2.0 * ROW_HEIGHT, 0.0));
 }
+
+/// A browser over every module and every role, with `library` read.
+fn with_roles(library: Vec<LibraryItem>) -> Browser {
+    let roles = loom_modules::registry().roles().collect();
+    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default()).with_roles(roles);
+    let _ = browser.update(Message::Library(library));
+    browser
+}
+
+/// A library item that declares `roles`.
+fn item_with_roles(name: &str, roles: &[&str]) -> LibraryItem {
+    LibraryItem {
+        path: std::path::PathBuf::from(format!("{name}.ron")),
+        library: format!("{name}.ron"),
+        name: name.to_string(),
+        roles: roles.iter().map(ToString::to_string).collect(),
+    }
+}
+
+/// The slot rows' role names, in list order.
+fn slot_names(browser: &Browser) -> Vec<&'static str> {
+    browser.slot_rows().into_iter().map(|(_, role)| role.name).collect()
+}
+
+/// One slot row per role a registered module fills, by name, after the
+/// modules and before the library items; Shaper and Voice have no part
+/// yet, so no row (sub-patches.md, Empty slots).
+#[test]
+fn slot_rows_list_the_roles_a_part_fills_after_the_modules() {
+    let browser = with_roles(vec![item_with_roles("Pad", &[])]);
+    assert_eq!(
+        slot_names(&browser),
+        ["Effect", "Envelope", "Filter", "Modulator", "Sound source"]
+    );
+    let modules = browser.results().len();
+    let rows: Vec<usize> = browser.slot_rows().into_iter().map(|(row, _)| row).collect();
+    assert_eq!(rows, (modules..modules + 5).collect::<Vec<_>>());
+    assert_eq!(browser.library_rows()[0].0, modules + 5);
+    let filter = &browser.model().rows[modules + 2];
+    assert_eq!(filter.name, "Filter slot");
+    assert_eq!(filter.mark, SLOT_MARK);
+    assert!(!filter.library, "a slot row has no menu");
+    assert_eq!(filter.id, browser_id().with("role").with("loom.role.filter"));
+}
+
+/// A library item adds the slot rows of the roles it declares, once each,
+/// when the registry knows them: an unknown role or a newer version adds
+/// nothing and does not panic.
+#[test]
+fn a_library_item_adds_rows_only_for_roles_the_registry_knows() {
+    let browser = with_roles(vec![
+        item_with_roles("Voice", &["loom.role.voice@1", "loom.role.voice@1"]),
+        item_with_roles("Fuzz", &["loom.role.shaper@1"]),
+        item_with_roles("Bad", &["loom.role.nonsense@1", "loom.role.filter@99", "not a kind"]),
+    ]);
+    let names = slot_names(&browser);
+    assert_eq!(names.iter().filter(|n| **n == "Voice").count(), 1, "{names:?}");
+    assert!(names.contains(&"Shaper"));
+    assert_eq!(names.len(), 7, "{names:?}");
+}
+
+/// The highlight stays on its row, by UI ID, when the library's items
+/// arrive and add a slot row above it.
+#[test]
+fn the_highlight_stays_on_its_row_when_the_library_arrives() {
+    let roles = loom_modules::registry().roles().collect();
+    let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default()).with_roles(roles);
+    let _ = browser.update(Message::Query("slot".into()));
+    let _ = browser.update(Message::Key(Nav::Down));
+    let _ = browser.update(Message::Key(Nav::Down));
+    let _ = browser.update(Message::Key(Nav::Down));
+    let _ = browser.update(Message::Key(Nav::Down));
+    let before = browser.model().rows[browser.model().highlight.unwrap()].id.clone();
+    assert_eq!(before, browser_id().with("role").with("loom.role.source"));
+    let _ = browser.update(Message::Library(vec![item_with_roles("Fuzz", &["loom.role.shaper@1"])]));
+    let after = browser.model().rows[browser.model().highlight.unwrap()].id.clone();
+    assert_eq!(after, before, "the Shaper row came in above it");
+    assert_eq!(browser.fresh_model(), *browser.model());
+}
+
+/// A slot row is found by its role's name, by `slot`, and by its kind; the
+/// area under the list says what it does, and a thru role that it passes
+/// its input through; picking it adds an empty slot.
+#[test]
+fn a_slot_row_is_found_described_and_picked() {
+    let mut browser = with_roles(Vec::new());
+    let _ = browser.update(Message::Query("filter slot".into()));
+    assert_eq!(slot_names(&browser), ["Filter"]);
+    let _ = browser.update(Message::Query("loom.role.envelope".into()));
+    assert_eq!(slot_names(&browser), ["Envelope"]);
+    let _ = browser.update(Message::Query("slot".into()));
+    assert_eq!(slot_names(&browser).len(), 5);
+    let _ = browser.update(Message::Query("filter slot".into()));
+    let at = browser.slot_rows()[0].0;
+    let _ = browser.update(Message::Hover(at));
+    let about = browser.model().about.clone().unwrap();
+    assert_eq!(
+        about.text,
+        "Shapes the spectrum of a signal around a cutoff frequency. Add an empty slot, then swap a part in \
+         from its menu or the inspector. While empty, it passes its input through."
+    );
+    assert_eq!(about.detail, "loom.role.filter@1");
+    match browser.update(Message::Pick(at)).0 {
+        Outcome::AddSlot(role, _) => assert_eq!(role.id, "loom.role.filter"),
+        other => panic!("expected an empty slot, got {other:?}"),
+    }
+}

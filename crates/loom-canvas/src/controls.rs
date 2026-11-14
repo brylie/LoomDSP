@@ -115,6 +115,11 @@ pub struct WidgetValue {
     pub ghost: Option<f32>,
     /// Read-only result shape, sampled left to right in the UI thread.
     pub shape: Vec<f32>,
+    /// True for a control with nothing behind it, such as a surface
+    /// control bound to an empty slot's role parameter: it is drawn under
+    /// a veil of the tile's colour, and its hover text says why
+    /// (sub-patches.md, Empty slots).
+    pub dimmed: bool,
     /// The second value of an XY pad or a range. The fields above then hold
     /// the first value, and `text` holds both, as the widget says them.
     pub second: Option<PartValue>,
@@ -670,6 +675,22 @@ impl ControlGeometry {
                         let samples = values.get(module.id, index).map_or(&[][..], |v| v.shape.as_slice());
                         lines.extend(preview_line(plot, samples, line_colour));
                     }
+                    // A note is text only: its caption is the whole widget.
+                    WidgetViewKind::Note { .. } => {}
+                }
+            }
+        }
+        // A control with nothing behind it goes under a veil of the tile's
+        // colour, drawn after every control shape and arc, so it reads as
+        // out of use (sub-patches.md, Empty slots).
+        for module in scene.modules() {
+            for index in 0..module.panel.widgets.len() {
+                let Some(rect) = module.widget_bounds(index) else {
+                    continue;
+                };
+                if values.get(module.id, index).is_some_and(|v| v.dimmed) {
+                    let veil = Color { a: 0.6, ..palette.tile };
+                    shapes.push(Shape::new(rect, 2.0, veil, Color::TRANSPARENT, 0.0));
                 }
             }
         }
@@ -912,7 +933,7 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rect) -> (Rect, f32) {
             .expand(1.0),
             4.0,
         ),
-        // Displays never take focus.
+        // Displays and notes never take focus.
         WidgetViewKind::Light
         | WidgetViewKind::Readout { .. }
         | WidgetViewKind::Meter { .. }
@@ -920,7 +941,8 @@ pub(crate) fn focus_ring(kind: &WidgetViewKind, rect: Rect) -> (Rect, f32) {
         | WidgetViewKind::LevelHistory
         | WidgetViewKind::Spectrum
         | WidgetViewKind::XyScope
-        | WidgetViewKind::Shape { .. } => (rect.expand(1.0), 4.0),
+        | WidgetViewKind::Shape { .. }
+        | WidgetViewKind::Note { .. } => (rect.expand(1.0), 4.0),
     }
 }
 

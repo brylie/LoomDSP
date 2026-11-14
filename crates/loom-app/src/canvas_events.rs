@@ -285,12 +285,10 @@ impl App {
             }
             CanvasEvent::OpenBrowser { world, at, area } => {
                 self.close_slider_gesture();
-                self.overlays.open(Overlay::Browser(browser::Browser::open(
-                    self.modules.clone(),
-                    world,
-                    at,
-                    area,
-                )));
+                let roles = self.session.controller.registry().roles().collect();
+                self.overlays.open(Overlay::Browser(
+                    browser::Browser::open(self.modules.clone(), world, at, area).with_roles(roles),
+                ));
             }
             CanvasEvent::ClearClip { module, widget } => self.reset_clip((module, widget), false),
             CanvasEvent::ResetMeter { module, widget } => self.reset_clip((module, widget), true),

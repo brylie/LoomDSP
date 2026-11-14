@@ -241,6 +241,13 @@ pub enum WidgetViewKind {
     },
     /// A large button. Its gesture depends on the mode stored with its value.
     Button,
+    /// A line of text with no control under it, as an empty slot's note:
+    /// its label is the text. Not a control, never focused or hit
+    /// (sub-patches.md, Empty slots).
+    Note {
+        /// Width in grid units.
+        width: u8,
+    },
 }
 
 impl WidgetViewKind {
@@ -325,6 +332,7 @@ impl WidgetView {
             WidgetViewKind::Radio { options } => (6, options.len() as u8 + 1),
             WidgetViewKind::Select { .. } => (6, 2),
             WidgetViewKind::Segmented { width, .. } => (*width, 2),
+            WidgetViewKind::Note { width } => (*width, 1),
         }
     }
 
@@ -341,6 +349,7 @@ impl WidgetView {
                 | WidgetViewKind::Spectrum
                 | WidgetViewKind::XyScope
                 | WidgetViewKind::Shape { .. }
+                | WidgetViewKind::Note { .. }
         )
     }
 

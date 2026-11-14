@@ -98,7 +98,7 @@ pub(crate) fn items(model: &Inspector) -> Vec<Item> {
                 value: Some(
                     current
                         .and_then(|at| s.choices.get(at))
-                        .map_or_else(|| crate::slots::NO_PART.to_string(), |c| c.label.clone()),
+                        .map_or_else(|| crate::slots::NO_PART_CHOICE.to_string(), |c| c.label.clone()),
                 ),
                 step: match current {
                     Some(at) => (swap(Some(at + 1)), swap(at.checked_sub(1))),
@@ -118,11 +118,14 @@ pub(crate) fn items(model: &Inspector) -> Vec<Item> {
                     parts.push(param_row(*module, label, row, None));
                 }
             }
-            parts.push(Item::button(
-                ids::part(&panel, "dissolve"),
-                "Dissolve slot",
-                Some(AppMessage::DissolveSlot(s.id)),
-            ));
+            // An empty slot has no part to put in its place.
+            if s.part.is_some() {
+                parts.push(Item::button(
+                    ids::part(&panel, "dissolve"),
+                    "Dissolve slot",
+                    Some(AppMessage::DissolveSlot(s.id)),
+                ));
+            }
             vec![Item::group(panel, s.name.clone(), parts)]
         }
         Inspector::Port(p) => {

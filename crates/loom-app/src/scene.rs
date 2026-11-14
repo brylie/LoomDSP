@@ -1260,9 +1260,7 @@ pub fn build(
                     Some(node) => Some(node.descriptor.name.to_string()),
                     None => hierarchy.tile_name(part),
                 });
-                let holds = part_name
-                    .as_ref()
-                    .map_or_else(|| "Holds nothing yet.".to_string(), |p| format!("Holds {p}."));
+                let note = loom_patch::hierarchy::no_part_text(state.role);
                 let role_port = |port: &loom_core::RolePort, into: bool| PortView {
                     label: port.label.to_string(),
                     hover: HoverText::new(port.label, port.description, port.name),
@@ -1295,25 +1293,37 @@ pub fn build(
                         panel
                     }
                     (Some(part), None) => crate::surface::surface_panel(graph, hierarchy, part),
-                    (None, _) => PanelView {
-                        width: 10,
-                        height: 3,
-                        widgets: Vec::new(),
-                    },
+                    // An empty slot draws its note, one sentence a line, as
+                    // text that is not a control (sub-patches.md, Empty slots).
+                    (None, _) => {
+                        let lines: Vec<&str> = note.split_inclusive(". ").map(str::trim).collect();
+                        PanelView {
+                            width: 10,
+                            height: lines.len().max(3) as u8,
+                            widgets: lines
+                                .iter()
+                                .enumerate()
+                                .map(|(row, line)| WidgetView {
+                                    kind: WidgetViewKind::Note { width: 10 },
+                                    x: 0,
+                                    y: row as u8,
+                                    label: (*line).to_string(),
+                                    hover: HoverText::default(),
+                                    hidden: false,
+                                    exposed: false,
+                                })
+                                .collect(),
+                        }
+                    }
                 };
                 ModuleView {
                     id: id.0,
                     title: name.clone(),
                     hover: HoverText {
-                        description: format!(
-                            "Slot for {}. {holds} {}",
-                            state.role.name,
-                            if part.is_some() {
-                                "Right-click to swap."
-                            } else {
-                                crate::slots::NO_PART
-                            }
-                        ),
+                        description: match &part_name {
+                            Some(part) => format!("Slot for {}. Holds {part}. Swap from its menu.", state.role.name),
+                            None => format!("Slot for {}. {note}", state.role.name),
+                        },
                         name: Some(state.role.kind()),
                         note: None,
                     },

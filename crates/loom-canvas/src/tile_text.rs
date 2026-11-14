@@ -422,6 +422,8 @@ fn caption_y(kind: &WidgetViewKind, rect: Rect) -> f32 {
         | WidgetViewKind::Readout { .. }
         | WidgetViewKind::Select { .. }
         | WidgetViewKind::Segmented { .. } => rect.y + GRID * 0.5,
+        // A note's text is its caption, in its one row.
+        WidgetViewKind::Note { .. } => rect.center_y(),
     }
 }
 

@@ -430,6 +430,9 @@ pub(crate) fn tree(
         let id = node_id(table, &tile_id(tile.id));
         let mut node = Node::new(Role::Group);
         node.set_label(tile.title.clone());
+        if let Some(description) = &tile.description {
+            node.set_description(description.clone());
+        }
         place(&mut node, tile.bounds);
         if ids.covered {
             // Below a panel that owns the input: not there for a screen
@@ -444,7 +447,8 @@ pub(crate) fn tree(
         node.add_action(Action::ShowContextMenu);
         let mut kids = Vec::new();
         for (index, widget) in tile.widgets.iter().enumerate() {
-            if widget.hidden {
+            // A note's text is the tile's description, read once there.
+            if widget.hidden || widget.kind == "note" {
                 continue;
             }
             let Some(widget_id) = ids.get(tile.id, index) else {

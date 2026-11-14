@@ -808,7 +808,18 @@ impl App {
                         )
                     })
                     .collect();
-                items.push(own("Dissolve slot", Message::DissolveSlot(module)));
+                // An empty slot has no part to remove or put in its place
+                // (sub-patches.md, Empty slots).
+                if session.hierarchy.part_of_slot(ModuleId(module)).is_some() {
+                    items.push(own(
+                        "Remove part",
+                        Message::SwapSlot {
+                            slot: module,
+                            to: crate::slots::SwapTarget::Empty,
+                        },
+                    ));
+                    items.push(own("Dissolve slot", Message::DissolveSlot(module)));
+                }
                 items
             }
             _ => {

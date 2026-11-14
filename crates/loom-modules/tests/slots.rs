@@ -657,3 +657,124 @@ fn a_modulation_output_fades_linearly_so_a_shared_value_stays_put() {
         }
     }
 }
+
+/// A sine into an empty Filter slot into the output: the slot is a thru
+/// (ADR-0043).
+const SINE_EMPTY: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Sine empty"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1"))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// The same sine with no slot at all.
+const SINE_PLAIN: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Sine"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// The largest step between two neighbouring frames of `samples`.
+fn largest_step(samples: &[f32]) -> f32 {
+    samples.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
+}
+
+/// Renders [`SINE_EMPTY`] at `block`, swapping its slot to an SVF at
+/// `SWAP_AT`, and, when `remove_at` is given, removing the part again
+/// there, after the first fade has finished.
+fn render_thru(block: usize, remove_at: Option<usize>) -> Vec<f32> {
+    let (mut parts, hierarchy) = load(SINE_EMPTY);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let finish = |parts: &mut EngineParts, hierarchy: &mut Hierarchy| {
+        let fading = hierarchy.fading_slots();
+        let done = !fading.is_empty()
+            && fading
+                .iter()
+                .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+        if done {
+            hierarchy.finish_all_fades(&mut parts.controller);
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        }
+    };
+    render_edit_at(
+        &mut parts,
+        FRAMES,
+        block,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.svf@1")
+                .expect("the SVF fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |position, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            finish(parts, &mut hierarchy);
+            if Some(position) == remove_at {
+                let emptied = hierarchy
+                    .swap_to_empty(&mut parts.controller, &layout, ModuleId(9))
+                    .expect("Remove part");
+                assert!(emptied.gone.is_empty(), "a thru slot fades the part out");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            }
+        },
+    )
+}
+
+/// An empty Filter slot passes the sine through, bit for bit (ADR-0043).
+#[test]
+fn an_empty_filter_slot_passes_its_input_through() {
+    let (mut thru, _) = load(SINE_EMPTY);
+    let (mut plain, _) = load(SINE_PLAIN);
+    let a = render_edit_at(&mut thru, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    let b = render_edit_at(&mut plain, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    assert!(a.iter().any(|v| v.abs() > 0.5), "the sine plays");
+    assert_eq!(a, b);
+}
+
+/// A swap into an empty Filter slot fades the SVF in from the thru signal,
+/// and Remove part fades it back out: neither steps more than the sine
+/// itself does, by a margin a hard switch from a reset filter would break.
+/// The swap-in renders the same at block sizes 1, 77, and 512; the removal
+/// runs at block size 1, so it lands on the frame asked for (sub-patches.md,
+/// Empty slots).
+#[test]
+fn swaps_into_and_out_of_an_empty_thru_slot_fade() {
+    let swapped: Vec<Vec<f32>> = [1, 77, 512].iter().map(|&b| render_thru(b, None)).collect();
+    assert_eq!(swapped[0], swapped[1]);
+    assert_eq!(swapped[0], swapped[2]);
+    let steady = largest_step(&swapped[0][SWAP_AT - 600..SWAP_AT]);
+    let into = largest_step(&swapped[0][SWAP_AT - 1..SWAP_AT + FADE + 10]);
+    assert!(into <= steady * 1.5, "into: {into} against {steady}");
+    let remove = SWAP_AT + 2 * FADE + 300;
+    let left = &render_thru(1, Some(remove));
+    let out = largest_step(&left[remove - 1..remove + FADE + 10]);
+    assert!(out <= steady * 1.5, "out: {out} against {steady}");
+    // After the fade out, the thru plays the sine alone again.
+    let (mut plain, _) = load(SINE_PLAIN);
+    let sine = render_edit_at(&mut plain, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    let tail = remove + FADE + 10..FRAMES;
+    assert_eq!(left[tail.clone()], sine[tail], "the thru is back, bit for bit");
+}
