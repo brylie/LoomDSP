@@ -12,16 +12,13 @@
 //!
 //! The frames that run work in `update` (`Frame` while measuring,
 //! `LiveFrame` while modulation plays) are deadlines at display rate,
-//! decided on 2026-11-14: Iced 0.14 does not report the display's refresh
-//! rate, so it is [`FRAME`], 16 ms. The `winit` shell can read the
-//! monitor's rate at step 2.2.
+//! decided on 2026-11-14. Their period is the display's frame, as the
+//! runtime gives it in `Context::window` (`WindowState::frame`): the
+//! `winit` shell reads it from the monitor, and a driver that cannot keeps
+//! 16 ms. [`App::update`] hands it to [`Timers`] before anything reads it.
 
 use crate::{App, Message, a11y, devices, learn, recovery};
 use std::time::{Duration, Instant};
-
-/// How often a frame runs while one is wanted: about 60 a second, the most
-/// common display rate, since Iced does not say the display's own.
-pub(crate) const FRAME: Duration = Duration::from_millis(16);
 
 /// Each check the app runs on a clock, and the message it sends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,10 +59,11 @@ impl Timer {
         Self::LiveTick,
     ];
 
-    /// How long from one message to the next.
-    pub(crate) fn period(self) -> Duration {
+    /// How long from one message to the next, on a display whose frame
+    /// lasts `frame`.
+    pub(crate) fn period(self, frame: Duration) -> Duration {
         match self {
-            Self::Frame | Self::LiveFrame => FRAME,
+            Self::Frame | Self::LiveFrame => frame,
             Self::Tick => Duration::from_millis(500),
             Self::Autosave => recovery::TICK,
             Self::MidiPoll => devices::MIDI_POLL,
@@ -117,19 +115,42 @@ impl Timer {
     }
 }
 
-/// When each timer is next due, or `None` while it does not run.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub(crate) struct Timers([Option<Instant>; Timer::ALL.len()]);
+/// When each timer is next due, or `None` while it does not run, and how
+/// long the display's frame lasts.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Timers {
+    /// When each timer is due, in the order of [`Timer::ALL`].
+    due: [Option<Instant>; Timer::ALL.len()],
+    /// The display's frame period, for the frames.
+    frame: Duration,
+}
+
+impl Default for Timers {
+    /// No timer runs, on a display whose rate is not known.
+    fn default() -> Self {
+        Self {
+            due: [None; Timer::ALL.len()],
+            frame: loom_ui::WindowState::FRAME,
+        }
+    }
+}
 
 impl Timers {
+    /// Frames from now on last `frame`. A frame already due keeps its time,
+    /// and the next one follows the new period.
+    pub(crate) fn set_frame(&mut self, frame: Duration) {
+        self.frame = frame;
+    }
+
     /// Runs `timer` while `wanted`: a timer that starts is due a period
     /// after `now`, one that runs keeps its time, and one not wanted stops.
     pub(crate) fn keep(&mut self, timer: Timer, wanted: bool, now: Instant) {
-        let due = &mut self.0[timer.index()];
+        let period = timer.period(self.frame);
+        let due = &mut self.due[timer.index()];
         *due = match (wanted, *due) {
             (false, _) => None,
             (true, Some(at)) => Some(at),
-            (true, None) => Some(now + timer.period()),
+            (true, None) => Some(now + period),
         };
     }
 
@@ -140,13 +161,14 @@ impl Timers {
     /// one after another while they draw slower, as the display's own
     /// frames did. The next `keep` stops it if it is no longer wanted.
     pub(crate) fn taken(&mut self, timer: Timer, now: Instant) {
-        let due = &mut self.0[timer.index()];
-        *due = due.map(|at| (at + timer.period()).max(now));
+        let period = timer.period(self.frame);
+        let due = &mut self.due[timer.index()];
+        *due = due.map(|at| (at + period).max(now));
     }
 
     /// When `timer` is next due.
     pub(crate) fn due(&self, timer: Timer) -> Option<Instant> {
-        self.0[timer.index()]
+        self.due[timer.index()]
     }
 
     /// The timer due first, and when. Two due at once go in the order of
@@ -166,7 +188,10 @@ impl App {
     /// test a message it did not ask for.
     pub(crate) fn sync_timers(&mut self, now: Instant) {
         if !self.watching {
-            self.timers = Timers::default();
+            self.timers = Timers {
+                frame: self.timers.frame,
+                ..Timers::default()
+            };
             return;
         }
         let stream = &self.session.engine.stream;

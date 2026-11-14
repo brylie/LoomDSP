@@ -74,6 +74,10 @@ iced = { version = "0.14", default-features = false, features = [
     "wayland",
 ] }
 iced_wgpu = "0.14"
+# The window's event conversion and clipboard for loom-app on the shell
+# (docs/dev/leaving-iced-plan.md, step 2.2b-ii), until phase 3. Iced already
+# builds it; no features of our own.
+iced_winit = { version = "0.14", default-features = false }
 # The canvas renderer names wgpu types itself, with no Iced type. This must be
 # the wgpu version Iced builds with, so there is one copy, until phase 2
 # (docs/dev/leaving-iced-plan.md). No features of our own: Iced turns on what

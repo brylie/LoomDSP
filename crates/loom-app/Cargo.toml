@@ -38,6 +38,10 @@ loom-canvas.workspace = true
 loom-ui-core.workspace = true
 loom-ui.workspace = true
 iced_wgpu.workspace = true
+# The window on loom-ui's shell: Iced's event conversion and clipboard, and
+# the window type the layers are handed (docs/dev/leaving-iced-plan.md, 2.2b-ii).
+iced_winit.workspace = true
+winit.workspace = true
 png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
