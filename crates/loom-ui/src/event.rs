@@ -9,6 +9,7 @@
 
 use loom_ui_core::{Event, Point, Size};
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// One thing a driver tells the runtime.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,15 +79,24 @@ pub struct WindowState {
     pub scale: f32,
     /// True while the window takes the keys.
     pub focused: bool,
+    /// How long one frame of its display lasts. A driver that knows the
+    /// display's rate sets it; the rest keep [`WindowState::FRAME`].
+    pub frame: Duration,
 }
 
 impl WindowState {
-    /// A window of `size` logical pixels at scale 1, with focus.
+    /// The frame period of a display whose rate is not known: 16 ms, about
+    /// 60 frames a second.
+    pub const FRAME: Duration = Duration::from_millis(16);
+
+    /// A window of `size` logical pixels at scale 1, with focus, on a
+    /// display whose rate is not known.
     pub fn new(size: Size) -> Self {
         Self {
             size,
             scale: 1.0,
             focused: true,
+            frame: Self::FRAME,
         }
     }
 }

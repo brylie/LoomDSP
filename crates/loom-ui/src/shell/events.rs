@@ -9,6 +9,7 @@
 
 use crate::event::{DriverEvent, WindowEvent};
 use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, Size};
+use std::time::Duration;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
@@ -180,6 +181,16 @@ pub(crate) fn scroll(delta: MouseScrollDelta, scale: f32) -> ScrollDelta {
 /// A position in physical pixels, in logical ones.
 pub(crate) fn point(position: PhysicalPosition<f64>, scale: f32) -> Point {
     Point::new(position.x as f32 / scale, position.y as f32 / scale)
+}
+
+/// How long one frame lasts on a display of `millihertz`, as winit gives
+/// a monitor's rate. A display that gives no rate, or zero, keeps
+/// [`WindowState::FRAME`](crate::event::WindowState::FRAME).
+pub(crate) fn frame_period(millihertz: Option<u32>) -> Duration {
+    match millihertz {
+        Some(rate) if rate > 0 => Duration::from_secs_f64(1000.0 / f64::from(rate)),
+        _ => crate::event::WindowState::FRAME,
+    }
 }
 
 /// A size in physical pixels, in logical ones.

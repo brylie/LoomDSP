@@ -64,6 +64,9 @@ pub(crate) struct Device {
 
 /// The window's device and surface.
 pub(crate) struct Gpu {
+    /// The adapter the device came from, for layers that build their
+    /// renderer from it.
+    pub adapter: wgpu::Adapter,
     /// The device, for drawing and for captures.
     pub device: Device,
     /// The window's surface.
@@ -164,6 +167,7 @@ impl Gpu {
             view_formats: Vec::new(),
         };
         let gpu = Self {
+            adapter,
             device: Device { device, queue, format },
             surface,
             config,

@@ -8,6 +8,9 @@ use loom_host_desktop::Tape;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+/// The frame period of a display whose rate is not known.
+const FRAME: Duration = loom_ui::WindowState::FRAME;
+
 /// The app with its window open, so timers may run.
 fn open_app() -> App {
     let mut app = crate::tests::app();
@@ -51,11 +54,14 @@ fn a_timer_is_due_a_period_after_it_starts_and_stops_when_unwanted() {
     let start = Instant::now();
     let mut timers = Timers::default();
     timers.keep(Timer::DropsDone, true, start);
-    assert_eq!(timers.due(Timer::DropsDone), Some(start + Timer::DropsDone.period()));
+    assert_eq!(
+        timers.due(Timer::DropsDone),
+        Some(start + Timer::DropsDone.period(FRAME))
+    );
     timers.keep(Timer::DropsDone, true, start + Duration::from_millis(40));
     assert_eq!(
         timers.due(Timer::DropsDone),
-        Some(start + Timer::DropsDone.period()),
+        Some(start + Timer::DropsDone.period(FRAME)),
         "a running timer keeps its time"
     );
     timers.keep(Timer::DropsDone, false, start);
@@ -69,7 +75,7 @@ fn a_timer_is_due_a_period_after_it_starts_and_stops_when_unwanted() {
 #[test]
 fn a_taken_timer_moves_on_by_one_period_at_a_fixed_rate() {
     let start = Instant::now();
-    let period = Timer::Frame.period();
+    let period = Timer::Frame.period(FRAME);
     let mut timers = Timers::default();
     timers.keep(Timer::Frame, true, start);
     let first = start + period;
@@ -137,7 +143,7 @@ fn measuring_runs_frames_at_display_rate() {
     let _ = app.send(Message::Tick);
     let after = Instant::now();
     let due = app.timers.due(Timer::Frame).expect("a frame while measuring");
-    assert_eq!(Timer::Frame.period(), FRAME);
+    assert_eq!(Timer::Frame.period(FRAME), FRAME);
     assert!(
         before + FRAME <= due && due <= after + FRAME,
         "a frame after the turn that started it"
@@ -166,4 +172,24 @@ fn the_live_frame_runs_only_while_modulation_moves() {
     let mut idle = open_app();
     let _ = idle.send(Message::Tick);
     assert_eq!(idle.timers.due(Timer::LiveFrame), None, "no audio, nothing moves");
+}
+
+/// On a 120 Hz display, frames follow its period, not the 16 ms default;
+/// the other timers keep their own.
+#[test]
+fn frames_follow_the_displays_period() {
+    let start = Instant::now();
+    let fast = Duration::from_secs_f64(1.0 / 120.0);
+    let mut timers = Timers::default();
+    timers.set_frame(fast);
+    timers.keep(Timer::LiveFrame, true, start);
+    timers.keep(Timer::DropsDone, true, start);
+    assert_eq!(timers.due(Timer::LiveFrame), Some(start + fast));
+    timers.taken(Timer::LiveFrame, start + fast);
+    assert_eq!(timers.due(Timer::LiveFrame), Some(start + fast * 2));
+    assert_eq!(
+        timers.due(Timer::DropsDone),
+        Some(start + Timer::DropsDone.period(fast))
+    );
+    assert_eq!(Timer::DropsDone.period(fast), Timer::DropsDone.period(FRAME));
 }

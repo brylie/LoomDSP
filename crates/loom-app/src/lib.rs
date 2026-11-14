@@ -1360,6 +1360,7 @@ impl App {
             "input is routed before update (iced_bridge.rs)"
         );
         let now = cx.now();
+        self.timers.set_frame(cx.window().frame);
         if let Some(timer) = timers::Timer::of(&message) {
             self.timers.taken(timer, now);
         }
