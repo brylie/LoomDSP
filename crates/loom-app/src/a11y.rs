@@ -54,6 +54,7 @@ pub(crate) use macos::attach;
 /// tree goes nowhere.
 #[cfg(not(target_os = "macos"))]
 mod platform {
+    #[cfg(test)]
     use super::Event;
     use accesskit::TreeUpdate;
     #[cfg(test)]
