@@ -16,7 +16,7 @@ Scales a signal by a control signal, with a linear or exponential response.
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
 | **In** (`in`) | audio | 0 | The signal to scale. |
-| **Level** (`level`) | modulation | 0 | How loud the output is. Values below 0 count as 0. Reads 1 while no cable is connected. |
+| **Level** (`level`) | modulation | 1 | How loud the output is. Values below 0 count as 0. Reads 1 while no cable is connected. |
 
 ## Outputs
 

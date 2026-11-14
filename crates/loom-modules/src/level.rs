@@ -35,7 +35,7 @@ pub static AMP: ModuleDescriptor = ModuleDescriptor {
             label: "Level",
             signal: SignalType::Modulation,
             description: "How loud the output is. Values below 0 count as 0. Reads 1 while no cable is connected.",
-            default: PortDefault::Value(0.0),
+            default: PortDefault::Value(1.0),
             range: loom_core::PortRange::Span(0.0, 1.0),
             channels: Channels::Downmix,
         },
@@ -99,7 +99,6 @@ struct Amp {
 impl Amp {
     const GAIN: usize = AMP.param_index("gain").unwrap();
     const RESPONSE: usize = AMP.param_index("response").unwrap();
-    const LEVEL_IN: usize = AMP.input_index("level").unwrap();
 
     /// The factor for a level: 0 below zero, 1 at 1, then the chosen curve.
     fn curve(&self, level: f32) -> f32 {
@@ -123,12 +122,13 @@ impl Module for Amp {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let level_connected = io.is_connected(Self::LEVEL_IN);
         let modulated = io.param(Self::GAIN);
         let ([input, level], [out]) = io.split::<2, 1>();
         for (i, ((out, &input), &level)) in out.iter_mut().zip(input).zip(level).enumerate() {
             let finite = input.is_finite() && level.is_finite();
-            let level = if level_connected { self.curve(level) } else { 1.0 };
+            // With no cable `level` reads its default, 1, which the curve
+            // keeps at 1 (unity gain).
+            let level = self.curve(level);
             let gain = modulated.at_or(i, self.gain.tick());
             *out = if finite {
                 hold_finite(hold_finite(input * hold_finite(level)) * gain)
