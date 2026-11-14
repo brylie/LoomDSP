@@ -618,6 +618,9 @@ fn mixers_fade_by_what_they_carry() {
     );
 }
 
+/// What a module plays for its first input and the input under test.
+type Apply = fn(f32, f32) -> f32;
+
 /// The inputs that read 1 with no cable (Amp `level`, Multiply `b`, Divide
 /// `b`) read that 1 from their port default, so a cable plugged in fades
 /// from 1 and a cable pulled fades back to 1 (live patching spec, rule 9;
@@ -625,9 +628,6 @@ fn mixers_fade_by_what_they_carry() {
 /// start its fade from 0: a drop to silence on a VCA, and a burst far over
 /// full scale on a Divide. Every sample is checked against the module
 /// applied to the faded input, at every block size.
-/// What a module plays for its first input and the input under test.
-type Apply = fn(f32, f32) -> f32;
-
 #[test]
 fn inputs_that_read_1_unplugged_fade_from_1() {
     let a = 0.25;
