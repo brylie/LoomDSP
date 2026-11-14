@@ -212,14 +212,16 @@ impl App {
             // engine does not run, so nothing moves.
             (Timer::LiveFrame, !self.measuring && modulating),
             // Otherwise the window redraws only when something changes
-            // (#90). A recording ticks to notice a write error, and a slot
-            // swap ticks until its fade is done, so the leaving part is
-            // removed (sub-patches.md, How a swap crossfades). With no
-            // audio device the engine is idle and the fade does not end,
-            // so it ticks at that slow rate until a device starts.
+            // (#90). A recording ticks to notice a write error, and while
+            // audio plays a slot swap ticks until its fade is done, so the
+            // leaving part is removed (sub-patches.md, How a swap
+            // crossfades). With no stream the engine is idle and the fade
+            // cannot end, so nothing ticks: the next edit finishes it, and
+            // a stream that starts brings the tick back.
             (
                 Timer::Tick,
-                !self.measuring && (self.rig.recorder.is_some() || self.session.hierarchy.is_fading()),
+                !self.measuring
+                    && (self.rig.recorder.is_some() || (stream.is_playing() && self.session.hierarchy.is_fading())),
             ),
             // Only while a copy may be due: once it matches the patch, an
             // idle app ticks no more (#90).

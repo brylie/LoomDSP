@@ -458,7 +458,12 @@ pub(crate) fn tree(
             // A control with nothing behind it is shown disabled, says why,
             // and offers no actions (sub-patches.md, Empty slots).
             if let Some(reason) = &widget.inert {
-                let mut w = Node::new(Role::Slider);
+                // The role its kind gives a live control, so the role does
+                // not change under the focus when the slot fills.
+                let role = ids
+                    .detail(tile.id, index)
+                    .map_or(Role::Slider, |d| control_role(&d.kind));
+                let mut w = Node::new(role);
                 w.set_label(widget.label.clone());
                 w.set_description(reason.clone());
                 w.set_disabled();
@@ -982,6 +987,21 @@ fn trace_words(widget: &Widget) -> Option<String> {
 /// The node for one panel widget: its role, name, value, and actions, by
 /// the kind of widget drawn (ui-layer.md, section 7, the role table).
 ///
+/// The role a control of `kind` has: what [`widget_node`] gives it, and
+/// what an inert control of that kind keeps while it is disabled. A kind
+/// that is not a control is an image.
+pub(super) fn control_role(kind: &WidgetViewKind) -> Role {
+    match kind {
+        WidgetViewKind::Knob { .. } | WidgetViewKind::Fader { .. } | WidgetViewKind::Number { .. } => Role::Slider,
+        WidgetViewKind::Toggle => Role::Switch,
+        WidgetViewKind::Button => Role::Button,
+        WidgetViewKind::Radio { .. } | WidgetViewKind::Segmented { .. } => Role::RadioGroup,
+        WidgetViewKind::Select { .. } => Role::ComboBox,
+        WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. } => Role::Group,
+        _ => Role::Image,
+    }
+}
+
 /// The name goes in the label. A control's value is a number, and the text
 /// the screen shows for it, with its unit, goes in the description
 /// (ui-layer.md, section 7, rules 3 and 4). Without a `detail` the widget
@@ -1001,7 +1021,7 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
             slider(&detail.kind, detail.main.as_ref(), widget.position)
         }
         WidgetViewKind::Toggle => {
-            let mut node = Node::new(Role::Switch);
+            let mut node = Node::new(control_role(&detail.kind));
             node.set_toggled(if widget.position >= 0.5 {
                 Toggled::True
             } else {
@@ -1011,17 +1031,17 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
             node
         }
         WidgetViewKind::Button => {
-            let mut node = Node::new(Role::Button);
+            let mut node = Node::new(control_role(&detail.kind));
             node.add_action(Action::Click);
             node
         }
         // One radio button per option, inside.
-        WidgetViewKind::Radio { .. } | WidgetViewKind::Segmented { .. } => Node::new(Role::RadioGroup),
+        WidgetViewKind::Radio { .. } | WidgetViewKind::Segmented { .. } => Node::new(control_role(&detail.kind)),
         // It says its chosen option and steps one option at a time. It
         // does not open: a list a screen reader can walk comes with our
         // own select, in phase 3.
         WidgetViewKind::Select { .. } => {
-            let mut node = Node::new(Role::ComboBox);
+            let mut node = Node::new(control_role(&detail.kind));
             node.set_value(widget.text.clone());
             node.add_action(Action::Increment);
             node.add_action(Action::Decrement);
@@ -1029,7 +1049,7 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
             node
         }
         // One slider per value, inside.
-        WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. } => Node::new(Role::Group),
+        WidgetViewKind::XyPad { .. } | WidgetViewKind::Range { .. } => Node::new(control_role(&detail.kind)),
         WidgetViewKind::Meter { .. } => {
             // The number its text says, never the stored level: the
             // tree does not work the mapping out a second time. Text with

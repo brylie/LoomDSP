@@ -2031,7 +2031,9 @@ pub fn fade_law(output: &loom_core::RolePort) -> Option<Law> {
     match output.signal {
         loom_core::SignalType::Gate | loom_core::SignalType::Phase => None,
         loom_core::SignalType::Pitch | loom_core::SignalType::Modulation => Some(Law::Linear),
-        _ => Some(Law::EqualPower),
+        // Every type is named, so a new one fails the build until its law
+        // is chosen.
+        loom_core::SignalType::Audio => Some(Law::EqualPower),
     }
 }
 
