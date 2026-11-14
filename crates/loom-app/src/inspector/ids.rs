@@ -10,7 +10,7 @@
 //! text, so the window can say where the part is (`places.rs`), and the
 //! accessibility tree gives the same ID to the part's node.
 
-use iced::Element;
+use crate::Element;
 use iced::widget::container;
 use loom_ui_core::UiId;
 

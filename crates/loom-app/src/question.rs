@@ -7,10 +7,11 @@
 //! (`Message::allowed_during_question` in `lib.rs`), and each question
 //! carries what to do after its answer.
 
+use crate::Element;
 use crate::files;
 use crate::style::{self, button};
+use iced::Length;
 use iced::widget::{column, container, opaque, row, space, text};
-use iced::{Element, Length};
 use loom_patch::Patch;
 use serde::Serialize;
 use std::path::PathBuf;

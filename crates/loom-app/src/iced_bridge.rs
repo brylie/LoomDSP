@@ -23,11 +23,12 @@
 //! This is the only module that may name Iced's `Task`, apart from the
 //! macOS accessibility adapter until step 2.2 (`tests/purity.rs`).
 
+use crate::Element;
 use crate::window_question::WindowQuestion;
 use crate::{App, Message};
 use iced::futures::channel::mpsc;
 use iced::futures::{Stream, StreamExt};
-use iced::{Element, Subscription, Task, Theme};
+use iced::{Subscription, Task, Theme};
 use loom_ui::effect::{
     Choice, FileAction, FileRequest, FocusTarget, Image, Job, Level, NoGpu, Question, Reply, Selection,
 };

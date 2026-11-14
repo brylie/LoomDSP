@@ -1,8 +1,9 @@
 //! Offline module help from the running registry and bundled notes.
 
+use crate::Element;
 use crate::style::{self, button};
 use iced::widget::{column, container, markdown, row, scrollable, space, text};
-use iced::{Element, Length, Theme};
+use iced::{Length, Theme};
 use loom_core::ModuleDescriptor;
 use serde::Serialize;
 

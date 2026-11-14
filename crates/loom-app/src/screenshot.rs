@@ -352,7 +352,7 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     let physical = physical_size(logical, options.scale)?;
     // The window holds Iced's own widgets and the canvas's wgpu primitive,
     // which only the wgpu renderer draws.
-    let mut renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
+    let mut renderer = iced::futures::executor::block_on(<crate::Renderer as Headless>::new(
         Font::DEFAULT,
         Pixels(16.0),
         Some("wgpu"),
@@ -388,7 +388,7 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
 /// The frame first gets a redraw event, as every frame in the app does.
 /// Iced's buttons choose their look (enabled, hovered, disabled) while they
 /// handle a redraw, and draw as disabled before the first one (#460).
-fn draw_window(app: &crate::App, renderer: &mut iced::Renderer, logical: Size, scale: f32) -> Vec<u8> {
+fn draw_window(app: &crate::App, renderer: &mut crate::Renderer, logical: Size, scale: f32) -> Vec<u8> {
     let physical = physical_size(logical, scale).expect("the caller checked the size");
     // A new cache, so the canvas starts from the still state.
     let theme = app.theme();
@@ -417,8 +417,8 @@ fn draw_window(app: &crate::App, renderer: &mut iced::Renderer, logical: Size, s
 /// Where the canvas is in the window, and its camera. The canvas reports a
 /// [`CanvasView`] to widget operations.
 pub(crate) fn canvas_view<M>(
-    ui: &mut UserInterface<'_, M, Theme, iced::Renderer>,
-    renderer: &mut iced::Renderer,
+    ui: &mut UserInterface<'_, M, Theme, crate::Renderer>,
+    renderer: &mut crate::Renderer,
 ) -> Option<CanvasView> {
     #[derive(Default)]
     struct Find(Option<CanvasView>);

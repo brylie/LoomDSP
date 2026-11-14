@@ -6,10 +6,11 @@
 //! [`Rig`](crate::settings::Rig) and outlives each engine. A failed read or
 //! write never stops an open or a save: it is only a convenience.
 
+use crate::Element;
 use crate::files;
 use crate::style::{self, button};
 use iced::widget::{column, container, row, space, text, tooltip};
-use iced::{Element, Length, Point};
+use iced::{Length, Point};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

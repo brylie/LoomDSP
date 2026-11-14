@@ -53,7 +53,7 @@ fn style(size: f32) -> TextStyle {
 /// Today's width of `text` at `size`: Iced's paragraph as the canvas set
 /// tile text before step 2.4b, with simple shaping.
 fn iced_width(text: &str, size: f32) -> f32 {
-    <iced::Renderer as text::Renderer>::Paragraph::with_text(iced::advanced::Text {
+    <crate::Renderer as text::Renderer>::Paragraph::with_text(iced::advanced::Text {
         content: text,
         bounds: iced::Size::new(f32::INFINITY, f32::INFINITY),
         size: Pixels(size),
@@ -101,7 +101,7 @@ fn window(patch: &std::path::Path) -> Option<(crate::App, CanvasView, Size<u32>,
     let options = &args.view;
     let logical = crate::WINDOW;
     let physical = physical_size(logical, options.scale).expect("a size");
-    let mut renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
+    let mut renderer = iced::futures::executor::block_on(<crate::Renderer as Headless>::new(
         Font::DEFAULT,
         Pixels(16.0),
         Some("wgpu"),

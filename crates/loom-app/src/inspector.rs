@@ -5,6 +5,7 @@
 //! window and [`crate::App::ui_snapshot`] both read the same model, so a
 //! test of the snapshot checks what the user sees.
 
+use crate::Element;
 use crate::modulation::{self, PolarityChoice};
 use crate::style::{self, button};
 use crate::view::remove_button;
@@ -13,7 +14,7 @@ use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, radio, row, scrollable, slider, space, stack, text, text_input,
     tooltip,
 };
-use iced::{Element, Length, Theme};
+use iced::{Length, Theme};
 use loom_core::{AssignmentId, MidiEncoding, MidiMappingOptions, MidiMode, ModuleId, OutputRef, ParamSpec, WidgetKind};
 use loom_ui_core::UiId;
 use serde::Serialize;
@@ -1133,7 +1134,7 @@ impl App {
 /// The inspector's widgets.
 pub fn view<'a>(
     model: Inspector,
-    authors: &'a iced::widget::text_editor::Content,
+    authors: &'a iced::widget::text_editor::Content<crate::Renderer>,
     drop_row: Option<(u32, usize)>,
     dragging: bool,
     listening: bool,
@@ -2132,9 +2133,9 @@ impl std::fmt::Display for ModeChoice {
 /// each with Open, Up, Down, and Remove, and Add member; for a stack,
 /// Copies, Stereo spread, and a spread slider per exposed item.
 fn mode_rows<'a>(
-    mut rows: iced::widget::Column<'a, AppMessage>,
+    mut rows: iced::widget::Column<'a, AppMessage, Theme, crate::Renderer>,
     s: &SubPatchRows,
-) -> iced::widget::Column<'a, AppMessage> {
+) -> iced::widget::Column<'a, AppMessage, Theme, crate::Renderer> {
     use crate::modes::Message as ModeMessage;
     let id = s.id;
     let panel = ids::panel(id);

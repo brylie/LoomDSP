@@ -275,6 +275,16 @@ pub fn run() -> iced::Result {
 /// The window size the app opens with.
 const WINDOW: Size = Size::new(1440.0, 900.0);
 
+/// The renderer the app's views are built for. Every view, widget, and
+/// element names this alias rather than Iced's own `Renderer`, so the
+/// headless harness can lay out on a renderer that needs no GPU while the
+/// window draws with wgpu (step 2.3, items 2 and 3 of the plan for leaving
+/// Iced). For now it is Iced's renderer.
+pub(crate) type Renderer = iced::Renderer;
+
+/// An element of the app's views, built for [`Renderer`].
+pub(crate) type Element<'a, M = Message> = iced::Element<'a, M, Theme, Renderer>;
+
 #[derive(Debug, Clone)]
 enum Message {
     /// The player pressed × on a kept error.
