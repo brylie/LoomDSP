@@ -16,7 +16,7 @@ Divides signal A by signal B. Outputs 0 while B is near zero.
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
 | **A** (`a`) | modulation | 0 | The signal to divide. |
-| **B** (`b`) | modulation | 0 | The divisor. Reads 1 while no cable is connected. |
+| **B** (`b`) | modulation | 1 | The divisor. Reads 1 while no cable is connected. |
 
 ## Outputs
 

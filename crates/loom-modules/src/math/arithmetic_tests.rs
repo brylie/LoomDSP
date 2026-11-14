@@ -29,11 +29,16 @@ fn divide_by_zero_gives_zero() {
     assert_eq!(apply(&mut Div, &[1.0], &[2e-9], true), [5e8]);
 }
 
-/// With no cable on B, Divide passes A unchanged.
+/// With no cable on B, Divide passes A unchanged: B reads its port
+/// default, 1, which the engine fills in.
 #[test]
 fn divide_without_cable_passes_a() {
     let a = [0.25, -3.0, 7.5];
-    assert_eq!(apply(&mut Div, &a, &[0.0; 3], false), a);
+    let PortDefault::Value(one) = DIV.inputs[1].default else {
+        panic!("a fixed default");
+    };
+    assert_eq!(one, 1.0);
+    assert_eq!(apply(&mut Div, &a, &[one; 3], false), a);
 }
 
 /// The modules keep no state, so a NaN or infinity on one frame does not

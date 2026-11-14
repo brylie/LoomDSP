@@ -10,6 +10,9 @@ use std::sync::Arc;
 /// Frames per buffer in these tests.
 const BLOCK: usize = 64;
 
+/// Blocks a 5 ms cable fade at 48 kHz (240 frames) takes to end.
+const FADE_BLOCKS: usize = 4;
+
 /// A port for test descriptors.
 const fn port(name: &'static str) -> PortSpec {
     PortSpec {
@@ -201,7 +204,8 @@ fn counted(first: u32) -> Vec<f32> {
 
 /// A counter and a pass that lead nowhere are not scheduled, so the
 /// counter does not count. A cable to the output makes it run from where
-/// it stands: 0, because it never ran.
+/// it stands: 0, because it never ran. The output fades to it over 5 ms
+/// (live patching spec, rule 9), so the check reads the block after that.
 #[test]
 fn an_unreachable_chain_is_not_processed() {
     let mut parts = engine();
@@ -221,12 +225,16 @@ fn an_unreachable_chain_is_not_processed() {
     parts.controller.connect(out(pass), input(speaker, 0)).unwrap();
     let report = parts.controller.commit().unwrap();
     assert_eq!(report.skipped.iter().copied().collect::<Vec<_>>(), vec![heard]);
-    assert_eq!(run(&mut parts, 1), counted(0));
+    assert_eq!(
+        run(&mut parts, FADE_BLOCKS + 1),
+        counted(FADE_BLOCKS as u32 * BLOCK as u32)
+    );
 }
 
 /// A chain that is unplugged keeps its state while skipped. Plugging it in
 /// again resumes it where it stopped: not reset, and not moved on by the
-/// time it spent unplugged.
+/// time it spent unplugged. The check reads the block after the 5 ms
+/// cable fade (rule 9).
 #[test]
 fn reconnecting_resumes_the_state() {
     let mut parts = engine();
@@ -245,12 +253,16 @@ fn reconnecting_resumes_the_state() {
 
     parts.controller.connect(out(counter), input(speaker, 0)).unwrap();
     parts.controller.commit().unwrap();
-    assert_eq!(run(&mut parts, 1), counted(10 * BLOCK as u32));
+    assert_eq!(
+        run(&mut parts, FADE_BLOCKS + 1),
+        counted((10 + FADE_BLOCKS as u32) * BLOCK as u32)
+    );
 }
 
 /// Disconnecting a unit delay preserves its held sample, even when its
 /// source is skipped too. Reconnection emits that sample before capturing
-/// a new one.
+/// a new one. A probe reads the delay's own output, because the output's
+/// input fades in from 0 after the cable change (rule 9).
 #[test]
 fn skipped_unit_delay_keeps_its_held_sample() {
     let mut parts = engine();
@@ -270,8 +282,18 @@ fn skipped_unit_delay_keeps_its_held_sample() {
     run(&mut parts, 20);
 
     parts.controller.connect(out(delay), input(speaker, 0)).unwrap();
+    parts
+        .controller
+        .add_probe(out(delay), loom_core::ProbeKind::MeterAndScope)
+        .unwrap();
     parts.controller.commit().unwrap();
-    let resumed = run(&mut parts, 1);
+    while parts.telemetry.scope().next().is_some() {}
+    run(&mut parts, 1);
+    let resumed: Vec<f32> = parts
+        .telemetry
+        .scope()
+        .flat_map(|chunk| chunk.samples().to_vec())
+        .collect();
     assert_eq!(resumed[0], 639.0 * SCALE);
     assert_eq!(resumed[1], 640.0 * SCALE);
 }

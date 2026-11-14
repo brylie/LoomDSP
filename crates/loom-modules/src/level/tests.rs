@@ -9,7 +9,11 @@ fn amp(response: f32, level: Option<f32>) -> f32 {
     };
     module.set_param(1, response);
     let input = [0.8_f32; 8];
-    let levels = [level.unwrap_or(0.0); 8];
+    // With no cable the engine fills `level` with its port default.
+    let PortDefault::Value(unplugged) = AMP.inputs[1].default else {
+        panic!("a fixed default");
+    };
+    let levels = [level.unwrap_or(unplugged); 8];
     let mut out = [0.0_f32; 8];
     run(
         &mut module,
@@ -45,7 +49,8 @@ fn zero_and_negative_levels_are_silent() {
     }
 }
 
-/// With no cable on `level`, only the gain acts.
+/// With no cable on `level`, it reads its default of 1, so only the gain
+/// acts.
 #[test]
 fn unconnected_level_reads_one() {
     assert!((amp(0.0, None) - 0.8).abs() < 1e-6);

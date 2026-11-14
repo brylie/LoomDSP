@@ -1175,3 +1175,106 @@ fn a_select_change_during_playback_has_no_click() {
     let across = max_step(&left[switch - 1..switch + 2 * swap_fade_frames()]);
     assert!(across <= limit, "select step {across} > {limit}");
 }
+
+/// Two constants, 0.8 into the output and 0.3 beside it, for cable
+/// changes at the output with nothing but rule 9 to soften them.
+const TWO_CONSTANTS: &str = r#"Patch(version: 1, metadata: Metadata(name: "Two constants"), modules: [
+    PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.8}),
+    PatchModule(id: 2, kind: "loom.math.constant@1", params: {"value": 0.3}),
+    PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+], cables: [
+    PatchCable(from: (1, "out"), to: (3, "in")),
+])"#;
+
+/// Moving, pulling, and plugging the output's cable through the canvas,
+/// with output safety Off so no DC blocker or limiter hides a step: the
+/// tape steps no more than the 5 ms cable fade allows, `|held − new| / N`
+/// (live patching spec, rule 9; FR-GRAPH-05).
+#[test]
+fn cable_changes_at_the_output_do_not_click() {
+    let mut run = Setup {
+        flag: Some(OutputSafety::Off),
+        ..Setup::new("cable_fade", PatchFrom::Text(TWO_CONSTANTS))
+    }
+    .start();
+    run.play(0.2);
+    let port = |module: u32, output: bool| loom_canvas::PortRef {
+        module,
+        index: 0,
+        output,
+    };
+    let length = (RATE as f32 * loom_core::cable_fade::CABLE_FADE_SECONDS).round();
+    let mut last = run.left().len();
+    for (event, from, to) in [
+        // Move to the 0.3 constant.
+        (
+            Message::Canvas(CanvasEvent::Connect {
+                from: port(2, true),
+                to: port(3, false),
+            }),
+            0.8f32,
+            0.3f32,
+        ),
+        // Pull it.
+        (Message::Canvas(CanvasEvent::Disconnect(port(3, false))), 0.3, 0.0),
+        // Plug the 0.8 constant back in.
+        (
+            Message::Canvas(CanvasEvent::Connect {
+                from: port(1, true),
+                to: port(3, false),
+            }),
+            0.0,
+            0.8,
+        ),
+    ] {
+        let _ = run.app.send(event);
+        run.play(0.1);
+        let left = run.left();
+        assert!(left.iter().all(|x| x.is_finite()));
+        let across = max_step(&left[last - 1..]);
+        let limit = (from - to).abs() / length + 1e-6;
+        assert!(across <= limit, "{from} to {to}: step {across} > {limit}");
+        assert_eq!(*left.last().unwrap(), to, "ends on the new signal");
+        last = left.len();
+    }
+}
+
+/// One gesture makes one schedule swap: a cable dropped on the canvas and
+/// a module deleted each commit once. Two swaps before one block would
+/// leave a fade with nothing to read (live patching spec, rule 9), so a
+/// gesture must not make two.
+#[test]
+fn one_gesture_makes_one_schedule_swap() {
+    let mut run = Setup {
+        flag: Some(OutputSafety::Off),
+        ..Setup::new("one_swap", PatchFrom::Text(TWO_CONSTANTS))
+    }
+    .start();
+    run.play(0.1);
+    let swaps = |run: &Run| {
+        run.app
+            .session
+            .controller
+            .stats()
+            .schedule_swaps
+            .load(std::sync::atomic::Ordering::Relaxed)
+    };
+    let before = swaps(&run);
+    let _ = run.app.send(Message::Canvas(CanvasEvent::Connect {
+        from: loom_canvas::PortRef {
+            module: 2,
+            index: 0,
+            output: true,
+        },
+        to: loom_canvas::PortRef {
+            module: 3,
+            index: 0,
+            output: false,
+        },
+    }));
+    run.play(0.05);
+    assert_eq!(swaps(&run), before + 1, "a cable drop swaps once");
+    let _ = run.app.send(Message::Canvas(CanvasEvent::Delete(vec![1])));
+    run.play(0.05);
+    assert_eq!(swaps(&run), before + 2, "a delete swaps once");
+}

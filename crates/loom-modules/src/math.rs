@@ -160,7 +160,7 @@ pub static MUL: ModuleDescriptor = ModuleDescriptor {
             label: "B",
             signal: SignalType::Modulation,
             description: "Scales A. Reads 1 while no cable is connected.",
-            default: PortDefault::Value(0.0),
+            default: PortDefault::Value(1.0),
             range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
@@ -202,7 +202,6 @@ struct Mul {
 }
 
 impl Mul {
-    const B_IN: usize = MUL.input_index("b").unwrap();
     const GAIN: usize = MUL.param_index("gain").unwrap();
 }
 
@@ -213,11 +212,9 @@ impl Module for Mul {
     }
 
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let b_connected = io.is_connected(Self::B_IN);
         let param = io.param(Self::GAIN);
         let ([a, b], [out]) = io.split::<2, 1>();
         for (i, ((out, &a), &b)) in out.iter_mut().zip(a).zip(b).enumerate() {
-            let b = if b_connected { b } else { 1.0 };
             let gain = param.at_or(i, self.gain.tick());
             // Held before the gain too, or a product that overflows and a gain
             // of 0 would give NaN.
@@ -334,7 +331,7 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
             label: "B",
             signal: SignalType::Modulation,
             description: "The divisor. Reads 1 while no cable is connected.",
-            default: PortDefault::Value(0.0),
+            default: PortDefault::Value(1.0),
             range: loom_core::PortRange::Signal,
             channels: Channels::Downmix,
         },
@@ -358,16 +355,10 @@ pub static DIV: ModuleDescriptor = ModuleDescriptor {
 /// Stateless, so a NaN or infinity on an input cannot stay in the module.
 struct Div;
 
-impl Div {
-    const B_IN: usize = DIV.input_index("b").unwrap();
-}
-
 impl Module for Div {
     fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
-        let b_connected = io.is_connected(Self::B_IN);
         let ([a, b], [out]) = io.split::<2, 1>();
         for ((out, &a), &b) in out.iter_mut().zip(a).zip(b) {
-            let b = if b_connected { b } else { 1.0 };
             *out = if b.abs() <= DIVISOR_FLOOR {
                 0.0
             } else if a.is_finite() {

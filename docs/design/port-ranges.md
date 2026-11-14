@@ -90,7 +90,7 @@ The built-in math modules get hooks that use interval arithmetic:
 | Add | `a + b + offset`, adding the lowest and the highest ends |
 | Multiply | `a × b × gain`: the lowest and highest of the products of the ends. An unconnected B counts as 1, as the module does. |
 
-*Why Multiply needs the connected flags:* its B input reads 1 when no cable is connected, but its `PortDefault` is 0. The hook must mirror the module's real behaviour, not the default.
+*Why an unconnected B counts as 1:* its `PortDefault` is 1, so with no cable B reads 1, and the hook can read that default rather than the connected flags. (Before #21 the 1 was made in the module's code while the default said 0.)
 
 A sketch of the hook, as a plain function in `ModuleDescriptor`:
 

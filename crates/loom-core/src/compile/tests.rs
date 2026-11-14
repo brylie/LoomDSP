@@ -9,6 +9,7 @@ fn new_right_taps_inherit_mono_history() {
         input: std::ptr::null(),
         output: std::ptr::null_mut(),
         state,
+        fade: None,
     };
     let mut old = Schedule::empty();
     old.taps.push(tap(3, 8, 0.5));
@@ -619,6 +620,7 @@ fn delay_state_keys_keep_voices_and_sides_separate() {
             input: std::ptr::null(),
             output: std::ptr::null_mut(),
             state: voice as f32 + 0.25,
+            fade: None,
         });
     }
     let mut next = Schedule::empty();
@@ -630,6 +632,7 @@ fn delay_state_keys_keep_voices_and_sides_separate() {
                 input: std::ptr::null(),
                 output: std::ptr::null_mut(),
                 state: 0.0,
+                fade: None,
             });
         }
     }
@@ -732,7 +735,9 @@ fn mono_voice_stereo_downmixes_are_shared() {
         let shared = schedule.downmixes[0].output as *const f32;
         if assignment {
             assert_eq!(schedule.fills.len(), 16);
-            assert!(schedule.fills.iter().all(|fill| fill.sources[0].buffer == shared));
+            assert!(schedule.fills.iter().all(
+                |fill| matches!(fill.sources[0], crate::compile::ModSource::Live { buffer, .. } if buffer == shared)
+            ));
         } else {
             for (op, module) in schedule.ops.iter().enumerate().filter(|(_, op)| op.voices == 16) {
                 assert_eq!(module.voices, 16);
@@ -740,4 +745,32 @@ fn mono_voice_stereo_downmixes_are_shared() {
             }
         }
     }
+}
+
+/// The check behind the fades' `unsafe` reads: every fade and read pointer
+/// lies inside the schedule's own buffers, and one outside fails it.
+#[test]
+fn fade_pointers_must_lie_inside_the_schedule() {
+    use super::Read;
+    let mut schedule = Schedule::empty();
+    schedule._zero = vec![0.0; 8].into_boxed_slice();
+    schedule._buffers.push(vec![0.0; 8].into_boxed_slice());
+    let inside = schedule._buffers[0].as_ptr();
+    schedule.reads.push(Read {
+        key: 1,
+        ptr: inside,
+        constant: None,
+    });
+    assert!(schedule.fade_pointers_inside());
+    // A pointer into the middle of a buffer leaves too few floats after it.
+    schedule.reads[0].ptr = inside.wrapping_add(7);
+    assert!(!schedule.fade_pointers_inside());
+    schedule.reads[0].ptr = inside;
+    let outside = [0.0f32; 4];
+    schedule.reads.push(Read {
+        key: 2,
+        ptr: outside.as_ptr(),
+        constant: None,
+    });
+    assert!(!schedule.fade_pointers_inside());
 }

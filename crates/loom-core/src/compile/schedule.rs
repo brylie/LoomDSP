@@ -1,6 +1,7 @@
 //! The compiled schedule the engine runs, and the operations and buffers it holds.
 
 use super::*;
+use crate::cable_fade::{InputFade, Ramp};
 
 pub(crate) struct ModuleOp {
     pub slot: u32,
@@ -23,6 +24,9 @@ pub(crate) struct ModuleOp {
     pub voices: u8,
     /// Bundle channel metadata owned by this operation.
     pub bundles: (u32, u32),
+    /// Range into [`Schedule::cable_fades`], run just before the module
+    /// (live patching spec, rule 9).
+    pub cable_fades: (u32, u32),
 }
 
 /// How a downmix makes one channel from two (stereo spec, rule 11).
@@ -73,10 +77,41 @@ pub(crate) struct DownmixOp {
     pub output: *mut f32,
 }
 
-/// One source of a modulated parameter. `state` indexes [`Schedule::assignments`].
-pub(crate) struct ModSource {
-    pub state: u32,
-    pub buffer: *const f32,
+/// One source of a modulated parameter.
+pub(crate) enum ModSource {
+    /// An assignment in this schedule. `state` indexes
+    /// [`Schedule::assignments`]. `ramp` fades its contribution in, or to a
+    /// new source, after a swap (live patching spec, rule 9).
+    Live {
+        id: AssignmentId,
+        state: u32,
+        buffer: *const f32,
+        ramp: Option<Ramp>,
+        /// True when the ramp starts in this swap; false when it is
+        /// carried from the last schedule.
+        fresh: bool,
+    },
+    /// An assignment that left this parameter: its last contribution,
+    /// ramping to 0. It has no runtime and no buffer, so it never looks
+    /// anything up in this schedule.
+    Leaving { id: AssignmentId, ramp: Ramp, fresh: bool },
+}
+
+impl ModSource {
+    /// The assignment this source belongs to.
+    pub fn id(&self) -> AssignmentId {
+        match self {
+            Self::Live { id, .. } | Self::Leaving { id, .. } => *id,
+        }
+    }
+
+    /// Its ramp, if it has one.
+    pub fn ramp(&self) -> Option<Ramp> {
+        match self {
+            Self::Live { ramp, .. } => *ramp,
+            Self::Leaving { ramp, .. } => Some(*ramp),
+        }
+    }
 }
 
 /// A parameter the engine fills before its module runs.
@@ -103,6 +138,15 @@ impl ParamFill {
     pub fn is_extra_copy(&self) -> bool {
         self.key & (RIGHT_FILL | (0xF << 24)) != 0
     }
+
+    /// True when an assignment in this schedule drives the parameter. A
+    /// fill kept only for contributions that are leaving is not, so its
+    /// knob shows no live dot.
+    pub fn is_modulated(&self) -> bool {
+        self.sources
+            .iter()
+            .any(|source| matches!(source, ModSource::Live { .. }))
+    }
 }
 
 /// Depth, polarity, and enabled flag. The audio thread updates these without
@@ -126,6 +170,20 @@ pub(crate) struct Tap {
     pub input: *const f32,
     pub output: *mut f32,
     pub state: f32,
+    /// Index into [`Schedule::cable_fades`] of the fade on a Unit Delay
+    /// module's input, run before the tap reads it (rule 9).
+    pub fade: Option<u32>,
+}
+
+/// The buffer one input channel read in a schedule, sorted by its key
+/// ([`crate::cable_fade::input_key`]). The next schedule reads the last
+/// frame from it to start a fade (rule 9).
+pub(crate) struct Read {
+    pub key: u64,
+    pub ptr: *const f32,
+    /// The value when the input reads a fixed default, known without
+    /// reading memory. Used when no block ran.
+    pub constant: Option<f32>,
 }
 
 pub(crate) struct OutputOp {
@@ -224,9 +282,23 @@ pub(crate) struct Schedule {
     /// Live value cells the previous schedule used and this one does not.
     /// The engine releases them when it swaps this schedule in.
     pub live_release: Vec<u32>,
+    /// Cable fades in the order they run, grouped by reader (rule 9).
+    pub cable_fades: Vec<InputFade>,
+    /// Indices into `cable_fades`, sorted by key, so the next schedule can
+    /// merge its fades with these.
+    pub cable_fade_order: Vec<u32>,
+    /// Range into `cable_fades` run before the outputs are summed.
+    pub output_fades: (u32, u32),
+    /// The buffer each input channel reads, sorted by key.
+    pub reads: Vec<Read>,
+    /// Set by the controller. The engine publishes it once every fade of
+    /// this schedule has ended (`EngineStats::cable_fades_settled`).
+    pub generation: u64,
 }
 
-// SAFETY: the raw pointers only point into buffers owned by this schedule.
+// SAFETY: the raw pointers only point into buffers owned by this schedule,
+// including the fade buffers and `reads`; a new schedule copies values,
+// never pointers, from the one it replaces.
 // The schedule is only ever used by one thread at a time (built on the control
 // thread, then moved to the audio thread, then moved back for dropping).
 unsafe impl Send for Schedule {}
@@ -261,7 +333,45 @@ impl Schedule {
             structural_params: Vec::new(),
             midi_maps: Vec::new(),
             live_release: Vec::new(),
+            cable_fades: Vec::new(),
+            cable_fade_order: Vec::new(),
+            output_fades: (0, 0),
+            reads: Vec::new(),
+            generation: 0,
         }
+    }
+
+    /// True when every cable fade's target and buffer, and every pointer in
+    /// `reads`, is the start of one of this schedule's own buffers with at
+    /// least `max_block` floats (the zero buffer's length). The engine reads
+    /// up to `max_block` floats through each, at the swap and in each block,
+    /// so the compiler checks this in debug builds (rule 9).
+    pub fn fade_pointers_inside(&self) -> bool {
+        let max_block = self._zero.len();
+        let inside = |ptr: *const f32| {
+            self._buffers
+                .iter()
+                .chain(std::iter::once(&self._zero))
+                .any(|buffer| std::ptr::eq(buffer.as_ptr(), ptr) && buffer.len() >= max_block)
+        };
+        self.cable_fades
+            .iter()
+            .all(|fade| inside(fade.target()) && inside(fade.buffer()))
+            && self.reads.iter().all(|read| inside(read.ptr))
+    }
+
+    /// Every fade and contribution ramp in this schedule, by what it fades.
+    /// The controller passes them to the next compile while they may still
+    /// run (rule 9).
+    pub fn fade_keys(&self) -> Vec<super::FadeKey> {
+        let inputs = self.cable_fades.iter().map(|fade| super::FadeKey::Input(fade.key));
+        let contributions = self.fills.iter().flat_map(|fill| {
+            fill.sources
+                .iter()
+                .filter(|source| source.ramp().is_some())
+                .map(|source| super::FadeKey::Contribution(fill.key, source.id()))
+        });
+        inputs.chain(contributions).collect()
     }
 
     /// Copies unit delay state from the previous schedule, matched by key.
