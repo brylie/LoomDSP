@@ -213,11 +213,11 @@ fn status_texts_read_as_the_spec_names_them() {
     );
     assert_eq!(
         mode_moves_slot("Voice", Mode::Layer),
-        "Cannot make Voice a layer: it holds a slot"
+        "Cannot make Voice a layer yet: it holds a slot; dissolve the slot first"
     );
     assert_eq!(
         mode_moves_slot("Pad", Mode::Single),
-        "Cannot make Pad single: it holds a slot"
+        "Cannot make Pad single yet: it holds a slot; dissolve the slot first"
     );
     assert_eq!(Mode::ALL.map(Mode::label), ["Single", "Layer", "Select", "Stack"]);
     assert!(Mode::Layer.has_members() && Mode::Select.has_members() && !Mode::Stack.has_members());

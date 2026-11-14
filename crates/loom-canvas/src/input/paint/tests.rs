@@ -29,6 +29,7 @@ fn widget(kind: WidgetViewKind, label: &str) -> WidgetView {
         },
         hidden: false,
         exposed: false,
+        inert: false,
     }
 }
 

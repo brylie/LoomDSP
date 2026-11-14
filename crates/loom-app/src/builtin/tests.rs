@@ -14,7 +14,7 @@ fn example(builtin: &Builtin) -> std::path::PathBuf {
 #[test]
 fn every_builtin_reads_flattens_and_has_no_links() {
     let registry = loom_modules::registry();
-    for builtin in ALL {
+    for builtin in &ALL {
         let patch = builtin.patch();
         assert_eq!(patch.metadata.name, builtin.name, "{}", builtin.stem);
         assert_eq!(patch.metadata.license.as_deref(), Some("CC0-1.0"));
@@ -33,7 +33,7 @@ fn every_builtin_reads_flattens_and_has_no_links() {
 #[test]
 fn each_example_patch_holds_its_builtins_definition() {
     let registry = loom_modules::registry();
-    for builtin in ALL {
+    for builtin in &ALL {
         let text = std::fs::read_to_string(example(builtin)).expect("the example patch");
         let example = loom_patch::Patch::from_ron(&text).expect("it reads");
         let (definition, _) = SubPatch::from_patch(&builtin.patch(), &registry, None);
@@ -52,12 +52,12 @@ fn the_synth_voice_exposes_its_surface_in_order() {
         names,
         [
             "cutoff",
-            "resonance",
-            "env amount",
-            "amp attack",
-            "amp decay",
-            "amp sustain",
-            "amp release",
+            "res",
+            "env mod",
+            "attack",
+            "decay",
+            "sustain",
+            "release",
             "fine tune",
             "level"
         ]
@@ -137,4 +137,42 @@ fn the_browser_inserts_a_builtin_as_a_copy() {
         .map(|r| r.name.clone())
         .collect();
     assert_eq!(names, ["Synth voice", "Effect chain"]);
+}
+
+/// No tile overlaps another, at the top of each example or inside its
+/// built-in, and no caption on the built-in's surface is cut with "…", so
+/// a player who opens one meets a tidy patch (sub-patches.md, Built-in
+/// abstractions).
+#[test]
+fn builtins_have_no_overlap_and_no_cut_caption() {
+    let no_overlap = |tiles: &[crate::snapshot::Tile], level: &str| {
+        for (i, a) in tiles.iter().enumerate() {
+            for b in &tiles[i + 1..] {
+                let (r, q) = (&a.bounds, &b.bounds);
+                let apart =
+                    r.x + r.width <= q.x || q.x + q.width <= r.x || r.y + r.height <= q.y || q.y + q.height <= r.y;
+                assert!(apart, "{level}: {} overlaps {}", a.title, b.title);
+            }
+        }
+    };
+    for builtin in &ALL {
+        let mut app = crate::App::new(crate::Args {
+            patch: Some(example(builtin)),
+            ..crate::tests::app_args()
+        });
+        let snapshot = app.ui_snapshot();
+        no_overlap(&snapshot.tiles, builtin.stem);
+        let instance = snapshot
+            .tiles
+            .iter()
+            .find(|t| t.title == builtin.name)
+            .expect("the built-in's tile");
+        for widget in &instance.widgets {
+            assert_eq!(widget.shown, None, "{}: {} is cut", builtin.stem, widget.label);
+        }
+        let _ = app.send(crate::Message::OpenLevel(loom_patch::ModulePath::top(instance.id)));
+        let inside = app.ui_snapshot();
+        assert!(inside.tiles.len() > 3, "{}: the inside shows", builtin.stem);
+        no_overlap(&inside.tiles, &format!("inside {}", builtin.name));
+    }
 }

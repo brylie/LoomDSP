@@ -109,3 +109,27 @@ fn a_long_chain_of_empty_thru_slots_flattens() {
         .collect();
     assert_eq!(cables, [((1, "out"), (2, "in"))]);
 }
+
+/// An empty thru slot whose output feeds its own input is a loop of
+/// pass-throughs: it carries nothing, and flattening neither hangs nor
+/// refuses it.
+#[test]
+fn an_empty_thru_slot_in_a_loop_carries_nothing() {
+    let (flat, _) = flatten(
+        r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Loop"),
+    modules: [
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.effect@1"))),
+        PatchModule(id: 10, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.effect@1"))),
+    ],
+    cables: [
+        PatchCable(from: (10, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (10, "in")),
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)"#,
+    );
+    assert!(flat.cables.is_empty(), "{:?}", flat.cables);
+}

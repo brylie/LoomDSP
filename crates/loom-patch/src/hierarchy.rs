@@ -37,6 +37,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod modes;
 pub use modes::{MEMBER_LID, PlayingMember};
+mod links;
 mod slots;
 pub use slots::{
     Emptied, Fading, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, added_slot_text,
@@ -276,7 +277,7 @@ pub struct Hierarchy {
     ports: BTreeMap<ModulePath, Port>,
     /// The slot tiles, by path (sub-patches.md, Slots).
     slots: BTreeMap<ModulePath, SlotState>,
-    links: BTreeSet<Link>,
+    links: links::LinkSet,
     /// The flat cables the links imply, as (output, input) in flat ids and
     /// port names, from the last sync or load.
     implied: BTreeSet<(End, End)>,
@@ -315,7 +316,7 @@ impl Hierarchy {
             instances: BTreeMap::new(),
             ports: BTreeMap::new(),
             slots: BTreeMap::new(),
-            links: BTreeSet::new(),
+            links: links::LinkSet::default(),
             implied: BTreeSet::new(),
             copies: BTreeMap::new(),
             added: BTreeMap::new(),
@@ -431,6 +432,11 @@ impl Hierarchy {
                         held: slot.held.clone(),
                         label: module.label.clone(),
                         fading: None,
+                        values: if slot.part.is_none() {
+                            slot.values.clone()
+                        } else {
+                            BTreeMap::new()
+                        },
                     },
                 );
                 // A held sub-patch keeps its definition, whole, since no
@@ -881,20 +887,18 @@ impl Hierarchy {
     }
 
     /// The links drawn on `level`.
-    fn links_at(&self, level: &ModulePath) -> impl Iterator<Item = &Link> {
-        let level = level.clone();
-        self.links.iter().filter(move |link| link.level == level)
+    fn links_at<'a>(&'a self, level: &ModulePath) -> impl Iterator<Item = &'a Link> + 'a {
+        self.links.at_level(level)
     }
 
-    /// The one link into `to` on `level`.
+    /// The one link into `to` on `level`, by range.
     fn link_into(&self, level: &ModulePath, to: &End) -> Option<&Link> {
-        self.links_at(level).find(|link| link.to == *to)
+        self.links.linked_into(level, to)
     }
 
-    /// The links out of `from` on `level`.
-    fn links_from(&self, level: &ModulePath, from: &End) -> impl Iterator<Item = &Link> {
-        let from = from.clone();
-        self.links_at(level).filter(move |link| link.from == from)
+    /// The links out of `from` on `level`, by range.
+    fn links_from<'a>(&'a self, level: &ModulePath, from: &End) -> impl Iterator<Item = Link> + 'a {
+        self.links.linked_from(level, from)
     }
 
     /// The exposed name of `instance` that stands for the flat parameter
@@ -1134,6 +1138,11 @@ impl Hierarchy {
                     role: slot.role.kind(),
                     part: slot.part,
                     held: slot.held.clone(),
+                    values: if slot.part.is_none() {
+                        slot.values.clone()
+                    } else {
+                        BTreeMap::new()
+                    },
                 }),
                 label: slot.label.clone(),
                 params: BTreeMap::new(),

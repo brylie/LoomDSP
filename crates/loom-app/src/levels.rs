@@ -870,11 +870,19 @@ impl App {
             return Vec::new();
         };
         let mut slots: Vec<ModuleId> = Vec::new();
-        for index in 0..definition.exposed.len() {
-            let Some(target) = session.hierarchy.exposed_target(ModuleId(instance), index) else {
-                continue;
-            };
-            if let Some(slot) = session.hierarchy.slot_of_part(target.module)
+        let inside = session.hierarchy.path_of(ModuleId(instance));
+        for (index, exposed) in definition.exposed.iter().enumerate() {
+            // A surface item on a slot's role parameter names the slot
+            // itself, so its swaps stay while the slot is empty.
+            let on_slot = session
+                .hierarchy
+                .id_at(&inside, exposed.module)
+                .filter(|id| session.hierarchy.slot(*id).is_some());
+            let slot = on_slot.or_else(|| {
+                let target = session.hierarchy.exposed_target(ModuleId(instance), index)?;
+                session.hierarchy.slot_of_part(target.module)
+            });
+            if let Some(slot) = slot
                 && !slots.contains(&slot)
             {
                 slots.push(slot);

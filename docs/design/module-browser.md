@@ -53,7 +53,7 @@ The list holds four kinds of row, in this order in an empty search:
 |---|---|---|---|---|
 | **Built-in abstractions** | The abstraction's name, such as `Synth voice` | `Built in` | Its one-sentence description; detail `Built in, inserted as a copy` | None |
 | **Modules** | The module's name | Its family | Its description; detail its ID | None |
-| **Slots** | `Filter slot`: one per role that a registered module or a library item fills | `Slot` | The role's description and `Add an empty slot, then swap a part in from its menu or the inspector.`; detail the role's kind | None |
+| **Slots** | `Filter slot`: one per role that a registered module or a library item fills | `Slot` | The role's description and `Add an empty slot, then swap a part in from its menu or the inspector.`, and for a Filter or Effect role `While empty, it passes its input through.`; detail the role's kind | None |
 | **Library items** | The patch's name | `Sub-patch` | `A sub-patch from your library, inserted as a copy. Right-click it to insert it linked.`; detail its path | Insert linked |
 
 - *Why built-ins first:* a new player should find the Synth voice without scrolling past every module.

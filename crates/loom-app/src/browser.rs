@@ -821,7 +821,7 @@ fn rows(results: &[Entry], builtins: &[crate::builtin::Builtin], library: &[Libr
                     mark: BUILTIN_MARK,
                     family: Family::Interface,
                     library: false,
-                    description: builtins[i].description(),
+                    description: builtins[i].description().to_string(),
                 },
                 Entry::Module(d) => BrowserRow {
                     id,
@@ -859,7 +859,7 @@ fn rows(results: &[Entry], builtins: &[crate::builtin::Builtin], library: &[Libr
 fn about(entry: Entry, builtins: &[crate::builtin::Builtin], library: &[LibraryItem]) -> About {
     match entry {
         Entry::Builtin(i) => About {
-            text: builtins[i].description(),
+            text: builtins[i].description().to_string(),
             detail: "Built in, inserted as a copy".to_string(),
         },
         Entry::Module(d) => About {

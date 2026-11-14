@@ -265,7 +265,16 @@ fn a_surface_control_bound_to_an_empty_slot_is_dimmed_and_says_why() {
     let value = app.session.values.get(2, 0).expect("a value for the control");
     assert!(value.dimmed);
     let panel = crate::surface::surface_panel(graph, &app.session.hierarchy, loom_core::ModuleId(2));
-    assert_eq!(panel.widgets[0].hover.description, "Filter has no part.");
+    assert_eq!(
+        panel.widgets[0].hover.description,
+        "Filter has no part. Swap one in from the tile's menu."
+    );
+    let snapshot = app.ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|t| t.id == 2).unwrap();
+    assert_eq!(
+        tile.widgets[0].inert.as_deref(),
+        Some("Filter has no part. Swap one in from the tile's menu.")
+    );
 }
 
 /// A Voice stacked four times whose Filter slot holds an SVF.
@@ -374,4 +383,32 @@ fn a_swap_past_the_module_limit_is_refused_whole() {
     assert_eq!(app.session.controller.graph().nodes().count(), count);
     assert_eq!(app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)), part);
     assert!(app.session.hierarchy.fading_slots().is_empty());
+}
+
+/// Remove part on a Ladder whose Slope is modulated and mapped names the
+/// Slope in the status, takes both away with the part, and one undo puts
+/// the part, the modulation, and the mapping back (sub-patches.md, Empty
+/// slots).
+#[test]
+fn remove_part_names_the_modulation_it_removes_and_undo_restores_it() {
+    let mut app = app_with(LADDER_SLOT);
+    let slot = inside(&app, 9);
+    let assignments = app.session.controller.graph().assignments().count();
+    let mappings = app.session.controller.graph().midi_mappings().count();
+    assert_eq!((assignments, mappings), (1, 1));
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Empty,
+    });
+    let status = app.alerts.status().to_string();
+    assert!(status.starts_with("Removed Ladder from Filter."), "{status}");
+    assert!(status.contains("Slope"), "{status}");
+    app.process(600);
+    assert_eq!(app.session.controller.graph().assignments().count(), 0);
+    assert_eq!(app.session.controller.graph().midi_mappings().count(), 0);
+    app.undo();
+    app.process(600);
+    assert!(app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)).is_some());
+    assert_eq!(app.session.controller.graph().assignments().count(), assignments);
+    assert_eq!(app.session.controller.graph().midi_mappings().count(), mappings);
 }

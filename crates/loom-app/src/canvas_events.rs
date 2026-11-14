@@ -288,7 +288,7 @@ impl App {
                 let roles = self.session.controller.registry().roles().collect();
                 self.overlays.open(Overlay::Browser(
                     browser::Browser::open(self.modules.clone(), world, at, area)
-                        .with_builtins(crate::builtin::ALL)
+                        .with_builtins(&crate::builtin::ALL)
                         .with_roles(roles),
                 ));
             }

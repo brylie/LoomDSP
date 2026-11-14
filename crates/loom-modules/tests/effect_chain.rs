@@ -104,6 +104,10 @@ fn the_chain_passes_audio_through_every_slot_in_order() {
         assert_eq!(play(&chain([0.0; 3], |_| {}), block), dry, "block {block}");
         assert_eq!(play(&chain([1.0, 0.0, 0.0], |_| {}), block), play(&flat(&[EQ]), block));
         assert_eq!(
+            play(&chain([0.0, 1.0, 0.0], |_| {}), block),
+            play(&flat(&[DYNAMICS]), block)
+        );
+        assert_eq!(
             play(&chain([0.0, 0.0, 1.0], |_| {}), block),
             play(&flat(&[DELAY]), block)
         );
@@ -126,17 +130,25 @@ fn a_middle_mix_is_a_linear_blend() {
     }
 }
 
+/// Effect 2 taken out, as Remove part leaves it once its fade is done.
+fn empty_effect_2(patch: &mut Patch) {
+    let definition = patch.subpatches.get_mut("effect chain").unwrap();
+    definition.modules.retain(|m| m.id != 3);
+    let slot = definition.modules.iter_mut().find(|m| m.id == 11).unwrap();
+    slot.slot.as_mut().unwrap().part = None;
+}
+
 /// With Effect 2 emptied, the chain still plays: the empty slot passes its
-/// input through (ADR-0043), so the chain is Effect 1 into Effect 3.
+/// input through (ADR-0043), so the chain is Effect 1 into Effect 3. With
+/// every mix at 0 it is still its input, bit for bit, though the thru and
+/// the slot's mix both read the one signal before the slot.
 #[test]
 fn an_emptied_slot_passes_its_input_through() {
-    let emptied = chain([1.0; 3], |patch| {
-        let definition = patch.subpatches.get_mut("effect chain").unwrap();
-        definition.modules.retain(|m| m.id != 3);
-        let slot = definition.modules.iter_mut().find(|m| m.id == 11).unwrap();
-        slot.slot.as_mut().unwrap().part = None;
-    });
-    assert_eq!(play(&emptied, 512), play(&flat(&[EQ, DELAY]), 512));
+    assert_eq!(
+        play(&chain([1.0; 3], empty_effect_2), 512),
+        play(&flat(&[EQ, DELAY]), 512)
+    );
+    assert_eq!(play(&chain([0.0; 3], empty_effect_2), 512), play(&flat(&[]), 512));
 }
 
 /// At its defaults the chain keeps its input's level within 2 dB, so

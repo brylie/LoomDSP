@@ -281,6 +281,11 @@ pub struct Widget {
     /// out for other widgets, and for a scope with no trace yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<TraceShown>,
+    /// For a control with nothing behind it, such as one bound to an empty
+    /// slot, why it does nothing: `Filter has no part.`. Left out for every
+    /// other widget (sub-patches.md, Empty slots).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inert: Option<String>,
 }
 
 /// The second value of an XY pad or a range, for the snapshot.
@@ -645,6 +650,7 @@ impl App {
                                     live: second.live,
                                 }),
                                 trace: self.session.traces.get(m.id, index).map(TraceShown::from),
+                                inert: w.inert.then(|| w.hover.description.clone()),
                             }
                         })
                         .collect(),

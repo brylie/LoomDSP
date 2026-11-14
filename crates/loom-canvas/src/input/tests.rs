@@ -71,6 +71,7 @@ fn widget(kind: WidgetViewKind, x: u8) -> WidgetView {
         hover: crate::scene::HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     }
 }
 
@@ -95,6 +96,18 @@ fn tab_skips_hidden_controls() {
     assert_eq!(next_focus(&panel, None, false), Some(0));
     assert_eq!(next_focus(&panel, Some(0), false), Some(0), "only the knob is left");
     assert_eq!(focusable(&panel), [0], "Tab within a module walks the same list");
+}
+
+/// Tab skips a control with nothing behind it, such as one bound to an
+/// empty slot: it is drawn, but it is not a control (sub-patches.md,
+/// Empty slots).
+#[test]
+fn tab_skips_inert_controls() {
+    let mut panel = panel();
+    panel.widgets[0].inert = true;
+    assert!(!panel.widgets[0].is_control());
+    assert_eq!(next_focus(&panel, None, false), Some(2));
+    assert_eq!(focusable(&panel), [2]);
 }
 
 #[test]

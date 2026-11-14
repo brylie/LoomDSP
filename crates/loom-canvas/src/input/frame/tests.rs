@@ -28,6 +28,7 @@ fn scene() -> Scene {
                     hover: HoverText::default(),
                     hidden: false,
                     exposed: false,
+                    inert: false,
                 }],
             },
         }],

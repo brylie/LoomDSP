@@ -262,7 +262,7 @@ pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -
             // Bound to an empty slot's role parameter: it says why it does
             // nothing (sub-patches.md, Empty slots).
             let (description, note) = match empty_slot_behind(hierarchy, instance, index) {
-                Some(slot) => (format!("{slot} has no part."), None),
+                Some(slot) => (format!("{slot} has no part. Swap one in from the tile's menu."), None),
                 None => (description, Some(note)),
             };
             WidgetView {
@@ -277,10 +277,19 @@ pub fn surface_panel(graph: &Graph, hierarchy: &Hierarchy, instance: ModuleId) -
                 },
                 hidden: false,
                 exposed: further.is_some(),
+                inert: empty_slot_behind(hierarchy, instance, index).is_some(),
             }
         })
         .collect();
     flow_layout(widgets)
+}
+
+/// True when widget `widget` of the sub-patch tile `tile` is a surface
+/// control bound to an empty slot: drawn, but with nothing behind it
+/// (sub-patches.md, Empty slots). It keeps the key of a control, so its UI
+/// ID does not change while the slot is empty.
+pub fn is_inert(hierarchy: &Hierarchy, tile: u32, widget: usize) -> bool {
+    empty_slot_behind(hierarchy, ModuleId(tile), widget).is_some()
 }
 
 /// The name of the empty slot the surface item `index` of the sub-patch

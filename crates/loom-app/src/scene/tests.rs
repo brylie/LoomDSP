@@ -536,6 +536,7 @@ fn hiding_a_whole_row_shortens_the_panel() {
         hover: HoverText::default(),
         hidden: false,
         exposed: false,
+        inert: false,
     };
     let mut panel = PanelView {
         width: 6,

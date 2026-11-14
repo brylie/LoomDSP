@@ -146,7 +146,7 @@ pub fn mode_moves_slot(name: &str, mode: Mode) -> String {
         Mode::Single => "single".to_string(),
         other => format!("a {}", other.word()),
     };
-    format!("Cannot make {name} {to}: it holds a slot")
+    format!("Cannot make {name} {to} yet: it holds a slot; dissolve the slot first")
 }
 
 /// The refusal of a mode change on a tile that is not a sub-patch.

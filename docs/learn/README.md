@@ -35,7 +35,7 @@ LoomDSP is also a way to learn modular sound design, for musicians and for the p
 | [Unison: copies, spread, and why a stack sums at 1/√N](unison.md) | Why identical copies add 6 dB and different ones 3 dB, why a stack scales by 1/√N and a layer does not, why spread is a share of the knob built from modulation, the constant-power pan law, and how a select's fade turns back without a click. |
 | [Flattening](flattening.md) | How a sub-patch becomes plain modules before the engine sees it, why a box that runs a box was rejected, and why flat ids come from a table keyed by path. |
 | [Normals: what an input reads when nothing is patched](normals.md) | Why every input reads its port default with no cable, why a module must not make its own, which inputs switch instead, and why an empty filter or effect slot passes its input through. |
-| [Abstraction: roles, slots, and swapping](abstraction.md) | Why a swap needs a written contract, why role parameters have kinds and may be optional, why a sound source takes a phase, why a swap crossfades with equal power over 10 ms, and why the fade is an ordinary module. |
+| [Abstraction: roles, slots, and swapping](abstraction.md) | Why a swap needs a written contract, why role parameters have kinds and may be optional, why a sound source takes a phase, why a swap crossfades with equal power over 10 ms, when a linear fade fits better, and why the fade is an ordinary module. |
 
 ## Writing one
 

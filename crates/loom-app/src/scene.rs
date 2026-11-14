@@ -217,6 +217,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 hover,
                 hidden: false,
                 exposed: false,
+                inert: false,
             }
         })
         .collect();
@@ -1311,6 +1312,7 @@ pub fn build(
                                     hover: HoverText::default(),
                                     hidden: false,
                                     exposed: false,
+                                    inert: false,
                                 })
                                 .collect(),
                         }

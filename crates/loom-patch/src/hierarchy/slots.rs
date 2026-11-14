@@ -118,6 +118,10 @@ pub struct SlotState {
     pub label: Option<String>,
     /// The crossfade in progress, if any. Never saved.
     pub fading: Option<Fading>,
+    /// The role values an empty slot keeps from the part that left it, by
+    /// role name, which the next part takes (sub-patches.md, Empty slots).
+    /// Empty while the slot holds a part.
+    pub values: BTreeMap<String, f32>,
 }
 
 impl SlotState {
@@ -580,7 +584,14 @@ impl Hierarchy {
                             .collect();
                         for dest in dests {
                             for (to, input) in self.inputs_behind(graph, &level, &dest) {
-                                wiring.retarget.push(((to.0, input), (fade.0, "out".to_string())));
+                                // A stack downstream runs this input in every
+                                // copy, each fed from the same source, so the
+                                // fade feeds them all (ADR-0044).
+                                for copy in std::iter::once(to).chain(self.copies_of(to).iter().map(|(c, _)| *c)) {
+                                    wiring
+                                        .retarget
+                                        .push(((copy.0, input.clone()), (fade.0, "out".to_string())));
+                                }
                             }
                         }
                     }
@@ -637,7 +648,7 @@ impl Hierarchy {
         for &step in &level_k.0 {
             if step >= crate::flatten::COPY_STEP {
                 // A copy step goes in only after a stack both paths share.
-                if i > 0 && out.len() >= i {
+                if i > 0 {
                     out.push(step);
                 }
                 continue;
@@ -656,7 +667,8 @@ impl Hierarchy {
     /// Adds, in every other copy of the stacks the slot at `slot_path` is
     /// in, the same fades as `fades` (copy 0's), at the same steps under
     /// that copy's slot path and with the same laws (ADR-0044). A copy
-    /// whose leaving part is missing is skipped.
+    /// whose leaving part is missing is skipped. On an error part-way, the
+    /// caller rolls back by comparing modules, as for [`Hierarchy::add_fades`].
     fn add_copy_fades(
         &mut self,
         controller: &mut Controller,
@@ -686,7 +698,8 @@ impl Hierarchy {
                 let law = controller
                     .graph()
                     .node(*fade)
-                    .and_then(|n| n.params.first().copied())
+                    // Copy 0's law, by name, so another parameter cannot change it.
+                    .and_then(|n| Some(n.params[n.descriptor.param_index("law")?]))
                     .unwrap_or(0.0);
                 let id = self.ids.id_of(&slot_k.child(step)).map_err(|e| e.to_string())?;
                 controller
@@ -733,7 +746,10 @@ impl Hierarchy {
 
     /// Adds one swap fade per `(role output, law)` under the slot at
     /// `slot_path`, with its law set (sub-patches.md, How a swap
-    /// crossfades). Returns them as `(role output, flat id)`.
+    /// crossfades). Returns them as `(role output, flat id)`. On an error
+    /// part-way, the fades already added stay in the controller: the
+    /// caller works on a candidate hierarchy and rolls back by comparing
+    /// the graph's modules with what it held before (`swap_now`).
     fn add_fades(
         &mut self,
         controller: &mut Controller,
@@ -805,6 +821,7 @@ impl Hierarchy {
                 held: BTreeMap::new(),
                 label: (label != role.name).then_some(label),
                 fading: None,
+                values: BTreeMap::new(),
             },
         );
         Ok(slot_id)
@@ -857,6 +874,7 @@ impl Hierarchy {
             held: BTreeMap::new(),
             label: None,
             fading: None,
+            values: BTreeMap::new(),
         };
 
         // Cables: a role port's move to the slot; another port's go.
@@ -1182,6 +1200,10 @@ impl Hierarchy {
         let Some(state) = self.slots.get(slot_path) else {
             return values;
         };
+        // An empty slot carries the values the last part left with it.
+        if state.part.is_none() {
+            return state.values.clone();
+        }
         for param in state.role.params {
             let Some((id, own)) = self.slot_param_target(slot_path, param.name) else {
                 continue;
@@ -1336,6 +1358,7 @@ impl Hierarchy {
             record.held.remove(&held_key);
             record.part = Some(new_path.last());
             record.part_fills = Some(fills);
+            record.values.clear();
         }
 
         // Assignments and mappings move by role name.
@@ -1456,6 +1479,7 @@ impl Hierarchy {
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.part = Some(new_path.last());
             record.part_fills = None;
+            record.values.clear();
         }
         let mut removed = Vec::new();
         if let Some(old_id) = old_id {
@@ -1592,12 +1616,16 @@ impl Hierarchy {
         } else {
             None
         };
+        // The role values stay with the slot, so the next part takes them,
+        // as a swap between two parts carries them (FR-ENCAP-08).
+        let values = self.role_values(controller.graph(), &slot_path);
         self.hold_part(controller.graph(), controller.registry(), layout, &slot_path);
         let removed = self.drop_links_under(controller, &old_path);
         {
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.part = None;
             record.part_fills = None;
+            record.values = values;
         }
         let gone = match fade_outputs {
             Some(outputs) => {
@@ -1637,6 +1665,12 @@ impl Hierarchy {
         let mut labels = Vec::new();
         let mut drops = Vec::new();
         for (aid, a) in graph.assignments() {
+            // An implied assignment, such as a stack's spread, is the
+            // flattener's, not the player's: it is not named, and `sync`
+            // takes it away with the part (ADR-0044).
+            if self.is_implied_module(a.source.module) || self.is_implied_module(a.target) {
+                continue;
+            }
             if under(a.target) {
                 let param = crate::param_name(graph, a.target, a.param);
                 labels.push(param_label(graph, a.target, &param));

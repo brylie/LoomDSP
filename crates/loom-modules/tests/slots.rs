@@ -934,3 +934,96 @@ fn a_part_into_an_empty_pulled_cable_slot_steps_until_rule_9() {
         "the envelope, with no gate, closes it at once"
     );
 }
+
+/// An empty Sound source slot into the output is silent: nothing stands
+/// behind its output (ADR-0043).
+#[test]
+fn an_empty_sound_source_slot_is_silent() {
+    let (mut parts, _) = load(
+        r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Empty source"),
+    modules: [
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.source@1"))),
+    ],
+    cables: [PatchCable(from: (9, "out"), to: (3, "in"))],
+)
+"#,
+    );
+    let left = render_edit_at(&mut parts, FRAMES, 512, SWAP_AT, |_| {}, |_, _| {});
+    assert!(left.iter().all(|v| *v == 0.0));
+}
+
+/// A sine through a Filter slot holding an SVF into a Voice stacked four
+/// times, which plays its input at a quarter gain. The cutoff is far below
+/// the sine, so the filtered and the dry signal differ, and a copy that
+/// switched between them at once would step.
+const THRU_INTO_STACK: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Thru into a stack"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 2, kind: "loom.level.amp@1", params: {"gain": 0.25}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (2, "in")),
+                PatchCable(from: (2, "out"), to: (4, "in")),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 20.0}),
+        PatchModule(id: 5, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 6, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 7, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (5, "in")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
+    ],
+)
+"#;
+
+/// Remove part on a thru slot that feeds a stack fades every copy of the
+/// stack to the thru signal, not only copy 0: each copy's input is fed by
+/// the fade, so the sum does not step.
+#[test]
+fn remove_part_before_a_stack_fades_every_copy() {
+    let (mut parts, hierarchy) = load(THRU_INTO_STACK);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_empty(&mut parts.controller, &layout, ModuleId(9))
+                .expect("Remove part");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, _| {},
+    );
+    // The quiet filtered signal before, the dry sine after: either side's
+    // own step, plus the fade's gain change per frame times the peak.
+    let before = &left[SWAP_AT - 600..SWAP_AT];
+    let after = &left[SWAP_AT + FADE + 100..SWAP_AT + FADE + 700];
+    let peak = after.iter().chain(before).fold(0.0f32, |m, v| m.max(v.abs()));
+    let limit = largest_step(before).max(largest_step(after)) + peak / FADE as f32 + 1e-6;
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + FADE + 10]);
+    assert!(across <= limit, "across: {across} against {limit}");
+}

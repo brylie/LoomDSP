@@ -455,6 +455,20 @@ pub(crate) fn tree(
                 continue;
             };
             let child = node_id(table, widget_id);
+            // A control with nothing behind it is shown disabled, says why,
+            // and offers no actions (sub-patches.md, Empty slots).
+            if let Some(reason) = &widget.inert {
+                let mut w = Node::new(Role::Slider);
+                w.set_label(widget.label.clone());
+                w.set_description(reason.clone());
+                w.set_disabled();
+                if let Some(bounds) = widget.bounds {
+                    place(&mut w, bounds);
+                }
+                kids.push(child);
+                nodes.push((child, w));
+                continue;
+            }
             let mut w = widget_node(widget, ids.detail(tile.id, index));
             // A control can take keyboard focus, and so can each of its
             // pieces, which focus the control.

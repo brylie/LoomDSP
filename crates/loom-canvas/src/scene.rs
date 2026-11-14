@@ -308,6 +308,11 @@ pub struct WidgetView {
     /// surface. It gets a small square at its corner, a shape and not only
     /// a colour (sub-patches.md, Exposing; NFR-UX-03).
     pub exposed: bool,
+    /// True for a control with nothing behind it, such as a surface control
+    /// bound to an empty slot's role parameter: it is drawn, but not a
+    /// control, so Tab, the arrow keys, and the pointer pass it by
+    /// (sub-patches.md, Empty slots).
+    pub inert: bool,
 }
 
 impl WidgetView {
@@ -336,21 +341,22 @@ impl WidgetView {
         }
     }
 
-    /// True for widgets the user operates (all but lights, meters, and
-    /// scopes).
+    /// True for widgets the user operates (all but lights, meters, scopes,
+    /// notes, and an inert control).
     pub fn is_control(&self) -> bool {
-        !matches!(
-            self.kind,
-            WidgetViewKind::Light
-                | WidgetViewKind::Readout { .. }
-                | WidgetViewKind::Meter { .. }
-                | WidgetViewKind::Scope
-                | WidgetViewKind::LevelHistory
-                | WidgetViewKind::Spectrum
-                | WidgetViewKind::XyScope
-                | WidgetViewKind::Shape { .. }
-                | WidgetViewKind::Note { .. }
-        )
+        !self.inert
+            && !matches!(
+                self.kind,
+                WidgetViewKind::Light
+                    | WidgetViewKind::Readout { .. }
+                    | WidgetViewKind::Meter { .. }
+                    | WidgetViewKind::Scope
+                    | WidgetViewKind::LevelHistory
+                    | WidgetViewKind::Spectrum
+                    | WidgetViewKind::XyScope
+                    | WidgetViewKind::Shape { .. }
+                    | WidgetViewKind::Note { .. }
+            )
     }
 
     /// The whole-number steps of a one-number control (panel-widgets.md, One

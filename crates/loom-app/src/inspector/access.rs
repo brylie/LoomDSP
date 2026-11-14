@@ -106,6 +106,9 @@ pub(crate) fn items(model: &Inspector) -> Vec<Item> {
                 },
                 ..Item::new(ids::part(&panel, "part"), Kind::Choice)
             });
+            if let Some(note) = &s.note {
+                parts.push(Item::text(ids::part(&panel, "note"), note.clone()));
+            }
             for (label, module, row) in &s.role_params {
                 parts.push(param_row(*module, label, row, None));
             }
