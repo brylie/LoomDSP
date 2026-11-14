@@ -9,8 +9,11 @@ fn amp(response: f32, level: Option<f32>) -> f32 {
     };
     module.set_param(1, response);
     let input = [0.8_f32; 8];
-    // With no cable the engine fills `level` with its port default, 1.
-    let levels = [level.unwrap_or(1.0); 8];
+    // With no cable the engine fills `level` with its port default.
+    let PortDefault::Value(unplugged) = AMP.inputs[1].default else {
+        panic!("a fixed default");
+    };
+    let levels = [level.unwrap_or(unplugged); 8];
     let mut out = [0.0_f32; 8];
     run(
         &mut module,

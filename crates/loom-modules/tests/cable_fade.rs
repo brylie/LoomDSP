@@ -619,48 +619,62 @@ fn mixers_fade_by_what_they_carry() {
 }
 
 /// The inputs that read 1 with no cable (Amp `level`, Multiply `b`, Divide
-/// `b`) must read that 1 from their port default, or a plugged cable would
+/// `b`) read that 1 from their port default, so a cable plugged in fades
+/// from 1 and a cable pulled fades back to 1 (live patching spec, rule 9;
+/// decision M1 of the #21 plan). If the 1 were made in code, a plug would
 /// start its fade from 0: a drop to silence on a VCA, and a burst far over
-/// full scale on a Divide (live patching spec, rule 9; decision M1 of the
-/// #21 plan). These fail until the normals live in the descriptors (#700).
+/// full scale on a Divide. Every sample is checked against the module
+/// applied to the faded input, at every block size.
+/// What a module plays for its first input and the input under test.
+type Apply = fn(f32, f32) -> f32;
+
 #[test]
 fn inputs_that_read_1_unplugged_fade_from_1() {
-    for (kind, port) in [
-        ("loom.level.amp", "level"),
-        ("loom.math.mul", "b"),
-        ("loom.math.div", "b"),
-    ] {
-        let mut parts = engine();
-        let c = &mut parts.controller;
-        let module = c.add_module(kind).unwrap();
-        let out = c.add_module("loom.io.audio-out").unwrap();
-        let first = c.graph().node(module).unwrap().descriptor.inputs[0].name;
-        c.connect_named(module, "out", out, "in").unwrap();
-        let signal = constant(&mut parts, 0.5);
-        let two = constant(&mut parts, 2.0);
-        parts.controller.connect_named(signal, "out", module, first).unwrap();
-        parts.controller.commit().unwrap();
-        let played = render_changing(&mut parts, 1_000, 500, 64, |parts| {
-            parts.controller.connect_named(two, "out", module, port).unwrap();
-        });
-        let before = played[499];
-        let after = played[999];
-        let step = largest_step(&played[499..]);
-        assert!(
-            step <= (after - before).abs() / fade_length() as f32 + 1e-6,
-            "{kind} {port}: the fade starts from the unplugged value, {before}, not from 0 (step {step})"
-        );
-        // Pulled again: back to the unplugged value, in a straight line.
-        let input = parts.controller.input_ref(module, port).unwrap();
-        let pulled = render_changing(&mut parts, 1_000, 500, 64, |parts| {
-            parts.controller.disconnect(input).unwrap();
-        });
-        let step = largest_step(&pulled[499..]);
-        assert!(
-            step <= (pulled[999] - pulled[499]).abs() / fade_length() as f32 + 1e-6,
-            "{kind} {port}: pulling fades back to the unplugged value (step {step})"
-        );
-        assert_eq!(pulled[999], before, "{kind} {port}: the unplugged value");
+    let a = 0.25;
+    let plugged = 0.5;
+    let modules: [(&str, &str, Apply); 3] = [
+        ("loom.level.amp", "level", |a, level| a * level),
+        ("loom.math.mul", "b", |a, b| a * b),
+        ("loom.math.div", "b", |a, b| a / b),
+    ];
+    for (kind, port, apply) in modules {
+        for block in BLOCKS {
+            let mut parts = engine();
+            let c = &mut parts.controller;
+            let module = c.add_module(kind).unwrap();
+            let out = c.add_module("loom.io.audio-out").unwrap();
+            let first = c.graph().node(module).unwrap().descriptor.inputs[0].name;
+            c.connect_named(module, "out", out, "in").unwrap();
+            let signal = constant(&mut parts, a);
+            let value = constant(&mut parts, plugged);
+            parts.controller.connect_named(signal, "out", module, first).unwrap();
+            parts.controller.commit().unwrap();
+            let played = render_changing(&mut parts, 1_000, 500, block, |parts| {
+                parts.controller.connect_named(value, "out", module, port).unwrap();
+            });
+            assert_eq!(played[499], apply(a, 1.0), "{kind} {port}: the unplugged value");
+            assert_ne!(played[999], played[499], "{kind} {port}: the cable changes the sound");
+            for k in 0..500 {
+                let expected = apply(a, faded(1.0, plugged, k));
+                assert!(
+                    (played[500 + k] - expected).abs() <= 1e-6,
+                    "{kind} {port}, plugged, frame {k}, block {block}: {} != {expected}",
+                    played[500 + k]
+                );
+            }
+            let input = parts.controller.input_ref(module, port).unwrap();
+            let pulled = render_changing(&mut parts, 1_000, 500, block, |parts| {
+                parts.controller.disconnect(input).unwrap();
+            });
+            for k in 0..500 {
+                let expected = apply(a, faded(plugged, 1.0, k));
+                assert!(
+                    (pulled[500 + k] - expected).abs() <= 1e-6,
+                    "{kind} {port}, pulled, frame {k}, block {block}: {} != {expected}",
+                    pulled[500 + k]
+                );
+            }
+        }
     }
 }
 
