@@ -51,10 +51,24 @@ Often that is fine. Say the loop closes into an Add's B input. Before the cable,
 
 A delay that starts at 0 goes wrong when the input did not read 0 before:
 
-- **A Multiply's B input reads 1 when nothing is plugged in.** Close a loop into it, and for one sample it reads 0 instead of 1 or the new signal. The Multiply's output drops out for one sample: a click. Measured error: -6 dB.
+- **A Multiply's B input reads 1 when nothing is plugged in.** (Today the Multiply makes that 1 in its own code; [#700](https://github.com/brylie/LoomDSP/issues/700) moves it into the port's default, so the input itself reads 1.) Close a loop into it, and for one sample it reads 0 instead of 1 or the new signal. The Multiply's output drops out for one sample: a click. Measured error: -6 dB.
 - **The compiler can move its delay.** Add a cable to a running loop, and the compiler may now break the loop on a different cable. The old delay is gone, and the new one started at 0, in the middle of a loop that was already ringing. Both placements make the same loop, so nothing should change. Measured error: -17 dB, for one sample.
 
 The fix is to start a new delay with the value it would hold if it had always been there: the last sample its source wrote before the swap. That is what the cable would carry in hardware. The engine does this now (live patching spec, rule 5), and both cases above are bit-identical to the ideal.
+
+## Cable changes: hold, then ramp
+
+Rules 5 and 6 make the *new signal* right from its first sample. But plugging a cable is still a step: the input read one thing a moment ago and reads another now. A step in a signal is a click. On hardware the same step happens, and the player hears it. LoomDSP softens it (live patching spec, rule 9).
+
+When a cable into an input is plugged, pulled, or moved, the input holds the last value it read and moves in a straight line to the new signal over 5 ms. Five milliseconds is long enough that the step stops being a click and short enough that nobody hears it as a fade.
+
+*Why hold, and not crossfade from the old signal:* the old source may be gone, and keeping it running costs CPU for a sound that is leaving. Holding its last value keeps the input continuous, which is all a click needs.
+
+*Why some changes do not ramp:* a ramp mixes a held value into the new signal for 5 ms. If the new signal is already continuous with the old one, that mix is a short dip, which is worse than nothing. So nothing ramps when the compiler only moves a delay (rule 5), when a source turns stereo (rule 6), or when the editor only rearranges cables around a mixer it adds, such as the Swap fade at the start and the end of a slot swap. When a mixer arrives or leaves with a real change of signal (a stack going from 1 copy to 2, Layer to Select), the player hears the ordinary 5 ms hold and ramp, not a crossfade, so a short dip on a sustained sound is intended.
+
+*Why gates, triggers, and phases switch:* a ramped gate crosses its 0.5 threshold late and fires late, and a ramped phase passes through values that look like wraps.
+
+What still steps, and why, is listed in rule 9 of the spec.
 
 ## How the measurements work
 

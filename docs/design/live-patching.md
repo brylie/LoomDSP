@@ -3,13 +3,13 @@
 What carries over when the player edits a patch while it plays, so a new cable joins the running sound with no cold start, click, or gap.
 
 - **Kind:** living specification.
-- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23). Rules 9 ([#21](https://github.com/brylie/LoomDSP/issues/21)) and 10 ([#416](https://github.com/brylie/LoomDSP/issues/416)) Agreed, M2 (2026-11-01).
+- **Status:** Rules 1 to 5, 7 ([#230](https://github.com/brylie/LoomDSP/issues/230)), and 8 Implemented. Rule 6 Agreed, from the research in [#203](https://github.com/brylie/LoomDSP/issues/203), and built with stereo copies (#23). Rule 9 ([#21](https://github.com/brylie/LoomDSP/issues/21)) Implemented; its open questions were settled with the maintainer on 2026-11-14. Rule 10 ([#416](https://github.com/brylie/LoomDSP/issues/416)) Agreed, M2 (2026-11-01).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (schedules and inserted delays), [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) (state of channel copies).
 - **Use case and requirements:** FR-GRAPH-01, FR-GRAPH-02, FR-GRAPH-03, FR-GRAPH-05, FR-GRAPH-09, FR-SIG-07, NFR-RT-01, NFR-RT-05, NFR-SND-02
 - **Background:** [Hot patching](../learn/hot-patching.md): why a new path clicks, and why a crossfade does not fix it. See also [Feedback loops and the unit delay](../learn/feedback-loops.md).
 - **Prior art:** in Eurorack, every module runs all the time, and a cable only connects what is already running. VCV Rack behaves the same way. Named only to explain the expectation.
-- **Issues:** #203, #23, [#230](https://github.com/brylie/LoomDSP/issues/230), [#22](https://github.com/brylie/LoomDSP/issues/22) (rule 8)
-- **Code:** `crates/loom-core/src/compile.rs` (`CompileReport::skipped`), `compile/order.rs` (`reaches_a_root`), `compile/schedule.rs` (`Schedule::take_tap_state_from`, `Schedule::sources`, `take_smooth_state_from`), `engine.rs` (`Command::SwapSchedule`, `last_frames`), `controller.rs` (new modules wait in `Controller::fresh` until the commit, rule 7). Measurements: `crates/loom-modules/tests/hot_patch.rs`.
+- **Issues:** #203, #23, [#230](https://github.com/brylie/LoomDSP/issues/230), [#22](https://github.com/brylie/LoomDSP/issues/22) (rule 8), [#21](https://github.com/brylie/LoomDSP/issues/21) (rule 9)
+- **Code:** `crates/loom-core/src/compile.rs` (`CompileReport::skipped`), `compile/order.rs` (`reaches_a_root`), `compile/schedule.rs` (`Schedule::take_tap_state_from`, `Schedule::sources`, `take_smooth_state_from`), `engine.rs` (`Command::SwapSchedule`, `last_frames`), `controller.rs` (new modules wait in `Controller::fresh` until the commit, rule 7). Rule 9: `cable_fade.rs` (the ramp, the fades the engine runs, `take_state_from`), `compile/fades.rs` (which inputs and contributions fade, `Wiring`, `FadePlan`), `compile/build.rs` (fade buffers and `Schedule::reads`), `CableFades` in `controller.rs`, and `EngineStats::cable_fades_settled`. Measurements: `crates/loom-modules/tests/hot_patch.rs`. Rule 9 tests: `crates/loom-modules/tests/cable_fade.rs`.
 
 ## Goal
 
@@ -30,6 +30,7 @@ Every edit that changes the graph compiles a new schedule on the control thread.
 | Copy 1 of a module that turns stereo | **No: starts from reset** | Not built yet (#23). Rule 6 fixes it. |
 | A module the player adds | No, by design | A new module is new hardware: it starts from reset. |
 | A module that reaches nothing | Yes, paused | It is not run while nothing hears or shows it (rule 8). |
+| An input whose cable changed, or an assignment added, removed, or moved | Its last value, then a 5 ms ramp | Rule 9. Gate, trigger, and phase inputs switch. |
 
 ## Rules
 
@@ -117,11 +118,11 @@ The measurements compare what the engine plays with the ideal continuation: what
 - [x] Pasting a filter while the patch plays adds no glide (an app test, or a manual check listed in the pull request). Reference renders that contained the glide are updated in the same pull request. (`first_values.rs` adds modules to a running engine with `set_params` before the commit, the calls paste and undo make in `clipboard.rs` and `undo.rs`. A listening check in the app is in the pull request.)
 - [x] Given a chain that reaches nothing, then it is not processed, and a cable that connects it again resumes its state (rule 8). Lights, probes, and modulated parameters keep their modules running, and an unreachable loop is reported but not run. (`loom-core/tests/reach.rs`, `compile/tests.rs`, `engine.rs` in `loom-modules`)
 - [ ] Listening check, rule 5: in the app, with a sustained sound, close a feedback loop into a Multiply's B input, and add a second cable to a running loop. No click is heard. (Manual check.)
-- [ ] Given a running sine into a filter, when its cable is removed, then the filter input ramps from the last value to 0 over 5 ms, at block sizes 1, 77, and 512 when the edit lands on the same frame (test, rule 9).
-- [ ] A gate, trigger, or phase input switches on the swap frame with no ramp (test, rule 9).
-- [ ] Adding a modulation assignment ramps its contribution in over 5 ms (test, rule 9).
-- [ ] A patch rendered from load has no fades (test: bit-identical to the current reference renders, rule 9).
-- [ ] The fades add no allocation on the audio thread (`no_alloc` test, rule 9).
+- [x] Given a running sine into a filter, when its cable is removed, then the filter input ramps from the last value to 0 over 5 ms, at block sizes 1, 77, and 512 when the edit lands on the same frame (test, rule 9). (`cable_fade.rs`, `pulling_a_sine_from_a_filter_ramps_its_input_to_zero`: the input is read through an Add at offset 0, an exact pass-through, sample by sample; the filter's own output stays within the click bound.)
+- [x] A gate, trigger, or phase input switches on the swap frame with no ramp (test, rule 9). (`cable_fade.rs`, `gate_trigger_and_phase_inputs_switch_on_the_swap_frame`, and `mixers_fade_by_what_they_carry` for gates through a Sum.)
+- [x] Adding a modulation assignment ramps its contribution in over 5 ms (test, rule 9). (`cable_fade.rs`, `assignments_ramp_their_contribution_in_and_out`: added, removed, and moved.)
+- [x] A patch rendered from load has no fades (test: bit-identical to the current reference renders, rule 9). (`tests/reference.rs` and `tests/patches.rs` pass with no new renders; `cable_fade.rs`, `nothing_fades_on_load_or_without_a_cable_change`.)
+- [x] The fades add no allocation on the audio thread (`no_alloc` test, rule 9). (`no_alloc.rs`, `cable_fades_never_allocate`.)
 - [ ] The staged retry adds no allocation on the audio thread (`no_alloc` test, rule 10).
 - [ ] With a small command queue and a paste larger than it, every staged module is committed after the engine drains the queue, with no edit and no periodic tick, and the audio matches a commit with enough capacity (app test, rule 10).
 - [ ] A queue that stays full causes no repeated compile (test, rule 10).
