@@ -80,6 +80,7 @@ mod style;
 mod subscriptions;
 mod surface;
 mod targets;
+mod timers;
 mod toolbar;
 #[cfg(any(test, feature = "test-ui"))]
 #[allow(dead_code, reason = "the crate's unit tests use the rest of this harness")]
@@ -370,13 +371,18 @@ enum Message {
     BenchDone,
     /// A command from the control channel.
     Control(control::Call),
-    /// The window is open: start the watcher threads (`watching.rs`). The
-    /// bridge sends it once, as it starts.
+    /// The window is open: start the watcher threads (`watching.rs`) and
+    /// the timers (`timers.rs`). The bridge sends it once, as it starts.
     StartWatching,
     /// Follows a control command's UI messages in the queue: they have run,
     /// so its answer can be read (`control/run.rs`).
     ControlReply,
-    /// A frame while control commands wait to be drawn, or sample it.
+    /// A frame shown while control commands wait to be drawn, or sample
+    /// it. An after-draw message, so it carries the time of the turn that
+    /// asked for it, a frame before, not the `cx.now()` of the turn it
+    /// arrives in: each step between them is still a frame, as `sample`
+    /// counts, and a test sends them with its own clock (#328), which
+    /// `cx.now()` would replace with the wall clock.
     ControlFrame(Instant),
     /// The window was searched for a `locate` command.
     Located {
@@ -400,6 +406,9 @@ enum Message {
         focused: bool,
     },
     Animate(bool),
+    /// A frame while `--measure` runs, a deadline at display rate
+    /// (`timers.rs`). It carries the time it was due, not the turn's
+    /// `cx.now()`, so a test can step the frame meter by its own clock.
     Frame(Instant),
     /// A slow tick while a recording runs, to notice a write error.
     Tick,
@@ -763,8 +772,14 @@ struct App {
     window_questions: std::cell::RefCell<Vec<window_question::WindowQuestion>>,
     /// Control commands whose UI messages are on their way (`control/run.rs`).
     control_replies: control::Replies,
-    /// True once the window is open and watchers may run (`watching.rs`).
+    /// True once the window is open and watchers and timers may run
+    /// (`watching.rs`, `timers.rs`).
     watching: bool,
+    /// When each timer is next due (`timers.rs`).
+    timers: timers::Timers,
+    /// True while a `ControlFrame` waits for a frame to be shown, so a
+    /// waiting command asks for one at a time.
+    control_frame_asked: bool,
     /// The watcher threads that outlive a patch (`watching.rs`).
     watchers: watching::AppWatchers,
     /// What waits for a native dialog's answer (`dialogs.rs`). It belongs
@@ -1334,12 +1349,25 @@ impl App {
             !matches!(message, Message::Input { .. }),
             "input is routed before update (iced_bridge.rs)"
         );
+        let now = cx.now();
+        if let Some(timer) = timers::Timer::of(&message) {
+            self.timers.taken(timer, now);
+        }
+        if matches!(message, Message::ControlFrame(_)) {
+            self.control_frame_asked = false;
+        }
         self.apply(message);
+        // The timers, the watchers, and the frames a command waits for
+        // follow what this update changed.
+        self.sync_timers(now);
+        self.sync_watchers(&cx.waker());
+        if self.control_waiting() && !self.control_frame_asked {
+            self.control_frame_asked = true;
+            self.effect(loom_ui::Effects::after_draw(Message::ControlFrame(now)));
+        }
         // As one batch for the next turn, which the runtime queues itself,
         // so no other thread's message lands between a command's steps and
         // its reply, or a step and its release.
-        // The watchers follow what this update changed.
-        self.sync_watchers(&cx.waker());
         let posted = std::mem::take(&mut self.posted);
         self.effect(loom_ui::Effects::next_turn(posted));
         std::mem::take(&mut self.effects)

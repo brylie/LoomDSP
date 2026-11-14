@@ -227,3 +227,26 @@ fn a_recovery_answer_is_used_after_a_replace() {
         "Not Now opened the start patch"
     );
 }
+
+/// The crash recovery question and a timer: the deadline is the one due
+/// first, and the question, due at once, comes before any timer.
+#[test]
+fn the_recovery_question_comes_before_a_timer() {
+    let dir = TempDir::new("dialogs-offer-timer");
+    let mut app = app();
+    let _ = app.send(Message::StartWatching);
+    app.drops.push(PathBuf::from("dropped.ron"));
+    let _ = app.send(Message::Tick);
+    let timer = app.next_deadline().expect("the drop timer");
+    assert!(matches!(timer.message, Message::DropsDone));
+    // Found before the timer is due, however long writing the copy takes.
+    app.recovery_offer = Some(RecoveryOffer {
+        orphan: recovery::tests::orphan_for(&dir.0, None),
+        start: StartPatch::Empty,
+        found: timer.at - std::time::Duration::from_secs(1),
+    });
+    assert!(
+        matches!(app.next_deadline().map(|d| d.message), Some(Message::AskRecovery)),
+        "the question is due at once"
+    );
+}

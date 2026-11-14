@@ -316,21 +316,16 @@ fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::win
 }
 
 impl crate::App {
-    /// Events from the adapter. While a screen reader listens: the window's
-    /// scale factor when it changes, and a timer only while live values
-    /// wait to be sent. With no screen reader, and at rest, nothing runs.
+    /// Events from the adapter, and while a screen reader listens, the
+    /// window's scale factor when it changes. The timer for live values is
+    /// a deadline (`timers.rs`). With no screen reader nothing runs.
     pub(crate) fn a11y_subscription(&self) -> Subscription<Event> {
-        let live = if self.a11y.live_waits() {
-            iced::time::every(LIVE_INTERVAL).map(|_| Event::LiveTick)
-        } else {
-            Subscription::none()
-        };
         let scale = if self.a11y.is_active() {
             iced::event::listen_with(rescaled)
         } else {
             Subscription::none()
         };
-        Subscription::batch([platform::events(), live, scale])
+        Subscription::batch([platform::events(), scale])
     }
 
     /// Notes a message the app just handled. Live values wait for the

@@ -33,6 +33,7 @@ use loom_ui::effect::{
 };
 use loom_ui::{Context, Deadline, DriverEvent, Effects, Runtime, Waker, WindowSpec, WindowState};
 use loom_ui_core::UiId;
+use sleeper::Sleeper;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +52,8 @@ pub(crate) enum Bridged {
     Woken,
     /// The app's deadline has come.
     Deadline,
+    /// A frame, while a message waits for one to be shown.
+    Presented,
     /// Iced's answer to the focus question (`focus_query`).
     Focus(FocusAnswer),
 }
@@ -227,6 +230,8 @@ pub(crate) struct Bridge<D: BridgeDriver = IcedDriver> {
     /// queue: that turn runs at once, so it needs no wake-up.
     quiet: Arc<AtomicBool>,
     wakes: WakeSource,
+    /// Wakes the loop at the runtime's next deadline.
+    sleeper: Sleeper,
 }
 
 impl<D: BridgeDriver> Bridge<D> {
@@ -257,11 +262,20 @@ impl<D: BridgeDriver> Bridge<D> {
             })
         };
         let window = WindowState::new(loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height));
+        // The sleeper wakes the loop as a waker does; the turn it starts
+        // finds the deadline due. Its wake is never one the bridge holds
+        // back: it holds them back only while it queues a message itself,
+        // and the turn that follows runs after the time came.
+        let sleeper = {
+            let wake = wake.clone();
+            Sleeper::start(move || wake())
+        };
         let mut bridge = Self {
             runtime: Runtime::new(Hosted(app, None), IcedTarget::default(), window, wake),
             driver: D::default(),
             quiet,
             wakes: WakeSource(Arc::new(Mutex::new(Some(receiver)))),
+            sleeper,
         };
         // The first turn builds the view and reads the first deadline, such
         // as the crash recovery question (autosave.md, Crash recovery).
@@ -285,6 +299,7 @@ impl<D: BridgeDriver> Bridge<D> {
             }
             Bridged::Woken => self.turn(DriverEvent::Woken),
             Bridged::Deadline => self.turn(DriverEvent::DeadlineReached),
+            Bridged::Presented => self.turn(DriverEvent::Presented),
             // Every answer reaches the app, changed or not, as the window's
             // word on focus after a press: a press elsewhere ends a draft
             // whose field never had focus.
@@ -335,11 +350,13 @@ impl<D: BridgeDriver> Bridge<D> {
         if next.again {
             tasks.push(Task::done(Bridged::Woken));
         }
-        // A deadline already due runs next. Later deadlines wait for item 3,
-        // when timers become deadlines.
-        if next.deadline.is_some_and(|at| at <= now) {
+        // A deadline already due runs next; a later one waits on the
+        // sleeper, which then wakes the loop.
+        let due = next.deadline.is_some_and(|at| at <= now);
+        if due {
             tasks.push(Task::done(Bridged::Deadline));
         }
+        self.sleeper.set(next.deadline.filter(|_| !due));
         Task::batch(tasks)
     }
 
@@ -416,12 +433,26 @@ impl<D: BridgeDriver> Bridge<D> {
         self.app().theme()
     }
 
-    /// The app's subscriptions, and the wake-ups from wakers.
+    /// The app's subscriptions, the wake-ups from wakers, and frames while
+    /// a message waits for one to be shown.
+    ///
+    /// Iced says when a frame begins, not when it is on screen, so each
+    /// frame stands in for `DriverEvent::Presented`. It comes just before
+    /// Iced draws, a frame early at most. The `winit` shell sends the exact
+    /// one at step 2.2 (ui-layer.md, section 2, Under the bridge).
     pub(crate) fn subscription(&self) -> Subscription<Bridged> {
-        Subscription::batch([
-            self.app().subscription().map(Bridged::App),
-            Subscription::run_with(self.wakes.clone(), wake_stream).map(|()| Bridged::Woken),
-        ])
+        let presented = self
+            .runtime
+            .waits_for_draw()
+            .then(|| iced::window::frames().map(|_| Bridged::Presented));
+        Subscription::batch(
+            [
+                self.app().subscription().map(Bridged::App),
+                Subscription::run_with(self.wakes.clone(), wake_stream).map(|()| Bridged::Woken),
+            ]
+            .into_iter()
+            .chain(presented),
+        )
     }
 }
 
@@ -751,5 +782,6 @@ fn choice(buttons: &[String], result: rfd::MessageDialogResult) -> Choice {
 
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) mod headless;
+mod sleeper;
 #[cfg(test)]
 mod tests;

@@ -233,7 +233,7 @@ impl App {
     /// while a copy waits to be offered. None while another dialog waits:
     /// the question could not be asked yet, so a due deadline would only
     /// wake the loop again and again until that dialog answers.
-    pub(crate) fn next_deadline(&self) -> Option<loom_ui::Deadline<Message>> {
+    pub(crate) fn recovery_deadline(&self) -> Option<loom_ui::Deadline<Message>> {
         if self.waiting.is_some() {
             return None;
         }

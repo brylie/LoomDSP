@@ -24,6 +24,29 @@ fn run(app: &mut App, line: &str) -> Answer {
     receiver.try_recv().expect("answered after drawing")
 }
 
+/// In the bridge, a command waiting to be drawn asks for the frame after
+/// its draw (`Effects::after_draw`), and answers once two frames have been
+/// shown, counted by `Presented`. A turn with no frame shown counts none.
+#[test]
+fn a_command_answers_after_two_frames_shown() {
+    use crate::iced_bridge::{AppBridge, Bridged};
+    let (mut bridge, _) = AppBridge::new(crate::tests::app());
+    let (sender, answers) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "wait", "ms": 0}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let _ = bridge.update(Bridged::App(Message::Control(call)));
+    assert!(bridge.app().control_waiting(), "it waits for the draw");
+    for frame in 0..FRAMES_BEFORE_ANSWER {
+        let _ = bridge.update(Bridged::Woken);
+        assert!(answers.try_recv().is_err(), "no answer before frame {frame} is shown");
+        let _ = bridge.update(Bridged::Presented);
+    }
+    assert!(answers.try_recv().expect("answered after two frames").is_ok());
+    assert!(!bridge.app().control_waiting());
+}
+
 #[test]
 fn parses_commands_and_rejects_unknown_ones() {
     let parse = |s: &str| serde_json::from_str::<Command>(s);

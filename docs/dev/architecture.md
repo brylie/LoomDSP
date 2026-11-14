@@ -174,7 +174,9 @@ The app's state has three levels, by how long it lives:
 | `editing.rs` | Undo steps, commits to the engine, and the clipboard commands |
 | `controls.rs` | Turning controls, ranges, buttons, modulation assignments, depth drags, and arming MIDI learn |
 | `canvas_events.rs` | What each `CanvasEvent` does to the patch |
-| `subscriptions.rs` | Timers, keys, MIDI, the control channel, and the watcher threads |
+| `watching.rs` | The watcher threads (audio, input, lights, telemetry, MIDI, the control channel), started and stopped by the app's state |
+| `timers.rs` | The periodic checks and the frames that run `update`, as deadlines kept by the app's state |
+| `subscriptions.rs` | What Iced still runs until the `winit` shell: the window's close request, the input listeners, and the accessibility layer's events |
 | `view.rs` | The window: toolbar, canvas, right panel, and stats bar. It reads state and changes nothing |
 
 The selection is not a part: the canvas, inspector, matrix, clipboard, undo, and snapshot all read it, so it stays a plain field of the session, as the graph stays shared in `Controller`.
