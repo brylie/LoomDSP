@@ -96,6 +96,11 @@ parley = "=0.12.0"
 # builds, so a build needs no libfontconfig headers and the binary no hard
 # link. Same version as Parley's, so Cargo unifies the features.
 fontique = { version = "=0.12.0", features = ["fontconfig-dlopen"] }
+# Layout for our own UI layer (docs/design/ui-layer.md, decision of
+# 2026-11-14): flexbox for rows, columns, and wrapping rows, and a one-cell
+# grid for stacks. Only the parts we use; `slotmap` and `smallvec` are
+# already in the lock.
+taffy = { version = "0.15.1", default-features = false, features = ["std", "flexbox", "grid", "taffy_tree", "content_size"] }
 # Glyph rasterising and atlas packing for canvas text. Both already in the
 # lock through Iced; listed here so the canvas names its own versions.
 swash = "0.2.10"

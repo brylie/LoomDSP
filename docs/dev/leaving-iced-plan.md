@@ -74,6 +74,7 @@ Run all of these at the end of each phase and list the results in the pull reque
 - `--measure-idle --bench-seconds 10` on `subtractive.ron`: CPU and redraw counts no worse than before (NFR-PERF-04).
 - `--generate 300 --bench`: frame rate no worse than before.
 - From phase 1 on: a VoiceOver check on macOS, recorded in the pull request (which controls were read, which could be changed).
+- In phase 3, **each view's layout changes once, when it moves.** Our layout follows flexbox's defaults, not Iced's ([spec](../design/ui-layer.md), section 5, rule 5), so a view's sizes and places may move by a few pixels when it moves to our widgets. At that step, the `--screenshot-window` pixel diff is identical outside the moved view's bounds and may differ inside them; every `locate` answer is recorded before and after, and the pull request lists each one that changed, with its old and new rectangle; and a changed expected value in a test is listed with its reason. That screenshot is then the new baseline, and the identical gate resumes from that step on. *Why:* a layout engine that is not Iced's places things differently, and a gate per view keeps each move visible and small, as the text gate does for text widths (spec section 8, rule 6).
 
 ## Phase 0: Decide and specify
 
@@ -321,7 +322,9 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
 
 1. Create `crates/loom-ui` with:
    - **Elements:** a tree built each frame from view models, keyed by stable IDs (ADR-0021 keyed identity).
-   - **Layout:** row, column, stack, padding, alignment, fixed and fill sizes. Use `taffy` † if a flexbox engine saves real work; otherwise a small layout pass of our own. Decide in the spec.
+   - **Layout:** row, column, stack, padding, alignment, fixed and fill sizes, and a wrapping row (the tag chips). Decided 2026-11-14: `taffy`, with flexbox's defaults and its rounding to whole logical pixels ([spec](../design/ui-layer.md), section 5, rules 5 and 6).
+
+     **Done (first part):** elements keyed by UI ID, layout of one panel, and hit-testing (`crates/loom-ui/src/element.rs`, `layout.rs`, `hit.rs`, and `examples/layout.rs`), with `TextStyle`, `Weight`, and `TextMeasure` moved to `loom-ui-core` so layout measures text with Parley's `CanvasText`. Nothing in the app uses them yet. Next: laying out the window's panels together, each in its place.
    - **Drawing:** our instanced rounded-rectangle pipeline (the canvas already has one in `canvas.wgsl`) plus the glyph renderer from 2.4. Clipping by scissor rectangles.
    - **Hit-testing and focus:** a focus order, focus rings, Tab and Shift+Tab, and focus that the accessibility tree reports.
    - **Accessibility:** every widget gives its AccessKit node from the same element, so the tree and the screen cannot disagree.

@@ -1,10 +1,12 @@
 //! What `loom-ui` may depend on and name (docs/design/ui-layer.md,
 //! section 1, rule 1, and section 2, rule 9).
 //!
-//! 1. **Its one required dependency is `loom-ui-core`.** No LoomDSP crate.
-//!    The window shell's `winit`, `wgpu`, and `pollster` are optional, and
-//!    only the `shell` feature turns them on, so a build without it has no
-//!    window toolkit (plan step 2.2).
+//! 1. **Its required dependencies are `loom-ui-core` and `taffy`,** the
+//!    layout engine. No LoomDSP crate. The window shell's `winit`, `wgpu`,
+//!    and `pollster` are optional, and only the `shell` feature turns them
+//!    on, so a build without it has no window toolkit (plan step 2.2).
+//!    Only `layout.rs` names taffy, so no taffy type reaches the crate's
+//!    API (decision of 2026-11-14).
 //! 2. **No source file names a window toolkit** (`winit`, `wgpu`, or Iced),
 //!    test files included, except the window shell: `shell.rs` and the
 //!    files under `shell/`. Iced is named nowhere.
@@ -16,10 +18,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The dependencies users of the crate get: the one required, then the
+/// The dependencies users of the crate get: the required ones, then the
 /// shell's.
-const ALLOWED: [&str; 4] = [
+const ALLOWED: [&str; 5] = [
     "dependencies.loom-ui-core.workspace",
+    "dependencies.taffy.workspace",
     "dependencies.winit",
     "dependencies.wgpu",
     "dependencies.pollster",
@@ -33,6 +36,9 @@ const TOOLKITS: [&str; 4] = ["winit", "wgpu", "iced::", "iced_"];
 
 /// Iced, which no file names, the shell included.
 const ICED: [&str; 2] = ["iced::", "iced_"];
+
+/// The layout engine, which only `layout.rs` names.
+const TAFFY: [&str; 1] = ["taffy"];
 
 /// The ways to read the clock.
 const CLOCK: [&str; 3] = ["Instant::now", "SystemTime", ".elapsed("];
@@ -139,10 +145,10 @@ fn dependency_line<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
         .find(|line| line.split('=').next().is_some_and(|key| key.trim() == name))
 }
 
-/// The crate depends on `loom-ui-core`, and on the shell's crates only
-/// as optional ones that the `shell` feature turns on.
+/// The crate depends on `loom-ui-core` and `taffy`, and on the shell's
+/// crates only as optional ones that the `shell` feature turns on.
 #[test]
-fn the_only_required_dependency_is_loom_ui_core() {
+fn the_required_dependencies_are_loom_ui_core_and_taffy() {
     let manifest = include_str!("../Cargo.toml");
     assert_eq!(user_dependencies(manifest), ALLOWED);
     for name in SHELL_DEPENDENCIES {
@@ -167,6 +173,14 @@ fn no_source_file_names_a_window_toolkit() {
     assert_eq!(found, Vec::<String>::new());
     let (shell, found) = scan(&ICED, is_shell);
     assert!(shell >= 1, "the scan found the shell's files, not {shell}");
+    assert_eq!(found, Vec::<String>::new());
+}
+
+/// Only `layout.rs` names taffy, so the crate's API holds no taffy type.
+#[test]
+fn only_the_layout_names_taffy() {
+    let (scanned, found) = scan(&TAFFY, |path| path != Path::new("layout.rs"));
+    assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
 }
 

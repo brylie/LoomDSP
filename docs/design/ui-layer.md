@@ -9,7 +9,7 @@ How LoomDSP's own UI layer turns events into messages, decides what to rebuild, 
 - **Background:** [how a UI layer decides what changed](../research/2026-11-ui-change-propagation.md), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [our own UI stack instead of Iced](../research/2026-11-own-ui-stack-tradeoffs.md). An explainer in `docs/learn/` follows in phase 4. The [canvas accessibility spec](canvas-accessibility.md) builds on sections 6, 7, and 9 for the patch outline, the patch map, and following cables.
 - **Prior art:** the Elm architecture (one message type, one update), and the rebuild-and-compare approach that Levien describes for Xilem. Named only to explain ideas.
 - **Issues:** [#683](https://github.com/brylie/LoomDSP/issues/683). The step-by-step work is in [the plan](../dev/leaving-iced-plan.md).
-- **Code:** `crates/loom-ui-core`, and `crates/loom-ui` for the runtime of section 2 (plan step 2.1). The rest is still in `crates/loom-app` and `crates/loom-canvas`.
+- **Code:** `crates/loom-ui-core`, and `crates/loom-ui` for the runtime of section 2 (plan step 2.1) and for elements, layout, and hit-testing (plan step 3.1: `element.rs`, `layout.rs`, `hit.rs`; the app does not use them yet). The rest is still in `crates/loom-app` and `crates/loom-canvas`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -45,7 +45,7 @@ All three work because one runtime, one set of view models, and one identity sch
 
 | Crate | Holds | May depend on |
 |---|---|---|
-| `loom-ui-core` | Geometry (`Point`, `Size`, `Rect`, `Vector`, `Color`), input events (`Event`, `PointerEvent`, `PointerButton`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`, and `Platform` for each platform's shortcut key), UI IDs | No UI toolkit, no LoomDSP crate |
+| `loom-ui-core` | Geometry (`Point`, `Size`, `Rect`, `Vector`, `Color`), input events (`Event`, `PointerEvent`, `PointerButton`, `KeyEvent`, `Modifiers`, `Key`, `ScrollDelta`, and `Platform` for each platform's shortcut key), UI IDs, and how text is set and measured (`TextStyle`, `Weight`, and the `TextMeasure` trait), so layout and the canvas share them | No UI toolkit, no LoomDSP crate |
 | `loom-ui` | Runtime, effects, elements, layout, focus, the accessibility tree, the `winit` shell, the widgets, and the drawing of panels | `loom-ui-core`, `winit`, `wgpu`, Parley and `swash` for text (section 8, rule 8), `taffy`, `accesskit`, `accesskit_winit` |
 | `loom-canvas` | The patch canvas, as a custom element | `loom-ui-core`, later `loom-ui`, and `iced` and `iced_wgpu` until phase 2 moves it off them |
 | `loom-app` | The app: messages, `update`, view models, panels | All of the above |
@@ -231,10 +231,12 @@ Keys come from what the element shows, not from where it sits:
    - On the canvas a UI ID resolves to where the accessibility tree puts that node, and a port or a badge to where its short name does, since tiles give no port nodes yet (section 7, rule 19). Outside the canvas it resolves to where the window drew the part. A part scrolled out of view is an error, because a pointer sent there would land on something else.
 
    *Why:* agents, tests, and people then use the same names. A path reads like the tree it names, and one escape rule keeps every ID readable back.
+6. **An element's UI ID is its panel's key, then the keys of the keyed elements around it, then its own key** (`Element::key`). An element with no key adds nothing to the path and has no UI ID of its own. *Why:* wrapping a part in another row or stack, for layout, then changes no ID, so focus, widget state, and the screen reader's place stay where they were.
+7. **Two elements with the same UI ID are a mistake in the panel's code.** In a debug build, the layout panics, naming the ID. In a release build, the first element in tree order (the order the panel built them, parent before children) keeps the ID. Every later one is laid out and drawn, but has no UI ID, and nothing inside it has one either, since each would name a place inside the first element. They are out of the bounds by UI ID, hit-testing, and, later, focus and the accessibility tree, and the pointer passes through them to the nearest keyed element around them. The layout counts every key dropped this way (`Layout::duplicate_keys`). *Why:* a debug build should stop at the mistake. A release build should not crash a performance over it, and the same model must always give the same result, which tree order does.
 
 ## 5. Layers, hit-testing, and who has the input
 
-**Status:** Agreed, phase 2.
+**Status:** Agreed, phase 2. Rules 5 to 7 are built in phase 3 (plan step 3.1: `layout.rs`, `hit.rs`); no view uses them yet.
 
 ### Behaviour
 
@@ -246,6 +248,17 @@ The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar
 2. **The app decides who has the input,** as today (`App::input_owner`, `Overlays::owner`). The layer asks the app; it does not keep its own idea of a modal panel. *Why:* one owner of this rule, so the canvas, the keys, and the accessibility tree all follow the same answer.
 3. **While a panel owns the input, the layers below it are hidden from the accessibility tree** and take no screen reader actions. *Why:* the spike left canvas controls in the tree under an open browser, where a screen reader could reach controls the pointer could not.
 4. **Layout is in logical pixels, and hit-testing and layout need no GPU.** *Why:* the harness tests events on machines with no GPU, and the control channel answers in logical pixels.
+5. **Sizes follow flexbox's defaults** (decided 2026-11-14), through `taffy`. Our `Length` sets only what it names, and the rest is flexbox's default (basis auto, shrink 1, minimum size auto):
+
+   | Ours | What it means |
+   |---|---|
+   | `Fill(n)` | Along a row's or column's main axis, grows by n shares of the space left after every item's content size. So two `Fill(1)` items with different content end up of different sizes. Across that axis, and in a stack, it stretches to fill |
+   | `Shrink` | The content's size, shrinking when the space is too short |
+   | `Fixed(px)` | `px` when there is room. It also shrinks when the space is too short, as flexbox's default does |
+
+   No item shrinks below its narrowest content: its longest word, or its widest fixed child. Across a row or a column, an item with no alignment set stretches, as in flexbox. A stack is a grid of one cell that holds every child, so it is as large as its largest child. A wrapping row is a row with `flex-wrap`, its spacing also between its lines. *Why:* Brylie's words: "flexbox defaults are fine. We can do sub-pixel rendering when it becomes an issue. We're moving away from Iced so don't need to preserve its behavior." Flexbox's meanings are published and widely known, so a reader can check a layout against them, and `taffy` is tested against them. Views may move by a few pixels when they leave Iced; [the plan's parity gates](../dev/leaving-iced-plan.md#parity-gates) say how that is checked.
+6. **Layout rounds to whole logical pixels,** with `taffy`'s rounding: each edge is rounded from its place in the panel, never each width, so neighbours meet with no gap and no overlap. At a scale factor of 2, every edge therefore lands on an even physical pixel. That is accepted, and not worked around: placing at half a logical pixel waits until it shows up as a problem. *Why:* the same decision.
+7. **Hit-testing reads the layout:** the deepest keyed element under the point is hit, a later sibling over an earlier one and a child over its parent. A point over an element with no key hits the keyed element around it. An opaque element takes the point, so nothing under it is hit, even where it holds no keyed element. Rectangles are half-open, so a point on a shared edge hits exactly one element. Across layers, the topmost is tried first (rule 1). *Why:* the order matches what is drawn on top, and a panel over the canvas must take the clicks the user aims at it.
 
 ## 6. Focus and the keyboard
 
@@ -439,6 +452,7 @@ A custom element is the layer's supported escape hatch. The patch canvas is the 
    - A request reaches the app as the adapter's does, an `a11y::Event::Action` message. It runs until no messages are left, and then the next frame is drawn, as in the window.
 5. **A control channel command always gets its reply.** A command that waits for the window to be drawn asks for a message once the next frame is shown (section 2, the effects table), which also makes the runtime draw. So the two-frame wait of [control channel rule 5](control-channel.md#rules) completes even when the command changes nothing visible, with no animation frames and no update per frame. This replaces `ControlFrame`. *Why:* without a frame to wait for, a command that changes nothing would never be answered, and a script would hang.
 6. **The control channel's protocol does not change.** `locate` finds targets from layout data and UI IDs, not from a toolkit's widget tree, and answers in logical pixels. Its replies are the same for every example in the [control channel spec](control-channel.md). *Why:* agents and scripts built on it keep working.
+7. **A view's layout changes once, when phase 3 moves it,** and the [plan's parity gates](../dev/leaving-iced-plan.md#parity-gates) say how that step is checked: what may differ, and what is recorded. *Why:* one place says it.
 
 ## Acceptance criteria
 
@@ -521,7 +535,9 @@ Recorded so later readers know these were chosen, not left open. Each is written
 | Messages the player sends through another part, under the bridge (2026-11-13) | A menu item's Enter, a screen reader's action, and a control command post their messages for the next turn, each its own update, with a trailing message for what must come after them (a step's release, the command's reply). Not nested updates, which rule 5 rules out. Brylie chose (2026-11-13) to make the posting an effect the runtime carries out, the next-turn effect, rather than the app sending through its own waker. Input is routed before `update`, and what only Iced's widgets know is asked as window questions, not effects, until phase 3 | Section 2, "Not effects" and "Under the bridge" |
 | Hooks for the canvas accessibility spec | Added at the maintainer's request: `controls` relations, focus into a custom element's parts, an app-driven tree, an image with its text alternative elsewhere, and a key between regions | Section 6, rule 7; section 7, rules 12 and 13; section 9, rules 6 and 7 |
 | Which key moves between regions | Ctrl+Tab forward and Ctrl+Shift+Tab back, wrapping, with Ctrl on every platform, and working from a text field. Chosen over F6, which needs Fn on most keyboards | Section 6, rule 7 |
-| Which layout engine | `taffy`, subject to `cargo deny check` and versions that fit the lock file | Section 1 |
+| Which layout engine (2026-11-14) | `taffy` 0.15, with only `std`, `flexbox`, `grid`, `taffy_tree`, and `content_size`: MIT, `cargo deny check` passes, it builds for wasm, and it adds one crate to the lock file (`slotmap` and `smallvec` were already there). Behind our own types: only `layout.rs` names it (`tests/purity.rs`). Chosen over a layout pass of our own (about 450 lines, plus tests, and every edge case ours), since it also gives the wrapping row the tag chips need, and the grid, absolute placement, and content size later views need | Section 1; section 5, rule 5 |
+| What our sizes mean, and rounding (2026-11-14) | Flexbox's defaults through `taffy`, and `taffy`'s rounding to whole logical pixels. Brylie's reason: "flexbox defaults are fine. We can do sub-pixel rendering when it becomes an issue. We're moving away from Iced so don't need to preserve its behavior." | Section 5, rules 5 and 6 |
+| What a duplicate UI ID does in a release build (2026-11-14) | The first in tree order keeps it; later ones, and everything inside them, are laid out and drawn with no UI ID, and each dropped key is counted | Section 4, rule 7 |
 | How a UI ID is written as text (2026-11-10) | A path: keys joined by `/`, digits as numbers, `/` and `%` escaped inside a name, and a name of digits escaped so it reads back as a name. The control channel's short names stay | Section 4, rule 5 |
 | Whether a slot's controls stay the same elements when its part is swapped (2026-11-11) | No. They are keyed under the part, so a swap makes new elements with new node IDs. The new part's controls can differ completely, and a screen reader must not read the new filter's cutoff as the old one's | Section 4, the key table |
 | What an XY pad and a range are to a screen reader (2026-11-10) | A named group holding one slider per value, each stepping as an arrow key does | Section 7, the role table and rule 16 |
