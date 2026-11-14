@@ -3,7 +3,8 @@
 //! This crate is the bottom of LoomDSP's own UI layer (ADR-0041,
 //! `docs/design/ui-layer.md`). It holds the values every other part passes
 //! around: where something is, how big it is, what colour it has, what the
-//! pointer and the keys did, and which element is which ([`UiId`]). It depends on no UI toolkit and on no
+//! pointer and the keys did, which element is which ([`UiId`]), and how
+//! large a piece of text is ([`TextMeasure`]). It depends on no UI toolkit and on no
 //! LoomDSP crate, so a tool that has nothing to do with patches can use it.
 //!
 //! # Units
@@ -42,9 +43,11 @@
 mod color;
 mod geometry;
 mod input;
+mod text;
 mod ui_id;
 
 pub use color::Color;
 pub use geometry::{Point, Rect, Size, Vector};
 pub use input::{Event, Key, KeyEvent, Modifiers, Platform, PointerButton, PointerEvent, ScrollDelta};
+pub use text::{TextMeasure, TextStyle, Weight};
 pub use ui_id::{IdKey, IdTable, ParseUiIdError, UiId};

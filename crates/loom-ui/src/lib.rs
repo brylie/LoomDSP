@@ -19,6 +19,11 @@
 //! - **The window shell** ([`shell`], the `shell` feature, on by default)
 //!   is the driver for a desktop window: `winit` and `wgpu`, in that one
 //!   module. The app's side draws each frame through [`shell::Layers`].
+//! - **Layout** ([`Element`], [`Layout`], [`Layout::hit`]): a panel builds
+//!   a tree of elements keyed by UI ID, and the layout places it, gives each
+//!   keyed element's bounds by UI ID, and finds the element under a point.
+//!   Sizes follow flexbox's defaults. It needs no GPU, and names no taffy
+//!   type in its API. See `examples/layout.rs`.
 //! - **Time comes from the driver.** Every call takes the current moment,
 //!   and the runtime never reads the clock, so a test decides what time it
 //!   is.
@@ -36,8 +41,11 @@
 mod app;
 mod driver;
 pub mod effect;
+mod element;
 mod event;
 pub mod headless;
+mod hit;
+mod layout;
 mod routing;
 mod runtime;
 #[cfg(feature = "shell")]
@@ -48,7 +56,10 @@ mod waker;
 pub use app::{App, Context, Deadline, WindowSpec};
 pub use driver::Driver;
 pub use effect::{Effect, Effects};
+pub use element::{Align, Element, Length, Padding};
 pub use event::{DriverEvent, WindowEvent, WindowState};
+pub use hit::{Hit, hit_layers};
+pub use layout::Layout;
 pub use routing::{NO_ELEMENTS, NoTarget, Target};
 pub use runtime::{Counts, Next, Runtime};
 pub use view::{Layer, View};

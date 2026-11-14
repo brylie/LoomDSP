@@ -18,7 +18,7 @@
 //! file no canvas holds any more is loaded again when next used, as a font
 //! of a new identity, and the atlas's old images age out.
 
-use crate::painter::{TextStyle, Weight};
+use crate::painter::{TextMeasure, TextStyle, Weight};
 use fontique::{Collection, CollectionOptions, SourceCache};
 use loom_ui_core::Size;
 use parley::{
@@ -96,6 +96,15 @@ pub struct CanvasText {
 impl Default for CanvasText {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The same measure as [`CanvasText::measure`], for a layout that asks
+/// through the trait, such as `loom-ui`'s panels: what a panel lays out is
+/// what the canvas text draws.
+impl TextMeasure for CanvasText {
+    fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
+        CanvasText::measure(self, text, style, wrap_width)
     }
 }
 

@@ -16,6 +16,8 @@ categories = ["gui"]
 # feature, so a build without it proves the runtime needs no toolkit.
 [dependencies]
 loom-ui-core.workspace = true
+# Lays out panels (`layout.rs`). No taffy type is in our public API.
+taffy.workspace = true
 winit = { workspace = true, optional = true }
 # wgpu's own defaults, which hold its backends: the app gets them through Iced,
 # and the shell alone needs them too. No crate beyond what Iced brings.

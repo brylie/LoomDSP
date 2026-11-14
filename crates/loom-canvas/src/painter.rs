@@ -8,11 +8,17 @@
 //! app, `crate::text::CanvasText` and its paint list.
 //!
 //! Nothing here knows about patches, so these types could serve other
-//! elements. They stay in this crate until phase 3 builds the element tree
-//! (docs/dev/leaving-iced-plan.md).
+//! elements. The text style and [`TextMeasure`] moved to `loom-ui-core`
+//! when phase 3 began the element tree; the painting types stay here until
+//! panels draw (docs/dev/leaving-iced-plan.md, step 3.1).
 
 use crate::tile_text::Align;
 use loom_ui_core::{Color, Point, Rect, Size};
+
+// The style and the measuring trait live in `loom-ui-core`, so the layout
+// in `loom-ui` measures text with the same types (docs/design/ui-layer.md,
+// section 1).
+pub use loom_ui_core::{TextMeasure, TextStyle, Weight};
 
 /// Where a run's anchor is, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,28 +27,6 @@ pub enum Vertical {
     Center,
     /// The anchor is at the run's top.
     Top,
-}
-
-/// How heavy the letters are.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Weight {
-    /// The interface font as it is.
-    Regular,
-    /// Bold, for a label that must stand apart from the line under it.
-    Bold,
-}
-
-/// How a piece of text is set, for drawing and for measuring. Every run is
-/// shaped in full, with fallback fonts for a symbol or a script the
-/// interface font lacks, so no style asks for a cheaper path.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TextStyle {
-    /// The font size in logical pixels.
-    pub size: f32,
-    /// The height of a line, as a multiple of `size`.
-    pub line_height: f32,
-    /// How heavy the letters are.
-    pub weight: Weight,
 }
 
 /// One piece of text to paint. The text is borrowed: a painter that keeps
@@ -114,17 +98,6 @@ pub trait Painter {
     fn begin_layer(&mut self, clip: Rect);
     /// Ends the layer last started.
     fn end_layer(&mut self);
-}
-
-/// Says how large a piece of text is when set.
-pub trait TextMeasure {
-    /// The size of `text` in `style`. With `wrap_width`, lines break
-    /// between words to fit that width, and the size is that of the lines
-    /// together. Without it, the text is one line.
-    ///
-    /// It takes `&mut self` because measuring sets the text, and a measure
-    /// keeps what it set for the painting that follows.
-    fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size;
 }
 
 /// Paints and measures with one object, so the size the canvas lays a box
