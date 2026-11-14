@@ -591,3 +591,69 @@ fn pulling_a_slot_s_output_during_its_fade_fades() {
     assert!(across <= bound, "{across} > {bound}");
     assert_eq!(left[FRAMES - 1], 0.0, "silent once the fade ends");
 }
+
+/// A Modulator slot holding a Random whose range is 0.5 to 0.5, so it
+/// outputs a constant 0.5, into the output.
+const HALF_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Half slot"),
+    modules: [
+        PatchModule(id: 2, kind: "loom.rand.random@1", params: {"low": 0.5, "high": 0.5}),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.modulator@1", part: Some(2)))),
+    ],
+    cables: [
+        PatchCable(from: (9, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// A sub-patch that fills the Modulator role with a constant 0.5.
+const HALF_PART: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Half"),
+    roles: ["loom.role.modulator@1"],
+    modules: [
+        PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.5}),
+        PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+    ],
+)
+"#;
+
+/// Swapping a Modulator slot between two parts that both output 0.5 keeps
+/// the output at 0.5 through the whole fade, at block sizes 1, 77, and
+/// 512: a modulation output fades linearly, so a value both parts share
+/// stays put. With equal power it would rise to about 0.707 in the middle
+/// (sub-patches.md, How a swap crossfades, point 6; #698).
+#[test]
+fn a_modulation_output_fades_linearly_so_a_shared_value_stays_put() {
+    for block in [1, 77, 512] {
+        let (mut parts, hierarchy) = load(HALF_SLOT);
+        let hierarchy = std::cell::RefCell::new(hierarchy);
+        let layout = |_: u32| Layout::default();
+        let part = Patch::from_ron(HALF_PART).unwrap();
+        let left = render_edit_at(
+            &mut parts,
+            FRAMES,
+            block,
+            SWAP_AT,
+            |parts| {
+                let mut hierarchy = hierarchy.borrow_mut();
+                hierarchy
+                    .swap_to_subpatch(&mut parts.controller, &layout, ModuleId(9), &part, None)
+                    .expect("the sub-patch fills Modulator");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            },
+            |_, _| {},
+        );
+        // From before the swap to the end, every frame holds 0.5.
+        for (i, value) in left.iter().enumerate().skip(SWAP_AT - 100) {
+            assert!((value - 0.5).abs() < 1e-6, "block {block}, frame {i}: {value}");
+        }
+    }
+}

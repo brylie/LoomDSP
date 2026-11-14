@@ -14,6 +14,7 @@ use super::*;
 use crate::slot::FADE_KIND;
 use crate::{Held, PartKey};
 use loom_core::{FillsRole, OutputRef, ParamRange, RoleDescriptor};
+use loom_dsp::blend::Law;
 
 /// The status bar text when Make sub-patch is asked for a selection that
 /// holds a slot. Moving a slot into a sub-patch is a follow-up.
@@ -1268,6 +1269,17 @@ impl Hierarchy {
                 .add_module_with_id(fade_id, FADE_KIND)
                 .map_err(|e| e.to_string())?;
             added.push(fade_id);
+            if let Some(law) = new_state
+                .role
+                .outputs
+                .iter()
+                .find(|o| o.name == role_out)
+                .and_then(fade_law)
+            {
+                controller
+                    .set_param_named(fade_id, "law", fade_law_value(law))
+                    .map_err(|e| e.to_string())?;
+            }
             fades_made.push((role_out, fade_id));
         }
         let through_fade: Vec<(OutputRef, ModuleId)> = fades_made
@@ -1384,16 +1396,33 @@ impl SlotState {
 /// The swap fade's `out` port index.
 const FADE_OUT: usize = 0;
 
-/// True for a role output a swap fades. A gate or phase output switches to
-/// the new part on the swap frame instead, for the reason live-patching
-/// rule 9 gives: a ramped gate fires late and a ramped phase looks like
-/// wraps (sub-patches.md, How a swap crossfades, point 6). A trigger is a
-/// one-sample gate.
+/// The law a swap fades a role output with, or `None` for one it does not
+/// fade (sub-patches.md, How a swap crossfades, point 6). Audio fades with
+/// equal power, since two parts are different sounds. Pitch and modulation
+/// fade linearly, so a value both parts share stays put. A gate or phase
+/// output switches to the new part on the swap frame, for the reason
+/// live-patching rule 9 gives: a ramped gate fires late and a ramped phase
+/// looks like wraps. A trigger is a one-sample gate.
+pub fn fade_law(output: &loom_core::RolePort) -> Option<Law> {
+    match output.signal {
+        loom_core::SignalType::Gate | loom_core::SignalType::Phase => None,
+        loom_core::SignalType::Pitch | loom_core::SignalType::Modulation => Some(Law::Linear),
+        _ => Some(Law::EqualPower),
+    }
+}
+
+/// True for a role output a swap fades: one [`fade_law`] gives a law for.
 pub fn fades(output: &loom_core::RolePort) -> bool {
-    !matches!(
-        output.signal,
-        loom_core::SignalType::Gate | loom_core::SignalType::Phase
-    )
+    fade_law(output).is_some()
+}
+
+/// The swap fade's `law` parameter value for `law`: 0 is Equal power, 1 is
+/// Linear (`loom.struct.fade` in `loom-modules`).
+pub fn fade_law_value(law: Law) -> f32 {
+    match law {
+        Law::EqualPower => 0.0,
+        Law::Linear => 1.0,
+    }
 }
 
 /// The leaving module part's declaration of the role, from its descriptor.

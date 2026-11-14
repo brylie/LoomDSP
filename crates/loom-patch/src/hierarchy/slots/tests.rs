@@ -751,3 +751,23 @@ fn dissolve_drops_an_exposure_the_part_cannot_carry() {
     let saved = written(&hierarchy, &controller);
     assert_eq!(saved.subpatches["voice"].exposed.len(), 1);
 }
+
+/// A swap sets each fade's law from its role output's signal type: audio
+/// fades with equal power, and modulation linearly (sub-patches.md, How a
+/// swap crossfades, point 6; #698).
+#[test]
+fn a_swap_sets_each_fade_law_from_the_output_signal_type() {
+    use loom_core::SignalType;
+    let law_of =
+        |role: &loom_core::RoleDescriptor| role.outputs.iter().map(|o| (o.signal, fade_law(o))).collect::<Vec<_>>();
+    assert_eq!(
+        law_of(&roles::FILTER),
+        vec![(SignalType::Audio, Some(loom_dsp::blend::Law::EqualPower))]
+    );
+    assert_eq!(
+        law_of(&roles::ENVELOPE),
+        vec![(SignalType::Modulation, Some(loom_dsp::blend::Law::Linear))]
+    );
+    assert_eq!(fade_law_value(loom_dsp::blend::Law::EqualPower), 0.0);
+    assert_eq!(fade_law_value(loom_dsp::blend::Law::Linear), 1.0);
+}

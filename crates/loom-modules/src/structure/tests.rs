@@ -110,3 +110,61 @@ fn every_mixer_is_registered() {
         assert!(registry.get(id).is_some(), "{id}");
     }
 }
+
+/// Under the Linear law the gains sum to 1, so A and B that both hold 0.5
+/// give 0.5 at every frame, and the fade still ends on B exactly
+/// (sub-patches.md, How a swap crossfades, point 6; #698).
+#[test]
+fn the_linear_fade_keeps_a_shared_value_and_ends_on_b_exactly() {
+    let mut fade = fade();
+    fade.set_param(FADE.param_index("law").unwrap(), 1.0);
+    let frames = 600;
+    let shared = vec![0.5; frames];
+    let mut out = vec![0.0; frames];
+    run(
+        fade.as_mut(),
+        RATE,
+        &[&shared, &shared],
+        &[true, true],
+        &mut [&mut out],
+        &[],
+    );
+    for (i, value) in out.iter().enumerate() {
+        assert!((value - 0.5).abs() < 1e-6, "frame {i}: {value}");
+    }
+    let a = vec![1.0; frames];
+    let b = vec![-0.5; frames];
+    let mut fade = self::fade();
+    fade.set_param(FADE.param_index("law").unwrap(), 1.0);
+    run(fade.as_mut(), RATE, &[&a, &b], &[true, true], &mut [&mut out], &[]);
+    assert_eq!(out[0], 1.0, "the first frame is A alone");
+    // a·(1 − p) + b·p at the middle, p = 0.5.
+    assert!((out[240] - 0.25).abs() < 1e-6, "{}", out[240]);
+    assert!(out[480..].iter().all(|&v| v == -0.5), "B alone after the fade");
+}
+
+/// A law value from a hand-edited file always picks one of the two laws:
+/// 1 is Linear, and anything else, NaN included, Equal power.
+#[test]
+fn any_law_value_plays_a_valid_law() {
+    let law = FADE.param_index("law").unwrap();
+    let frames = 600;
+    let a = vec![1.0; frames];
+    let b = vec![-0.5; frames];
+    let mut equal_power = vec![0.0; frames];
+    run(
+        fade().as_mut(),
+        RATE,
+        &[&a, &b],
+        &[true, true],
+        &mut [&mut equal_power],
+        &[],
+    );
+    for value in [f32::NAN, -3.0, 0.0, 2.0, 7.5] {
+        let mut module = fade();
+        module.set_param(law, value);
+        let mut out = vec![0.0; frames];
+        run(module.as_mut(), RATE, &[&a, &b], &[true, true], &mut [&mut out], &[]);
+        assert_eq!(out, equal_power, "law {value} plays Equal power");
+    }
+}
