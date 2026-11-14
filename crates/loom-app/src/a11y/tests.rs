@@ -4807,3 +4807,18 @@ fn a_control_bound_to_an_empty_slot_is_disabled_and_says_why() {
     let tile = node_of(&mut app, &tile_id(2));
     assert_eq!(app.a11y_tree(&Places::default()).focus, tile);
 }
+
+/// An inert control keeps the role a live control of its kind has, so
+/// the role does not change under a screen reader's focus when its slot
+/// fills: a toggle is a switch, a select a combo box (sub-patches.md,
+/// Empty slots).
+#[test]
+fn an_inert_control_keeps_the_role_of_its_kind() {
+    use loom_canvas::WidgetViewKind;
+    let role = super::tree::control_role;
+    assert_eq!(role(&WidgetViewKind::Knob { steps: 0 }), Role::Slider);
+    assert_eq!(role(&WidgetViewKind::Toggle), Role::Switch);
+    assert_eq!(role(&WidgetViewKind::Button), Role::Button);
+    assert_eq!(role(&WidgetViewKind::Select { options: Vec::new() }), Role::ComboBox);
+    assert_eq!(role(&WidgetViewKind::Radio { options: Vec::new() }), Role::RadioGroup);
+}
