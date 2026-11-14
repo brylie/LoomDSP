@@ -72,3 +72,38 @@ fn an_action_no_sink_runs_is_named() {
         ran.stuck
     );
 }
+
+/// A long chain of tasks that are ready at once finishes, however many
+/// times its parts yield and wake themselves on the way.
+#[test]
+fn a_long_chain_of_ready_tasks_finishes() {
+    let mut task = Task::done(0);
+    for _ in 0..32 {
+        task = task.then(|n| Task::done(n + 1));
+    }
+    let ran = run(task, &mut Fake::default());
+    assert_eq!(ran.outputs, [32]);
+    assert_eq!(ran.stuck, None);
+}
+
+/// A future that wakes itself on every poll and never settles.
+struct Spin;
+
+impl std::future::Future for Spin {
+    type Output = i32;
+
+    fn poll(self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<i32> {
+        context.waker().wake_by_ref();
+        std::task::Poll::Pending
+    }
+}
+
+/// A task that keeps waking itself and never goes on stops as spinning,
+/// keeping what it gave, so it cannot hold a turn forever.
+#[test]
+fn a_task_that_spins_is_stuck() {
+    let task = Task::done(1).chain(Task::future(Spin));
+    let ran = run(task, &mut Fake::default());
+    assert_eq!(ran.outputs, [1]);
+    assert_eq!(ran.stuck, Some(Stuck::Spins));
+}
