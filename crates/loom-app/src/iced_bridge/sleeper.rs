@@ -49,6 +49,14 @@ impl Sleeper {
     }
 }
 
+#[cfg(test)]
+impl Sleeper {
+    /// The time it waits for now, for a test.
+    fn waits_for(&self) -> Option<Instant> {
+        self.shared.0.lock().unwrap_or_else(PoisonError::into_inner).at
+    }
+}
+
 impl Drop for Sleeper {
     /// Ends the thread on its next look, and returns at once.
     fn drop(&mut self) {

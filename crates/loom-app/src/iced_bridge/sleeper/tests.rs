@@ -48,10 +48,13 @@ fn only_the_latest_time_wakes_and_only_once() {
         wakes.recv_timeout(Duration::from_millis(50)).is_err(),
         "once per deadline"
     );
-    // Far off, so only the cancel can explain silence, however slow the
-    // test runs between the two calls.
-    sleeper.set(Some(Instant::now() + Duration::from_secs(3600)));
+    // Far off, so no wake can come before the cancel however slow the
+    // test runs; the cancel itself shows as no time to wait for.
+    let far = Instant::now() + Duration::from_secs(3600);
+    sleeper.set(Some(far));
+    assert_eq!(sleeper.waits_for(), Some(far));
     sleeper.set(None);
+    assert_eq!(sleeper.waits_for(), None, "the cancel cleared the time");
     assert!(
         wakes.recv_timeout(Duration::from_millis(100)).is_err(),
         "a cancelled time wakes nothing"
