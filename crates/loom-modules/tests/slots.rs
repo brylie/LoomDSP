@@ -691,11 +691,6 @@ const SINE_PLAIN: &str = r#"Patch(
 )
 "#;
 
-/// The largest step between two neighbouring frames of `samples`.
-fn largest_step(samples: &[f32]) -> f32 {
-    samples.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
-}
-
 /// Renders [`SINE_EMPTY`] at `block`, swapping its slot to an SVF at
 /// `SWAP_AT`, and, when `remove_at` is given, removing the part again
 /// there, after the first fade has finished.
@@ -876,6 +871,58 @@ fn a_swap_inside_a_stack_has_no_step_in_any_copy() {
     assert!(across <= steady * 1.5, "across: {across} against {steady}");
 }
 
+/// Remove part inside a stack of four is a cable change in every copy, not
+/// a swap fade: each copy's output moves from its SVF to the slot's thru
+/// source, and live-patching rule 9 ramps that over 5 ms. So the sum steps
+/// no more than the signal on either side plus the ramp's change per
+/// frame, at block sizes 1, 77, and 512, where a switch on one frame would
+/// jump from the filtered sound to the dry one (sub-patches.md, Mode;
+/// ADR-0044).
+#[test]
+fn remove_part_inside_a_stack_ramps_every_copy() {
+    let text = STACKED_SLOT.replace("\"cutoff\": 2000.0", "\"cutoff\": 60.0");
+    let ramp = (SAMPLE_RATE * loom_core::cable_fade::CABLE_FADE_SECONDS).round() as usize;
+    let mut renders = Vec::new();
+    for block in [1, 77, 512] {
+        let (mut parts, hierarchy) = load(&text);
+        let hierarchy = std::cell::RefCell::new(hierarchy);
+        let layout = |_: u32| Layout::default();
+        let slot = hierarchy
+            .borrow()
+            .id_at(&loom_patch::ModulePath::top(2), 9)
+            .expect("the slot");
+        renders.push(render_edit_at(
+            &mut parts,
+            FRAMES,
+            block,
+            SWAP_AT,
+            |parts| {
+                let mut hierarchy = hierarchy.borrow_mut();
+                hierarchy
+                    .swap_to_empty(&mut parts.controller, &layout, slot)
+                    .expect("the part comes out");
+                assert_eq!(hierarchy.fading_slots(), [], "no swap fade inside a stack");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            },
+            |_, _| {},
+        ));
+    }
+    assert_eq!(renders[0], renders[1]);
+    assert_eq!(renders[0], renders[2]);
+    let left = &renders[0];
+    let before = &left[SWAP_AT - 600..SWAP_AT];
+    let after = &left[SWAP_AT + ramp + 100..SWAP_AT + ramp + 700];
+    let peak = |w: &[f32]| w.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(
+        peak(after) > 2.0 * peak(before),
+        "the dry sine is louder than the filtered one"
+    );
+    let limit = largest_step(before).max(largest_step(after)) + peak(after).max(peak(before)) / ramp as f32 + 1e-6;
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + ramp + 4]);
+    assert!(across <= limit, "across: {across} against {limit}");
+}
+
 /// A sine through an Amplifier whose `level` an empty Envelope slot feeds:
 /// the slot is a pulled cable, so the Amplifier plays at its normal, open.
 const ENVELOPE_INTO_LEVEL: &str = r#"Patch(
@@ -898,11 +945,11 @@ const ENVELOPE_INTO_LEVEL: &str = r#"Patch(
 
 /// An empty Envelope slot into an Amplifier's `level` plays the tone at the
 /// Amplifier's normal, fully open (ADR-0043). Swapping an Envelope in is a
-/// cable change on a pulled cable, which steps until live-patching rule 9
-/// is built: the level drops from 1 to the envelope's 0 on one frame. When
-/// #21 lands this test fails, and its step becomes a 5 ms ramp.
+/// cable change on a pulled cable, so live-patching rule 9 ramps it: the
+/// level falls from 1 to the envelope's 0 over 5 ms, with no step larger
+/// than the tone's own plus the ramp's, and is closed after it.
 #[test]
-fn a_part_into_an_empty_pulled_cable_slot_steps_until_rule_9() {
+fn a_part_into_an_empty_pulled_cable_slot_ramps_over_5_ms() {
     let (mut thru, _) = load(SINE_PLAIN);
     let sine = render_edit_at(&mut thru, FRAMES, 1, SWAP_AT, |_| {}, |_, _| {});
     let (mut parts, hierarchy) = load(ENVELOPE_INTO_LEVEL);
@@ -929,10 +976,19 @@ fn a_part_into_an_empty_pulled_cable_slot_steps_until_rule_9() {
         sine[..SWAP_AT],
         "open before the swap: the tone at full level"
     );
+    let ramp = (SAMPLE_RATE * loom_core::cable_fade::CABLE_FADE_SECONDS).round() as usize;
     assert!(
-        left[SWAP_AT..].iter().all(|v| *v == 0.0),
-        "the envelope, with no gate, closes it at once"
+        left[SWAP_AT + ramp + 2..].iter().all(|v| *v == 0.0),
+        "the envelope, with no gate, closes it after the ramp"
     );
+    assert!(
+        left[SWAP_AT..SWAP_AT + ramp / 2].iter().any(|v| v.abs() > 0.05),
+        "the tone fades, not steps"
+    );
+    let peak = sine.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let limit = largest_step(&sine) + peak / ramp as f32 + 1e-6;
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + ramp + 4]);
+    assert!(across <= limit, "across: {across} against {limit}");
 }
 
 /// An empty Sound source slot into the output is silent: nothing stands

@@ -36,7 +36,7 @@ Option 3.
 
    Inputs whose default is a transport signal are filled by the engine and need no rule.
 4. **An empty audio place is a thru.** A slot whose role has a required audio input `in` and a required audio output `out`, and which is marked as a thru role, passes `in` to `out` while it is empty. Filter and Effect are thru roles. The flattener routes it as it routes a pass-through port (flattening rule 9), and adds no module.
-5. **LoomDSP never adds a hidden module to fake an absence.** A change between a normal and a signal is a cable change. Live-patching rule 9 is what makes it click-free, once it is built ([#21](https://github.com/brylie/LoomDSP/issues/21)). Until then, a slot swap into or out of an empty thru slot is softened by the swap fade, and every other such change steps, as a hand-plugged cable does.
+5. **LoomDSP never adds a hidden module to fake an absence.** A change between a normal and a signal is a cable change. Live-patching rule 9 ([#21](https://github.com/brylie/LoomDSP/issues/21)) makes it click-free: the input ramps over 5 ms. A slot swap into or out of an empty thru slot is softened by the slot's own swap fade instead.
 
 ## Consequences
 
