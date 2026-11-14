@@ -251,6 +251,7 @@ fn run(task: Pending, bridge: &mut Bridge<UiDriver>, surface: &mut Surface) -> V
         Some(Stuck::Waits) => {
             panic!("Ui: a task waits on something the harness cannot give, such as a timer or a dialog")
         }
+        Some(Stuck::Spins) => panic!("Ui: a task keeps waking itself and never goes on"),
         Some(Stuck::Action(action)) => panic!("Ui: the harness cannot run this task: {action}"),
     }
 }

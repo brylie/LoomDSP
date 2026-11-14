@@ -11,7 +11,29 @@
 use iced::Task;
 use iced::advanced::widget::Operation;
 use iced_runtime::Action;
-use iced_runtime::futures::futures::{FutureExt, StreamExt};
+use iced_runtime::futures::futures::StreamExt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll, Wake, Waker};
+
+/// How many times in a row a stream may wake itself before one action.
+/// An Iced chain yields once per step, so this is far above any real
+/// chain, and it stops a future that never settles from spinning forever.
+const SELF_WAKES: usize = 4096;
+
+/// A waker that only records that it was woken.
+#[derive(Default)]
+struct Woken(AtomicBool);
+
+impl Wake for Woken {
+    fn wake(self: Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 /// Where a task's actions go.
 pub(crate) trait Sink {
@@ -28,6 +50,9 @@ pub(crate) trait Sink {
 pub(crate) enum Stuck {
     /// It waits on something outside, such as a timer or a dialog.
     Waits,
+    /// It woke itself [`SELF_WAKES`] times in a row and never went on, so
+    /// it would spin forever inside one turn.
+    Spins,
     /// It asked for an action no [`Sink`] carries out, named here.
     Action(String),
 }
@@ -47,20 +72,34 @@ pub(crate) fn run<T: std::fmt::Debug>(task: Task<T>, sink: &mut impl Sink) -> Ra
     let Some(mut stream) = iced_runtime::task::into_stream(task) else {
         return Ran { outputs, stuck: None };
     };
+    let woken = Arc::new(Woken::default());
+    let waker = Waker::from(woken.clone());
+    let mut context = Context::from_waker(&waker);
     loop {
-        // A stream can return Pending once while its parts hand over, for
-        // example after a clipboard reply. A few polls tell that apart from
-        // a task that waits on the outside world.
-        let polled = (0..8).find_map(|_| stream.next().now_or_never());
-        let action = match polled {
-            Some(Some(action)) => action,
-            Some(None) => return Ran { outputs, stuck: None },
-            None => {
-                return Ran {
-                    outputs,
-                    stuck: Some(Stuck::Waits),
-                };
-            }
+        // A stream returns Pending while its parts hand over, for example
+        // between the steps of a chain or after a clipboard reply. It then
+        // wakes itself before returning, so it can go on at once. A stream
+        // that returns Pending without waking itself waits on the outside
+        // world.
+        let mut wakes = 0;
+        let action = loop {
+            woken.0.store(false, Ordering::Relaxed);
+            let stuck = match stream.poll_next_unpin(&mut context) {
+                Poll::Ready(action) => break action,
+                Poll::Pending if !woken.0.load(Ordering::Relaxed) => Stuck::Waits,
+                Poll::Pending if wakes == SELF_WAKES => Stuck::Spins,
+                Poll::Pending => {
+                    wakes += 1;
+                    continue;
+                }
+            };
+            return Ran {
+                outputs,
+                stuck: Some(stuck),
+            };
+        };
+        let Some(action) = action else {
+            return Ran { outputs, stuck: None };
         };
         match action {
             Action::Output(output) => outputs.push(output),
