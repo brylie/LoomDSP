@@ -286,6 +286,7 @@ Gates for 2.2b and 2.2c, with main as the base:
 2. Separate layout and hit-testing from drawing, so the harness needs no GPU for event tests. Text that Iced still draws keeps Iced's measure, so layout matches the drawn widths. Text that Parley draws, from step 2.4b on, is measured by Parley, which needs only its font and layout contexts on the CPU.
 3. Drawing tests (`screenshot.rs`, its smoke test) render to an offscreen `wgpu` texture. Without a GPU adapter they skip with `NO_GPU`, as today. Iced's `tiny-skia` fallback goes away; nothing should depend on it once events need no renderer. If CI has no GPU, try a software `wgpu` adapter (such as llvmpipe through Vulkan, or WARP on Windows) and record whether it works.
 4. Add an accessibility test driver to the harness: `Ui::a11y_tree()` returns the current tree, and `Ui::a11y_action(name, action)` performs an action by node name. Agents and tests can then check the tree the way a screen reader sees it.
+   - **Done.** `crates/loom-app/src/ui_test/a11y.rs`: `A11yTree` reads the whole tree with the harness's own places, and finds a node by accessible name, by a path of names, or by UI ID. `Ui::a11y_action(target, Action)` and `Ui::a11y_set_value(target, value)` send the request as the adapter does, then draw a frame. The signatures are in the spec, section 10, rule 4, and a decision row dated 2026-11-14.
 
 ### 2.4 Text drawing for the canvas
 

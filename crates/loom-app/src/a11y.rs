@@ -554,9 +554,19 @@ impl crate::App {
         ids
     }
 
+    /// The UI ID the tree gave node `node`, for the harness
+    /// (`ui_test/a11y.rs`).
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn a11y_ui_id(&self, node: accesskit::NodeId) -> Option<loom_ui_core::UiId> {
+        self.a11y.ids.id(node.0).cloned()
+    }
+
     /// The tree as it is now, with the canvas placed by `view`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-ui"))]
     pub(crate) fn a11y_tree(&mut self, places: &Places) -> TreeUpdate {
+        // Actions that place something, such as a tile's menu, use the
+        // canvas the tree was built with, as after `a11y_changes`.
+        self.a11y.canvas = places.canvas;
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
