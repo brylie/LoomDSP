@@ -265,6 +265,7 @@ fn convert() {
 #[test]
 fn note_in() {
     Harness::new(&midi::NOTE_IN)
+        .reference_outputs(&["pitch", "gate", "velocity"])
         .seconds(0.1)
         .midi([
             MidiEvent::note_on(100, 0, 60, 100),
@@ -275,6 +276,32 @@ fn note_in() {
             MidiEvent::note_off(4_000, 0, 60),
         ])
         .check(reference!("note_in"));
+}
+
+/// Voice merge's five modes retain a deterministic reference across gate edges.
+#[test]
+fn voice_merge() {
+    Harness::new(&loom_modules::voice::MERGE)
+        .seconds(0.1)
+        .bundle_input(
+            "in",
+            (0..8)
+                .map(|voice| {
+                    Signal::from_fn(move |frame| (voice as f32 + 1.0) * 0.05 + (frame as f32 * 0.001).sin() * 0.01)
+                })
+                .collect(),
+        )
+        .bundle_input(
+            "gate",
+            (0..8)
+                .map(|voice| Signal::from_fn(move |frame| if (frame / 120 + voice) % 3 == 0 { 1.0 } else { 0.0 }))
+                .collect(),
+        )
+        .param_at(0.02, "mode", 1.0)
+        .param_at(0.04, "mode", 2.0)
+        .param_at(0.06, "mode", 3.0)
+        .param_at(0.08, "mode", 4.0)
+        .check(reference!("voice_merge"));
 }
 
 /// Reference render for `loom.midi.controller`: controller 1 moves and
@@ -747,6 +774,7 @@ fn every_dsp_module_has_a_reference_test() {
         &math::CONVERT,
         &level::AMP,
         &midi::NOTE_IN,
+        &loom_modules::voice::MERGE,
         &midi::CONTROLLER_IN,
         &display::METER,
         &display::SCOPE,

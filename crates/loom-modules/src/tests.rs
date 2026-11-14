@@ -88,6 +88,8 @@ fn panels_follow_the_spec() {
             }
             // Choice controls that stand in for a knob on these modules.
             let non_knob = [
+                ("loom.midi.note", "mode"),
+                ("loom.voice.merge", "mode"),
                 ("loom.io.audio-in", "pair"),
                 ("loom.io.audio-in", "mute"),
                 ("loom.gate.euclid", "source"),
@@ -142,7 +144,8 @@ fn panels_follow_the_spec() {
             // widget, moves off a knob.
             use loom_core::WidgetKind::{Fader, Number, Range};
             let moved = match (descriptor.id, param.name) {
-                ("loom.clock.transport", "tempo")
+                ("loom.midi.note", "voices")
+                | ("loom.clock.transport", "tempo")
                 | ("loom.gate.euclid", "steps" | "hits" | "rotation")
                 | ("loom.midi.controller", "controller")
                 | ("loom.logic.divide", "n" | "offset")

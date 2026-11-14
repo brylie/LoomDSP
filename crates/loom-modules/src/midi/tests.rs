@@ -17,7 +17,9 @@ fn display_shows_a_held_note() {
         note_in.set_param(i, p.default);
     }
     let mut display = [f32::NAN];
-    let (mut pitch, mut gate, mut velocity) = ([0.0; 64], [0.0; 64], [0.0; 64]);
+    let (mut pitch, mut gate, mut velocity, mut pressure, mut timbre) =
+        ([0.0; 64], [0.0; 64], [0.0; 64], [0.0; 64], [0.0; 64]);
+    let level = [0.0; 64];
 
     note_in.displays(&mut display);
     assert_eq!(display[0], 0.0, "no note yet");
@@ -26,9 +28,9 @@ fn display_shows_a_held_note() {
     run(
         note_in.as_mut(),
         1_000.0,
-        &[],
-        &[],
-        &mut [&mut pitch, &mut gate, &mut velocity],
+        &[&level],
+        &[false],
+        &mut [&mut pitch, &mut gate, &mut velocity, &mut pressure, &mut timbre],
         &on,
     );
     note_in.displays(&mut display);
@@ -39,9 +41,9 @@ fn display_shows_a_held_note() {
     run(
         note_in.as_mut(),
         1_000.0,
-        &[],
-        &[],
-        &mut [&mut pitch, &mut gate, &mut velocity],
+        &[&level],
+        &[false],
+        &mut [&mut pitch, &mut gate, &mut velocity, &mut pressure, &mut timbre],
         &off,
     );
     note_in.displays(&mut display);

@@ -2396,9 +2396,10 @@ fn tab_closes_an_inspector_field() {
     let before = param_value(&ui, id, "cutoff");
     ui.typewrite("5");
     assert!(ui.app().session.value_draft.is_some());
+    let previous_focus = ui.app().focus.clone();
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
     assert!(ui.app().session.value_draft.is_none());
-    assert!(!ui.app().focus.is_some());
+    assert_ne!(ui.app().focus, previous_focus, "the original field gave up focus");
     assert_eq!(param_value(&ui, id, "cutoff"), before);
 }
 

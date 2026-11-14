@@ -4,11 +4,11 @@ What a voice is, why a polysynth has to steal, why LoomDSP infers a bundle inste
 
 - **Specification:** [Polyphony and voice allocation](../design/polyphony.md).
 - **Decision:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md).
-- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), and `crates/loom-dsp/src/voice.rs` (allocation).
+- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), `crates/loom-dsp/src/voice.rs` (allocation), and `crates/loom-modules/src/midi.rs` (MIDI notes and expression).
 
 ## A voice is a chain, not a note
 
-A monophonic synth is one chain: oscillator, filter, envelope. Play one key and the chain plays it. Play a second key while the first is held, and the chain has to choose, because it has one pitch input and one gate. That is last-note priority, and it is what `loom.midi.note` does today.
+A monophonic synth is one chain: oscillator, filter, envelope. Play one key and the chain plays it. Play a second key while the first is held, and the chain has to choose, because it has one pitch input and one gate. That is last-note priority, and it is what `loom.midi.note` does at one voice in Legato mode.
 
 To play two notes at once you need two chains. A **voice** is one such chain, with its own pitch, its own gate, its own envelope state, and its own filter state. An 8-voice polysynth is eight chains that happen to share one set of knobs.
 
@@ -74,6 +74,21 @@ So the stolen voice's gate goes low for exactly one sample, then high again. Tha
 C major is C, E, G. A minor 7 is A, C, E, G. If the chord sequencer sent "all notes off, then four notes on" at the change, every voice would restart, and the player would hear the whole chord re-attack, which is not how a pianist moves between those chords.
 
 LoomDSP puts the rule on the source, not the allocator: a chord change is note-offs for the pitches that left and note-ons for the pitches that arrived. G and C and E are never re-sent, so their voices never see an edge, and their envelopes carry on. A, which arrived, takes a free voice. That is voice leading, and it falls out of two rules that a keyboard needed anyway: a held pitch keeps its voice, and a voice only changes on an edge.
+
+## A note belongs to its input
+
+Two keyboards can hold middle C on the same channel. Each needs its own note
+identity, or unplugging one keyboard can release the other's note. LoomDSP uses
+the input, channel, and pitch together. The engine remembers held notes per input
+and sends that input's note-offs when it disconnects.
+
+MPE uses a different channel for each note's expression. The manager channel
+adds a shared bend, while member channels carry note bends, pressure, and timbre.
+An RPN 6 message announces which channels belong to the zone. That announcement
+is device configuration, rather than part of a patch: replacing a patch must not
+forget it. The rig retains it and seeds each new engine before sending more MIDI.
+Inside a buffer, the engine retains configuration changes at their sample offsets,
+so an announcement later in the buffer cannot change an earlier note.
 
 ## Why there is no event cable
 

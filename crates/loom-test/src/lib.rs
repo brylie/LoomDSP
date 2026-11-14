@@ -160,6 +160,7 @@ pub struct Harness {
     /// Transport changes during the render: `(seconds, settings)`.
     transport_changes: Vec<(f64, TransportSettings)>,
     tolerance: f32,
+    reference_outputs: Option<Vec<usize>>,
     allow_undocumented: bool,
     /// First bad frame for the non-finite recovery check.
     non_finite_start: usize,
@@ -207,6 +208,7 @@ impl Harness {
             param_changes: Vec::new(),
             transport_changes: Vec::new(),
             tolerance: DEFAULT_TOLERANCE,
+            reference_outputs: None,
             allow_undocumented: false,
             non_finite_start: BAD_START,
         }
@@ -320,11 +322,12 @@ impl Harness {
             .chain(self.descriptor.outputs)
             .any(|port| port.channels == loom_core::Channels::Voices);
         let sides = self
-            .bundle_inputs
-            .values()
-            .map(|(width, _)| width.sides)
-            .max()
-            .unwrap_or(1);
+            .descriptor
+            .inputs
+            .iter()
+            .position(|port| port.channels == loom_core::Channels::Voices)
+            .and_then(|port| self.bundle_inputs.get(&port))
+            .map_or(1, |(width, _)| width.sides);
         testing::BundleLayout::new(
             self.descriptor
                 .outputs
@@ -672,6 +675,30 @@ impl Harness {
         let transport = self.transport_spans();
         let params = self.scheduled_params();
         let frames = span.end;
+        let bundle_aware = self
+            .descriptor
+            .inputs
+            .iter()
+            .chain(self.descriptor.outputs)
+            .any(|port| port.channels == loom_core::Channels::Voices);
+        let normals: Vec<_> = if bundle_aware {
+            self.descriptor
+                .inputs
+                .iter()
+                .map(|port| default_signal(port.default, &transport, frames))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut midi_config = loom_core::MidiConfigTimeline::new(self.midi.len());
+        // Copy-state checks start a span after earlier zone announcements.
+        let prior: Vec<_> = self
+            .midi
+            .iter()
+            .copied()
+            .filter(|event| (event.frame as usize) < span.start)
+            .collect();
+        midi_config.begin_block(&prior);
         let mut block_midi = Vec::with_capacity(self.midi.len());
         let mut start = span.start;
         while start < frames {
@@ -699,6 +726,7 @@ impl Harness {
                         ..*event
                     }),
             );
+            midi_config.begin_block(&block_midi);
             let block_inputs: Vec<&[f32]> = inputs.iter().map(|input| &input[start..end]).collect();
             if self
                 .descriptor
@@ -725,13 +753,16 @@ impl Harness {
                     .map(|(_, output)| &mut output[start..end])
                     .collect();
                 let ctx = loom_core::ProcessContext::new(self.sample_rate, len, &block_midi)
-                    .with_transport(transport_at_frame(&transport, start));
-                testing::run_bundles(
+                    .with_transport(transport_at_frame(&transport, start))
+                    .with_midi_config(&midi_config);
+                let block_normals: Vec<_> = normals.iter().map(|normal| &normal[start..end]).collect();
+                testing::run_bundles_with_normals(
                     module,
                     &ctx,
                     &self.input_layout(),
                     &block_inputs,
                     connected,
+                    &block_normals,
                     &active,
                     &mut block_outputs,
                 );
@@ -874,6 +905,18 @@ impl Harness {
             }
         }
         reference
+    }
+
+    /// Compares only these named outputs with a previously recorded reference.
+    /// All rendered outputs still take the finite and block-size checks.
+    pub fn reference_outputs(mut self, names: &[&str]) -> Self {
+        self.reference_outputs = Some(
+            names
+                .iter()
+                .map(|name| self.descriptor.output_index(name).expect("reference output exists"))
+                .collect(),
+        );
+        self
     }
 
     /// Renders in blocks of [`MAX_BLOCK`] and compares with the reference
@@ -1121,10 +1164,23 @@ impl Harness {
 
     #[track_caller]
     fn compare_or_update(&self, render: &Render, path: &Path, update: bool) {
+        let selected;
+        let mut channels = reference::Channels::of(render);
+        if let Some(ports) = &self.reference_outputs {
+            let indices: Vec<_> = (0..render.outputs.len())
+                .filter(|&i| ports.contains(&render.layout.port_of(i)))
+                .collect();
+            selected = indices.iter().map(|&i| render.outputs[i].clone()).collect::<Vec<_>>();
+            channels.names = indices
+                .iter()
+                .map(|&i| render.descriptor.outputs[render.layout.port_of(i)].name)
+                .collect();
+            channels.samples = &selected;
+        }
         if update {
-            reference::write(&reference::Channels::of(render), path);
+            reference::write(&channels, path);
         } else {
-            reference::compare(&reference::Channels::of(render), path, self.tolerance);
+            reference::compare(&channels, path, self.tolerance);
         }
     }
 }

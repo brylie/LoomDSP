@@ -291,6 +291,25 @@ impl App {
             };
             changes.push((copy, index, value));
         }
+        // A count crossing changes the offered mode in the same edit and schedule swap.
+        let modes: Vec<_> = changes
+            .iter()
+            .filter_map(|&(module, index, value)| {
+                let node = self.session.controller.graph().node(module)?;
+                if node.descriptor.id != "loom.midi.note" || node.descriptor.params[index].name != "voices" {
+                    return None;
+                }
+                let count = node.descriptor.params[index].clamp(value);
+                ((node.params[index] <= 1.0) != (count <= 1.0)).then(|| {
+                    (
+                        module,
+                        node.descriptor.param_index("mode").unwrap(),
+                        if count <= 1.0 { 2.0 } else { 0.0 },
+                    )
+                })
+            })
+            .collect();
+        changes.extend(modes);
         self.session.controller.set_params_across(&changes)
     }
 

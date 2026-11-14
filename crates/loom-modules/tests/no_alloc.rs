@@ -797,3 +797,45 @@ fn a_slot_swap_inside_a_stack_never_allocates() {
         assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
     }
 }
+
+/// Bundle merge exercises all modes while the MIDI configuration timeline changes.
+#[test]
+fn polyphonic_midi_and_merge_never_allocate() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let c = &mut parts.controller;
+    let note = c.add_module("loom.midi.note").unwrap();
+    c.set_param_named(note, "voices", 8.0).unwrap();
+    c.open_midi_input(loom_core::MidiInputId(1)).unwrap();
+    let merge = c.add_module("loom.voice.merge").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(note, "pitch", merge, "in").unwrap();
+    c.connect_named(note, "gate", merge, "gate").unwrap();
+    c.connect_named(merge, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+    for mode in 0..5 {
+        parts.controller.set_param_named(merge, "mode", mode as f32).unwrap();
+        for (controller, value) in [(101, 0), (100, 6), (6, 8)] {
+            assert!(
+                parts
+                    .midi
+                    .send(MidiEvent::control_change(0, 0, controller, value).from_input(loom_core::MidiInputId(1)))
+            );
+        }
+        for voice in 0..8u8 {
+            assert!(
+                parts
+                    .midi
+                    .send(MidiEvent::note_on(20, voice + 1, 60 + voice, 100).from_input(loom_core::MidiInputId(1)))
+            );
+            assert!(
+                parts.midi.send(
+                    MidiEvent::poly_pressure(77, voice + 1, 60 + voice, 90).from_input(loom_core::MidiInputId(1))
+                )
+            );
+        }
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    parts.controller.release_midi_input(loom_core::MidiInputId(1)).unwrap();
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+}

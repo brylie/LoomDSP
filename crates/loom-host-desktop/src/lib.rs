@@ -1180,11 +1180,47 @@ impl CallbackStats {
 /// The engine's MIDI queue has a single producer, so senders take turns
 /// through a mutex. Only MIDI and UI threads lock it; the audio thread reads
 /// the queue without locks, so real-time rules are kept (NFR-RT-01).
-pub type SharedMidi = Arc<Mutex<MidiSender>>;
+pub type SharedMidi = Arc<Mutex<MidiIngress>>;
+
+/// The current engine sender and physical inputs' retained MPE announcements.
+/// This state belongs to the rig, never the patch or the audio thread.
+pub struct MidiIngress {
+    sender: MidiSender,
+    config: loom_core::MidiConfigTable,
+}
+
+impl MidiIngress {
+    /// Replaces the engine and seeds it before another thread can send an event.
+    pub fn replace(&mut self, mut sender: MidiSender) {
+        // A fresh sender's snapshot queue is empty. Failure indicates host misuse.
+        assert!(
+            sender.seed_config(Box::new(self.config.clone())).is_ok(),
+            "new engine already seeded"
+        );
+        self.sender = sender;
+    }
+
+    /// Clears configuration when a physical input closes or starts a new connection.
+    pub fn clear_input(&mut self, input: loom_core::MidiInputId) {
+        self.config.clear(input.0);
+    }
+
+    /// Caches only events accepted by the engine's ingress queue.
+    pub fn send(&mut self, event: MidiEvent) -> bool {
+        let accepted = self.sender.send(event);
+        if accepted {
+            self.config.follow(&event);
+        }
+        accepted
+    }
+}
 
 /// Wraps a [`MidiSender`] so several threads can send through it.
 pub fn share_midi(sender: MidiSender) -> SharedMidi {
-    Arc::new(Mutex::new(sender))
+    Arc::new(Mutex::new(MidiIngress {
+        sender,
+        config: loom_core::MidiConfigTable::default(),
+    }))
 }
 
 /// Sends one event through a shared sender. Returns false if the queue was

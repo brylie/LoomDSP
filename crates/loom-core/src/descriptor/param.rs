@@ -50,6 +50,16 @@ pub struct ParamSpec {
     pub options: ParamOptions,
 }
 
+/// A choice list split at `split`: earlier choices for many voices, later for one.
+/// Values keep their original indices in saved patches and MIDI mappings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CountChoices {
+    /// Integer parameter whose value selects one or many.
+    pub param: &'static str,
+    /// First choice offered at one voice.
+    pub split: usize,
+}
+
 /// Optional settings of a [`ParamSpec`].
 ///
 /// It is a separate struct with a [`ParamOptions::DEFAULT`] constant, so a
@@ -82,6 +92,8 @@ pub struct ParamOptions {
     /// steps of 1, or empty. Set with [`ParamSpec::choices`].
     /// Spec: `docs/design/panels.md`, Choice names.
     pub choices: &'static [&'static str],
+    /// Narrow choice filtering by an integer count of one or more than one.
+    pub count_choices: Option<CountChoices>,
     /// The ranges a player can pick for this parameter's control, from the
     /// smallest up, or empty. Set with [`ParamSpec::ranges`].
     /// Spec: `docs/design/control-ranges.md`.
@@ -148,6 +160,7 @@ impl ParamOptions {
         mapping: ParamMapping::Linear,
         smooth_seconds: 0.0,
         choices: &[],
+        count_choices: None,
         ranges: &[],
         default_range: None,
         shown_when: None,
@@ -526,6 +539,28 @@ impl ParamSpec {
             return problem("a choice name is empty");
         }
         Ok(())
+    }
+
+    /// Offers earlier choices above one voice and later choices at one voice.
+    pub const fn choices_by_count(mut self, param: &'static str, split: usize) -> Self {
+        self.options.count_choices = Some(CountChoices { param, split });
+        self
+    }
+
+    /// Control-only view of the choice list. Processing retains the full parameter.
+    pub fn for_count(mut self, count: f32) -> Self {
+        if let Some(filter) = self.options.count_choices {
+            let (start, end) = if count <= 1.0 {
+                (filter.split, self.options.choices.len())
+            } else {
+                (0, filter.split)
+            };
+            self.options.choices = &self.options.choices[start..end];
+            self.min += start as f32;
+            self.max = self.min + (end - start - 1) as f32;
+            self.default = self.min;
+        }
+        self
     }
 
     /// Clamps a value into range, rounding whole-number parameters.

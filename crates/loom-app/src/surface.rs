@@ -61,7 +61,7 @@ pub fn control_target(
             module: ModuleId(tile),
             index,
             kind: w.kind,
-            spec: node.spec(index)?,
+            spec: node.control_spec(index)?,
         });
     }
     if part != ControlPart::Main {
@@ -70,7 +70,7 @@ pub fn control_target(
     let exposed = hierarchy.exposed_target(ModuleId(tile), widget)?;
     let node = graph.node(exposed.module)?;
     let index = node.parameter_index(&exposed.param)?;
-    let spec = node.spec(index)?;
+    let spec = node.control_spec(index)?;
     let spec = match exposed.range {
         Some((min, max)) => spec.in_range(ParamRange::new(min, max)),
         None => spec,

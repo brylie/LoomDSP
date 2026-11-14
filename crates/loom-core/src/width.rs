@@ -76,12 +76,10 @@ fn outputs(graph: &Graph, widths: &Widths, id: ModuleId) -> Vec<Width> {
         node.descriptor
             .inputs
             .iter()
-            .enumerate()
-            .filter(|(_, port)| port.channels == Channels::Voices)
-            .filter_map(|(port, _)| graph.source_of(InputRef { module: id, port }))
-            .map(|from| widths.outputs.get(&from).copied().unwrap_or_default().sides)
-            .max()
-            .unwrap_or(1)
+            .position(|port| port.channels == Channels::Voices)
+            .and_then(|port| graph.source_of(InputRef { module: id, port }))
+            .and_then(|from| widths.outputs.get(&from))
+            .map_or(1, |width| width.sides)
     } else {
         1
     };

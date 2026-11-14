@@ -11,7 +11,7 @@ pub use display::{DisplayFormat, DisplayKind, DisplayRange, DisplaySpec, MAX_DIS
 pub use format::number_text;
 pub use lint::{MissingText, SpecKind, Undocumented, assert_documented};
 pub use panel::{ButtonMode, Panel, Widget, WidgetKind};
-pub use param::{NotANumber, ParamMapping, ParamOptions, ParamRange, ParamSpec, ShownWhen};
+pub use param::{CountChoices, NotANumber, ParamMapping, ParamOptions, ParamRange, ParamSpec, ShownWhen};
 pub use port::{Channels, Polarity, PortDefault, PortRange, PortSpec};
 
 use crate::module::Module;
@@ -181,6 +181,20 @@ impl ModuleDescriptor {
             i += 1;
         }
         None
+    }
+
+    /// Choice controls filtered by a one-versus-many integer parameter.
+    /// Stored values and the processing parameter range stay unchanged.
+    pub fn control_spec(&self, index: usize, values: &[f32]) -> Option<ParamSpec> {
+        let spec = *self.params.get(index)?;
+        Some(match spec.options.count_choices {
+            Some(filter) => spec.for_count(
+                self.param_index(filter.param)
+                    .and_then(|i| values.get(i).copied())
+                    .unwrap_or(1.0),
+            ),
+            None => spec,
+        })
     }
 
     /// True when parameter `index` shows its widget for these values

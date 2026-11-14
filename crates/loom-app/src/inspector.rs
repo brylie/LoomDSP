@@ -551,7 +551,7 @@ impl App {
                     .controller
                     .graph()
                     .node(ModuleId(module))
-                    .and_then(|n| n.spec(index))
+                    .and_then(|n| n.control_spec(index))
                     .map(|spec| spec.clamp(spec.min + choice as f32));
                 if let Some(value) = value {
                     self.turn_param(module, index, value);
@@ -588,7 +588,18 @@ impl App {
         let graph = self.session.controller.graph();
         let node = graph.node(ModuleId(id))?;
         let d = node.descriptor;
-        let value = *node.params.get(index)?;
+        let filtered = if spec.options.count_choices.is_some() {
+            node.control_spec(index)?
+        } else {
+            *spec
+        };
+        let spec = &filtered;
+        let stored = *node.params.get(index)?;
+        let value = if spec.options.count_choices.is_some() && !(spec.min..=spec.max).contains(&stored) {
+            spec.min
+        } else {
+            stored
+        };
         let range = spec.options.ranges.first().filter(|_| show_range).map(|_| RangeRow {
             choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
             selected: node
@@ -1483,13 +1494,13 @@ fn param_row_view<'a>(
                 head,
                 match p.range {
                     Some(range) => row![
-                        with_ghost(value_control(id, index, control, position, step, &ui), ghost),
+                        with_ghost(value_control(id, index, control, position, step, &ui, &p.spec), ghost),
                         range_view(id, index, range, &ui),
                     ]
                     .spacing(6)
                     .align_y(iced::Alignment::Center)
                     .into(),
-                    None => with_ghost(value_control(id, index, control, position, step, &ui), ghost),
+                    None => with_ghost(value_control(id, index, control, position, step, &ui, &p.spec), ghost),
                 },
             ]
             .spacing(2);
@@ -1853,6 +1864,7 @@ fn value_control<'a>(
     position: f32,
     step: f32,
     row: &UiId,
+    spec: &ParamSpec,
 ) -> Element<'a, AppMessage> {
     let ui = ids::part(row, "value");
     // A choice is the parameter's minimum plus its index. The model gives
@@ -1874,7 +1886,7 @@ fn value_control<'a>(
             for (i, name) in choices.into_iter().enumerate() {
                 // Each choice by its index, which is the parameter's value.
                 list = list.push(ids::named(
-                    &ui.clone().with("option").with(i as u32),
+                    &choice_ui(&ui, spec, i, name),
                     radio(name, i, Some(selected), pick)
                         .size(style::SWITCH)
                         .text_size(style::BODY),
@@ -1900,6 +1912,16 @@ fn value_control<'a>(
         .id(crate::places::widget_id(&ui))
         .width(Length::Fill)
         .into()
+}
+
+/// Filtered choice names keep their UI identity when the count switches lists.
+fn choice_ui(root: &UiId, spec: &ParamSpec, index: usize, name: &str) -> UiId {
+    let root = root.clone().with("option");
+    if spec.options.count_choices.is_some() {
+        root.with(name)
+    } else {
+        root.with(index as u32)
+    }
 }
 
 /// The **Range** selector: a pick list of the range names. A pick is one

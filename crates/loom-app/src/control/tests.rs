@@ -2670,3 +2670,47 @@ fn the_control_watcher_hands_each_call_to_the_app() {
         "one line, one call"
     );
 }
+
+/// Control-channel count edits and UI edits use the same mode change and undo step.
+#[test]
+fn voice_count_crossings_switch_mode_and_undo_together() {
+    let mut app = crate::tests::app();
+    app.add_module(
+        loom_modules::registry().resolve("loom.midi.note").unwrap(),
+        loom_ui_core::Point::new(100.0, 100.0),
+    );
+    let module = *app.session.selection.iter().next().unwrap();
+    let values = |app: &App| {
+        let node = app.session.controller.graph().node(ModuleId(module)).unwrap();
+        (
+            node.params[node.descriptor.param_index("voices").unwrap()],
+            node.params[node.descriptor.param_index("mode").unwrap()],
+        )
+    };
+    let set = |app: &mut App, param: &str, value: f32| {
+        run(
+            app,
+            &format!(r#"{{"cmd":"set","module":{module},"param":"{param}","value":{value}}}"#),
+        )
+        .unwrap();
+    };
+    assert_eq!(values(&app), (1.0, 2.0));
+    set(&mut app, "voices", 8.0);
+    assert_eq!(values(&app), (8.0, 0.0));
+    run(&mut app, r#"{"cmd":"undo"}"#).unwrap();
+    assert_eq!(values(&app), (1.0, 2.0));
+    run(&mut app, r#"{"cmd":"redo"}"#).unwrap();
+    assert_eq!(values(&app), (8.0, 0.0));
+    // Setting mode alone is allowed to store a combination that falls back at runtime.
+    set(&mut app, "mode", 3.0);
+    assert_eq!(values(&app), (8.0, 3.0));
+    let node = app.session.controller.graph().node(ModuleId(module)).unwrap();
+    let mode = node.descriptor.param_index("mode").unwrap();
+    assert_eq!(
+        node.control_spec(mode).unwrap().options.choices,
+        &["Oldest", "Quietest"]
+    );
+    set(&mut app, "mode", 1.0);
+    set(&mut app, "voices", 1.0);
+    assert_eq!(values(&app), (1.0, 2.0));
+}

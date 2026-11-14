@@ -99,7 +99,7 @@ fn part_text(d: &ModuleDescriptor, name: &str) -> PartText {
 /// parameter's label, meters their output's, and lights their display
 /// value's, each with its description as hover text
 /// (port-and-parameter-text.md, Display values).
-fn panel_view(d: &ModuleDescriptor) -> PanelView {
+fn panel_view(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
     let widgets = d
         .panel
         .widgets
@@ -148,25 +148,23 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
                 WidgetKind::Shape { width, .. } => WidgetViewKind::Shape { width },
                 // The names come from the parameter (panels.md, Choice names).
                 WidgetKind::Radio => WidgetViewKind::Radio {
-                    options: d
-                        .params
-                        .iter()
-                        .find(|p| p.name == w.bind())
-                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
+                    options: d.params.iter().find(|p| p.name == w.bind()).map_or_else(Vec::new, |p| {
+                        let spec = d.control_spec(d.param_index(p.name).unwrap(), values).unwrap();
+                        spec.options.choices.iter().map(|o| o.to_string()).collect()
+                    }),
                 },
                 WidgetKind::Select => WidgetViewKind::Select {
-                    options: d
-                        .params
-                        .iter()
-                        .find(|p| p.name == w.bind())
-                        .map_or_else(Vec::new, ParamSpec::value_names),
+                    options: d.params.iter().find(|p| p.name == w.bind()).map_or_else(Vec::new, |p| {
+                        d.control_spec(d.param_index(p.name).unwrap(), values)
+                            .unwrap()
+                            .value_names()
+                    }),
                 },
                 WidgetKind::Segmented { width } => WidgetViewKind::Segmented {
-                    options: d
-                        .params
-                        .iter()
-                        .find(|p| p.name == w.bind())
-                        .map_or_else(Vec::new, |p| p.options.choices.iter().map(|o| o.to_string()).collect()),
+                    options: d.params.iter().find(|p| p.name == w.bind()).map_or_else(Vec::new, |p| {
+                        let spec = d.control_spec(d.param_index(p.name).unwrap(), values).unwrap();
+                        spec.options.choices.iter().map(|o| o.to_string()).collect()
+                    }),
                     width,
                 },
                 WidgetKind::Button { .. } => WidgetViewKind::Button,
@@ -232,7 +230,7 @@ fn panel_view(d: &ModuleDescriptor) -> PanelView {
 /// does not use them are hidden, and the panel closes up around them
 /// (ADR-0030, panels.md, Panel layout, principle 5).
 pub fn panel_for(d: &ModuleDescriptor, values: &[f32]) -> PanelView {
-    let mut panel = panel_view(d);
+    let mut panel = panel_view(d, values);
     let displays: Vec<bool> = d
         .panel
         .widgets
@@ -348,6 +346,11 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
     for (id, node) in controller.graph().nodes() {
         let d = node.descriptor;
         for (index, p) in d.params.iter().enumerate() {
+            if let Some(filter) = p.options.count_choices
+                && let Some(count) = d.param_index(filter.param)
+            {
+                key.push((id.0, count, node.params[count].round() as i64));
+            }
             if p.options.shapes_graph {
                 key.push((id.0, index, node.params[index].round() as i64));
             }
@@ -374,6 +377,12 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
 /// A control's position for the canvas: the knob position from 0 to 1, the
 /// toggle state, or the radio option index.
 pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
+    let value = if spec.options.count_choices.is_some() && !(spec.min..=spec.max).contains(&value) {
+        spec.min
+    } else {
+        value
+    };
+
     if kind.is_mapped() {
         spec.normalize(value)
     } else {

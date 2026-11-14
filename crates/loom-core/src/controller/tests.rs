@@ -201,3 +201,23 @@ fn a_full_queue_changes_neither_value_of_a_range_pair() {
     assert_eq!((low, high), (Some(NARROW), Some(NARROW)));
     assert_eq!(values, vec![1.0, 1.0]);
 }
+
+/// A retained MIDI snapshot and a full command queue can both return their memory.
+#[test]
+fn midi_seed_and_schedule_swap_do_not_overflow_garbage() {
+    let mut parts = create_engine(
+        Arc::new(Registry::new()),
+        EngineConfig {
+            command_capacity: 1,
+            ..EngineConfig::default()
+        },
+    );
+    parts
+        .controller
+        .send(Command::SwapSchedule(Box::new(crate::compile::Schedule::empty())))
+        .unwrap();
+    parts.midi.seed_config(Box::default()).unwrap();
+    parts.engine.process(&mut [0.0; 1], &mut [0.0; 1]);
+    assert_eq!(parts.controller.stats().leaked.load(Ordering::Relaxed), 0);
+    parts.controller.collect_garbage();
+}

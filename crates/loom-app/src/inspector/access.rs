@@ -11,7 +11,7 @@
 
 use super::{
     AssignmentRow, DrivesGroup, ExposureRow, Inspector, MappingRow, Message, ModeChoice, ModuleRows, ParamControl,
-    ParamMode, ParamRow, SourceRow, SubPatchRows, UnknownLink, encoding_name, encoding_of, ids, mode_name,
+    ParamMode, ParamRow, SourceRow, SubPatchRows, UnknownLink, choice_ui, encoding_name, encoding_of, ids, mode_name,
 };
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, Number, SetNumber, SetText};
@@ -588,7 +588,7 @@ fn value_control(module: u32, label: &str, p: &ParamRow, position: f32, step: f3
                     label: Some((*name).to_string()),
                     on: Some(at == *selected),
                     click: (at != *selected).then(|| choose(at)),
-                    ..Item::new(id.clone().with("option").with(at as u32), Kind::Option)
+                    ..Item::new(choice_ui(&id, &p.spec, at, name), Kind::Option)
                 })
                 .collect();
             Item {

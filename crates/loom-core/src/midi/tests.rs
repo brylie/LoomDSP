@@ -36,3 +36,17 @@ fn decodes_bend_and_pressure() {
     );
     assert_eq!(MidiEvent::from_bytes(0, &[0xD0]).message(), MidiMessage::Other);
 }
+
+/// Key pressure retains its note number and channel through decoding.
+#[test]
+fn poly_pressure_decodes_key_identity() {
+    assert_eq!(
+        MidiEvent::poly_pressure(17, 3, 67, 99).message(),
+        MidiMessage::PolyPressure {
+            channel: 3,
+            note: 67,
+            value: 99
+        }
+    );
+    assert_eq!(MidiEvent::from_bytes(0, &[0xA3, 67]).message(), MidiMessage::Other);
+}

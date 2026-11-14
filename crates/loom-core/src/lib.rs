@@ -27,6 +27,8 @@ mod error;
 mod graph;
 mod live;
 mod midi;
+mod mpe;
+pub use mpe::{MidiConfigTable, MidiConfigTimeline, MidiInputConfig};
 mod midi_map;
 mod module;
 mod names;
@@ -42,9 +44,9 @@ mod width;
 pub use compile::{CompileReport, FeedbackLoop};
 pub use controller::{Controller, EngineParts, MidiSender, create_engine};
 pub use descriptor::{
-    ButtonMode, Channels, DisplayFormat, DisplayKind, DisplayRange, DisplaySpec, Family, MAX_DISPLAYS, MissingText,
-    ModuleConfig, ModuleDescriptor, ModuleRole, NotANumber, Panel, ParamMapping, ParamOptions, ParamRange, ParamSpec,
-    Polarity, PortDefault, PortRange, PortSpec, ShownWhen, SpecKind, Undocumented, Widget, WidgetKind,
+    ButtonMode, Channels, CountChoices, DisplayFormat, DisplayKind, DisplayRange, DisplaySpec, Family, MAX_DISPLAYS,
+    MissingText, ModuleConfig, ModuleDescriptor, ModuleRole, NotANumber, Panel, ParamMapping, ParamOptions, ParamRange,
+    ParamSpec, Polarity, PortDefault, PortRange, PortSpec, ShownWhen, SpecKind, Undocumented, Widget, WidgetKind,
     assert_documented, number_text,
 };
 pub use display::{DisplayReader, DisplaySource, TriggerFlag};

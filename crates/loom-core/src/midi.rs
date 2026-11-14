@@ -37,11 +37,6 @@ pub const MAX_MIDI_INPUTS: u16 = 64;
 pub(crate) struct HeldSet([u128; 16]);
 
 impl HeldSet {
-    /// True if `note` on `channel` is held.
-    pub(crate) fn has(&self, channel: u8, note: u8) -> bool {
-        self.0[usize::from(channel & 0x0F)] & (1u128 << (note & 0x7F)) != 0
-    }
-
     /// Marks a note held or released.
     pub(crate) fn set(&mut self, channel: u8, note: u8, held: bool) {
         let bit = 1u128 << (note & 0x7F);
@@ -92,6 +87,15 @@ pub enum MidiMessage {
         /// Controller number.
         controller: u8,
         /// Value, 0 to 127.
+        value: u8,
+    },
+    /// Pressure for one note on a channel.
+    PolyPressure {
+        /// Channel, 0 to 15.
+        channel: u8,
+        /// Note number.
+        note: u8,
+        /// Pressure, 0 to 127.
         value: u8,
     },
     /// Channel pressure (aftertouch for the whole channel).
@@ -154,6 +158,11 @@ impl MidiEvent {
         Self::from_bytes(frame, &[0xE0 | (channel & 0x0F), (raw & 0x7F) as u8, (raw >> 7) as u8])
     }
 
+    /// A polyphonic key pressure event.
+    pub fn poly_pressure(frame: u32, channel: u8, note: u8, value: u8) -> Self {
+        Self::from_bytes(frame, &[0xA0 | (channel & 15), note & 127, value & 127])
+    }
+
     /// A channel pressure (aftertouch) event.
     pub fn channel_pressure(frame: u32, channel: u8, value: u8) -> Self {
         Self::from_bytes(frame, &[0xD0 | (channel & 0x0F), value & 0x7F])
@@ -178,6 +187,11 @@ impl MidiEvent {
             0xB0 if self.len == 3 => MidiMessage::ControlChange {
                 channel,
                 controller: a,
+                value: b,
+            },
+            0xA0 if self.len == 3 => MidiMessage::PolyPressure {
+                channel,
+                note: a,
                 value: b,
             },
             0xD0 => MidiMessage::ChannelPressure { channel, value: a },

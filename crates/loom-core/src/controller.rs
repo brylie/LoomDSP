@@ -64,10 +64,11 @@ pub struct EngineParts {
 pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EngineParts {
     let (command_tx, command_rx) = RingBuffer::new(config.command_capacity);
     // Every command can produce at most one piece of garbage, so a garbage
-    // queue as large as the command queue cannot overflow as long as the
-    // controller drains it before sending more commands.
-    let (garbage_tx, garbage_rx) = RingBuffer::new(config.command_capacity);
+    // queue as large as the command queue plus the one initial MIDI snapshot
+    // cannot overflow while the controller drains it before sending more commands.
+    let (garbage_tx, garbage_rx) = RingBuffer::new(config.command_capacity + 1);
     let (midi_tx, midi_rx) = RingBuffer::new(config.midi_capacity);
+    let (config_tx, config_rx) = RingBuffer::new(1);
     let (meter_tx, meter_rx) = RingBuffer::new(config.meter_capacity);
     let (scope_tx, scope_rx) = RingBuffer::new(config.scope_capacity);
     let (pair_tx, pair_rx) = RingBuffer::new(config.pair_capacity);
@@ -79,7 +80,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         config,
         command_rx,
         garbage_tx,
-        (midi_rx, midi_feedback.clone()),
+        (midi_rx, config_rx, midi_feedback.clone()),
         TelemetrySender {
             meters: meter_tx,
             scope: scope_tx,
@@ -110,7 +111,10 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
     EngineParts {
         controller,
         engine,
-        midi: MidiSender { tx: midi_tx },
+        midi: MidiSender {
+            tx: midi_tx,
+            config: config_tx,
+        },
         telemetry: Telemetry::new(meter_rx, scope_rx, pair_rx),
     }
 }
@@ -118,9 +122,16 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
 /// Sends MIDI events to the engine from any single thread.
 pub struct MidiSender {
     tx: Producer<MidiEvent>,
+    config: Producer<Box<crate::MidiConfigTable>>,
 }
 
 impl MidiSender {
+    /// Seeds a newly attached engine before any events are sent to it.
+    /// The host calls this once while holding its ingress lock.
+    pub fn seed_config(&mut self, config: Box<crate::MidiConfigTable>) -> Result<(), Box<crate::MidiConfigTable>> {
+        self.config.push(config).map_err(|rtrb::PushError::Full(config)| config)
+    }
+
     /// Queues an event. Returns false if the queue is full (event dropped).
     pub fn send(&mut self, event: MidiEvent) -> bool {
         self.tx.push(event).is_ok()

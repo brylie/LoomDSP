@@ -257,3 +257,19 @@ fn decibel_text_parses_back() {
         assert_eq!(LEVEL.value_text(back), text, "{gain}");
     }
 }
+
+/// Filtered controls retain the full parameter's stable choice values.
+#[test]
+fn count_choices_narrow_only_the_control_view() {
+    let mode = param("mode", 0.0, 3.0, 2.0, "")
+        .integer()
+        .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
+        .choices_by_count("voices", 2);
+    let single = mode.for_count(1.0);
+    let multiple = mode.for_count(8.0);
+    assert_eq!((single.min, single.max), (2.0, 3.0));
+    assert_eq!((multiple.min, multiple.max), (0.0, 1.0));
+    assert_eq!(single.choice_name(3.0), Some("Retrigger"));
+    assert_eq!(multiple.choice_name(1.0), Some("Quietest"));
+    assert_eq!(mode.clamp(3.0), 3.0);
+}

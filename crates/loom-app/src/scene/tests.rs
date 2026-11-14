@@ -1,5 +1,10 @@
 use super::*;
 
+/// Builds a descriptor's panel at its declared parameter defaults.
+fn panel_view(d: &ModuleDescriptor) -> PanelView {
+    super::panel_view(d, &d.params.iter().map(|param| param.default).collect::<Vec<_>>())
+}
+
 /// Stereo cable widths appear on both ports and clear after disconnection.
 #[test]
 fn stereo_cable_hover_follows_the_compile_report() {
@@ -908,4 +913,27 @@ fn loops_of_empty_slots_build_their_scene_quickly() {
             "the load and scene took {took:?}"
         );
     }
+}
+
+/// Count changes rebuild the offered choices without renumbering stored mode values.
+#[test]
+fn note_mode_choices_follow_voice_count() {
+    let descriptor = &loom_modules::midi::NOTE_IN;
+    let mut values: Vec<_> = descriptor.params.iter().map(|p| p.default).collect();
+    let voices = descriptor.param_index("voices").unwrap();
+    let choices = |values: &[f32]| {
+        let panel = panel_for(descriptor, values);
+        let WidgetViewKind::Segmented { options, .. } = &panel.widgets[0].kind else {
+            panic!("mode is segmented");
+        };
+        options.clone()
+    };
+    assert_eq!(choices(&values), ["Legato", "Retrigger"]);
+    values[voices] = 8.0;
+    assert_eq!(choices(&values), ["Oldest", "Quietest"]);
+    let mode = descriptor.param_index("mode").unwrap();
+    assert_eq!(
+        descriptor.params[mode].options.choices,
+        &["Oldest", "Quietest", "Legato", "Retrigger"]
+    );
 }

@@ -405,9 +405,16 @@ impl<'l, 'a> Builder<'l, 'a> {
                         channels.push(self.read_input(input, channel, copies).0 as *mut f32);
                     }
                 }
+                let normal = if node.descriptor.inputs[port].channels == Channels::Voices {
+                    DefaultKey::of(layout.default_of(input))
+                        .map_or(self.zero, |key| self.ptr(self.inputs.defaults[&key]))
+                } else {
+                    ptr
+                };
                 self.schedule.bundle_ports.push(crate::module::BundlePort {
                     width,
                     channels: channels.into_boxed_slice(),
+                    normal,
                 });
             }
             if is_connected {
@@ -487,9 +494,12 @@ impl<'l, 'a> Builder<'l, 'a> {
                     .map(|channel| self.ptr(layout.channel_buffer(from, channel)))
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
-                self.schedule
-                    .bundle_ports
-                    .push(crate::module::BundlePort { width, channels });
+                let normal = channels[0] as *const f32;
+                self.schedule.bundle_ports.push(crate::module::BundlePort {
+                    width,
+                    channels,
+                    normal,
+                });
             }
             if node
                 .descriptor

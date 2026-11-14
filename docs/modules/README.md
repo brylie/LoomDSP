@@ -88,6 +88,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Selector](loom.route.selector.md) | `loom.route.selector` | Picks one of up to eight inputs: the next on a trigger, the one a value points at, or one at random. |
 | [Slew](loom.level.slew.md) | `loom.level.slew` | Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal. |
 | [Split](loom.mix.split.md) | `loom.mix.split` | Separates a stereo cable into its two sides. |
+| [Voice Merge](loom.voice.merge.md) | `loom.voice.merge` | Sums or averages voices, or follows one voice selected by its gate. |
 
 ## Interface
 
@@ -98,7 +99,7 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Button](loom.ui.button.md) | `loom.ui.button` | Sends a gate from a large button. Toggle keeps it on; Momentary is high only while held. |
 | [Level Meter](loom.display.meter.md) | `loom.display.meter` | Shows the peak and RMS level of its input. Passes the input through unchanged. |
 | [MIDI Controller](loom.midi.controller.md) | `loom.midi.controller` | Turns a MIDI controller, the pitch bend, or channel aftertouch into a signal. Controllers and aftertouch go from 0 to 1, bend from -1 to 1. |
-| [MIDI Note](loom.midi.note.md) | `loom.midi.note` | Monophonic note input (last-note priority). Pitch includes pitch bend. |
+| [MIDI Note](loom.midi.note.md) | `loom.midi.note` | Allocates MIDI notes to voices, with pitch bend, pressure, and timbre. |
 | [Macro](loom.ui.macro.md) | `loom.ui.macro` | One knob whose value is a signal. Assign it to many parameters, so one knob shapes a whole sound. |
 | [Patch Input](loom.struct.input.md) | `loom.struct.input` | An input port of a sub-patch. Inside a sub-patch, cables into the port continue from here; at the top level it outputs silence. |
 | [Patch Output](loom.struct.output.md) | `loom.struct.output` | An output port of a sub-patch. Inside a sub-patch, the cable into it continues out of the port; at the top level it does nothing. |

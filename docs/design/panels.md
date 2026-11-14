@@ -78,7 +78,7 @@ A panel reads from top to bottom as **what it does, how it behaves, what you pla
 3. **Play row.** Continuous controls follow in one row, in the order the sound happens (Attack, Decay, Sustain, Release; Cutoff, then Resonance). Controls set less often go in a second row. *Why:* the hand finds the most-played controls in the same place on every tile.
 4. **Report next to the cause.** A light sits beside the control or port it reports on, or at the right end of the mode row. It never floats alone. *Why:* a light only helps when the eye knows where to look.
 5. **Show only what the mode uses.** A control its mode ignores is hidden ([ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md)). The tile keeps its width: a row with a hidden control closes up and is centred again, and the tile gets shorter only when whole rows empty, so ports and cables never move. The inspector still lists the hidden parameter and says which choice does not use it. *Why:* a knob that does nothing misleads a performer; a tile that changes width would move cables on stage.
-6. **Smallest widget that keeps the choice visible.** On and off is a toggle. Two to four short named choices are a [segmented control](panel-widgets.md#segmented-control): one row, every option visible, one click. More choices, or long names, are a select list. Radio buttons are for lists of five that need every name visible and have the height to spare. *Why:* seeing the options matters on stage, and a segmented control shows them in one row.
+6. **Smallest widget that keeps the choice visible.** On and off is a toggle. Two to four short named choices are a [segmented control](panel-widgets.md#segmented-control): one row, every option visible, one click. More choices, or long names, are a select list. Voice merge uses a wider segmented row for its five modes, as its polyphony specification requires. Radio buttons are for lists of five that need every name visible and have the height to spare. *Why:* seeing the options matters on stage, and a segmented control shows them in one row.
 7. **One alignment grid.** Captions are centred under their widget. A group's caption sits above it. Groups are one grid unit apart, and a row of controls is centred in the panel. The panel is as wide as its widest row; there are no empty quarters.
 8. **Words fit.** No built-in panel cuts a caption or port label at 100% zoom. If a word does not fit, the layout changes, never the stable ID ([Labels and hover text](#labels-and-hover-text)).
 9. **Details on demand.** Exact values, ranges, units, and descriptions are in hover text, the inspector, and help. The tile shows only what is played or watched.
@@ -828,6 +828,13 @@ A sub-patch's surface is made of the same widgets as its inside. *Why:* a user w
 - [x] A sub-patch with three exposed parameters and no designed panel shows three widgets in the order exposed (test: `crates/loom-app/src/surface/tests.rs`, `three_exposed_parameters_make_three_widgets_in_exposure_order`).
 - [x] An exposed control inside the sub-patch has its mark and its "Exposed as" hover text (UI snapshot and scene: `crates/loom-app/src/surface/tests.rs`, `an_exposed_control_inside_has_its_mark_and_hover_text`; `crates/loom-app/src/levels/tests.rs`, `exposing_a_fader_puts_a_fader_on_the_surface`).
 - [ ] A light and a curve exposed from inside a sub-patch show on its surface. The light follows the inner display value, and a point dragged on the surface curve moves on the inner curve. One undo step reverts it (`Ui` harness). Waits for display values and data slots to be exposable; slice 3 exposes parameters only.
+
+## Voice-count choice filtering
+
+A choice parameter may list choices shown only while another integer parameter
+is one, or above one. Choice IDs remain stable. The panel is rebuilt when that
+integer changes. The choice's effective value may apply the source's documented
+mode fallback without rewriting its stored value (polyphony.md, Note input).
 
 ## Open points
 

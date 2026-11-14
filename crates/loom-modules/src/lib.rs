@@ -38,6 +38,7 @@ pub mod test_modules;
 pub mod time;
 pub mod transport;
 pub mod ui;
+pub mod voice;
 
 /// Every built-in module.
 pub static ALL: &[&ModuleDescriptor] = &[
@@ -81,6 +82,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &io::AUDIO_OUT,
     &io::AUDIO_IN,
     &midi::NOTE_IN,
+    &voice::MERGE,
     &midi::CONTROLLER_IN,
     &display::METER,
     &display::SCOPE,

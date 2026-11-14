@@ -3,14 +3,14 @@
 How a cable carries one value per voice, how notes are given to voices, which modules make, merge, and spread voices, and what a module author has to do to become polyphonic (nothing, in most cases).
 
 - **Kind:** living specification.
-- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator and bundle engine are implemented. Note input and the voice modules remain pending.
+- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator and bundle engine are implemented. Note input and Voice merge are implemented. Voice split, Voice spread, and Voice assigner remain pending.
 - **Decision behind it:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md) (per-voice signals, bundle as inferred width), refining [ADR-0020](../adr/0020-inferred-channel-count.md) (inferred channel count) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (every cable is `f32`). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of a new copy. [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md) for the allocator's panel.
 - **Use case and requirements:** UC10 (sequence chords and note clips), UC2 (live play). FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-MIDI-03 (MPE), FR-LIB-13, FR-LIB-20, NFR-RT-01, NFR-PERF-01, NFR-PERF-03.
 - **Builds on:** [Stereo cables](stereo.md) (widths, copies, downmix), [Changing a running patch](live-patching.md) (schedule swaps), [Sub-patches](sub-patches.md) (stack mode is not voices), [Module data](module-data.md) (stored notes and chords), [Scale and tuning](scale-and-tuning.md) (chords as scale steps), [Arrangement](arrangement.md) (the note cycle).
 - **Background:** [Voices and polyphony](../learn/voices-and-polyphony.md): what a voice is, why stealing exists, why a bundle is inferred, and why a gate carries the timing.
 - **Prior art:** per-voice signals are how a modular grid such as Bitwig's Grid carries polyphony. Hardware polysynths settled oldest-note and quietest-note stealing decades ago. Named only to explain the ideas; the rules and modules below are our own.
 - **Issues:** [#665](https://github.com/brylie/LoomDSP/issues/665) (this spec), [#666](https://github.com/brylie/LoomDSP/issues/666) (the note model). Users: [#510](https://github.com/brylie/LoomDSP/issues/510) (MIDI out), [#307](https://github.com/brylie/LoomDSP/issues/307) (multi-lane sequencer), [#50](https://github.com/brylie/LoomDSP/issues/50) (stored notes).
-- **Code:** `crates/loom-dsp/src/voice.rs` (allocator); `crates/loom-core/src/width.rs` and `compile.rs` (bundles and copies). `crates/loom-modules/src/test_modules.rs` supplies the bundle test source. Note input integration in `midi.rs` remains pending.
+- **Code:** `crates/loom-dsp/src/voice.rs` (allocator); `crates/loom-core/src/width.rs` and `compile.rs` (bundles and copies). `crates/loom-modules/src/test_modules.rs` supplies the bundle test source. `crates/loom-modules/src/midi.rs` (Note input), `voice.rs` (Voice merge), and `crates/loom-core/src/mpe.rs` (per-input MPE configuration).
 
 ## Goal
 
@@ -61,7 +61,7 @@ What the player sees.
 
 4. **A module runs as one copy per voice when any input other than a `Voices` input receives a bundle.** Its voice count is the largest voice count among those inputs. A module with any `Voices` port never runs per voice, whatever its other inputs receive. Its inputs must all be `Voices` or `Downmix`; the registry refuses other input declarations. Inside each voice, the stereo rules apply unchanged, so a voice can run as two copies. *Why the largest:* a 4-voice pitch and an 8-voice gate into one oscillator should give 8 oscillators, not 4; the narrower cable is padded (rule 6).
 
-5. **Output widths.** A `Voices` output has the module's voice count. Any other output has as many voices as its module runs. A `Stereo` output is stereo per voice. So a module with no inputs is one voice wide unless it declares a `Voices` output, and voices flow only from sources, as stereo flows only from stereo sources ([stereo](stereo.md), rule 7).
+5. **Output widths.** A `Voices` output has the module's voice count. Any other output has as many voices as its module runs. For a bundle-aware module, a `PerChannel` output takes its stereo sides from the first declared `Voices` input, the signal input; later control inputs do not widen it. A `Stereo` output is stereo per voice. So a module with no inputs is one voice wide unless it declares a `Voices` output, and voices flow only from sources, as stereo flows only from stereo sources ([stereo](stereo.md), rule 7).
 
 6. **A narrower cable into a wider module is padded with the port's default.** Copies past the cable's last voice read the input's default: zero for a gate, the default pitch for a pitch. Padded value inputs keep their declared default and still report that a cable exists. An input whose default is a normal of 1 (Amp `level`, Multiply `b`, Divide `b`) pads with 1, so a voice past the end of a narrower level bundle plays at unity, as the module does with no cable. When an input chooses an alternate source, its missing voice uses that source: OwnPhase runs its phase, Dynamics keys from its own signal, and Chance follows the lane above. These fallbacks use `uses_default`, while `is_connected` remains cable-only. *Why:* missing value inputs should not invent a playing signal; alternate-source inputs already define what replaces a missing source. Mono cables are the common case: a mono cable into a polyphonic module feeds every copy, as it feeds both stereo sides. That is the fan-out FR-VOICE-03 asks for, and it costs no module.
 
@@ -184,6 +184,44 @@ The [rules for M2 modules](p2-modules.md#rules-for-all-modules-here) apply.
 - `pressure` and `timbre` are the catalogue's Expression input (MT-IO-05), on this module rather than a separate one. *Why:* expression has to reach the voice that plays its note, and only the module that allocated the voice knows which that is.
 - MPE: the module follows the MPE zone on its channel when the device announces one, and each member channel's bend, pressure, and timbre reach the voice playing that channel's note.
 
+### Note input decisions for #674 (Agreed)
+
+- A note is identified by MIDI input, channel, and pitch. Input 0 is a distinct
+  source too. Each input's real note-offs reach modules; disconnect synthesizes
+  that input's tagged note-offs. Repeated note-ons retrigger the same identity.
+- Output width is the module's capacity. Modes resolve without rewriting the
+  stored value: Oldest or Quietest at one voice acts as Legato; Legato or
+  Retrigger above one voice acts as Oldest. Returning to a held key on note-off
+  does not retrigger. Released voices freeze pitch, velocity, and expression.
+- Editing the count across one voice switches the mode to Legato or Oldest,
+  respectively, in the same undo step. The control channel uses this same edit
+  path. A mode edit alone may select an incompatible stored mode; processing
+  uses the fallback above and the controls show its effective choice.
+- Choice filtering is limited to one integer parameter being one or above one.
+  Choice IDs stay stable, and rebuilding the panel follows that integer edit.
+- Channel 0 listens to every channel and both announced MPE zones. Channel 1
+  includes the active lower zone; channel 16 includes the active upper zone.
+  Other settings select exactly that channel. Input 0 never learns an MPE zone.
+- An MPE input starts with no zone until RPN 6 announces one. The table belongs
+  to the rig's MIDI ingress and outlives patch sessions. New, Open, a new Note
+  input, and a module becoming scheduled again see current configuration.
+  Disconnect or disabling an input clears it. A new connection starts empty;
+  a rapid replug that polling cannot distinguish retains the existing identity.
+  If the controller announced before the app opened its input, toggle its MPE
+  mode or reconnect it to announce again. There is no manual zone control.
+- The engine uses the same pure RPN decoder as ingress and exposes configuration
+  at each event's sample, including inside feedback loops. Manager bend starts
+  at 2 semitones and member bend at 48. RPN 0 replaces the relevant sensitivity;
+  a member's update applies to that zone's members. Manager and member bends
+  add; notes on the manager apply its bend once. RPN 6 value zero disables a
+  zone, and a newer conflicting zone announcement takes precedence.
+- A zone change releases notes and resets expression controls on channels entering
+  or leaving MPE control, following RP-053 section 2.1.4. Unaffected channels keep
+  playing. This is separate from disconnect releases, whose final values hold.
+- Manager and member pressure and timbre combine by maximum. Ordinary channel
+  pressure and CC74 update every held voice on that input/channel. Polyphonic
+  key pressure updates its note. CC74 remains available for MIDI mappings too.
+
 ### Voice merge (MT-VOICE-01)
 
 `loom.voice.merge`: one signal from a bundle.
@@ -198,6 +236,13 @@ The [rules for M2 modules](p2-modules.md#rules-for-all-modules-here) apply.
 - **Sum** adds the voices. **Average** divides the sum by the voice count. *Why both:* a sum is right for audio, and an average is right for a modulation signal that should stay in range.
 - **Last**, **Lowest**, and **Highest** pass one voice through: the voice whose gate rose most recently, or the playing voice with the lowest or highest `in` value. With `gate` unconnected its default of 1 makes every voice count as playing, and Last passes voice 1 until a gate edge arrives. The chosen voice changes only on a gate edge, so the output does not jump between voices while they sustain. *Why `in` and not pitch:* the module does not know what `in` is; the player patches the pitch bundle to get the lowest note.
 - A one-voice `in` passes through unchanged in every mode.
+
+Selection decisions for #675's Voice merge (Agreed): all-low gates keep the last
+selection, initially voice 1. Ties choose the lowest voice index. Stereo voices
+are compared by their mean and both sides move together. Missing gate voices
+read the declared normal, including beyond a narrower bundle. Within each voice,
+stereo gate sides combine by maximum and stereo Level sides by mean, following
+the control-signal conventions of the stereo specification.
 
 ### Voice split (MT-VOICE-02)
 
@@ -255,6 +300,14 @@ These check the model. Only the first is built in M2.
 
 Note input (`voices` 8, Oldest) `pitch` → Saw `pitch` → SVF `in` → Amplifier `in` → Voice merge `in` (Sum) → Audio Out. Note input's `gate` goes to an Envelope's `gate`, whose `out` goes to the Amplifier's `level` input and to Note input's `level`. These are today's modules with today's ports; the `pitch`, `gate`, and `level` inputs are `Downmix`, which rule 3 leaves as it is.
 
+The `level` cable closes a loop. The compiler inserts a one-sample delay and
+reports it. Its tie rule can choose a different cable when module IDs change.
+The acceptance test creates Note input before Envelope and asserts that the
+inserted delay is exactly Envelope `out` to Note input `level`. This loop runs
+one sample at a time, including the eight envelopes. Choosing `level` regardless
+of creation order is follow-up [#733](https://github.com/brylie/LoomDSP/issues/733),
+outside this change.
+
 1. The compiler finds a `Voices` output on Note input, so the Saw, SVF, Envelope, and Amplifier run as 8 copies each (rule 4), and Voice merge and Note input, which have `Voices` inputs, run as one.
 2. Eight keys down: the allocator gives each a voice in the order the notes arrived. Each gate rises on its note's frame and each pitch holds. Velocity is output per voice too; this chain does not patch it, but a second Amplifier with `velocity` on its `level` input would scale each voice by it.
 3. A ninth key: no voice is free. Oldest steals the voice whose note started first; its gate is low on that frame and high on the next with the new pitch. Switching Mode to Quietest would steal the voice whose envelope has decayed furthest instead, because Note input reads all 8 levels in one instance.
@@ -290,7 +343,7 @@ A MIDI note output module has `pitch`, `gate`, and `velocity` inputs on `Channel
 
 Bundles and copies:
 
-- [ ] Given Note input at 8 voices into the chain of [the first source](#a-keyboard-into-an-8-voice-synth-m2), with today's descriptors unchanged, when 8 notes play, then the four modules run as 8 copies each, Voice merge runs as one, and the output is bit-identical to 8 mono chains fed one note each and summed (test).
+- [x] Given Note input at 8 voices into the chain of [the first source](#a-keyboard-into-an-8-voice-synth-m2), with today's descriptors unchanged, when 8 notes play, then the four modules run as 8 copies each, Voice merge runs as one, and the output is bit-identical to 8 mono chains fed one note each and summed (test).
 - [x] Given a mono LFO into a modulation input of a copied module, then every copy reads the same values (test).
 - [x] Given a 4-voice pitch and an 8-voice gate into one oscillator, then it runs as 8 copies and copies 5 to 8 read the pitch input's default (test).
 - [x] Given a bundle into a `Downmix` or `Stereo` input, then the module runs per voice and no voice is averaged or dropped; given a stereo cable inside one voice into that `Downmix` input, then the stereo downmix of the two sides still applies (test).
@@ -306,28 +359,28 @@ Bundles and copies:
 Allocation, at block sizes 1, 77, and 512 with scripted events:
 
 Checked **Algorithm** items below are covered by `loom-dsp` tests. MIDI routing,
-level cables, and source-module processing at these block sizes remain pending
-with the source modules. Reference-render and Voice assigner criteria stay open.
+level cables, and Note input processing at these block sizes are covered by
+`polyphonic_midi.rs`. Voice assigner criteria stay open.
 
 
-- [ ] Given 8 voices and a ninth note-on, then in Oldest mode the voice whose note started first has its gate low on the note's frame and high on the next frame with the new pitch (reference test).
+- [x] Given 8 voices and a ninth note-on, then in Oldest mode the voice whose note started first has its gate low on the note's frame and high on the next frame with the new pitch (reference test).
 - [x] **Algorithm:** Given Quietest mode with `level` patched, then the voice with the lowest level is stolen; with `level` unconnected, the oldest (test).
-- [ ] Given one voice, then Legato keeps the gate high while any note is held and Retrigger drops it for one sample on each note (reference test).
+- [x] Given one voice, then Legato keeps the gate high while any note is held and Retrigger drops it for one sample on each note (reference test).
 - [x] **Algorithm:** Given a note-on for a note already sounding, then its voices retrigger and no other voice changes; given the same pitch on two MPE member channels, then it takes two voices (test).
 - [ ] Given Voice assigner with `unison` 2, then a note takes two voices together and its note-off releases both; given a pressure change on the input voice, then both output voices' `pressure` follow it (test).
 - [x] **Algorithm:** Given note-offs and note-ons for a chord change with one shared pitch, then the shared pitch's voice keeps its gate high across the change (test).
-- [ ] Given a note-on at frame `i`, then the gate rises at frame `i` at every block size (reference test).
+- [x] Given a note-on at frame `i`, then the gate rises at frame `i` at every block size (reference test).
 - [x] **Algorithm:** Given a note-off, then the voice holds its pitch and velocity until its next note (test).
 - [x] **Algorithm:** Given a note-on and a note-off on one frame, then a fresh voice has a one-sample gate on that frame; a stolen or retriggered voice has its low sample first, a one-sample gate on the next frame, then goes low (test).
 - [x] **Algorithm:** Given the same events in the same order, then the same voices are chosen on every run (test).
 
 Voice modules:
 
-- [ ] Voice merge: Sum and Average over 8 voices match the arithmetic; Last, Lowest, and Highest follow the gates and change only on a gate edge; a one-voice input passes through in every mode (reference tests).
+- [x] Voice merge: Sum and Average over 8 voices match the arithmetic; Last, Lowest, and Highest follow the gates and change only on a gate edge; a one-voice input passes through in every mode (reference tests).
 - [ ] Voice split: `out1` to `out8` are voices `first` onward, and an output past the last voice holds the default (test).
 - [ ] Voice spread: Even gives the stack's offsets, Series gives 0 up to `amount`, Random differs per voice and repeats per seed; one voice gives `out = in` (reference tests).
 - [ ] Voice assigner: a mono gate and pitch into 8 voices gives overlapping release tails on distinct voices (reference test).
-- [ ] Note input at one voice in Legato mode gives the same output as before this feature on every existing reference render (reference tests).
+- [x] Note input at one voice in Legato mode gives the same output as before this feature on every existing reference render (reference tests).
 
 Cost:
 
@@ -389,4 +442,3 @@ Cost:
 ## Open points
 
 - **Lockstep copies for SIMD.** Whether the schedule format needs a per-voice stride for NFR-PERF-03, or the optimisation can stay inside the engine. Not before M2's exit criterion is measured.
-- **MPE zones.** How the lower and upper zones map onto Note input's `channel` setting, with FR-MIDI-03.

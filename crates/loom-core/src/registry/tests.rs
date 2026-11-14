@@ -747,7 +747,7 @@ fn refuses_parameters_and_displays_on_non_dsp_modules() {
 
 /// `shown_when` names a choice parameter, or an on and off switch, of
 /// the same module, and choices it has (ADR-0030). A segmented control
-/// binds 2 to 4 named choices. The errors name what is wrong.
+/// binds 2 to 5 named choices. The errors name what is wrong.
 #[test]
 fn refuses_bad_mode_conditions_and_segmented_controls() {
     macro_rules! with {
@@ -781,6 +781,25 @@ fn refuses_bad_mode_conditions_and_segmented_controls() {
         ),
         Ok(())
     );
+    assert_eq!(
+        with!(
+            &[param("mode", 0.0, 4.0, 0.0, "")
+                .integer()
+                .choices(&["A", "B", "C", "D", "E"])],
+            &[crate::Widget::segmented(0, 0, 9, "mode")]
+        ),
+        Ok(())
+    );
+    assert!(
+        with!(
+            &[param("mode", 0.0, 5.0, 0.0, "")
+                .integer()
+                .choices(&["A", "B", "C", "D", "E", "F"])],
+            &[crate::Widget::segmented(0, 0, 9, "mode")]
+        )
+        .unwrap_err()
+        .contains("2 to 5")
+    );
     let refused = [
         (
             with!(&[MODE, param("depth", 0.0, 1.0, 0.0, "").shown_when("nope", &[0])], &[]),
@@ -805,7 +824,7 @@ fn refuses_bad_mode_conditions_and_segmented_controls() {
                 &[param("level", 0.0, 1.0, 0.0, "")],
                 &[crate::Widget::segmented(0, 0, 6, "level")]
             ),
-            "a segmented control needs a width and 2 to 4 named whole-number choices",
+            "a segmented control needs a width and 2 to 5 named whole-number choices",
         ),
     ];
     for (result, expected) in refused {

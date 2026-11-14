@@ -59,11 +59,13 @@ pub fn busy_each(harness: Harness, descriptor: &ModuleDescriptor) -> Harness {
         "{} has more inputs than BUSY_HZ has frequencies",
         descriptor.id
     );
-    descriptor
-        .inputs
-        .iter()
-        .zip(BUSY_HZ)
-        .fold(harness, |h, (port, hz)| h.input(port.name, busy(hz)))
+    descriptor.inputs.iter().zip(BUSY_HZ).fold(harness, |h, (port, hz)| {
+        if port.channels == loom_core::Channels::Voices {
+            h.bundle_input(port.name, (0..8).map(|voice| busy(hz + voice as f32 * 2.3)).collect())
+        } else {
+            h.input(port.name, busy(hz))
+        }
+    })
 }
 
 /// The frame where the bar wraps on [`playing_short_bar`].
@@ -368,5 +370,11 @@ pub fn busy_without_reset(harness: Harness, descriptor: &ModuleDescriptor) -> Ha
         .iter()
         .zip(BUSY_HZ)
         .filter(|(port, _)| port.name != "reset")
-        .fold(harness, |h, (port, hz)| h.input(port.name, busy(hz)))
+        .fold(harness, |h, (port, hz)| {
+            if port.channels == loom_core::Channels::Voices {
+                h.bundle_input(port.name, (0..8).map(|voice| busy(hz + voice as f32 * 2.3)).collect())
+            } else {
+                h.input(port.name, busy(hz))
+            }
+        })
 }

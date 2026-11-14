@@ -128,6 +128,7 @@ pub struct ProcessContext<'a> {
     /// Sample rate in Hz.
     pub sample_rate: f32,
     pub(crate) midi: &'a [MidiEvent],
+    pub(crate) midi_config: Option<&'a crate::MidiConfigTimeline>,
     /// Frame index (relative to the buffer the events were stamped against)
     /// of the first frame in this call.
     pub(crate) midi_base: usize,
@@ -143,12 +144,26 @@ pub struct ProcessContext<'a> {
 }
 
 impl<'a> ProcessContext<'a> {
+    /// Uses the engine-owned MIDI configuration timeline.
+    pub fn with_midi_config(mut self, config: &'a crate::MidiConfigTimeline) -> Self {
+        self.midi_config = Some(config);
+        self
+    }
+
+    /// Configuration at a sample relative to this process call.
+    pub fn midi_config(&self, input: u16, frame: usize) -> crate::MidiInputConfig {
+        self.midi_config.map_or_else(crate::MidiInputConfig::default, |config| {
+            config.input_at(input, self.midi_base + frame)
+        })
+    }
+
     /// Creates a context. Mainly useful for testing modules in isolation.
     /// The transport is stopped at position 0, at 120 BPM, in 4/4.
     pub fn new(sample_rate: f32, frames: usize, midi: &'a [MidiEvent]) -> Self {
         Self {
             sample_rate,
             midi,
+            midi_config: None,
             midi_base: 0,
             frames,
             transport: TransportInfo::default(),
@@ -261,6 +276,7 @@ pub struct PortIo<'a> {
 pub(crate) struct BundlePort {
     pub width: crate::Width,
     pub channels: Box<[*mut f32]>,
+    pub normal: *const f32,
 }
 
 impl<'a> PortIo<'a> {
@@ -327,12 +343,19 @@ impl<'a> PortIo<'a> {
 
     /// Reads one zero-based voice and side from a bundle input.
     ///
-    /// Indices must be inside [`Self::input_width`]. Mono sides share one buffer.
+    /// Mono cables feed every voice. A voice past a wider cable's last voice
+    /// reads the port's normal. Voice indices are zero-based and below 16;
+    /// mono sides share one buffer.
     pub fn voice_input(&self, port: usize, voice: usize, side: usize) -> &'a [f32] {
         let width = self.input_width(port);
-        assert!(voice < width.voices && side < 2, "bundle input index out of range");
+        assert!(voice < 16 && side < 2, "bundle input index out of range");
         let ptr = self.bundles.get(port).map_or(self.inputs[port], |entry| {
-            entry.channels[voice * width.sides + side.min(width.sides - 1)] as *const f32
+            if width.voices > 1 && voice >= width.voices {
+                entry.normal
+            } else {
+                let voice = if width.voices == 1 { 0 } else { voice };
+                entry.channels[voice * width.sides + side.min(width.sides - 1)] as *const f32
+            }
         });
         // SAFETY: compiler and isolation callers provide readable bundle buffers
         // for offset + frames, with the same lifetime as every ordinary input.
@@ -760,6 +783,33 @@ pub mod testing {
         output_layout: &BundleLayout,
         outputs: &mut [&mut [f32]],
     ) {
+        let normals = vec![vec![0.0; ctx.frames]; input_layout.ports()];
+        run_bundles_with_normals(
+            module,
+            ctx,
+            input_layout,
+            inputs,
+            connected,
+            &normals.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+            output_layout,
+            outputs,
+        );
+    }
+
+    /// Like `run_bundles`, with each input's normal supplied for padded voices.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_bundles_with_normals(
+        module: &mut dyn Module,
+        ctx: &ProcessContext<'_>,
+        input_layout: &BundleLayout,
+        inputs: &[&[f32]],
+        connected: &[bool],
+        normals: &[&[f32]],
+        output_layout: &BundleLayout,
+        outputs: &mut [&mut [f32]],
+    ) {
+        assert_eq!(normals.len(), input_layout.ports());
+        assert!(normals.iter().all(|buffer| buffer.len() == ctx.frames));
         assert_eq!(inputs.len(), input_layout.channels());
         assert_eq!(outputs.len(), output_layout.channels());
         assert_eq!(connected.len(), input_layout.ports());
@@ -791,9 +841,15 @@ pub mod testing {
                         }
                     }
                 }
+                let normal = if output {
+                    channels[0] as *const f32
+                } else {
+                    normals.get(port).expect("each input has a normal buffer").as_ptr()
+                };
                 bundles.push(BundlePort {
                     width,
                     channels: channels.into_boxed_slice(),
+                    normal,
                 });
             }
         }

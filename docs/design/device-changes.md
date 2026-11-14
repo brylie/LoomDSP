@@ -27,7 +27,7 @@ What the app does when a MIDI controller is plugged in or removed, and when the 
 
 ### Held notes belong to an input
 
-Each MIDI event carries the index of its input. The engine keeps, for each open input, a set of the notes it holds (16 channels by 128 notes, 2 KB), allocated when the input is opened, on the control thread. A removal sends `ReleaseInput(index)`: for every held note on that input, the engine delivers a note off to the modules, then clears the set. *Why:* the modules see only a stream of messages, and "release what this device held" needs to know which device sent what. Two inputs playing the same note: the note ends only when the last holder releases it (a count per note), so removing one keyboard does not cut a chord that another is still holding.
+Each MIDI event carries the index of its input. The engine keeps, for each open input, a set of the notes it holds (16 channels by 128 notes, 256 bytes), allocated when the input is opened, on the control thread. A removal sends `ReleaseInput(index)`: for every held note on that input, the engine delivers a note off to the modules, then clears the set. *Why:* the modules see only a stream of messages, and "release what this device held" needs to know which device sent what. Note identities include input, channel, and pitch. Two inputs playing the same pitch hold separate notes, so every input delivers its own tagged note off. Removing one keyboard leaves the other keyboard's notes held.
 
 Hold note (the app's own button) is its own source and is not released by a device removal.
 

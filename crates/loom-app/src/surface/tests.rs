@@ -325,12 +325,18 @@ fn a_surface_item_exposed_further_out_has_the_mark() {
 
 /// A structural voice count exposed on an otherwise ordinary sub-patch surface.
 fn voices_app() -> App {
+    voices_app_kind("test.voices")
+}
+
+/// A structural count exposed from a selected source module kind.
+fn voices_app_kind(kind: &str) -> App {
     let patch = Patch::from_ron(
-        r#"Patch(version: 1,
+        &r#"Patch(version: 1,
         subpatches: {"v": SubPatch(
             modules: [(id: 1, kind: "test.voices@1")],
             exposed: [(name: "Voices", module: 1, param: "voices")])},
-        modules: [(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"), position: Some((200.0, 0.0)))])"#,
+        modules: [(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("v"), position: Some((200.0, 0.0)))])"#
+            .replace("test.voices", kind),
     )
     .unwrap();
     let loaded = crate::Loaded::read(
@@ -455,4 +461,30 @@ fn sub_patch_outputs_show_the_underlying_bundle_width() {
             .description
             .ends_with("8 voices, stereo.")
     );
+}
+
+/// An exposed Note count applies the mode crossing as part of its single undo step.
+#[test]
+fn an_exposed_note_count_switches_mode_and_undo_together() {
+    let mut app = voices_app_kind("loom.midi.note");
+    let target = app.control_target(1, 0, ControlPart::Main).unwrap();
+    app.edit(|app| {
+        let _ = app.send(crate::Message::Canvas(loom_canvas::CanvasEvent::TypedValue {
+            module: 1,
+            widget: 0,
+            text: "8".into(),
+        }));
+    });
+    let values = |app: &App| {
+        let node = app.session.controller.graph().node(target.module).unwrap();
+        (
+            node.params[target.index],
+            node.params[node.descriptor.param_index("mode").unwrap()],
+        )
+    };
+    assert_eq!(values(&app), (8.0, 0.0));
+    let _ = app.send(crate::Message::Undo);
+    assert_eq!(values(&app), (1.0, 2.0));
+    let _ = app.send(crate::Message::Redo);
+    assert_eq!(values(&app), (8.0, 0.0));
 }

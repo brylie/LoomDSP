@@ -71,7 +71,7 @@ Patch(
         ),
     },
     modules: [
-        PatchModule(id: 1, kind: "loom.midi.note@1", position: Some((0.0, 0.0))),
+        PatchModule(id: 1, kind: "loom.midi.note@1", position: Some((-192.0, 0.0))),
         PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("synth voice"), position: Some((192.0, 0.0))),
         PatchModule(id: 3, kind: "loom.io.audio-out@1", position: Some((576.0, 0.0))),
         PatchModule(id: 4, kind: "loom.clock.transport@1", position: Some((0.0, 240.0))),

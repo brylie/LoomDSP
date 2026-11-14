@@ -271,7 +271,9 @@ impl Rig {
     /// inputs are still to be opened.
     pub fn attach(&mut self, sender: loom_core::MidiSender) -> bool {
         if let Some(midi) = &self.midi_in {
-            *midi.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = sender;
+            midi.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .replace(sender);
             return false;
         }
         self.midi_in = Some(loom_host_desktop::share_midi(sender));
@@ -1275,6 +1277,9 @@ impl App {
             .controller
             .open_midi_input(input)
             .map_err(|e| e.to_string())?;
+        midi.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear_input(input);
         match self.rig.host.open_midi(name, midi, input) {
             Ok(port) => {
                 self.rig.ports.push(port);
@@ -1293,6 +1298,11 @@ impl App {
         let port = self.rig.ports.remove(index);
         let input = port.input();
         port.close();
+        if let Some(midi) = &self.rig.midi_in {
+            midi.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear_input(input);
+        }
         let _ = self.session.controller.release_midi_input(input);
     }
 

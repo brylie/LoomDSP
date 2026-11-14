@@ -173,6 +173,15 @@ impl crate::ModuleNames for Node {
 }
 
 impl Node {
+    /// Parameter view for a UI choice control, including count filtering.
+    pub fn control_spec(&self, index: usize) -> Option<ParamSpec> {
+        let spec = self.descriptor.control_spec(index, &self.params)?;
+        Some(match self.range(index) {
+            Some(range) => spec.in_range(range),
+            None => spec,
+        })
+    }
+
     /// A node with default parameter values and default ranges.
     pub(crate) fn new(descriptor: &'static ModuleDescriptor, slot: Option<usize>) -> Self {
         Self {

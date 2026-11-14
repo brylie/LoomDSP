@@ -6,45 +6,96 @@ use loom_core::{
     ParamOptions, ParamSpec, PortDefault, PortIo, PortSpec, ProcessContext, SignalType, Widget,
 };
 
-/// `loom.midi.note`: monophonic MIDI note input with last-note priority.
+/// `loom.midi.note`: polyphonic MIDI notes with per-voice expression.
 pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     id: "loom.midi.note",
     version: 1,
     name: "MIDI Note",
     category: "MIDI",
     family: loom_core::Family::Interface,
-    description: "Monophonic note input (last-note priority). Pitch includes pitch bend.",
-    inputs: &[],
+    description: "Allocates MIDI notes to voices, with pitch bend, pressure, and timbre.",
+    inputs: &[PortSpec {
+        name: "level",
+        label: "Level",
+        description: "Per-voice envelope level for Quietest stealing.",
+        signal: SignalType::Modulation,
+        default: PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: Channels::Voices,
+    }],
     outputs: &[
         PortSpec {
             name: "pitch",
             label: "Pitch",
             signal: SignalType::Pitch,
-            description: "Pitch of the last note held, with pitch bend. 0 is middle C.",
+            description: "Pitch of this voice, with pitch bend. 0 is middle C.",
             default: PortDefault::Value(0.0),
             range: loom_core::PortRange::Signal,
-            channels: Channels::PerChannel,
+            channels: Channels::Voices,
         },
         PortSpec {
             name: "gate",
             label: "Gate",
             signal: SignalType::Gate,
-            description: "High while any note is held.",
+            description: "High while this voice holds a note.",
             default: PortDefault::Value(0.0),
             range: loom_core::PortRange::Signal,
-            channels: Channels::PerChannel,
+            channels: Channels::Voices,
         },
         PortSpec {
             name: "velocity",
             label: "Velocity",
             signal: SignalType::Modulation,
-            description: "How hard the last note was played, from 0 to 1.",
+            description: "How hard this voice was played, from 0 to 1.",
             default: PortDefault::Value(0.0),
             range: loom_core::PortRange::Span(0.0, 1.0),
-            channels: Channels::PerChannel,
+            channels: Channels::Voices,
+        },
+        PortSpec {
+            name: "pressure",
+            label: "Pressure",
+            description: "Per-note pressure, from 0 to 1.",
+            signal: SignalType::Modulation,
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Span(0.0, 1.0),
+            channels: Channels::Voices,
+        },
+        PortSpec {
+            name: "timbre",
+            label: "Timbre",
+            description: "Per-note CC74 expression, from 0 to 1.",
+            signal: SignalType::Modulation,
+            default: PortDefault::Value(0.0),
+            range: loom_core::PortRange::Span(0.0, 1.0),
+            channels: Channels::Voices,
         },
     ],
     params: &[
+        ParamSpec {
+            name: "voices",
+            label: "Voices",
+            description: "Number of simultaneous voices.",
+            min: 1.0,
+            max: 16.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .shapes_graph(),
+        ParamSpec {
+            name: "mode",
+            label: "Mode",
+            description: "How notes steal voices, or how a single voice articulates notes.",
+            min: 0.0,
+            max: 3.0,
+            default: 2.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
+        .choices_by_count("voices", 2),
         ParamSpec {
             name: "channel",
             label: "Channel",
@@ -69,7 +120,15 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
         .integer(),
     ],
     role: ModuleRole::Dsp(|_| Box::new(NoteIn::default())),
-    panel: Panel::new(3, 2, &[Widget::light(0, 0, "gate")]),
+    panel: Panel::new(
+        12,
+        5,
+        &[
+            Widget::segmented(0, 0, 12, "mode"),
+            Widget::number(0, 2, "voices"),
+            Widget::light(9, 2, "gate"),
+        ],
+    ),
     displays: &[DisplaySpec {
         name: "gate",
         label: "Gate",
@@ -80,64 +139,242 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
     roles: &[],
 };
 
-const MAX_HELD: usize = 16;
-
-#[derive(Default, Clone)]
-struct NoteIn {
-    held: [u8; MAX_HELD],
-    held_len: usize,
-    note: u8,
+/// One remembered key's raw expression, before manager/channel expression is added.
+#[derive(Clone, Copy)]
+struct Key {
+    id: loom_dsp::voice::NoteId,
     velocity: f32,
-    bend: f32,
+    generation: u64,
+    zone: Option<u8>,
+    pressure: u8,
+    serial: u64,
+}
+
+/// Channel expression belongs to an input, not just a MIDI channel number.
+#[derive(Clone, Copy, Default)]
+struct Expression {
+    zone: Option<u8>,
+    bend: i16,
+    pressure: u8,
+    timbre: u8,
+}
+
+/// MIDI source state; the engine owns zone configuration, even while unscheduled.
+#[derive(Clone)]
+struct NoteIn {
+    allocator: loom_dsp::voice::Allocator,
+    keys: [Option<Key>; 16],
+    serial: u64,
+    mono_velocity: f32,
+    expression: [[Expression; 16]; loom_core::MAX_MIDI_INPUTS as usize],
+    generations: [u64; loom_core::MAX_MIDI_INPUTS as usize],
     channel: u8,
     bend_range: f32,
+    mode: usize,
+}
+
+impl Default for NoteIn {
+    fn default() -> Self {
+        Self {
+            allocator: Default::default(),
+            keys: [None; 16],
+            serial: 0,
+            mono_velocity: 0.0,
+            expression: [[Expression::default(); 16]; loom_core::MAX_MIDI_INPUTS as usize],
+            generations: [0; loom_core::MAX_MIDI_INPUTS as usize],
+            channel: 0,
+            bend_range: 2.0,
+            mode: 2,
+        }
+    }
 }
 
 impl NoteIn {
-    const CHANNEL: usize = NOTE_IN.param_index("channel").unwrap();
-    const BEND_RANGE: usize = NOTE_IN.param_index("bend-range").unwrap();
-
-    /// True when a message on `channel` (0 to 15) passes the `listen`
-    /// setting, where 0 means every channel and 1 to 16 pick one.
+    /// Ordinary MIDI filtering used by Controller input.
     fn accepts(listen: u8, channel: u8) -> bool {
         listen == 0 || listen == channel + 1
     }
 
-    fn release(&mut self, note: u8) {
-        if let Some(i) = self.held[..self.held_len].iter().position(|&n| n == note) {
-            self.held.copy_within(i + 1..self.held_len, i);
-            self.held_len -= 1;
+    const CHANNEL: usize = NOTE_IN.param_index("channel").unwrap();
+    const BEND_RANGE: usize = NOTE_IN.param_index("bend-range").unwrap();
+    const MODE: usize = NOTE_IN.param_index("mode").unwrap();
+    const LEVEL: usize = NOTE_IN.input_index("level").unwrap();
+    const PITCH: usize = NOTE_IN.output_index("pitch").unwrap();
+    const GATE: usize = NOTE_IN.output_index("gate").unwrap();
+    const VELOCITY: usize = NOTE_IN.output_index("velocity").unwrap();
+    const PRESSURE: usize = NOTE_IN.output_index("pressure").unwrap();
+    const TIMBRE: usize = NOTE_IN.output_index("timbre").unwrap();
+
+    /// Packs all three identity parts without collisions, including untracked input 0.
+    fn identity(input: u16, channel: u8, note: u8) -> loom_dsp::voice::NoteId {
+        loom_dsp::voice::NoteId((u64::from(input) << 11) | (u64::from(channel) << 7) | u64::from(note))
+    }
+
+    /// Stored choice values remain stable even when their effective mode falls back.
+    fn mode(value: usize) -> loom_dsp::voice::Mode {
+        use loom_dsp::voice::Mode;
+        match value {
+            0 => Mode::Oldest,
+            1 => Mode::Quietest,
+            3 => Mode::Retrigger,
+            _ => Mode::Legato,
         }
     }
 
-    fn press(&mut self, note: u8, velocity: u8) {
-        self.release(note);
-        if self.held_len == MAX_HELD {
-            // Forget the oldest held note.
-            self.held.copy_within(1.., 0);
-            self.held_len -= 1;
+    /// Converts raw expression using configuration at this exact sample.
+    fn note(&self, key: Key, ctx: &ProcessContext<'_>, frame: usize, ordinary_range: f32) -> loom_dsp::voice::Note {
+        let input = (key.id.0 >> 11) as u16;
+        let channel = ((key.id.0 >> 7) & 15) as u8;
+        let config = ctx.midi_config(input, frame);
+        let member = self.expression[usize::from(input)][usize::from(channel)];
+        let mut bend = f32::from(member.bend) / 8192.0 * config.bend_range(channel, ordinary_range);
+        let mut pressure = member.pressure.max(key.pressure);
+        let mut timbre = member.timbre;
+        if let Some(manager) = config.manager(channel).filter(|m| *m != channel) {
+            let manager_expression = self.expression[usize::from(input)][usize::from(manager)];
+            bend += f32::from(manager_expression.bend) / 8192.0 * config.bend_range(manager, ordinary_range);
+            pressure = pressure.max(manager_expression.pressure);
+            timbre = timbre.max(manager_expression.timbre);
         }
-        self.held[self.held_len] = note;
-        self.held_len += 1;
-        self.note = note;
-        self.velocity = f32::from(velocity) / 127.0;
+        loom_dsp::voice::Note {
+            id: key.id,
+            pitch: pitch::from_midi_note((key.id.0 & 127) as f32) + bend * pitch::PER_SEMITONE,
+            velocity: if self.allocator.voices().len() == 1 {
+                self.mono_velocity
+            } else {
+                key.velocity
+            },
+            pressure: f32::from(pressure) / 127.0,
+            timbre: f32::from(timbre) / 127.0,
+        }
     }
 
-    fn handle(&mut self, message: MidiMessage, listen: u8) {
-        match message {
+    /// RP-053 2.1.4 resets only channels entering or leaving MPE control.
+    fn sync_input(&mut self, input: usize, config: loom_core::MidiInputConfig) {
+        if config.generation != self.generations[input] {
+            self.expression[input].fill(Expression::default());
+            self.generations[input] = config.generation;
+        }
+        for channel in 0..16u8 {
+            let zone = config.manager(channel);
+            let expression = &mut self.expression[input][usize::from(channel)];
+            if expression.zone != zone {
+                *expression = Expression {
+                    zone,
+                    ..Expression::default()
+                };
+            }
+            for key in &mut self.keys {
+                if key.is_some_and(|key| {
+                    key.generation == config.generation
+                        && (key.id.0 >> 11) as usize == input
+                        && ((key.id.0 >> 7) & 15) as u8 == channel
+                        && key.zone != zone
+                }) {
+                    self.allocator.note_off(key.take().expect("matching key exists").id);
+                }
+            }
+        }
+    }
+
+    /// Refreshes held keys only. Released voices retain their last expression.
+    fn refresh(&mut self, ctx: &ProcessContext<'_>, frame: usize, range: f32) {
+        let mut visited = 0u64;
+        for key in self.keys.into_iter().flatten() {
+            let input = (key.id.0 >> 11) as u16;
+            if visited & (1u64 << input) == 0 {
+                visited |= 1u64 << input;
+                self.sync_input(usize::from(input), ctx.midi_config(input, frame));
+            }
+        }
+        for key in self.keys.into_iter().flatten() {
+            let input = (key.id.0 >> 11) as u16;
+            if key.generation == ctx.midi_config(input, frame).generation {
+                self.allocator.update_note(self.note(key, ctx, frame, range));
+            }
+        }
+    }
+
+    /// Reclaims expression slots for stolen or removed voices.
+    /// Mono's held-key history is retained until an actual capacity change.
+    fn retain_sounding_keys(&mut self) {
+        for key in &mut self.keys {
+            if key.is_some_and(|key| self.allocator.voices_for(key.id).next().is_none()) {
+                *key = None;
+            }
+        }
+    }
+
+    /// Consumes one event. Releases do not depend on the current channel filter.
+    fn handle(&mut self, event: &loom_core::MidiEvent, listen: u8, range: f32, ctx: &ProcessContext<'_>, frame: usize) {
+        let input = usize::from(event.input);
+        if input >= self.expression.len() {
+            return;
+        }
+        let config = ctx.midi_config(event.input, frame);
+        self.sync_input(input, config);
+        match event.message() {
             MidiMessage::NoteOn {
                 channel,
                 note,
                 velocity,
-            } if Self::accepts(listen, channel) => self.press(note, velocity),
-            MidiMessage::NoteOff { channel, note } if Self::accepts(listen, channel) => {
-                self.release(note);
-                if self.held_len > 0 {
-                    self.note = self.held[self.held_len - 1];
+            } if config.accepts(listen, channel) => {
+                let id = Self::identity(event.input, channel, note);
+                self.mono_velocity = f32::from(velocity) / 127.0;
+                self.serial = self.serial.saturating_add(1);
+                let key = Key {
+                    id,
+                    velocity: f32::from(velocity) / 127.0,
+                    generation: config.generation,
+                    zone: config.manager(channel),
+                    pressure: 0,
+                    serial: self.serial,
+                };
+                self.allocator.note_on(self.note(key, ctx, frame, range));
+                if self.allocator.voices().len() > 1 {
+                    self.retain_sounding_keys();
+                }
+                let slot = self
+                    .keys
+                    .iter()
+                    .position(|key| key.is_some_and(|key| key.id == id))
+                    .or_else(|| self.keys.iter().position(Option::is_none))
+                    .unwrap_or_else(|| {
+                        self.keys
+                            .iter()
+                            .enumerate()
+                            .min_by_key(|(_, key)| key.map(|k| k.serial))
+                            .unwrap()
+                            .0
+                    });
+                self.keys[slot] = Some(key);
+            }
+            MidiMessage::NoteOff { channel, note } => {
+                self.refresh(ctx, frame, range);
+                let id = Self::identity(event.input, channel, note);
+                self.allocator.note_off(id);
+                for key in &mut self.keys {
+                    if key.is_some_and(|key| key.id == id) {
+                        *key = None;
+                    }
                 }
             }
-            MidiMessage::PitchBend { channel, value } if Self::accepts(listen, channel) => {
-                self.bend = f32::from(value) / 8192.0;
+            MidiMessage::PitchBend { channel, value } => self.expression[input][usize::from(channel)].bend = value,
+            MidiMessage::ChannelPressure { channel, value } => {
+                self.expression[input][usize::from(channel)].pressure = value
+            }
+            MidiMessage::ControlChange {
+                channel,
+                controller: 74,
+                value,
+            } => self.expression[input][usize::from(channel)].timbre = value,
+            MidiMessage::PolyPressure { channel, note, value } => {
+                let id = Self::identity(event.input, channel, note);
+                for key in self.keys.iter_mut().flatten() {
+                    if key.id == id {
+                        key.pressure = value;
+                    }
+                }
             }
             _ => {}
         }
@@ -145,32 +382,69 @@ impl NoteIn {
 }
 
 impl Module for NoteIn {
-    /// Takes the running state of another instance (ADR-0022).
     fn copy_state_from(&mut self, other: &dyn Module) -> bool {
         loom_core::copy_state(self, other)
     }
 
     fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let capacity = io.output_width(Self::PITCH).voices;
         let channel = io.param(Self::CHANNEL);
         let bend_range = io.param(Self::BEND_RANGE);
-        let ([], [pitch_out, gate_out, velocity_out]) = io.split::<0, 3>();
+        let mode = io.param(Self::MODE);
         let mut events = ctx.midi().peekable();
-        for i in 0..pitch_out.len() {
-            // Modulated values live only for this frame. The fields keep the
-            // knob's base, so removing an assignment returns to it.
-            let listen = channel.map_or(i, self.channel, |v| v.round() as u8);
-            let bend_range = bend_range.at_or(i, self.bend_range);
-            while let Some((frame, event)) = events.peek() {
-                if *frame > i {
+        for frame in 0..io.frames() {
+            let listen = channel.map_or(frame, self.channel, |v| v.round().clamp(0.0, 16.0) as u8);
+            let range = bend_range.at_or(frame, self.bend_range);
+            let mode = mode.map_or(frame, self.mode, |v| v.round().clamp(0.0, 3.0) as usize);
+            let resized = self.allocator.voices().len() != capacity;
+            self.allocator.configure(capacity, Self::mode(mode), 1);
+            if resized {
+                self.retain_sounding_keys();
+                // Preserve the surviving output when crossing mono's last-note velocity rule.
+                for key in self.keys.iter_mut().flatten() {
+                    if let Some(note) = self
+                        .allocator
+                        .voices()
+                        .iter()
+                        .filter_map(|voice| voice.note)
+                        .find(|note| note.id == key.id)
+                    {
+                        key.velocity = note.velocity;
+                    }
+                }
+                if capacity == 1
+                    && let Some(note) = self.allocator.voices()[0].note
+                {
+                    self.mono_velocity = note.velocity;
+                }
+            }
+            let mut levels = [0.0; 16];
+            for (voice, level) in levels[..capacity].iter_mut().enumerate() {
+                let left = io.voice_input(Self::LEVEL, voice, 0)[frame];
+                *level = if io.input_width(Self::LEVEL).sides == 2 {
+                    left * 0.5 + io.voice_input(Self::LEVEL, voice, 1)[frame] * 0.5
+                } else {
+                    left
+                };
+            }
+            self.allocator
+                .begin_frame((!io.uses_default(Self::LEVEL)).then_some(&levels[..capacity]));
+            while let Some((at, event)) = events.peek() {
+                if *at > frame {
                     break;
                 }
-                self.handle(event.message(), listen);
+                self.handle(event, listen, range, ctx, frame);
                 events.next();
             }
-            let bend = self.bend * bend_range * pitch::PER_SEMITONE;
-            pitch_out[i] = pitch::from_midi_note(f32::from(self.note)) + bend;
-            gate_out[i] = if self.held_len > 0 { 1.0 } else { 0.0 };
-            velocity_out[i] = self.velocity;
+            self.refresh(ctx, frame, range);
+            for (voice, state) in self.allocator.voices().iter().enumerate() {
+                let note = state.note;
+                io.voice_output(Self::PITCH, voice, 0)[frame] = note.map_or(-0.5, |note| note.pitch);
+                io.voice_output(Self::GATE, voice, 0)[frame] = if state.gate { 1.0 } else { 0.0 };
+                io.voice_output(Self::VELOCITY, voice, 0)[frame] = note.map_or(0.0, |note| note.velocity);
+                io.voice_output(Self::PRESSURE, voice, 0)[frame] = note.map_or(0.0, |note| note.pressure);
+                io.voice_output(Self::TIMBRE, voice, 0)[frame] = note.map_or(0.0, |note| note.timbre);
+            }
         }
     }
 
@@ -178,17 +452,26 @@ impl Module for NoteIn {
         match index {
             Self::CHANNEL => self.channel = value.round() as u8,
             Self::BEND_RANGE => self.bend_range = value,
+            Self::MODE => self.mode = value.round() as usize,
             _ => {}
         }
     }
 
     fn reset(&mut self) {
-        self.held_len = 0;
-        self.bend = 0.0;
+        self.allocator.reset();
+        self.keys.fill(None);
+        self.serial = 0;
+        self.mono_velocity = 0.0;
+        self.expression.fill([Expression::default(); 16]);
+        self.generations.fill(0);
     }
 
     fn displays(&self, values: &mut [f32]) {
-        values[0] = if self.held_len > 0 { 1.0 } else { 0.0 };
+        values[0] = if self.allocator.voices().iter().any(|voice| voice.gate) {
+            1.0
+        } else {
+            0.0
+        };
     }
 }
 

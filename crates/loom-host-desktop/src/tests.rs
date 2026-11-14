@@ -561,3 +561,101 @@ fn render_into_parts_returns_engine_and_tap() {
     assert!(tap.is_none());
     assert!(!engine.is_silent());
 }
+
+/// A pitch signal with output protection off, past its initial fade.
+fn mpe_pitch_engine() -> (EngineParts, loom_core::ModuleId) {
+    let mut parts = create_engine(
+        loom_modules::registry(),
+        EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::default()
+        },
+    );
+    let c = &mut parts.controller;
+    c.open_midi_input(loom_core::MidiInputId(1)).unwrap();
+    let note = c.add_module("loom.midi.note").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(note, "pitch", out, "in").unwrap();
+    c.commit().unwrap();
+    (parts, out)
+}
+
+/// Plays long enough to pass startup and cable fades, returning the final pitch.
+fn mpe_pitch(engine: &mut loom_core::Engine) -> f32 {
+    let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+    for _ in 0..3 {
+        engine.process(&mut left, &mut right);
+    }
+    left[511]
+}
+
+/// New/Open and a newly added source receive zones announced before they existed.
+#[test]
+fn mpe_zone_survives_engine_replacement_and_new_modules() {
+    let (parts, _) = mpe_pitch_engine();
+    let midi = share_midi(parts.midi);
+    for (controller, value) in [(101, 0), (100, 6), (6, 4)] {
+        assert!(send_midi(
+            &midi,
+            MidiEvent::control_change(0, 0, controller, value).from_input(loom_core::MidiInputId(1))
+        ));
+    }
+    let (mut next, out) = mpe_pitch_engine();
+    midi.lock().unwrap().replace(next.midi);
+    mpe_pitch(&mut next.engine);
+    let play = || {
+        assert!(send_midi(
+            &midi,
+            MidiEvent::note_on(0, 1, 60, 100).from_input(loom_core::MidiInputId(1))
+        ));
+        assert!(send_midi(
+            &midi,
+            MidiEvent::pitch_bend(0, 1, 4096).from_input(loom_core::MidiInputId(1))
+        ));
+    };
+    play();
+    let expected = 24.0 * loom_core::signal::pitch::PER_SEMITONE;
+    assert_eq!(mpe_pitch(&mut next.engine), expected);
+    let later = next.controller.add_module("loom.midi.note").unwrap();
+    next.controller.connect_named(later, "pitch", out, "in").unwrap();
+    next.controller.commit().unwrap();
+    play();
+    assert_eq!(
+        mpe_pitch(&mut next.engine),
+        expected,
+        "a new module sees the existing zone without another announcement"
+    );
+    next.controller.release_midi_input(loom_core::MidiInputId(1)).unwrap();
+    assert_eq!(
+        mpe_pitch(&mut next.engine),
+        expected,
+        "disconnect releases gates while retaining the final expression"
+    );
+}
+
+/// Dropped ingress events cannot enter the retained table, and disconnect clears it.
+#[test]
+fn mpe_ingress_caches_only_accepted_events_and_clears_connections() {
+    let parts = create_engine(
+        loom_modules::registry(),
+        EngineConfig {
+            midi_capacity: 2,
+            ..EngineConfig::default()
+        },
+    );
+    let midi = share_midi(parts.midi);
+    for (controller, value) in [(101, 0), (100, 6)] {
+        assert!(send_midi(
+            &midi,
+            MidiEvent::control_change(0, 0, controller, value).from_input(loom_core::MidiInputId(1))
+        ));
+    }
+    assert!(!send_midi(
+        &midi,
+        MidiEvent::control_change(0, 0, 6, 4).from_input(loom_core::MidiInputId(1))
+    ));
+    assert_eq!(midi.lock().unwrap().config.input(1).lower, 0);
+    midi.lock().unwrap().clear_input(loom_core::MidiInputId(1));
+    assert_eq!(midi.lock().unwrap().config.input(1).generation, 1);
+    assert_eq!(midi.lock().unwrap().config.input(1).lower, 0);
+}

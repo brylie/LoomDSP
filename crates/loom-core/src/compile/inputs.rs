@@ -276,7 +276,13 @@ impl Inputs {
                 };
                 if let Some(from) = layout.graph.source_of(input) {
                     let width = layout.widths.outputs.get(&from).copied().unwrap_or_default();
-                    if width.voices == 1 || width.voices >= layout.widths.voices[&layout.ids[v]] {
+                    if node
+                        .descriptor
+                        .inputs
+                        .get(port)
+                        .is_none_or(|spec| spec.channels != Channels::Voices)
+                        && (width.voices == 1 || width.voices >= layout.widths.voices[&layout.ids[v]])
+                    {
                         continue;
                     }
                 }

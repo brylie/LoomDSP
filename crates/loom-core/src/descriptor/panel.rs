@@ -259,7 +259,7 @@ impl Widget {
     }
 
     /// A segmented control: one joined button per choice name, `width`
-    /// grid units wide, for a parameter with 2 to 4 named values.
+    /// grid units wide, for a parameter with 2 to 5 named values.
     pub const fn segmented(x: u8, y: u8, width: u8, param: &'static str) -> Self {
         Self {
             kind: WidgetKind::Segmented { width },
@@ -441,7 +441,7 @@ pub enum WidgetKind {
     Radio,
     /// A compact box that opens a list of named choices.
     Select,
-    /// A row of joined buttons, one per choice name, for 2 to 4 named
+    /// A row of joined buttons, one per choice name, for 2 to 5 named
     /// choices (panel-widgets.md, Segmented control).
     Segmented {
         /// Width in panel grid units. The segments share it equally.
@@ -751,6 +751,21 @@ impl ModuleDescriptor {
         }
         for param in self.params {
             param.check_choices()?;
+            if let Some(filter) = param.options.count_choices {
+                if filter.split == 0 || filter.split >= param.options.choices.len() {
+                    return Err(format!(
+                        "parameter `{}`: count choice split must leave both lists nonempty",
+                        param.name
+                    ));
+                }
+                let count = self.param_index(filter.param).map(|i| &self.params[i]);
+                if !count.is_some_and(|count| count.options.integer && count.min >= 1.0 && count.max > 1.0) {
+                    return Err(format!(
+                        "parameter `{}`: count choices need an integer count starting at 1 or above",
+                        param.name
+                    ));
+                }
+            }
             param.check_ranges()?;
             if let Some(when) = param.options.shown_when {
                 let problem = |text: &str| {
@@ -884,10 +899,10 @@ impl ModuleDescriptor {
                         return Err(name("radio buttons need a whole-number parameter with choice names"));
                     }
                     WidgetKind::Segmented { width }
-                        if !integer || !(2..=4).contains(&param.options.choices.len()) || width == 0 =>
+                        if !integer || !(2..=5).contains(&param.options.choices.len()) || width == 0 =>
                     {
                         return Err(name(
-                            "a segmented control needs a width and 2 to 4 named whole-number choices",
+                            "a segmented control needs a width and 2 to 5 named whole-number choices",
                         ));
                     }
                     WidgetKind::Select if !integer || !(1..=MAX_SELECT_VALUES).contains(&param.value_count()) => {

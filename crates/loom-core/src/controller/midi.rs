@@ -265,7 +265,7 @@ impl Controller {
     }
 
     /// Stops tracking MIDI input `input`: the engine sends a note off for
-    /// every note it held, unless another input still holds that note, and
+    /// every note identity it held, and
     /// drops later events stamped with it. Call it when the input is closed
     /// or gone.
     pub fn release_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {

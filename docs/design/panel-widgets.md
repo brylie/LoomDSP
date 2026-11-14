@@ -230,7 +230,7 @@ The current choice is shown as text. Clicking it shows the other choices in a li
 
 A row of joined buttons, one per choice name. The chosen one is filled in the value colour; the others are outlined. All choices are visible, and one click picks any of them.
 
-- **Binds to:** a whole-number parameter with 2 to 4 choice names. The registry refuses one without names, or with more than 4.
+- **Binds to:** a whole-number parameter with 2 to 5 choice names. The registry refuses one without names, or with more than 5. Five needs a wider row, as Voice merge uses; the usual compact panel uses at most four.
 - **Size:** `width` × 2 grid units, declared on the widget, as for a shape preview. The caption sits in the top row and the segments in the bottom row. Segments share the width equally. The author picks a width that fits the longest name; the cut-label test catches one that does not.
 - **Click:** on a segment picks it: one undo step. **Drag:** moves the tile, as on radio buttons (rule 1). **Double-click:** resets to the default.
 - **Keyboard:** focused, Space or Enter picks the next choice, wrapping round; Up and Right step up, Down and Left step down, as with every whole-number control.
@@ -491,10 +491,10 @@ The catalogue entries that would use each new widget. The knob is used by nearly
 | Widget | Catalogue entries |
 |---|---|
 | Fader | MT-MIX-01 levels, MT-MIX-02, MT-UI-02, MT-EQ-01 band gains, MT-ARR-06, MT-SRC-03 group levels |
-| Number | MT-CLOCK-01 tempo, MT-CLOCK-03 division, MT-PHASE-02 ratio, MT-PHASE-06, MT-GATE-02 hits, steps, and rotation, MT-LOGIC-04 count, MT-PITCH-01 offsets, MT-IO-04 controller number, MT-ARR-01 and MT-ARR-02 length in bars, TR-07 seed |
-| Segmented control | MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-02 how to choose, MT-ENV-01 mode, MT-GATE-02 source, MT-RAND-01 mode and shape, MT-DYN-01 detect, MT-EQ-01 slopes |
+| Number | MT-IO-03 voices, MT-CLOCK-01 tempo, MT-CLOCK-03 division, MT-PHASE-02 ratio, MT-PHASE-06, MT-GATE-02 hits, steps, and rotation, MT-LOGIC-04 count, MT-PITCH-01 offsets, MT-IO-04 controller number, MT-ARR-01 and MT-ARR-02 length in bars, TR-07 seed |
+| Segmented control | MT-IO-03 mode, MT-VOICE-01 merge mode, MT-FILTER-04 slope, MT-MIX-02 law, MT-LEVEL-02 response, MT-PHASE-08 wrap or fold, MT-ROUTE-02 how to choose, MT-ENV-01 mode, MT-GATE-02 source, MT-RAND-01 mode and shape, MT-DYN-01 detect, MT-EQ-01 slopes |
 | Radio buttons | MT-DELAY-04 time change, MT-LOGIC-01 mode, TR-02 timebase, TR-03 retrigger |
-| Select list | MT-SRC-08 and MT-VOICE-04 unison voices, MT-SRC-02 colour, MT-LEVEL-01 unit, MT-MATH-02 function, MT-MATH-03 conversion, MT-LOGIC-02 operation, MT-VOICE-01 merge mode, MT-SHAPE-01 curve, MT-DYN-01 mode, MT-FX-01 space, MT-SEQ-04 algorithm, MT-PITCH-02 and MT-PITCH-03 scale, TR-01 basic shape, TR-02 musical division, TR-05 character, TR-06 quality |
+| Select list | MT-SRC-08 and MT-VOICE-04 unison voices, MT-SRC-02 colour, MT-LEVEL-01 unit, MT-MATH-02 function, MT-MATH-03 conversion, MT-LOGIC-02 operation, MT-SHAPE-01 curve, MT-DYN-01 mode, MT-FX-01 space, MT-SEQ-04 algorithm, MT-PITCH-02 and MT-PITCH-03 scale, TR-01 basic shape, TR-02 musical division, TR-05 character, TR-06 quality |
 | Toggle | MT-MIX-01 mute, MT-ENV-01 loop, MT-DELAY-04 ping-pong, MT-SRC-01 sync |
 | XY pad | MT-UI-03, MT-STATE-02, MT-FX-10 position |
 | Range | MT-RAND-01 range, MT-LEVEL-05 limits, MT-LEVEL-03 range map, MT-LOGIC-01 window, MT-NOTE-07 pitch and velocity ranges, MT-SAMPLE-05 zones, MT-SEQ-04 note range |
