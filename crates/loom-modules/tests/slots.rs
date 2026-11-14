@@ -415,3 +415,172 @@ fn a_swap_during_a_fade_fades_the_step_it_leaves() {
     let across = max_step(&left[second_at - 1..second_at + 2 * FADE]);
     assert!(across <= bound, "{across} > {bound}");
 }
+
+/// The step limit for a swap window: the steady sound's largest step, plus
+/// the swap fade's gain change per sample times the peak, plus a cable
+/// fade's slope across two peaks.
+fn swap_limit(steady: &[f32]) -> f32 {
+    let max_step = |s: &[f32]| s.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+    let peak = steady.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    max_step(steady) + peak * (std::f32::consts::FRAC_PI_2 / FADE as f32) + 2.0 * peak / 240.0 + 1e-6
+}
+
+/// The largest step in `window`.
+fn largest_step(window: &[f32]) -> f32 {
+    window.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max)
+}
+
+/// A slot swap with a modulated role parameter: the leaving part's cutoff
+/// ramps out while it fades away, and the new part has the modulation from
+/// its first frame, so the swap window has no step larger than the swap
+/// fade and the cable fade allow.
+#[test]
+fn a_swap_with_a_modulated_role_parameter_has_no_step() {
+    let (mut parts, hierarchy) = load(MODULATED_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.ladder@1")
+                .expect("the ladder fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, _| {},
+    );
+    assert!(left.iter().all(|v| v.is_finite()));
+    let bound = swap_limit(&left[SWAP_AT - 1_000..SWAP_AT]).max(swap_limit(&left[FRAMES - 1_000..]));
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + 2 * FADE]);
+    assert!(across <= bound, "{across} > {bound}");
+}
+
+/// A second swap made in one edit during a fade, as `swap_to_module_at`
+/// does when it finishes the first fade itself: the output moves from the
+/// old fade's blend onto the new fade, so it fades once, with no step.
+#[test]
+fn a_second_swap_in_one_edit_fades_once() {
+    let (mut parts, hierarchy) = load(NOISE_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let second_at = SWAP_AT + FADE / 2;
+    let mut fades = None;
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        1,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.ladder@1")
+                .expect("the ladder fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |position, parts| {
+            if position == second_at {
+                let mut hierarchy = hierarchy.borrow_mut();
+                hierarchy
+                    .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.onepole@1")
+                    .expect("the one-pole fills Filter");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                fades = Some(parts.controller.commit().expect("commits").cable_fades);
+            }
+        },
+    );
+    assert!(
+        fades.expect("the second swap ran") > 0,
+        "off the unfinished fade, onto the new one"
+    );
+    assert!(left.iter().all(|v| v.is_finite()));
+    let bound = swap_limit(&left[..SWAP_AT]).max(swap_limit(&left[second_at + 2 * FADE..]));
+    let across = largest_step(&left[second_at - 1..second_at + 2 * FADE]);
+    assert!(across <= bound, "{across} > {bound}");
+}
+
+/// The app's two commits for a swap during a fade, with a block of audio
+/// between them: the finish fades the output off the blend, and the swap
+/// then switches it onto the new fade, where the running fade goes on.
+#[test]
+fn a_swap_during_a_fade_with_a_block_between_its_commits_has_no_step() {
+    let (mut parts, hierarchy) = load(NOISE_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    // On a block boundary, about halfway through the fade.
+    let second_at = SWAP_AT + 256;
+    let mut ran = 0;
+    let left = render_edit_at(
+        &mut parts,
+        FRAMES,
+        64,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.ladder@1")
+                .expect("the ladder fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |position, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            if position == second_at {
+                hierarchy.finish_all_fades(&mut parts.controller);
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                assert!(parts.controller.commit().expect("commits").cable_fades > 0);
+                ran += 1;
+            }
+            if position == second_at + 64 {
+                hierarchy
+                    .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.onepole@1")
+                    .expect("the one-pole fills Filter");
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                assert_eq!(parts.controller.commit().expect("commits").cable_fades, 0);
+                ran += 1;
+            }
+        },
+    );
+    assert_eq!(ran, 2, "both commits ran");
+    assert!(left.iter().all(|v| v.is_finite()));
+    let bound = swap_limit(&left[..SWAP_AT]).max(swap_limit(&left[second_at + 3 * FADE..]));
+    let across = largest_step(&left[second_at - 1..second_at + 3 * FADE]);
+    assert!(across <= bound, "{across} > {bound}");
+}
+
+/// Pulling the slot's output during its swap fade is the player's own edit,
+/// not the swap's rewiring, so it fades like any pulled cable.
+#[test]
+fn pulling_a_slot_s_output_during_its_fade_fades() {
+    let (mut parts, hierarchy) = load(NOISE_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let mut fades = None;
+    render_edit_at(
+        &mut parts,
+        FRAMES,
+        64,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, ModuleId(9), "loom.filter.ladder@1")
+                .expect("the ladder fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |position, parts| {
+            if position == SWAP_AT + 128 {
+                let input = parts.controller.input_ref(ModuleId(3), "in").unwrap();
+                parts.controller.disconnect(input).unwrap();
+                fades = Some(parts.controller.commit().expect("commits").cable_fades);
+            }
+        },
+    );
+    assert!(fades.expect("pulled") > 0);
+}

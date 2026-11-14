@@ -435,10 +435,26 @@ fn render_mode_edit(
     at: usize,
     edit: impl FnOnce(&mut loom_patch::Hierarchy, &mut loom_core::Controller),
 ) -> (Vec<f32>, usize) {
+    let (left, _, fades) = render_mode_edits(text, frames, at, |_, _| {}, edit);
+    (left, fades)
+}
+
+/// [`render_mode_edit`] with a `setup` edit made and committed before the
+/// first frame, and both sides returned.
+fn render_mode_edits(
+    text: &str,
+    frames: usize,
+    at: usize,
+    setup: impl FnOnce(&mut loom_patch::Hierarchy, &mut loom_core::Controller),
+    edit: impl FnOnce(&mut loom_patch::Hierarchy, &mut loom_core::Controller),
+) -> (Vec<f32>, Vec<f32>, usize) {
     let (mut parts, mut hierarchy) = load_editor(text);
+    setup(&mut hierarchy, &mut parts.controller);
+    hierarchy.sync(&mut parts.controller).expect("syncs");
+    parts.controller.commit().expect("commits");
     let mut edit = Some(edit);
     let mut fades = 0;
-    let (left, _) = render_with(&mut parts, frames, 64, &[], |position, parts| {
+    let (left, right) = render_with(&mut parts, frames, 64, &[], |position, parts| {
         if position == at
             && let Some(edit) = edit.take()
         {
@@ -447,7 +463,12 @@ fn render_mode_edit(
             fades = parts.controller.commit().expect("commits").cable_fades;
         }
     });
-    (left, fades)
+    (left, right, fades)
+}
+
+/// The largest change from one sample to the next.
+fn largest_step(signal: &[f32]) -> f32 {
+    signal.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max)
 }
 
 /// Single to Layer, and Single to Select, only rearrange: the cable to the
@@ -492,9 +513,107 @@ fn a_stack_going_from_one_copy_to_two_fades_once() {
     let before = audio[at - 1];
     let after = audio[frames - 1];
     assert!(after > before, "two copies are louder");
-    let step = audio[at - 1..]
-        .windows(2)
-        .map(|w| (w[1] - w[0]).abs())
-        .fold(0.0f32, f32::max);
+    let step = largest_step(&audio[at - 1..]);
     assert!(step <= (after - before) / 240.0 + 1e-6, "no step: {step}");
+}
+
+/// Layer of one member back to Single, and Select back to Single: the
+/// mixer that leaves played its member alone, so the output switches and
+/// the sound does not change by a single bit (rule 9, rule A).
+#[test]
+fn layer_or_select_of_one_back_to_single_switches_with_no_fade() {
+    let text = patch(&alone("a", 0.0, 0.5), "", "");
+    let (plain, _) = render_mode_edit(&text, 2_048, 1_024, |_, _| {});
+    for mode in [loom_patch::Mode::Layer, loom_patch::Mode::Select] {
+        let (edited, _, fades) = render_mode_edits(
+            &text,
+            2_048,
+            1_024,
+            |hierarchy, controller| {
+                hierarchy
+                    .set_mode(controller.graph(), ModuleId(7), mode, &|name| name.to_string())
+                    .expect("to the mode");
+            },
+            |hierarchy, controller| {
+                hierarchy
+                    .set_mode(controller.graph(), ModuleId(7), loom_patch::Mode::Single, &|name| {
+                        name.to_string()
+                    })
+                    .expect("back to single");
+            },
+        );
+        assert_eq!(fades, 0, "{mode:?} back to single");
+        assert_eq!(edited, plain, "{mode:?} back to single does not change the sound");
+    }
+}
+
+/// A stack going from 2 copies to 1 loses its Sum, which played both, so
+/// the output fades once to copy 0. Going from 2 to 3 plugs the new copy
+/// into the Sum, which fades it in. Neither steps.
+#[test]
+fn a_stack_of_two_losing_or_gaining_a_copy_fades() {
+    let at = 1_024;
+    let frames = 2_048;
+    let text = patch(&audio_stack("copies: 2,"), "", "");
+    for copies in [1, 3] {
+        let (audio, _, fades) = render_mode_edits(
+            &text,
+            frames,
+            at,
+            |_, _| {},
+            |hierarchy, _| {
+                hierarchy.set_copies(ModuleId(7), copies).expect("copies change");
+            },
+        );
+        assert!(fades > 0, "{copies} copies");
+        let before = audio[at - 1];
+        let after = audio[frames - 1];
+        assert_ne!(before, after, "{copies} copies changes the level");
+        // Each copy plays 0.2. Going to 1, the output fades straight to
+        // copy 0. Going to 3, copy 3 fades in over 5 ms at a gain of at
+        // most 1/√2, while the Sum's gain glides to 1/√3 over 10 ms.
+        let limit = if copies == 1 {
+            (after - before).abs() / 240.0
+        } else {
+            0.2 * std::f32::consts::FRAC_1_SQRT_2 / 240.0
+                + 0.4 * (std::f32::consts::FRAC_1_SQRT_2 - 1.0 / 3f32.sqrt()) / 480.0
+        };
+        let step = largest_step(&audio[at - 1..]);
+        assert!(step <= limit + 1e-6, "{copies} copies: step {step} > {limit}");
+    }
+}
+
+/// A stack with stereo spread going from 1 copy to 2. Its Stereo spread sum
+/// is there already at one copy, so the new copy's cable into it fades in,
+/// while copy 0 glides to its spread value and new place. Nothing steps on
+/// either side: each side's largest step is within twice the slope of one
+/// 5 ms move across that side's whole change, because two things move at
+/// once. A click would be a jump of the whole change on one frame.
+#[test]
+fn a_spread_stack_going_from_one_copy_to_two_fades_both_sides() {
+    let at = 1_024;
+    let frames = 4_096;
+    let text = patch(&audio_stack(r#"spread: {"value": 0.3}, stereo_spread: true,"#), "", "");
+    let (left, right, fades) = render_mode_edits(
+        &text,
+        frames,
+        at,
+        |_, _| {},
+        |hierarchy, _| {
+            hierarchy.set_copies(ModuleId(7), 2).expect("copies change");
+        },
+    );
+    assert!(fades > 0, "the new copy fades in");
+    for (side, played) in [("left", &left), ("right", &right)] {
+        assert!(played.iter().all(|v| v.is_finite()));
+        let after = &played[at - 1..];
+        let low = after.iter().copied().fold(f32::INFINITY, f32::min);
+        let high = after.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let step = largest_step(after);
+        assert!(
+            step <= 2.0 * (high - low) / 240.0 + 1e-6,
+            "{side}: step {step}, change {}",
+            high - low
+        );
+    }
 }

@@ -182,6 +182,10 @@ impl<'l, 'a> Builder<'l, 'a> {
         );
         self.schedule.cable_fade_order = order;
         self.schedule.reads = std::mem::take(&mut self.reads).into_values().collect();
+        debug_assert!(
+            self.schedule.fade_pointers_inside(),
+            "every fade and read points into this schedule"
+        );
     }
 
     /// The buffer channel `ch` of `input` should be read from: `target`, or

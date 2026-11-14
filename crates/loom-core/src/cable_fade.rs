@@ -212,7 +212,6 @@ impl InputFade {
     }
 
     /// The buffer the reader reads.
-    #[cfg(test)]
     pub(crate) fn buffer(&self) -> *const f32 {
         self.buffer
     }

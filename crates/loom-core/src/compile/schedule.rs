@@ -341,6 +341,24 @@ impl Schedule {
         }
     }
 
+    /// True when every cable fade's target and buffer, and every pointer in
+    /// `reads`, lies inside one of this schedule's own buffers. The engine
+    /// reads through them at the swap and in each block, so the compiler
+    /// checks this in debug builds (rule 9).
+    pub fn fade_pointers_inside(&self) -> bool {
+        let inside = |ptr: *const f32| {
+            self._buffers
+                .iter()
+                .map(|buffer| buffer.as_ptr_range())
+                .chain(std::iter::once(self._zero.as_ptr_range()))
+                .any(|range| range.contains(&ptr))
+        };
+        self.cable_fades
+            .iter()
+            .all(|fade| inside(fade.target()) && inside(fade.buffer()))
+            && self.reads.iter().all(|read| inside(read.ptr))
+    }
+
     /// Every fade and contribution ramp in this schedule, by what it fades.
     /// The controller passes them to the next compile while they may still
     /// run (rule 9).

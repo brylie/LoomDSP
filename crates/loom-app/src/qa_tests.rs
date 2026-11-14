@@ -1238,3 +1238,43 @@ fn cable_changes_at_the_output_do_not_click() {
         last = left.len();
     }
 }
+
+/// One gesture makes one schedule swap: a cable dropped on the canvas and
+/// a module deleted each commit once. Two swaps before one block would
+/// leave a fade with nothing to read (live patching spec, rule 9), so a
+/// gesture must not make two.
+#[test]
+fn one_gesture_makes_one_schedule_swap() {
+    let mut run = Setup {
+        flag: Some(OutputSafety::Off),
+        ..Setup::new("one_swap", PatchFrom::Text(TWO_CONSTANTS))
+    }
+    .start();
+    run.play(0.1);
+    let swaps = |run: &Run| {
+        run.app
+            .session
+            .controller
+            .stats()
+            .schedule_swaps
+            .load(std::sync::atomic::Ordering::Relaxed)
+    };
+    let before = swaps(&run);
+    let _ = run.app.send(Message::Canvas(CanvasEvent::Connect {
+        from: loom_canvas::PortRef {
+            module: 2,
+            index: 0,
+            output: true,
+        },
+        to: loom_canvas::PortRef {
+            module: 3,
+            index: 0,
+            output: false,
+        },
+    }));
+    run.play(0.05);
+    assert_eq!(swaps(&run), before + 1, "a cable drop swaps once");
+    let _ = run.app.send(Message::Canvas(CanvasEvent::Delete(vec![1])));
+    run.play(0.05);
+    assert_eq!(swaps(&run), before + 2, "a delete swaps once");
+}

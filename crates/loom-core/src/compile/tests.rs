@@ -746,3 +746,26 @@ fn mono_voice_stereo_downmixes_are_shared() {
         }
     }
 }
+
+/// The check behind the fades' `unsafe` reads: every fade and read pointer
+/// lies inside the schedule's own buffers, and one outside fails it.
+#[test]
+fn fade_pointers_must_lie_inside_the_schedule() {
+    use super::Read;
+    let mut schedule = Schedule::empty();
+    schedule._buffers.push(vec![0.0; 8].into_boxed_slice());
+    let inside = schedule._buffers[0].as_ptr();
+    schedule.reads.push(Read {
+        key: 1,
+        ptr: inside.wrapping_add(7),
+        constant: None,
+    });
+    assert!(schedule.fade_pointers_inside());
+    let outside = [0.0f32; 4];
+    schedule.reads.push(Read {
+        key: 2,
+        ptr: outside.as_ptr(),
+        constant: None,
+    });
+    assert!(!schedule.fade_pointers_inside());
+}

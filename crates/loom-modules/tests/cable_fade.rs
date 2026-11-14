@@ -1227,3 +1227,32 @@ fn a_panic_ends_every_fade() {
     let swaps = stats.schedule_swaps.load(std::sync::atomic::Ordering::Relaxed);
     assert_eq!(settled, swaps, "the panic ended the fade");
 }
+
+/// A patch of mixers that share inputs, as a crafted file could place them:
+/// twelve Sums, each with all sixteen inputs fed by the next, the last
+/// empty. Finding what a cable from the first carries visits each mixer
+/// once, so a cable edit compiles at once instead of walking 16^12 paths.
+#[test]
+fn a_cable_edit_past_many_shared_mixers_compiles_quickly() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let sums: Vec<ModuleId> = (0..12).map(|_| c.add_module("loom.struct.sum").unwrap()).collect();
+    for pair in sums.windows(2) {
+        for k in 1..=16 {
+            c.connect_named(pair[1], "out", pair[0], &format!("in{k}")).unwrap();
+        }
+    }
+    let seen = c.add_module("loom.math.add").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(seen, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    render(&mut parts, 64, 64, &[]);
+    let started = std::time::Instant::now();
+    parts.controller.connect_named(sums[0], "out", seen, "a").unwrap();
+    parts.controller.commit().unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
