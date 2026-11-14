@@ -63,8 +63,9 @@ pub(crate) struct Window {
 struct Record {
     layout: Layout,
     layer: Layer,
-    /// The panel whose slot holds it.
-    parent: Option<UiId>,
+    /// The panel whose slot holds it, and that slot's number among its
+    /// slots: only that one slot holds it, even if another names it too.
+    parent: Option<(UiId, usize)>,
     /// Where its slot is in the window, or the window's corner for a root.
     origin: Point,
     /// The size it was last laid out in.
@@ -80,6 +81,16 @@ struct Record {
     measured: [Option<(Constraint, Size)>; MEASURED_SIZES],
     /// How many times it was laid out, for tests.
     computes: u64,
+}
+
+/// What one [`Window::sync`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Synced {
+    /// Keys the rebuilds dropped ([`Layout::duplicate_keys`]).
+    pub(crate) dropped: u64,
+    /// The panels' order, or which slot holds which panel, changed: what is
+    /// drawn changed even if no panel's model did.
+    pub(crate) composition: bool,
 }
 
 /// What one [`Window::lay_out`] did.
@@ -104,14 +115,14 @@ impl Measure for Panels<'_> {
         self.text.measure(text, style, wrap_width)
     }
 
-    fn slot(&mut self, owner: &UiId, panel: &UiId, constraint: Constraint) -> Size {
-        // Only the panel's own child is asked; a panel another slot holds,
-        // or one taken out of the table because it is being laid out (an
-        // ancestor), has no size here.
+    fn slot(&mut self, owner: &UiId, panel: &UiId, index: usize, constraint: Constraint) -> Size {
+        // Only the slot that holds the panel asks it; a panel another slot
+        // holds, or one taken out of the table because it is being laid out
+        // (an ancestor), has no size here.
         let Some(mut record) = self.records.remove(panel) else {
             return Size::ZERO;
         };
-        let size = if record.parent.as_ref() != Some(owner) {
+        let size = if !record.held_by(owner, index) {
             Size::ZERO
         } else if let Some((_, size)) = record.measured.iter().flatten().find(|(kept, _)| *kept == constraint) {
             *size
@@ -137,6 +148,20 @@ fn measure(record: &mut Record, constraint: Constraint, panels: &mut Panels<'_>)
     record.layout.size()
 }
 
+impl Record {
+    /// True when slot number `index` of the panel keyed `owner` holds it.
+    fn held_by(&self, owner: &UiId, index: usize) -> bool {
+        self.parent
+            .as_ref()
+            .is_some_and(|(key, at)| key == owner && *at == index)
+    }
+
+    /// The key of the panel whose slot holds it.
+    fn parent_key(&self) -> Option<&UiId> {
+        self.parent.as_ref().map(|(key, _)| key)
+    }
+}
+
 impl Default for Window {
     fn default() -> Self {
         Self {
@@ -153,14 +178,24 @@ impl Window {
     /// Takes the panels of a new view, `built` as [`View::built`] gives
     /// them: an element tree for each panel that is new or changed. Drops
     /// the panels the view no longer has, and works out again which panel
-    /// is in which slot. Returns the keys the rebuilds dropped
-    /// ([`Layout::duplicate_keys`]).
+    /// is in which slot.
+    ///
+    /// A panel that comes into a slot or leaves one changes its parent's
+    /// layout even when the parent did not rebuild, so the parent's slot is
+    /// laid out again. A change of order or of slots also means the last
+    /// layout no longer matches, so reads wait for the next
+    /// [`Window::lay_out`].
     ///
     /// [`View::built`]: crate::view::View::built
-    pub(crate) fn sync(&mut self, built: Vec<(UiId, Layer, Option<Element>)>) -> u64 {
+    pub(crate) fn sync(&mut self, built: Vec<(UiId, Layer, Option<Element>)>) -> Synced {
+        let before: Vec<(UiId, Option<(UiId, usize)>)> = self
+            .records
+            .iter()
+            .map(|(key, record)| (key.clone(), record.parent.clone()))
+            .collect();
+        let old_order = std::mem::take(&mut self.order);
         self.records
             .retain(|key, _| built.iter().any(|(kept, _, _)| kept == key));
-        self.order.clear();
         let mut dropped = 0;
         for (key, layer, element) in built {
             let record = self.records.entry(key.clone()).or_insert_with(|| Record {
@@ -191,15 +226,60 @@ impl Window {
             self.order.push(key);
         }
         self.link();
-        dropped
+
+        let mut composition = self.order != old_order;
+        let new: Vec<(UiId, Option<(UiId, usize)>)> = self
+            .records
+            .iter()
+            .map(|(key, record)| (key.clone(), record.parent.clone()))
+            .collect();
+        for (key, old) in &before {
+            let now = new
+                .iter()
+                .find(|(kept, _)| kept == key)
+                .and_then(|(_, parent)| parent.clone());
+            if *old != now {
+                composition = true;
+                self.moved(key, old.as_ref(), now.as_ref());
+            }
+        }
+        for (key, now) in &new {
+            if now.is_some() && !before.iter().any(|(kept, _)| kept == key) {
+                composition = true;
+                self.moved(key, None, now.as_ref());
+            }
+        }
+        if composition {
+            self.laid_out_at = None;
+        }
+        Synced { dropped, composition }
+    }
+
+    /// The panel keyed `key` left the slot `from`, if any, and came into
+    /// `to`, if any. Each parent lays that slot out again, and measures
+    /// itself again if it is in a shrink slot; the panel forgets the sizes
+    /// it measured in its old place.
+    fn moved(&mut self, key: &UiId, from: Option<&(UiId, usize)>, to: Option<&(UiId, usize)>) {
+        for (owner, _) in [from, to].into_iter().flatten() {
+            if let Some(parent) = self.records.get_mut(owner) {
+                parent.layout.slot_changed(key);
+                parent.dirty = true;
+                parent.remeasure |= parent.measured.iter().any(Option::is_some);
+            }
+        }
+        if let Some(record) = self.records.get_mut(key) {
+            record.measured = [None; MEASURED_SIZES];
+            record.remeasure = false;
+            record.slot = None;
+        }
     }
 
     /// Works out each panel's parent from the slots, in view order.
     fn link(&mut self) {
-        let mut parents: HashMap<UiId, UiId> = HashMap::new();
+        let mut parents: HashMap<UiId, (UiId, usize)> = HashMap::new();
         for owner in &self.order {
             let record = &self.records[owner];
-            for (child, _) in record.layout.slots() {
+            for (index, (child, _)) in record.layout.slots().enumerate() {
                 let Some(held) = self.records.get(child) else {
                     continue;
                 };
@@ -210,7 +290,7 @@ impl Window {
                 } else if parents.contains_key(child) {
                     self.mistake(&format!("panel {child} is in two slots"));
                 } else {
-                    parents.insert(child.clone(), owner.clone());
+                    parents.insert(child.clone(), (owner.clone(), index));
                 }
             }
         }
@@ -220,12 +300,12 @@ impl Window {
             let mut at = parents.get(key);
             for _ in 0..self.order.len() {
                 match at {
-                    Some(parent) if parent == key => {
+                    Some((parent, _)) if parent == key => {
                         self.mistake(&format!("the slots of panel {key} hold its own ancestor"));
                         parents.remove(key);
                         break;
                     }
-                    Some(parent) => at = parents.get(parent),
+                    Some((parent, _)) => at = parents.get(parent),
                     None => break,
                 }
             }
@@ -265,16 +345,17 @@ impl Window {
 
     /// Measures each rebuilt panel again in the spaces its shrink slot
     /// offered before, deepest first, and tells its parent to lay out again
-    /// where a size changed.
+    /// where a size changed. A parent that is itself in a shrink slot is
+    /// then measured again too, so a change moves up through every
+    /// enclosing shrink slot.
     fn remeasure(&mut self, text: &mut dyn TextMeasure, laid: &mut Laid) {
-        let mut waiting: Vec<(usize, UiId)> = self
+        while let Some(key) = self
             .order
             .iter()
             .filter(|key| self.records[*key].remeasure)
-            .map(|key| (self.depth(key), key.clone()))
-            .collect();
-        waiting.sort_by_key(|(depth, _)| std::cmp::Reverse(*depth));
-        for (_, key) in waiting {
+            .max_by_key(|key| self.depth(key))
+            .cloned()
+        {
             let mut record = self.records.remove(&key).expect("a waiting panel has a record");
             let before = std::mem::replace(&mut record.measured, [None; MEASURED_SIZES]);
             let mut changed = false;
@@ -292,11 +373,12 @@ impl Window {
                 changed |= size != old;
             }
             record.remeasure = false;
-            let parent = record.parent.clone();
+            let parent = record.parent_key().cloned();
             self.records.insert(key.clone(), record);
             if changed && let Some(parent) = parent.and_then(|parent| self.records.get_mut(&parent)) {
                 parent.layout.slot_changed(&key);
                 parent.dirty = true;
+                parent.remeasure |= parent.measured.iter().any(Option::is_some);
             }
         }
     }
@@ -304,10 +386,10 @@ impl Window {
     /// How many panels are around the one keyed `key`.
     fn depth(&self, key: &UiId) -> usize {
         let mut depth = 0;
-        let mut at = self.records[key].parent.as_ref();
+        let mut at = self.records[key].parent_key();
         while let Some(parent) = at {
             depth += 1;
-            at = self.records[parent].parent.as_ref();
+            at = self.records[parent].parent_key();
         }
         depth
     }
@@ -336,12 +418,8 @@ impl Window {
         let slots: Vec<(UiId, Rect)> = record.layout.slots().map(|(child, at)| (child.clone(), at)).collect();
         self.records.insert(key.clone(), record);
         self.drawn.push(key.clone());
-        for (child, at) in slots {
-            if self
-                .records
-                .get(&child)
-                .is_some_and(|held| held.parent.as_ref() == Some(key))
-            {
+        for (index, (child, at)) in slots.into_iter().enumerate() {
+            if self.records.get(&child).is_some_and(|held| held.held_by(key, index)) {
                 let place = Point::new(origin.x + at.x, origin.y + at.y);
                 self.place(&child, place, at.size(), text, laid);
             }

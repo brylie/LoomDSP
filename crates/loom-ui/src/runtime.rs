@@ -440,7 +440,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         };
         self.counts.panels_compared += view.len() as u64;
         self.counts.panels_changed += changed as u64;
-        self.counts.duplicate_keys += self.panels.sync(view.built(self.view.as_ref()));
+        let synced = self.panels.sync(view.built(self.view.as_ref()));
+        self.counts.duplicate_keys += synced.dropped;
         self.view = Some(view);
 
         let spec = self.app.window();
@@ -449,7 +450,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.spec = Some(spec);
         }
         self.deadline = self.app.next_deadline();
-        changed > 0
+        // A new order of panels, or a panel in another slot, is drawn
+        // differently even when no model changed.
+        changed > 0 || synced.composition
     }
 }
 

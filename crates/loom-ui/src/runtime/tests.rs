@@ -803,6 +803,7 @@ fn a_turn_lays_nothing_out_and_lay_out_does() {
 /// Section 5, rule 8: a read after a change and before `lay_out` would be
 /// out of date, so it panics in a debug build.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "call Runtime::lay_out first")]
 fn a_read_before_lay_out_panics() {
     let mut runtime = composed();
@@ -835,4 +836,56 @@ fn dropped_keys_are_counted() {
     runtime.waker().send(vec!["open", "open", "open"]);
     runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
     assert_eq!(runtime.counts().duplicate_keys, 2);
+}
+
+/// Two roots, `a` and `b`, in the order the message gives.
+#[derive(Default)]
+struct Ordered {
+    /// True to list `b` first.
+    flipped: bool,
+}
+
+impl App for Ordered {
+    type Message = bool;
+
+    fn update(&mut self, flipped: bool, _cx: &Context<'_, Self::Message>) -> Effects<Self::Message> {
+        self.flipped = flipped;
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        /// A keyed square.
+        fn square(_: &()) -> crate::Element {
+            crate::Element::space(crate::Length::Fixed(10.0), crate::Length::Fixed(10.0)).key("square")
+        }
+        let keys = if self.flipped { ["b", "a"] } else { ["a", "b"] };
+        for key in keys {
+            view.panel_with(UiId::panel(key), Layer::Panels, &(), square);
+        }
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec {
+            title: "Ordered".to_string(),
+            min_size: None,
+        }
+    }
+}
+
+/// Section 5, rule 8: a new order of panels with the same models changes
+/// what is drawn on top, so the turn draws.
+#[test]
+fn a_new_order_of_panels_draws() {
+    let mut runtime = Runtime::new(
+        Ordered::default(),
+        NoTarget,
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    runtime.waker().send(false);
+    assert!(!runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).draw);
+    runtime.waker().send(true);
+    assert!(runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver).draw);
 }

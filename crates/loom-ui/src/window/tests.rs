@@ -365,6 +365,7 @@ fn mistaken(mistake: &str) -> View {
 
 /// A slot for a panel in another layer is a mistake.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "panel a has a slot for b, which is in another layer")]
 fn a_slot_for_another_layer_panics_in_a_debug_build() {
     Screen::new().show_view(mistaken("layer"));
@@ -372,6 +373,7 @@ fn a_slot_for_another_layer_panics_in_a_debug_build() {
 
 /// One panel in two slots is a mistake.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "panel b is in two slots")]
 fn a_panel_in_two_slots_panics_in_a_debug_build() {
     Screen::new().show_view(mistaken("twice"));
@@ -379,6 +381,7 @@ fn a_panel_in_two_slots_panics_in_a_debug_build() {
 
 /// A slot that holds its own ancestor is a mistake.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "the slots of panel a hold its own ancestor")]
 fn a_slot_holding_an_ancestor_panics_in_a_debug_build() {
     Screen::new().show_view(mistaken("loop"));
@@ -402,4 +405,129 @@ fn slot_mistakes_in_a_release_build_keep_the_first() {
     // `a` becomes a root; `b` is in its slot, and `a` in `b`'s is not.
     assert_eq!(place("loop", "b"), Some(Point::ORIGIN));
     assert_eq!(place("loop", "a"), Some(Point::ORIGIN));
+}
+
+/// A row: a shrink slot for the panel `child`, then a keyed 10-pixel
+/// square, `after`, whose place shows the slot's width.
+fn holder(_: &u8) -> Element {
+    Element::row([
+        Element::slot(panel("child")),
+        Element::space(Length::Fixed(10.0), Length::Fixed(10.0)).key("after"),
+    ])
+}
+
+/// A row: a shrink slot for the panel `grandchild`.
+fn middle(_: &u8) -> Element {
+    Element::row([Element::slot(panel("grandchild"))])
+}
+
+/// A view of `holder`, and, with `child` text, the child panel in its slot.
+fn holding(child: Option<&String>) -> View {
+    let mut view = View::new();
+    view.panel_with(panel("holder"), Layer::Panels, &0, holder);
+    if let Some(text) = child {
+        view.panel_with(panel("child"), Layer::Panels, text, shrink_label);
+    }
+    view
+}
+
+/// A panel that leaves or comes into a shrink slot changes its parent's
+/// layout, though the parent did not rebuild.
+#[test]
+fn a_child_coming_or_going_lays_out_its_parent_again() {
+    let mut screen = Screen::new();
+    let text = "Ready".to_string();
+    screen.show_view(holding(Some(&text)));
+    screen.lay_out(Size::new(300.0, 100.0));
+    assert_eq!(screen.at("holder/after").map(|at| at.x), Some(40.0));
+
+    screen.show_view(holding(None));
+    assert!(!screen.window.is_settled(Size::new(300.0, 100.0)));
+    screen.lay_out(Size::new(300.0, 100.0));
+    assert_eq!(screen.at("holder/after").map(|at| at.x), Some(0.0));
+
+    screen.show_view(holding(Some(&text)));
+    screen.lay_out(Size::new(300.0, 100.0));
+    assert_eq!(screen.at("holder/after").map(|at| at.x), Some(40.0));
+}
+
+/// A change in size moves up through every enclosing shrink slot: in
+/// holder, child, grandchild, all in shrink slots, a wider grandchild
+/// widens the child's slot in the holder.
+#[test]
+fn a_new_size_moves_up_through_shrink_slots() {
+    let view = |text: &String| {
+        let mut view = View::new();
+        view.panel_with(panel("holder"), Layer::Panels, &0, holder);
+        view.panel_with(panel("child"), Layer::Panels, &0, middle);
+        view.panel_with(panel("grandchild"), Layer::Panels, text, shrink_label);
+        view
+    };
+    let mut screen = Screen::new();
+    screen.show_view(view(&"Ready".to_string()));
+    screen.lay_out(Size::new(300.0, 100.0));
+    assert_eq!(screen.at("holder/after").map(|at| at.x), Some(40.0));
+
+    screen.show_view(view(&"Ready now".to_string()));
+    screen.lay_out(Size::new(300.0, 100.0));
+    assert_eq!(screen.at("child").map(|at| at.width), Some(72.0));
+    assert_eq!(screen.at("holder/after").map(|at| at.x), Some(72.0));
+}
+
+/// A new order of roots changes what is on top, so reads wait for the next
+/// layout, and then the later root is hit.
+#[test]
+fn a_new_order_of_roots_waits_for_layout() {
+    /// A keyed square of 20 pixels.
+    fn square(_: &u8) -> Element {
+        Element::space(Length::Fixed(20.0), Length::Fixed(20.0)).key("square")
+    }
+    let view = |first: &str, second: &str| {
+        let mut view = View::new();
+        view.panel_with(panel(first), Layer::Panels, &0, square);
+        view.panel_with(panel(second), Layer::Panels, &0, square);
+        view
+    };
+    let top = |screen: &Screen| match screen.window.hit(Point::new(5.0, 5.0)) {
+        Some((_, Hit::Element(id))) => id.to_string(),
+        other => format!("{other:?}"),
+    };
+    let mut screen = Screen::new();
+    screen.show_view(view("a", "b"));
+    screen.lay_out(Size::new(100.0, 100.0));
+    assert_eq!(top(&screen), "b/square");
+
+    screen.show_view(view("b", "a"));
+    assert!(!screen.window.is_settled(Size::new(100.0, 100.0)));
+    screen.lay_out(Size::new(100.0, 100.0));
+    assert_eq!(top(&screen), "a/square");
+}
+
+/// In a release build, a panel one parent names in two slots is in the
+/// first only: placed there, and not hit in the second.
+#[test]
+fn a_panel_named_twice_by_one_parent_is_in_the_first_slot() {
+    /// Two fixed slots for the panel `child`, side by side.
+    fn twice(_: &u8) -> Element {
+        Element::row([
+            Element::slot(panel("child"))
+                .width(Length::Fixed(20.0))
+                .height(Length::Fixed(10.0)),
+            Element::slot(panel("child"))
+                .width(Length::Fixed(20.0))
+                .height(Length::Fixed(10.0)),
+        ])
+    }
+    let mut screen = Screen::new();
+    screen.window.allow_mistakes();
+    let mut view = View::new();
+    view.panel_with(panel("parent"), Layer::Panels, &0, twice);
+    view.panel_with(panel("child"), Layer::Panels, &"Hi".to_string(), label);
+    screen.show_view(view);
+    screen.lay_out(Size::new(100.0, 100.0));
+    assert_eq!(screen.at("child"), Some(rect(0.0, 0.0, 20.0, 10.0)));
+    assert!(matches!(
+        screen.window.hit(Point::new(25.0, 5.0)),
+        None | Some((_, Hit::Blocked))
+    ));
 }

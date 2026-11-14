@@ -111,9 +111,9 @@ pub(crate) trait Measure {
     /// The size of `text` in `style`, wrapped at `wrap_width` or on one
     /// line, as [`TextMeasure::measure`] gives it.
     fn text(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size;
-    /// The size of the panel keyed `panel`, in a slot of the panel keyed
-    /// `owner`, in `constraint`.
-    fn slot(&mut self, owner: &UiId, panel: &UiId, constraint: Constraint) -> Size;
+    /// The size of the panel keyed `panel`, in slot number `index` of the
+    /// panel keyed `owner`, in `constraint`.
+    fn slot(&mut self, owner: &UiId, panel: &UiId, index: usize, constraint: Constraint) -> Size;
 }
 
 /// A measure for one panel on its own: text from a [`TextMeasure`], and a
@@ -125,7 +125,7 @@ impl Measure for Alone<'_> {
         self.0.measure(text, style, wrap_width)
     }
 
-    fn slot(&mut self, _owner: &UiId, _panel: &UiId, _constraint: Constraint) -> Size {
+    fn slot(&mut self, _owner: &UiId, _panel: &UiId, _index: usize, _constraint: Constraint) -> Size {
         Size::ZERO
     }
 }
@@ -159,6 +159,8 @@ pub(crate) enum Leaf {
     Slot {
         /// The panel's key.
         panel: UiId,
+        /// Its number among the panel's slots, in tree order.
+        index: usize,
         /// Its width shrinks to the panel's, so the panel is asked.
         shrink_width: bool,
         /// Its height shrinks to the panel's, so the panel is asked.
@@ -187,6 +189,7 @@ impl Leaf {
             } => Size::ZERO,
             Self::Slot {
                 panel,
+                index,
                 shrink_width,
                 shrink_height,
             } => {
@@ -199,7 +202,7 @@ impl Leaf {
                     width: space(known.width, available.width),
                     height: space(known.height, available.height),
                 };
-                let size = measure.slot(owner, panel, constraint);
+                let size = measure.slot(owner, panel, *index, constraint);
                 Size::new(
                     if *shrink_width { size.width } else { 0.0 },
                     if *shrink_height { size.height } else { 0.0 },
@@ -400,7 +403,8 @@ impl Layout {
         self.duplicates
     }
 
-    /// Each slot's panel and its place in this panel, in tree order.
+    /// Each slot's panel and its place in this panel, in tree order; a
+    /// slot's number is its place in this order.
     pub(crate) fn slots(&self) -> impl Iterator<Item = (&UiId, Rect)> {
         self.slots
             .iter()
@@ -469,9 +473,11 @@ impl Layout {
                 self.tree.new_leaf_with_context(style, leaf)
             }
             Kind::Slot(panel) => {
+                let index = self.slots.len();
                 self.slots.push((panel.clone(), self.records.len()));
                 let leaf = Leaf::Slot {
                     panel,
+                    index,
                     shrink_width: shrinks.0,
                     shrink_height: shrinks.1,
                 };
