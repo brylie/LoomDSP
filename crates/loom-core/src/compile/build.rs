@@ -3,11 +3,8 @@
 
 use super::fades::{FadePlan, key_of};
 use super::*;
-use crate::cable_fade::{InputFade, Ramp};
+use crate::cable_fade::{InputFade, Ramp, fallback};
 use crate::names::ModuleNames;
-
-/// The most voices an audio output can play, as `loom-dsp`'s `MAX_VOICES`.
-const MAX_OUTPUT_VOICES: usize = 16;
 
 /// Builds the [`Schedule`] from the plan. Operations are made the first time
 /// a step needs them, so they are stored in the order they run.
@@ -38,7 +35,6 @@ pub(super) struct Builder<'l, 'a> {
 
 impl<'l, 'a> Builder<'l, 'a> {
     /// Allocates `buffers` buffers of `max_block` samples.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         layout: &'l Layout<'a>,
         plan: &'l Plan,
@@ -190,11 +186,12 @@ impl<'l, 'a> Builder<'l, 'a> {
 
     /// The buffer channel `ch` of `input` should be read from: `target`, or
     /// the channel's fade buffer when it fades (rule 9). Records the read.
-    /// `constant` is the value when `target` is a fixed default.
+    /// `constant` is the value when `target` is a fixed default. `copies`
+    /// is true when each channel is a copy of a module, so a new copy takes
+    /// copy 0's start; where channels are summed, a new one starts from 0.
     fn read_through_fade(
         &mut self,
-        input: InputRef,
-        ch: usize,
+        (input, ch, copies): (InputRef, usize, bool),
         target: *const f32,
         constant: Option<f32>,
     ) -> *const f32 {
@@ -204,14 +201,19 @@ impl<'l, 'a> Builder<'l, 'a> {
                 if let Some(&buffer) = self.fade_buffers.get(&key) {
                     buffer as *const f32
                 } else {
-                    let mut buffer = vec![0.0; self.max_block].into_boxed_slice();
-                    let ptr = buffer.as_mut_ptr();
-                    // The box's memory does not move when the box does.
-                    self.schedule._buffers.push(buffer);
-                    self.fade_buffers.insert(key, ptr);
                     self.schedule
-                        .cable_fades
-                        .push(InputFade::new(key, fresh, self.fades.length, target, ptr));
+                        ._buffers
+                        .push(vec![0.0; self.max_block].into_boxed_slice());
+                    // Taken after the push, from the box where it stays.
+                    let ptr = self.schedule._buffers.last_mut().expect("just pushed").as_mut_ptr();
+                    self.fade_buffers.insert(key, ptr);
+                    self.schedule.cable_fades.push(InputFade::new(
+                        key,
+                        (fresh, fallback(ch, copies)),
+                        self.fades.length,
+                        target,
+                        ptr,
+                    ));
                     self.fresh += usize::from(fresh);
                     ptr as *const f32
                 }
@@ -243,10 +245,10 @@ impl<'l, 'a> Builder<'l, 'a> {
 
     /// The pointer channel `ch` of `input` reads, through its fade if it
     /// fades, and whether a cable is plugged into it.
-    fn read_input(&mut self, input: InputRef, ch: usize) -> (*const f32, bool) {
+    fn read_input(&mut self, input: InputRef, ch: usize, copies: bool) -> (*const f32, bool) {
         let (target, connected) = self.resolve_input(input, ch);
         let constant = self.constant_of(input, ch);
-        (self.read_through_fade(input, ch, target, constant), connected)
+        (self.read_through_fade((input, ch, copies), target, constant), connected)
     }
 
     /// The pointer to buffer `buffer`.
@@ -365,7 +367,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 module: layout.ids[v],
                 port,
             };
-            let (ptr, is_connected) = self.read_input(input, ch);
+            let (ptr, is_connected) = self.read_input(input, ch, true);
             if self.plan.input_buffer(layout, input, ch).is_none() {
                 defaulted |= 1 << port;
             }
@@ -394,7 +396,9 @@ impl<'l, 'a> Builder<'l, 'a> {
                         } else {
                             ch
                         };
-                        channels.push(self.read_input(input, channel).0 as *mut f32);
+                        // Voices of a bundle are read together, not copies.
+                        let copies = node.descriptor.inputs[port].channels != Channels::Voices;
+                        channels.push(self.read_input(input, channel, copies).0 as *mut f32);
                     }
                 }
                 self.schedule.bundle_ports.push(crate::module::BundlePort {
@@ -420,7 +424,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                     .get(&input)
                     .is_some_and(|&from| layout.is_stereo(from))
             {
-                let (ptr, _) = self.read_input(input, right);
+                let (ptr, _) = self.read_input(input, right, true);
                 self.schedule.right_ptrs.push(RightPtr {
                     port: port as u16,
                     output: false,
@@ -431,7 +435,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 // what a mono cable gives, the left signal (rule 9).
                 let (left, _) = self.resolve_input(input, ch / 2 * 2);
                 let constant = self.constant_of(input, ch / 2 * 2);
-                let ptr = self.read_through_fade(input, right, left, constant);
+                let ptr = self.read_through_fade((input, right, true), left, constant);
                 self.schedule.right_ptrs.push(RightPtr {
                     port: port as u16,
                     output: false,
@@ -619,7 +623,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             let ch = self.plan.taps[i].channel;
             let constant = self.plan.taps[i].input.is_none().then_some(0.0);
             let fades = self.schedule.cable_fades.len();
-            tap.input = self.read_through_fade(input, ch, tap.input, constant);
+            tap.input = self.read_through_fade((input, ch, true), tap.input, constant);
             // Each tap reads its own channel, so its fade is always new.
             tap.fade = (self.schedule.cable_fades.len() > fades).then_some(fades as u32);
         }
@@ -677,26 +681,22 @@ impl<'l, 'a> Builder<'l, 'a> {
                 layout.widths.outputs.get(&from).copied().unwrap_or_default().voices
             });
             // Voices only the old schedule played, while they still fade.
-            let fading = (0..MAX_OUTPUT_VOICES)
-                .rev()
-                .find(|&voice| {
-                    [voice * 2, voice * 2 + 1].iter().any(|&ch| {
-                        let key = key_of(input, ch);
-                        match self.fades.input(input, key) {
-                            Some(true) => self.fades.old_reads.contains(&key),
-                            Some(false) => true,
-                            None => false,
-                        }
-                    })
-                })
-                .map_or(0, |voice| voice + 1);
+            let fading = self
+                .fades
+                .old_channels(input)
+                .filter(|&ch| self.fades.input(input, key_of(input, ch)).is_some())
+                .map(|ch| ch / 2 + 1)
+                .max()
+                .unwrap_or(0);
             for voice in 0..voices.max(fading) {
                 let mut side = |ch: usize| {
                     let (target, constant) = match from {
                         Some(from) if voice < voices => (self.ptr(layout.channel_buffer(from, ch)) as *const f32, None),
                         _ => (self.zero, Some(0.0)),
                     };
-                    self.read_through_fade(input, ch, target, constant)
+                    // Voices are summed at the output, so a new one starts
+                    // from 0 rather than from voice 0's value.
+                    self.read_through_fade((input, ch, false), target, constant)
                 };
                 let left = side(voice * 2);
                 let right = side(voice * 2 + 1);

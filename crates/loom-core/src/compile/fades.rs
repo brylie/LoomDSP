@@ -4,7 +4,10 @@
 //! `cable_fade.rs` holds the ramps and what the engine does with them.
 
 use super::*;
-use crate::cable_fade::{MEMBER_MODULE, SELECT_MODULE, SPREAD_SUM_MODULE, SUM_MODULE, SWAP_FADE_MODULE, input_key};
+use crate::cable_fade::{
+    MEMBER_MODULE, MEMBER_PARAM, SELECT_MEMBER_INPUT, SELECT_MODULE, SPREAD_SUM_MODULE, SUM_GAIN_PARAM, SUM_MODULE,
+    SWAP_FADE_MODULE, input_key,
+};
 use crate::display::DisplaySource;
 
 /// A fade that may still run in the engine, named by what it fades. The
@@ -85,23 +88,43 @@ impl Wiring {
     }
 }
 
-/// What feeds input `port` of the module at `v` past the mixers: the first
-/// source upstream that is not a mixer. Follows mixer inputs in order.
-fn signal_through_mixers(layout: &Layout, from: OutputRef, depth: usize) -> Option<SignalType> {
-    let v = *layout.index_of.get(&from.module)?;
-    let node = layout.nodes[v];
-    if MixerKind::of(node.descriptor.id).is_none() || depth > 32 {
-        return node.descriptor.outputs.get(from.port).map(|port| port.signal);
-    }
-    (0..node.input_count())
-        .filter(|&port| node.descriptor.inputs[port].name != "member")
-        .filter_map(|port| {
-            layout.graph.source_of(InputRef {
-                module: from.module,
-                port,
+/// The signal types outputs carry past the mixers, worked out at most once
+/// per output in a compile, so a patch of many mixers that share inputs
+/// costs time linear in its cables, not exponential in its depth.
+#[derive(Default)]
+pub(super) struct Carried(BTreeMap<OutputRef, Option<SignalType>>);
+
+impl Carried {
+    /// What `from` carries: its own type, or for a mixer's output the type
+    /// of the first source upstream that is not a mixer, following the
+    /// mixer's inputs in order. `None` when nothing upstream has a type.
+    fn signal(&mut self, layout: &Layout, from: OutputRef) -> Option<SignalType> {
+        if let Some(&known) = self.0.get(&from) {
+            return known;
+        }
+        let v = *layout.index_of.get(&from.module)?;
+        let node = layout.nodes[v];
+        if MixerKind::of(node.descriptor.id).is_none() {
+            let signal = node.descriptor.outputs.get(from.port).map(|port| port.signal);
+            self.0.insert(from, signal);
+            return signal;
+        }
+        // Marked before the walk, so a loop of mixers ends.
+        self.0.insert(from, None);
+        let signal = (0..node.input_count())
+            .filter(|&port| node.descriptor.inputs[port].name != SELECT_MEMBER_INPUT)
+            .filter_map(|port| {
+                layout.graph.source_of(InputRef {
+                    module: from.module,
+                    port,
+                })
             })
-        })
-        .find_map(|source| signal_through_mixers(layout, source, depth + 1))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .find_map(|source| self.signal(layout, source));
+        self.0.insert(from, signal);
+        signal
+    }
 }
 
 /// True when a signal of this type fades (rule 9): audio, modulation, and
@@ -110,9 +133,25 @@ fn fades(signal: SignalType) -> bool {
     matches!(signal, SignalType::Audio | SignalType::Modulation | SignalType::Pitch)
 }
 
-/// True when input `port` of the module at `v` fades on a cable change:
-/// its own type, and for a mixer's input the type it carries.
-pub(super) fn input_fades(layout: &Layout, v: usize, port: usize, from: Option<OutputRef>) -> bool {
+/// True when the module is one of the mixers the editor adds.
+fn is_mixer(layout: &Layout, module: ModuleId) -> bool {
+    layout
+        .index_of
+        .get(&module)
+        .is_some_and(|&v| MixerKind::of(layout.nodes[v].descriptor.id).is_some())
+}
+
+/// True when input `port` of the module at `v` fades on a cable change.
+/// The port's own type decides (rule 9). Into or out of a mixer, whose
+/// ports carry any signal, the type the cable carries past the mixers
+/// decides too, so a gate through a Sum switches.
+pub(super) fn input_fades(
+    layout: &Layout,
+    carried: &mut Carried,
+    v: usize,
+    port: usize,
+    from: Option<OutputRef>,
+) -> bool {
     let node = layout.nodes[v];
     if node.unknown.is_some() {
         return false;
@@ -123,16 +162,15 @@ pub(super) fn input_fades(layout: &Layout, v: usize, port: usize, from: Option<O
     if !fades(spec.signal) {
         return false;
     }
-    let mixer = MixerKind::of(node.descriptor.id);
-    if mixer.is_some() && spec.name == "member" {
+    let mixer = MixerKind::of(node.descriptor.id).is_some();
+    if mixer && spec.name == SELECT_MEMBER_INPUT {
         // Read as a whole member number: a ramp would walk through the
         // wrong members.
         return false;
     }
     match from {
-        // Through a mixer, or into one: the first source past the mixers.
-        Some(from) => signal_through_mixers(layout, from, 0).is_none_or(fades),
-        None => true,
+        Some(from) if mixer || is_mixer(layout, from.module) => carried.signal(layout, from).is_none_or(fades),
+        _ => true,
     }
 }
 
@@ -140,7 +178,7 @@ pub(super) fn input_fades(layout: &Layout, v: usize, port: usize, from: Option<O
 fn mixer_of(graph: &Graph, id: ModuleId, node: &Node) -> Option<Mixer> {
     let kind = MixerKind::of(node.descriptor.id)?;
     let signal_ports: Vec<usize> = (0..node.input_count())
-        .filter(|&port| node.descriptor.inputs[port].name != "member")
+        .filter(|&port| node.descriptor.inputs[port].name != SELECT_MEMBER_INPUT)
         .collect();
     let inputs: Vec<Option<OutputRef>> = signal_ports
         .iter()
@@ -149,10 +187,7 @@ fn mixer_of(graph: &Graph, id: ModuleId, node: &Node) -> Option<Mixer> {
     let connected: Vec<OutputRef> = inputs.iter().flatten().copied().collect();
     let alone = match kind {
         // One input at gain 1 plays that input exactly.
-        MixerKind::Sum => {
-            let gain = node.params.first().copied().unwrap_or(1.0);
-            (connected.len() == 1 && gain == 1.0).then(|| connected[0])
-        }
+        MixerKind::Sum => (connected.len() == 1 && sum_gain(node) == Some(1.0)).then(|| connected[0]),
         // A spread sum pans, so it never plays a source unchanged.
         MixerKind::SpreadSum => None,
         MixerKind::Select => select_choice(graph, id, node, &inputs),
@@ -182,7 +217,7 @@ fn mixer_of(graph: &Graph, id: ModuleId, node: &Node) -> Option<Mixer> {
 /// The input a Select plays, from its Member module's value in the graph.
 /// `None` when the member is modulated, so the compiler cannot know.
 fn select_choice(graph: &Graph, id: ModuleId, node: &Node, inputs: &[Option<OutputRef>]) -> Option<OutputRef> {
-    let member_port = node.descriptor.input_index("member")?;
+    let member_port = node.descriptor.input_index(SELECT_MEMBER_INPUT)?;
     let value = match graph.source_of(InputRef {
         module: id,
         port: member_port,
@@ -199,7 +234,7 @@ fn select_choice(graph: &Graph, id: ModuleId, node: &Node, inputs: &[Option<Outp
             if graph.assignments.values().any(|a| a.target == from.module) {
                 return None;
             }
-            *member.params.first()?
+            *member.params.get(member.descriptor.param_index(MEMBER_PARAM)?)?
         }
     };
     let members = node
@@ -208,7 +243,12 @@ fn select_choice(graph: &Graph, id: ModuleId, node: &Node, inputs: &[Option<Outp
         .and_then(|i| node.params.get(i).copied())
         .unwrap_or(inputs.len() as f32);
     let pick = value.round().clamp(1.0, members.max(1.0)) as usize;
-    inputs.get(pick - 1).copied().flatten()
+    inputs.get(pick.checked_sub(1)?).copied().flatten()
+}
+
+/// A Sum's gain, by name.
+fn sum_gain(node: &Node) -> Option<f32> {
+    node.params.get(node.descriptor.param_index(SUM_GAIN_PARAM)?).copied()
 }
 
 /// What fades in the next schedule.
@@ -276,16 +316,22 @@ impl FadePlan {
                             && (mixer.kind != MixerKind::SwapFade || done.contains(&old.module))
                     })
             });
-            // A Layer that adds members (rule B): onto a new Sum at gain 1
-            // whose inputs hold the old source. Its other inputs fade in.
-            let layer = new.and_then(|new| new_mixers.get(&new.module)).is_some_and(|mixer| {
+            onto || off
+        };
+        // A Layer that adds members (rule B): a cable moved onto a new Sum
+        // at gain 1 whose inputs hold its old source. The cable switches,
+        // and the Sum's other inputs fade in below. Only cables: an
+        // assignment moved onto such a Sum fades as any moved source does.
+        let layer_sum = |old: Option<OutputRef>, new: Option<OutputRef>| -> Option<&Mixer> {
+            let new = new?;
+            new_mixers.get(&new.module).filter(|mixer| {
                 mixer.kind == MixerKind::Sum
                     && old.is_some()
                     && mixer.inputs.contains(&old)
-                    && graph.nodes[&new.expect("checked").module].params.first() == Some(&1.0)
-            });
-            onto || off || layer
+                    && sum_gain(&graph.nodes[&new.module]) == Some(1.0)
+            })
         };
+        let mut carried_types = Carried::default();
         for (v, node) in layout.nodes.iter().enumerate() {
             let id = layout.ids[v];
             if !previous.modules.contains(&id) {
@@ -295,10 +341,12 @@ impl FadePlan {
                 let input = InputRef { module: id, port };
                 let old = previous.cables.get(&input).copied();
                 let new = graph.source_of(input);
-                if old == new || exact(old, new) {
+                if old == new || exact(old, new) || layer_sum(old, new).is_some() {
                     continue;
                 }
-                if input_fades(layout, v, port, new) && old.is_none_or(|old| input_fades_old(layout, v, port, old)) {
+                if input_fades(layout, &mut carried_types, v, port, new)
+                    && old.is_none_or(|old| input_fades_old(layout, &mut carried_types, v, port, old))
+                {
                     plan.fresh.insert(input);
                 }
             }
@@ -307,20 +355,14 @@ impl FadePlan {
         // new Sum at gain 1 that holds its old source, and the Sum's other
         // inputs fade in from 0.
         for (&to, &from) in &graph.cables {
-            let Some(mixer) = new_mixers.get(&from.module) else {
+            let old = previous.cables.get(&to).copied();
+            let Some(mixer) = layer_sum(old, Some(from)) else {
                 continue;
             };
-            let Some(old) = previous.cables.get(&to).copied() else {
-                continue;
-            };
-            let gain = graph.nodes[&from.module].params.first().copied();
-            if mixer.kind != MixerKind::Sum || gain != Some(1.0) || !mixer.inputs.contains(&Some(old)) {
-                continue;
-            }
             for (port, source) in mixer.inputs.iter().enumerate() {
-                if source.is_some_and(|source| source != old) {
+                if source.is_some() && *source != old {
                     let v = layout.index(from.module);
-                    if input_fades(layout, v, port, *source) {
+                    if input_fades(layout, &mut carried_types, v, port, *source) {
                         plan.fresh.insert(InputRef {
                             module: from.module,
                             port,
@@ -426,6 +468,18 @@ impl FadePlan {
         }
     }
 
+    /// The channels of `input` that the last schedule read or that may
+    /// still be fading, so a voice only the old cable had keeps a reader
+    /// while it fades out.
+    pub(super) fn old_channels(&self, input: InputRef) -> impl Iterator<Item = usize> + '_ {
+        let start = key_of(input, 0);
+        let end = start | 0xFFFF;
+        self.old_reads
+            .range(start..=end)
+            .chain(self.carried.range(start..=end))
+            .map(|&key| (key & 0xFFFF) as usize)
+    }
+
     /// How the contribution of assignment `id` on fill `fill` of
     /// `(target, param)` fades: `Some(fresh)` or `None` for no ramp.
     pub(super) fn contribution(&self, target: ModuleId, param: usize, id: AssignmentId, fill: u64) -> Option<bool> {
@@ -469,11 +523,11 @@ impl FadePlan {
 /// True when the old cable `old` into input `port` of the module at `v`
 /// carried a signal that fades. When its source is gone from the graph,
 /// only the input's own type is left to read.
-fn input_fades_old(layout: &Layout, v: usize, port: usize, old: OutputRef) -> bool {
+fn input_fades_old(layout: &Layout, carried: &mut Carried, v: usize, port: usize, old: OutputRef) -> bool {
     if layout.index_of.contains_key(&old.module) {
-        input_fades(layout, v, port, Some(old))
+        input_fades(layout, carried, v, port, Some(old))
     } else {
-        input_fades(layout, v, port, None)
+        input_fades(layout, carried, v, port, None)
     }
 }
 

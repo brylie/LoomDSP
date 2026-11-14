@@ -30,6 +30,13 @@ pub const MEMBER_MODULE: &str = "loom.struct.member";
 /// crossfades).
 pub const SWAP_FADE_MODULE: &str = "loom.struct.fade";
 
+/// The input of a Select that picks the member, read as a whole number.
+pub const SELECT_MEMBER_INPUT: &str = "member";
+/// The parameter of a Member module that holds the member it picks.
+pub const MEMBER_PARAM: &str = "member";
+/// The parameter of a Sum that scales the sum.
+pub const SUM_GAIN_PARAM: &str = "gain";
+
 /// The mixers the editor adds. Rule 9 treats cables onto and off them
 /// specially, because a mixer that plays one source alone carries that
 /// source on with no step (live patching spec, rule 9, The mixers the
@@ -167,6 +174,13 @@ pub(crate) struct InputFade {
     /// what the input read last. False for a fade carried from the last
     /// schedule, which goes on where it was or starts finished.
     pub(crate) fresh: bool,
+    /// For a fresh fade with nothing to read, the channel of the same
+    /// input whose start it takes: the left side for a right side, copy 0
+    /// for a new copy of a module. `None` starts from 0, as a new voice
+    /// does where voices are summed (the audio output, a bundle input).
+    fallback: Option<u16>,
+    /// Set at the swap while the held value is still to be found.
+    pending: bool,
     target: *const f32,
     buffer: *mut f32,
 }
@@ -174,12 +188,24 @@ pub(crate) struct InputFade {
 impl InputFade {
     /// A fade from `target` into `buffer`. The held value is set at the
     /// swap.
-    pub(crate) fn new(key: u64, fresh: bool, length: u32, target: *const f32, buffer: *mut f32) -> Self {
+    pub(crate) fn new(
+        key: u64,
+        (fresh, fallback): (bool, Option<u16>),
+        length: u32,
+        target: *const f32,
+        buffer: *mut f32,
+    ) -> Self {
         debug_assert!(!std::ptr::eq(target, buffer), "a fade reads another buffer");
+        debug_assert!(
+            fallback.is_none_or(|channel| usize::from(channel) < key_channel(key)),
+            "a fade takes its start from a lower channel"
+        );
         Self {
             key,
             ramp: Ramp::finished(length),
             fresh,
+            fallback,
+            pending: false,
             target,
             buffer,
         }
@@ -208,6 +234,30 @@ pub(crate) fn input_key(module: u32, port: usize, channel: usize) -> u64 {
 /// The channel part of an input-channel key.
 fn key_channel(key: u64) -> usize {
     (key & 0xFFFF) as usize
+}
+
+/// Where a fresh fade on channel `channel` takes its start when it has
+/// nothing of its own to read: a right side from its own voice's left side,
+/// a new copy of a module (`copies`) from copy 0, and a new voice that is
+/// summed with the others from nothing.
+pub(crate) fn fallback(channel: usize, copies: bool) -> Option<u16> {
+    if channel % 2 == 1 {
+        u16::try_from(channel - 1).ok()
+    } else if channel > 0 && copies {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+/// The last of the first `frames` samples at `ptr`, or `None` when no frame
+/// ran.
+fn last_sample(ptr: *const f32, frames: usize) -> Option<f32> {
+    let last = frames.checked_sub(1)?;
+    // SAFETY: callers pass a buffer of `max_block` floats owned by the old
+    // schedule, which is alive during the swap, and `frames` is the length
+    // of that schedule's last block, so `last < frames <= max_block`.
+    Some(unsafe { *ptr.add(last) })
 }
 
 /// Runs `fades` over `len` frames from `offset`.
@@ -266,13 +316,8 @@ pub(crate) fn finish_all(schedule: &mut Schedule) {
 fn last_read(old: &Schedule, key: u64, frames: usize) -> Option<f32> {
     let i = old.reads.binary_search_by_key(&key, |read| read.key).ok()?;
     let read = &old.reads[i];
-    match frames.checked_sub(1) {
-        // SAFETY: every pointer in `reads` names a buffer of `max_block`
-        // floats owned by `old`, which is alive here, and the last block
-        // filled its first `frames <= max_block` floats.
-        Some(last) => Some(unsafe { *read.ptr.add(last) }),
-        None => read.constant,
-    }
+    // Every pointer in `reads` names a buffer of `max_block` floats in `old`.
+    last_sample(read.ptr, frames).or(read.constant)
 }
 
 /// Fills in the held value of each fade and contribution ramp of `new` from
@@ -310,15 +355,9 @@ pub(crate) fn take_state_from(new: &mut Schedule, old: &Schedule, frames: usize)
             } else {
                 last_read(old, key, frames)
             };
-            match held {
-                Some(held) => Ramp::new(held, length),
-                // Filled from copy 0 below, or 0.
-                None => Ramp {
-                    held: f32::NAN,
-                    position: 0,
-                    length,
-                },
-            }
+            fade.pending = held.is_none();
+            // A pending fade is filled below, from another channel or 0.
+            Ramp::new(held.unwrap_or(0.0), length)
         } else {
             match previous {
                 Some(previous) if !previous.is_done() => {
@@ -330,36 +369,30 @@ pub(crate) fn take_state_from(new: &mut Schedule, old: &Schedule, frames: usize)
             }
         };
     }
-    // A fresh fade with nothing to read is a new copy, or a module that
-    // read nothing: it takes copy 0's start (rule 6), or starts from 0.
-    // Reads only fades already filled above.
+    // A fresh fade with nothing to read takes the start of a lower channel
+    // of the same input (its left side, or copy 0, rule 6), or starts from
+    // 0. Keys sort by channel, so that channel is already settled here.
     for n in 0..new.cable_fade_order.len() {
         let i = new.cable_fade_order[n] as usize;
         let fade = &new.cable_fades[i];
-        if !(fade.fresh && fade.ramp.held.is_nan() && fade.ramp.position == 0) {
+        if !fade.pending {
             continue;
         }
-        let key = fade.key;
         let length = fade.ramp.length;
-        let channel = key_channel(key);
-        let copy0 = (channel != 0)
-            .then(|| {
-                let base = key & !0xFFFF;
-                new.cable_fade_order
-                    .binary_search_by_key(&base, |&k| new.cable_fades[k as usize].key)
-                    .ok()
-                    .map(|k| new.cable_fades[new.cable_fade_order[k] as usize].ramp)
-            })
-            .flatten()
-            .filter(|ramp| !ramp.held.is_nan());
-        new.cable_fades[i].ramp = match copy0 {
-            Some(ramp) => {
-                let mut copied = Ramp::finished(length);
-                copied.continue_from(&ramp);
-                copied
-            }
-            None => Ramp::new(0.0, length),
-        };
+        let from = fade.fallback.and_then(|channel| {
+            let key = (fade.key & !0xFFFF) | u64::from(channel);
+            let k = new
+                .cable_fade_order
+                .binary_search_by_key(&key, |&k| new.cable_fades[k as usize].key)
+                .ok()?;
+            Some(new.cable_fades[new.cable_fade_order[k] as usize].ramp)
+        });
+        let fade = &mut new.cable_fades[i];
+        fade.pending = false;
+        if let Some(from) = from {
+            fade.ramp = Ramp::finished(length);
+            fade.ramp.continue_from(&from);
+        }
     }
     take_contributions_from(new, old, frames);
 }
@@ -385,7 +418,11 @@ fn take_contributions_from(new: &mut Schedule, old: &Schedule, frames: usize) {
                 ModSource::Leaving { id, ramp, fresh } => (*id, ramp, *fresh),
             };
             let length = ramp.length;
-            let previous = old_fill.and_then(|old_fill| old_fill.sources.iter().find(|source| source.id() == id));
+            // A fill's sources are sorted by assignment id.
+            let previous = old_fill.and_then(|old_fill| {
+                let k = old_fill.sources.binary_search_by_key(&id, ModSource::id).ok()?;
+                Some(&old_fill.sources[k])
+            });
             *ramp = if fresh {
                 let held = previous.map_or(0.0, |previous| contribution_of(previous, old_assignments, frames));
                 Ramp::new(held, length)
@@ -417,19 +454,20 @@ fn contribution_of(source: &ModSource, assignments: &[crate::compile::Assignment
         ModSource::Live {
             state, buffer, ramp, ..
         } => {
-            let Some(last) = frames.checked_sub(1) else {
+            if frames == 0 {
                 return ramp.map_or(0.0, |ramp| if ramp.is_done() { 0.0 } else { ramp.held() });
-            };
+            }
             let Some(assignment) = assignments.get(*state as usize) else {
                 return 0.0;
             };
             if !assignment.enabled || assignment.depth == 0.0 || assignment.silent_source {
                 return 0.0;
             }
-            // SAFETY: `buffer` is an output or delay tap of `max_block`
-            // floats owned by the old schedule, which is alive here, and
-            // its last block filled its first `frames <= max_block` floats.
-            let sample = unsafe { *buffer.add(last) };
+            // `buffer` is an output or delay tap of `max_block` floats in
+            // the old schedule.
+            let Some(sample) = last_sample(*buffer, frames) else {
+                return 0.0;
+            };
             let sample = match assignment.polarity {
                 Some(polarity) => polarity.remap(assignment.source_polarity, sample),
                 None => sample,

@@ -411,20 +411,23 @@ impl Controller {
         report.without_live_value = missing;
         // Order matters: swap first (the new schedule no longer uses the
         // removed slots), then remove the instances.
-        let pushed = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok()
-            && self
-                .slots
-                .retiring()
-                .iter()
-                .all(|&slot| self.commands.push(Command::RemoveModule { slot }).is_ok());
-        debug_assert!(pushed, "capacity was checked above");
-        if pushed {
+        let swapped = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok();
+        // The engine runs the schedule once it is sent, so what the next
+        // compile fades from follows that push alone (rule 9).
+        if swapped {
             self.cable_fades = CableFades {
                 wiring: Some(wiring),
                 generation,
                 fading,
             };
         }
+        let pushed = swapped
+            && self
+                .slots
+                .retiring()
+                .iter()
+                .all(|&slot| self.commands.push(Command::RemoveModule { slot }).is_ok());
+        debug_assert!(pushed, "capacity was checked above");
         self.slots.free_retired();
         self.dirty = false;
         self.last_report = report;

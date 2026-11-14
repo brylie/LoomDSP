@@ -105,7 +105,7 @@ fn running_a_fade_fills_its_buffer_from_its_target() {
     let mut buffer = [9.0f32; 8];
     let mut fades = [InputFade::new(
         input_key(1, 0, 0),
-        true,
+        (true, None),
         4,
         target.as_ptr(),
         buffer.as_mut_ptr(),

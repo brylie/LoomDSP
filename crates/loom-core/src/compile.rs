@@ -125,9 +125,10 @@ pub struct CompileReport {
     pub stereo_outputs: BTreeSet<OutputRef>,
     /// Voice count and stereo sides of every output.
     pub widths: BTreeMap<OutputRef, Width>,
-    /// Input channels and modulation contributions that start a 5 ms fade
-    /// at this swap, because their cable or assignment changed (live
-    /// patching spec, rule 9). 0 on the first schedule after a load.
+    /// Input channels and modulation contributions planned to start a 5 ms
+    /// fade at this swap, because their cable or assignment changed (live
+    /// patching spec, rule 9). 0 on the first schedule after a load. The
+    /// engine ends them at once if it has not played a block yet.
     pub cable_fades: usize,
 }
 
