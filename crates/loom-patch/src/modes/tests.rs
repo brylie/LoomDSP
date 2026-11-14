@@ -211,7 +211,14 @@ fn status_texts_read_as_the_spec_names_them() {
         fills_a_role("Voice", "Filter"),
         "Voice fills Filter; turn that off before changing its mode"
     );
-    assert_eq!(stack_holds_slot("Voice"), "Cannot stack Voice: it holds a slot");
+    assert_eq!(
+        mode_moves_slot("Voice", Mode::Layer),
+        "Cannot make Voice a layer: it holds a slot"
+    );
+    assert_eq!(
+        mode_moves_slot("Pad", Mode::Single),
+        "Cannot make Pad single: it holds a slot"
+    );
     assert_eq!(Mode::ALL.map(Mode::label), ["Single", "Layer", "Select", "Stack"]);
     assert!(Mode::Layer.has_members() && Mode::Select.has_members() && !Mode::Stack.has_members());
 }

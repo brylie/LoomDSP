@@ -267,3 +267,111 @@ fn a_surface_control_bound_to_an_empty_slot_is_dimmed_and_says_why() {
     let panel = crate::surface::surface_panel(graph, &app.session.hierarchy, loom_core::ModuleId(2));
     assert_eq!(panel.widgets[0].hover.description, "Filter has no part.");
 }
+
+/// A Voice stacked four times whose Filter slot holds an SVF.
+const STACKED: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stacked"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1"),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// The app with `text` open and an engine that holds at most `max_modules`.
+fn app_with_limit(text: &str, max_modules: usize) -> App {
+    let patch = loom_patch::Patch::from_ron(text).unwrap();
+    let config = EngineConfig {
+        max_modules,
+        ..EngineConfig::default()
+    };
+    let loaded = Loaded::read(
+        config,
+        false,
+        Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    App::assemble(
+        Err("test".to_string()),
+        48_000.0,
+        loaded,
+        1,
+        &crate::tests::app_args(),
+        crate::settings::Rig::empty(),
+        false,
+    )
+}
+
+/// Raising Copies while a swap inside the stack still fades finishes the
+/// fade first, so the new copies never meet a half-done fade (ADR-0044).
+#[test]
+fn a_mode_edit_during_a_fade_finishes_it_first() {
+    let mut app = app_with(STACKED);
+    let slot = inside(&app, 9);
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".into()),
+    });
+    assert_eq!(app.session.hierarchy.fading_slots().len(), 1);
+    app.mode_message(crate::modes::Message::SetCopies { tile: 2, copies: 5 });
+    assert!(
+        app.session.hierarchy.fading_slots().is_empty(),
+        "the fade finished first"
+    );
+    let fades = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == "loom.struct.fade")
+        .count();
+    assert_eq!(fades, 0);
+}
+
+/// A swap inside a stack that would pass the engine's module limit in some
+/// copy is refused whole: nothing is added, and the slot keeps its part
+/// (sub-patches.md, How modes meet the rest).
+#[test]
+fn a_swap_past_the_module_limit_is_refused_whole() {
+    let probe = app_with(STACKED);
+    let count = probe.session.controller.graph().nodes().count();
+    // Room for two more modules: four ladders and four fades do not fit.
+    let mut app = app_with_limit(STACKED, count + 2);
+    let slot = inside(&app, 9);
+    let part = app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot));
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".into()),
+    });
+    assert!(
+        app.alerts.status().starts_with("Cannot swap Filter"),
+        "{}",
+        app.alerts.status()
+    );
+    assert_eq!(app.session.controller.graph().nodes().count(), count);
+    assert_eq!(app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)), part);
+    assert!(app.session.hierarchy.fading_slots().is_empty());
+}

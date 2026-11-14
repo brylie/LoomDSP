@@ -967,3 +967,166 @@ fn the_hierarchy_follows_a_long_chain_of_empty_thru_slots() {
         .join()
         .expect("no stack overflow");
 }
+
+/// A sine into a stack of four copies of a Voice that holds a Filter slot
+/// with an SVF, with a spread on the slot's cutoff, into the output.
+fn stacked_slot(copies: u32) -> String {
+    format!(
+        r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stacked slot"),
+    subpatches: {{
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: {copies},
+            spread: {{"cutoff": 0.2}},
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1", params: {{"cutoff": 800.0}}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 9, param: "cutoff")],
+        ),
+    }},
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#
+    )
+}
+
+/// The assignments onto `module`, as (id, depth).
+fn assignments_onto(controller: &Controller, module: ModuleId) -> Vec<(loom_core::AssignmentId, f32)> {
+    controller
+        .graph()
+        .assignments()
+        .filter(|(_, a)| a.target == module)
+        .map(|(id, a)| (id, a.depth))
+        .collect()
+}
+
+/// A swap between two parts inside a stack of four fades in every copy:
+/// one fade per copy, every leaving copy keeps its id and its spread
+/// assignment (same id, same depth) until the fade ends, a second sync
+/// mid-fade changes nothing, a save mid-fade holds no fade or leaving part,
+/// and finishing removes them all (ADR-0044).
+#[test]
+fn a_swap_inside_a_stack_fades_every_copy() {
+    let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_slot(4)).unwrap());
+    let layout = |_: u32| Layout::default();
+    let slot = inside(&hierarchy, 9);
+    let svf0 = hierarchy.part_of_slot(slot).unwrap();
+    let svfs: Vec<ModuleId> = std::iter::once(svf0)
+        .chain(hierarchy.copies_of(svf0).iter().map(|(id, _)| *id))
+        .collect();
+    assert_eq!(svfs.len(), 4, "four copies of the SVF");
+    let spreads: Vec<_> = svfs.iter().map(|id| assignments_onto(&controller, *id)).collect();
+    assert!(
+        spreads.iter().all(|s| s.len() == 1),
+        "a spread on each copy: {spreads:?}"
+    );
+
+    hierarchy
+        .swap_to_module(&mut controller, &layout, slot, "loom.filter.ladder@1")
+        .expect("the ladder fills Filter");
+    hierarchy.sync(&mut controller).expect("syncs");
+    let fading = hierarchy.slot(slot).unwrap().fading.clone().expect("fading");
+    assert_eq!(fading.fades.len(), 1);
+    assert_eq!(fading.copies.len(), 3, "a fade in every other copy");
+    let ladders = controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == "loom.filter.ladder")
+        .count();
+    assert_eq!(ladders, 4, "a new part in every copy");
+    for (svf, spread) in svfs.iter().zip(&spreads) {
+        assert!(
+            controller.graph().node(*svf).is_some(),
+            "the leaving copy keeps running"
+        );
+        assert_eq!(
+            &assignments_onto(&controller, *svf),
+            spread,
+            "its spread stays as it was"
+        );
+    }
+    let count = controller.graph().assignments().count();
+    hierarchy.sync(&mut controller).expect("syncs again");
+    assert_eq!(
+        controller.graph().assignments().count(),
+        count,
+        "a second sync changes nothing"
+    );
+    let saved = written(&hierarchy, &controller).to_ron().unwrap();
+    assert!(!saved.contains("loom.struct.fade"), "{saved}");
+    assert!(
+        !saved.contains("kind: \"loom.filter.svf"),
+        "the leaving part is not in the file, only held: {saved}"
+    );
+
+    hierarchy.finish_all_fades(&mut controller);
+    hierarchy.sync(&mut controller).expect("syncs");
+    assert!(
+        svfs.iter().all(|id| controller.graph().node(*id).is_none()),
+        "every leaving copy went"
+    );
+    let fades = controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == "loom.struct.fade")
+        .count();
+    assert_eq!(fades, 0);
+    let ladders: Vec<ModuleId> = controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == "loom.filter.ladder")
+        .map(|(id, _)| id)
+        .collect();
+    assert!(
+        ladders.iter().all(|id| assignments_onto(&controller, *id).len() == 1),
+        "spread on each new copy"
+    );
+}
+
+/// The copy levels of a slot in a stack of two inside a stack of two are
+/// the three other combinations, and a slot outside a stack has none.
+#[test]
+fn copy_levels_cover_nested_stacks() {
+    let (_, mut hierarchy) = load(&Patch::from_ron(&stacked_slot(2)).unwrap());
+    let level = ModulePath::top(2);
+    assert_eq!(hierarchy.copy_levels(&level), vec![level.copy(1)]);
+    assert!(hierarchy.copy_levels(&ModulePath::root()).is_empty());
+    // A stack of one is no stack.
+    hierarchy.set_copies(ModuleId(2), 1).unwrap();
+    assert!(hierarchy.copy_levels(&level).is_empty());
+}
+
+/// Single and stack switch with a slot inside; a layer or select is refused
+/// with the slot's text, since the inside would move under a member.
+#[test]
+fn a_slot_allows_a_stack_and_refuses_a_layer() {
+    let (_, hierarchy) = load(&Patch::from_ron(&stacked_slot(1)).unwrap());
+    let role = |r: &str| r.to_string();
+    assert_eq!(
+        hierarchy.mode_refusal(ModuleId(2), crate::modes::Mode::Single, &role),
+        None
+    );
+    assert_eq!(
+        hierarchy
+            .mode_refusal(ModuleId(2), crate::modes::Mode::Layer, &role)
+            .as_deref(),
+        Some("Cannot make Voice a layer: it holds a slot")
+    );
+}

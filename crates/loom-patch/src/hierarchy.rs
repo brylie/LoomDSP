@@ -1569,7 +1569,10 @@ impl Hierarchy {
         for (from, to) in desired.difference(&current) {
             controller.connect_named(ModuleId(from.0), &from.1, ModuleId(to.0), &to.1)?;
         }
-        self.sync_implied_links(controller, &flat)?;
+        // While a slot fades in a stack, a wanted assignment from a copy's
+        // new part comes from that copy's fade (ADR-0044).
+        let through_fade: BTreeMap<End, End> = wiring.reroute.iter().cloned().collect();
+        self.sync_implied_links(controller, &flat, &through_fade)?;
         let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
         // The range MIDI sweeps follows the surfaces: a range that changed
         // or went away reaches the engine with the caller's commit.

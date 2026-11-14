@@ -778,3 +778,100 @@ fn swaps_into_and_out_of_an_empty_thru_slot_fade() {
     let tail = remove + FADE + 10..FRAMES;
     assert_eq!(left[tail.clone()], sine[tail], "the thru is back, bit for bit");
 }
+
+/// A sine into a stack of four copies of a Voice whose Filter slot holds an
+/// SVF, with a spread on the slot's cutoff.
+const STACKED_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stacked slot"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            spread: {"cutoff": 0.2},
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1", params: {"cutoff": 2000.0}),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (4, "in")),
+            ],
+            exposed: [Exposed(name: "cutoff", module: 9, param: "cutoff")],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)
+"#;
+
+/// Renders [`STACKED_SLOT`] at `block`, swapping the slot (copy 0's, which
+/// the editor shows) to a Ladder at `SWAP_AT`, and finishing the fade when
+/// copy 0's fade is done.
+fn render_stacked_swap(block: usize) -> Vec<f32> {
+    let (mut parts, hierarchy) = load(STACKED_SLOT);
+    let hierarchy = std::cell::RefCell::new(hierarchy);
+    let layout = |_: u32| Layout::default();
+    let slot = hierarchy
+        .borrow()
+        .id_at(&loom_patch::ModulePath::top(2), 9)
+        .expect("the slot");
+    render_edit_at(
+        &mut parts,
+        FRAMES,
+        block,
+        SWAP_AT,
+        |parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            hierarchy
+                .swap_to_module(&mut parts.controller, &layout, slot, "loom.filter.ladder@1")
+                .expect("the ladder fills Filter");
+            hierarchy.sync(&mut parts.controller).expect("syncs");
+            parts.controller.commit().expect("commits");
+        },
+        |_, parts| {
+            let mut hierarchy = hierarchy.borrow_mut();
+            let fading = hierarchy.fading_slots();
+            let done = !fading.is_empty()
+                && fading
+                    .iter()
+                    .all(|(_, fades)| fades.iter().all(|f| parts.controller.display(*f, 0) == Some(1.0)));
+            if done {
+                hierarchy.finish_all_fades(&mut parts.controller);
+                hierarchy.sync(&mut parts.controller).expect("syncs");
+                parts.controller.commit().expect("commits");
+            }
+        },
+    )
+}
+
+/// A swap inside a stack of four fades in every copy: the sum steps no more
+/// than the sine itself does, where copies that switched at once (a Ladder
+/// starting from reset) would step by most of the signal. The same at
+/// block sizes 1, 77, and 512 (ADR-0044).
+#[test]
+fn a_swap_inside_a_stack_has_no_step_in_any_copy() {
+    let renders: Vec<Vec<f32>> = [1, 77, 512].iter().map(|&b| render_stacked_swap(b)).collect();
+    assert_eq!(renders[0], renders[1]);
+    assert_eq!(renders[0], renders[2]);
+    let left = &renders[0];
+    assert!(left.iter().all(|v| v.is_finite()));
+    assert!(
+        left[SWAP_AT + 2 * FADE..].iter().any(|v| v.abs() > 0.05),
+        "the ladders play"
+    );
+    let steady = largest_step(&left[SWAP_AT - 600..SWAP_AT]);
+    let across = largest_step(&left[SWAP_AT - 1..SWAP_AT + FADE + 10]);
+    assert!(across <= steady * 1.5, "across: {across} against {steady}");
+}

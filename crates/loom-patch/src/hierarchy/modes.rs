@@ -219,11 +219,14 @@ impl Hierarchy {
             .filter(|m| m.path.is_implied())
             .map(|m| (m.id, m))
             .collect();
+        // A leaving part or a fade of a stack copy sits at an implied path,
+        // but the swap made it, not the flattener (ADR-0044).
+        let fading = self.fading_ids();
         let current: Vec<ModuleId> = controller
             .graph()
             .nodes()
             .map(|(id, _)| id)
-            .filter(|id| self.is_implied_module(*id))
+            .filter(|id| self.is_implied_module(*id) && !fading.contains(id))
             .collect();
         for id in current.iter().filter(|id| !desired.contains_key(id)) {
             controller.remove_module(*id)?;
@@ -280,7 +283,15 @@ impl Hierarchy {
     /// source or target, other than onto a select's Member) the ones `flat`
     /// has, keeping the id of each that stays, and sets the followers of
     /// each mapping (ADR-0040).
-    pub(super) fn sync_implied_links(&mut self, controller: &mut Controller, flat: &Flat) -> Result<(), PatchError> {
+    pub(super) fn sync_implied_links(
+        &mut self,
+        controller: &mut Controller,
+        flat: &Flat,
+        through_fade: &BTreeMap<End, End>,
+    ) -> Result<(), PatchError> {
+        // An assignment onto a fading module keeps going until the fade
+        // ends: a leaving copy keeps its spread (ADR-0044).
+        let fading = self.fading_ids();
         let is_implied = |hierarchy: &Self, end: u32| {
             let id = ModuleId(end);
             hierarchy.is_implied_module(id) && !matches!(hierarchy.added.get(&id), Some(Added::Member { .. }))
@@ -290,13 +301,20 @@ impl Hierarchy {
         for (id, a) in graph.assignments() {
             let source = (a.source.module.0, crate::port_name(graph, a.source));
             let target = (a.target.0, crate::param_name(graph, a.target, a.param));
+            if fading.contains(&a.target) {
+                continue;
+            }
             if is_implied(self, source.0) || is_implied(self, target.0) {
                 current.entry((source, target)).or_default().push(id);
             }
         }
-        let mut wanted: Vec<&PatchModulation> = Vec::new();
+        let mut wanted: Vec<PatchModulation> = Vec::new();
         for entry in &flat.modulation {
             if is_implied(self, entry.source.0) || is_implied(self, entry.target.0) {
+                let mut entry = entry.clone();
+                if let Some(fade_out) = through_fade.get(&entry.source) {
+                    entry.source = fade_out.clone();
+                }
                 wanted.push(entry);
             }
         }
@@ -320,7 +338,7 @@ impl Hierarchy {
                         controller.set_assignment_enabled(id, entry.enabled)?;
                     }
                 }
-                None => add.push(entry.clone()),
+                None => add.push(entry),
             }
         }
         for ids in current.into_values() {
@@ -384,8 +402,10 @@ impl Hierarchy {
         if let Some(role) = definition.roles.first() {
             return Some(modes::fills_a_role(&name, &role_name(role)));
         }
-        if self.slots.keys().any(|slot| slot.starts_with(path)) {
-            return Some(modes::NO_MODE_WITH_SLOT.to_string());
+        // Single and stack keep copy 0's paths, so a slot stays put; a
+        // change to or from members moves the inside, and a slot with it.
+        if from.has_members() != mode.has_members() && self.slots.keys().any(|slot| slot.starts_with(path)) {
+            return Some(modes::mode_moves_slot(&name, mode));
         }
         if from.has_members() && !mode.has_members() && definition.modes.members.len() > 1 {
             return Some(modes::several_members(&name, mode));
@@ -631,15 +651,12 @@ impl Hierarchy {
     }
 
     /// Sets the copy count of the stack tile `instance`, 1 to 16 (sub-patches.md,
-    /// The editor for modes). Refused above 1 for a sub-patch that holds a
-    /// slot.
+    /// The editor for modes). A sub-patch that holds a slot may be a stack:
+    /// a swap fades in every copy (ADR-0044).
     pub fn set_copies(&mut self, instance: ModuleId, copies: u32) -> Result<(), String> {
         let path = self.ids.path_of(instance).cloned().ok_or_else(String::new)?;
-        let definition = self.definition_at(&path).ok_or_else(String::new)?;
+        self.definition_at(&path).ok_or_else(String::new)?;
         let copies = copies.clamp(1, MOST_MEMBERS as u32);
-        if copies > 1 && self.slots.keys().any(|slot| slot.starts_with(&path)) {
-            return Err(modes::stack_holds_slot(&definition.metadata.name));
-        }
         let key = self.instances[&path].key.clone();
         let settings = &mut self.definitions.get_mut(&key).expect("checked above").modes;
         settings.copies = if copies <= 1 { 0 } else { copies };

@@ -175,6 +175,22 @@ pub struct Fading {
     /// One swap fade per role output that both parts have: the role
     /// output's name and the fade's flat id.
     pub fades: Vec<(String, ModuleId)>,
+    /// The same fade in every other copy of the stacks the slot is in
+    /// (ADR-0044). Empty outside a stack.
+    pub copies: Vec<CopyFade>,
+}
+
+/// A swap's fade in one stack copy past the first (ADR-0044): the leaving
+/// part there keeps running, and its fades sit under the copy's slot path.
+/// All of these are transient, named only here, and never saved.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopyFade {
+    /// The slot's level in this copy: copy 0's level with this copy's
+    /// steps.
+    pub level: ModulePath,
+    /// One fade per faded role output, as copy 0's: the role output's name
+    /// and the fade's flat id.
+    pub fades: Vec<(String, ModuleId)>,
 }
 
 /// What Make slot did.
@@ -332,9 +348,19 @@ impl Hierarchy {
             // The leaving part and the fades keep their paths and flat ids,
             // which a snapshot taken before them does not have.
             let level = path.parent().unwrap_or_else(ModulePath::root);
-            let leaving = fading.leaving.map(|lid| level.child(lid));
+            let mut leaving: Vec<ModulePath> = Vec::new();
+            let mut slot_paths = vec![path.clone()];
+            for copy in &fading.copies {
+                slot_paths.push(copy.level.child(path.last()));
+            }
+            if let Some(lid) = fading.leaving {
+                leaving.push(level.child(lid));
+                leaving.extend(fading.copies.iter().map(|c| c.level.child(lid)));
+            }
             for (p, id) in live.ids.paths() {
-                if leaving.as_ref().is_some_and(|l| p.starts_with(l)) || p.parent().as_ref() == Some(path) {
+                if leaving.iter().any(|l| p.starts_with(l))
+                    || p.parent().is_some_and(|parent| slot_paths.contains(&parent))
+                {
                     let _ = self.ids.reserve(p.clone(), id);
                 }
             }
@@ -462,6 +488,49 @@ impl Hierarchy {
         let mut wiring = FadeWiring::default();
         for (slot_path, state) in &self.slots {
             let Some(fading) = &state.fading else { continue };
+            let own = self.slot_fade_wiring(graph, slot_path, state, fading);
+            // Every other stack copy is wired as copy 0 is, each end moved
+            // into that copy by path; an end outside the stack feeds every
+            // copy and stays (ADR-0044).
+            for copy in &fading.copies {
+                let fade_k = |fade: u32| -> Option<u32> {
+                    let (role_out, _) = fading.fades.iter().find(|(_, f)| f.0 == fade)?;
+                    copy.fades.iter().find(|(r, _)| r == role_out).map(|(_, f)| f.0)
+                };
+                let end_k = |end: &End| -> Option<End> {
+                    let id = fade_k(end.0)
+                        .map(ModuleId)
+                        .or_else(|| self.in_copy(ModuleId(end.0), &copy.level))?;
+                    Some((id.0, end.1.clone()))
+                };
+                for (from, to) in &own.add {
+                    if let (Some(from), Some(to)) = (end_k(from), end_k(to)) {
+                        wiring.add.push((from, to));
+                    }
+                }
+                for (from, to) in &own.reroute {
+                    if let (Some(from), Some(to)) = (end_k(from), end_k(to)) {
+                        wiring.reroute.push((from, to));
+                    }
+                }
+            }
+            wiring.add.extend(own.add);
+            wiring.reroute.extend(own.reroute);
+            wiring.retarget.extend(own.retarget);
+        }
+        wiring
+    }
+
+    /// The fade wiring of one slot in copy 0.
+    fn slot_fade_wiring(
+        &self,
+        graph: &Graph,
+        slot_path: &ModulePath,
+        state: &SlotState,
+        fading: &Fading,
+    ) -> FadeWiring {
+        let mut wiring = FadeWiring::default();
+        {
             let level = slot_path.parent().unwrap_or_else(ModulePath::root);
             let slot_lid = slot_path.last();
             // What feeds the slot's role input `name`, at the flat level.
@@ -519,6 +588,138 @@ impl Hierarchy {
             }
         }
         wiring
+    }
+
+    /// The slot's level `level` in every stack copy past the first, at any
+    /// nesting depth: copy 0's level with each copy's steps put in after
+    /// its stack's instance (ADR-0040, Copies in the editor). Empty outside
+    /// a stack of more than one copy.
+    pub fn copy_levels(&self, level: &ModulePath) -> Vec<ModulePath> {
+        let mut partial = vec![ModulePath(Vec::new())];
+        for n in 1..=level.0.len() {
+            let step = level.0[n - 1];
+            for path in &mut partial {
+                path.0.push(step);
+            }
+            let copies = self
+                .modes_at(&level.prefix(n))
+                .filter(|m| m.mode == crate::modes::Mode::Stack)
+                .map_or(1, |m| m.copy_count());
+            if copies > 1 {
+                let more: Vec<ModulePath> = partial
+                    .iter()
+                    .flat_map(|path| (1..copies).map(move |k| path.copy(k)))
+                    .collect();
+                partial.extend(more);
+            }
+        }
+        partial.retain(|path| path != level);
+        partial
+    }
+
+    /// The flat module in the copy whose level is `level_k` that stands for
+    /// copy 0's module `id`: its path with the copy's steps put in where
+    /// both run inside the same stacks. A module outside those stacks, which
+    /// feeds every copy, is itself.
+    fn in_copy(&self, id: ModuleId, level_k: &ModulePath) -> Option<ModuleId> {
+        let path = self.ids.path_of(id)?;
+        let mut out = Vec::new();
+        let mut i = 0;
+        for &step in &level_k.0 {
+            if step >= crate::flatten::COPY_STEP {
+                // A copy step goes in only after a stack both paths share.
+                if i > 0 && out.len() >= i {
+                    out.push(step);
+                }
+                continue;
+            }
+            if path.0.get(i) == Some(&step) {
+                out.push(step);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        out.extend_from_slice(&path.0[i..]);
+        self.ids.get(&ModulePath(out))
+    }
+
+    /// Adds, in every other copy of the stacks the slot at `slot_path` is
+    /// in, the same fades as `fades` (copy 0's), at the same steps under
+    /// that copy's slot path and with the same laws (ADR-0044). A copy
+    /// whose leaving part is missing is skipped.
+    fn add_copy_fades(
+        &mut self,
+        controller: &mut Controller,
+        slot_path: &ModulePath,
+        leaving: Option<u32>,
+        fades: &[(String, ModuleId)],
+    ) -> Result<Vec<CopyFade>, String> {
+        let Some(leaving) = leaving else {
+            return Ok(Vec::new());
+        };
+        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+        let mut made = Vec::new();
+        for level_k in self.copy_levels(&level) {
+            if self.ids.get(&level_k.child(leaving)).is_none()
+                && !self.ids.paths().any(|(p, _)| p.starts_with(&level_k.child(leaving)))
+            {
+                continue;
+            }
+            let slot_k = level_k.child(slot_path.last());
+            let mut copy_fades = Vec::new();
+            for (role_out, fade) in fades {
+                let step = self
+                    .ids
+                    .path_of(*fade)
+                    .map(ModulePath::last)
+                    .ok_or("a fade has no path")?;
+                let law = controller
+                    .graph()
+                    .node(*fade)
+                    .and_then(|n| n.params.first().copied())
+                    .unwrap_or(0.0);
+                let id = self.ids.id_of(&slot_k.child(step)).map_err(|e| e.to_string())?;
+                controller
+                    .add_module_with_id(id, FADE_KIND)
+                    .map_err(|e| e.to_string())?;
+                copy_fades.push((role_out.clone(), id));
+                controller.set_param_named(id, "law", law).map_err(|e| e.to_string())?;
+            }
+            made.push(CopyFade {
+                level: level_k,
+                fades: copy_fades,
+            });
+        }
+        Ok(made)
+    }
+
+    /// Every module that exists only while a slot fades, in every copy:
+    /// each leaving part and everything under it, and each swap fade.
+    /// `sync` leaves them, and the assignments onto them, alone
+    /// (ADR-0044).
+    pub fn fading_ids(&self) -> BTreeSet<ModuleId> {
+        let mut ids = BTreeSet::new();
+        for (path, state) in &self.slots {
+            let Some(fading) = &state.fading else { continue };
+            let level = path.parent().unwrap_or_else(ModulePath::root);
+            let mut levels = vec![level];
+            levels.extend(fading.copies.iter().map(|c| c.level.clone()));
+            if let Some(lid) = fading.leaving {
+                for level in &levels {
+                    let leaving = level.child(lid);
+                    ids.extend(
+                        self.ids
+                            .paths()
+                            .filter(|(p, _)| p.starts_with(&leaving))
+                            .map(|(_, id)| id),
+                    );
+                }
+            }
+            ids.extend(fading.fades.iter().map(|(_, id)| *id));
+            ids.extend(fading.copies.iter().flat_map(|c| c.fades.iter().map(|(_, id)| *id)));
+        }
+        ids
     }
 
     /// Adds one swap fade per `(role output, law)` under the slot at
@@ -853,6 +1054,30 @@ impl Hierarchy {
             return Vec::new();
         };
         let mut removed: Vec<ModuleId> = fading.fades.iter().map(|(_, id)| *id).collect();
+        // Every other stack copy's fades and leaving part, with what is
+        // under it, go too, and their paths are forgotten (ADR-0044).
+        for copy in &fading.copies {
+            let mut gone: Vec<ModulePath> = copy
+                .fades
+                .iter()
+                .filter_map(|(_, id)| self.ids.path_of(*id).cloned())
+                .collect();
+            if let Some(lid) = fading.leaving {
+                let leaving = copy.level.child(lid);
+                gone.extend(
+                    self.ids
+                        .paths()
+                        .filter(|(p, _)| p.starts_with(&leaving))
+                        .map(|(p, _)| p.clone()),
+                );
+            }
+            for path in gone {
+                if let Some(id) = self.ids.get(&path) {
+                    removed.push(id);
+                }
+                self.ids.forget(&path);
+            }
+        }
         let Some(leaving) = fading.leaving.map(|lid| level.child(lid)) else {
             // A part faded in from the thru: only the fades go.
             return removed;
@@ -1111,10 +1336,13 @@ impl Hierarchy {
                 self.move_links_to_new_part(controller, &slot_path, &state, old_id, new_id)?;
             added.extend(moved);
             removed.append(&mut gone);
+            let copies = self.add_copy_fades(controller, &slot_path, old_part, &fades)?;
+            added.extend(copies.iter().flat_map(|c| c.fades.iter().map(|(_, id)| *id)));
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.fading = Some(Fading {
                 leaving: old_part,
                 fades,
+                copies,
             });
         } else if self.fades_with_thru(&slot_path) {
             // Into an empty thru slot: the part fades in from the thru
@@ -1123,7 +1351,11 @@ impl Hierarchy {
             let fades = self.add_fades(controller, &slot_path, outputs)?;
             added.extend(fades.iter().map(|(_, id)| *id));
             let record = self.slots.get_mut(&slot_path).expect("checked above");
-            record.fading = Some(Fading { leaving: None, fades });
+            record.fading = Some(Fading {
+                leaving: None,
+                fades,
+                copies: Vec::new(),
+            });
         }
         Ok(Swapped {
             part: new_id,
@@ -1222,10 +1454,13 @@ impl Hierarchy {
                 self.move_links_to_new_part(controller, &slot_path, &state, old_id, new_id)?;
             added.extend(moved);
             removed.append(&mut gone);
+            let copies = self.add_copy_fades(controller, &slot_path, old_part, &fades)?;
+            added.extend(copies.iter().flat_map(|c| c.fades.iter().map(|(_, id)| *id)));
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.fading = Some(Fading {
                 leaving: old_part,
                 fades,
+                copies,
             });
         } else if self.fades_with_thru(&slot_path) {
             // Into an empty thru slot: the part fades in from the thru
@@ -1234,7 +1469,11 @@ impl Hierarchy {
             let fades = self.add_fades(controller, &slot_path, outputs)?;
             added.extend(fades.iter().map(|(_, id)| *id));
             let record = self.slots.get_mut(&slot_path).expect("checked above");
-            record.fading = Some(Fading { leaving: None, fades });
+            record.fading = Some(Fading {
+                leaving: None,
+                fades,
+                copies: Vec::new(),
+            });
         }
         Ok(Swapped {
             part: new_id,
@@ -1358,6 +1597,7 @@ impl Hierarchy {
                 record.fading = Some(Fading {
                     leaving: Some(old_lid),
                     fades,
+                    copies: Vec::new(),
                 });
                 Vec::new()
             }
@@ -1367,6 +1607,7 @@ impl Hierarchy {
                 record.fading = Some(Fading {
                     leaving: Some(old_lid),
                     fades: Vec::new(),
+                    copies: Vec::new(),
                 });
                 self.end_fade(&slot_path)
             }
@@ -1451,6 +1692,12 @@ impl Hierarchy {
             let target_under = under_old(a.target);
             let source_under = under_old(a.source.module);
             if !target_under && !source_under {
+                continue;
+            }
+            // An implied assignment, such as a stack's spread, is the
+            // flattener's: the new part gets its own from `sync`, and the
+            // leaving part keeps this one until the fade ends (ADR-0044).
+            if self.is_implied_module(a.source.module) || self.is_implied_module(a.target) {
                 continue;
             }
             let mut source = a.source;
