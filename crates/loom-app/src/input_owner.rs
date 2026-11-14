@@ -111,7 +111,7 @@ pub(crate) fn always_event(event: iced::Event, status: Status, window: window::I
 }
 
 /// What the two listeners send for an event, for the paths that hand events on
-/// themselves: `pointer::Injector` and the headless `Ui`.
+/// themselves, through `subscriptions::Listeners`.
 pub(crate) fn heard_messages(event: &iced::Event, status: Status, listening: Listening) -> Vec<Message> {
     let window = window::Id::unique();
     input_event(event.clone(), status, window)

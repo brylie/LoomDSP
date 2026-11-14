@@ -308,7 +308,7 @@ impl Access {
 }
 
 /// The window's new scale factor, from a window event.
-fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Event> {
+pub(crate) fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Event> {
     match event {
         iced::Event::Window(iced::window::Event::Rescaled(scale)) => Some(Event::ScaleFactor(scale)),
         _ => None,

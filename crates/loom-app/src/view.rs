@@ -149,8 +149,8 @@ impl App {
         }
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
-        let listening = self.listening();
-        let on_input = move |event: iced::Event, status| crate::input_owner::heard_messages(&event, status, listening);
+        let listeners = self.listeners();
+        let on_input = move |event: iced::Event, status| listeners.messages(&event, status);
         pointer::Injector::new(layers, self, on_input).into()
     }
 

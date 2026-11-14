@@ -10,17 +10,16 @@
 //!   own tests the fake dialogs answer instead. A capture waits for the
 //!   harness to draw.
 //! - [`Surface`] holds the renderer and the widget cache, and [`settle`]
-//!   runs the Iced tasks the bridge returns on it, as Iced's runtime runs
-//!   them on the window, until nothing is left.
+//!   runs the Iced tasks the bridge returns on it through `tasks.rs`, as
+//!   Iced's runtime runs them on the window, until nothing is left.
 
+use super::tasks::{self, Sink, Stuck};
 use super::{Bridge, BridgeDriver, Bridged};
 use crate::{App, Message};
 use iced::advanced::renderer::{Headless as _, Style};
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
 use iced::{Size, Task, mouse};
-use iced_runtime::Action;
-use iced_runtime::futures::futures::{FutureExt, StreamExt};
 use iced_runtime::user_interface::{Cache, UserInterface};
 use loom_ui::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply};
 use loom_ui::headless::Headless;
@@ -222,33 +221,36 @@ pub(crate) fn settle(bridge: &mut Bridge<UiDriver>, surface: &mut Surface, tasks
     }
 }
 
-/// Runs one task to its end and gives its outputs.
+/// The harness's place for a task's actions: operations on its surface,
+/// and the clipboard on its driver.
+struct HarnessSink<'a> {
+    bridge: &'a mut Bridge<UiDriver>,
+    surface: &'a mut Surface,
+}
+
+impl Sink for HarnessSink<'_> {
+    fn operate(&mut self, operation: Box<dyn Operation>) {
+        self.surface.operate(self.bridge.app(), operation);
+    }
+
+    fn clipboard_read(&mut self) -> Option<String> {
+        self.bridge.driver_mut().headless.clipboard().map(str::to_string)
+    }
+
+    fn clipboard_write(&mut self, contents: String) {
+        self.bridge.driver_mut().headless.set_clipboard(Some(contents));
+    }
+}
+
+/// Runs one task to its end and gives its outputs. Panics on a task that
+/// stops early, naming why, so no test passes by skipping one.
 fn run(task: Pending, bridge: &mut Bridge<UiDriver>, surface: &mut Surface) -> Vec<Bridged> {
-    let mut outputs = Vec::new();
-    let Some(mut stream) = iced_runtime::task::into_stream(task) else {
-        return outputs;
-    };
-    loop {
-        // A stream can return Pending once while its parts hand over, for
-        // example after a clipboard reply. A few polls tell that apart from
-        // a task that waits on the outside world.
-        let polled = (0..8).find_map(|_| stream.next().now_or_never());
-        let action = match polled {
-            Some(Some(action)) => action,
-            Some(None) => return outputs,
-            None => panic!("Ui: a task waits on something the harness cannot give, such as a timer or a dialog"),
-        };
-        match action {
-            Action::Output(output) => outputs.push(output),
-            Action::Widget(operation) => surface.operate(bridge.app(), operation),
-            Action::Clipboard(iced_runtime::clipboard::Action::Read { channel, .. }) => {
-                let text = bridge.driver_mut().headless.clipboard().map(str::to_string);
-                let _ = channel.send(text);
-            }
-            Action::Clipboard(iced_runtime::clipboard::Action::Write { contents, .. }) => {
-                bridge.driver_mut().headless.set_clipboard(Some(contents));
-            }
-            other => panic!("Ui: the harness cannot run this task: {other:?}"),
+    let ran = tasks::run(task, &mut HarnessSink { bridge, surface });
+    match ran.stuck {
+        None => ran.outputs,
+        Some(Stuck::Waits) => {
+            panic!("Ui: a task waits on something the harness cannot give, such as a timer or a dialog")
         }
+        Some(Stuck::Action(action)) => panic!("Ui: the harness cannot run this task: {action}"),
     }
 }
