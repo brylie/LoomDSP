@@ -994,3 +994,32 @@ fn padded_chance_lanes_follow_the_lane_above() {
     parts.controller.commit().unwrap();
     assert_eq!(render(&mut parts), [0.7f32 + 4.0 * 0.01; 512]);
 }
+
+/// A voice past the end of a narrower bundle on an input whose default is
+/// a normal of 1 reads that 1: four level voices into an eight-voice
+/// Amplifier leave voices 5 to 8 at unity (polyphony rule 6).
+#[test]
+fn a_voice_past_a_narrower_level_bundle_plays_at_unity() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let signal = c.add_module("test.voices").unwrap();
+    let level = c.add_module("test.voices").unwrap();
+    let amp = c.add_module("loom.level.amp").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(signal, "voices", 8.0).unwrap();
+    c.set_param_named(level, "voices", 4.0).unwrap();
+    c.set_param_named(level, "value", 0.5).unwrap();
+    c.connect_named(signal, "out", amp, "in").unwrap();
+    c.connect_named(level, "out", amp, "level").unwrap();
+    c.connect_named(amp, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    let sum = (0..8)
+        .map(|v| {
+            let input = 0.01 + v as f32 * 0.01;
+            let gain = if v < 4 { 0.5 + v as f32 * 0.01 } else { 1.0 };
+            input * gain
+        })
+        .sum::<f32>();
+    let played = render(&mut parts);
+    assert!((played[511] - sum).abs() < 1e-6, "{} != {sum}", played[511]);
+}

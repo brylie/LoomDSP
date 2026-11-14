@@ -47,6 +47,7 @@ use loom_rt::Smoothed;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod build;
+mod fades;
 mod inputs;
 mod midi_maps;
 mod order;
@@ -54,13 +55,15 @@ mod schedule;
 mod steps;
 
 use build::Builder;
+use fades::FadePlan;
+pub(crate) use fades::{FadeKey, Wiring};
 use inputs::{CompiledAssignment, DefaultKey, DownmixSpec, Inputs, compile_assignments};
 use midi_maps::compile_midi_maps;
 pub(crate) use order::{partner, partners};
 use order::{reaches_a_root, tarjan};
 pub(crate) use schedule::{
-    AssignmentRuntime, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, PairOp, ParamFill, ProbeOp, Schedule,
-    Step, Tap, TransportBuffers,
+    AssignmentRuntime, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, PairOp, ParamFill, ProbeOp, Read,
+    Schedule, Step, Tap, TransportBuffers,
 };
 use steps::{Plan, StepSpec, successors};
 
@@ -122,6 +125,11 @@ pub struct CompileReport {
     pub stereo_outputs: BTreeSet<OutputRef>,
     /// Voice count and stereo sides of every output.
     pub widths: BTreeMap<OutputRef, Width>,
+    /// Input channels and modulation contributions planned to start a 5 ms
+    /// fade at this swap, because their cable or assignment changed (live
+    /// patching spec, rule 9). 0 on the first schedule after a load. The
+    /// engine ends them at once if it has not played a block yet.
+    pub cable_fades: usize,
 }
 
 impl CompileReport {
@@ -310,6 +318,8 @@ impl<'a> Layout<'a> {
 /// Compiles the graph. `max_block` is the buffer length. `probes` are output
 /// ports to read for telemetry; probes on unknown modules or ports are
 /// skipped. `sample_rate` sets the base-value smoother for modulated parameters.
+/// Nothing fades: see [`compile_with_fades`].
+#[cfg(test)]
 pub(crate) fn compile(
     graph: &Graph,
     probes: &BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
@@ -318,9 +328,54 @@ pub(crate) fn compile(
     sample_rate: f32,
     max_block: usize,
 ) -> (Schedule, CompileReport) {
+    let (schedule, report, _) = compile_with_fades(
+        graph,
+        (probes, pairs, midi_synced),
+        sample_rate,
+        max_block,
+        Fades::default(),
+    );
+    (schedule, report)
+}
+
+/// What the engine reports on besides the audio: probes, pairs, and the
+/// MIDI mappings with their synced values.
+pub(crate) type Watched<'a> = (
+    &'a BTreeMap<ProbeId, (OutputRef, ProbeKind)>,
+    &'a BTreeMap<ProbeId, PairProbe>,
+    &'a BTreeMap<MidiMappingId, u32>,
+);
+
+/// What the compiler needs to know about the last schedule to fade the
+/// changes since (live patching spec, rule 9).
+#[derive(Default)]
+pub(crate) struct Fades<'a> {
+    /// What the last schedule was compiled from. `None` for the first
+    /// schedule after a load or a new engine, which fades nothing.
+    pub previous: Option<&'a Wiring>,
+    /// Fades that may still run in the engine.
+    pub carried: &'a [FadeKey],
+    /// Swap fades that are leaving and have finished.
+    pub done: BTreeSet<ModuleId>,
+}
+
+/// [`compile`], fading what changed since `fades.previous`. Also returns
+/// the new schedule's [`Wiring`], for the next compile.
+pub(crate) fn compile_with_fades(
+    graph: &Graph,
+    (probes, pairs, midi_synced): Watched,
+    sample_rate: f32,
+    max_block: usize,
+    fades: Fades,
+) -> (Schedule, CompileReport, Wiring) {
     let mut buffers = Buffers::default();
     let layout = Layout::new(graph, &mut buffers);
     let compiled = compile_assignments(&layout);
+    let length = crate::cable_fade::fade_frames(sample_rate);
+    let fade_plan = match fades.previous {
+        Some(previous) => FadePlan::new(previous, &layout, &compiled, fades.carried, &fades.done, length),
+        None => FadePlan::none(length),
+    };
 
     // 2. SCCs. Cables and assignments are both edges.
     let (succ, self_loop) = successors(&layout, &compiled);
@@ -348,9 +403,9 @@ pub(crate) fn compile(
     // 3 and 4. Steps, and the delays that break feedback loops.
     let mut plan = Plan::new(&layout, &compiled, &sccs, &self_loop, &live, &mut buffers);
     // 5 and 6. Fills, downmixes, and defaults.
-    let inputs = Inputs::new(&layout, &compiled, &plan, &live, &mut buffers);
+    let inputs = Inputs::new(&layout, &compiled, &plan, &live, &fade_plan, &mut buffers);
 
-    let report = CompileReport {
+    let mut report = CompileReport {
         modules: layout.ids.len(),
         skipped: (0..layout.ids.len())
             .filter(|&v| !live[v])
@@ -361,14 +416,21 @@ pub(crate) fn compile(
         per_channel: layout.widths.per_channel.clone(),
         stereo_outputs: layout.widths.stereo_outputs.clone(),
         widths: layout.widths.outputs.clone(),
+        cable_fades: 0,
     };
-    let schedule = Builder::new(&layout, &plan, &inputs, buffers, max_block, sample_rate).finish(
-        &compiled,
-        probes,
-        &pairs,
-        midi_synced,
-    );
-    (schedule, report)
+    let (schedule, fresh) = Builder::new(
+        &layout,
+        &plan,
+        &inputs,
+        (&compiled, &fade_plan, &live),
+        buffers,
+        max_block,
+        sample_rate,
+    )
+    .finish(probes, &pairs, midi_synced);
+    report.cable_fades = fresh;
+    let wiring = Wiring::of(&layout, &schedule.reads);
+    (schedule, report, wiring)
 }
 
 #[cfg(test)]

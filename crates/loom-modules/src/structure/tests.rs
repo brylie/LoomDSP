@@ -90,3 +90,23 @@ fn the_fade_is_block_size_invariant() {
     );
     assert_eq!(again[0], 0.8, "after reset the fade starts from A");
 }
+
+/// The swap fade's kind names the module ID that live patching rule 9
+/// treats as a mixer, so a rename cannot leave the two apart.
+#[test]
+fn the_fade_kind_names_the_core_mixer_id() {
+    assert_eq!(FADE_KIND, format!("{}@1", loom_core::cable_fade::SWAP_FADE_MODULE));
+}
+
+/// Every module rule 9 treats as a mixer is registered, so the core's list
+/// cannot name a module that does not exist.
+#[test]
+fn every_mixer_is_registered() {
+    let registry = crate::registry();
+    for id in loom_core::cable_fade::MIXERS
+        .iter()
+        .chain([&loom_core::cable_fade::MEMBER_MODULE])
+    {
+        assert!(registry.get(id).is_some(), "{id}");
+    }
+}

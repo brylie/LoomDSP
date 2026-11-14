@@ -11,17 +11,35 @@ readme.workspace = true
 keywords = ["gui", "ui", "runtime", "accessibility"]
 categories = ["gui"]
 
-# Only loom-ui-core for now. The runtime and the App trait name no window
-# toolkit (docs/design/ui-layer.md, section 2, rule 9); the winit shell
-# arrives in plan step 2.2, in its own module.
+# The runtime and the App trait name no window toolkit (docs/design/ui-layer.md,
+# section 2, rule 9). Only the `shell` module does, and only with the `shell`
+# feature, so a build without it proves the runtime needs no toolkit.
 [dependencies]
 loom-ui-core.workspace = true
+winit = { workspace = true, optional = true }
+# wgpu's own defaults, which hold its backends: the app gets them through Iced,
+# and the shell alone needs them too. No crate beyond what Iced brings.
+wgpu = { workspace = true, optional = true, features = ["default"] }
+pollster = { workspace = true, optional = true }
 
 [features]
+default = ["shell"]
+# The winit shell: a window, its GPU surface, and the loop that drives the
+# runtime (`loom_ui::shell`).
+shell = ["dep:winit", "dep:wgpu", "dep:pollster"]
 # `Runtime::app_mut`, for a test driver that sets up the app's state between
 # turns. A real driver never changes the app outside `update` (section 2,
 # rule 1), so nothing turns this on outside tests.
 test-driver = []
+
+[dev-dependencies]
+# Saves the window example's `--capture` frame.
+png.workspace = true
+
+# The shell in a real window; it needs the `shell` feature.
+[[example]]
+name = "window"
+required-features = ["shell"]
 
 [lints]
 workspace = true

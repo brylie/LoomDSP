@@ -588,3 +588,96 @@ fn a_select_change_never_allocates() {
     }
     parts.controller.collect_garbage();
 }
+
+/// Cable fades add no allocation on the audio thread (live patching spec,
+/// rule 9): a plug, a pull, and a move, the audio output's cable pulled, an
+/// assignment added and removed, a swap during a fade, two swaps before one
+/// block, and a panic during a fade.
+#[test]
+fn cable_fades_never_allocate() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let c = &mut parts.controller;
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let svf = c.add_module("loom.filter.svf").unwrap();
+    let other = c.add_module("loom.osc.saw").unwrap();
+    let lfo = c.add_module("loom.mod.lfo").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(phase, "phase", sine, "phase").unwrap();
+    c.connect_named(svf, "lowpass", out, "in").unwrap();
+    c.commit().unwrap();
+    let svf_in = c.input_ref(svf, "in").unwrap();
+    let out_in = c.input_ref(out, "in").unwrap();
+    let mut left = [0.0; 256];
+    let mut right = [0.0; 256];
+    let play = |parts: &mut loom_core::EngineParts| {
+        let mut left = [0.0; 256];
+        let mut right = [0.0; 256];
+        for _ in 0..3 {
+            assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+        }
+        parts.controller.collect_garbage();
+    };
+    play(&mut parts);
+    type Edit = fn(&mut loom_core::Controller, [loom_core::ModuleId; 5], [InputRef; 2]);
+    let edits: [Edit; 7] = [
+        |c, [sine, ..], [svf_in, _]| {
+            c.connect(c.output_ref(sine, "out").unwrap(), svf_in).unwrap();
+        },
+        |c, [_, _, other, ..], [svf_in, _]| {
+            c.connect(c.output_ref(other, "out").unwrap(), svf_in).unwrap();
+        },
+        |c, _, [svf_in, _]| {
+            c.disconnect(svf_in).unwrap();
+        },
+        |c, [_, svf, _, lfo, _], _| {
+            c.add_assignment_named(lfo, "out", svf, "cutoff", 0.5).unwrap();
+        },
+        |c, _, _| {
+            let ids: Vec<_> = c.graph().assignments().map(|(id, _)| id).collect();
+            for id in ids {
+                c.remove_assignment(id).unwrap();
+            }
+        },
+        |c, _, [_, out_in]| {
+            c.disconnect(out_in).unwrap();
+        },
+        |c, [_, svf, ..], [_, out_in]| {
+            c.connect(c.output_ref(svf, "lowpass").unwrap(), out_in).unwrap();
+        },
+    ];
+    let modules = [sine, svf, other, lfo, out];
+    let inputs = [svf_in, out_in];
+    for edit in edits {
+        edit(&mut parts.controller, modules, inputs);
+        parts.controller.commit().unwrap();
+        play(&mut parts);
+    }
+    // A swap during a fade, and two swaps before one block.
+    edits[0](&mut parts.controller, modules, inputs);
+    parts.controller.commit().unwrap();
+    assert_no_alloc(|| parts.engine.process(&mut left[..16], &mut right[..16]));
+    edits[1](&mut parts.controller, modules, inputs);
+    parts.controller.commit().unwrap();
+    edits[2](&mut parts.controller, modules, inputs);
+    parts.controller.commit().unwrap();
+    play(&mut parts);
+    // A panic during a fade ends every fade.
+    edits[0](&mut parts.controller, modules, inputs);
+    parts.controller.commit().unwrap();
+    assert_no_alloc(|| parts.engine.process(&mut left[..16], &mut right[..16]));
+    parts.controller.panic().unwrap();
+    for _ in 0..200 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    parts.controller.collect_garbage();
+    assert!(
+        parts
+            .controller
+            .stats()
+            .cable_fades_settled
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 0,
+        "the fades settle"
+    );
+}

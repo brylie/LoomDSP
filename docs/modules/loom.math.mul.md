@@ -16,7 +16,7 @@ Multiplies two signals and a gain, for ring modulation. To control loudness, use
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
 | **A** (`a`) | audio | 0 | The signal to scale. |
-| **B** (`b`) | modulation | 0 | Scales A. Reads 1 while no cable is connected. |
+| **B** (`b`) | modulation | 1 | Scales A. Reads 1 while no cable is connected. |
 
 ## Outputs
 

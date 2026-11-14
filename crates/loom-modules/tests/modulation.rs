@@ -919,7 +919,9 @@ fn a_full_live_table_drops_the_dot_but_not_the_sound() {
 
 /// After a recompile gives a cell to another parameter, the old knob never
 /// reads the new parameter's value, and the new one reads nothing until
-/// the engine has the schedule that gives it the cell.
+/// the engine has the schedule that gives it the cell. The new assignment
+/// ramps in over 5 ms (live patching spec, rule 9), so its full value shows
+/// once the ramp ends; the removed one ramps out with no cell.
 #[test]
 fn a_moved_cell_never_shows_another_parameters_value() {
     let mut parts = engine_with_live_cells(1);
@@ -945,6 +947,12 @@ fn a_moved_cell_never_shows_another_parameters_value() {
     assert_eq!(parts.controller.modulated(a, 0), None);
     assert_eq!(parts.controller.modulated(b, 0), None);
     render(&mut parts, 8, 8);
+    assert_eq!(parts.controller.modulated(a, 0), None);
+    assert!(
+        parts.controller.modulated(b, 0).is_some_and(|value| value < 0.5),
+        "still ramping in"
+    );
+    render(&mut parts, 512, 8);
     assert_eq!(parts.controller.modulated(a, 0), None);
     assert_eq!(parts.controller.modulated(b, 0), Some(0.5));
 }

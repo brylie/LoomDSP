@@ -215,3 +215,14 @@ fn status_texts_read_as_the_spec_names_them() {
     assert_eq!(Mode::ALL.map(Mode::label), ["Single", "Layer", "Select", "Stack"]);
     assert!(Mode::Layer.has_members() && Mode::Select.has_members() && !Mode::Stack.has_members());
 }
+
+/// The kinds of the mixers the flattener adds name the module IDs that live
+/// patching rule 9 treats as mixers (`loom_core::cable_fade`).
+#[test]
+fn mixer_kinds_name_the_core_mixer_ids() {
+    use loom_core::cable_fade::{MEMBER_MODULE, SELECT_MODULE, SPREAD_SUM_MODULE, SUM_MODULE};
+    assert_eq!(SUM_KIND, format!("{SUM_MODULE}@1"));
+    assert_eq!(SPREAD_SUM_KIND, format!("{SPREAD_SUM_MODULE}@1"));
+    assert_eq!(SELECT_KIND, format!("{SELECT_MODULE}@1"));
+    assert_eq!(MEMBER_KIND, format!("{MEMBER_MODULE}@1"));
+}

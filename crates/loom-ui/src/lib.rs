@@ -16,6 +16,9 @@
 //!   window shell, or the headless driver tests use. The runtime names no
 //!   window toolkit, so a third driver, such as a plugin host's window, can
 //!   be added without changing it.
+//! - **The window shell** ([`shell`], the `shell` feature, on by default)
+//!   is the driver for a desktop window: `winit` and `wgpu`, in that one
+//!   module. The app's side draws each frame through [`shell::Layers`].
 //! - **Time comes from the driver.** Every call takes the current moment,
 //!   and the runtime never reads the clock, so a test decides what time it
 //!   is.
@@ -37,6 +40,8 @@ mod event;
 pub mod headless;
 mod routing;
 mod runtime;
+#[cfg(feature = "shell")]
+pub mod shell;
 mod view;
 mod waker;
 

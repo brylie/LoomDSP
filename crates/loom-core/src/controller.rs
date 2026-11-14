@@ -25,7 +25,7 @@
 //! functions, stay in this file, because a child module cannot see its
 //! siblings' private items. Why: ADR-0034.
 
-use crate::compile::{CompileReport, compile};
+use crate::compile::{CompileReport, FadeKey, Fades, Wiring, compile_with_fades};
 use crate::descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamRange, Polarity};
 use crate::display::{DisplayReader, DisplaySource, DisplayTable};
 use crate::engine::{Command, Engine, EngineConfig, EngineStats, Garbage};
@@ -44,8 +44,9 @@ use crate::telemetry::{PairProbe, ProbeId, ProbeKind, Telemetry, TelemetrySender
 use crate::transport::{TimeSignature, TransportSettings, clamp_tempo};
 use crate::width;
 use rtrb::{Consumer, Producer, RingBuffer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 /// The handles returned by [`create_engine`].
 pub struct EngineParts {
@@ -104,6 +105,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         transport: TransportSettings::default(),
         config,
         stats,
+        cable_fades: CableFades::default(),
     };
     EngineParts {
         controller,
@@ -168,6 +170,33 @@ pub struct Controller {
     transport: TransportSettings,
     config: EngineConfig,
     stats: Arc<EngineStats>,
+    /// What the next compile needs to fade the changes since the last one.
+    cable_fades: CableFades,
+}
+
+/// What the last schedule sent was compiled from, and the fades that may
+/// still run in it (live patching spec, rule 9). Updated only after the
+/// engine was sent the schedule.
+#[derive(Default)]
+struct CableFades {
+    /// `None` before the first schedule, so nothing fades after a load.
+    wiring: Option<Wiring>,
+    /// The generation of the last schedule sent.
+    generation: u64,
+    /// Every fade and contribution ramp in that schedule.
+    fading: Vec<FadeKey>,
+}
+
+impl CableFades {
+    /// The fades the next schedule carries: none once the engine says the
+    /// last schedule's fades have all ended.
+    fn carried(&self, stats: &EngineStats) -> &[FadeKey] {
+        if stats.cable_fades_settled.load(Ordering::Relaxed) >= self.generation {
+            &[]
+        } else {
+            &self.fading
+        }
+    }
 }
 
 /// # The graph, commit, and engine state
@@ -178,6 +207,13 @@ impl Controller {
     /// The module registry.
     pub fn registry(&self) -> &Arc<Registry> {
         &self.registry
+    }
+
+    /// How many fades and contribution ramps of the last schedule sent the
+    /// controller still keeps, because the engine has not said they ended
+    /// (live patching spec, rule 9). For tests and diagnostics.
+    pub fn cable_fades_in_flight(&self) -> usize {
+        self.cable_fades.carried(&self.stats).len()
     }
 
     /// The current graph (including uncommitted edits).
@@ -330,26 +366,49 @@ impl Controller {
         // What the graph holds per mapping. With a screen edit on its way,
         // every control change so far is older than the graph's value.
         let synced = self.midi.synced(&self.graph);
-        let (mut schedule, mut report) = compile(
+        // Swap fades that leave with this edit and had finished: a cable
+        // moved off one onto its new part switches (rule 9).
+        let reader = self.display_reader();
+        let done: BTreeSet<ModuleId> = self
+            .cable_fades
+            .wiring
+            .as_ref()
+            .map(|wiring| {
+                wiring
+                    .leaving_fades(&self.graph)
+                    .into_iter()
+                    .filter(|&(_, source)| reader.read(source) >= 0.5)
+                    .map(|(id, _)| id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let generation = self.cable_fades.generation + 1;
+        let (mut schedule, mut report, wiring) = compile_with_fades(
             &self.graph,
-            self.probes.as_map(),
-            self.probes.pairs(),
-            &synced,
+            (self.probes.as_map(), self.probes.pairs(), &synced),
             self.config.sample_rate,
             self.config.max_block,
+            Fades {
+                previous: self.cable_fades.wiring.as_ref(),
+                carried: self.cable_fades.carried(&self.stats),
+                done,
+            },
         );
+        schedule.generation = generation;
+        let fading = schedule.fade_keys();
         // Live value cells, kept from the last compile where the parameter
         // is still modulated.
-        // A right copy's fills get none: the knob shows copy 0.
+        // A right copy's fills get none: the knob shows copy 0. Nor does a
+        // fill kept only while an assignment ramps out (rule 9).
         let keys: Vec<u64> = schedule
             .fills
             .iter()
-            .filter(|fill| !fill.is_extra_copy())
+            .filter(|fill| !fill.is_extra_copy() && fill.is_modulated())
             .map(|fill| fill.key)
             .collect();
         let (released, missing) = self.live.assign(&keys);
         for fill in &mut schedule.fills {
-            fill.live = if fill.is_extra_copy() {
+            fill.live = if fill.is_extra_copy() || !fill.is_modulated() {
                 NO_CELL
             } else {
                 self.live.cell(fill.key).unwrap_or(NO_CELL)
@@ -359,7 +418,17 @@ impl Controller {
         report.without_live_value = missing;
         // Order matters: swap first (the new schedule no longer uses the
         // removed slots), then remove the instances.
-        let pushed = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok()
+        let swapped = self.commands.push(Command::SwapSchedule(Box::new(schedule))).is_ok();
+        // The engine runs the schedule once it is sent, so what the next
+        // compile fades from follows that push alone (rule 9).
+        if swapped {
+            self.cable_fades = CableFades {
+                wiring: Some(wiring),
+                generation,
+                fading,
+            };
+        }
+        let pushed = swapped
             && self
                 .slots
                 .retiring()

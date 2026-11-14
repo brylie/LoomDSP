@@ -218,3 +218,10 @@ fn an_exposed_slot_parameter_has_the_roles_kind() {
             .is_empty()
     );
 }
+
+/// The swap fade's kind names the module ID that live patching rule 9
+/// treats as a mixer (`loom_core::cable_fade`).
+#[test]
+fn the_fade_kind_names_the_core_mixer_id() {
+    assert_eq!(FADE_KIND, format!("{}@1", loom_core::cable_fade::SWAP_FADE_MODULE));
+}

@@ -93,7 +93,7 @@ const fn count_param(name: &'static str, label: &'static str, description: &'sta
 /// `loom.struct.sum`: the sum of a layer's or a mono stack's outputs.
 /// Internal.
 pub static SUM: ModuleDescriptor = ModuleDescriptor {
-    id: "loom.struct.sum",
+    id: loom_core::cable_fade::SUM_MODULE,
     version: 1,
     name: "Sum",
     category: "Structure",
@@ -178,7 +178,7 @@ impl Module for Sum {
 /// `loom.struct.spread_sum`: the stereo sum of a stack with stereo spread.
 /// Internal.
 pub static SPREAD_SUM: ModuleDescriptor = ModuleDescriptor {
-    id: "loom.struct.spread_sum",
+    id: loom_core::cable_fade::SPREAD_SUM_MODULE,
     version: 1,
     name: "Stereo Spread Sum",
     category: "Structure",
@@ -278,7 +278,7 @@ impl Module for SpreadSum {
 
 /// `loom.struct.member`: the home of a select's Member parameter. Internal.
 pub static MEMBER: ModuleDescriptor = ModuleDescriptor {
-    id: "loom.struct.member",
+    id: loom_core::cable_fade::MEMBER_MODULE,
     version: 1,
     name: "Member",
     category: "Structure",
@@ -335,7 +335,7 @@ impl Module for MemberValue {
 /// `loom.struct.select`: one output of a select, crossfading between
 /// members. Internal.
 pub static SELECT: ModuleDescriptor = ModuleDescriptor {
-    id: "loom.struct.select",
+    id: loom_core::cable_fade::SELECT_MODULE,
     version: 1,
     name: "Select",
     category: "Structure",
