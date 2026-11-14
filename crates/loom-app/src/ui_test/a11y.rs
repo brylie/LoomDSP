@@ -206,8 +206,13 @@ impl<'a> A11yNode<'a> {
         self.tree.ids.get(&self.id)
     }
 
-    /// Its shown children, in order.
+    /// Its shown children, in order. A hidden node has none: what is
+    /// inside it is hidden too, even when only the node itself is marked,
+    /// as a covered tile is.
     pub fn children(&self) -> Vec<A11yNode<'a>> {
+        if self.raw().is_hidden() {
+            return Vec::new();
+        }
         self.raw()
             .children()
             .iter()

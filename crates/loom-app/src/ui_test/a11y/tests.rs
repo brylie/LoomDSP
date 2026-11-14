@@ -85,3 +85,24 @@ fn click_opens_the_browser_and_hides_the_tiles() {
     assert!(!names.iter().any(|name| name == "Cutoff"), "{names:?}");
     assert!(ui.app().ui_snapshot().browser.is_some(), "the browser is open");
 }
+
+/// A covered tile is found by its UI ID, but nothing inside it is: the
+/// tile is the only node marked hidden, and its controls are hidden with it.
+#[test]
+fn nothing_inside_a_covered_tile_is_found() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.a11y_action("Add module", Action::Click);
+    let tree = ui.a11y_tree();
+    let tile = tree.node_by_id(&crate::a11y::tree::tile_id(4));
+    assert_eq!(tile.name(), Some("SVF"));
+    assert!(tile.children().is_empty(), "the tile's knobs are covered too");
+}
+
+/// ShowContextMenu on a tile opens its menu in a fresh harness: the tree
+/// the request was found in placed the canvas the menu is placed on.
+#[test]
+fn show_context_menu_opens_a_tiles_menu() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.a11y_action("SVF", Action::ShowContextMenu);
+    assert_eq!(ui.app().overlays.tile_menu().map(|(module, _)| module), Some(4));
+}
