@@ -316,9 +316,14 @@ Gates for 2.2b and 2.2c, with main as the base:
 ### 2.5 The agent tools on the new shell
 
 1. `--control` and `--control-script`: the listener thread wakes the loop through the proxy. `locate` finds targets from our layout data and the view models, not from an Iced widget `Operation`. The JSON protocol does not change.
+   - **Done, the wake.** The listener runs on the control channel's watcher thread and hands each command to the watcher's outlet, which wakes the loop through the runtime's waker: the event loop's proxy under the shell (spec section 2, rule 7). The thread and channel from Iced's `futures` in between are gone, so `control/` names no `iced::futures`.
+   - **`locate`: from our data where that data exists; the rest moves with phase 3** (spec section 10, rule 6, ruling of 2026-11-15). A module, a control, a port, a light, a meter, and a badge come from the scene and the camera, and a canvas UI ID from the accessibility tree. The canvas's place and live camera, the parts Iced draws, and text in the window still come from the `Find` window question until each view moves (step 3.2). No reply changed.
 2. `screenshot` (the command) and `--screenshot-window`: draw the same frame offscreen.
+   - Done in step 2.2c, which draws the window with a frame function of our own.
 3. `--dump-ui`: unchanged, since it comes from `ui_snapshot`.
+   - **Checked.** Plain and with `--select 4`, on `subtractive.ron`, the output is byte-identical to `main` before this step.
 4. `scripts/bundle-macos.sh` and desktop automation: now see a real accessibility tree. Update `docs/design/control-channel.md`, which still says the window has none.
+   - **Done.** control-channel.md says the window exposes the tree on macOS, Windows, and Linux, and that finding, reading, and acting on a control through it is checked on macOS only. The script needs no change, since the adapter needs nothing in `Info.plist`; its header says what automation finds. Checked on the bundled app with `examples/accesskit-macos-repro/inspect.swift`.
 5. Run every command listed in the Commands section of `AGENTS.md` and record that each works.
 
 ### Phase 2 done
@@ -348,7 +353,7 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
 
 ### 3.2 The order of views
 
-Move the simplest views first. One pull request per row, each passing the parity gates.
+Move the simplest views first. One pull request per row, each passing the parity gates. Each row also moves its parts' bounds, for `locate` and the accessibility tree, from Iced's named containers to our layout by UI ID. The last row removes the `Find` and `Places` window questions and `places.rs` (spec section 10, rule 6).
 
 | Order | View | Widgets it needs |
 |---|---|---|

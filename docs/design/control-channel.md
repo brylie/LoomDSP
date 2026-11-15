@@ -18,7 +18,7 @@ An agent building a feature wants to check it in the real app: "select the filte
 
 - `--screenshot`, `--screenshot-window`, and `--dump-ui` show a still frame of a patch at start. With `--frames`, `--dump-ui` and `--screenshot-window` can run the engine for a while first, but they cannot show what happens after an edit or a note.
 - The headless `Ui` harness drives the real view, but only inside a Rust test.
-- Desktop automation can see and click the window of `LoomDSP.app`, but by pixel only: the window has no accessibility tree (#190), so a control cannot be found by name or read.
+- Desktop automation can see and click the window of `LoomDSP.app`, and the window exposes an accessibility tree on macOS, Windows, and Linux (#190). On macOS, automation has been checked to find a control by name, read its value, and act on it through the tree; on Windows and Linux this is not checked yet. It cannot see the canvas's own state: what is under the pointer, a pinned badge, a drag in progress.
 
 The control channel fills the gap: commands by name into the running app, and replies with what the UI shows. It also tells pixel-based automation where a named control is, so its clicks land.
 
@@ -110,7 +110,7 @@ Commands for the checks that need a hand today: hover lines, pinning a badge and
 | `scroll` | `target` or `x`, `y`, `dy` (lines, negative is down), optional `dx`, `modifiers` | A wheel step |
 
 - **Same path as the UI.** Each command becomes the pointer events a real pointer sends, in order, through the same event handling as the window (rule 3). A `drag` is a press, `steps` moves, and a release, each applied and drawn before the next. So a cable drag, an arc drag, a tile move, and a drop all work.
-- **How events are injected** is an implementation choice (a message into the iced event stream, or the `Ui` harness run against the live `App::view`). The rules above must hold either way: the same handlers, undo steps, and status messages.
+- **How events are injected** is an implementation choice. Today an injector wraps the window view and gives it one event per drawn frame (`pointer.rs`), until the views are our own widgets (phase 3). The rules above must hold either way: the same handlers, undo steps, and status messages.
 - **`target`** is resolved at the time of the event. A target that is not on screen is an error. A `drag` with a `to` target resolves it at the last move, so a target that appears during the drag (a highlight) works.
 - **Reply.** `ok`, and the pointer position. The snapshot gains `pointer`: `x`, `y`, `buttons` (down), `hover` (the name of the control, port, or badge under it, if any), `pinned` (the pinned output), and `drag` (what is being dragged, if anything), so a script can check each step.
 - **`key`** with `escape` already exists, so "pin a badge, press Escape" is `hover`, `press`, `release`, `key`.

@@ -193,17 +193,21 @@ fn keys_and_modifiers_by_name() {
 /// Serves a script through a fake app thread that answers every call.
 #[test]
 fn serve_writes_one_reply_per_command_with_its_id() {
-    let (mut tx, mut rx) = mpsc::channel::<Call>(1);
+    let (outlet, inlet) = crate::watcher::channel::<Call>(1);
+    // Only the snapshot reaches the app: the bad line fails to parse, and
+    // `wait` is the listener's own. The app stays open until the script
+    // ends, since a closed outlet stops `serve`.
+    let (done, ended) = std::sync::mpsc::channel::<()>();
     let app = std::thread::spawn(move || {
-        while let Some(call) = iced::futures::executor::block_on(iced::futures::StreamExt::next(&mut rx)) {
-            call.answer(Ok(fields(json!({ "seen": matches!(call.command, Command::Snapshot) }))));
-        }
+        let call = inlet.recv().expect("the snapshot arrives");
+        call.answer(Ok(fields(json!({ "seen": matches!(call.command, Command::Snapshot) }))));
+        let _ = ended.recv();
     });
     let input =
         "{\"id\": 1, \"cmd\": \"snapshot\"}\n\n{\"cmd\": \"fly\"}\n{\"id\": \"w\", \"cmd\": \"wait\", \"ms\": 1}\n";
     let mut output = Vec::new();
-    serve(input.as_bytes(), &mut output, &mut tx, None);
-    drop(tx);
+    serve(input.as_bytes(), &mut output, &outlet, None);
+    drop(done);
     app.join().unwrap();
     let lines: Vec<Value> = String::from_utf8(output)
         .unwrap()
@@ -219,16 +223,16 @@ fn serve_writes_one_reply_per_command_with_its_id() {
 /// Serves `script` with the variables in `vars` to a real app, as
 /// `--control-script` does, and returns the replies.
 fn serve_script(app: &mut App, script: &'static str, vars: &'static [(&'static str, &'static str)]) -> Vec<Value> {
-    let (mut tx, mut rx) = mpsc::channel::<Call>(1);
+    let (outlet, inlet) = crate::watcher::channel::<Call>(1);
     let client = std::thread::spawn(move || {
         let env = |name: &str| vars.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string());
         let mut output = Vec::new();
-        serve(script.as_bytes(), &mut output, &mut tx, Some(&env));
+        serve(script.as_bytes(), &mut output, &outlet, Some(&env));
         output
     });
     // The app's side: take each call and draw frames until it is answered.
     while !client.is_finished() {
-        if let Ok(call) = rx.try_recv() {
+        if let Some(call) = inlet.try_recv() {
             let _ = app.send(Message::Control(call));
         }
         let _ = app.send(Message::ControlFrame(Instant::now()));
@@ -293,23 +297,22 @@ impl Write for Closed {
 /// cannot be written (V4).
 #[test]
 fn an_unset_variable_quits_even_when_stdout_is_closed() {
-    let (mut tx, mut rx) = mpsc::channel::<Call>(1);
+    let (outlet, inlet) = crate::watcher::channel::<Call>(1);
+    // The unset variable stops the script before its command is sent, so
+    // the one call that arrives is the quit.
     let app = std::thread::spawn(move || {
-        let mut quit = false;
-        while let Some(call) = iced::futures::executor::block_on(iced::futures::StreamExt::next(&mut rx)) {
-            quit |= matches!(call.command, Command::Quit);
-            call.answer(Ok(Map::new()));
-        }
+        let call = inlet.recv().expect("the quit arrives");
+        let quit = matches!(call.command, Command::Quit);
+        call.answer(Ok(Map::new()));
         quit
     });
     let env = |_: &str| None;
     serve(
         "{\"cmd\": \"audio\", \"device\": \"${LOOM_TEST_UNSET}\"}\n".as_bytes(),
         Closed,
-        &mut tx,
+        &outlet,
         Some(&env),
     );
-    drop(tx);
     assert!(app.join().unwrap(), "the app was asked to quit");
     assert_eq!(exit_status(), COULD_NOT_RUN);
 }
@@ -2028,17 +2031,18 @@ fn socket_serves_clients_and_cleans_up() {
     drop(UnixListener::bind(&path).unwrap());
     assert!(path.exists());
 
-    let (tx, mut rx) = mpsc::channel::<Call>(1);
+    let (outlet, inlet) = crate::watcher::channel::<Call>(1);
     let app = std::thread::spawn(move || {
-        // Answers three commands, then closes as the app does.
+        // Answers three commands, then closes as the app does: dropping
+        // the inlet closes the outlet.
         for _ in 0..3 {
-            let call = iced::futures::executor::block_on(iced::futures::StreamExt::next(&mut rx)).unwrap();
+            let call = inlet.recv().expect("a command arrives");
             call.answer(Ok(fields(json!({ "seen": matches!(call.command, Command::Snapshot) }))));
         }
     });
     let listener = {
         let path = path.clone();
-        std::thread::spawn(move || listen(&path, tx))
+        std::thread::spawn(move || listen(&path, &outlet))
     };
     let ask = |lines: &str, replies: usize| -> Vec<Value> {
         let mut stream = loop {
@@ -2080,8 +2084,8 @@ fn socket_leaves_a_regular_file_alone() {
     let dir = socket_dir("file");
     let path = dir.join("s");
     std::fs::write(&path, "precious").unwrap();
-    let (tx, _rx) = mpsc::channel::<Call>(1);
-    listen(&path, tx);
+    let (outlet, _inlet) = crate::watcher::channel::<Call>(1);
+    listen(&path, &outlet);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "precious");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -2093,8 +2097,8 @@ fn socket_leaves_a_regular_file_alone() {
 fn socket_refuses_a_path_that_is_too_long() {
     let dir = socket_dir("long");
     let path = dir.join("s".repeat(200));
-    let (tx, _rx) = mpsc::channel::<Call>(1);
-    listen(&path, tx);
+    let (outlet, _inlet) = crate::watcher::channel::<Call>(1);
+    listen(&path, &outlet);
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(&dir);
 }

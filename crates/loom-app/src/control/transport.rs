@@ -48,27 +48,14 @@ pub(super) fn remove_socket(path: &std::path::Path) {
 /// How long a listener waits for the app to answer one command.
 pub(super) const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Runs a listener on its own thread and yields each command for the app.
-pub fn stream(listener: &Listener) -> impl Stream<Item = Call> + use<> {
-    let (tx, rx) = mpsc::channel(1);
-    let listener = listener.clone();
-    std::thread::spawn(move || match listener {
-        Listener::Script(path) => match std::fs::File::open(&path) {
-            Ok(file) => {
-                let mut tx = tx;
-                // Only a script reads the environment (V1).
-                let env = |name: &str| std::env::var(name).ok();
-                serve(BufReader::new(file), std::io::stdout(), &mut tx, Some(&env));
-            }
-            Err(e) => eprintln!("loom-app: control script {}: {e}", path.display()),
-        },
-        Listener::Socket(path) => listen(&path, tx),
-    });
-    rx
-}
+/// Where a listener hands each call: the outlet of the control channel's
+/// watcher, which wakes the loop through the runtime's waker (the event
+/// loop's proxy under the window shell). Its handle lives on the `App`, so
+/// the outlet closes when the app does.
+pub(super) type Outlet = crate::watcher::Outlet<Call>;
 
 #[cfg(unix)]
-pub(super) fn listen(path: &std::path::Path, mut tx: mpsc::Sender<Call>) {
+pub(super) fn listen(path: &std::path::Path, outlet: &Outlet) {
     use std::os::unix::fs::FileTypeExt;
     use std::os::unix::net::UnixListener;
     // A socket left by an earlier run is replaced; any other file is not.
@@ -90,12 +77,12 @@ pub(super) fn listen(path: &std::path::Path, mut tx: mpsc::Sender<Call>) {
     eprintln!("loom-app: control channel on {}", path.display());
     // Poll, so the thread ends when the app closes.
     let _ = listener.set_nonblocking(true);
-    while !tx.is_closed() {
+    while !outlet.is_closed() {
         match listener.accept() {
             Ok((stream, _)) => {
                 let _ = stream.set_nonblocking(false);
                 if let Ok(reader) = stream.try_clone() {
-                    serve(BufReader::new(reader), stream, &mut tx, None);
+                    serve(BufReader::new(reader), stream, outlet, None);
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(50)),
@@ -109,7 +96,7 @@ pub(super) fn listen(path: &std::path::Path, mut tx: mpsc::Sender<Call>) {
 }
 
 #[cfg(not(unix))]
-pub(super) fn listen(_path: &std::path::Path, _tx: mpsc::Sender<Call>) {
+pub(super) fn listen(_path: &std::path::Path, _outlet: &Outlet) {
     eprintln!("loom-app: --control needs Unix domain sockets, which this platform lacks; use --control-script");
 }
 
@@ -132,14 +119,14 @@ pub fn exit_status() -> i32 {
 /// reply as a line. Returns when the input ends or the app closes. With
 /// `env`, `${NAME}` in string values is replaced first, and an unset
 /// variable ends the script and quits the app with status 2.
-pub(super) fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::Sender<Call>, env: Env) {
+pub(super) fn serve(input: impl BufRead, mut output: impl Write, outlet: &Outlet, env: Env) {
     for line in input.lines() {
         let Ok(line) = line else { return };
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let (id, answer, vars, stop) = run_line(line, tx, env);
+        let (id, answer, vars, stop) = run_line(line, outlet, env);
         let mut reply = Map::new();
         if let Some(id) = id {
             reply.insert("id".to_string(), id);
@@ -162,13 +149,13 @@ pub(super) fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::
         // its reply could not be written (stdout closed).
         if stop {
             EXIT_STATUS.store(COULD_NOT_RUN, std::sync::atomic::Ordering::Relaxed);
-            let _ = send(Command::Quit, tx);
+            let _ = send(Command::Quit, outlet);
             return;
         }
         if write_failed {
             return;
         }
-        if tx.is_closed() {
+        if outlet.is_closed() {
             return;
         }
     }
@@ -176,11 +163,7 @@ pub(super) fn serve(input: impl BufRead, mut output: impl Write, tx: &mut mpsc::
 
 /// Parses one line and gets its answer, with the variables it used, and
 /// whether the script must stop because one was unset.
-pub(super) fn run_line(
-    line: &str,
-    tx: &mut mpsc::Sender<Call>,
-    env: Env,
-) -> (Option<Value>, Answer, Map<String, Value>, bool) {
+pub(super) fn run_line(line: &str, outlet: &Outlet, env: Env) -> (Option<Value>, Answer, Map<String, Value>, bool) {
     let mut value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(e) => return (None, Err(format!("not JSON: {e}")), Map::new(), false),
@@ -195,23 +178,30 @@ pub(super) fn run_line(
         Ok(command) => command,
         Err(e) => return (id, Err(e.to_string()), vars, false),
     };
-    (id, send(command, tx), vars, false)
+    (id, send(command, outlet), vars, false)
 }
 
-/// The control channel's watcher: runs the listener and hands each call to
-/// the app through `outlet`, waiting for room, since every call must
-/// arrive. One call is in flight at a time anyway: the listener waits for
-/// each answer before it reads the next line (rule 5).
-pub fn watch(listener: &Listener, outlet: crate::watcher::Outlet<Call>) {
-    for call in iced::futures::executor::block_on_stream(stream(listener)) {
-        if !outlet.send(call) {
-            return;
-        }
+/// The control channel's watcher: runs the listener on the watcher's own
+/// thread and hands each call to the app through `outlet`, waiting for
+/// room, since every call must arrive. One call is in flight at a time
+/// anyway: the listener waits for each answer before it reads the next
+/// line (rule 5). Returns when the input ends or the app closes.
+pub fn watch(listener: &Listener, outlet: Outlet) {
+    match listener {
+        Listener::Script(path) => match std::fs::File::open(path) {
+            Ok(file) => {
+                // Only a script reads the environment (V1).
+                let env = |name: &str| std::env::var(name).ok();
+                serve(BufReader::new(file), std::io::stdout(), &outlet, Some(&env));
+            }
+            Err(e) => eprintln!("loom-app: control script {}: {e}", path.display()),
+        },
+        Listener::Socket(path) => listen(path, &outlet),
     }
 }
 
 /// Has the app run one command and waits for its answer.
-pub(super) fn send(command: Command, tx: &mut mpsc::Sender<Call>) -> Answer {
+pub(super) fn send(command: Command, outlet: &Outlet) -> Answer {
     if let Command::Wait { ms } = command {
         std::thread::sleep(Duration::from_millis(ms));
         return Ok(Map::new());
@@ -221,7 +211,7 @@ pub(super) fn send(command: Command, tx: &mut mpsc::Sender<Call>) -> Answer {
         command,
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    if iced::futures::executor::block_on(tx.send(call)).is_err() {
+    if !outlet.send(call) {
         return Err("the app closed".to_string());
     }
     receiver

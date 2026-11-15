@@ -1,7 +1,10 @@
 #!/bin/sh
 # Builds loom-app in release mode and wraps it in a minimal LoomDSP.app, so
 # macOS desktop automation tools (which find apps by bundle) can see and
-# drive the window.
+# drive the window. They also read its accessibility tree, so they can find
+# a control by name, read its value, and act on it, as VoiceOver does. The
+# control channel (docs/design/control-channel.md) reaches what the tree
+# does not, such as the canvas's pointer state.
 #
 # No signing, no notarisation, no icon. The release workflow
 # (docs/design/releases.md) uses it too, with these optional variables:
