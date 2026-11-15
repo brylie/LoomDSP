@@ -325,10 +325,43 @@ Gates for 2.2b and 2.2c, with main as the base:
 4. `scripts/bundle-macos.sh` and desktop automation: now see a real accessibility tree. Update `docs/design/control-channel.md`, which still says the window has none.
    - **Done.** control-channel.md says the window exposes the tree on macOS, Windows, and Linux, and that finding, reading, and acting on a control through it is checked on macOS only. The script needs no change, since the adapter needs nothing in `Info.plist`; its header says what automation finds. Checked on the bundled app with `examples/accesskit-macos-repro/inspect.swift`.
 5. Run every command listed in the Commands section of `AGENTS.md` and record that each works.
+   - **Done, on macOS, 2026-11-15, after step 2.2c.** Every command ran and exited 0:
+     - `mise run check` (which runs the coverage step), `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`, `cargo deny check`, `typos`, `cargo bench -p loom-modules`, and `mise run help-pages` (no change to `docs/modules`);
+     - the two `LOOM_UPDATE_REFERENCES=1` runs. They are deterministic here: two runs write the same files. Three committed renders (`dynamics_compress`, `dynamics_expand`, `dynamics_limit`) differ from this machine's renders within the test's 1e-3 tolerance, and the reference test passes against them. The committed files were kept;
+     - `loom check`, `loom render`, and `loom analyze` on the recorded WAV;
+     - `loom midi-port "Loom Pad"`, which opened the port, took the typed lines, and ended with its input;
+     - every `loom-app` line:
+       - the window, ended by a script that quits;
+       - `--bench`: 118 fps with 300 modules;
+       - `--measure`;
+       - `--measure-idle`: frames only from meters, as #730 says;
+       - `--measure-tree`: 20 tree builds, 1.7 ms each on average;
+       - `--fake-audio --record`;
+       - `--preferences` with `--device MOTU --buffer 128`: no MOTU device here, so the app starts on the default output;
+       - the control socket: `set` answers 800, and `audio` answers its `--fake-audio` error;
+       - `--screenshot` with `--zoom`, `--scale`, `--focus`, `--pointer`, and `--wire`;
+       - `--screenshot-window --select`;
+       - `--dump-ui` with `--select` and with `--frames`;
+       - `--test-modules`;
+     - `scripts/bundle-macos.sh`.
+   - Two notes from the run:
+     - `--control` needs a short socket path. The operating system's limit is about 100 bytes, and a longer path is refused with that error (control-channel rule 13).
+     - A release build warns that `iced_bridge::measure::Measure::new` is never used, since only tests call it. Clippy's `--all-targets` run does not see it.
+   - The pan check after 2.2c: in the running app, through `--control-script`, `locate` on module 4 moved by (+40, +25) during a middle-button pan of (+40, +25), before the release, and stayed there after it. That matches the harness test `locate_follows_a_pan_before_release`.
 
 ### Phase 2 done
 
 The parity gates pass. `iced::application`, Iced's `winit` shell, and `iced_runtime`'s task runner are no longer used. Screen readers work on macOS, and the tree is exposed on Windows and Linux (checked with Narrator and Orca if a machine is at hand; otherwise listed as not checked).
+
+**Done, 2026-11-15, except Brylie's VoiceOver listening check.**
+- **The parity gates:** each step's pull request records its gate, and this step's are above. For example, `--dump-ui` and `locate` are byte-identical before and after 2.5.
+- **No Iced application or shell:**
+  - `rg 'iced::application|iced::daemon|iced::run\b|iced::winit' crates` finds nothing. The app starts through `loom_ui::shell::run` (`loom-app/src/lib.rs`).
+  - `iced_winit` is named only in `iced_bridge/window.rs`, for its event and pointer conversions and its clipboard, not its shell.
+  - `iced_runtime` is used for `UserInterface`, which still lays out and draws the views until phase 3. It also turns an Iced `Task` into a stream (`task::into_stream`, `task::widget`) that our runner in `iced_bridge/tasks.rs` drives. Nothing runs Iced's own runtime or its event loop.
+- **Screen readers:**
+  - macOS: VoiceOver's tree and actions were checked by script (step 2.2d's gate, again here on the bundled app). Brylie's listening check with VoiceOver is still to do, by hand.
+  - Windows and Linux: the tree is exposed through `accesskit_winit`. Narrator and Orca are not checked, since no machine was at hand.
 
 ## Phase 3: Our own widgets, one view at a time
 

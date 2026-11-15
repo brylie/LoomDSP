@@ -2789,3 +2789,48 @@ fn voice_count_crossings_switch_mode_and_undo_together() {
     set(&mut app, "voices", 1.0);
     assert_eq!(values(&app), (1.0, 2.0));
 }
+
+/// An empty folder of its own for a test's script files, on any platform.
+fn script_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("loom-script-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// `watch` serves a script file to its end and returns. A script of blank
+/// lines sends no call, so nothing reaches the app and nothing is written.
+#[test]
+fn watch_serves_a_script_file_to_its_end() {
+    let dir = script_dir("watch-script");
+    let path = dir.join("blank.jsonl");
+    std::fs::write(&path, "\n\n").unwrap();
+    let (outlet, inlet) = crate::watcher::channel::<Call>(1);
+    watch(&Listener::Script(path), outlet);
+    assert!(inlet.try_recv().is_none(), "a blank script sends nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `watch` returns at once for a script that cannot be opened, sending
+/// nothing.
+#[test]
+fn watch_returns_for_a_missing_script() {
+    let dir = script_dir("watch-missing");
+    let (outlet, inlet) = crate::watcher::channel::<Call>(1);
+    watch(&Listener::Script(dir.join("missing.jsonl")), outlet);
+    assert!(inlet.try_recv().is_none(), "a missing script sends nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `watch` runs a socket listener, which returns at once for a path the
+/// operating system refuses.
+#[cfg(unix)]
+#[test]
+fn watch_runs_a_socket_listener() {
+    let dir = socket_dir("watch-socket");
+    let path = dir.join("s".repeat(200));
+    let (outlet, _inlet) = crate::watcher::channel::<Call>(1);
+    watch(&Listener::Socket(path.clone()), outlet);
+    assert!(!path.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
