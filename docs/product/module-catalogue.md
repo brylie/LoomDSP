@@ -137,8 +137,8 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-VOICE-01 | Voice merge | Turns a polyphonic signal into one signal: sum, average, last voice, lowest, or highest. | | M2 | FR-VOICE-03 | Built (`loom.voice.merge`; split and spread remain separate work in #675) |
-| MT-VOICE-02 | Voice split | Separates the voices of a polyphonic signal into outputs. Copying one signal to every voice needs no module: a mono cable feeds every voice. | | M2 | FR-VOICE-03 | Specified ([polyphony](../design/polyphony.md#voice-split-mt-voice-02)) |
-| MT-VOICE-03 | Voice spread | Gives each voice a different value from one control, by an even spread, a series, or a seeded random set. | Spread, Seed | M2 | New | Specified ([polyphony](../design/polyphony.md#voice-spread-mt-voice-03)) |
+| MT-VOICE-02 | Voice split | Separates the voices of a polyphonic signal into outputs. Copying one signal to every voice needs no module: a mono cable feeds every voice. | | M2 | FR-VOICE-05 | Specified ([polyphony](../design/polyphony.md#voice-split-mt-voice-02)) |
+| MT-VOICE-03 | Voice spread | Gives each voice a different value from one control, by an even spread, a series, or a seeded random set. | Spread, Seed | M2 | FR-VOICE-05 | Specified ([polyphony](../design/polyphony.md#voice-spread-mt-voice-03)) |
 | MT-VOICE-04 | Voice assigner | Redistributes notes across voices, or doubles them into unison voices. | | M2 | FR-VOICE-02 | Specified ([polyphony](../design/polyphony.md#voice-assigner-mt-voice-04)) |
 
 ## Envelopes and modulation sources

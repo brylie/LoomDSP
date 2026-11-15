@@ -3,12 +3,12 @@
 A choice of ranges for wide controls, such as Multiply's gain, so a player can make a knob fine and safe for the job it does in a patch.
 
 - **Kind:** living specification.
-- **Status:** Implemented ([#122](https://github.com/brylie/LoomDSP/issues/122)), except the manual check below.
+- **Status:** Implemented ([#122](https://github.com/brylie/LoomDSP/issues/122)), except the manual check below. Refined on 2026-11-15 for [#675](https://github.com/brylie/LoomDSP/issues/675): [Showing the value](#showing-the-value) and Voice spread's `amount` are not built yet.
 - **Decision behind it:** none yet. It extends [parameter mapping](modulation.md#parameter-mapping) (Agreed) and does not change a decision.
 - **Use case and requirements:** FR-MOD-09 (proposed here), FR-MOD-03, FR-MOD-08, FR-SIG-03.
 - **Background:** [Why feedback FM turns to noise](../learn/feedback-fm.md): exponential pitch, the one-sample loop, and aliasing at high depth.
 - **Issues:** [#121](https://github.com/brylie/LoomDSP/issues/121) (the problem that started this), [#122](https://github.com/brylie/LoomDSP/issues/122) (this spec).
-- **Code:** `ParamRange`, `ParamSpec::ranges`, `in_range`, `ParamSpec::load_range`, and `check_ranges` in `loom-core/src/descriptor/param.rs`, and `ModuleDescriptor::load_range` in `loom-core/src/descriptor.rs`; `Node::spec` in `graph.rs`; `Controller::set_range`; the ranged specs in `ParamFill` (`compile/schedule.rs`) and `MidiMapOp` (`midi_map.rs`, built in `compile/midi_maps.rs`); `WIDE_RANGES` in `loom-modules/src/math.rs`; `ranges` in `loom-patch`; the **Range** selector in `loom-app/src/inspector.rs`.
+- **Code:** `ParamRange`, `ParamSpec::ranges`, `in_range`, `ParamSpec::load_range`, and `check_ranges` in `loom-core/src/descriptor/param.rs`, and `ModuleDescriptor::load_range` in `loom-core/src/descriptor.rs`; `Node::spec` in `graph.rs`; `Controller::set_range`; the ranged specs in `ParamFill` (`compile/schedule.rs`) and `MidiMapOp` (`midi_map.rs`, built in `compile/midi_maps.rs`); `WIDE_RANGES` in `loom-modules/src/math.rs`; `ranges` in `loom-patch`; the **Range** selector in `loom-app/src/inspector.rs`; the value text in `param::format` (`loom-app/src/param.rs`).
 
 ## Goal
 
@@ -65,6 +65,19 @@ Two parameters on one [range widget](panel-widgets.md#range) share one selected 
 - A mapped controller or a modulation assignment on either parameter uses the shared range.
 - *Why:* both handles sit on one track, so one position must mean one value. With separate ranges, a handle would stop partway along the track with nothing on screen to explain it, and the two modulation bars would use different scales.
 
+## Showing the value
+
+The text that shows a linear parameter's value has enough decimals that one 1% step of the selected range changes it, on any range whose span is 0.01 or more.
+
+- **Which parameters.** The rule applies only to a parameter with `ParamMapping::Linear` that is not a whole number. A whole number always shows no decimals, on any range. A logarithmic parameter, a decibel parameter, and a choice keep today's text.
+- **The rule.** `param::format` takes the span, `max - min`, from the spec it is given. The callers pass the ranged spec (`ParamSpec::in_range`, as `Node::spec` gives it), so the span is the selected range's. When the span is under 0.1, the value shows 4 decimals. Otherwise it shows what today's rules give from the value's size: 0 decimals for 1,000 and up, 1 from 100, 2 from 1, and 3 below 1. Today's rules stay the floor, so no value shows fewer decimals than it does today. So -0.01 to 0.01 shows 0.0004, -0.1 to 0.1 shows 3 decimals as today, and 0 to 1 shows 1.00 as today. A span under 0.01, which only a sub-patch surface's exposed range can give, still shows 4 decimals, so a 1% step there may not show.
+- **Bad spans.** The span is computed in `f64`, so `max - min` of two finite `f32` bounds cannot overflow. A span that is not finite, or not above 0, uses today's rules. *Why:* a sub-patch surface's exposed range comes from a patch file and is checked only by `is_span` (`loom-patch/src/hierarchy.rs`), so the span must not be trusted. The rule itself never asks for more than 4 decimals; a cap of 6 decimals guards any span the rule cannot otherwise reach, and is never met by it. *Why a threshold, not a formula:* `ceil(-log10(span / 100))` in `f32` gives 3 decimals for a span of 1.0, so 1.00 would become 1.000, and every 0 to 1 knob would change.
+- **Who calls it.** The tile's knob and range values (`scene.rs:585` and `:601`), the inspector row (`inspector.rs:648` and `:676`), a sub-patch surface's controls (`surface.rs:461`), and the range note that shows what a mapped controller sweeps (`inspector.rs:759`). Hover text shows no value, so it does not call it.
+- **The screen reader hears the shown text.** A control's node in the accessibility tree (a knob, a fader, a number) and an inspector row take their description from the text the screen shows: `widget_node` in `crates/loom-app/src/a11y/tree.rs` uses `widget.text` for a tile control, and `value_control` in `crates/loom-app/src/inspector/access.rs` uses the row's shown value. So a screen reader hears the same "0.0003" the screen shows. The node's numeric value is still the parameter as a number. `ParamSpec::value_text` describes only the pieces of an XY pad and a range (the piece path, about `a11y/tree.rs:1110`). This batch does not change `value_text`.
+- **The inspector's draft.** Enter on a value field commits nothing when the text is the text the field already showed (`submit_value_draft`, `controls.rs:500`). That baseline must be the text the row shows: taken from the shown row's text, or formatted with the spec of the row's `control_target` (`crates/loom-app/src/surface.rs`), so a sub-patch surface row uses its exposed range. It must not come from a lookup by module and parameter, because a surface row and the inner module's row share that key. With the descriptor spec, an untouched 0.0004 would compare as "0.000" against "0.0004", and Enter would commit a change and add an undo step. Typing (`type_value_draft`, `controls.rs:479`) keeps parsing with the descriptor spec, on purpose: parsing does not round, and a typed value is clamped later as any edit is.
+- **Which step is visible.** On a span of 0.01 or more, the 1% arrow-key step ([panels](panels.md), Keyboard) always changes the text. The Shift fine steps may not: Shift with an arrow key moves 0.1% of the range, and Shift-drag is 10 times finer than a drag. *Why only 1%:* showing every 0.1% step would need a fifth decimal on a fine range, more digits than a tile or a row reads at a glance.
+- *Why the rule:* on a fine range a value such as 0.0004 would show as "0.000", and a 1% step would change nothing on screen. The player cannot tell what the knob is set to.
+
 ## Acceptance criteria
 
 - [x] The registry refuses a range outside the parameter's `min` and `max`, a range with `min >= max`, a default range not in the list, a default value outside the default range, and ranges on a logarithmic or whole-number parameter.
@@ -76,6 +89,15 @@ Two parameters on one [range widget](panel-widgets.md#range) share one selected 
 - [x] Every example patch loads with the same values as before. A value outside the default range (for example a gain of 5) loads with the smallest range that holds it.
 - [x] A saved range that does not hold the saved value (gain 5 with -0.1 to 0.1) loads with the value unchanged, the smallest range that holds it (-5 to 5), and a report. The report is a note that `loom` prints and the app shows in its status bar.
 - [x] Two instances of one module keep separate ranges.
+- [ ] [Showing the value](#showing-the-value) (tests in `crates/loom-app`):
+  - 0.0004 on -0.01 to 0.01 shows "0.0004", and one 1% arrow-key step on the tile knob changes the text;
+  - a knob's and an inspector row's accessibility node read the same text the screen shows;
+  - 1.0 on 0 to 1 shows "1.00";
+  - a whole number shows "1", on any range;
+  - a logarithmic parameter shows the same text as today;
+  - spans of 0, 1e-45, -3e38 to 3e38, and NaN give a short string with no panic;
+  - Enter on an untouched draft of a value on -0.01 to 0.01 commits nothing and adds no undo step;
+  - typing "0.000" and Enter sets the value to 0.
 - [ ] Manual: in `fm-feedback.ron`, with Multiply's range at -0.1 to 0.1, a full knob turn moves from a pure tone to a bright one without the harsh noise from #121.
 
 ## Out of scope
@@ -92,6 +114,7 @@ Two parameters on one [range widget](panel-widgets.md#range) share one selected 
 - **Rule 6 is confirmed:** a smaller range clamps the value, a wider range keeps it.
 - **Clamp** `low` and `high` offer the same list, with the default range -1 to 1. A patch whose limits lie outside it loads with the smallest range that holds them.
 - **Scale** ([M1 modules](p1-modules.md)) offers the same list for its offset. Not built yet.
+- **Voice spread** `amount` ([polyphony](polyphony.md#voice-spread-mt-voice-03)) offers -0.01 to 0.01, -0.1 to 0.1, -1 to 1, and -10 to 10, with the default range -0.1 to 0.1. *Why its own list:* a detune of a few cents is about 0.0003, which no knob on the math list can set; and a Spread on a pitch cable should start within ±1 octave.
 - **Ranges from what is connected.** Could a range follow the signals around the module? [Port ranges](port-ranges.md) (Draft) proposes that ports declare nominal ranges and that the inspector offers a one-click **Match** for the Range selector. It never changes a range or value on its own, because that would break rules 6 and 7 here. Nothing in this spec waits for it.
 - **Other parameters.** Phase `tune` and `octave` are already in musical units and probably need no ranges. Check each new module as it comes.
 - **Explainer.** Written: [Why feedback FM turns to noise](../learn/feedback-fm.md).

@@ -162,10 +162,10 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_reset`.
 - [x] Every built-in DSP module in `loom_modules::ALL` passes `check_extreme_recovery` on every input, except inputs with a stated reason, which pass `check_extreme_stays_bounded_on`.
 - [x] `check_extreme_recovery` fails for a module that stores a huge input as it comes, for each of the two faults found in Phase Reset.
-- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`. Copying allocates nothing (`no_alloc.rs`).
+- [x] Every built-in DSP module in `loom_modules::ALL` passes `check_copy_state`, except seeded ones, which pass `check_copy_state_repeatable`, other than Selector and Voice spread, which pass the strict check ([stereo](stereo.md), rule 27; Voice spread with [#675](https://github.com/brylie/LoomDSP/issues/675)). Copying allocates nothing (`no_alloc.rs`).
 - [x] `check_non_finite_recovery` fails for a module that stores a bad input on another input's rising edge, on `Signal::non_finite_busy` (test).
 - [x] Every built-in DSP module passes `check_non_finite_recovery` with the transport playing, on port defaults and on busy inputs.
-- [x] Every built-in DSP module passes `check_copy_state` on port defaults with the transport playing, copied mid-cycle, on the bar wrap, and on the frame after it, except seeded ones.
+- [x] Every built-in DSP module passes `check_copy_state` on port defaults with the transport playing, copied mid-cycle, on the bar wrap, and on the frame after it, except seeded ones other than Selector and Voice spread, which pass the strict check ([stereo](stereo.md), rule 27; Voice spread with [#675](https://github.com/brylie/LoomDSP/issues/675)).
 - [x] Every built-in DSP module passes the all-input extreme check at its defaults and in each option of each choice parameter, except modules with a stated exception, which stay bounded.
 - [x] Every built-in DSP module stays finite with its continuous parameters at their maximum, each input in turn and all inputs at once.
 - [x] A parameter change and a transport change land on the same frame at block sizes 1, 77, and 512, for every built-in DSP module.
