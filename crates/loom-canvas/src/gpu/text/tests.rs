@@ -233,6 +233,8 @@ fn draw(device: &wgpu::Device, queue: &wgpu::Queue, list: PaintList) -> Vec<u8> 
         camera: crate::Camera::default(),
         cable_dim: 1.0,
         paint: list,
+        // No background, so only the painted text shows.
+        background: loom_ui_core::Color::TRANSPARENT,
     };
     let mut renderer = super::super::CanvasRenderer::new(device, format);
     renderer.prepare(device, queue, &frame, target);

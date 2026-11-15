@@ -89,6 +89,10 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // it stays until the window says otherwise; the app asks it again.
         focus: _,
         focus_question,
+        // Empty between frames: every draw empties it before Iced's draw
+        // call and takes the frame after, so no frame of the old patch is
+        // left to draw (`iced_bridge/paint.rs`). Checked below.
+        canvas_drawn,
         generation,
         test_modules,
         // The update that sets it ends by exiting the app, so a replace never
@@ -214,6 +218,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(linked_before.is_none());
     assert!(value_draft.is_none());
     assert!(focus_question.get(), "the window is asked where focus is");
+    assert!(canvas_drawn.take().is_none(), "no canvas frame is left between frames");
     assert!(lights.is_empty());
     assert!(!run_driven);
     assert!(meter_levels.is_empty());

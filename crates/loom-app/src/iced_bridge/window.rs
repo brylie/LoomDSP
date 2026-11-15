@@ -12,7 +12,8 @@
 //!   the turn's Iced tasks through `tasks.rs`: focus and scrolls, the window
 //!   questions, and the focus query, whose answer runs alone
 //!   ([`Layers::alone`]);
-//! - [`Layers::draw`] runs Iced's redraw update, draws, and presents.
+//! - [`Layers::draw`] runs Iced's redraw update and draws: the canvas in
+//!   the app's own pass, then Iced's layers (`paint.rs`).
 //!
 //! Iced's loop ran a redraw update's messages inside the frame. Here they
 //! go to the next turn, since the layers only read the app while they
@@ -26,7 +27,7 @@ use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
 use iced::{Task, mouse};
 use iced_runtime::user_interface::{Cache, State, UserInterface};
-use iced_wgpu::graphics::{Shell, Viewport};
+use iced_wgpu::graphics::Shell;
 use loom_ui::shell::{Frame, Ime, Layers, Opened, Parts, Pointer, Redraw, Report};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -45,6 +46,8 @@ pub(crate) struct WindowLayers {
     /// of the app's renderer type; the other half, the measure renderer,
     /// is the headless harness's and draws nothing.
     renderer: Option<crate::Renderer>,
+    /// The canvas's renderer, built with Iced's, for the window's format.
+    canvas: Option<super::paint::CanvasPass>,
     /// The widget tree's state between builds.
     cache: Option<Cache>,
     /// Window events since the last report, as Iced's.
@@ -74,6 +77,7 @@ impl WindowLayers {
     pub(crate) fn new(clipboard: SharedClipboard) -> Self {
         Self {
             renderer: None,
+            canvas: None,
             cache: Some(Cache::default()),
             events: Vec::new(),
             cursor: mouse::Cursor::Unavailable,
@@ -228,6 +232,7 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             iced::Font::DEFAULT,
             iced::Pixels(16.0),
         )));
+        self.canvas = Some(super::paint::CanvasPass::new(opened.device, opened.format));
         *self.clipboard.borrow_mut() = Some(iced_winit::Clipboard::connect(opened.window.clone()));
         self.scale = opened.window.scale_factor() as f32;
     }
@@ -335,7 +340,14 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             (frame.size.width * frame.scale).round() as u32,
             (frame.size.height * frame.scale).round() as u32,
         );
-        let viewport = Viewport::with_physical_size(physical, frame.scale);
+        let target = super::paint::Target {
+            device: frame.device,
+            queue: frame.queue,
+            view: frame.view,
+            format: frame.format,
+            physical,
+            scale: frame.scale,
+        };
         if frame.capture {
             // A capture is the window's last frame drawn again, as Iced's
             // screenshot was: the renderer still holds what that frame
@@ -348,11 +360,16 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             // the shell holds a capture until the first frame is shown. The
             // last frame is at the current size too: after a resize the
             // shell draws before any capture is due.
-            if let Some(renderer) = self.renderer.as_mut() {
-                wgpu(renderer).present(Some(background), frame.format, frame.view, &viewport);
+            //
+            // The canvas is drawn again from what it last uploaded, at the
+            // bounds it last had, so the capture is that frame. After New or
+            // Open it is the new patch's, since a frame of it was shown first.
+            if let (Some(renderer), Some(pass)) = (self.renderer.as_mut(), self.canvas.as_mut()) {
+                super::paint::draw_again(&target, wgpu(renderer), pass, background);
             }
             return;
         }
+        let Some(mut pass) = self.canvas.take() else { return };
         let mut messages = Vec::new();
         let window = size(&parts);
         let drawn = self.with_ui(app, window, |ui, renderer, cursor, clipboard| {
@@ -370,6 +387,9 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
                     break state;
                 }
             };
+            // The canvas widget leaves its frame in the app's slot while
+            // Iced draws; emptied first, so only this frame's is drawn.
+            app.canvas_drawn.clear();
             ui.draw(renderer, &theme, &style, cursor);
             if let State::Updated { input_method, .. } = &state
                 && let Some(composed) = super::preedit::of(input_method)
@@ -377,9 +397,11 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             {
                 super::preedit::draw(renderer, composed, *caret, window, &theme, crate::style::BODY);
             }
-            wgpu(renderer).present(Some(background), frame.format, frame.view, &viewport);
+            let drawing = app.canvas_drawn.take();
+            super::paint::draw(&target, wgpu(renderer), &mut pass, drawing, background);
             state
         });
+        self.canvas = Some(pass);
         if let Some(state) = drawn {
             self.take_state(&state);
             if let State::Updated { input_method, .. } = &state {

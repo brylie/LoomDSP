@@ -42,6 +42,7 @@ mod input;
 mod painter;
 mod reaction;
 mod scene;
+mod slot;
 pub mod stats;
 mod text;
 mod theme;
@@ -68,6 +69,7 @@ pub use scene::{
     PORT_HIT_RADIUS, PanelView, PartText, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal,
     WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
+pub use slot::{CanvasDrawing, CanvasSlot};
 pub use text::{CanvasText, ListPainter, PaintList};
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{Align, TextItem, TextKind, for_each as for_each_tile_text};

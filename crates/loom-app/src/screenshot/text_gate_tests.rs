@@ -32,6 +32,7 @@
 use super::*;
 use clap::Parser as _;
 use iced::advanced::text::{self, Paragraph as _};
+use iced::{Font, Pixels};
 use loom_canvas::{Align, CanvasText, TextKind, TextStyle, Weight, for_each_tile_text};
 use loom_ui_core::Rect;
 
@@ -101,9 +102,10 @@ fn window(patch: &std::path::Path) -> Option<(crate::App, CanvasView, Size<u32>,
     let options = &args.view;
     let logical = crate::WINDOW;
     let physical = physical_size(logical, options.scale).expect("a size");
-    let mut renderer = crate::iced_bridge::offscreen::renderer()?;
-    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), &mut renderer);
-    let canvas = canvas_view(&mut ui, &mut renderer).expect("a canvas");
+    let mut offscreen = Offscreen::new()?;
+    let renderer = &mut offscreen.renderer;
+    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
+    let canvas = canvas_view(&mut ui, renderer).expect("a canvas");
     drop(ui);
     let (scene, shown) = shown(
         options,
@@ -118,10 +120,11 @@ fn window(patch: &std::path::Path) -> Option<(crate::App, CanvasView, Size<u32>,
     app.session.scene = scene;
     app.refresh_values();
     app.still = Some(shown.still);
-    let pixels = draw_window(&app, &mut renderer, logical, options.scale);
+    let pixels = draw_window(&app, &mut offscreen, logical, options.scale);
     // The camera the still frame shows, as the canvas reports it.
-    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), &mut renderer);
-    let canvas = canvas_view(&mut ui, &mut renderer).expect("a canvas");
+    let renderer = &mut offscreen.renderer;
+    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
+    let canvas = canvas_view(&mut ui, renderer).expect("a canvas");
     drop(ui);
     Some((app, canvas, physical, pixels))
 }

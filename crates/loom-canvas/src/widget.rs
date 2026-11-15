@@ -2,9 +2,14 @@
 //!
 //! This is the only Iced code in the canvas beside the GPU primitive. It
 //! turns Iced's events into ours, hands them to [`CanvasInput`], applies the
-//! [`Reaction`] to Iced's shell, and draws. The input handling itself is in
-//! `crate::input` and knows nothing of Iced. The canvas draws its own text:
-//! Iced draws only the background and the primitive.
+//! [`Reaction`] to Iced's shell, and builds each frame. The input handling
+//! itself is in `crate::input` and knows nothing of Iced.
+//!
+//! Iced draws nothing of the canvas (step 2.2c). The widget stays in Iced's
+//! tree so it takes the canvas's input and Iced keeps overlays above it,
+//! and its draw call leaves the frame, text included, in a
+//! [`CanvasSlot`] the host lends. The host draws it with
+//! [`CanvasRenderer`](crate::CanvasRenderer) in a pass of its own.
 
 use crate::CanvasEvent;
 use crate::camera::Camera;
@@ -13,6 +18,7 @@ use crate::iced_convert::{ToCore as _, ToIced as _};
 use crate::input::*;
 use crate::reaction::Reaction;
 use crate::scene::Scene;
+use crate::slot::CanvasSlot;
 use crate::theme::Palette;
 use crate::trace::ScopeTraces;
 use iced::advanced::layout::{self, Layout};
@@ -28,7 +34,6 @@ mod drag_line;
 mod primitive;
 
 pub use drag_line::DragLine;
-use primitive::CanvasPrimitive;
 
 /// The patch canvas as an Iced widget. Draws a [`Scene`] and reports
 /// gestures as [`CanvasEvent`]s, through the message `on_event` makes.
@@ -37,6 +42,8 @@ pub struct PatchCanvas<'a, Message> {
     model: CanvasModel<'a>,
     /// Turns what the canvas reports into the app's message.
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
+    /// Where the draw call leaves its frame. Without one it builds none.
+    slot: Option<&'a CanvasSlot>,
 }
 
 /// What the widget keeps between frames: the canvas's input state, and the
@@ -54,7 +61,15 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         Self {
             model: CanvasModel::new(scene, selection),
             on_event: Box::new(on_event),
+            slot: None,
         }
+    }
+
+    /// Leaves each frame the widget builds in `slot`, for the host to draw.
+    /// See [`CanvasSlot`].
+    pub fn drawn(mut self, slot: &'a CanvasSlot) -> Self {
+        self.slot = Some(slot);
+        self
     }
 
     /// Starts the canvas with this camera and focus, for one still image.
@@ -198,7 +213,7 @@ impl<'a, Message> PatchCanvas<'a, Message> {
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for PatchCanvas<'_, Message>
 where
-    Renderer: iced_wgpu::primitive::Renderer,
+    Renderer: iced::advanced::Renderer,
 {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<State>()
@@ -290,39 +305,31 @@ where
             .to_iced()
     }
 
+    /// Draws nothing with Iced: builds the frame and leaves it in the
+    /// slot, if there is one.
     fn draw(
         &self,
         tree: &Tree,
-        renderer: &mut Renderer,
+        _renderer: &mut Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
         _viewport: &iced::Rectangle,
     ) {
+        let Some(slot) = self.slot else { return };
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds().to_core();
-        let model = &self.model;
-        let input = &state.input;
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: bounds.to_iced(),
-                ..renderer::Quad::default()
-            },
-            model.palette.background.to_iced(),
-        );
         // Text and floating boxes are painted into the frame, so the
-        // canvas's renderer draws them over its shapes in one primitive.
-        let mut frame = input.frame(model, bounds.size(), &state.cache);
-        frame.paint = input.paint_list(model, bounds, &state.cache);
-        renderer.draw_primitive(bounds.to_iced(), CanvasPrimitive(frame));
+        // canvas's renderer draws them over its shapes in the same pass.
+        slot.put(state.input.drawing(&self.model, bounds, &state.cache));
     }
 }
 
 impl<'a, Message, Theme, Renderer> From<PatchCanvas<'a, Message>> for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Renderer: iced_wgpu::primitive::Renderer + 'a,
+    Renderer: iced::advanced::Renderer + 'a,
     Theme: 'a,
 {
     fn from(canvas: PatchCanvas<'a, Message>) -> Self {

@@ -8,8 +8,9 @@
 //
 // Cost model: every shape is one small quad, and its fragment shader runs
 // only inside that quad. Cables are thin triangle strips. Nothing runs a
-// shader over the whole canvas except the background dot grid, which is a
-// few arithmetic operations per pixel. This keeps GPU cost tied to what is
+// shader over the whole canvas except the background fill and the dot grid,
+// each a few arithmetic operations per pixel. The fill replaces the box the
+// window drew under the canvas before step 2.2c, so it adds no work. This keeps GPU cost tied to what is
 // drawn, not to the number of pixels on a Retina display.
 
 struct Globals {
@@ -347,6 +348,51 @@ fn vs_grid(@builtin(vertex_index) vi: u32) -> GridOut {
 }
 
 const GRID_SPACING: f32 = 24.0;
+
+// The canvas background, drawn first, on a full-size quad. One instance:
+// the canvas's place in the target in physical pixels (x, y, width,
+// height, as floats, since the canvas's edges can fall between pixels),
+// and its colour.
+//
+// Coverage is the same as for the shapes above (`fs_shape`): the signed
+// distance from the pixel's centre to a box, here with square corners
+// (the standard box distance function, as in Inigo Quilez, "2D distance
+// functions"), and `0.5 - d` of the colour kept. So an edge between pixels
+// blends with the window behind it, as a box drawn there by the host
+// would.
+
+struct FillOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) view: vec4<f32>,
+    @location(1) colour: vec4<f32>,
+};
+
+@vertex
+fn vs_fill(
+    @builtin(vertex_index) vi: u32,
+    @location(0) view: vec4<f32>,
+    @location(1) colour: vec4<f32>,
+) -> FillOut {
+    let corner = vec2<f32>(f32(vi & 1u), f32(vi >> 1u));
+    var result: FillOut;
+    result.position = vec4<f32>(corner.x * 2.0 - 1.0, 1.0 - corner.y * 2.0, 0.0, 1.0);
+    result.view = view;
+    result.colour = colour;
+    return result;
+}
+
+@fragment
+fn fs_fill(v: FillOut) -> @location(0) vec4<f32> {
+    let half_size = v.view.zw * 0.5;
+    let local = v.position.xy - (v.view.xy + half_size);
+    let q = abs(local) - half_size;
+    let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0);
+    let coverage = clamp(0.5 - d, 0.0, 1.0);
+    if (coverage <= 0.0) {
+        discard;
+    }
+    return premultiply(v.colour, coverage);
+}
 
 @fragment
 fn fs_grid(v: GridOut) -> @location(0) vec4<f32> {

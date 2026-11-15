@@ -97,7 +97,18 @@ impl CanvasInput {
             camera,
             cable_dim: CABLE_OPACITY,
             paint: crate::text::PaintList::default(),
+            background: model.palette.background,
         }
+    }
+
+    /// The whole frame for a canvas at `bounds` in the host's logical
+    /// pixels: [`frame`](Self::frame) with its text and floating boxes
+    /// painted in ([`paint_list`](Self::paint_list)), ready for a host's
+    /// canvas pass.
+    pub fn drawing(&self, model: &CanvasModel<'_>, bounds: Rect, cache: &FrameCache) -> crate::CanvasDrawing {
+        let mut frame = self.frame(model, bounds.size(), cache);
+        frame.paint = self.paint_list(model, bounds, cache);
+        crate::CanvasDrawing { bounds, frame }
     }
 
     /// Paints the frame's text and floating boxes (see [`CanvasInput::paint`])

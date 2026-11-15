@@ -13,6 +13,7 @@
 //!   runs the Iced tasks the bridge returns on it through `tasks.rs`, as
 //!   Iced's runtime runs them on the window, until nothing is left.
 
+use super::offscreen::Offscreen;
 use super::tasks::{self, Sink, Stuck};
 use super::{Bridge, BridgeDriver, Bridged};
 use crate::{App, Message};
@@ -97,9 +98,9 @@ pub(crate) struct Surface {
     /// The measure renderer, which events, layout, operations, and frames
     /// run on, so they need no GPU.
     renderer: crate::Renderer,
-    /// The wgpu renderer for captures, made on the first one: `Ok` once
-    /// made, `Err` when no adapter was found.
-    gpu: Option<Result<crate::Renderer, NoGpu>>,
+    /// The GPU and its renderers for captures, made on the first one: `Ok`
+    /// once made, `Err` when no adapter was found.
+    gpu: Option<Result<Offscreen, NoGpu>>,
     cache: Option<Cache>,
     /// Where the pointer is, for events and drawing.
     pub(crate) cursor: mouse::Cursor,
@@ -143,14 +144,14 @@ impl Surface {
         }
         let size = self.size;
         let measured = places(app, size, &mut self.renderer);
-        let drawn = places(app, size, self.gpu().ok()?);
+        let drawn = places(app, size, &mut self.gpu().ok()?.renderer);
         Some((measured, drawn))
     }
 
-    /// The wgpu renderer for captures, made the first time it is asked for.
-    fn gpu(&mut self) -> Result<&mut crate::Renderer, NoGpu> {
+    /// The GPU for captures, made the first time it is asked for.
+    fn gpu(&mut self) -> Result<&mut Offscreen, NoGpu> {
         self.gpu
-            .get_or_insert_with(|| super::offscreen::renderer().ok_or(NoGpu))
+            .get_or_insert_with(|| Offscreen::new().ok_or(NoGpu))
             .as_mut()
             .map_err(|NoGpu| NoGpu)
     }
@@ -167,13 +168,17 @@ impl Surface {
         self.cache = Some(ui.into_cache());
     }
 
-    /// Draws `app`'s view, as after each frame.
+    /// Draws `app`'s view, as after each frame. The canvas's frame is
+    /// built, as in the window, and dropped: the measure renderer draws
+    /// nothing, so no frame it drew is ever drawn on a GPU.
     pub(crate) fn draw(&mut self, app: &App) {
         let theme = app.theme();
         let style = Style {
             text_color: theme.palette().text,
         };
+        app.canvas_drawn.clear();
         self.with_ui(app, |ui, renderer, cursor| ui.draw(renderer, &theme, &style, cursor));
+        app.canvas_drawn.clear();
     }
 
     /// Runs a widget operation, and those it chains, on `app`'s view.
@@ -195,10 +200,11 @@ impl Surface {
         let size = self.size;
         let cursor = self.cursor;
         let cache = self.cache.take().expect("the cache is put back after every frame");
-        let Ok(renderer) = self.gpu() else {
+        let Ok(offscreen) = self.gpu() else {
             self.cache = Some(cache);
             return Err(NoGpu);
         };
+        let renderer = &mut offscreen.renderer;
         let theme = app.theme();
         let style = Style {
             text_color: theme.palette().text,
@@ -219,10 +225,13 @@ impl Surface {
             &mut iced::advanced::clipboard::Null,
             &mut asked,
         );
+        // The canvas leaves its frame in the app's slot while Iced draws.
+        app.canvas_drawn.clear();
         ui.draw(renderer, &theme, &style, cursor);
+        let drawing = app.canvas_drawn.take();
         // The tree owns the text the renderer holds weakly, so it stays
         // until the frame is drawn.
-        let pixels = super::offscreen::pixels(renderer, physical, 1.0, theme.palette().background);
+        let pixels = offscreen.pixels(physical, 1.0, theme.palette().background, drawing);
         self.cache = Some(ui.into_cache());
         Image::new(physical.width, physical.height, 1.0, pixels).ok_or(NoGpu)
     }

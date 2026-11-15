@@ -490,6 +490,17 @@ pub struct CanvasFrame {
     /// Text and floating boxes painted over the scene, in the host's
     /// logical pixels. Empty until the host paints into it.
     pub(crate) paint: crate::text::PaintList,
+    /// The canvas background, drawn first over the canvas's place.
+    pub(crate) background: Color,
+}
+
+/// The canvas background as the fill pipeline's one instance: where the
+/// canvas is in the target, in physical pixels, and its colour.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+struct Fill {
+    view: [f32; 4],
+    colour: [f32; 4],
 }
 
 #[repr(C)]
@@ -579,6 +590,8 @@ pub struct CanvasRenderer {
     arcs: wgpu::RenderPipeline,
     traces: wgpu::RenderPipeline,
     grid: wgpu::RenderPipeline,
+    /// The background, under everything else.
+    fill: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     scene_cables: InstanceBuffer,
@@ -594,6 +607,10 @@ pub struct CanvasRenderer {
     /// Filled shapes under the traces: the other buffer a moving display
     /// uploads, never the controls.
     trace_fills: InstanceBuffer,
+    /// The background's one instance, and what it last held, so a frame
+    /// with the same place and colour uploads nothing.
+    background: InstanceBuffer,
+    background_uploaded: Option<Fill>,
     uploaded: u64,
     controls_uploaded: (u64, u64),
     traces_uploaded: (u64, u64, bool),
@@ -606,6 +623,8 @@ pub struct CanvasRenderer {
     /// Painted text and boxes, drawn last.
     text: text::TextRenderer,
 }
+
+const FILL_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4];
 
 const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
@@ -718,6 +737,16 @@ impl CanvasRenderer {
                 &[instance_layout(std::mem::size_of::<Segment>())],
             ),
             grid: make("loom-canvas grid", "vs_grid", "fs_grid", &[]),
+            fill: make(
+                "loom-canvas background",
+                "vs_fill",
+                "fs_fill",
+                &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Fill>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &FILL_ATTRIBUTES,
+                }],
+            ),
             globals,
             bind_group,
             scene_cables: InstanceBuffer::new(device, "loom-canvas scene cables"),
@@ -729,6 +758,8 @@ impl CanvasRenderer {
             control_lines: InstanceBuffer::new(device, "loom-canvas control lines"),
             trace_segments: InstanceBuffer::new(device, "loom-canvas trace segments"),
             trace_fills: InstanceBuffer::new(device, "loom-canvas trace fills"),
+            background: InstanceBuffer::new(device, "loom-canvas background"),
+            background_uploaded: None,
             uploaded: 0,
             controls_uploaded: (0, 0),
             traces_uploaded: (0, 0, false),
@@ -764,6 +795,21 @@ impl CanvasRenderer {
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         stats::frame();
+
+        // The background moves only with the canvas's place or colour.
+        let fill = Fill {
+            view: [
+                target.origin.x * target.scale,
+                target.origin.y * target.scale,
+                target.size.width * target.scale,
+                target.size.height * target.scale,
+            ],
+            colour: packed(frame.background),
+        };
+        if self.background_uploaded != Some(fill) {
+            self.background.upload(device, queue, &[fill]);
+            self.background_uploaded = Some(fill);
+        }
 
         if self.uploaded != frame.geometry.generation {
             self.scene_cables.upload(device, queue, &frame.geometry.cables);
@@ -828,6 +874,11 @@ impl CanvasRenderer {
         let plan = &self.plan;
         pass.set_bind_group(0, &self.bind_group, &[]);
 
+        if self.background.len > 0 {
+            pass.set_pipeline(&self.fill);
+            pass.set_vertex_buffer(0, self.background.slice());
+            pass.draw(0..4, 0..1);
+        }
         pass.set_pipeline(&self.grid);
         pass.draw(0..4, 0..1);
 

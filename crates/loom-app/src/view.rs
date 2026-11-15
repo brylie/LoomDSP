@@ -15,6 +15,7 @@ use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 impl App {
     pub(crate) fn view(&self) -> Element<'_, Message> {
         let mut canvas = PatchCanvas::new(&self.session.scene, &self.session.selection, Message::Canvas)
+            .drawn(&self.canvas_drawn)
             .values(&self.session.values)
             .window_drag_line(self.session.gestures.assign_drag().is_some())
             .traces(&self.session.traces)

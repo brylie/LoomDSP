@@ -718,6 +718,11 @@ struct App {
     /// Set when a message may have moved focus: the bridge then asks the
     /// window where it is, after the turn (`App::take_focus_question`).
     focus_question: std::cell::Cell<bool>,
+    /// Where the canvas widget leaves the frame it builds while the view is
+    /// drawn, for the window's canvas pass (`iced_bridge/paint.rs`). Each
+    /// draw empties it first and takes the frame after, so it holds nothing
+    /// between frames.
+    pub(crate) canvas_drawn: loom_canvas::CanvasSlot,
     /// Counts the engines built. Background watchers restart when it changes.
     generation: u64,
     /// The `test.` modules are loaded (`--test-modules`).

@@ -2,21 +2,24 @@
 //! it as a PNG file, and exits. `--screenshot-window` does the same for the
 //! whole window: toolbar, canvas, inspector, and stats bar.
 //!
-//! The frame goes through the same `Scene`, `PanelValues`, and wgpu
-//! primitive as the window, drawn by Iced's headless wgpu renderer. So the
-//! image is what a user sees, and an agent or a reviewer can check a UI
+//! The frame goes through the same `Scene`, `PanelValues`, canvas
+//! renderer, and frame function (`iced_bridge/paint.rs`) as the window,
+//! drawn offscreen (`iced_bridge/offscreen.rs`). So the image is what a
+//! user sees, and an agent or a reviewer can check a UI
 //! change without a person at the screen. It opens no window, no audio
 //! device, and no MIDI port.
 
-use iced::advanced::renderer::{Headless, Style};
+use crate::iced_bridge::offscreen::Offscreen;
+use iced::advanced::mouse;
+use iced::advanced::renderer::Style;
+use iced::advanced::widget::Id;
 use iced::advanced::widget::operation::Operation;
-use iced::advanced::widget::{Id, Tree};
-use iced::advanced::{Layout, layout, mouse};
-use iced::{Color, Element, Font, Pixels, Rectangle, Size, Theme};
+use iced::{Rectangle, Size, Theme};
 use iced_runtime::user_interface::{Cache, UserInterface};
 use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
 use loom_canvas::{
-    Camera, CanvasView, MAX_ZOOM, MIN_ZOOM, Palette, PanelValues, PatchCanvas, PortRef, Scene, Still, StillDrag,
+    Camera, CanvasInput, CanvasModel, CanvasView, FrameCache, MAX_ZOOM, MIN_ZOOM, Palette, PanelValues, PortRef, Scene,
+    Still, StillDrag,
 };
 use loom_core::{AssignmentId, Controller, ModuleId, OutputRef};
 use loom_ui_core::Point;
@@ -350,14 +353,13 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     let options = &args.view;
     let logical = options.size.map_or(crate::WINDOW, ImageSize::logical);
     let physical = physical_size(logical, options.scale)?;
-    // The window holds Iced's own widgets and the canvas's wgpu primitive,
-    // which only the wgpu renderer draws.
-    let mut renderer = crate::iced_bridge::offscreen::renderer().ok_or(NO_GPU)?;
+    let mut offscreen = Offscreen::new().ok_or(NO_GPU)?;
 
     // The camera fits the canvas, not the window, so lay the window out
     // once to find the canvas size.
-    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), &mut renderer);
-    let canvas = canvas_view(&mut ui, &mut renderer).ok_or("the window has no patch canvas")?;
+    let renderer = &mut offscreen.renderer;
+    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
+    let canvas = canvas_view(&mut ui, renderer).ok_or("the window has no patch canvas")?;
     drop(ui);
     let (scene, shown) = shown(
         options,
@@ -374,7 +376,7 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     app.session.selection.extend(shown.selected);
     app.still = Some(shown.still);
 
-    let pixels = draw_window(&app, &mut renderer, logical, options.scale);
+    let pixels = draw_window(&app, &mut offscreen, logical, options.scale);
     write_png(path, physical, &pixels)
 }
 
@@ -383,10 +385,11 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
 /// The frame first gets a redraw event, as every frame in the app does.
 /// Iced's buttons choose their look (enabled, hovered, disabled) while they
 /// handle a redraw, and draw as disabled before the first one (#460).
-fn draw_window(app: &crate::App, renderer: &mut crate::Renderer, logical: Size, scale: f32) -> Vec<u8> {
+fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale: f32) -> Vec<u8> {
     let physical = physical_size(logical, scale).expect("the caller checked the size");
     // A new cache, so the canvas starts from the still state.
     let theme = app.theme();
+    let renderer = &mut offscreen.renderer;
     let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
     let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
     // The image is one still frame, so what the widgets ask for is dropped.
@@ -401,10 +404,13 @@ fn draw_window(app: &crate::App, renderer: &mut crate::Renderer, logical: Size, 
     let style = Style {
         text_color: theme.palette().text,
     };
+    // The canvas leaves its frame in the app's slot while Iced draws.
+    app.canvas_drawn.clear();
     ui.draw(renderer, &theme, &style, mouse::Cursor::Unavailable);
+    let drawing = app.canvas_drawn.take();
     // The renderer holds text paragraphs weakly, and the widget tree owns
     // them, so the tree must live until the frame is drawn.
-    let pixels = crate::iced_bridge::offscreen::pixels(renderer, physical, scale, theme.palette().background);
+    let pixels = offscreen.pixels(physical, scale, theme.palette().background, drawing);
     drop(ui);
     pixels
 }
@@ -618,43 +624,20 @@ pub fn render(
     size: Size<u32>,
     scale: f32,
 ) -> Result<Vec<u8>, String> {
-    // The same font and text size as Iced's window defaults.
-    let mut renderer = iced::futures::executor::block_on(<iced_wgpu::Renderer as Headless>::new(
-        Font::DEFAULT,
-        Pixels(16.0),
-        Some("wgpu"),
-    ))
-    .ok_or(NO_GPU)?;
-
+    let mut offscreen = Offscreen::new().ok_or(NO_GPU)?;
     let palette = Palette::default();
-    let mut canvas: Element<'_, (), Theme, iced_wgpu::Renderer> = PatchCanvas::new(scene, selection, |_| ())
+    let model = CanvasModel::new(scene, selection)
         .values(values)
         .palette(palette)
-        .still(still)
-        .into();
-
-    let logical = Size::new(size.width as f32 / scale, size.height as f32 / scale);
-    let mut tree = Tree::new(&canvas);
-    let node = canvas
-        .as_widget_mut()
-        .layout(&mut tree, &renderer, &layout::Limits::new(Size::ZERO, logical));
-    canvas.as_widget().draw(
-        &tree,
-        &mut renderer,
-        &Theme::Dark,
-        &Style {
-            text_color: Color::WHITE,
-        },
-        Layout::new(&node),
-        mouse::Cursor::Unavailable,
-        &Rectangle::with_size(logical),
-    );
-    Ok(Headless::screenshot(
-        &mut renderer,
-        size,
-        scale,
-        palette.background.to_iced(),
-    ))
+        .still(still);
+    // The canvas's own state, started from the still frame, as the widget
+    // starts it; no Iced view is built, since the image is the canvas alone.
+    let input = CanvasInput::still(&model, still, std::time::Instant::now());
+    let cache = FrameCache::default();
+    let logical = loom_ui_core::Size::new(size.width as f32 / scale, size.height as f32 / scale);
+    let bounds = loom_ui_core::Rect::new(Point::ORIGIN, logical);
+    let drawing = input.drawing(&model, bounds, &cache);
+    Ok(offscreen.pixels(size, scale, palette.background.to_iced(), Some(drawing)))
 }
 
 pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(), String> {

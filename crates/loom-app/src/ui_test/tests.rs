@@ -2791,3 +2791,176 @@ fn a_capture_draws_enabled_buttons_as_enabled() {
         colour(Status::Active)
     );
 }
+
+/// Captures the window through the capture effect, as the control channel's
+/// `screenshot` does; `None` with no GPU adapter, unless one is required.
+fn capture_window(ui: &mut Ui) -> Option<loom_ui::effect::Image> {
+    use std::sync::{Arc, Mutex};
+    if !ui.draws_the_canvas() {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
+        return None;
+    }
+    let seen = Arc::new(Mutex::new(None));
+    let got = seen.clone();
+    ui.app_mut().effect(loom_ui::Effects::capture(move |image| {
+        *got.lock().unwrap() = Some(image);
+        Message::Tick
+    }));
+    let _ = ui.deliver(Message::Tick);
+    let image = seen.lock().unwrap().take().expect("the capture was answered");
+    Some(image.expect("a GPU draws it"))
+}
+
+/// The RGB of the pixel at `(x, y)`.
+fn pixel_at(image: &loom_ui::effect::Image, x: f32, y: f32) -> [u8; 3] {
+    let at = ((y as u32 * image.width() + x as u32) * 4) as usize;
+    let rgba = &image.rgba()[at..at + 3];
+    [rgba[0], rgba[1], rgba[2]]
+}
+
+/// How many pixels inside `area` are exactly `colour`, and how many
+/// pixels the area has.
+fn count_colour(image: &loom_ui::effect::Image, area: Rect, colour: [u8; 3]) -> (usize, usize) {
+    let (mut found, mut all) = (0, 0);
+    for y in area.y as u32..(area.y + area.height) as u32 {
+        for x in area.x as u32..(area.x + area.width) as u32 {
+            all += 1;
+            if pixel_at(image, x as f32, y as f32) == colour {
+                found += 1;
+            }
+        }
+    }
+    (found, all)
+}
+
+/// The canvas background as RGB.
+fn canvas_background() -> [u8; 3] {
+    let c = loom_canvas::Palette::default().background.to_iced().into_rgba8();
+    [c[0], c[1], c[2]]
+}
+
+/// The canvas is drawn in the app's own pass, under Iced's layers (plan
+/// for leaving Iced, step 2.2c): a capture shows the canvas background over
+/// the canvas's bounds, not the window's, and the module browser open over
+/// the canvas in its own fill, above the canvas.
+#[test]
+fn the_canvas_draws_under_the_overlays_over_it() {
+    let mut ui = Ui::open("subtractive.ron");
+    let canvas = ui.canvas().bounds;
+    ui.move_to(Point::new(canvas.x + 8.0, canvas.y + 8.0));
+    ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
+    let browser = ui
+        .places()
+        .of(&crate::browser::browser_id())
+        .expect("the browser is open")
+        .rect;
+    assert!(
+        canvas.contains(Point::new(browser.x, browser.y)),
+        "the browser opens over the canvas"
+    );
+    let Some(image) = capture_window(&mut ui) else { return };
+
+    let (bare, all) = count_colour(&image, canvas, canvas_background());
+    assert!(
+        bare * 4 > all,
+        "{bare} of {all} canvas pixels show the canvas background"
+    );
+    // Inside the browser's top padding, clear of its border and its rows.
+    let theme = ui.app().theme().extended_palette().background.base.color.into_rgba8();
+    assert_eq!(
+        pixel_at(&image, browser.x + 20.0, browser.y + 3.0),
+        [theme[0], theme[1], theme[2]],
+        "the browser's fill is drawn over the canvas"
+    );
+}
+
+/// A capture after New shows the new patch's canvas, not the old one's:
+/// the slot the canvas leaves its frame in holds nothing between frames.
+/// A new patch holds one Transport tile, so every canvas pixel outside it
+/// is the background or a grid dot, a faint white over it, while the
+/// subtractive patch drew tiles across the canvas.
+#[test]
+fn a_capture_after_new_shows_the_new_canvas() {
+    let mut ui = Ui::open("subtractive.ron");
+    let background = canvas_background();
+    let empty = |rgb: [u8; 3]| rgb.iter().zip(background).all(|(got, bg)| (bg..=bg + 24).contains(got));
+    // The pixels wholly inside the canvas, whose bounds can end between
+    // pixels.
+    let inside = |canvas: Rect| {
+        (canvas.y.ceil() as u32..(canvas.y + canvas.height).floor() as u32)
+            .flat_map(move |y| (canvas.x.ceil() as u32..(canvas.x + canvas.width).floor() as u32).map(move |x| (x, y)))
+    };
+    let Some(before) = capture_window(&mut ui) else { return };
+    let canvas = ui.canvas();
+    let drawn = inside(canvas.bounds)
+        .filter(|&(x, y)| !empty(pixel_at(&before, x as f32, y as f32)))
+        .count();
+    assert!(drawn > 10_000, "the subtractive patch shows its tiles ({drawn} pixels)");
+
+    assert!(ui.app_mut().replace(crate::Source::Empty));
+    ui.step(&[]);
+    let after = capture_window(&mut ui).expect("drawn before");
+    let (id, _) = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .next()
+        .expect("the Transport tile");
+    let found = crate::control::Found {
+        canvas: Some(ui.canvas()),
+        ..crate::control::Found::default()
+    };
+    let tile = crate::control::locate(ui.app(), &id.0.to_string(), &found).expect("the tile is shown");
+    // Its ports stand a little outside it.
+    let tile = Rect::new(
+        Point::new(tile.x - 8.0, tile.y - 8.0),
+        loom_ui_core::Size::new(tile.width + 16.0, tile.height + 16.0),
+    );
+    for (x, y) in inside(ui.canvas().bounds) {
+        let rgb = pixel_at(&after, x as f32, y as f32);
+        assert!(
+            empty(rgb) || tile.contains(Point::new(x as f32, y as f32)),
+            "{rgb:?} at ({x}, {y}) is outside the new patch's one tile"
+        );
+    }
+}
+
+/// `locate` follows a pan while the button is still down. It reads the
+/// canvas's live camera from the canvas widget (`control::Find`), which
+/// the widget still reports now that it draws nothing (step 2.2c); the
+/// app's own copy of the camera is written only when the pan ends, so an
+/// answer taken from it would stay where the pan began.
+#[test]
+fn locate_follows_a_pan_before_release() {
+    let mut ui = Ui::open("subtractive.ron");
+    let locate = |ui: &mut Ui| {
+        let found = crate::control::Found {
+            canvas: Some(ui.canvas()),
+            ..crate::control::Found::default()
+        };
+        crate::control::locate(ui.app(), "4", &found).expect("module 4 is shown")
+    };
+    let stored = |ui: &Ui| ui.app().session.cameras.get(&ui.app().session.level).copied();
+    let start = locate(&mut ui);
+    let camera = stored(&ui);
+    assert!(camera.is_some(), "the app keeps a camera for the level");
+    let bounds = ui.canvas().bounds;
+    let from = Point::new(bounds.x + 12.0, bounds.y + 12.0);
+    ui.move_to(from);
+    ui.step(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle))]);
+    ui.move_to(Point::new(from.x + 40.0, from.y + 25.0));
+
+    let during = locate(&mut ui);
+    assert_eq!(stored(&ui), camera, "the app's camera has not moved yet");
+    let moved = (during.x - start.x, during.y - start.y);
+    assert!(
+        (moved.0 - 40.0).abs() < 0.01 && (moved.1 - 25.0).abs() < 0.01,
+        "the tile moved with the pan: {moved:?}"
+    );
+
+    ui.step(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle))]);
+    let after = locate(&mut ui);
+    assert!((after.x - during.x).abs() < 0.01 && (after.y - during.y).abs() < 0.01);
+}

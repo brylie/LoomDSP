@@ -179,6 +179,7 @@ impl App {
             right_tab: matrix::Tab::default(),
             focus: None,
             focus_question: std::cell::Cell::new(false),
+            canvas_drawn: loom_canvas::CanvasSlot::default(),
             generation,
             test_modules: args.test_modules,
             quit: false,

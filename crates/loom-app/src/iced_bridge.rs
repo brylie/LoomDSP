@@ -610,6 +610,7 @@ impl iced::advanced::widget::Operation<()> for ScrollBy {
 pub(crate) mod headless;
 mod measure;
 pub(crate) mod offscreen;
+pub(crate) mod paint;
 pub(crate) use measure::Measure;
 mod preedit;
 mod services;
