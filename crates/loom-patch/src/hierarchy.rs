@@ -42,9 +42,9 @@ pub mod behind;
 mod links;
 mod slots;
 pub use slots::{
-    Emptied, Fading, Hidden, MadeSlot, NO_SLOT_IN_COLLAPSE, SlotState, StoredPart, Swapped, added_slot_text,
-    expose_role_only_text, fade_law, fade_law_value, made_slot_text, make_slot_label, no_part_text, removed_part_text,
-    swapped_text,
+    CopyFade, Emptied, Fading, Hidden, MadeSlot, NO_SLOT_IN_COLLAPSE, SLOT_GONE_TEXT, SlotState, StoredPart, Swapped,
+    added_slot_text, expose_role_only_text, fade_law, fade_law_value, made_slot_text, make_slot_label, no_part_text,
+    removed_part_text, swapped_text, too_many_modules_text,
 };
 
 /// The status bar text when Dissolve is asked for a sub-patch that holds
@@ -1543,10 +1543,19 @@ impl Hierarchy {
         controller: &mut Controller,
         skip: &[ModuleId],
     ) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
-        let mut skip: BTreeSet<ModuleId> = skip.iter().copied().collect();
+        // The modules the caller is removing: a fade never takes over an
+        // input of one (ADR-0045), and one with no path is given none.
+        let going: BTreeSet<ModuleId> = skip.iter().copied().collect();
+        let mut skip = going.clone();
         skip.extend(self.transient_ids());
         self.refresh_member_entries();
-        self.adopt(controller.graph());
+        for (id, _) in controller.graph().nodes() {
+            if self.ids.path_of(id).is_none() && !going.contains(&id) {
+                // Refused only when another path owns the id, which a
+                // module the controller holds never has.
+                let _ = self.ids.reserve(ModulePath::top(id.0), id);
+            }
+        }
         // What the links imply, from the links alone: a cable the graph
         // holds for a link that is gone must be written as direct now.
         let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), false, &skip);
@@ -1604,6 +1613,21 @@ impl Hierarchy {
         for (input, fade_out) in &wiring.retarget {
             desired.retain(|(_, to)| to != input);
             desired.insert((fade_out.clone(), input.clone()));
+        }
+        // A stack copy's fade takes over an input only while its thru cable
+        // is still wanted, so an edit during the fade wins (ADR-0045).
+        for (thru, input, fade_out) in &wiring.replace {
+            let take = match thru {
+                Some(thru) => desired.remove(&(thru.clone(), input.clone())),
+                None => {
+                    controller.graph().node(ModuleId(input.0)).is_some()
+                        && !going.contains(&ModuleId(input.0))
+                        && !desired.iter().any(|(_, to)| to == input)
+                }
+            };
+            if take {
+                desired.insert((fade_out.clone(), input.clone()));
+            }
         }
         desired.extend(wiring.add);
         let current = graph_cables(controller.graph());
@@ -2812,9 +2836,16 @@ impl Hierarchy {
         let (copies, added) = (std::mem::take(&mut self.copies), std::mem::take(&mut self.added));
         *self = snapshot.clone();
         for (path, id) in implied {
-            if self.ids.get(&path).is_none() && self.ids.path_of(id).is_none() {
-                let _ = self.ids.reserve(path, id);
+            if self.ids.path_of(id).is_some() {
+                continue;
             }
+            // A copy made again since the snapshot, as by an undo step's
+            // swap that synced before the rest of the step: the one in the
+            // graph keeps its path, not the snapshot's older id.
+            if self.ids.get(&path).is_some() {
+                self.ids.forget(&path);
+            }
+            let _ = self.ids.reserve(path, id);
         }
         self.copies = copies;
         self.added = added;

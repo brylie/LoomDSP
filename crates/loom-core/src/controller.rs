@@ -287,17 +287,33 @@ impl Controller {
         self.commit_synced()
     }
 
-    /// Compiles a graph whose MIDI feedback was already reconciled before
-    /// staging edits. Importing feedback again would overwrite staged values.
-    fn commit_synced(&mut self) -> Result<&CompileReport, LoomError> {
-        if !self.dirty {
-            return Ok(&self.last_report);
-        }
-        // Prepare voice/side copies before the swap. Removed copies retire
-        // after the new schedule no longer names their slots.
+    /// The engine slots the next commit would take for stereo and voice
+    /// copies: one for each copy a module's width now needs and does not
+    /// have yet (sub-patches.md, The module limit). Worked out by the same
+    /// plan the commit follows, so an edit fits exactly when this is at
+    /// most [`Controller::free_module_slots`].
+    pub fn slots_needed(&self) -> usize {
+        self.copy_plan().starting.len()
+    }
+
+    /// The engine slots the module `id` took at the last commit: 1 for a
+    /// module that runs DSP, plus one for each stereo or voice copy. 0 for
+    /// a module with no slot or one the graph does not hold. Undo records
+    /// it with a step, so it can count a module it puts back at its width.
+    pub fn slots_of(&self, id: ModuleId) -> usize {
+        self.graph
+            .nodes
+            .get(&id)
+            .map_or(0, |node| usize::from(node.slot.is_some()) + node.copy_slots.len())
+    }
+
+    /// The copies the graph's widths need that are not running yet, and
+    /// the running copies they no longer need, by module and `(voice,
+    /// side)`. The commit starts and stops these; [`Controller::slots_needed`]
+    /// counts the first.
+    fn copy_plan(&self) -> CopyPlan {
         let widths = width::infer(&self.graph);
-        let mut starting = Vec::new();
-        let mut stopping = Vec::new();
+        let mut plan = CopyPlan::default();
         for (&id, node) in &self.graph.nodes {
             if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
                 continue;
@@ -307,16 +323,28 @@ impl Controller {
                 for side in 0..sides {
                     let key = (voice, side);
                     if key != (0, 0) && !node.copy_slots.contains_key(&key) {
-                        starting.push((id, key));
+                        plan.starting.push((id, key));
                     }
                 }
             }
             for (&key, &slot) in &node.copy_slots {
                 if key.0 >= widths.voices[&id] || key.1 >= sides {
-                    stopping.push((id, key, slot));
+                    plan.stopping.push((id, key, slot));
                 }
             }
         }
+        plan
+    }
+
+    /// Compiles a graph whose MIDI feedback was already reconciled before
+    /// staging edits. Importing feedback again would overwrite staged values.
+    fn commit_synced(&mut self) -> Result<&CompileReport, LoomError> {
+        if !self.dirty {
+            return Ok(&self.last_report);
+        }
+        // Prepare voice/side copies before the swap. Removed copies retire
+        // after the new schedule no longer names their slots.
+        let CopyPlan { starting, stopping } = self.copy_plan();
         if self.slots.free_count() < starting.len() {
             return Err(LoomError::TooManyModules(self.config.max_modules));
         }
@@ -536,6 +564,16 @@ impl Controller {
         }
         Ok(())
     }
+}
+
+/// What a commit changes in the stereo and voice copies
+/// ([`Controller::copy_plan`]).
+#[derive(Default)]
+struct CopyPlan {
+    /// Copies to start, by module and `(voice, side)`.
+    starting: Vec<(ModuleId, (usize, usize))>,
+    /// Running copies to stop, by module, `(voice, side)`, and slot.
+    stopping: Vec<(ModuleId, (usize, usize), usize)>,
 }
 
 mod assignments;

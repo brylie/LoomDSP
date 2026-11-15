@@ -18,13 +18,13 @@ fn record(c: &mut Controller, positions: &mut BTreeMap<u32, (f32, f32)>, change:
 }
 
 fn undo(step: &Step, c: &mut Controller, positions: &mut BTreeMap<u32, (f32, f32)>) {
-    check(step, false, c).unwrap();
+    check(step, false, c, &Hierarchy::flat()).unwrap();
     apply(step, false, c, positions).unwrap();
     c.commit().unwrap();
 }
 
 fn redo(step: &Step, c: &mut Controller, positions: &mut BTreeMap<u32, (f32, f32)>) {
-    check(step, true, c).unwrap();
+    check(step, true, c, &Hierarchy::flat()).unwrap();
     apply(step, true, c, positions).unwrap();
     c.commit().unwrap();
 }
@@ -268,8 +268,11 @@ fn undo_with_no_room_for_the_modules_changes_nothing() {
     // Something else takes the freed place.
     let filler = c.add_module("loom.osc.noise").unwrap();
     c.commit().unwrap();
-    let error = check(&step, false, &c).unwrap_err();
-    assert!(error.contains("no room"), "{error}");
+    let error = check(&step, false, &c, &Hierarchy::flat()).unwrap_err();
+    assert_eq!(
+        error,
+        "the patch would have more than 2 modules. Delete modules to make room."
+    );
     assert!(c.graph().node(filler).is_some() && c.graph().node(b).is_some());
 }
 
@@ -685,4 +688,445 @@ fn undo_of_a_depth_change_fades() {
             }
         }
     }
+}
+
+/// The app with the patch `text` open and an engine with exactly `free`
+/// slots left after the load (sub-patches.md, The module limit).
+fn app_with_room(text: &str, free: usize) -> crate::App {
+    let open = |max_modules: usize| {
+        let config = EngineConfig {
+            max_modules,
+            ..EngineConfig::default()
+        };
+        let patch = loom_patch::Patch::from_ron(text).unwrap();
+        let loaded = crate::Loaded::read(
+            config,
+            false,
+            crate::Source::Recovered(Box::new(patch)),
+            &loom_patch::NoLibrary,
+        )
+        .unwrap();
+        crate::App::assemble(
+            Err("test".to_string()),
+            48_000.0,
+            loaded,
+            1,
+            &crate::tests::app_args(),
+            crate::settings::Rig::empty(),
+            false,
+        )
+    };
+    let max = EngineConfig::default().max_modules;
+    let used = max - open(max).session.controller.free_module_slots();
+    let app = open(used + free);
+    assert_eq!(app.session.controller.free_module_slots(), free, "the room asked for");
+    app
+}
+
+/// Leaves exactly `free` engine slots, taking the rest with modules outside
+/// the history, once the slots of removed modules are free again.
+fn leave_room(app: &mut crate::App, free: usize) {
+    let mut fillers = Vec::new();
+    loop {
+        while app.session.controller.free_module_slots() > 0 {
+            fillers.push(app.session.controller.add_module("loom.osc.noise").unwrap());
+        }
+        assert!(app.commit(), "{}", app.alerts.status());
+        app.process(64);
+        if app.session.controller.free_module_slots() == 0 {
+            break;
+        }
+    }
+    for id in fillers.into_iter().take(free) {
+        app.session.controller.remove_module(id).unwrap();
+    }
+    assert!(app.commit());
+    app.process(64);
+    assert!(app.commit());
+    assert_eq!(app.session.controller.free_module_slots(), free);
+}
+
+/// The patch as undo sees it in `app`.
+fn snapshot_of(app: &crate::App) -> Snapshot {
+    Snapshot::take_full(
+        &app.session.controller,
+        &app.session.hierarchy,
+        &app.session.level,
+        &app.session.positions,
+        &app.session.sizes,
+    )
+}
+
+/// Makes the history the one step from `before` to the patch now, as one
+/// edit that did all of it would record.
+fn one_step_since(app: &mut crate::App, before: &Snapshot) {
+    let step = diff(before, &snapshot_of(app), &BTreeSet::new()).expect("the edits changed the patch");
+    app.session.edits.history.clear();
+    app.session.edits.history.push(step);
+}
+
+/// The graph's modules and cables, to compare before and after a refusal.
+fn graph_of(app: &crate::App) -> (Vec<ModuleId>, Vec<(OutputRef, InputRef)>) {
+    let graph = app.session.controller.graph();
+    (graph.nodes().map(|(id, _)| id).collect(), graph.cables().collect())
+}
+
+/// How many modules of `kind` the graph holds.
+fn count_of(app: &crate::App, kind: &str) -> usize {
+    app.session
+        .controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == kind)
+        .count()
+}
+
+/// Swaps the slot tile `slot` to `to` as the player does.
+fn swap(app: &mut crate::App, slot: u32, to: crate::slots::SwapTarget) {
+    let _ = app.send(crate::Message::SwapSlot { slot, to });
+    app.process(600);
+}
+
+/// A sine into an empty Filter slot into an Amplifier, a Noise beside, and
+/// the output fed by the Amplifier.
+const ONE_SLOT: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "One slot"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 4, kind: "loom.clock.transport@1"),
+        PatchModule(id: 5, kind: "loom.osc.noise@1"),
+        PatchModule(id: 6, kind: "loom.level.amp@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1"))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (6, "in")),
+        PatchCable(from: (6, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// A step built by hand that fills a slot and deletes a module: its undo
+/// empties the slot and puts the module back. With room for the module
+/// but not also the slot's fade, the removal yields: the module comes
+/// back, the slot falls back to the 5 ms ramp, and the history stays
+/// (sub-patches.md, The module limit).
+#[test]
+fn an_undo_that_empties_a_slot_leaves_room_for_the_rest_of_its_step() {
+    let mut app = app_with_room(ONE_SLOT, 8);
+    let before = snapshot_of(&app);
+    swap(
+        &mut app,
+        9,
+        crate::slots::SwapTarget::Module("loom.filter.svf@1".into()),
+    );
+    let _ = app.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Delete(vec![5])));
+    one_step_since(&mut app, &before);
+    leave_room(&mut app, 1);
+    app.undo();
+    assert!(app.alerts.status().starts_with("Undo: "), "{}", app.alerts.status());
+    assert!(
+        app.session.controller.graph().node(ModuleId(5)).is_some(),
+        "the Noise is back"
+    );
+    assert_eq!(app.session.hierarchy.part_of_slot(ModuleId(9)), None);
+    assert_eq!(count_of(&app, "loom.struct.fade"), 0, "the slot ramps over 5 ms");
+    assert_eq!(count_of(&app, "loom.filter.svf"), 0);
+    assert!(app.redo_hint().is_ok(), "the history stays");
+}
+
+/// An undo step whose slot is gone, as after a dissolve, is refused before
+/// anything changes, with the reason, and nothing panics (sub-patches.md,
+/// The module limit).
+#[test]
+fn a_step_whose_slot_is_gone_is_refused() {
+    let mut app = app_with_room(ONE_SLOT, 8);
+    swap(
+        &mut app,
+        9,
+        crate::slots::SwapTarget::Module("loom.filter.svf@1".into()),
+    );
+    let step = app.session.edits.history.undo_step().cloned().expect("the swap's step");
+    app.dissolve_slot(9);
+    assert!(app.session.hierarchy.slot(ModuleId(9)).is_none(), "dissolved");
+    let refused = check(&step, false, &app.session.controller, &app.session.hierarchy);
+    assert_eq!(refused, Err(loom_patch::hierarchy::SLOT_GONE_TEXT.to_string()));
+    app.session.edits.history.push(step);
+    let before = graph_of(&app);
+    app.undo();
+    assert_eq!(
+        app.alerts.status(),
+        "Cannot undo swap Filter: the slot it changes is gone"
+    );
+    assert_eq!(graph_of(&app), before);
+}
+
+/// A step that fills a slot at exactly the limit passes `check`, because
+/// the part the swap adds is not counted again with the rest of the step,
+/// and the undo goes through (sub-patches.md, The module limit).
+#[test]
+fn a_swapped_part_is_counted_once() {
+    let mut app = app_with_room(ONE_SLOT, 8);
+    swap(
+        &mut app,
+        9,
+        crate::slots::SwapTarget::Module("loom.filter.svf@1".into()),
+    );
+    swap(&mut app, 9, crate::slots::SwapTarget::Empty);
+    // Room for the part and its fade, and no more.
+    leave_room(&mut app, 2);
+    let step = app.session.edits.history.undo_step().cloned().unwrap();
+    assert_eq!(
+        check(&step, false, &app.session.controller, &app.session.hierarchy),
+        Ok(0)
+    );
+    app.undo();
+    assert_eq!(app.alerts.status(), "Undo: remove part from Filter");
+    assert_eq!(app.session.hierarchy.fading_slots().len(), 1, "it crossfades");
+}
+
+/// [`ONE_SLOT`] with a stereo signal from a Join into an SVF of its own,
+/// which runs once per side and feeds nothing, so no other module's width
+/// follows it.
+fn one_slot_and_stereo() -> String {
+    ONE_SLOT
+        .replace(
+            r#"PatchModule(id: 6, kind: "loom.level.amp@1"),"#,
+            r#"PatchModule(id: 6, kind: "loom.level.amp@1"),
+        PatchModule(id: 7, kind: "loom.mix.join@1"),
+        PatchModule(id: 8, kind: "loom.filter.svf@1"),"#,
+        )
+        .replace(
+            r#"PatchCable(from: (6, "out"), to: (3, "in")),"#,
+            r#"PatchCable(from: (6, "out"), to: (3, "in")),
+        PatchCable(from: (1, "out"), to: (7, "left")),
+        PatchCable(from: (7, "out"), to: (8, "in")),"#,
+        )
+}
+
+/// A step that empties a slot and puts back an SVF that ran stereo, at a
+/// limit where the SVF's two slots fit but not also the slot's fade: the
+/// SVF comes back with both sides, the slot falls back to the 5 ms ramp,
+/// and the commit does not fail (sub-patches.md, The module limit).
+#[test]
+fn an_undo_that_restores_a_stereo_module_counts_its_copies() {
+    let mut app = app_with_room(&one_slot_and_stereo(), 8);
+    assert_eq!(app.session.controller.slots_of(ModuleId(8)), 2, "the SVF runs stereo");
+    let before = snapshot_of(&app);
+    swap(
+        &mut app,
+        9,
+        crate::slots::SwapTarget::Module("loom.filter.svf@1".into()),
+    );
+    let _ = app.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Delete(vec![8])));
+    one_step_since(&mut app, &before);
+    leave_room(&mut app, 2);
+    app.undo();
+    assert!(app.alerts.status().starts_with("Undo: "), "{}", app.alerts.status());
+    assert_eq!(app.session.controller.slots_of(ModuleId(8)), 2, "back with both sides");
+    assert_eq!(app.session.hierarchy.part_of_slot(ModuleId(9)), None);
+    assert_eq!(count_of(&app, "loom.struct.fade"), 0, "the slot ramps over 5 ms");
+}
+
+/// A Voice stacked four times on a stereo signal, whose Filter slot holds
+/// an SVF, and a second, empty Filter slot after it.
+const STEREO_STACK: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stereo stack"),
+    subpatches: {
+        "voice": SubPatch(
+            metadata: Metadata(name: "Voice"),
+            mode: Stack,
+            copies: 4,
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 3, kind: "loom.filter.svf@1"),
+                PatchModule(id: 4, kind: "loom.struct.output@1", label: Some("out")),
+                PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+                PatchModule(id: 10, kind: "loom.struct.slot@1", label: Some("Tone"), slot: Some(Slot(role: "loom.role.filter@1"))),
+            ],
+            cables: [
+                PatchCable(from: (1, "out"), to: (9, "in")),
+                PatchCable(from: (9, "out"), to: (10, "in")),
+                PatchCable(from: (10, "out"), to: (4, "in")),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+        PatchModule(id: 3, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 5, kind: "loom.mix.join@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (5, "left")),
+        PatchCable(from: (1, "out"), to: (5, "right")),
+        PatchCable(from: (5, "out"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+    ],
+)"#;
+
+/// The flat id of the tile `lid` inside the Voice tile.
+fn in_voice(app: &crate::App, lid: u32) -> u32 {
+    app.session
+        .hierarchy
+        .id_at(&ModulePath::top(2), lid)
+        .expect("a tile inside Voice")
+        .0
+}
+
+/// Undo of Remove part inside a stereo stack, at a limit that `check`
+/// passes (the part is the swap's) and that the parts and fades fit by
+/// count, but not their right sides: the measure after the sync refuses it,
+/// the swaps are taken back, the graph's modules and cables are as before,
+/// the status says why, and the history stays (sub-patches.md, The module
+/// limit).
+#[test]
+fn an_undo_whose_swap_does_not_fit_is_taken_back() {
+    let mut app = app_with_room(STEREO_STACK, 16);
+    let slot = in_voice(&app, 9);
+    swap(&mut app, slot, crate::slots::SwapTarget::Empty);
+    leave_room(&mut app, 8);
+    let step = app.session.edits.history.undo_step().cloned().unwrap();
+    assert_eq!(
+        check(&step, false, &app.session.controller, &app.session.hierarchy),
+        Ok(0)
+    );
+    let before = graph_of(&app);
+    app.undo();
+    let limit = app.session.controller.config().max_modules;
+    assert_eq!(
+        app.alerts.status(),
+        format!(
+            "Cannot undo remove part from Filter: the patch would have more than {limit} modules. Delete modules or lower Copies on Voice to make room."
+        )
+    );
+    assert_eq!(graph_of(&app), before, "taken back whole");
+    assert_eq!(app.session.controller.free_module_slots(), 8);
+    assert_eq!(app.undo_hint(), Ok("Undo: remove part from Filter".to_string()));
+}
+
+/// A step built by hand that, undone, empties a slot inside a stack and
+/// fills another: with no room for the fill, it is refused before the
+/// removal runs, so the emptied slot's running copies are never retired
+/// and made again from reset. Every module keeps its id, and no slot is
+/// retired (sub-patches.md, The module limit).
+#[test]
+fn a_refused_fill_leaves_the_slot_a_step_empties_untouched() {
+    let text = STEREO_STACK.replace(", part: Some(3)", "").replace(
+        r#"label: Some("Tone"), slot: Some(Slot(role: "loom.role.filter@1")))"#,
+        r#"label: Some("Tone"), slot: Some(Slot(role: "loom.role.filter@1", part: Some(3))))"#,
+    );
+    // Now the first slot is empty and the second, Tone, holds the SVF.
+    let mut app = app_with_room(&text, 24);
+    let (first, tone) = (in_voice(&app, 9), in_voice(&app, 10));
+    let before = snapshot_of(&app);
+    swap(
+        &mut app,
+        first,
+        crate::slots::SwapTarget::Module("loom.filter.svf@1".into()),
+    );
+    swap(&mut app, tone, crate::slots::SwapTarget::Empty);
+    one_step_since(&mut app, &before);
+    leave_room(&mut app, 2);
+    let running = graph_of(&app);
+    app.undo();
+    assert!(
+        app.alerts.status().starts_with("Cannot undo"),
+        "{}",
+        app.alerts.status()
+    );
+    assert!(app.alerts.status().ends_with("lower Copies on Voice to make room."));
+    assert_eq!(graph_of(&app), running, "every module keeps its id and cables");
+    assert_eq!(app.session.controller.free_module_slots(), 2, "nothing was retired");
+    assert!(app.session.hierarchy.part_of_slot(ModuleId(first)).is_some());
+    assert!(app.undo_hint().is_ok(), "the history stays");
+}
+
+/// A sine into the left of a Join, the Join into an SVF, the SVF into the
+/// output.
+const STEREO_INTO_SVF: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Stereo into SVF"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.mix.join@1"),
+        PatchModule(id: 3, kind: "loom.filter.svf@1"),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (2, "left")),
+        PatchCable(from: (2, "out"), to: (3, "in")),
+        PatchCable(from: (3, "lowpass"), to: (4, "in")),
+    ],
+)"#;
+
+/// Undo of deleting a Join, at a limit with room for the Join alone: the
+/// Join's recorded width passes `check`, but the cable it puts back makes
+/// the kept SVF stereo, which needs a slot more. The measure after the rest
+/// of the step refuses it, everything is taken back, and the history
+/// stays (sub-patches.md, The module limit).
+#[test]
+fn an_undo_that_widens_a_kept_module_at_the_limit() {
+    let mut app = app_with_room(STEREO_INTO_SVF, 4);
+    assert_eq!(app.session.controller.slots_of(ModuleId(3)), 2, "the SVF runs stereo");
+    let _ = app.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Delete(vec![2])));
+    let name = app.undo_hint().unwrap();
+    assert_eq!(app.session.controller.slots_of(ModuleId(3)), 1, "mono without the Join");
+    leave_room(&mut app, 1);
+    let before = graph_of(&app);
+    app.undo();
+    let limit = app.session.controller.config().max_modules;
+    assert_eq!(
+        app.alerts.status(),
+        format!(
+            "Cannot {}: the patch would have more than {limit} modules. Delete modules to make room.",
+            name.replacen("Undo: ", "undo ", 1)
+        )
+    );
+    assert_eq!(graph_of(&app), before, "taken back whole");
+    assert_eq!(app.session.controller.free_module_slots(), 1);
+    assert_eq!(app.undo_hint(), Ok(name), "the history stays");
+}
+
+/// When a recorded width is stale, the slot a step empties still yields its
+/// fade before the step is refused: putting back an SVF that ran stereo
+/// also makes the Amplifier after it stereo again, a slot `check` did not
+/// count. With room for both but not the fade too, the undo goes through
+/// with the 5 ms ramp (sub-patches.md, The module limit).
+#[test]
+fn a_removal_yields_its_fade_when_a_width_was_stale() {
+    let text = one_slot_and_stereo()
+        .replace(
+            r#"PatchModule(id: 8, kind: "loom.filter.svf@1"),"#,
+            r#"PatchModule(id: 8, kind: "loom.filter.svf@1"),
+        PatchModule(id: 10, kind: "loom.level.amp@1"),"#,
+        )
+        .replace(
+            r#"PatchCable(from: (7, "out"), to: (8, "in")),"#,
+            r#"PatchCable(from: (7, "out"), to: (8, "in")),
+        PatchCable(from: (8, "lowpass"), to: (10, "in")),"#,
+        );
+    let mut app = app_with_room(&text, 8);
+    assert_eq!(
+        app.session.controller.slots_of(ModuleId(10)),
+        2,
+        "the Amplifier runs stereo"
+    );
+    let before = snapshot_of(&app);
+    swap(
+        &mut app,
+        9,
+        crate::slots::SwapTarget::Module("loom.filter.svf@1".into()),
+    );
+    let _ = app.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Delete(vec![8])));
+    one_step_since(&mut app, &before);
+    // The SVF's two slots and the Amplifier's right side, not the fade.
+    leave_room(&mut app, 3);
+    app.undo();
+    assert!(app.alerts.status().starts_with("Undo: "), "{}", app.alerts.status());
+    assert_eq!(app.session.controller.slots_of(ModuleId(8)), 2);
+    assert_eq!(app.session.controller.slots_of(ModuleId(10)), 2);
+    assert_eq!(count_of(&app, "loom.struct.fade"), 0, "the slot ramps over 5 ms");
 }

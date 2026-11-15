@@ -400,6 +400,28 @@ fn copies_are_created_and_retired_with_the_width() {
     assert_eq!(parts.controller.free_module_slots(), free + 2);
 }
 
+/// `slots_needed` counts the copy slots the next commit takes, by the
+/// commit's own plan, and `slots_of` counts a module's slots after it: a
+/// stereo cable into two lags needs one right side each (sub-patches.md,
+/// The module limit).
+#[test]
+fn slots_needed_counts_the_copies_the_next_commit_starts() {
+    let mut parts = engine(64);
+    let ramp = add(&mut parts, "test.ramp");
+    let first = add(&mut parts, "test.lag");
+    let second = add(&mut parts, "test.lag");
+    connect(&mut parts, first, "out", second, "in");
+    parts.controller.commit().unwrap();
+    assert_eq!(parts.controller.slots_needed(), 0);
+    assert_eq!(parts.controller.slots_of(first), 1);
+    connect(&mut parts, ramp, "out", first, "in");
+    assert_eq!(parts.controller.slots_needed(), 2, "a right side for each lag");
+    parts.controller.commit().unwrap();
+    assert_eq!(parts.controller.slots_needed(), 0);
+    assert_eq!(parts.controller.slots_of(first), 2);
+    assert_eq!(parts.controller.slots_of(ModuleId(999)), 0, "no such module");
+}
+
 /// Returning a running chain to mono preserves its left copy's state. Its
 /// pulled input fades from the left side's last value to 0 (rule 9).
 #[test]

@@ -858,7 +858,9 @@ fn phase_cable_changes_never_allocate() {
 
 /// A swap inside a stack of four, with a spread on the slot's cutoff, adds
 /// each copy's part and fade on the control thread: the audio thread
-/// allocates nothing through the fade or the finish (ADR-0044).
+/// allocates nothing through the fade or the finish (ADR-0044), nor
+/// through Remove part and a swap back into the empty slot, which fade in
+/// every copy too (ADR-0045).
 #[test]
 fn a_slot_swap_inside_a_stack_never_allocates() {
     use loom_patch::{FlatIds, Hierarchy, Layout, ModulePath, Patch};
@@ -910,6 +912,34 @@ fn a_slot_swap_inside_a_stack_never_allocates() {
     hierarchy
         .swap_to_module(&mut parts.controller, &layout, slot, "loom.filter.ladder@1")
         .unwrap();
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    hierarchy.finish_all_fades(&mut parts.controller);
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..2 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    // Out of the slot and back in, each fading in every copy from or to
+    // its own thru signal (ADR-0045).
+    let emptied = hierarchy.swap_to_empty(&mut parts.controller, &layout, slot).unwrap();
+    assert!(emptied.gone.is_empty(), "every copy fades out");
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    for _ in 0..4 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    hierarchy.finish_all_fades(&mut parts.controller);
+    hierarchy.sync(&mut parts.controller).unwrap();
+    parts.controller.commit().unwrap();
+    assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    hierarchy
+        .swap_to_module(&mut parts.controller, &layout, slot, "loom.filter.svf@1")
+        .unwrap();
+    assert_eq!(hierarchy.fading_slots().len(), 1, "every copy fades in");
     hierarchy.sync(&mut parts.controller).unwrap();
     parts.controller.commit().unwrap();
     for _ in 0..4 {

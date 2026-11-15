@@ -137,6 +137,24 @@ pub fn swapped_text(slot_name: &str, part_name: &str, removed: &[String]) -> Str
     }
 }
 
+/// Why an edit that would pass the engine's module limit `limit` is
+/// refused, and what to do, in the same words for a swap, an undo, and a
+/// redo (sub-patches.md, The module limit). Inside a stack, `stack` names
+/// the stack whose Copies the player can lower. The caller puts its own
+/// start before it, such as `Cannot swap Filter: `.
+pub fn too_many_modules_text(limit: usize, stack: Option<&str>) -> String {
+    match stack {
+        Some(stack) => format!(
+            "the patch would have more than {limit} modules. Delete modules or lower Copies on {stack} to make room."
+        ),
+        None => format!("the patch would have more than {limit} modules. Delete modules to make room."),
+    }
+}
+
+/// The refusal when an undo or redo step changes a slot that no longer
+/// exists, as after a dissolve (sub-patches.md, The module limit).
+pub const SLOT_GONE_TEXT: &str = "the slot it changes is gone";
+
 /// The refusal when Expose is asked for a parameter only the current part
 /// has (sub-patches.md, Slots).
 pub fn expose_role_only_text(role: &RoleDescriptor, param_label: &str, part_name: &str) -> String {
@@ -225,6 +243,15 @@ pub struct Fading {
     /// The same fade in every other copy of the stacks the slot is in
     /// (ADR-0044). Empty outside a stack.
     pub copies: Vec<CopyFade>,
+    /// Inside a stack, out of an empty thru slot only: copy 0's thru
+    /// source, read from the graph before the swap, as each [`CopyFade`]
+    /// holds its own (ADR-0045). Outside a stack copy 0 finds its ends from
+    /// the slot's links at every sync, and this is `None`.
+    pub thru_source: Option<End>,
+    /// Inside a stack, out of an empty thru slot only: the inputs copy 0's
+    /// leaving part fed, read before the swap. The slot's links cannot name
+    /// copy 0's own input on the stack's Sum, any more than another copy's.
+    pub thru_dests: Vec<End>,
 }
 
 /// A swap's fade in one stack copy past the first (ADR-0044): the leaving
@@ -238,7 +265,21 @@ pub struct CopyFade {
     /// One fade per faded role output, as copy 0's: the role output's name
     /// and the fade's flat id.
     pub fades: Vec<(String, ModuleId)>,
+    /// Out of an empty thru slot only: the output that fed the leaving
+    /// part's `in` in this copy, read from the graph before the swap, or
+    /// `None` when nothing fed it (ADR-0045). The fade's `b` takes it.
+    pub thru_source: Option<End>,
+    /// Out of an empty thru slot only: every input the leaving part's role
+    /// output fed in this copy, read before the swap. While the fade runs,
+    /// its `out` takes over each one whose thru cable is still there, so a
+    /// cable the player moved is never put back (ADR-0045).
+    pub thru_dests: Vec<End>,
 }
+
+/// One copy's thru ends out of an empty thru slot: the output that fed the
+/// leaving part's `in`, if any, and the inputs its role output fed
+/// ([`CopyFade::thru_source`] and [`CopyFade::thru_dests`]).
+type ThruEnds = (Option<End>, Vec<End>);
 
 /// What Make slot did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -302,12 +343,31 @@ pub(super) struct FadeWiring {
     /// feeds them, as `(input, fade output)`: a part fading out to an
     /// empty thru slot's signal, by destination.
     pub retarget: Vec<(End, End)>,
+    /// Inputs a fade's `out` takes over only while their thru cable is
+    /// still wanted, as `(thru source, input, fade output)`: each stack
+    /// copy's part, copy 0's too, fading out to its own thru signal
+    /// (ADR-0045). With no
+    /// thru source, it takes over an input whose module is still there
+    /// and that nothing else feeds.
+    pub replace: Vec<(Option<End>, End, End)>,
 }
 
 impl Hierarchy {
     /// The slot tile `id`, if it is one.
     pub fn slot(&self, id: ModuleId) -> Option<&SlotState> {
         self.slots.get(self.ids.path_of(id)?)
+    }
+
+    /// The name of the innermost stack of more than one copy that holds
+    /// the slot tile `slot`, as its tile shows it: the stack whose Copies a
+    /// refusal at the module limit names. `None` outside a stack.
+    pub fn stack_holding(&self, slot: ModuleId) -> Option<String> {
+        let level = self.ids.path_of(slot)?.parent()?;
+        (1..=level.0.len()).rev().find_map(|n| {
+            let definition = self.definition_at(&level.prefix(n))?;
+            let stacked = definition.modes.mode == crate::modes::Mode::Stack && definition.modes.copy_count() > 1;
+            stacked.then(|| definition.metadata.name.clone())
+        })
     }
 
     /// True when the sub-patch tile `instance` holds a slot directly, which
@@ -580,10 +640,19 @@ impl Hierarchy {
                         wiring.reroute.push((from, to));
                     }
                 }
+                // Out of an empty thru slot, a copy's `b` and the inputs
+                // its fade takes over are its own thru ends, recorded at
+                // the swap: a path cannot name its port on a consumer
+                // outside the stack (ADR-0045). Copy 0's own wiring adds no
+                // `b` for it to move.
+                if state.part.is_none() {
+                    self.thru_ends_wiring(graph, &copy.thru_source, &copy.thru_dests, &copy.fades, &mut wiring);
+                }
             }
             wiring.add.extend(own.add);
             wiring.reroute.extend(own.reroute);
             wiring.retarget.extend(own.retarget);
+            wiring.replace.extend(own.replace);
         }
         wiring
     }
@@ -627,6 +696,14 @@ impl Hierarchy {
                     // the slot's output fed, by destination, so other
                     // inputs the thru source feeds are untouched. With
                     // nothing on `in`, the part fades to 0.
+                    if self.in_stack(&level) {
+                        // Inside a stack, copy 0 takes its own ends from
+                        // the graph at the swap, as every copy does
+                        // (ADR-0045).
+                        let own = [(role_out.clone(), *fade)];
+                        self.thru_ends_wiring(graph, &fading.thru_source, &fading.thru_dests, &own, &mut wiring);
+                        continue;
+                    }
                     if let Some((x, x_out)) = fed(loom_core::THRU_IN) {
                         wiring.add.push(((x.0, x_out), (fade.0, "b".to_string())));
                     }
@@ -659,6 +736,71 @@ impl Hierarchy {
             }
         }
         wiring
+    }
+
+    /// The fade wiring of one stack copy, copy 0 or another, whose part fades out to its thru
+    /// signal, from the ends `source` and `dests` recorded at the swap
+    /// (ADR-0045): the thru source feeds the copy's fade's `b` while its
+    /// module is still there, and each recorded input moves onto the
+    /// fade's `out` only while its thru cable is still wanted.
+    fn thru_ends_wiring(
+        &self,
+        graph: &Graph,
+        source: &Option<End>,
+        dests: &[End],
+        fades: &[(String, ModuleId)],
+        wiring: &mut FadeWiring,
+    ) {
+        let there = source.clone().filter(|end| graph.node(ModuleId(end.0)).is_some());
+        for (role_out, fade) in fades {
+            if role_out != loom_core::THRU_OUT {
+                continue;
+            }
+            if let Some(there) = &there {
+                wiring.add.push((there.clone(), (fade.0, "b".to_string())));
+            }
+            for dest in dests {
+                wiring
+                    .replace
+                    .push((source.clone(), dest.clone(), (fade.0, "out".to_string())));
+            }
+        }
+    }
+
+    /// The thru ends of the leaving part `lid` of the slot at `level`, in
+    /// the copy whose level is `level_k`, read from the graph before the
+    /// swap empties the slot (ADR-0045): the output that feeds the part's
+    /// `in` there, and every input outside the part that its role output
+    /// feeds.
+    fn copy_thru_ends(&self, graph: &Graph, level: &ModulePath, lid: u32, level_k: &ModulePath) -> ThruEnds {
+        let inside = level_k.child(lid);
+        let under_part = |module: ModuleId| self.ids.path_of(module).is_some_and(|p| p.starts_with(&inside));
+        let source = self
+            .part_inputs(graph, level, lid, loom_core::THRU_IN)
+            .into_iter()
+            .find_map(|(id, own)| {
+                let id = self.in_copy(id, level_k)?;
+                let port = graph.node(id)?.input_index(&own)?;
+                let input = InputRef { module: id, port };
+                let from = graph.source_of(input)?;
+                Some(cable_ends(graph, from, input).0)
+            });
+        let dests = self
+            .part_output(graph, level, lid, loom_core::THRU_OUT)
+            .and_then(|(id, own)| {
+                let id = self.in_copy(id, level_k)?;
+                let port = graph.node(id)?.output_index(&own)?;
+                Some(OutputRef { module: id, port })
+            })
+            .map(|output| {
+                graph
+                    .cables()
+                    .filter(|(from, to)| *from == output && !under_part(to.module))
+                    .map(|(from, to)| cable_ends(graph, from, to).1)
+                    .collect()
+            })
+            .unwrap_or_default();
+        (source, dests)
     }
 
     /// The slot's level `level` in every stack copy past the first, at any
@@ -717,9 +859,11 @@ impl Hierarchy {
 
     /// Adds, in every other copy of the stacks the slot at `slot_path` is
     /// in, the same fades as `fades` (copy 0's), at the same steps under
-    /// that copy's slot path and with the same laws (ADR-0044). A copy
-    /// whose leaving part is missing is skipped. On an error part-way, the
-    /// caller rolls back by comparing modules, as for [`Hierarchy::add_fades`].
+    /// that copy's slot path and with the same laws (ADR-0044), into an
+    /// empty thru slot as well as out of one (ADR-0045). With a leaving
+    /// part, a copy whose leaving part is missing is skipped. On an error
+    /// part-way, the caller rolls back by comparing modules, as for
+    /// [`Hierarchy::add_fades`].
     fn add_copy_fades(
         &mut self,
         controller: &mut Controller,
@@ -727,13 +871,11 @@ impl Hierarchy {
         leaving: Option<u32>,
         fades: &[(String, ModuleId)],
     ) -> Result<Vec<CopyFade>, String> {
-        let Some(leaving) = leaving else {
-            return Ok(Vec::new());
-        };
         let level = slot_path.parent().unwrap_or_else(ModulePath::root);
         let mut made = Vec::new();
         for level_k in self.copy_levels(&level) {
-            if self.ids.get(&level_k.child(leaving)).is_none()
+            if let Some(leaving) = leaving
+                && self.ids.get(&level_k.child(leaving)).is_none()
                 && !self.ids.paths().any(|(p, _)| p.starts_with(&level_k.child(leaving)))
             {
                 continue;
@@ -762,6 +904,8 @@ impl Hierarchy {
             made.push(CopyFade {
                 level: level_k,
                 fades: copy_fades,
+                thru_source: None,
+                thru_dests: Vec::new(),
             });
         }
         Ok(made)
@@ -824,13 +968,12 @@ impl Hierarchy {
     }
 
     /// True when a swap into or out of the empty slot at `slot_path` fades
-    /// from or to its thru signal: a thru role, outside a stack of more
-    /// than one copy. Inside a stack the swap is a cable change in every
-    /// copy, which live-patching rule 9 ramps over 5 ms, until each copy
-    /// has its own thru wiring (#768; sub-patches.md, Empty slots).
+    /// from or to its thru signal: a thru role, inside any number of
+    /// stacks, each copy from or to its own thru signal (ADR-0045;
+    /// sub-patches.md, Empty slots). Any other role changes as a cable
+    /// change, which live-patching rule 9 ramps over 5 ms.
     fn fades_with_thru(&self, slot_path: &ModulePath) -> bool {
-        let level = slot_path.parent().unwrap_or_else(ModulePath::root);
-        self.slots.get(slot_path).is_some_and(|s| s.role.thru) && !self.in_stack(&level)
+        self.slots.get(slot_path).is_some_and(|s| s.role.thru)
     }
 
     /// The thru output of the slot at `slot_path` that `part` (a level id)
@@ -1427,18 +1570,24 @@ impl Hierarchy {
                 leaving: old_part,
                 fades,
                 copies,
+                thru_source: None,
+                thru_dests: Vec::new(),
             });
         } else if self.fades_with_thru(&slot_path) {
             // Into an empty thru slot: the part fades in from the thru
-            // signal (sub-patches.md, Empty slots).
+            // signal, in every stack copy (sub-patches.md, Empty slots).
             let outputs = self.thru_fade_outputs(controller.graph(), &slot_path, new_path.last());
             let fades = self.add_fades(controller, &slot_path, outputs)?;
             added.extend(fades.iter().map(|(_, id)| *id));
+            let copies = self.add_copy_fades(controller, &slot_path, None, &fades)?;
+            added.extend(copies.iter().flat_map(|c| c.fades.iter().map(|(_, id)| *id)));
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.fading = Some(Fading {
                 leaving: None,
                 fades,
-                copies: Vec::new(),
+                copies,
+                thru_source: None,
+                thru_dests: Vec::new(),
             });
         }
         Ok(Swapped {
@@ -1546,18 +1695,24 @@ impl Hierarchy {
                 leaving: old_part,
                 fades,
                 copies,
+                thru_source: None,
+                thru_dests: Vec::new(),
             });
         } else if self.fades_with_thru(&slot_path) {
             // Into an empty thru slot: the part fades in from the thru
-            // signal (sub-patches.md, Empty slots).
+            // signal, in every stack copy (sub-patches.md, Empty slots).
             let outputs = self.thru_fade_outputs(controller.graph(), &slot_path, new_path.last());
             let fades = self.add_fades(controller, &slot_path, outputs)?;
             added.extend(fades.iter().map(|(_, id)| *id));
+            let copies = self.add_copy_fades(controller, &slot_path, None, &fades)?;
+            added.extend(copies.iter().flat_map(|c| c.fades.iter().map(|(_, id)| *id)));
             let record = self.slots.get_mut(&slot_path).expect("checked above");
             record.fading = Some(Fading {
                 leaving: None,
                 fades,
-                copies: Vec::new(),
+                copies,
+                thru_source: None,
+                thru_dests: Vec::new(),
             });
         }
         Ok(Swapped {
@@ -1632,11 +1787,14 @@ impl Hierarchy {
     /// slots). The leaving part goes into `held`, so swapping it back
     /// restores its values. Assignments and MIDI mappings on it, and
     /// assignments from it, have nowhere to go: they are removed, and
-    /// their labels returned for the status text. A thru role outside a
-    /// stack fades the part out to the thru signal, Linear; any other slot
-    /// lets it go at once, and `Emptied::gone` names the modules the caller
-    /// leaves out of its sync and then removes. A fade in progress is
-    /// finished first. Refused on an empty slot.
+    /// their labels returned for the status text. A thru role fades the
+    /// part out to the thru signal, Linear, in every stack copy, each to
+    /// its own thru signal (ADR-0045); any other slot lets it go at once,
+    /// and `Emptied::gone` names the modules the caller leaves out of its
+    /// sync and then removes. When the fades cannot be added, as at the
+    /// module limit, the part goes at once too: a removal never fails for
+    /// room. A fade in progress is finished first. Refused on an empty
+    /// slot.
     pub fn swap_to_empty(
         &mut self,
         controller: &mut Controller,
@@ -1662,11 +1820,22 @@ impl Hierarchy {
             .tile_name(old_id)
             .or_else(|| controller.graph().node(old_id).map(|n| n.descriptor.name.to_string()))
             .unwrap_or_default();
-        // Worked out while the part is still the slot's.
+        // Worked out while the part is still the slot's: each copy's thru
+        // ends are read from the graph before anything changes (ADR-0045).
         let fade_outputs = if self.fades_with_thru(&slot_path) {
             Some(self.thru_fade_outputs(controller.graph(), &slot_path, old_lid))
         } else {
             None
+        };
+        let thru_ends: Vec<(ModulePath, ThruEnds)> = match fade_outputs {
+            Some(_) if self.in_stack(&level) => std::iter::once(level.clone())
+                .chain(self.copy_levels(&level))
+                .map(|level_k| {
+                    let ends = self.copy_thru_ends(controller.graph(), &level, old_lid, &level_k);
+                    (level_k, ends)
+                })
+                .collect(),
+            _ => Vec::new(),
         };
         // The role values stay with the slot, so the next part takes them,
         // as a swap between two parts carries them (FR-ENCAP-08).
@@ -1679,33 +1848,150 @@ impl Hierarchy {
             record.part_fills = None;
             record.values = values;
         }
-        let gone = match fade_outputs {
-            Some(outputs) => {
-                let fades = self.add_fades(controller, &slot_path, outputs)?;
+        let faded = match fade_outputs {
+            Some(outputs) => self.add_removal_fades(controller, &slot_path, old_lid, outputs, thru_ends),
+            None => None,
+        };
+        let gone = match faded {
+            Some(fading) => {
                 let record = self.slots.get_mut(&slot_path).expect("checked above");
-                record.fading = Some(Fading {
-                    leaving: Some(old_lid),
-                    fades,
-                    copies: Vec::new(),
-                });
+                record.fading = Some(fading);
                 Vec::new()
             }
-            None => {
-                // No fade: the part goes now, as a pulled cable does.
-                let record = self.slots.get_mut(&slot_path).expect("checked above");
-                record.fading = Some(Fading {
-                    leaving: Some(old_lid),
-                    fades: Vec::new(),
-                    copies: Vec::new(),
-                });
-                self.end_fade(&slot_path)
-            }
+            None => self.let_part_go(controller, &slot_path, old_lid),
         };
         Ok(Emptied {
             part_name,
             removed,
             gone,
         })
+    }
+
+    /// Adds the fades that take the leaving part `lid` of the slot at
+    /// `slot_path` out to its thru signal, in copy 0 and every stack copy,
+    /// with each copy's thru ends (ADR-0045). `None` when they cannot all
+    /// be added, as when the engine has no slot left for one: whatever was
+    /// added is taken away again, and was never sent to the engine.
+    fn add_removal_fades(
+        &mut self,
+        controller: &mut Controller,
+        slot_path: &ModulePath,
+        lid: u32,
+        outputs: Vec<(String, Law)>,
+        thru_ends: Vec<(ModulePath, ThruEnds)>,
+    ) -> Option<Fading> {
+        let modules: BTreeSet<ModuleId> = controller.graph().nodes().map(|(id, _)| id).collect();
+        let paths: BTreeSet<ModulePath> = self.ids.paths().map(|(p, _)| p.clone()).collect();
+        let added = self.add_fades(controller, slot_path, outputs).and_then(|fades| {
+            let copies = self.add_copy_fades(controller, slot_path, Some(lid), &fades)?;
+            Ok((fades, copies))
+        });
+        match added {
+            Ok((fades, mut copies)) => {
+                let ends_at = |level: &ModulePath| {
+                    thru_ends
+                        .iter()
+                        .find(|(at, _)| at == level)
+                        .map(|(_, ends)| ends.clone())
+                        .unwrap_or_default()
+                };
+                for copy in &mut copies {
+                    (copy.thru_source, copy.thru_dests) = ends_at(&copy.level);
+                }
+                let level = slot_path.parent().unwrap_or_else(ModulePath::root);
+                let (thru_source, thru_dests) = ends_at(&level);
+                Some(Fading {
+                    leaving: Some(lid),
+                    fades,
+                    copies,
+                    thru_source,
+                    thru_dests,
+                })
+            }
+            Err(_) => {
+                let new: Vec<ModuleId> = controller
+                    .graph()
+                    .nodes()
+                    .map(|(id, _)| id)
+                    .filter(|id| !modules.contains(id))
+                    .collect();
+                for id in new {
+                    let _ = controller.remove_module(id);
+                }
+                let reserved: Vec<ModulePath> = self
+                    .ids
+                    .paths()
+                    .map(|(p, _)| p.clone())
+                    .filter(|p| !paths.contains(p))
+                    .collect();
+                for path in reserved {
+                    self.ids.forget(&path);
+                }
+                None
+            }
+        }
+    }
+
+    /// Lets the leaving part `lid` of the now empty slot at `slot_path` go
+    /// at once, in copy 0 and every stack copy, as a pulled cable does:
+    /// the slot's inputs change as a cable change, which live-patching
+    /// rule 9 ramps over 5 ms. Returns the modules the caller leaves out of
+    /// its sync and then removes. Every copy's leaving part is named here,
+    /// so nothing is removed before the caller's sync succeeds.
+    fn let_part_go(&mut self, controller: &mut Controller, slot_path: &ModulePath, lid: u32) -> Vec<ModuleId> {
+        // No fade module is added: an empty list of fades only names each
+        // copy's leaving part.
+        let copies = self
+            .add_copy_fades(controller, slot_path, Some(lid), &[])
+            .unwrap_or_default();
+        if let Some(record) = self.slots.get_mut(slot_path) {
+            record.fading = Some(Fading {
+                leaving: Some(lid),
+                fades: Vec::new(),
+                copies,
+                thru_source: None,
+                thru_dests: Vec::new(),
+            });
+        }
+        self.end_fade(slot_path)
+    }
+
+    /// Takes back the fades a removal added on the slot tile `slot`, when
+    /// the edit does not fit the module limit (sub-patches.md, The module
+    /// limit): the fades were never sent to the engine, so their slots are
+    /// free at once, and their copies were never given slots. The slot
+    /// then lets its part go as a slot with no thru does, and the leaving
+    /// parts are returned for the caller to leave out of its sync and then
+    /// remove. Nothing happens, and nothing is returned, on a slot that is
+    /// not fading out to its thru signal.
+    pub fn drop_removal_fades(&mut self, controller: &mut Controller, slot: ModuleId) -> Vec<ModuleId> {
+        let Some(slot_path) = self.ids.path_of(slot).cloned() else {
+            return Vec::new();
+        };
+        let Some(state) = self.slots.get(&slot_path) else {
+            return Vec::new();
+        };
+        let Some(fading) = state
+            .fading
+            .as_ref()
+            .filter(|f| state.part.is_none() && f.leaving.is_some())
+        else {
+            return Vec::new();
+        };
+        let fades: BTreeSet<ModuleId> = fading
+            .fades
+            .iter()
+            .chain(fading.copies.iter().flat_map(|c| c.fades.iter()))
+            .map(|(_, id)| *id)
+            .collect();
+        let removed = self.end_fade(&slot_path);
+        for id in &fades {
+            let _ = controller.remove_module(*id);
+            if let Some(path) = self.ids.path_of(*id).cloned() {
+                self.ids.forget(&path);
+            }
+        }
+        removed.into_iter().filter(|id| !fades.contains(id)).collect()
     }
 
     /// Removes every assignment onto or from a module under `part`, and

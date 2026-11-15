@@ -361,8 +361,9 @@ fn a_mode_edit_during_a_fade_finishes_it_first() {
 }
 
 /// A swap inside a stack that would pass the engine's module limit in some
-/// copy is refused whole: nothing is added, and the slot keeps its part
-/// (sub-patches.md, How modes meet the rest).
+/// copy is refused whole, with the limit's text and the Copies hint:
+/// nothing is added, and the slot keeps its part (sub-patches.md, How modes
+/// meet the rest and The module limit).
 #[test]
 fn a_swap_past_the_module_limit_is_refused_whole() {
     let probe = app_with(STACKED);
@@ -375,10 +376,13 @@ fn a_swap_past_the_module_limit_is_refused_whole() {
         slot,
         to: SwapTarget::Module("loom.filter.ladder@1".into()),
     });
-    assert!(
-        app.alerts.status().starts_with("Cannot swap Filter"),
-        "{}",
-        app.alerts.status()
+    assert_eq!(
+        app.alerts.status(),
+        format!(
+            "Cannot swap Filter: the patch would have more than {} modules. Delete modules or lower Copies on Voice to make room.",
+            count + 2
+        ),
+        "a swap between two parts says why, as a swap into an empty slot does"
     );
     assert_eq!(app.session.controller.graph().nodes().count(), count);
     assert_eq!(app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)), part);
@@ -465,4 +469,447 @@ fn undo_during_a_stack_fade_fades_back_without_extra_modules() {
         ),
         (4, 0, 0)
     );
+}
+
+/// [`STACKED`] with `copies` copies, its slot holding the SVF when `part`,
+/// else empty.
+fn stacked(copies: u32, part: bool) -> String {
+    let text = STACKED.replace("copies: 4", &format!("copies: {copies}"));
+    if part {
+        text
+    } else {
+        text.replace("                PatchModule(id: 3, kind: \"loom.filter.svf@1\"),\n", "")
+            .replace(", part: Some(3)", "")
+    }
+}
+
+/// The app with `text` open and exactly `free` engine slots left.
+fn app_with_room(text: &str, free: usize) -> App {
+    let probe = app_with(text);
+    let used = EngineConfig::default().max_modules - probe.session.controller.free_module_slots();
+    let app = app_with_limit(text, used + free);
+    assert_eq!(app.session.controller.free_module_slots(), free, "the room asked for");
+    app
+}
+
+/// Takes every engine slot left with modules outside the history, after
+/// the slots of removed modules are free again.
+fn fill(app: &mut App) {
+    loop {
+        while app.session.controller.free_module_slots() > 0 {
+            app.session.controller.add_module("loom.osc.noise").unwrap();
+        }
+        assert!(app.commit(), "{}", app.alerts.status());
+        app.process(64);
+        if app.session.controller.free_module_slots() == 0 {
+            return;
+        }
+    }
+}
+
+/// How many modules of `kind` the graph holds.
+fn count_of(app: &App, kind: &str) -> usize {
+    app.session
+        .controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == kind)
+        .count()
+}
+
+/// The graph's modules and cables, to compare before and after a refusal.
+fn graph_of(
+    app: &App,
+) -> (
+    Vec<loom_core::ModuleId>,
+    Vec<(loom_core::OutputRef, loom_core::InputRef)>,
+) {
+    let graph = app.session.controller.graph();
+    (graph.nodes().map(|(id, _)| id).collect(), graph.cables().collect())
+}
+
+/// The limit's refusal text after `start`, with the Copies hint on Voice
+/// when `in_stack` (sub-patches.md, The module limit).
+fn no_room(app: &App, start: &str, in_stack: bool) -> String {
+    let limit = app.session.controller.config().max_modules;
+    let hint = if in_stack { " or lower Copies on Voice" } else { "" };
+    format!("{start}: the patch would have more than {limit} modules. Delete modules{hint} to make room.")
+}
+
+/// The slot's fade now: how many other copies fade, and how many fade
+/// modules the graph holds.
+fn fading_now(app: &App, slot: u32) -> (usize, usize) {
+    let copies = app
+        .session
+        .hierarchy
+        .slot(loom_core::ModuleId(slot))
+        .and_then(|s| s.fading.clone())
+        .map_or(0, |f| f.copies.len());
+    (copies, count_of(app, "loom.struct.fade"))
+}
+
+/// What feeds the input `port` of `module` in the app's graph.
+fn fed_by(app: &App, module: loom_core::ModuleId, port: &str) -> Option<loom_core::OutputRef> {
+    let controller = &app.session.controller;
+    controller.graph().source_of(controller.input_ref(module, port).ok()?)
+}
+
+/// The one module of `kind` in the graph.
+fn one_of(app: &App, kind: &str) -> loom_core::ModuleId {
+    let ids: Vec<loom_core::ModuleId> = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .filter(|(_, n)| n.descriptor.id == kind)
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(ids.len(), 1, "one {kind}");
+    ids[0]
+}
+
+/// Checks a removal's fades in [`STACKED`]: copy k's fade takes that
+/// copy's thru source, the sine, on `b`, and its `out` feeds copy k's own
+/// input on the stack's Sum, copy 0's included. No fade takes over another
+/// copy's input or the Audio Out, which still plays the Sum (ADR-0045).
+fn check_removal_wiring(app: &App, slot: u32, what: &str) {
+    let controller = &app.session.controller;
+    let fading = app
+        .session
+        .hierarchy
+        .slot(loom_core::ModuleId(slot))
+        .and_then(|s| s.fading.clone())
+        .expect("fading");
+    let fades: Vec<loom_core::ModuleId> = fading
+        .fades
+        .iter()
+        .chain(fading.copies.iter().flat_map(|c| c.fades.iter()))
+        .map(|(_, id)| *id)
+        .collect();
+    assert_eq!(fades.len(), 4, "{what}: a fade per copy");
+    let sine = controller.output_ref(one_of(app, "loom.osc.sine"), "out").unwrap();
+    let sum = one_of(app, "loom.struct.sum");
+    let inputs = controller.graph().node(sum).unwrap().descriptor.inputs;
+    for (k, &fade) in fades.iter().enumerate() {
+        assert_eq!(fed_by(app, fade, "b"), Some(sine), "{what}: copy {k}'s b is its thru");
+        assert_eq!(
+            fed_by(app, sum, inputs[k].name),
+            Some(controller.output_ref(fade, "out").unwrap()),
+            "{what}: copy {k}'s fade into its own input on the Sum"
+        );
+    }
+    let out = one_of(app, "loom.io.audio-out");
+    assert_eq!(
+        fed_by(app, out, "in").map(|from| from.module),
+        Some(sum),
+        "{what}: the Sum still plays"
+    );
+}
+
+/// Inside a stack of 4, all four directions fade every copy: Remove part,
+/// undo of it, and redo of it; a swap into the empty slot, undo of it, and
+/// redo of it. Each adds one fade per copy, and each ends with only the
+/// thru or the four parts (sub-patches.md, Empty-slot swaps inside a
+/// stack). The two removals through undo and redo wire each copy's fade
+/// into that copy alone ([`check_removal_wiring`]).
+#[test]
+fn every_direction_of_an_empty_slot_swap_inside_a_stack_fades_every_copy() {
+    let mut app = app_with(&stacked(4, true));
+    let slot = inside(&app, 9);
+    let check = |app: &mut App, what: &str, parts: usize| {
+        assert_eq!(fading_now(app, slot), (3, 4), "{what}: a fade in every copy");
+        app.process(600);
+        assert_eq!(fading_now(app, slot), (0, 0), "{what}: the fades finished");
+        assert_eq!(count_of(app, "loom.filter.svf"), parts, "{what}");
+    };
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Empty,
+    });
+    check(&mut app, "Remove part", 0);
+    app.undo();
+    check(&mut app, "undo of Remove part", 4);
+    app.redo();
+    check_removal_wiring(&app, slot, "redo of Remove part");
+    check(&mut app, "redo of Remove part", 0);
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.svf@1".into()),
+    });
+    check(&mut app, "a swap in", 4);
+    app.undo();
+    check_removal_wiring(&app, slot, "undo of the swap in");
+    check(&mut app, "undo of the swap in", 0);
+    app.redo();
+    check(&mut app, "redo of the swap in", 4);
+}
+
+/// At the module limit, a swap into an empty slot is refused whole, inside
+/// a stack and outside one: nothing is added, the cables are as before,
+/// the undo history is kept, the inspector's Part list still reports no
+/// part, and the status says why, with the Copies hint only inside a stack
+/// (sub-patches.md, The module limit).
+#[test]
+fn a_swap_into_an_empty_slot_at_the_limit_is_refused_whole() {
+    for (copies, in_stack) in [(4, true), (1, false)] {
+        // A part and a fade per copy do not fit in one slot less.
+        let mut ui = Ui::with_app(app_with_room(&stacked(copies, false), 2 * copies as usize - 1));
+        let slot = inside(ui.app(), 9);
+        let before = graph_of(ui.app());
+        let undo = ui.app().undo_hint();
+        let _ = ui.app_mut().send(Message::SwapSlot {
+            slot,
+            to: SwapTarget::Module("loom.filter.svf@1".into()),
+        });
+        assert_eq!(
+            ui.app().alerts.status(),
+            no_room(ui.app(), "Cannot swap Filter", in_stack)
+        );
+        assert_eq!(graph_of(ui.app()), before, "nothing is kept");
+        assert_eq!(ui.app().undo_hint(), undo, "the history is as it was");
+        assert!(ui.app().session.hierarchy.fading_slots().is_empty());
+        ui.app_mut().session.selection = std::collections::BTreeSet::from([slot]);
+        ui.redraw();
+        assert_eq!(ui.a11y_tree().node("Part").value(), Some("No part"));
+    }
+}
+
+/// At the module limit, Remove part still works, inside a stack and
+/// outside one: it adds no fade module, and each copy's inputs ramp over
+/// 5 ms by live-patching rule 9 instead. Undo of it, which adds the part
+/// back, is then refused at the limit with the history kept, the
+/// inspector's Part list still reports no part, and a screen reader meets
+/// the refusal as a status (sub-patches.md, The module limit).
+#[test]
+fn remove_part_at_the_limit_ramps_and_its_undo_is_refused() {
+    for (copies, in_stack) in [(4, true), (1, false)] {
+        let mut ui = Ui::with_app(app_with_room(&stacked(copies, true), 0));
+        let app = ui.app_mut();
+        let slot = inside(app, 9);
+        let _ = app.send(Message::SwapSlot {
+            slot,
+            to: SwapTarget::Empty,
+        });
+        assert_eq!(app.alerts.status(), "Removed SVF from Filter.");
+        assert_eq!(fading_now(app, slot), (0, 0), "no fade module");
+        assert_eq!(count_of(app, "loom.filter.svf"), 0, "every copy's part went");
+        assert!(
+            app.session.controller.last_report().cable_fades >= copies as usize,
+            "a 5 ms ramp in every copy"
+        );
+        fill(app);
+        app.undo();
+        assert_eq!(
+            app.alerts.status(),
+            no_room(app, "Cannot undo remove part from Filter", in_stack)
+        );
+        assert_eq!(app.undo_hint(), Ok("Undo: remove part from Filter".to_string()));
+        assert_eq!(app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)), None);
+        ui.redraw();
+        let status_id = crate::a11y::tree::fixed_id(crate::bars::STATUS_ID);
+        let role = ui.a11y_tree().node_by_id(&status_id).role();
+        assert_eq!(role, accesskit::Role::Status, "the refusal is a status");
+        // `fill` adds modules behind the hierarchy, and one can take the
+        // slot tile's id, so they go before the inspector is read.
+        let app = ui.app_mut();
+        let filler: Vec<_> = app
+            .session
+            .controller
+            .graph()
+            .nodes()
+            .filter(|(_, n)| n.descriptor.id == "loom.osc.noise")
+            .map(|(id, _)| id)
+            .collect();
+        for id in filler {
+            app.session.controller.remove_module(id).unwrap();
+        }
+        assert!(app.commit(), "{}", app.alerts.status());
+        app.session.selection = std::collections::BTreeSet::from([slot]);
+        ui.redraw();
+        assert_eq!(ui.a11y_tree().node("Part").value(), Some("No part"));
+    }
+}
+
+/// At the module limit, undo of a swap into an empty slot still works,
+/// inside a stack and outside one, with the 5 ms ramp and no fade module;
+/// redo of the swap in is then refused at the limit, with the history kept
+/// (sub-patches.md, The module limit).
+#[test]
+fn undo_of_a_swap_in_at_the_limit_ramps_and_its_redo_is_refused() {
+    for (copies, in_stack) in [(4, true), (1, false)] {
+        let mut app = app_with_room(&stacked(copies, false), 2 * copies as usize);
+        let slot = inside(&app, 9);
+        let _ = app.send(Message::SwapSlot {
+            slot,
+            to: SwapTarget::Module("loom.filter.svf@1".into()),
+        });
+        assert_eq!(app.alerts.status(), "Swapped Filter to SVF.");
+        app.process(600);
+        fill(&mut app);
+        app.undo();
+        assert_eq!(app.alerts.status(), "Undo: swap Filter");
+        assert_eq!(fading_now(&app, slot), (0, 0), "no fade module");
+        assert_eq!(count_of(&app, "loom.filter.svf"), 0);
+        assert!(
+            app.session.controller.last_report().cable_fades >= copies as usize,
+            "a 5 ms ramp in every copy"
+        );
+        fill(&mut app);
+        app.redo();
+        assert_eq!(app.alerts.status(), no_room(&app, "Cannot redo swap Filter", in_stack));
+        assert_eq!(app.redo_hint(), Ok("Redo: swap Filter".to_string()));
+        assert_eq!(count_of(&app, "loom.filter.svf"), 0, "nothing is kept");
+    }
+}
+
+/// A sine as both sides of a stereo signal into a Voice stacked four times
+/// whose Filter slot holds an SVF (when `part`), so every copy's part, and
+/// every fade, runs once per side.
+fn stereo_stacked(part: bool) -> String {
+    stacked(4, part)
+        .replace(
+            "PatchModule(id: 3, kind: \"loom.io.audio-out@1\"),",
+            "PatchModule(id: 3, kind: \"loom.io.audio-out@1\"),\n        PatchModule(id: 5, kind: \"loom.mix.join@1\"),",
+        )
+        .replace(
+            "PatchCable(from: (1, \"out\"), to: (2, \"in\")),",
+            "PatchCable(from: (1, \"out\"), to: (5, \"left\")),\n        PatchCable(from: (1, \"out\"), to: (5, \"right\")),\n        PatchCable(from: (5, \"out\"), to: (2, \"in\")),",
+        )
+}
+
+/// Remove part inside a stack on a stereo signal, with room for one fade
+/// per copy but not for their right sides, succeeds with the 5 ms ramp and
+/// no fade module, and the commit does not fail: the room is measured
+/// after the sync, by the commit's own rule. A swap in on the same stereo
+/// signal with the same room is refused, and the graph is as before
+/// (sub-patches.md, The module limit).
+#[test]
+fn remove_part_on_a_stereo_signal_at_the_limit_ramps() {
+    let mut app = app_with_room(&stereo_stacked(true), 4);
+    let slot = inside(&app, 9);
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Empty,
+    });
+    assert_eq!(app.alerts.status(), "Removed SVF from Filter.");
+    assert_eq!(fading_now(&app, slot), (0, 0), "no fade module");
+    assert_eq!(count_of(&app, "loom.filter.svf"), 0);
+    assert!(app.session.controller.last_report().cable_fades > 0, "the 5 ms ramp");
+
+    let mut app = app_with_room(&stereo_stacked(false), 4);
+    let slot = inside(&app, 9);
+    let before = graph_of(&app);
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.svf@1".into()),
+    });
+    assert_eq!(app.alerts.status(), no_room(&app, "Cannot swap Filter", true));
+    assert_eq!(graph_of(&app), before, "nothing is kept");
+}
+
+/// A sine into a Voice stacked four times whose Effect slot holds Dynamics
+/// (when `part`), a module with stereo ports: on a mono signal each part
+/// takes one slot, but its output is stereo, so each fade runs once per
+/// side.
+fn stereo_effect(part: bool) -> String {
+    let text = stacked(4, true)
+        .replace("loom.role.filter@1", "loom.role.effect@1")
+        .replace("loom.filter.svf@1", "loom.dyn.dynamics@1");
+    if part {
+        text
+    } else {
+        text.replace(
+            "                PatchModule(id: 3, kind: \"loom.dyn.dynamics@1\"),\n",
+            "",
+        )
+        .replace(", part: Some(3)", "")
+    }
+}
+
+/// Dynamics in an Effect slot on a mono signal, in a stack of 4, with room
+/// for 4 fade slots but not 8: Remove part succeeds, ramps over 5 ms, adds
+/// no fade module, and the commit does not fail (sub-patches.md, The
+/// module limit).
+#[test]
+fn remove_part_with_a_stereo_effect_on_a_mono_signal_at_the_limit() {
+    let mut app = app_with_room(&stereo_effect(true), 4);
+    let slot = inside(&app, 9);
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Empty,
+    });
+    assert_eq!(app.alerts.status(), "Removed Dynamics from Effect.");
+    assert_eq!(fading_now(&app, slot), (0, 0), "no fade module");
+    assert_eq!(count_of(&app, "loom.dyn.dynamics"), 0);
+    assert!(app.session.controller.last_report().cable_fades > 0, "the 5 ms ramp");
+}
+
+/// The twin: a swap of Dynamics into the empty Effect slot, with room for
+/// the parts and the fades by count but not for the fades' right sides, is
+/// refused with the limit's text after the sync measures it, and nothing
+/// is kept (sub-patches.md, The module limit).
+#[test]
+fn a_swap_in_of_a_stereo_effect_at_the_limit_is_refused() {
+    let mut app = app_with_room(&stereo_effect(false), 8);
+    let slot = inside(&app, 9);
+    let before = graph_of(&app);
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.dyn.dynamics@1".into()),
+    });
+    assert_eq!(app.alerts.status(), no_room(&app, "Cannot swap Effect", true));
+    assert_eq!(graph_of(&app), before, "nothing is kept");
+    assert_eq!(
+        app.session.controller.free_module_slots(),
+        8,
+        "every slot is free again"
+    );
+}
+
+/// A sine through two Filter slots in a row, each holding an SVF.
+const TWO_SLOTS: &str = r#"Patch(
+    version: 1,
+    metadata: Metadata(name: "Two slots"),
+    modules: [
+        PatchModule(id: 1, kind: "loom.osc.sine@1"),
+        PatchModule(id: 2, kind: "loom.filter.svf@1"),
+        PatchModule(id: 3, kind: "loom.filter.svf@1"),
+        PatchModule(id: 4, kind: "loom.io.audio-out@1"),
+        PatchModule(id: 9, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+        PatchModule(id: 10, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(3)))),
+    ],
+    cables: [
+        PatchCable(from: (1, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (10, "in")),
+        PatchCable(from: (10, "out"), to: (4, "in")),
+    ],
+)"#;
+
+/// Remove part while another slot's fade runs, with room for the new fade
+/// only once the running fade's modules are freed: the running fade is
+/// finished and committed first, so the removal crossfades (sub-patches.md,
+/// The module limit).
+#[test]
+fn remove_part_at_the_limit_during_a_fade() {
+    let mut app = app_with_room(TWO_SLOTS, 2);
+    let _ = app.send(Message::SwapSlot {
+        slot: 9,
+        to: SwapTarget::Module("loom.filter.ladder@1".into()),
+    });
+    assert_eq!(app.session.hierarchy.fading_slots().len(), 1);
+    assert_eq!(app.session.controller.free_module_slots(), 0, "no room while it fades");
+    let _ = app.send(Message::SwapSlot {
+        slot: 10,
+        to: SwapTarget::Empty,
+    });
+    assert_eq!(app.alerts.status(), "Removed SVF from Filter.");
+    let fading: Vec<_> = app
+        .session
+        .hierarchy
+        .fading_slots()
+        .into_iter()
+        .map(|(slot, _)| slot.0)
+        .collect();
+    assert_eq!(fading, [10], "the first fade finished, the removal crossfades");
+    assert_eq!(count_of(&app, "loom.struct.fade"), 1);
 }

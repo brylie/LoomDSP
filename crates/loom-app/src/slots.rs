@@ -354,9 +354,12 @@ impl App {
 
     /// Remove part: empties the slot tile `slot`, named `name`, as one undo
     /// step (sub-patches.md, Empty slots). A thru slot fades the part out
-    /// to its thru signal; any other lets it go now, removed from the graph
-    /// only once the sync has succeeded. The status names the assignments
-    /// and mappings that had nowhere to go.
+    /// to its thru signal, in every stack copy; any other lets it go now,
+    /// removed from the graph only once the sync has succeeded. When the
+    /// fades do not fit the module limit, they are dropped and the part
+    /// goes now too, so a removal never fails for room (The module limit).
+    /// The status names the assignments and mappings that had nowhere to
+    /// go.
     fn remove_part(&mut self, slot: u32, name: &str) {
         self.session.step_name = Some(format!("remove part from {name}"));
         self.edit(|app| {
@@ -374,9 +377,29 @@ impl App {
                     return;
                 }
             };
-            match candidate.sync_without(&mut app.session.controller, &emptied.gone) {
-                Ok(renamed) => {
-                    for id in &emptied.gone {
+            let mut gone = emptied.gone.clone();
+            let mut renamed = Vec::new();
+            let mut synced = candidate.sync_without(&mut app.session.controller, &gone);
+            // Measured after the sync, by the commit's own rule. A sync can
+            // also meet the limit itself, when it adds a mixer the editor
+            // implies, so a refusal for room takes the same way out.
+            let no_room = match &synced {
+                Ok(_) => !app.fits(0),
+                Err(e) => is_room_error(&app.session.controller, &sync_why(e)),
+            };
+            if no_room {
+                // The fades do not fit, so the part goes now and rule 9
+                // ramps each copy over 5 ms: a removal never fails for room.
+                if let Ok(first) = &synced {
+                    renamed.extend(first.iter().copied());
+                }
+                gone.extend(candidate.drop_removal_fades(&mut app.session.controller, ModuleId(slot)));
+                synced = candidate.sync_without(&mut app.session.controller, &gone);
+            }
+            match synced {
+                Ok(last) => {
+                    renamed.extend(last);
+                    for id in &gone {
                         let _ = app.session.controller.remove_module(*id);
                     }
                     app.session.hierarchy = candidate;
@@ -389,14 +412,17 @@ impl App {
                 Err(e) => {
                     app.remove_added_since(&before);
                     app.restore_links(&links);
-                    app.alerts.warn(format!("Cannot remove the part from {name}: {e}"));
+                    let why = app.room_text_for(slot, sync_why(&e));
+                    app.alerts.warn(format!("Cannot remove the part from {name}: {why}"));
                 }
             }
         });
     }
 
-    /// Performs a swap on the live hierarchy and syncs it, rolling the
-    /// added modules back on a refusal.
+    /// Performs a swap on a candidate hierarchy and syncs it, rolling the
+    /// added modules back on a refusal. A swap that does not fit the module
+    /// limit, measured after the sync, is refused whole with the limit's
+    /// text (sub-patches.md, The module limit).
     fn swap_now(&mut self, slot: u32, to: &SwapTarget, file: Option<&Patch>) -> Result<hierarchy::Swapped, String> {
         let layout = self.layout_fn_owned();
         let mut candidate = self.session.hierarchy.clone();
@@ -442,20 +468,56 @@ impl App {
                 // it moved come back.
                 self.remove_added_since(&before);
                 self.restore_links(&links);
-                return Err(why);
+                return Err(self.room_text_for(slot, why));
             }
         };
-        match candidate.sync(&mut self.session.controller) {
-            Ok(renamed) => {
+        let why = match candidate.sync(&mut self.session.controller) {
+            Ok(renamed) if self.fits(0) => {
                 self.session.hierarchy = candidate;
                 self.assignments_renumbered(&renamed);
-                Ok(swapped)
+                return Ok(swapped);
             }
-            Err(e) => {
-                self.remove_added_since(&before);
-                self.restore_links(&links);
-                Err(e.to_string())
+            Ok(renamed) => {
+                self.assignments_renumbered(&renamed);
+                self.no_room_text(slot)
             }
+            Err(e) => self.room_text_for(slot, sync_why(&e)),
+        };
+        // Taken back as a failed sync is: the live hierarchy, which the
+        // candidate never replaced, syncs again, so the graph's cables are
+        // as they were.
+        self.remove_added_since(&before);
+        self.restore_links(&links);
+        if let Ok(renamed) = self.session.hierarchy.sync(&mut self.session.controller) {
+            self.assignments_renumbered(&renamed);
+        }
+        Err(why)
+    }
+
+    /// True when the next commit fits the engine's module limit with `room`
+    /// more slots taken: the copy slots it would start, by the commit's own
+    /// rule, plus `room`, are at most the free slots (sub-patches.md, The
+    /// module limit). Measured after a sync, since a fade's width follows
+    /// the cables the sync gives it.
+    pub(crate) fn fits(&self, room: usize) -> bool {
+        let controller = &self.session.controller;
+        controller.slots_needed().saturating_add(room) <= controller.free_module_slots()
+    }
+
+    /// Why an edit on the slot tile `slot` is refused at the module limit,
+    /// with the Copies hint when a stack holds the slot.
+    pub(crate) fn no_room_text(&self, slot: u32) -> String {
+        let stack = self.session.hierarchy.stack_holding(ModuleId(slot));
+        hierarchy::too_many_modules_text(self.session.controller.config().max_modules, stack.as_deref())
+    }
+
+    /// `why`, or the module limit's text when `why` is the engine's refusal
+    /// for lack of room, which a part added on the way can meet.
+    pub(crate) fn room_text_for(&self, slot: u32, why: String) -> String {
+        if is_room_error(&self.session.controller, &why) {
+            self.no_room_text(slot)
+        } else {
+            why
         }
     }
 
@@ -498,7 +560,7 @@ impl App {
     }
 
     /// Removes every module the graph holds that `before` did not.
-    fn remove_added_since(&mut self, before: &std::collections::BTreeSet<ModuleId>) {
+    pub(crate) fn remove_added_since(&mut self, before: &std::collections::BTreeSet<ModuleId>) {
         let added: Vec<ModuleId> = self
             .session
             .controller
@@ -577,6 +639,20 @@ impl App {
                 size: sizes.get(&id).copied(),
             }
         }
+    }
+}
+
+/// True when `why` is the engine's refusal for lack of a module slot.
+pub(crate) fn is_room_error(controller: &loom_core::Controller, why: &str) -> bool {
+    why == loom_core::LoomError::TooManyModules(controller.config().max_modules).to_string()
+}
+
+/// The text of a refused sync, with the engine's own text for an engine
+/// error, so [`is_room_error`] can find a lack of room.
+pub(crate) fn sync_why(error: &loom_patch::PatchError) -> String {
+    match error {
+        loom_patch::PatchError::Engine(e) => e.to_string(),
+        e => e.to_string(),
     }
 }
 

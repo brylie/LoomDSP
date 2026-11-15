@@ -43,6 +43,12 @@ pub struct ModuleState {
     position: Option<(f32, f32)>,
     /// Optional tile dimensions in grid units.
     size: Option<(u8, u8)>,
+    /// The engine slots the module took when the step was recorded: 1 for
+    /// one that runs DSP, plus its stereo and voice copies
+    /// (`Controller::slots_of`). A module put back counts this many
+    /// (sub-patches.md, The module limit). Not part of what the module is,
+    /// so a step never records a module only because its width changed.
+    slots: usize,
 }
 
 impl PartialEq for ModuleState {
@@ -137,6 +143,7 @@ impl Snapshot {
                             ranges: (0..node.params.len()).map(|index| node.range(index)).collect(),
                             position: positions.get(&id.0).copied(),
                             size: sizes.get(&id.0).copied(),
+                            slots: controller.slots_of(id),
                         },
                     )
                 })
@@ -488,25 +495,112 @@ fn name(step: &Step, hierarchy: &Hierarchy) -> String {
     }
 }
 
+/// The step that takes the patch from `now` back to `then`, with every
+/// parameter counted, mapped or not: what takes back the rest of a step
+/// refused part-way (sub-patches.md, The module limit).
+pub(crate) fn back_to(now: &Snapshot, then: &Snapshot) -> Option<Step> {
+    let touched = now
+        .modules
+        .iter()
+        .chain(&then.modules)
+        .flat_map(|(id, m)| (0..m.params.len()).map(move |index| (*id, index)))
+        .collect();
+    diff(now, then, &touched)
+}
+
+/// The slots a step swaps, from the side it leaves to the side it goes to:
+/// each slot on both sides whose part differs, with the part it holds now
+/// and the part it takes, by level id. A slot that appears or goes (Make
+/// slot, Dissolve slot) is a plain hierarchy change, not a swap.
+fn swaps(step: &Step, forward: bool) -> Vec<(ModuleId, Option<u32>, Option<u32>)> {
+    let Some((before, after)) = &step.hierarchy else {
+        return Vec::new();
+    };
+    let (from, to) = if forward { (before, after) } else { (after, before) };
+    to.slots_differing_from(from)
+        .into_iter()
+        .filter_map(|slot| Some((slot, from.slot(slot)?.part, to.slot(slot)?.part)))
+        .collect()
+}
+
+/// True when the step swaps a slot's part ([`apply_fills`] and
+/// [`apply_removals`] have something to do).
+pub(crate) fn swaps_a_slot(step: &Step, forward: bool) -> bool {
+    !swaps(step, forward).is_empty()
+}
+
+/// Every flat id at or under the part of a slot the step swaps, on either
+/// side: what the swap itself adds and removes, so the rest of the step,
+/// and its count of room, leave them alone. [`check`], [`apply_fills`],
+/// [`apply_removals`], and [`apply_rest`] all take them from here, so they
+/// never disagree, and copy 0's part is never counted twice.
+pub(crate) fn swapped_ids(step: &Step, forward: bool) -> BTreeSet<u32> {
+    let mut ids = BTreeSet::new();
+    let Some((before, after)) = &step.hierarchy else {
+        return ids;
+    };
+    let (from, to) = if forward { (before, after) } else { (after, before) };
+    // Every flat id at or under a part's path: a sub-patch part brings its
+    // inner modules.
+    let under = |side: &Hierarchy, path: &ModulePath| -> Vec<u32> {
+        side.ids()
+            .paths()
+            .filter(|(p, _)| p.starts_with(path))
+            .map(|(_, id)| id.0)
+            .collect()
+    };
+    for (slot, have, want) in swaps(step, forward) {
+        let level = to.level_of(slot);
+        if let Some(lid) = have {
+            ids.extend(under(from, &level.child(lid)));
+        }
+        if let Some(lid) = want {
+            ids.extend(under(to, &level.child(lid)));
+        }
+    }
+    ids
+}
+
 /// Checks that a step can be applied, before anything changes (undo.md,
-/// rule 10). A refusal leaves the patch and the history as they were.
-pub fn check(step: &Step, forward: bool, controller: &Controller) -> Result<(), String> {
-    let mut needed = 0;
-    for (old, new) in step.modules.values() {
+/// rule 10). A refusal leaves the patch and the history as they were. A
+/// slot the step swaps must still be in `hierarchy`, the live one. The
+/// modules the step puts back outside its swapped slots must fit the
+/// engine's free slots, each counted at the width it had when the step was
+/// recorded. Returns that count: the room the rest of the step needs, which
+/// `App::step` keeps free when it measures the swaps (sub-patches.md, The
+/// module limit).
+pub fn check(step: &Step, forward: bool, controller: &Controller, hierarchy: &Hierarchy) -> Result<usize, String> {
+    let swaps = swaps(step, forward);
+    if swaps.iter().any(|(slot, _, _)| hierarchy.slot(*slot).is_none()) {
+        return Err(loom_patch::hierarchy::SLOT_GONE_TEXT.to_string());
+    }
+    let swapped = swapped_ids(step, forward);
+    let mut needed: usize = 0;
+    for (id, (old, new)) in &step.modules {
         let (have, want) = if forward { (old, new) } else { (new, old) };
         if let (None, Some(state)) = (have, want) {
             if state.unknown.is_none() && controller.registry().resolve(&state.descriptor.kind()).is_err() {
                 return Err(format!("{} is no longer available", state.descriptor.name));
             }
-            if matches!(state.descriptor.role, ModuleRole::Dsp(_)) {
-                needed += 1;
+            if matches!(state.descriptor.role, ModuleRole::Dsp(_)) && !swapped.contains(id) {
+                needed = needed.saturating_add(state.slots.max(1));
             }
         }
     }
     if needed > controller.free_module_slots() {
-        return Err("the patch has no room for these modules".to_string());
+        return Err(no_room_text(step, forward, controller, hierarchy));
     }
-    Ok(())
+    Ok(needed)
+}
+
+/// Why `step` is refused at the module limit: the limit's text, with the
+/// Copies hint when a slot the step swaps is inside a stack
+/// (sub-patches.md, The module limit).
+pub(crate) fn no_room_text(step: &Step, forward: bool, controller: &Controller, hierarchy: &Hierarchy) -> String {
+    let stack = swaps(step, forward)
+        .into_iter()
+        .find_map(|(slot, _, _)| hierarchy.stack_holding(slot));
+    loom_patch::hierarchy::too_many_modules_text(controller.config().max_modules, stack.as_deref())
 }
 
 /// Applies one side of a step to a flat patch: the new values going
@@ -537,7 +631,8 @@ pub fn apply(
 /// swapped, with its crossfade, rather than having one part removed and
 /// the other added (sub-patches.md, Slots: undo of a swap fades too);
 /// `layout` gives tile layouts for a sub-patch part that is stored. The
-/// caller syncs the hierarchy and commits afterwards.
+/// caller syncs the hierarchy and commits afterwards. `App::step` drives
+/// the same parts with a measure between them.
 pub fn apply_full(
     step: &Step,
     forward: bool,
@@ -547,59 +642,46 @@ pub fn apply_full(
     sizes: &mut BTreeMap<u32, (u8, u8)>,
     layout: &dyn Fn(u32) -> loom_patch::Layout,
 ) -> Result<(), String> {
-    let swapped = apply_swaps(step, forward, controller, hierarchy, layout)?;
-    apply_rest(step, forward, controller, hierarchy, positions, sizes, &swapped).map_err(|e| e.to_string())
+    apply_fills(step, forward, controller, hierarchy, layout)?;
+    let removals = apply_removals(step, forward, controller, hierarchy, layout)?;
+    for id in removals.gone {
+        let _ = controller.remove_module(id);
+    }
+    let swapped = swapped_ids(step, forward);
+    apply_rest(step, forward, controller, hierarchy, positions, sizes, &swapped, None).map_err(|e| e.to_string())
 }
 
-/// Swaps every slot whose part differs between the step's two sides, at
-/// the id the target side had, and returns the ids of both parts, which
-/// the rest of the step leaves alone.
-fn apply_swaps(
+/// What the removals of a step did ([`apply_removals`]).
+#[derive(Default)]
+pub(crate) struct Removals {
+    /// The slots they emptied.
+    pub slots: Vec<ModuleId>,
+    /// The modules that go with no fade. The caller leaves them out of its
+    /// sync and removes them once the step is sure to go through.
+    pub gone: Vec<ModuleId>,
+}
+
+/// Swaps every slot the step fills, at the id the target side had: a swap
+/// into an empty slot or between two parts. Each adds a part, so each must
+/// fit the module limit; `App::step` measures them before any removal runs
+/// (sub-patches.md, The module limit).
+pub(crate) fn apply_fills(
     step: &Step,
     forward: bool,
     controller: &mut Controller,
     hierarchy: &mut Hierarchy,
     layout: &dyn Fn(u32) -> loom_patch::Layout,
-) -> Result<BTreeSet<u32>, String> {
-    let mut parts = BTreeSet::new();
+) -> Result<(), String> {
     let Some((before, after)) = &step.hierarchy else {
-        return Ok(parts);
+        return Ok(());
     };
-    let (from, to) = if forward { (before, after) } else { (after, before) };
-    // Every flat id at or under a part's path: a sub-patch part brings its
-    // inner modules.
-    let under = |side: &Hierarchy, path: &loom_patch::ModulePath| -> Vec<u32> {
-        side.ids()
-            .paths()
-            .filter(|(p, _)| p.starts_with(path))
-            .map(|(_, id)| id.0)
-            .collect()
-    };
-    for slot in to.slots_differing_from(from) {
-        let Some(target) = to.slot(slot) else { continue };
-        // A slot that appears or goes (Make slot, Dissolve slot) is a plain
-        // hierarchy change, not a swap.
-        let Some(source) = from.slot(slot) else { continue };
+    let to = if forward { after } else { before };
+    for (slot, _, want) in swaps(step, forward) {
+        let Some(lid) = want else { continue };
         let level = to.level_of(slot);
-        if let Some(lid) = source.part {
-            parts.extend(under(from, &level.child(lid)));
-        }
-        let Some(lid) = target.part else {
-            // The slot empties, as Remove part does: a thru slot fades the
-            // part out to its thru signal, and any other lets it go now
-            // (sub-patches.md, Empty slots).
-            if source.part.is_some() {
-                let emptied = hierarchy.swap_to_empty(controller, layout, slot)?;
-                for id in emptied.gone {
-                    let _ = controller.remove_module(id);
-                }
-            }
-            continue;
-        };
         let Some(id) = to.ids().get(&level.child(lid)) else {
             continue;
         };
-        parts.extend(under(to, &level.child(lid)));
         let state = step
             .modules
             .get(&id.0)
@@ -629,13 +711,39 @@ fn apply_swaps(
             }
         }
     }
-    Ok(parts)
+    Ok(())
+}
+
+/// Empties every slot the step empties, as Remove part does: a thru slot
+/// fades the part out to its thru signal, in every stack copy, and any
+/// other lets it go now (sub-patches.md, Empty slots). Nothing is removed
+/// from the controller here: the modules that go are returned.
+pub(crate) fn apply_removals(
+    step: &Step,
+    forward: bool,
+    controller: &mut Controller,
+    hierarchy: &mut Hierarchy,
+    layout: &dyn Fn(u32) -> loom_patch::Layout,
+) -> Result<Removals, String> {
+    let mut removals = Removals::default();
+    for (slot, have, want) in swaps(step, forward) {
+        if have.is_none() || want.is_some() {
+            continue;
+        }
+        let emptied = hierarchy.swap_to_empty(controller, layout, slot)?;
+        removals.slots.push(slot);
+        removals.gone.extend(emptied.gone);
+    }
+    Ok(removals)
 }
 
 /// The step's graph side, with `swapped` (the parts of swapped slots)
 /// left alone, and the hierarchy restored to the step's side with the
-/// swaps' fades carried over.
-fn apply_rest(
+/// swaps' fades carried over. With `deferred`, a module the step removes
+/// is put there instead of being removed, so a step refused after this can
+/// still be taken back; the caller syncs without it and removes it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_rest(
     step: &Step,
     forward: bool,
     controller: &mut Controller,
@@ -643,6 +751,7 @@ fn apply_rest(
     positions: &mut BTreeMap<u32, (f32, f32)>,
     sizes: &mut BTreeMap<u32, (u8, u8)>,
     swapped: &BTreeSet<u32>,
+    mut deferred: Option<&mut Vec<ModuleId>>,
 ) -> Result<(), LoomError> {
     fn sides<T>(pair: &Pair<T>, forward: bool) -> (&Option<T>, &Option<T>) {
         if forward {
@@ -716,7 +825,12 @@ fn apply_rest(
             continue;
         }
         if let (Some(_), None) = sides(pair, forward) {
-            controller.remove_module(ModuleId(id))?;
+            match deferred.as_deref_mut() {
+                Some(deferred) => deferred.push(ModuleId(id)),
+                None => {
+                    controller.remove_module(ModuleId(id))?;
+                }
+            }
             positions.remove(&id);
             sizes.remove(&id);
         }

@@ -6,6 +6,30 @@ use loom_core::{LoomError, ModuleId};
 use loom_ui_core::{Point, UiId};
 use std::collections::BTreeSet;
 
+/// Why an undo or redo step did not go through ([`App::apply_step`]).
+enum StepRefusal {
+    /// It would pass the module limit. It was taken back whole, and the
+    /// history stays.
+    NoRoom,
+    /// It failed for another reason, which a record that does not match
+    /// the patch causes. The history cannot be trusted.
+    Failed(String),
+}
+
+/// What a step refused part-way puts back ([`App::take_back`]).
+struct SavedPatch {
+    /// The hierarchy before the step.
+    hierarchy: loom_patch::Hierarchy,
+    /// The modules the graph held before the step.
+    modules: BTreeSet<ModuleId>,
+    /// The assignments and mappings before the step.
+    links: crate::slots::Links,
+    /// Where every tile sat.
+    positions: std::collections::BTreeMap<u32, (f32, f32)>,
+    /// The tiles' saved sizes.
+    sizes: std::collections::BTreeMap<u32, (u8, u8)>,
+}
+
 /// Why toolbar Undo or Redo is disabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HistoryBlock {
@@ -305,26 +329,33 @@ impl App {
         };
         let Some(step) = step.cloned() else { return };
         let verb = if forward { "Redo" } else { "Undo" };
-        // A fade in progress is finished first; the step's own swap, if
-        // any, fades again (sub-patches.md, Slots).
+        // A fade in progress is finished and committed first, so its
+        // modules are free when the step is measured; the step's own swap,
+        // if any, fades again (sub-patches.md, Slots and The module limit).
         self.finish_all_fades();
-        if let Err(why) = undo::check(&step, forward, &self.session.controller) {
+        let room = match undo::check(&step, forward, &self.session.controller, &self.session.hierarchy) {
+            Ok(room) => room,
+            Err(why) => {
+                self.alerts
+                    .warn(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
+                return;
+            }
+        };
+        // An armed parameter is a mode, not an edit: undo disarms it first.
+        self.session.learn.disarm();
+        let applied = self.apply_step(&step, forward, room);
+        if let Err(StepRefusal::NoRoom) = applied {
+            // Taken back whole, before anything reached the engine: the
+            // history stays (undo.md, rule 10).
+            let why = undo::no_room_text(&step, forward, &self.session.controller, &self.session.hierarchy);
             self.alerts
                 .warn(format!("Cannot {} {}: {why}", verb.to_lowercase(), step.name()));
             return;
         }
-        // An armed parameter is a mode, not an edit: undo disarms it first.
-        self.session.learn.disarm();
-        let layout = self.layout_fn_owned();
-        let applied = undo::apply_full(
-            &step,
-            forward,
-            &mut self.session.controller,
-            &mut self.session.hierarchy,
-            &mut self.session.positions,
-            &mut self.session.sizes,
-            &layout,
-        );
+        let applied = applied.map_err(|refusal| match refusal {
+            StepRefusal::Failed(e) => e,
+            StepRefusal::NoRoom => unreachable!("handled above"),
+        });
         match applied {
             Ok(()) => {
                 if forward {
@@ -384,6 +415,198 @@ impl App {
                 );
             }
         }
+    }
+
+    /// Applies one side of `step` and syncs it, measuring the module limit
+    /// between its parts (sub-patches.md, The module limit). `room` is what
+    /// `undo::check` counted for the modules the rest of the step puts
+    /// back. The order keeps a refusal exact:
+    ///
+    /// 1. The swaps that fill a slot run first, and are synced and
+    ///    measured with `room` kept free, before any removal runs or syncs.
+    ///    So a refusal here has changed nothing a removal would retire.
+    /// 2. The swaps that empty a slot run next. When their fades do not fit
+    ///    with `room` kept free, the fades are dropped and the parts go at
+    ///    once: a removal yields its room to the rest and ramps over 5 ms.
+    /// 3. The rest of the step runs, is synced, and is measured once more,
+    ///    since a recorded width can be stale (a kept module that a cable
+    ///    the step puts back makes stereo).
+    ///
+    /// A measure that fails takes everything back, and the step is refused
+    /// with the history kept. Nothing reaches the engine until the caller
+    /// commits, and no module leaves the graph until every measure passes.
+    fn apply_step(&mut self, step: &undo::Step, forward: bool, room: usize) -> Result<(), StepRefusal> {
+        let layout = self.layout_fn_owned();
+        let saved = SavedPatch {
+            hierarchy: self.session.hierarchy.clone(),
+            modules: self.session.controller.graph().nodes().map(|(id, _)| id).collect(),
+            links: crate::slots::Links::of(self.session.controller.graph()),
+            positions: self.session.positions.clone(),
+            sizes: self.session.sizes.clone(),
+        };
+        let mut renamed = Vec::new();
+        let mut gone: Vec<ModuleId> = Vec::new();
+        // The slots the step empties, whose fades yield when room is short.
+        let mut emptied_slots: Vec<ModuleId> = Vec::new();
+        // A step that swaps no slot has only its rest.
+        if undo::swaps_a_slot(step, forward) {
+            // 1. Fills.
+            let filled = undo::apply_fills(
+                step,
+                forward,
+                &mut self.session.controller,
+                &mut self.session.hierarchy,
+                &layout,
+            )
+            .and_then(|()| self.sync_step(&gone, &mut renamed));
+            if let Some(refusal) = self.refusal(filled, room) {
+                self.take_back(saved, None, renamed);
+                return Err(refusal);
+            }
+
+            // 2. Removals.
+            let removals = match undo::apply_removals(
+                step,
+                forward,
+                &mut self.session.controller,
+                &mut self.session.hierarchy,
+                &layout,
+            ) {
+                Ok(removals) => removals,
+                Err(e) => {
+                    self.take_back(saved, None, renamed);
+                    return Err(StepRefusal::Failed(e));
+                }
+            };
+            gone.extend(removals.gone.iter().copied());
+            emptied_slots.clone_from(&removals.slots);
+            let mut emptied = self.sync_step(&gone, &mut renamed);
+            if emptied.is_ok() && !self.fits(room) {
+                for slot in &removals.slots {
+                    gone.extend(
+                        self.session
+                            .hierarchy
+                            .drop_removal_fades(&mut self.session.controller, *slot),
+                    );
+                }
+                emptied = self.sync_step(&gone, &mut renamed);
+            }
+            if let Some(refusal) = self.refusal(emptied, room) {
+                self.take_back(saved, None, renamed);
+                return Err(refusal);
+            }
+        }
+
+        // 3. The rest.
+        let before_rest = self.snapshot();
+        let swapped = undo::swapped_ids(step, forward);
+        let mut rest = undo::apply_rest(
+            step,
+            forward,
+            &mut self.session.controller,
+            &mut self.session.hierarchy,
+            &mut self.session.positions,
+            &mut self.session.sizes,
+            &swapped,
+            Some(&mut gone),
+        )
+        .map_err(|e| e.to_string())
+        .and_then(|()| self.sync_step(&gone, &mut renamed));
+        if rest.is_ok() && !self.fits(0) && !emptied_slots.is_empty() {
+            // A recorded width was stale, so `room` was short: a removal
+            // still yields its fades before the step is refused.
+            for slot in &emptied_slots {
+                gone.extend(
+                    self.session
+                        .hierarchy
+                        .drop_removal_fades(&mut self.session.controller, *slot),
+                );
+            }
+            rest = self.sync_step(&gone, &mut renamed);
+        }
+        if let Some(refusal) = self.refusal(rest, 0) {
+            self.take_back(saved, Some(before_rest), renamed);
+            return Err(refusal);
+        }
+        for id in gone {
+            let _ = self.session.controller.remove_module(id);
+        }
+        self.assignments_renumbered(&renamed);
+        Ok(())
+    }
+
+    /// Syncs the hierarchy for a step, leaving out `gone`, and keeps the
+    /// assignments the sync renumbered, after those of the syncs before.
+    fn sync_step(
+        &mut self,
+        gone: &[ModuleId],
+        renamed: &mut Vec<(loom_core::AssignmentId, loom_core::AssignmentId)>,
+    ) -> Result<(), String> {
+        let synced = self
+            .session
+            .hierarchy
+            .sync_without(&mut self.session.controller, gone)
+            .map_err(|e| crate::slots::sync_why(&e))?;
+        renamed.extend(synced);
+        Ok(())
+    }
+
+    /// Whether a part of a step went wrong: a failure, a lack of room on
+    /// the way, or a measure with `room` kept free that does not fit.
+    fn refusal(&self, part: Result<(), String>, room: usize) -> Option<StepRefusal> {
+        match part {
+            Ok(()) if self.fits(room) => None,
+            Ok(()) => Some(StepRefusal::NoRoom),
+            Err(why) if crate::slots::is_room_error(&self.session.controller, &why) => Some(StepRefusal::NoRoom),
+            Err(why) => Some(StepRefusal::Failed(why)),
+        }
+    }
+
+    /// The patch as undo sees it now.
+    fn snapshot(&self) -> undo::Snapshot {
+        undo::Snapshot::take_full(
+            &self.session.controller,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.positions,
+            &self.session.sizes,
+        )
+    }
+
+    /// Takes back a step refused part-way, as a refused swap is: the rest
+    /// of the step first, when it ran, back to `before_rest`, then the
+    /// hierarchy from before, every module added since removed (none of
+    /// them reached the engine), and the links put back. A sync then makes
+    /// the graph's cables the hierarchy's again.
+    fn take_back(
+        &mut self,
+        saved: SavedPatch,
+        before_rest: Option<undo::Snapshot>,
+        mut renamed: Vec<(loom_core::AssignmentId, loom_core::AssignmentId)>,
+    ) {
+        if let Some(before_rest) = before_rest
+            && let Some(back) = undo::back_to(&self.snapshot(), &before_rest)
+        {
+            let _ = undo::apply_rest(
+                &back,
+                true,
+                &mut self.session.controller,
+                &mut self.session.hierarchy,
+                &mut self.session.positions,
+                &mut self.session.sizes,
+                &BTreeSet::new(),
+                None,
+            );
+        }
+        self.session.hierarchy = saved.hierarchy;
+        self.remove_added_since(&saved.modules);
+        self.restore_links(&saved.links);
+        self.session.positions = saved.positions;
+        self.session.sizes = saved.sizes;
+        if let Ok(synced) = self.session.hierarchy.sync(&mut self.session.controller) {
+            renamed.extend(synced);
+        }
+        self.assignments_renumbered(&renamed);
     }
 
     /// Sends the graph to the engine. Returns false if that failed; the
