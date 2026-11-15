@@ -1,7 +1,8 @@
 //! Golden-audio tests for every example patch (#93, NFR-OSS-05).
 //!
 //! Each patch in `examples/patches/` plays one note through the engine,
-//! and its stereo output is compared with
+//! or a chord for a polyphonic patch ([`notes`]), and its stereo output is
+//! compared with
 //! `tests/reference/patches/<name>.wav`. A change that keeps every module
 //! correct can still change how a patch sounds, for example through the
 //! compiler's feedback-loop handling; these tests catch it.
@@ -29,6 +30,33 @@ const NOTE: Note = Note {
     off: 7_200,
 };
 
+/// The chord the polysynth plays: C, E, G, and B up from middle C. The
+/// notes start on different frames inside the engine block from frame 128
+/// to 255 and end on different frames, so four voices sound at once and
+/// their release tails overlap (polyphony.md, The shipped example).
+const CHORD: [Note; 4] = [
+    Note {
+        note: 60,
+        on: 240,
+        off: 4_800,
+    },
+    Note {
+        note: 64,
+        on: 243,
+        off: 5_600,
+    },
+    Note {
+        note: 67,
+        on: 247,
+        off: 6_400,
+    },
+    Note {
+        note: 71,
+        on: 251,
+        off: 7_200,
+    },
+];
+
 /// Host buffer sizes the render is played in. 1 is the smallest a host
 /// can ask for, 77 does not divide the engine's block, and 1,000 is larger
 /// than it, so the engine splits each buffer.
@@ -53,7 +81,18 @@ fn example_patches() -> Vec<PathBuf> {
     patches
 }
 
-/// Plays `patch` with [`NOTE`] in host buffers of `buffer` frames. The
+/// The notes `patch` plays in its render: [`CHORD`] for the polysynth,
+/// which tests several voices at once, and [`NOTE`] for every other patch,
+/// so their references do not change.
+fn notes(patch: &Path) -> &'static [Note] {
+    if patch.file_name().is_some_and(|name| name == "polysynth.ron") {
+        &CHORD
+    } else {
+        &[NOTE]
+    }
+}
+
+/// Plays `patch` with its [`notes`] in host buffers of `buffer` frames. The
 /// output safety stage is off, so the reference holds what the patch makes,
 /// not what the limiter does to it (ADR-0019).
 fn play(patch: &Path, buffer: usize) -> Vec<Vec<f32>> {
@@ -66,7 +105,7 @@ fn play(patch: &Path, buffer: usize) -> Vec<Vec<f32>> {
     loaded
         .load_into(&mut parts.controller)
         .unwrap_or_else(|e| panic!("{} is valid: {e}", patch.display()));
-    let (left, right) = render(&mut parts, FRAMES, buffer, &[NOTE]);
+    let (left, right) = render(&mut parts, FRAMES, buffer, notes(patch));
     vec![left, right]
 }
 

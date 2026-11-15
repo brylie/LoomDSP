@@ -134,3 +134,25 @@ fn check_names_a_missing_file() {
     assert!(!out.status.success());
     assert!(stderr.starts_with(&format!("error: {}: ", path.display())), "{stderr}");
 }
+
+/// `loom check` passes on the polysynth example: it loads with nothing
+/// unknown, every module processed, and no feedback loop (polyphony.md, The
+/// shipped example).
+#[test]
+fn check_passes_on_the_polysynth_example() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/polysynth.ron");
+    let out = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(stdout.contains("\"Polysynth\""), "{stdout}");
+    assert!(stdout.contains("12 modules, 11 cables"), "{stdout}");
+    assert!(stdout.contains("no feedback loops"), "{stdout}");
+    assert!(!stdout.contains("not processed"), "{stdout}");
+    assert!(!stdout.contains("unknown module"), "{stdout}");
+    assert!(stderr.is_empty(), "the patch loads as saved: {stderr}");
+}

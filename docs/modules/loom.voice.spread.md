@@ -87,3 +87,4 @@ Patch(
 - [Repeatable randomness](../learn/repeatable-randomness.md)
 - [Voice Merge](loom.voice.merge.md)
 - [MIDI Note](loom.midi.note.md)
+- [Polysynth patch](../../examples/patches/polysynth.ron)

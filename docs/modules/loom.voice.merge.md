@@ -66,3 +66,4 @@ Patch(
 
 - [Voices and polyphony](../learn/voices-and-polyphony.md)
 - [MIDI Note](loom.midi.note.md)
+- [Polysynth patch](../../examples/patches/polysynth.ron)

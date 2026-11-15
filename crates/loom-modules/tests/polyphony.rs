@@ -1,6 +1,8 @@
 //! Bundle compilation and structural edits before the MIDI source exists.
 
-use loom_core::{EngineConfig, EngineParts, MidiControl, OutputSafety, Registry, Width, create_engine};
+mod common;
+
+use loom_core::{EngineConfig, EngineParts, MidiControl, ModuleId, OutputSafety, Registry, Width, create_engine};
 use loom_modules::{register_all, test_modules};
 use std::sync::Arc;
 
@@ -1184,4 +1186,78 @@ fn merge_reselects_only_when_a_width_edit_removes_its_choice() {
         };
         assert_eq!(render(&mut parts), [expected; 512], "mode {mode}");
     }
+}
+
+/// The polysynth example's voice chain, by module ID: MIDI Note, Voice
+/// Spread, Phase, Saw, SVF, Envelope, and Amplifier.
+const POLYSYNTH_VOICE_CHAIN: [u32; 7] = [1, 2, 3, 4, 7, 8, 9];
+
+/// The polysynth example's one-voice modules, by module ID: the LFO, the
+/// Multiply that sets its depth, and Voice Merge.
+const POLYSYNTH_ONE_VOICE: [u32; 3] = [5, 6, 10];
+
+/// The polysynth example's width of every output of `module`.
+fn output_widths(parts: &EngineParts, module: u32) -> Vec<(&'static str, Width)> {
+    let c = &parts.controller;
+    let node = c.graph().node(ModuleId(module)).expect("module exists");
+    node.descriptor
+        .outputs
+        .iter()
+        .map(|port| {
+            let output = c.output_ref(ModuleId(module), port.name).expect("output exists");
+            (port.name, c.last_report().width(output))
+        })
+        .collect()
+}
+
+/// The shipped polysynth compiles with no feedback loop, nothing skipped, and
+/// no stereo copies. Every output from MIDI Note through the Amplifier is 8
+/// mono voices, and the LFO, its Multiply, and Voice Merge give one mono
+/// voice (polyphony.md, The shipped example). The variant with the `level`
+/// cable is tested in `tests/polyphonic_midi.rs`.
+#[test]
+fn the_polysynth_example_compiles_to_eight_voices_and_no_loop() {
+    let parts = common::load("polysynth.ron");
+    let report = parts.controller.last_report();
+    assert!(report.loops.is_empty(), "no feedback loops: {:?}", report.loops);
+    assert!(report.skipped.is_empty(), "nothing skipped: {:?}", report.skipped);
+    assert!(report.per_channel.is_empty(), "no stereo copies");
+    assert!(report.stereo_outputs.is_empty(), "every output is mono");
+    let eight = Width { voices: 8, sides: 1 };
+    for module in POLYSYNTH_VOICE_CHAIN {
+        for (name, width) in output_widths(&parts, module) {
+            assert_eq!(width, eight, "module {module} output {name}");
+        }
+    }
+    for module in POLYSYNTH_ONE_VOICE {
+        for (name, width) in output_widths(&parts, module) {
+            assert_eq!(width, Width::MONO, "module {module} output {name}");
+        }
+    }
+}
+
+/// -1 dBFS, the most the polysynth may peak with 8 notes held.
+const MINUS_ONE_DBFS: f32 = 0.891;
+
+/// Eight notes held on the polysynth peak under -1 dBFS. The notes are the
+/// benchmark's (polyphony.md, The shipped example), all started on frame 0
+/// and held for 5 s: the envelopes reach sustain in under 1 s, and the LFO's
+/// 4 s cycle then runs once in full. Output safety is off, so the limiter
+/// cannot hide an overshoot. The test also checks the chord is loud enough
+/// to be a real check, so a silent patch cannot pass.
+#[test]
+fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
+    let mut parts = common::load_raw("polysynth.ron");
+    for note in [48, 52, 55, 59, 60, 64, 67, 71] {
+        assert!(parts.midi.send(loom_core::MidiEvent::note_on(0, 0, note, 100)));
+    }
+    let frames = 5 * common::SAMPLE_RATE as usize;
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    for (l, r) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
+        parts.engine.process(l, r);
+    }
+    let peak = loom_analysis::peak(&left).max(loom_analysis::peak(&right));
+    assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
+    assert!(peak > 0.25, "8 notes play: peak {peak}");
 }

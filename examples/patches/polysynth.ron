@@ -1,0 +1,98 @@
+// An 8-voice polysynth built from primitives (docs/design/polyphony.md,
+// "A keyboard into an 8-voice synth"). In the module browser the modules are
+// MIDI Note, Voice Spread, Phase, Saw, LFO, Multiply, SVF, Envelope,
+// Amplifier, Voice Merge, and Audio Out.
+//
+// MIDI Note gives each held key its own voice, up to 8, in Oldest mode: a
+// ninth key takes the voice whose note started first. Every module after it
+// runs once per voice. Hover over an output in the voice chain to see
+// "8 voices".
+//
+// To hear a chord, play a MIDI keyboard. With no hardware on macOS or Linux,
+// run `loom midi-port "Loom Pad"` in a terminal, before or after starting
+// the app. The app connects to it on its own, and the status bar says
+// `MIDI: "Loom Pad" connected.` Then type `on 60`, `on 64`, and `on 67`, and
+// `off 60` and so on to let go. On Windows, use a MIDI keyboard. Hold note
+// in the toolbar plays one note, and `loom render --note 60 --note 64`
+// plays its notes one after another, not together.
+//
+// What to turn:
+// - Voice Spread detunes each voice by its own small amount: Random mode,
+//   default seed, amount 0.0003 in pitch units (0.1 per octave), so about
+//   +/-3.6 cents. Its knob is on the -0.01 to 0.01 range.
+// - The LFO sweeps the filter at 0.25 Hz, one slow wave every 4 seconds.
+//   Multiply sets the depth: gain 0.05 turns the LFO's -1 to 1 into
+//   +/-0.5 octave on the SVF's cutoff input.
+// - The SVF's cutoff is 1,200 Hz, so the sweep runs from about 850 to
+//   1,700 Hz. Resonance is 0.4.
+// - The Envelope is slow, for a pad: attack 0.25 s, decay 0.6 s, sustain
+//   0.8, release 1.2 s.
+//
+// Headroom for 8 notes. The Amplifier's gain is set so a full chord peaks
+// under -1 dBFS (0.891) and stays out of the output limiter:
+//   8 voices x saw peak 1 x envelope peak 1 x SVF peak gain x gain <= 0.891
+// The SVF's damping is k = 2 - 1.98 x 0.4 = 1.208, so Q = 1/k = 0.83, and
+// a lowpass with Q above 0.707 peaks at Q / sqrt(1 - 1/(4 Q^2)) = 1.04.
+// So gain <= 0.891 / (8 x 1.04) = 0.107, and the patch uses 0.1: about
+// 0.83, or -1.6 dBFS, with 8 notes. The estimate is not a bound, since a
+// resonant filter can ring past its peak gain, so a test holds 8 notes and
+// checks the peak. One note then peaks near 0.1, about -20 dBFS. If you
+// play fewer notes, raise the Amplifier's gain.
+//
+// Audio Out already sums the voices of a cable. Voice Merge is here to make
+// that fold visible, and so you can change it: Average, or one voice only.
+//
+// Trying Quietest. Cable the Envelope's out to MIDI Note's level, and set
+// MIDI Note's mode to Quietest, so a new key takes the voice that has faded
+// most. That cable closes a feedback loop, which runs one sample at a time
+// and costs more. The status bar then says "1 feedback loop, 1 automatic
+// 1-sample delay (dashed)", and the dashed cable is the one into level.
+Patch(
+    version: 1,
+    metadata: Metadata(
+        name: "Polysynth",
+        license: "CC0-1.0",
+    ),
+    modules: [
+        // 8 voices, Oldest mode.
+        PatchModule(id: 1, kind: "loom.midi.note@1", params: {"voices": 8.0, "mode": 0.0}),
+        // Random mode, default seed, about +/-3.6 cents.
+        PatchModule(
+            id: 2,
+            kind: "loom.voice.spread@1",
+            params: {"amount": 0.0003, "mode": 2.0},
+            ranges: {"amount": (-0.01, 0.01)},
+        ),
+        PatchModule(id: 3, kind: "loom.phase.generator@1"),
+        PatchModule(id: 4, kind: "loom.osc.saw@1"),
+        // The filter sweep: 0.25 Hz, +/-0.5 octave.
+        PatchModule(id: 5, kind: "loom.mod.lfo@1", params: {"rate": 0.25}),
+        PatchModule(id: 6, kind: "loom.math.mul@1", params: {"gain": 0.05}, ranges: {"gain": (-0.1, 0.1)}),
+        PatchModule(id: 7, kind: "loom.filter.svf@1", params: {"cutoff": 1200.0, "resonance": 0.4}),
+        PatchModule(
+            id: 8,
+            kind: "loom.env.envelope@1",
+            params: {"attack": 0.25, "decay": 0.6, "sustain": 0.8, "release": 1.2},
+        ),
+        // Gain 0.1 leaves headroom for 8 voices (see above).
+        PatchModule(id: 9, kind: "loom.level.amp@1", params: {"gain": 0.1}),
+        // Sum.
+        PatchModule(id: 10, kind: "loom.voice.merge@1"),
+        PatchModule(id: 11, kind: "loom.io.audio-out@1"),
+        // The patch transport: 120 BPM, 4/4, running.
+        PatchModule(id: 12, kind: "loom.clock.transport@1"),
+    ],
+    cables: [
+        PatchCable(from: (1, "pitch"), to: (2, "in")),
+        PatchCable(from: (2, "out"), to: (3, "pitch")),
+        PatchCable(from: (3, "phase"), to: (4, "phase")),
+        PatchCable(from: (4, "out"), to: (7, "in")),
+        PatchCable(from: (5, "out"), to: (6, "a")),
+        PatchCable(from: (6, "out"), to: (7, "cutoff")),
+        PatchCable(from: (7, "lowpass"), to: (9, "in")),
+        PatchCable(from: (1, "gate"), to: (8, "gate")),
+        PatchCable(from: (8, "out"), to: (9, "level")),
+        PatchCable(from: (9, "out"), to: (10, "in")),
+        PatchCable(from: (10, "out"), to: (11, "in")),
+    ],
+)

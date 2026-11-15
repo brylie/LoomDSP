@@ -157,6 +157,7 @@ fn audio_thread_never_allocates() {
         "fm-feedback.ron",
         "fm-feedback-delay1.ron",
         "plucked-string.ron",
+        "polysynth.ron",
     ] {
         let mut parts = load(patch);
         let outputs: Vec<OutputRef> = parts

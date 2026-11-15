@@ -468,11 +468,11 @@ Voice modules:
 
 The shipped example:
 
-- [ ] `examples/patches/polysynth.ron` opens in the app, where hover text on an output port in its voice chain says `8 voices`, and a screen reader finds Voice Spread's `amount` and `mode` and Voice Merge's `mode` by name (`Ui` harness).
-- [ ] `loom check` passes on it (CLI test).
-- [ ] Its reference render of the four-note chord is bit-identical at buffer sizes 1, 77, 256, and 1,000 (reference test).
-- [ ] It compiles with no feedback loop and nothing skipped, with 8 voices from Note input through the Amplifier and one voice after Voice merge (test). The loop that the `level` cable would make is already tested on `main` (`tests/polyphonic_midi.rs`).
-- [ ] With 8 notes held for several seconds and output safety Off, its output peaks under -1 dBFS (test).
+- [x] `examples/patches/polysynth.ron` opens in the app, where hover text on an output port in its voice chain says `8 voices`, and a screen reader finds Voice Spread's `amount` and `mode` and Voice Merge's `mode` by name (`Ui` harness).
+- [x] `loom check` passes on it (CLI test).
+- [x] Its reference render of the four-note chord is bit-identical at buffer sizes 1, 77, 256, and 1,000 (reference test).
+- [x] It compiles with no feedback loop and nothing skipped, with 8 voices from Note input through the Amplifier and one voice after Voice merge (test). The loop that the `level` cable would make is already tested on `main` (`tests/polyphonic_midi.rs`).
+- [x] With 8 notes held for several seconds and output safety Off, its output peaks under -1 dBFS (test).
 - [ ] The benchmark prints the line above on any machine that runs it, and CI compiles it (bench).
 
 Cost:

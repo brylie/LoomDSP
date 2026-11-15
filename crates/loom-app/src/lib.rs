@@ -61,6 +61,8 @@ mod patch_info;
 mod patches;
 mod places;
 mod pointer;
+#[cfg(test)]
+mod polysynth_tests;
 mod preferences;
 mod probe_menu;
 #[cfg(test)]
