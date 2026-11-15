@@ -86,7 +86,7 @@ These early alpha builds are not signed yet, so macOS and Windows warn the first
 - **Windows:** double-click `loom-app.exe`. On the "Windows protected your PC" screen, choose **More info**, then **Run anyway**.
 - **Linux:** run `./loom-app` in a terminal.
 
-Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard first, or click **Hold note** in the toolbar, then turn the filter's **Cutoff** knob while the note plays. [Getting started](docs/guide/getting-started.md) walks you through your first patch.
+Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard first, or click **Hold note** in the toolbar, then turn the filter's **Cutoff** knob while the note plays. To play chords, open `examples/patches/polysynth.ron`, an 8-voice synth built from primitives, and play a MIDI keyboard. [Getting started](docs/guide/getting-started.md) walks you through your first patch.
 
 ### Build it yourself
 
@@ -113,6 +113,12 @@ More things to try:
 # Feedback FM: an oscillator that modulates itself
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron
 
+# An 8-voice polysynth: hold a chord on a MIDI keyboard
+cargo run --release -p loom-app -- examples/patches/polysynth.ron
+
+# No keyboard? On macOS and Linux, make a virtual one, then type `on 60`, `on 64`, and `on 67`
+cargo run --release -p loom-cli -- midi-port "Loom Pad"
+
 # Start from an empty canvas
 cargo run --release -p loom-app
 
@@ -122,7 +128,7 @@ cargo run --release -p loom-cli -- modules
 # Play a patch from the terminal with your MIDI keyboard, or hold one note
 cargo run --release -p loom-cli -- play examples/patches/fm-feedback.ron --note 57
 
-# Render a chord to a WAV file
+# Render three notes, one after another, to a WAV file
 cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o out.wav --note 48 --note 55 --note 60
 
 # Show where the engine found feedback loops

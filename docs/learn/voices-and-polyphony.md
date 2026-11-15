@@ -4,7 +4,7 @@ What a voice is, why a polysynth has to steal, why LoomDSP infers a bundle inste
 
 - **Specification:** [Polyphony and voice allocation](../design/polyphony.md).
 - **Decision:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md).
-- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), `crates/loom-dsp/src/voice.rs` (allocation), and `crates/loom-modules/src/midi.rs` (MIDI notes and expression).
+- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), `crates/loom-dsp/src/voice.rs` (allocation), `crates/loom-modules/src/midi.rs` (MIDI notes and expression), and `crates/loom-modules/src/voice.rs` (Voice merge, Voice split, and Voice spread).
 
 ## A voice is a chain, not a note
 
@@ -101,6 +101,28 @@ LoomDSP decided against it ([ADR-0038](../adr/0038-notes-travel-as-per-voice-sig
 3. **Anything can modulate a note.** A voice's pitch is a signal, so a slew, an LFO, or a quantiser can act on it with no converter in between. In an event model each of those is a special module.
 
 The cost is real and was paid on purpose: every module that makes or changes notes needs voice allocation, and a bundle has a fixed count. The allocation is paid once, as one algorithm in `loom-dsp` that every source calls. The fixed count is the same limit every hardware polysynth has.
+
+## A different value for each voice
+
+Copies of a module share its knobs, so eight copies of a saw play in perfect tune. Real polysynths drift: each voice is a little sharp or flat, and the chord sounds wider for it. **Voice spread** (`loom.voice.spread`) gives each voice its own offset from one `amount` knob. Put it on the pitch path, after Note input, and each voice is detuned by its own small amount.
+
+A stack's spread does something that looks the same but is not. A [stack](unison.md) is one sound copied N times for **one** note, and its spread moves the copies apart: that is unison. Voice spread moves **different** notes apart, one offset per voice. In Even mode both use the same formula, offsets evenly spaced from -1 to 1, so they agree. Random mode gives each voice a fixed share from its seed instead, which is closer to how analog voices drift. The same seed gives the same offsets every time ([repeatable randomness](repeatable-randomness.md)), and a voice keeps its offset when the count changes.
+
+On a one-voice cable Voice spread does nothing, so it can sit in a patch before the patch is polyphonic.
+
+## Why the `level` cable makes a loop
+
+Quietest stealing needs to know how loud each voice is, so the player cables each voice's envelope back into Note input's `level` input. Now the signal goes around a circle: Note input's gate starts the envelope, and the envelope feeds Note input. That is a feedback loop, and every loop needs a delay somewhere so that each sample can be computed from the one before ([feedback loops](feedback-loops.md)). The compiler inserts a one-sample delay and reports it, and the loop runs one sample at a time.
+
+Note input only reads `level` to choose a voice to steal, so one sample of delay changes nothing you can hear. But the compiler cannot know that. It sees a cable, and a cable is an edge in the graph. So the loop costs more: Note input and every envelope in it are called once per sample, not once per block. On the reference laptop the polysynth with this cable costs about 40% more ([the benchmark](../benchmarks/2026-11-15-polysynth.md)). This is why Oldest is the default, and why the shipped polysynth leaves `level` unpatched.
+
+## The polysynth example
+
+`examples/patches/polysynth.ron` puts the ideas on this page in one patch. MIDI Note hands out 8 voices in Oldest mode. Voice Spread detunes each voice by about 3.6 cents in Random mode. A Phase module drives a Saw, then an SVF, an Envelope, and an Amplifier, all as 8 copies. One mono LFO sweeps every voice's filter through a Multiply, because a mono cable into a copied module is free. Voice Merge sums the voices into one cable for Audio Out.
+
+Hover over an output in the voice chain and it says `8 voices`; after Voice Merge the cable is one voice. To play a chord, use a MIDI keyboard, or, on macOS and Linux, run `loom midi-port "Loom Pad"` and type `on 60`, `on 64`, and `on 67`.
+
+The Amplifier's gain is low on purpose. Eight voices at their loudest add up, so the gain leaves room for all of them under -1 dBFS, and one note alone plays quietly. The patch's comment shows the arithmetic.
 
 ## Compared with other systems
 

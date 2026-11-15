@@ -16,12 +16,23 @@
 //! Every member of a select runs, so a select of 8 should cost about what
 //! a layer of 8 does.
 //!
-//! Run with: `cargo bench -p loom-modules`
+//! The `patch` group runs example patches with a note held:
+//! `subtractive.ron`, `fm-feedback.ron`, and `modulation.ron` with one note,
+//! and `polysynth.ron` with [`POLYSYNTH_NOTES`].
+//!
+//! After criterion's groups, `polysynth` prints the polysynth's share of real
+//! time, in two lines: the shipped example, and its Quietest variant with the
+//! `level` cable ([`polysynth_share`], polyphony.md, The shipped example).
+//! The lines report and never fail, since the number depends on the machine.
+//!
+//! Run with: `cargo bench -p loom-modules`, or only the polysynth with
+//! `cargo bench -p loom-modules --bench engine -- polysynth`.
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use loom_core::{EngineConfig, EngineParts, MidiEvent, create_engine};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
+use loom_core::{EngineConfig, EngineParts, MidiEvent, ModuleId, create_engine};
 use loom_patch::Patch;
 use std::hint::black_box;
+use std::time::Instant;
 
 const BLOCK: usize = 128;
 
@@ -103,19 +114,42 @@ fn svf_chain(n: usize, feedback: bool) -> EngineParts {
     parts
 }
 
+/// The notes the polysynth holds in its benchmarks: two four-note chords,
+/// C, E, G, and B from an octave below middle C and from middle C, so every
+/// one of its 8 voices plays.
+const POLYSYNTH_NOTES: [u8; 8] = [48, 52, 55, 59, 60, 64, 67, 71];
+
+/// An example patch from `examples/patches`, loaded into a new engine.
+fn example(name: &str) -> EngineParts {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/patches")
+        .join(name);
+    let patch = Patch::from_ron(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    patch.load_into(&mut parts.controller).unwrap();
+    parts
+}
+
+/// Sends a note-on on frame 0 for each of `notes`.
+fn hold(parts: &mut EngineParts, notes: &[u8]) {
+    for &note in notes {
+        assert!(parts.midi.send(MidiEvent::note_on(0, 0, note, 100)));
+    }
+}
+
 fn patches(c: &mut Criterion) {
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
     let mut group = c.benchmark_group("patch");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    for name in ["subtractive.ron", "fm-feedback.ron", "modulation.ron"] {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/patches")
-            .join(name);
-        let patch = Patch::from_ron(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
-        patch.load_into(&mut parts.controller).unwrap();
-        parts.midi.send(MidiEvent::note_on(0, 0, 60, 100));
+    for name in ["subtractive.ron", "fm-feedback.ron", "modulation.ron", "polysynth.ron"] {
+        let mut parts = example(name);
+        let notes: &[u8] = if name == "polysynth.ron" {
+            &POLYSYNTH_NOTES
+        } else {
+            &[60]
+        };
+        hold(&mut parts, notes);
         group.bench_function(name, |b| {
             b.iter(|| {
                 parts.engine.process(&mut left, &mut right);
@@ -343,4 +377,142 @@ fn modes(c: &mut Criterion) {
 }
 
 criterion_group!(benches, feedback_regions, patches, modulation, dynamics, modes);
-criterion_main!(benches);
+
+/// MIDI Note's module ID in `polysynth.ron`.
+const POLYSYNTH_NOTE: ModuleId = ModuleId(1);
+
+/// The Envelope's module ID in `polysynth.ron`.
+const POLYSYNTH_ENVELOPE: ModuleId = ModuleId(8);
+
+/// Blocks played before timing: 1 s at 48 kHz and 128 frames, so the
+/// envelopes reach their sustain.
+const WARM_UP_BLOCKS: usize = 375;
+
+/// Blocks timed: 10 s at 48 kHz and 128 frames.
+const TIMED_BLOCKS: usize = 3_750;
+
+/// The share of real time the NFR-PERF-01 budget allows, in percent.
+const BUDGET_PERCENT: f64 = 25.0;
+
+/// Criterion's options that take a value, so the word after one is not
+/// read as the name filter.
+const VALUE_OPTIONS: [&str; 20] = [
+    "-c",
+    "--color",
+    "--colour",
+    "-s",
+    "--save-baseline",
+    "-b",
+    "--baseline",
+    "--baseline-lenient",
+    "--format",
+    "--profile-time",
+    "--load-baseline",
+    "--sample-size",
+    "--warm-up-time",
+    "--measurement-time",
+    "--nresamples",
+    "--noise-threshold",
+    "--confidence-level",
+    "--significance-level",
+    "--plotting-backend",
+    "--output-format",
+];
+
+/// True when the arguments ask for a timed run that includes `name`: they
+/// hold `--bench`, hold neither `--list`, `--test`, nor `--ignored`, and
+/// hold either no name filter or one that matches `name`. Criterion's help
+/// says it skips benchmarks whose names do not contain the filter, so a
+/// filter matches when `name` contains it, or equals it with `--exact`. So
+/// `cargo test --benches`, a listing, and `cargo bench -- modes` skip it.
+fn runs(name: &str, args: &[String]) -> bool {
+    let has = |flag: &str| args.iter().any(|arg| arg == flag);
+    if !has("--bench") || has("--list") || has("--test") || has("--ignored") {
+        return false;
+    }
+    let mut filter = None;
+    let mut words = args.iter();
+    while let Some(arg) = words.next() {
+        if arg.starts_with('-') {
+            if VALUE_OPTIONS.contains(&arg.as_str()) {
+                words.next();
+            }
+        } else if filter.is_none() {
+            filter = Some(arg.as_str());
+        }
+    }
+    match filter {
+        None => true,
+        Some(filter) if has("--exact") => name == filter,
+        Some(filter) => name.contains(filter),
+    }
+}
+
+/// Plays `parts` with [`POLYSYNTH_NOTES`] held: a warm-up, a check that it
+/// is not silent, so a broken patch cannot report a false low number, then
+/// [`TIMED_BLOCKS`] blocks timed with one clock. Prints one line, headed
+/// `label`, with the mean time per block and its share of the block's real
+/// time.
+fn time_polysynth(label: &str, mut parts: EngineParts) {
+    let config = EngineConfig::default();
+    hold(&mut parts, &POLYSYNTH_NOTES);
+    let mut left = vec![0.0f32; config.max_block];
+    let mut right = vec![0.0f32; config.max_block];
+    let mut loudest = 0.0f32;
+    for _ in 0..WARM_UP_BLOCKS {
+        parts.engine.process(&mut left, &mut right);
+        loudest = left.iter().chain(&right).fold(loudest, |most, s| most.max(s.abs()));
+    }
+    assert!(loudest > 0.01, "{label}: the warm-up is silent (peak {loudest})");
+    let start = Instant::now();
+    for _ in 0..TIMED_BLOCKS {
+        parts.engine.process(&mut left, &mut right);
+        black_box(&left);
+        black_box(&right);
+    }
+    let per_block = start.elapsed().as_secs_f64() / TIMED_BLOCKS as f64;
+    let real_time = config.max_block as f64 / f64::from(config.sample_rate);
+    println!(
+        "{label}: 8 voices, 8 notes held, {} kHz, {} frames: {:.1} µs per block, {:.2}% of real time (budget {BUDGET_PERCENT}%)",
+        config.sample_rate / 1000.0,
+        config.max_block,
+        per_block * 1e6,
+        100.0 * per_block / real_time,
+    );
+}
+
+/// The polysynth's cost as a share of real time (polyphony.md, rule 29, and
+/// The shipped example): the shipped example, then the variant with the
+/// Envelope cabled to MIDI Note's `level` and Mode at Quietest, which closes
+/// one feedback loop. Runs only for a timed run that includes `polysynth`
+/// ([`runs`]).
+fn polysynth_share() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !runs("polysynth", &args) {
+        return;
+    }
+    let parts = example("polysynth.ron");
+    let report = parts.controller.last_report();
+    assert!(report.loops.is_empty(), "the shipped polysynth has no feedback loop");
+    let pitch = parts.controller.output_ref(POLYSYNTH_NOTE, "pitch").unwrap();
+    assert_eq!(report.width(pitch).voices, 8, "MIDI Note's pitch is 8 voices");
+    time_polysynth("polysynth", parts);
+
+    let mut parts = example("polysynth.ron");
+    let c = &mut parts.controller;
+    c.connect_named(POLYSYNTH_ENVELOPE, "out", POLYSYNTH_NOTE, "level")
+        .unwrap();
+    // Quietest, the second of MIDI Note's modes.
+    c.set_param_named(POLYSYNTH_NOTE, "mode", 1.0).unwrap();
+    let report = c.commit().unwrap();
+    assert_eq!(report.loops.len(), 1, "the level cable closes one loop");
+    time_polysynth("polysynth (Quietest, level loop)", parts);
+}
+
+/// Criterion's groups, then the polysynth's share of real time, then
+/// criterion's summary: what `criterion_main!` does, with one call added.
+fn main() {
+    benches();
+    polysynth_share();
+    Criterion::default().configure_from_args().final_summary();
+}

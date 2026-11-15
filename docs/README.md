@@ -64,6 +64,10 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 | [Phase 0 UI spikes](benchmarks/p0-ui-spikes.md) | Iced + iced_nodegraph and egui-snarl, measured on the reference laptop |
 | [Phase 1 canvas](benchmarks/p1-canvas.md) | Our own canvas: how to measure it, and the results |
 | [Phase 1 modulation](benchmarks/p1-modulation.md) | Cost of a modulated filter cutoff, and of 1 to 16 assignments on one parameter |
+| [Mono engine cost after stereo, 2026-11-01](benchmarks/2026-11-01-stereo-mono.md) | The mono add chain before and after the stereo work |
+| [Dynamics outputs, 2026-11-04](benchmarks/2026-11-04-dynamics-outputs.md) | Dynamics taking its outputs once per call instead of once per sample (#616) |
+| [Sub-patch modes, 2026-11-09](benchmarks/2026-11-09-sub-patch-modes.md) | A select, a layer, and a stack of 8 voices against one voice |
+| [Polysynth, 2026-11-15](benchmarks/2026-11-15-polysynth.md) | The 8-voice polysynth as a share of real time, shipped and with the Quietest `level` loop (NFR-PERF-01) |
 
 ## How to read requirement IDs
 
