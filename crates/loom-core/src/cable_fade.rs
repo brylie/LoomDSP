@@ -3,7 +3,9 @@
 //! When a schedule swap changes what feeds an input, the input holds the
 //! last value it read and moves in a straight line to the new signal over
 //! 5 ms, sample by sample. A modulation assignment that is added, removed,
-//! or moved fades its contribution the same way.
+//! or moved fades its contribution the same way. One turned on or off, or
+//! given a new depth or polarity, blends its old setting into the new one
+//! over 5 ms while its source plays (`ContributionRamp`).
 //!
 //! The compiler decides which inputs fade (`compile/fades.rs`) and gives
 //! each one a fixed slot and buffer on the control thread. At the swap the
@@ -13,7 +15,7 @@
 //!
 //! Background: `docs/learn/hot-patching.md`.
 
-use crate::compile::{ModSource, Schedule};
+use crate::compile::{ModSource, Schedule, fallback_fill};
 use crate::signal::hold_finite;
 
 /// Module ID of the hidden Sum that a layer or a stack adds
@@ -158,6 +160,150 @@ impl Ramp {
     /// The held value, for a ramp that starts from another one's start.
     pub(crate) fn held(&self) -> f32 {
         self.held
+    }
+}
+
+/// A straight line from one assignment setting to another, one step per
+/// sample (live patching spec, rule 9, and How rule 9 handles assignment
+/// changes).
+///
+/// A setting is a straight-line map of the source sample `x`, `g·x + h`
+/// ([`AssignmentRuntime::map`](crate::compile::AssignmentRuntime::map)).
+/// The ramp blends from the map `(g0, h0)` into what the current setting
+/// gives. On frame `p` below `N`, with `t = p/N`, it gives
+/// `old · (1 − t) + new · t`, where `old = g0·x + h0`, and from frame `N`
+/// on `new` exactly. A ramp from a value has `g0 = 0`: it never reads the
+/// source for `old`, so it gives the same values as [`Ramp`], and a NaN
+/// source never reaches `h0`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ContributionRamp {
+    g0: f32,
+    h0: f32,
+    position: u32,
+    length: u32,
+}
+
+impl ContributionRamp {
+    /// A ramp that is already over: it gives the current setting.
+    pub(crate) fn finished(length: u32) -> Self {
+        let length = length.max(1);
+        Self {
+            g0: 0.0,
+            h0: 0.0,
+            position: length,
+            length,
+        }
+    }
+
+    /// A ramp from a held value, as a swap's fresh ramp starts. A value
+    /// that is NaN or infinite gives a finished ramp, so the contribution
+    /// switches, as a held input value does (rule 9, The ramp).
+    pub(crate) fn from_value(held: f32, length: u32) -> Self {
+        if held.is_finite() {
+            Self::from_map((0.0, held), length)
+        } else {
+            Self::finished(length)
+        }
+    }
+
+    /// A ramp from the setting `(g0, h0)`, at its start.
+    pub(crate) fn from_map((g0, h0): (f32, f32), length: u32) -> Self {
+        Self {
+            g0,
+            h0,
+            position: 0,
+            length: length.max(1),
+        }
+    }
+
+    /// A ramp that goes on where a value ramp `ramp` is.
+    pub(crate) fn from_ramp(ramp: &Ramp, length: u32) -> Self {
+        let mut carried = Self::from_map((0.0, ramp.held()), length);
+        carried.position = ramp.position.min(carried.length);
+        carried
+    }
+
+    /// Its length in frames.
+    pub(crate) fn length(&self) -> u32 {
+        self.length
+    }
+
+    /// True once the ramp gives the current setting unchanged.
+    pub(crate) fn is_done(&self) -> bool {
+        self.position >= self.length
+    }
+
+    /// Ends the ramp at once, as a panic does.
+    pub(crate) fn finish(&mut self) {
+        self.position = self.length;
+    }
+
+    /// True when the ramp reads the source sample for its old setting.
+    #[inline]
+    pub(crate) fn reads_source(&self) -> bool {
+        !self.is_done() && self.g0 != 0.0
+    }
+
+    /// The map the ramp plays at its current position, heading for the
+    /// setting `to`: the blend of the two, or `to` once it has ended.
+    pub(crate) fn map_toward(&self, to: (f32, f32)) -> (f32, f32) {
+        if self.is_done() {
+            to
+        } else {
+            let t = self.position as f32 * (1.0 / self.length as f32);
+            (self.g0 * (1.0 - t) + to.0 * t, self.h0 * (1.0 - t) + to.1 * t)
+        }
+    }
+
+    /// Starts again from where it is, heading for the setting `played`
+    /// was heading for: a change of settings (rule 9, A change while a
+    /// blend runs). A blend of two finite maps is finite.
+    pub(crate) fn restart_toward(&mut self, played: (f32, f32)) {
+        (self.g0, self.h0) = self.map_toward(played);
+        self.position = 0;
+    }
+
+    /// The contribution for source sample `x`, where `new` is what the
+    /// current setting makes of it, without moving on.
+    ///
+    /// `hold_finite` holds only infinities: `f32::clamp` passes NaN
+    /// through. NaN is kept out in other ways. While `g0` is 0 the source
+    /// is not read, and a held value that is not finite makes a finished
+    /// ramp ([`ContributionRamp::from_value`]). A NaN source read through
+    /// a setting with `g0` not 0 gives NaN, as the setting alone would, and
+    /// `ParamSpec::denormalize` turns a NaN position into the default.
+    #[inline]
+    pub(crate) fn value(&self, x: f32, new: f32) -> f32 {
+        if self.position >= self.length {
+            return new;
+        }
+        let old = if self.g0 == 0.0 {
+            self.h0
+        } else {
+            hold_finite(self.g0 * x + self.h0)
+        };
+        if self.position == 0 {
+            old
+        } else {
+            let t = self.position as f32 * (1.0 / self.length as f32);
+            // The two-weight form, as `Ramp::value` uses (ADR-0037).
+            hold_finite(old * (1.0 - t) + new * t)
+        }
+    }
+
+    /// The contribution for `x` and `new`, then one step on.
+    #[inline]
+    pub(crate) fn next(&mut self, x: f32, new: f32) -> f32 {
+        let value = self.value(x, new);
+        self.position = self.position.saturating_add(1).min(self.length);
+        value
+    }
+
+    /// The same ramp, continued from `other`'s map and position.
+    pub(crate) fn continue_from(&mut self, other: &ContributionRamp) {
+        self.g0 = other.g0;
+        self.h0 = other.h0;
+        self.position = other.position.min(self.length);
     }
 }
 
@@ -313,6 +459,57 @@ pub(crate) fn finish_all(schedule: &mut Schedule) {
     }
 }
 
+/// Starts the setting ramps that the commands of one batch call for
+/// (live patching spec, rule 9, Turned off or on). Runs on the audio
+/// thread after the whole batch, before the next block, and only when a
+/// command changed an assignment.
+///
+/// Each source with a ramp slot whose assignment changed, and whose
+/// settings now map the source differently from the ones it was heading
+/// for (`played`), starts a ramp from where it is. Maps are compared, not
+/// settings, because two settings can map alike: off and depth 0, or a
+/// polarity forced to the source's own. A batch that ends on a map that
+/// plays starts nothing, so it is bit-identical to no command. Before the
+/// engine's first block (`playing` false) nothing starts: nobody heard the
+/// old setting. Then every changed runtime's `played` takes its settings.
+/// One visit per source, no allocation.
+pub(crate) fn start_setting_ramps(schedule: &mut Schedule, playing: bool) {
+    if !schedule.assignments_changed {
+        return;
+    }
+    let assignments = &schedule.assignments;
+    if playing {
+        for fill in &mut schedule.fills {
+            for source in &mut fill.sources {
+                let ModSource::Live {
+                    state,
+                    ramp: Some(ramp),
+                    ..
+                } = source
+                else {
+                    continue;
+                };
+                let Some(assignment) = assignments.get(*state as usize) else {
+                    continue;
+                };
+                let played = assignment.map(assignment.played);
+                if assignment.changed && assignment.map(assignment.settings()) != played {
+                    ramp.restart_toward(played);
+                }
+            }
+        }
+    }
+    // A separate loop, so a runtime with no slot on any source, onto a
+    // parameter that switches, is cleared too.
+    for assignment in &mut schedule.assignments {
+        if assignment.changed {
+            assignment.played = assignment.settings();
+            assignment.changed = false;
+        }
+    }
+    schedule.assignments_changed = false;
+}
+
 /// What an input read last in `old`, whose last block was `frames` frames.
 /// Reads memory only when that block ran. When it did not, an input that
 /// read a fixed default gives that value, and anything else gives `None`.
@@ -400,52 +597,177 @@ pub(crate) fn take_state_from(new: &mut Schedule, old: &Schedule, frames: usize)
     take_contributions_from(new, old, frames);
 }
 
-/// Fills in the contribution ramps of `new`'s fills from `old`.
-fn take_contributions_from(new: &mut Schedule, old: &Schedule, frames: usize) {
-    let old_assignments = &old.assignments;
-    for fill in &mut new.fills {
-        let old_fill = old
-            .fill_order
-            .binary_search_by_key(&fill.key, |&k| old.fills[k as usize].key)
-            .ok()
-            .map(|k| &old.fills[old.fill_order[k] as usize]);
-        for source in &mut fill.sources {
-            let (id, ramp, fresh) = match source {
-                ModSource::Live {
-                    id,
-                    ramp: Some(ramp),
-                    fresh,
-                    ..
-                } => (*id, ramp, *fresh),
-                ModSource::Live { ramp: None, .. } => continue,
-                ModSource::Leaving { id, ramp, fresh } => (*id, ramp, *fresh),
+/// The source of assignment `id` on the fill with key `fill` in `old`.
+/// Every lookup is a binary search and a checked index, so a stale index
+/// cannot panic on the audio thread. A live source whose runtime `old`
+/// does not have counts as no match.
+fn old_source(old: &Schedule, fill: u64, id: crate::graph::AssignmentId) -> Option<&ModSource> {
+    let k = old
+        .fill_order
+        .binary_search_by_key(&fill, |&k| old.fills.get(k as usize).map_or(u64::MAX, |fill| fill.key))
+        .ok()?;
+    let old_fill = old.fills.get(*old.fill_order.get(k)? as usize)?;
+    // A fill's sources are sorted by assignment id.
+    let s = old_fill.sources.binary_search_by_key(&id, ModSource::id).ok()?;
+    let source = old_fill.sources.get(s)?;
+    match source {
+        ModSource::Live { state, .. } if old.assignments.get(*state as usize).is_none() => None,
+        _ => Some(source),
+    }
+}
+
+/// The ramp a live source that is not fresh takes from its old match
+/// `previous`, when its settings now map the source as `map` (rule 9, A
+/// schedule swap).
+///
+/// The same map as the old runtime's `played` carries the old ramp on.
+/// Another map, as an undo brings back, starts a ramp from where the old
+/// one was, heading for the setting it played. Maps are compared, not
+/// settings, as in [`start_setting_ramps`]. A leaving source carries its
+/// value ramp on.
+fn carried_ramp(previous: &ModSource, old: &Schedule, map: Option<(f32, f32)>, length: u32) -> ContributionRamp {
+    match previous {
+        ModSource::Leaving { ramp, .. } if !ramp.is_done() => ContributionRamp::from_ramp(ramp, length),
+        ModSource::Leaving { .. } => ContributionRamp::finished(length),
+        ModSource::Live { state, ramp, .. } => {
+            let Some(runtime) = old.assignments.get(*state as usize) else {
+                return ContributionRamp::finished(length);
             };
-            let length = ramp.length;
-            // A fill's sources are sorted by assignment id.
-            let previous = old_fill.and_then(|old_fill| {
-                let k = old_fill.sources.binary_search_by_key(&id, ModSource::id).ok()?;
-                Some(&old_fill.sources[k])
-            });
-            *ramp = if fresh {
-                let held = previous.map_or(0.0, |previous| contribution_of(previous, old_assignments, frames));
-                Ramp::new(held, length)
-            } else {
-                match previous.and_then(ModSource::ramp) {
-                    Some(previous) if !previous.is_done() => {
-                        let mut carried = Ramp::finished(length);
-                        carried.continue_from(&previous);
-                        carried
-                    }
-                    _ => Ramp::finished(length),
+            let played = runtime.map(runtime.played);
+            if map == Some(played) {
+                let mut carried = ContributionRamp::finished(length);
+                if let Some(ramp) = ramp {
+                    carried.continue_from(ramp);
                 }
-            };
+                carried
+            } else {
+                let from = ramp.as_ref().map_or(played, |ramp| ramp.map_toward(played));
+                ContributionRamp::from_map(from, length)
+            }
         }
     }
 }
 
-/// What an old source added to its parameter on the last frame of a block
-/// of `frames` frames: 0 when it added nothing or that block never ran.
-fn contribution_of(source: &ModSource, assignments: &[crate::compile::AssignmentRuntime], frames: usize) -> f32 {
+/// Fills in the contribution ramps and last values of `new`'s fills from
+/// `old`, whose last block was `frames` frames (rule 9, A schedule swap).
+///
+/// - A fresh source ramps from a value: what the old source added last.
+/// - A live source that is not fresh carries its ramp on, or blends from
+///   the setting that played when its map differs ([`carried_ramp`]).
+/// - A leaving source ramps from a value, or carries a leaving ramp on.
+/// - A source with no old match on a right side or a new copy takes the
+///   state of the same assignment on its fallback fill, in a second pass.
+///
+/// Copies values only. No allocation, binary searches only.
+fn take_contributions_from(new: &mut Schedule, old: &Schedule, frames: usize) {
+    let assignments = &new.assignments;
+    for fill in &mut new.fills {
+        let key = fill.key;
+        for source in &mut fill.sources {
+            let previous = old_source(old, key, source.id());
+            let held = previous.map_or(0.0, |previous| contribution_of(previous, frames));
+            match source {
+                ModSource::Live {
+                    state,
+                    ramp,
+                    last,
+                    fresh,
+                    ..
+                } => {
+                    // Copied for every match, so a fresh ramp in a second
+                    // swap before any block starts from what played.
+                    *last = held;
+                    let Some(ramp) = ramp else {
+                        continue;
+                    };
+                    let length = ramp.length();
+                    *ramp = match previous {
+                        _ if *fresh => ContributionRamp::from_value(held, length),
+                        Some(previous) => carried_ramp(
+                            previous,
+                            old,
+                            assignments
+                                .get(*state as usize)
+                                .map(|runtime| runtime.map(runtime.settings())),
+                            length,
+                        ),
+                        None => ContributionRamp::finished(length),
+                    };
+                }
+                ModSource::Leaving { ramp, fresh, .. } => {
+                    let length = ramp.length;
+                    // A map ramp is never carried into a leaving source:
+                    // one whose old source was live starts from its value.
+                    *ramp = match previous {
+                        Some(ModSource::Leaving { ramp: previous, .. }) if !*fresh => {
+                            let mut carried = Ramp::finished(length);
+                            if !previous.is_done() {
+                                carried.continue_from(previous);
+                            }
+                            carried
+                        }
+                        Some(_) => Ramp::new(held, length),
+                        None if *fresh => Ramp::new(0.0, length),
+                        None => Ramp::finished(length),
+                    };
+                }
+            }
+        }
+    }
+    take_fallback_contributions(new, old);
+}
+
+/// The second pass of [`take_contributions_from`]: a live source with no
+/// old match on a right side or a new copy takes `last` and the ramp of
+/// the same assignment on its fallback fill (the left side, or copy 0),
+/// so both blend together. Runs in key order, so a fallback fill, whose
+/// key is lower, is already settled.
+fn take_fallback_contributions(new: &mut Schedule, old: &Schedule) {
+    for n in 0..new.fill_order.len() {
+        let i = new.fill_order[n] as usize;
+        let Some(fallback) = fallback_fill(new.fills[i].key) else {
+            continue;
+        };
+        let Ok(f) = new
+            .fill_order
+            .binary_search_by_key(&fallback, |&k| new.fills[k as usize].key)
+        else {
+            continue;
+        };
+        let f = new.fill_order[f] as usize;
+        for s in 0..new.fills[i].sources.len() {
+            let source = &new.fills[i].sources[s];
+            let id = source.id();
+            if !matches!(source, ModSource::Live { .. }) || old_source(old, new.fills[i].key, id).is_some() {
+                continue;
+            }
+            let from = &new.fills[f].sources;
+            let Some(&ModSource::Live {
+                ramp: from_ramp,
+                last: from_last,
+                ..
+            }) = from
+                .binary_search_by_key(&id, ModSource::id)
+                .ok()
+                .and_then(|k| from.get(k))
+            else {
+                continue;
+            };
+            if let ModSource::Live { ramp, last, .. } = &mut new.fills[i].sources[s] {
+                *last = from_last;
+                if let (Some(ramp), Some(from_ramp)) = (ramp, from_ramp) {
+                    ramp.continue_from(&from_ramp);
+                }
+            }
+        }
+    }
+}
+
+/// What an old source added to its parameter on the last frame it ran.
+/// A live source reads its `last`, whether or not the old schedule ran,
+/// so a command in the same batch cannot change it. A leaving one reads
+/// its ramp.
+fn contribution_of(source: &ModSource, frames: usize) -> f32 {
     match source {
         ModSource::Leaving { ramp, .. } => {
             if frames == 0 {
@@ -454,30 +776,7 @@ fn contribution_of(source: &ModSource, assignments: &[crate::compile::Assignment
                 ramp.value(0.0)
             }
         }
-        ModSource::Live {
-            state, buffer, ramp, ..
-        } => {
-            if frames == 0 {
-                return ramp.map_or(0.0, |ramp| if ramp.is_done() { 0.0 } else { ramp.held() });
-            }
-            let Some(assignment) = assignments.get(*state as usize) else {
-                return 0.0;
-            };
-            if !assignment.enabled || assignment.depth == 0.0 || assignment.silent_source {
-                return 0.0;
-            }
-            // `buffer` is an output or delay tap of `max_block` floats in
-            // the old schedule.
-            let Some(sample) = last_sample(*buffer, frames) else {
-                return 0.0;
-            };
-            let sample = match assignment.polarity {
-                Some(polarity) => polarity.remap(assignment.source_polarity, sample),
-                None => sample,
-            };
-            let live = assignment.depth * sample;
-            ramp.map_or(live, |ramp| ramp.value(live))
-        }
+        ModSource::Live { last, .. } => *last,
     }
 }
 

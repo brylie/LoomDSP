@@ -349,6 +349,10 @@ fn unknown_target_keeps_the_feedback_edge() {
     assert!(render(&mut parts, 512, 77).iter().all(|&sample| sample == 0.0));
 }
 
+/// Depth and the enabled flag apply at the next buffer, with no recompile,
+/// and blend from the old setting over 5 ms (live patching spec, rule 9):
+/// the first frame still plays the old setting, and from frame 240 on the
+/// new one plays exactly.
 #[test]
 fn depth_and_enabled_apply_at_the_next_buffer() {
     let mut parts = engine();
@@ -363,10 +367,15 @@ fn depth_and_enabled_apply_at_the_next_buffer() {
     assert!(render(&mut parts, 4, 4).iter().all(|&sample| sample == 0.5));
 
     parts.controller.set_assignment_depth(id, 0.25).unwrap();
-    assert!(render(&mut parts, 4, 4).iter().all(|&sample| sample == 0.25));
+    let blend = render(&mut parts, 300, 4);
+    assert_eq!(blend[0], 0.5, "the blend starts from the old setting");
+    assert!(blend[1] < 0.5 && blend[1] > 0.25, "and moves at once: {}", blend[1]);
+    assert!(blend[240..].iter().all(|&sample| sample == 0.25));
 
     parts.controller.set_assignment_enabled(id, false).unwrap();
-    assert!(render(&mut parts, 4, 4).iter().all(|&sample| sample == 0.0));
+    let blend = render(&mut parts, 300, 4);
+    assert_eq!(blend[0], 0.25);
+    assert!(blend[240..].iter().all(|&sample| sample == 0.0));
 }
 
 #[test]

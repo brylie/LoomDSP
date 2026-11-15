@@ -180,3 +180,59 @@ fn non_finite_sources_give_finite_parameters() {
         assert_eq!(controller.display(watch, 1), Some(0.0), "block {block}");
     }
 }
+
+/// Setting blends from a non-finite source keep the parameter finite and
+/// in range: depth, polarity, and on/off changes during blends, and a
+/// source moved to a finite one, whose fresh ramp would start from a
+/// non-finite last value and so switches instead (live patching spec, rule
+/// 9, #762).
+#[test]
+fn setting_blends_from_a_non_finite_source_stay_finite() {
+    for block in [1, 64] {
+        let mut registry = Registry::new();
+        registry.register(&BAD).unwrap();
+        registry.register(&WATCH).unwrap();
+        let config = EngineConfig {
+            max_block: 64,
+            ..EngineConfig::with_sample_rate(48_000.0)
+        };
+        let EngineParts {
+            mut controller,
+            mut engine,
+            ..
+        } = create_engine(Arc::new(registry), config);
+        let bad = controller.add_module("test.bad").unwrap();
+        let watch = controller.add_module("test.watch").unwrap();
+        let calm = controller.add_module("test.watch").unwrap();
+        let source = controller.output_ref(bad, "out").unwrap();
+        let first = controller.add_assignment(source, watch, 0, 0.5).unwrap();
+        let second = controller.add_assignment(source, watch, 1, 0.5).unwrap();
+        controller.commit().unwrap();
+        let mut left = [0.0; 64];
+        let mut right = [0.0; 64];
+        let mut play = |engine: &mut loom_core::Engine, frames: usize| {
+            for _ in 0..frames / block {
+                engine.process(&mut left[..block], &mut right[..block]);
+            }
+        };
+        play(&mut engine, 512);
+        for id in [first, second] {
+            controller.set_assignment_depth(id, -0.25).unwrap();
+        }
+        play(&mut engine, 64);
+        controller
+            .set_assignment_polarity(first, Some(Polarity::Unipolar))
+            .unwrap();
+        controller.set_assignment_enabled(second, false).unwrap();
+        play(&mut engine, 64);
+        controller.set_assignment_enabled(second, true).unwrap();
+        play(&mut engine, 512);
+        let calm = controller.output_ref(calm, "out").unwrap();
+        controller.retarget_assignment(first, calm, watch, 0).unwrap();
+        controller.commit().unwrap();
+        play(&mut engine, 512);
+        let seen = controller.display(watch, 0).unwrap();
+        assert!(seen >= 3_000.0, "block {block}: only {seen} modulated frames");
+        assert_eq!(controller.display(watch, 1), Some(0.0), "block {block}");
+    }
+}

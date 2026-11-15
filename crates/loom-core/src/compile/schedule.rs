@@ -1,7 +1,7 @@
 //! The compiled schedule the engine runs, and the operations and buffers it holds.
 
 use super::*;
-use crate::cable_fade::{InputFade, Ramp};
+use crate::cable_fade::{ContributionRamp, InputFade, Ramp};
 
 pub(crate) struct ModuleOp {
     pub slot: u32,
@@ -80,13 +80,25 @@ pub(crate) struct DownmixOp {
 /// One source of a modulated parameter.
 pub(crate) enum ModSource {
     /// An assignment in this schedule. `state` indexes
-    /// [`Schedule::assignments`]. `ramp` fades its contribution in, or to a
-    /// new source, after a swap (live patching spec, rule 9).
+    /// [`Schedule::assignments`].
     Live {
         id: AssignmentId,
         state: u32,
         buffer: *const f32,
-        ramp: Option<Ramp>,
+        /// The slot that fades its contribution (live patching spec, rule
+        /// 9): after a swap that adds or moves it, and after a change of
+        /// its settings. `Some` on every source onto a parameter that ramps
+        /// (not a whole number, a choice, or a structural value), so a
+        /// command can start a ramp on the audio thread without allocating.
+        /// `None` where the parameter switches.
+        ramp: Option<ContributionRamp>,
+        /// What it added to the parameter's 0 to 1 position on the last
+        /// frame it ran, after its ramp: 0 when it added nothing. A fresh
+        /// ramp in the next schedule starts from it.
+        last: f32,
+        /// True when the compile planned a fade of this contribution, so
+        /// [`Schedule::fade_keys`] lists it for the next compile.
+        planned: bool,
         /// True when the ramp starts in this swap; false when it is
         /// carried from the last schedule.
         fresh: bool,
@@ -105,11 +117,12 @@ impl ModSource {
         }
     }
 
-    /// Its ramp, if it has one.
-    pub fn ramp(&self) -> Option<Ramp> {
+    /// True when the compile planned a fade of it: a planned live source,
+    /// or any leaving one.
+    pub fn is_planned(&self) -> bool {
         match self {
-            Self::Live { ramp, .. } => *ramp,
-            Self::Leaving { ramp, .. } => Some(*ramp),
+            Self::Live { planned, .. } => *planned,
+            Self::Leaving { .. } => true,
         }
     }
 }
@@ -149,6 +162,29 @@ impl ParamFill {
     }
 }
 
+/// The key of the fill a new right side or a new copy takes its ramps
+/// from: its own voice's left side for a right side, voice 0 for another
+/// voice. `None` for voice 0's left side.
+pub(crate) fn fallback_fill(key: u64) -> Option<u64> {
+    const VOICE: u64 = 0xF << 24;
+    if key & RIGHT_FILL != 0 {
+        Some(key & !RIGHT_FILL)
+    } else if key & VOICE != 0 {
+        Some(key & !VOICE)
+    } else {
+        None
+    }
+}
+
+/// What an assignment's setting is made of: depth, enabled flag, and
+/// polarity. Compared on the audio thread to tell a real change from none.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AssignmentSettings {
+    pub depth: f32,
+    pub enabled: bool,
+    pub polarity: Option<Polarity>,
+}
+
 /// Depth, polarity, and enabled flag. The audio thread updates these without
 /// recompiling. Sorted by [`AssignmentRuntime::id`].
 pub(crate) struct AssignmentRuntime {
@@ -159,6 +195,59 @@ pub(crate) struct AssignmentRuntime {
     pub source_polarity: Polarity,
     /// A missing source must remain inert even under a polarity override.
     pub silent_source: bool,
+    /// The settings its sources' ramps head for: what plays once they end
+    /// (live patching spec, rule 9). It differs from the settings only
+    /// between a command and the pass after the command batch.
+    pub played: AssignmentSettings,
+    /// Set by a command that changes the settings, and cleared by the pass
+    /// after the batch.
+    pub changed: bool,
+}
+
+impl AssignmentRuntime {
+    /// The settings it has now.
+    pub fn settings(&self) -> AssignmentSettings {
+        AssignmentSettings {
+            depth: self.depth,
+            enabled: self.enabled,
+            polarity: self.polarity,
+        }
+    }
+
+    /// True when it adds nothing: off, depth 0, or a missing source.
+    pub fn is_silent(&self) -> bool {
+        !self.enabled || self.depth == 0.0 || self.silent_source
+    }
+
+    /// The contribution its settings make of source sample `x`: the depth
+    /// times the source after the polarity's remap, or 0 when silent.
+    #[inline]
+    pub fn contribution(&self, x: f32) -> f32 {
+        let x = match self.polarity {
+            Some(polarity) => polarity.remap(self.source_polarity, x),
+            None => x,
+        };
+        self.depth * x
+    }
+
+    /// `settings` as a straight-line map of the source sample, `g·x + h`
+    /// (live patching spec, How rule 9 handles assignment changes). Depth
+    /// is clamped by the controller, so both are finite.
+    pub fn map(&self, settings: AssignmentSettings) -> (f32, f32) {
+        let depth = settings.depth;
+        if !settings.enabled || depth == 0.0 || self.silent_source {
+            return (0.0, 0.0);
+        }
+        match settings.polarity {
+            Some(polarity) if polarity != self.source_polarity => match polarity {
+                // A bipolar source forced unipolar: `(x + 1) / 2`.
+                Polarity::Unipolar => (depth / 2.0, depth / 2.0),
+                // A unipolar source forced bipolar: `2x - 1`.
+                Polarity::Bipolar => (2.0 * depth, -depth),
+            },
+            _ => (depth, 0.0),
+        }
+    }
 }
 
 pub(crate) struct Tap {
@@ -263,6 +352,9 @@ pub(crate) struct Schedule {
     /// so [`Schedule::take_smooth_state_from`] can merge two sorted lists.
     pub fill_order: Vec<u32>,
     pub assignments: Vec<AssignmentRuntime>,
+    /// Set when a command changed an assignment's settings, so the pass
+    /// after the command batch visits the sources (rule 9).
+    pub assignments_changed: bool,
     pub param_ptrs: Vec<(u16, *const f32)>,
     /// Downmixes, run by the module operation that owns them, or before the
     /// outputs are summed (`output_downmixes`).
@@ -323,6 +415,7 @@ impl Schedule {
             fills: Vec::new(),
             fill_order: Vec::new(),
             assignments: Vec::new(),
+            assignments_changed: false,
             param_ptrs: Vec::new(),
             downmixes: Vec::new(),
             output_downmixes: (0, 0),
@@ -360,15 +453,17 @@ impl Schedule {
             && self.reads.iter().all(|read| inside(read.ptr))
     }
 
-    /// Every fade and contribution ramp in this schedule, by what it fades.
-    /// The controller passes them to the next compile while they may still
-    /// run (rule 9).
+    /// Every fade and planned contribution ramp in this schedule, by what
+    /// it fades. The controller passes them to the next compile while they
+    /// may still run (rule 9). Contributions no compile planned are left
+    /// out: every continuous source has a ramp slot in every schedule, so
+    /// they need no key.
     pub fn fade_keys(&self) -> Vec<super::FadeKey> {
         let inputs = self.cable_fades.iter().map(|fade| super::FadeKey::Input(fade.key));
         let contributions = self.fills.iter().flat_map(|fill| {
             fill.sources
                 .iter()
-                .filter(|source| source.ramp().is_some())
+                .filter(|source| source.is_planned())
                 .map(|source| super::FadeKey::Contribution(fill.key, source.id()))
         });
         inputs.chain(contributions).collect()

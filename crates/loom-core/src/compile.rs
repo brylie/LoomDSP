@@ -62,8 +62,8 @@ use midi_maps::compile_midi_maps;
 pub(crate) use order::{partner, partners};
 use order::{reaches_a_root, tarjan};
 pub(crate) use schedule::{
-    AssignmentRuntime, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, PairOp, ParamFill, ProbeOp, Read,
-    Schedule, Step, Tap, TransportBuffers,
+    AssignmentRuntime, AssignmentSettings, DownmixKind, DownmixOp, ModSource, ModuleOp, OutputOp, PairOp, ParamFill,
+    ProbeOp, Read, Schedule, Step, Tap, TransportBuffers, fallback_fill,
 };
 use steps::{Plan, StepSpec, successors};
 

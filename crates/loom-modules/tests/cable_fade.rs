@@ -1379,3 +1379,581 @@ fn an_assignment_from_a_gate_ramps() {
         "the gate's contribution ramps in"
     );
 }
+
+// Assignment changes (#762): the old setting blends into the new one over
+// 5 ms while the source plays (rule 9, Turned off or on). The source is a
+// sine of about 200 Hz, played on the right side, so each test knows the
+// sample `x_k` the engine read on every frame. The left side plays an Add
+// whose offset the sine modulates, so it shows the contribution.
+
+/// One setting of an assignment, as the test works it out from the rule.
+#[derive(Clone, Copy, Debug)]
+struct Setting {
+    depth: f32,
+    enabled: bool,
+    polarity: Option<loom_core::Polarity>,
+}
+
+impl Setting {
+    /// On, following the source, at `depth`.
+    fn on(depth: f32) -> Self {
+        Self {
+            depth,
+            enabled: true,
+            polarity: None,
+        }
+    }
+
+    /// What it makes of a bipolar source sample: the depth times the
+    /// sample after the polarity's remap, or 0 when off.
+    fn of(self, x: f64) -> f64 {
+        if !self.enabled {
+            return 0.0;
+        }
+        let x = match self.polarity {
+            Some(loom_core::Polarity::Unipolar) => (x + 1.0) / 2.0,
+            _ => x,
+        };
+        f64::from(self.depth) * x
+    }
+}
+
+/// The contribution the rule gives on each frame, for a setting `first`
+/// and changes `(frame, setting)` in frame order. Each blend runs from
+/// where the last one was on the frame of the change to the new setting.
+struct Blends {
+    first: Setting,
+    changes: Vec<(usize, Setting)>,
+}
+
+impl Blends {
+    /// The contribution on frame `k` for source sample `x`.
+    fn at(&self, k: usize, x: f64) -> f64 {
+        self.upto(self.changes.len(), k, x)
+    }
+
+    /// The contribution on frame `k` with only the first `n` changes.
+    fn upto(&self, n: usize, k: usize, x: f64) -> f64 {
+        let Some(&(start, setting)) = n.checked_sub(1).map(|i| &self.changes[i]) else {
+            return self.first.of(x);
+        };
+        if k < start {
+            return self.upto(n - 1, k, x);
+        }
+        let t = ((k - start) as f64 / fade_length() as f64).min(1.0);
+        self.upto(n - 1, start, x) * (1.0 - t) + setting.of(x) * t
+    }
+}
+
+/// A sine of about 200 Hz on the right side, assigned at `depth` to the
+/// offset of an Add on the left side. Returns the assignment.
+fn blend_patch(parts: &mut EngineParts, depth: f32) -> loom_core::AssignmentId {
+    blend_patch_on(parts, depth, 0.0)
+}
+
+/// [`blend_patch`] with the Add's offset at `base`. An offset of 0 comes
+/// back exactly through the parameter's 0 to 1 position; most others do
+/// not, so a fill that adds even 0 changes the base bits.
+fn blend_patch_on(parts: &mut EngineParts, depth: f32, base: f32) -> loom_core::AssignmentId {
+    let c = &mut parts.controller;
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    // 12 · log2(200 / 261.63) semitones below middle C.
+    c.set_param_named(phase, "tune", -4.65).unwrap();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    c.connect_named(phase, "phase", sine, "phase").unwrap();
+    let seen = c.add_module("loom.math.add").unwrap();
+    c.set_param_named(seen, "offset", base).unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(seen, "out", join, "left").unwrap();
+    c.connect_named(sine, "out", join, "right").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
+    let id = c.add_assignment_named(sine, "out", seen, "offset", depth).unwrap();
+    c.commit().unwrap();
+    id
+}
+
+/// The Add offset a contribution gives, through the parameter's 0 to 1
+/// position, as fills add it.
+fn offset_of(contribution: f64) -> f32 {
+    let param = loom_modules::math::ADD.param_index("offset").unwrap();
+    let mut parts = engine();
+    let seen = window(&mut parts);
+    let spec = parts.controller.graph().node(seen).unwrap().spec(param).unwrap();
+    spec.denormalize(spec.normalize(0.0) + contribution as f32)
+}
+
+/// A change made between blocks, just before its frame.
+type Change = Box<dyn FnOnce(&mut loom_core::Controller)>;
+
+/// Renders `frames` frames in buffers of up to `block`, making each change
+/// just before its frame. Returns both sides.
+fn render_with_changes(
+    parts: &mut EngineParts,
+    frames: usize,
+    block: usize,
+    changes: Vec<(usize, Change)>,
+) -> (Vec<f32>, Vec<f32>) {
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    let mut changes = changes.into_iter().peekable();
+    let mut position = 0;
+    while position < frames {
+        while let Some((_, change)) = changes.next_if(|(at, _)| *at == position) {
+            change(&mut parts.controller);
+        }
+        let until = changes.peek().map_or(frames, |(at, _)| *at);
+        let n = block.min(until - position);
+        parts
+            .engine
+            .process(&mut left[position..position + n], &mut right[position..position + n]);
+        position += n;
+    }
+    (left, right)
+}
+
+/// Checks every frame from `from` on against the blends, within 1e-6.
+fn check_blends(name: &str, block: usize, (left, right): &(Vec<f32>, Vec<f32>), from: usize, blends: &Blends) {
+    assert!(right[from..].iter().any(|x| x.abs() > 0.9), "{name}: the source moves");
+    for k in from..left.len() {
+        let expected = offset_of(blends.at(k, f64::from(right[k])));
+        assert!(
+            (left[k] - expected).abs() <= 1e-6,
+            "{name}, frame {k}, block {block}: {} != {expected}",
+            left[k]
+        );
+    }
+}
+
+/// A change that sets assignment `id`'s depth.
+fn set_depth(id: loom_core::AssignmentId, depth: f32) -> Change {
+    Box::new(move |c| {
+        c.set_assignment_depth(id, depth).unwrap();
+    })
+}
+
+/// Rule 9's #762 criteria: turning an assignment off fades the moving
+/// modulation out, `depth · x_k · (1 − k/N)`, and from frame N on it adds
+/// exactly nothing; on again fades it in from 0. A depth change and a
+/// polarity flip blend `old(x_k)` into `new(x_k)`. Each at block sizes 1,
+/// 77, and 512.
+#[test]
+fn turning_an_assignment_off_and_on_and_changing_it_blends_the_setting() {
+    let frames = 3_000;
+    let (off_at, on_at) = (1_000, 2_000);
+    let depth = 0.4;
+    for block in BLOCKS {
+        // Off, then on.
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, depth);
+        let played = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![
+                (off_at, Box::new(move |c| c.set_assignment_enabled(id, false).unwrap())),
+                (on_at, Box::new(move |c| c.set_assignment_enabled(id, true).unwrap())),
+            ],
+        );
+        let off = Setting {
+            enabled: false,
+            ..Setting::on(depth)
+        };
+        let blends = Blends {
+            first: Setting::on(depth),
+            changes: vec![(off_at, off), (on_at, Setting::on(depth))],
+        };
+        check_blends("off and on", block, &played, off_at - 10, &blends);
+        assert!(
+            played.0[off_at + fade_length()..on_at].iter().all(|&v| v == 0.0),
+            "off adds exactly nothing, block {block}"
+        );
+
+        // A depth change and a polarity flip.
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, depth);
+        let played = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![
+                (off_at, set_depth(id, -0.15)),
+                (
+                    on_at,
+                    Box::new(move |c| {
+                        c.set_assignment_polarity(id, Some(loom_core::Polarity::Unipolar))
+                            .unwrap()
+                    }),
+                ),
+            ],
+        );
+        let unipolar = Setting {
+            polarity: Some(loom_core::Polarity::Unipolar),
+            ..Setting::on(-0.15)
+        };
+        let blends = Blends {
+            first: Setting::on(depth),
+            changes: vec![(off_at, Setting::on(-0.15)), (on_at, unipolar)],
+        };
+        check_blends("depth and polarity", block, &played, off_at - 10, &blends);
+    }
+}
+
+/// A drag: five depth changes 800 frames apart, each of which ends before
+/// the next, and five 100 frames apart, each of which starts from a
+/// running blend. Both match the exact sequence of blends (rule 9, A
+/// change while a blend runs).
+#[test]
+fn a_depth_drag_glides_through_the_exact_sequence_of_blends() {
+    let depths = [0.3, -0.2, 0.45, 0.1, -0.35];
+    for gap in [800, 100] {
+        for block in BLOCKS {
+            let mut parts = engine();
+            let id = blend_patch(&mut parts, 0.25);
+            let start = 1_000;
+            let changes: Vec<(usize, Change)> = depths
+                .iter()
+                .enumerate()
+                .map(|(i, &depth)| {
+                    let change = set_depth(id, depth);
+                    (start + i * gap, change)
+                })
+                .collect();
+            let frames = start + depths.len() * gap + 1_000;
+            let played = render_with_changes(&mut parts, frames, block, changes);
+            let blends = Blends {
+                first: Setting::on(0.25),
+                changes: depths
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &depth)| (start + i * gap, Setting::on(depth)))
+                    .collect(),
+            };
+            check_blends(&format!("gap {gap}"), block, &played, start - 10, &blends);
+        }
+    }
+}
+
+/// A batch that ends where it began (A, then B, then A) and the same
+/// values sent twice are bit-identical to sending nothing, and a change
+/// before the first block is bit-identical to a patch loaded with the new
+/// setting (rule 9, How rule 9 handles assignment changes).
+#[test]
+fn changes_that_change_nothing_heard_are_bit_identical() {
+    let frames = 2_000;
+    for block in BLOCKS {
+        let untouched = {
+            let mut parts = engine();
+            blend_patch(&mut parts, 0.4);
+            render_with_changes(&mut parts, frames, block, vec![])
+        };
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let there_and_back = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![(
+                1_000,
+                Box::new(move |c| {
+                    c.set_assignment_depth(id, 0.1).unwrap();
+                    c.set_assignment_enabled(id, false).unwrap();
+                    c.set_assignment_polarity(id, Some(loom_core::Polarity::Unipolar))
+                        .unwrap();
+                    c.set_assignment_polarity(id, None).unwrap();
+                    c.set_assignment_enabled(id, true).unwrap();
+                    c.set_assignment_depth(id, 0.4).unwrap();
+                }),
+            )],
+        );
+        assert_eq!(there_and_back, untouched, "A, B, A, block {block}");
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let twice = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![(
+                1_000,
+                Box::new(move |c| {
+                    c.set_assignment_depth(id, 0.4).unwrap();
+                    c.set_assignment_depth(id, 0.4).unwrap();
+                }),
+            )],
+        );
+        assert_eq!(twice, untouched, "the same values twice, block {block}");
+
+        let loaded = {
+            let mut parts = engine();
+            blend_patch(&mut parts, 0.1);
+            render_with_changes(&mut parts, frames, block, vec![])
+        };
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        parts.controller.set_assignment_depth(id, 0.1).unwrap();
+        let before_play = render_with_changes(&mut parts, frames, block, vec![]);
+        assert_eq!(before_play, loaded, "a change before the first block, block {block}");
+    }
+}
+
+/// Two settings that map the source alike start no blend, so they are
+/// bit-identical to no command (rule 9, How rule 9 handles assignment
+/// changes: maps are compared, not settings). The sine is bipolar, so
+/// forcing it bipolar changes nothing. An assignment that is off, given
+/// depth 0 and then turned on at depth 0, adds nothing all along. Its Add
+/// sits at an offset of 0.1, which the parameter's position does not give
+/// back exactly, so a blend of nothing into nothing would still show.
+#[test]
+fn settings_that_map_alike_are_bit_identical() {
+    let frames = 2_000;
+    let (off_at, depth_at, on_at) = (500, 1_000, 1_500);
+    for block in BLOCKS {
+        let untouched = {
+            let mut parts = engine();
+            blend_patch(&mut parts, 0.4);
+            render_with_changes(&mut parts, frames, block, vec![])
+        };
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let own_polarity = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![(
+                1_000,
+                Box::new(move |c| {
+                    c.set_assignment_polarity(id, Some(loom_core::Polarity::Bipolar))
+                        .unwrap();
+                }),
+            )],
+        );
+        assert_eq!(own_polarity, untouched, "the source's own polarity, block {block}");
+
+        let only_off = {
+            let mut parts = engine();
+            let id = blend_patch_on(&mut parts, 0.4, 0.1);
+            render_with_changes(
+                &mut parts,
+                frames,
+                block,
+                vec![(off_at, Box::new(move |c| c.set_assignment_enabled(id, false).unwrap()))],
+            )
+        };
+        let mut parts = engine();
+        let id = blend_patch_on(&mut parts, 0.4, 0.1);
+        let off_then_depth_0 = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![
+                (off_at, Box::new(move |c| c.set_assignment_enabled(id, false).unwrap())),
+                (depth_at, set_depth(id, 0.0)),
+                (on_at, Box::new(move |c| c.set_assignment_enabled(id, true).unwrap())),
+            ],
+        );
+        assert!(
+            only_off.0[off_at + fade_length()..].iter().all(|&v| v == 0.1),
+            "the base plays, block {block}"
+        );
+        assert_eq!(off_then_depth_0, only_off, "off, then depth 0, then on, block {block}");
+    }
+}
+
+/// A swap during a blend carries it on with no step, bit-identical to no
+/// swap. A swap and a change in the same batch blend from what played,
+/// whichever comes first in the batch.
+#[test]
+fn a_swap_during_or_with_a_blend_carries_it_on() {
+    let frames = 2_000;
+    for block in BLOCKS {
+        let alone = {
+            let mut parts = engine();
+            let id = blend_patch(&mut parts, 0.4);
+            render_with_changes(&mut parts, frames, block, vec![(1_000, set_depth(id, 0.1))])
+        };
+        let unrelated = |c: &mut loom_core::Controller| {
+            c.add_module("loom.osc.noise").unwrap();
+            c.commit().unwrap();
+        };
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let during = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![(1_000, set_depth(id, 0.1)), (1_100, Box::new(unrelated))],
+        );
+        assert_eq!(during, alone, "a swap during the blend, block {block}");
+        for change_first in [false, true] {
+            let mut parts = engine();
+            let id = blend_patch(&mut parts, 0.4);
+            let together = render_with_changes(
+                &mut parts,
+                frames,
+                block,
+                vec![(
+                    1_000,
+                    Box::new(move |c| {
+                        if change_first {
+                            c.set_assignment_depth(id, 0.1).unwrap();
+                            unrelated(c);
+                        } else {
+                            unrelated(c);
+                            c.set_assignment_depth(id, 0.1).unwrap();
+                        }
+                    }),
+                )],
+            );
+            assert_eq!(
+                together, alone,
+                "a swap and a change in one batch, change first: {change_first}, block {block}"
+            );
+        }
+    }
+}
+
+/// Undo of a settings change reaches the engine as a removal and a
+/// restore with the same id and other settings, and a commit: the setting
+/// blends, as for the change itself. A change 100 frames later, during the
+/// blend the swap started, blends on from where it is.
+#[test]
+fn a_restored_assignment_with_new_settings_fades_the_setting() {
+    let frames = 2_000;
+    let at = 1_000;
+    for block in BLOCKS {
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let played = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![
+                (
+                    at,
+                    Box::new(move |c| {
+                        let mut assignment = *c.graph().assignment(id).unwrap();
+                        c.remove_assignment(id).unwrap();
+                        assignment.depth = -0.2;
+                        assignment.enabled = true;
+                        c.restore_assignment(id, assignment).unwrap();
+                        c.commit().unwrap();
+                    }),
+                ),
+                (at + 100, set_depth(id, 0.3)),
+            ],
+        );
+        assert_eq!(parts.controller.last_report().cable_fades, 0, "no planned fade");
+        let blends = Blends {
+            first: Setting::on(0.4),
+            changes: vec![(at, Setting::on(-0.2)), (at + 100, Setting::on(0.3))],
+        };
+        check_blends("restored", block, &played, at - 10, &blends);
+    }
+}
+
+/// A target that turns stereo during a blend: the new right copy takes the
+/// left side's ramp, so with the same signal on both sides the right side
+/// plays the left side's contribution on every frame.
+#[test]
+fn a_target_that_turns_stereo_during_a_blend_blends_both_sides() {
+    let frames = 2_400;
+    for block in BLOCKS {
+        let mut parts = engine();
+        let source = sine(&mut parts);
+        let c = &mut parts.controller;
+        let lfo_phase = c.add_module("loom.phase.generator").unwrap();
+        c.set_param_named(lfo_phase, "octave", -3.0).unwrap();
+        let lfo = c.add_module("loom.osc.sine").unwrap();
+        c.connect_named(lfo_phase, "phase", lfo, "phase").unwrap();
+        let svf = c.add_module("loom.filter.svf").unwrap();
+        let join = c.add_module("loom.mix.join").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(source, "out", svf, "in").unwrap();
+        c.connect_named(source, "out", join, "left").unwrap();
+        c.connect_named(source, "out", join, "right").unwrap();
+        c.connect_named(svf, "lowpass", out, "in").unwrap();
+        let id = c.add_assignment_named(lfo, "out", svf, "cutoff", 0.3).unwrap();
+        c.commit().unwrap();
+        let (left, right) = render_with_changes(
+            &mut parts,
+            frames,
+            block,
+            vec![
+                (1_000, set_depth(id, -0.2)),
+                (
+                    1_100,
+                    Box::new(move |c| {
+                        c.connect_named(join, "out", svf, "in").unwrap();
+                        c.commit().unwrap();
+                    }),
+                ),
+            ],
+        );
+        assert!(parts.controller.last_report().runs_per_channel(svf));
+        assert_eq!(left, right, "block {block}");
+    }
+}
+
+/// An assignment on a whole-number parameter switches at the next buffer
+/// when it is turned off (rule 9, Exceptions).
+#[test]
+fn turning_off_an_assignment_on_a_whole_number_switches() {
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    for block in BLOCKS {
+        let mut registry = loom_core::Registry::new();
+        loom_modules::register_all(&mut registry).unwrap();
+        loom_modules::test_modules::register(&mut registry).unwrap();
+        let mut parts = create_engine(std::sync::Arc::new(registry), config);
+        let source = constant(&mut parts, 1.0);
+        let c = &mut parts.controller;
+        let steps = c.add_module("test.steps").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.connect_named(steps, "out", out, "in").unwrap();
+        let id = c.add_assignment_named(source, "out", steps, "steps", 0.5).unwrap();
+        c.commit().unwrap();
+        let (played, _) = render_with_changes(
+            &mut parts,
+            1_000,
+            block,
+            vec![(500, Box::new(move |c| c.set_assignment_enabled(id, false).unwrap()))],
+        );
+        assert!(played[499] > 0.0, "modulated before, block {block}");
+        assert!(played[500..].iter().all(|&v| v == 0.0), "off at once, block {block}");
+    }
+}
+
+/// A panic during a blend ends it on the silent frame: from there on the
+/// patch plays exactly as one whose depth changed long before the panic.
+/// The depth changes 300 frames into the panic's 480-frame fade out, so
+/// the silent frame comes 180 frames into the 240-frame blend.
+#[test]
+fn a_panic_ends_a_setting_blend() {
+    let (panic_at, change_at, silent) = (1_000, 1_300, 1_480);
+    for block in BLOCKS {
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let during = render_with_changes(
+            &mut parts,
+            2_400,
+            block,
+            vec![
+                (panic_at, Box::new(|c| c.panic().unwrap())),
+                (change_at, set_depth(id, 0.1)),
+            ],
+        );
+        let mut parts = engine();
+        let id = blend_patch(&mut parts, 0.4);
+        let before = render_with_changes(
+            &mut parts,
+            2_400,
+            block,
+            vec![(500, set_depth(id, 0.1)), (panic_at, Box::new(|c| c.panic().unwrap()))],
+        );
+        assert_ne!(during.0[..silent], before.0[..silent], "the blend ran before the panic");
+        assert_eq!(during.0[silent..], before.0[silent..], "left, block {block}");
+        assert_eq!(during.1[silent..], before.1[silent..], "right, block {block}");
+    }
+}

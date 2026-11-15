@@ -744,10 +744,15 @@ impl Engine {
                         .assignments
                         .binary_search_by_key(&id, |assignment| assignment.id)
                     {
+                        // Only the settings change here. The pass after the
+                        // batch starts the ramps, so a batch that ends where
+                        // it began starts none (rule 9).
                         let assignment = &mut self.schedule.assignments[index];
                         assignment.depth = depth;
                         assignment.enabled = enabled;
                         assignment.polarity = polarity;
+                        assignment.changed = true;
+                        self.schedule.assignments_changed = true;
                     }
                 }
                 Command::ResetModule { slot } => {
@@ -786,6 +791,8 @@ impl Engine {
                 }
             }
         }
+        // After the whole batch, so several changes act as one (rule 9).
+        crate::cable_fade::start_setting_ramps(&mut self.schedule, self.frame > 0);
     }
 
     /// Hands memory back to the control thread for freeing.
@@ -1306,33 +1313,41 @@ fn fill_param(fill: &mut ParamFill, assignments: &[AssignmentRuntime], offset: u
         for source in &mut fill.sources {
             match source {
                 ModSource::Live {
-                    state, buffer, ramp, ..
+                    state,
+                    buffer,
+                    ramp,
+                    last,
+                    ..
                 } => {
                     let assignment = &assignments[*state as usize];
-                    let silent = !assignment.enabled || assignment.depth == 0.0 || assignment.silent_source;
-                    // A contribution that fades in or moves (rule 9). The
-                    // ramp steps every sample, even while the source adds
-                    // nothing, so it always ends.
+                    let silent = assignment.is_silent();
+                    // A contribution that fades in, moves, or blends to a
+                    // new setting (rule 9). The ramp steps every sample,
+                    // even while the source adds nothing, so it always
+                    // ends. A silent source past its ramp is skipped, not
+                    // multiplied by 0, because 0 · NaN is NaN.
                     let fading = ramp.as_ref().is_some_and(|ramp| !ramp.is_done());
                     if silent && !fading {
+                        *last = 0.0;
                         continue;
                     }
-                    let live = if silent {
-                        0.0
-                    } else {
+                    // A ramp from a held value does not read the source, so
+                    // a NaN source never reaches it.
+                    let reads = !silent || ramp.as_ref().is_some_and(|ramp| ramp.reads_source());
+                    let sample = if reads {
                         // SAFETY: `buffer` is an output or delay tap of
                         // `max_block` floats, and `offset + i < max_block`.
-                        let sample = unsafe { *buffer.add(offset + i) };
-                        let sample = match assignment.polarity {
-                            Some(polarity) => polarity.remap(assignment.source_polarity, sample),
-                            None => sample,
-                        };
-                        assignment.depth * sample
+                        unsafe { *buffer.add(offset + i) }
+                    } else {
+                        0.0
                     };
-                    added += match ramp {
-                        Some(ramp) => ramp.next(live),
+                    let live = if silent { 0.0 } else { assignment.contribution(sample) };
+                    let value = match ramp {
+                        Some(ramp) => ramp.next(sample, live),
                         None => live,
                     };
+                    *last = value;
+                    added += value;
                     contributed = true;
                 }
                 // The last contribution of an assignment that left,

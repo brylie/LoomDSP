@@ -3,7 +3,7 @@
 
 use super::fades::{FadePlan, key_of};
 use super::*;
-use crate::cable_fade::{InputFade, Ramp, fallback};
+use crate::cable_fade::{ContributionRamp, InputFade, Ramp, fallback};
 use crate::names::ModuleNames;
 
 /// Builds the [`Schedule`] from the plan. Operations are made the first time
@@ -154,6 +154,12 @@ impl<'l, 'a> Builder<'l, 'a> {
                 polarity: assignment.polarity,
                 source_polarity: assignment.source_polarity,
                 silent_source: assignment.silent_source,
+                played: AssignmentSettings {
+                    depth: assignment.depth,
+                    enabled: assignment.enabled,
+                    polarity: assignment.polarity,
+                },
+                changed: false,
             })
             .collect();
         self.schedule.midi_maps = compile_midi_maps(layout.graph, midi_synced);
@@ -541,17 +547,23 @@ impl<'l, 'a> Builder<'l, 'a> {
                 };
             let target = layout.ids[v];
             let length = self.fades.length;
+            // Every source onto a parameter that ramps gets a slot, planned
+            // or not, so a later command can blend its setting without
+            // allocating (rule 9).
+            let ramps = node.unknown.is_none() && super::fades::ramps(&param_spec);
             let mut sources: Vec<ModSource> = spec
                 .sources
                 .iter()
                 .map(|source| {
                     let id = self.compiled[source.assignment].id;
-                    let fade = self.fades.contribution(target, spec.param, id, key);
+                    let fade = self.fades.contribution(target, spec.param, id, key).filter(|_| ramps);
                     ModSource::Live {
                         id,
                         state: source.assignment as u32,
                         buffer: self.ptr(source.buffer) as *const f32,
-                        ramp: fade.map(|_| Ramp::finished(length)),
+                        ramp: ramps.then(|| ContributionRamp::finished(length)),
+                        last: 0.0,
+                        planned: fade.is_some(),
                         fresh: fade.unwrap_or(false),
                     }
                 })

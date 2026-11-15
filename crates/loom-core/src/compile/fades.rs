@@ -133,6 +133,13 @@ fn fades(signal: SignalType) -> bool {
     matches!(signal, SignalType::Audio | SignalType::Modulation | SignalType::Pitch)
 }
 
+/// True when a parameter takes a contribution ramp (rule 9): not a whole
+/// number, a choice, or a structural value, where a ramp across separate
+/// values would add steps instead of softening one.
+pub(super) fn ramps(spec: &ParamSpec) -> bool {
+    !spec.options.integer && spec.options.choices.is_empty() && !spec.options.shapes_graph
+}
+
 /// True when the module is one of the mixers the editor adds.
 fn is_mixer(layout: &Layout, module: ModuleId) -> bool {
     layout
@@ -411,12 +418,10 @@ impl FadePlan {
         // not new in this swap.
         let continuous = |module: ModuleId, param: usize| {
             previous.modules.contains(&module)
-                && graph.nodes.get(&module).is_some_and(|node| {
-                    node.unknown.is_none()
-                        && node.descriptor.params.get(param).is_some_and(|spec| {
-                            !spec.options.integer && spec.options.choices.is_empty() && !spec.options.shapes_graph
-                        })
-                })
+                && graph
+                    .nodes
+                    .get(&module)
+                    .is_some_and(|node| node.unknown.is_none() && node.descriptor.params.get(param).is_some_and(ramps))
         };
         for assignment in compiled {
             let target = layout.ids[assignment.target_node];

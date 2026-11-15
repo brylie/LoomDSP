@@ -9,7 +9,11 @@
 //!
 //! The `modulation` groups measure parameter modulation (#139): an SVF
 //! whose cutoff is moved by a sine LFO, and one parameter with 0 to 16
-//! assignments, to show how the engine's fill scales.
+//! assignments, to show how the engine's fill scales. The
+//! `modulation/changes` group sends assignment changes every block, as a
+//! depth drag does: one change, and 16 in one batch, so the cost of the
+//! setting blends and of the pass after a batch shows (live patching spec,
+//! rule 9, #762).
 //!
 //! The `modes` group measures sub-patch modes (sub-patches.md, Open
 //! points): one voice alone, then eight as a select, a layer, and a stack.
@@ -118,6 +122,27 @@ fn patches(c: &mut Criterion) {
         parts.midi.send(MidiEvent::note_on(0, 0, 60, 100));
         group.bench_function(name, |b| {
             b.iter(|| {
+                parts.engine.process(&mut left, &mut right);
+                black_box(&left);
+            })
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("modulation/changes");
+    group.throughput(Throughput::Elements(BLOCK as u64));
+    for (label, changed) in [("one", 1usize), ("batch_of_16", 16)] {
+        let mut parts = assigned_svf(16);
+        let ids: Vec<_> = parts.controller.graph().assignments().map(|(id, _)| id).collect();
+        let mut step = 0u32;
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                // A new depth every block keeps a blend running.
+                step = step.wrapping_add(1);
+                let depth = 0.01 + (step % 8) as f32 * 0.001;
+                for &id in &ids[..changed] {
+                    parts.controller.set_assignment_depth(id, depth).unwrap();
+                }
                 parts.engine.process(&mut left, &mut right);
                 black_box(&left);
             })

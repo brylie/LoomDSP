@@ -586,3 +586,103 @@ fn a_label_change_is_a_step_named_for_the_module() {
     });
     assert_eq!(step.name(), "label Sine");
 }
+
+/// Undo and redo of a depth change, of turning an assignment off, and of a
+/// polarity flip blend the setting over 5 ms, as the change itself does
+/// (live patching spec, rule 9). They reach the engine as a removal, a
+/// restore with the same id, and a commit, so the engine compares what
+/// plays with what arrives. A sine on the right side shows the source
+/// sample the engine read; an Add on the left shows the contribution
+/// through its offset. Checked frame by frame against
+/// `old(x) · (1 − t) + new(x) · t`, at block sizes 1, 77, and 512.
+#[test]
+fn undo_of_a_depth_change_fades() {
+    use loom_core::Polarity;
+    let length = 240;
+    let (change_at, undo_at, redo_at, frames) = (1_000, 1_600, 2_200, 2_800);
+    // Each change, and what the setting makes of `x` before and after it.
+    type Change = (&'static str, fn(&mut Controller, AssignmentId), fn(f32) -> f32);
+    let changes: [Change; 3] = [
+        (
+            "depth",
+            |c, id| {
+                c.set_assignment_depth(id, -0.2).unwrap();
+            },
+            |x| -0.2 * x,
+        ),
+        ("off", |c, id| c.set_assignment_enabled(id, false).unwrap(), |_| 0.0),
+        (
+            "polarity",
+            |c, id| c.set_assignment_polarity(id, Some(Polarity::Unipolar)).unwrap(),
+            |x| 0.4 * (x + 1.0) / 2.0,
+        ),
+    ];
+    let before = |x: f32| 0.4 * x;
+    for (name, change, after) in changes {
+        for block in [1, 77, 512] {
+            let config = EngineConfig {
+                output_safety: loom_core::OutputSafety::Off,
+                ..EngineConfig::with_sample_rate(48_000.0)
+            };
+            let mut parts = create_engine(loom_modules::registry(), config);
+            let c = &mut parts.controller;
+            let phase = c.add_module("loom.phase.generator").unwrap();
+            c.set_param_named(phase, "tune", -4.65).unwrap();
+            let sine = c.add_module("loom.osc.sine").unwrap();
+            c.connect_named(phase, "phase", sine, "phase").unwrap();
+            let seen = c.add_module("loom.math.add").unwrap();
+            let join = c.add_module("loom.mix.join").unwrap();
+            let out = c.add_module("loom.io.audio-out").unwrap();
+            c.connect_named(seen, "out", join, "left").unwrap();
+            c.connect_named(sine, "out", join, "right").unwrap();
+            c.connect_named(join, "out", out, "in").unwrap();
+            let id = c.add_assignment_named(sine, "out", seen, "offset", 0.4).unwrap();
+            c.commit().unwrap();
+            let param = c.graph().node(seen).unwrap().descriptor.param_index("offset").unwrap();
+            let spec = c.graph().node(seen).unwrap().spec(param).unwrap();
+            let mut positions = BTreeMap::new();
+
+            let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+            let mut play = |parts: &mut EngineParts, from: usize, to: usize| {
+                let mut at = from;
+                while at < to {
+                    let n = block.min(to - at);
+                    parts.engine.process(&mut left[at..at + n], &mut right[at..at + n]);
+                    at += n;
+                }
+            };
+            play(&mut parts, 0, change_at);
+            let step = record(&mut parts.controller, &mut positions, |c| change(c, id));
+            play(&mut parts, change_at, undo_at);
+            undo(&step, &mut parts.controller, &mut positions);
+            assert_eq!(parts.controller.graph().assignment(id).unwrap().depth, 0.4);
+            play(&mut parts, undo_at, redo_at);
+            redo(&step, &mut parts.controller, &mut positions);
+            play(&mut parts, redo_at, frames);
+
+            let blend = |k: usize, start: usize, old: f32, new: f32| {
+                let t = ((k - start) as f32 / length as f32).min(1.0);
+                old * (1.0 - t) + new * t
+            };
+            assert!(right[change_at..].iter().any(|x| x.abs() > 0.9), "the source moves");
+            for k in change_at - 10..frames {
+                let x = right[k];
+                let contribution = if k < change_at {
+                    before(x)
+                } else if k < undo_at {
+                    blend(k, change_at, before(x), after(x))
+                } else if k < redo_at {
+                    blend(k, undo_at, after(x), before(x))
+                } else {
+                    blend(k, redo_at, before(x), after(x))
+                };
+                let expected = spec.denormalize(spec.normalize(0.0) + contribution);
+                assert!(
+                    (left[k] - expected).abs() <= 1e-6,
+                    "{name}, frame {k}, block {block}: {} != {expected}",
+                    left[k]
+                );
+            }
+        }
+    }
+}
