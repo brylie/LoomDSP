@@ -41,7 +41,7 @@ It helps only when the new copy settles faster than the fade. A crossfade multip
 
 The new copy should not start empty. At the swap it takes the running copy's state: the integrators, the smoothing, a delay line's buffer. Then it continues exactly where the left side was, and with the same signal on both sides the two are bit-identical. That needs one small method per module, which is why ADR-0022 makes it a decision.
 
-One exception: a module with a random generator must not copy the generator as it is. Then the right side would play the same random numbers as the left, which is mono in disguise. It takes everything else and restarts its generator from its seed and its channel.
+One exception: a module with a random generator must not copy the generator as it is. Then the right side would play the same random numbers as the left, which is mono in disguise. It takes everything else and restarts its generator from its seed and its channel. Two modules leave the channel out of their numbers, so they copy their state as it is and both sides agree. Selector's numbers choose a route, so both sides must make the same picks. Voice spread's numbers belong to a voice, so both sides of a voice get the same offset.
 
 ## Inserted delays: a value that was never there
 

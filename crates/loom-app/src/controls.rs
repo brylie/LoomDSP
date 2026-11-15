@@ -406,28 +406,54 @@ impl App {
         }
     }
 
-    /// Every value field the inspector shows now, as (module, parameter
-    /// index, the field's part): a module's own parameters, a sub-patch
-    /// tile's exposed rows, and a slot's parameters, each under the inner
-    /// module that owns the parameter, as its draft is.
-    fn value_fields(&self) -> Vec<(u32, usize, UiId)> {
-        use crate::inspector::{Inspector, ParamRow, ids};
-        let field = |module: u32, row: &ParamRow| {
-            row.field
-                .is_some()
-                .then(|| (module, row.index, ids::part(&row.ui, "field")))
-        };
-        match self.inspector_model() {
-            Inspector::Module(rows) => rows.params.iter().filter_map(|p| field(rows.id, p)).collect(),
-            Inspector::SubPatch(s) => s.params.iter().filter_map(|e| field(e.module, &e.row)).collect(),
+    /// Every row with a value field the inspector shows now, with the
+    /// module whose parameter it edits: a module's own parameters, a
+    /// sub-patch tile's exposed rows, and a slot's parameters, each under
+    /// the inner module that owns the parameter, as its draft is.
+    fn value_rows(&self) -> Vec<(u32, crate::inspector::ParamRow)> {
+        use crate::inspector::Inspector;
+        let rows: Vec<_> = match self.inspector_model() {
+            Inspector::Module(rows) => {
+                let id = rows.id;
+                rows.params.into_iter().map(|p| (id, p)).collect()
+            }
+            Inspector::SubPatch(s) => s.params.into_iter().map(|e| (e.module, e.row)).collect(),
             Inspector::Slot(s) => s
                 .role_params
-                .iter()
-                .chain(&s.other_params)
-                .filter_map(|(_, module, p)| field(*module, p))
+                .into_iter()
+                .chain(s.other_params)
+                .map(|(_, module, p)| (module, p))
                 .collect(),
             _ => Vec::new(),
+        };
+        rows.into_iter().filter(|(_, row)| row.field.is_some()).collect()
+    }
+
+    /// Every value field the inspector shows now, as (module, parameter
+    /// index, the field's part), from [`Self::value_rows`].
+    fn value_fields(&self) -> Vec<(u32, usize, UiId)> {
+        self.value_rows()
+            .into_iter()
+            .map(|(module, row)| (module, row.index, crate::inspector::ids::part(&row.ui, "field")))
+            .collect()
+    }
+
+    /// The text the value field of `module`'s parameter `index` stands
+    /// for: the shown row's value, so a sub-patch surface row gives the
+    /// text on its exposed range. With no such row shown, the value on the
+    /// module's selected range. It is not looked up from the module and
+    /// parameter alone, because a surface row and the inner module's row
+    /// share them (control-ranges.md, Showing the value).
+    fn shown_value_text(&self, module: u32, index: usize) -> Option<String> {
+        if let Some((_, row)) = self
+            .value_rows()
+            .into_iter()
+            .find(|(m, row)| (*m, row.index) == (module, index))
+        {
+            return Some(row.value);
         }
+        let node = self.session.controller.graph().node(ModuleId(module))?;
+        Some(crate::param::format(&node.spec(index)?, *node.params.get(index)?))
     }
 
     /// The part of this parameter's value field, as the inspector shows it,
@@ -496,14 +522,9 @@ impl App {
         else {
             return;
         };
-        let shown = self.session.controller.graph().node(ModuleId(module)).and_then(|node| {
-            Some(crate::param::format(
-                node.descriptor.params.get(index)?,
-                node.params[index],
-            ))
-        });
         // The inspector's baseline is the value as it shows now, which MIDI
-        // may have moved since the typing began.
+        // may have moved since the typing began, on the row's own range.
+        let shown = self.shown_value_text(module, index);
         match draft.draft.submit(shown.as_deref()) {
             loom_canvas::DraftSubmit::Unchanged => {
                 self.session.value_draft = None;
@@ -711,3 +732,6 @@ pub(crate) fn text_focus_event(
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests;

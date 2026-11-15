@@ -89,6 +89,8 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Slew](loom.level.slew.md) | `loom.level.slew` | Limits how fast a signal can rise and fall. Times are per 1.0 of change, so a glide takes the same time on any signal. |
 | [Split](loom.mix.split.md) | `loom.mix.split` | Separates a stereo cable into its two sides. |
 | [Voice Merge](loom.voice.merge.md) | `loom.voice.merge` | Sums or averages voices, or follows one voice selected by its gate. |
+| [Voice Split](loom.voice.split.md) | `loom.voice.split` | Takes the voices of a bundle out on separate outputs, from voice First on. For the two sides of a stereo cable, use Split. |
+| [Voice Spread](loom.voice.spread.md) | `loom.voice.spread` | Gives each voice its own offset from one control. On a one-voice cable it does nothing. |
 
 ## Interface
 

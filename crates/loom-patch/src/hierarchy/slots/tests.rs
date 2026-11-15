@@ -1541,7 +1541,7 @@ fn count_of(controller: &Controller, kind: &str) -> usize {
 /// sine on `in`, that copy's Amplifier on `out`), and wires each copy's
 /// fade into its own Amplifier only: copy 0's fade takes none of the
 /// slot's own copies. Finishing leaves the thru alone in every copy
-/// (ADR-0045).
+/// (ADR-0046).
 #[test]
 fn remove_part_inside_a_stack_fades_each_copy_to_its_own_thru() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_thru(4, true, true)).unwrap());
@@ -1592,7 +1592,7 @@ fn remove_part_inside_a_stack_fades_each_copy_to_its_own_thru() {
 /// copy in from its own thru signal: a fade per copy at that copy's slot
 /// path, `a` on the sine, `b` on that copy's new SVF, `out` into that
 /// copy's Amplifier. Finishing leaves each SVF feeding its Amplifier
-/// (ADR-0045).
+/// (ADR-0046).
 #[test]
 fn a_swap_into_an_empty_slot_inside_a_stack_fades_each_copy_in() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_thru(4, false, true)).unwrap());
@@ -1634,7 +1634,7 @@ fn a_swap_into_an_empty_slot_inside_a_stack_fades_each_copy_in() {
 
 /// Remove part on a slot that feeds the stack's output: each copy's fade
 /// feeds that copy's own input on the stack's Sum, copy 0's included,
-/// which no path or link names (ADR-0045).
+/// which no path or link names (ADR-0046).
 #[test]
 fn remove_part_feeding_the_stack_output_fades_into_every_copy_s_sum_input() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_slot(4)).unwrap());
@@ -1667,7 +1667,7 @@ fn remove_part_feeding_the_stack_output_fades_into_every_copy_s_sum_input() {
 
 /// A cable moved or pulled during a stack fade wins: the fade does not
 /// take back the input the player plugged elsewhere, and a pulled cable is
-/// not put back, during the fade or when it finishes (ADR-0045).
+/// not put back, during the fade or when it finishes (ADR-0046).
 #[test]
 fn a_cable_moved_or_pulled_during_a_stack_fade_is_not_put_back() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_thru(4, true, true)).unwrap());
@@ -1708,7 +1708,7 @@ fn a_cable_moved_or_pulled_during_a_stack_fade_is_not_put_back() {
 /// With nothing on the Voice's input, Remove part fades each copy's part
 /// to 0 into its own Amplifier. Deleting the Amplifier during the fade
 /// takes it out of every copy, and no later sync wires a fade to an input
-/// whose module is gone (ADR-0045).
+/// whose module is gone (ADR-0046).
 #[test]
 fn a_destination_deleted_during_a_stack_fade_is_not_wired_again() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_thru(4, true, false)).unwrap());
@@ -1743,7 +1743,7 @@ fn a_destination_deleted_during_a_stack_fade_is_not_wired_again() {
 
 /// A sub-patch part swapped into an empty slot in a stack of four wires
 /// every copy's fade `b` to that copy's own inner output module, found by
-/// its path once the flattener has added the copy (ADR-0045).
+/// its path once the flattener has added the copy (ADR-0046).
 #[test]
 fn a_sub_patch_part_into_an_empty_slot_in_a_stack_wires_every_copy_s_inner_output() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(&stacked_thru(4, false, true)).unwrap());
@@ -1775,7 +1775,7 @@ fn a_sub_patch_part_into_an_empty_slot_in_a_stack_wires_every_copy_s_inner_outpu
 
 /// In a stack of two inside a stack of two, Remove part fades in all four
 /// copies, three of them past copy 0, each fade into its own input, and
-/// finishing leaves no fade or leaving part (ADR-0045).
+/// finishing leaves no fade or leaving part (ADR-0046).
 #[test]
 fn remove_part_inside_nested_stacks_fades_every_copy() {
     let (mut controller, mut hierarchy) = load(&Patch::from_ron(NESTED_STACKS).unwrap());

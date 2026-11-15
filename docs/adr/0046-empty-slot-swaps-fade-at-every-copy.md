@@ -1,4 +1,4 @@
-# ADR-0045: Empty-slot swaps fade at every copy, from each copy's own thru ends
+# ADR-0046: Empty-slot swaps fade at every copy, from each copy's own thru ends
 
 - **Status:** Accepted
 - **Date:** 2026-11-15

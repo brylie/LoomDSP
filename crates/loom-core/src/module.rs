@@ -908,6 +908,26 @@ pub mod testing {
             .map(|o| o.len())
             .or_else(|| inputs.first().map(|i| i.len()))
             .unwrap_or(0);
+        let ctx = ProcessContext::new(sample_rate, frames, midi)
+            .with_transport(transport)
+            .with_channel(channel);
+        run_with_context(module, &ctx, inputs, connected, outputs);
+    }
+
+    /// Runs `module.process` once with the given context, so a test can pick
+    /// the voice, the voice count, and the channel as well as the transport
+    /// (`ProcessContext::with_voice`, `ProcessContext::with_channel`). For a
+    /// module with no `Voices` port, like [`run_with_transport_and_channel`].
+    ///
+    /// Every input and output slice must have `ctx`'s frame count.
+    pub fn run_with_context(
+        module: &mut dyn Module,
+        ctx: &ProcessContext<'_>,
+        inputs: &[&[f32]],
+        connected: &[bool],
+        outputs: &mut [&mut [f32]],
+    ) {
+        let frames = ctx.frames;
         assert!(inputs.iter().all(|i| i.len() == frames));
         assert!(outputs.iter().all(|o| o.len() == frames));
         let input_ptrs: Vec<*const f32> = inputs.iter().map(|i| i.as_ptr()).collect();
@@ -928,15 +948,12 @@ pub mod testing {
             .iter()
             .enumerate()
             .fold(0u64, |mask, (i, &c)| if c { mask | (1 << i) } else { mask });
-        let ctx = ProcessContext::new(sample_rate, frames, midi)
-            .with_transport(transport)
-            .with_channel(channel);
         // SAFETY: the pointers come from distinct slices of length `frames`
         // that outlive this call; `&mut [&mut [f32]]` guarantees outputs are
         // unique and cannot alias the shared input slices. The separate
         // right buffers are also distinct and outlive the call.
         let mut io = unsafe { PortIo::new(&input_ptrs, &output_ptrs, &[], &right_ptrs, &[], mask, 0, frames) };
-        module.process(&ctx, &mut io);
+        module.process(ctx, &mut io);
     }
 }
 

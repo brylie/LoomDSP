@@ -109,7 +109,7 @@ Scope:
 - Patch authors, tags, and licence, and a browser for the user's own patches that filters by them (FR-FILE-08 to 10, FR-SHARE-06, ADR-0023, [specification](../design/patch-metadata.md)).
 
 Exit criteria:
-- [ ] An 8-voice polysynth built from primitives, with a 6-knob panel, runs within the CPU budget.
+- [ ] An 8-voice polysynth built from primitives, with a 6-knob panel, runs within the CPU budget. The polysynth is [`examples/patches/polysynth.ron`](../../examples/patches/polysynth.ron), and the CPU budget is signed off by hand on [#643](https://github.com/brylie/LoomDSP/issues/643).
 - [ ] A 30-minute test set with 4 patches, preset changes, and external MIDI clock runs with zero dropouts.
 - [ ] One-hour live soak test with edits during playback: zero dropouts, no memory growth.
 - [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial) ([#45](https://github.com/brylie/LoomDSP/issues/45)). Written last in this phase, when sub-patches, polyphony, and panels have settled.

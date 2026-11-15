@@ -18,6 +18,15 @@ pub(crate) fn stream(seed: u32, channel: usize, number: u32) -> Rng {
     Rng::new(seed | ((channel as u32 & 1) << 16) | number << 17 | (channel as u32 >> 1) << 24)
 }
 
+/// The stream number Voice spread draws its Random offsets from
+/// (`docs/design/polyphony.md`, Voice spread). The numbers already taken all
+/// start at 0: Random's two outputs use 0 and 1, Chance's four lanes use 0 to
+/// 3, and Selector uses 0. Voice spread's own number keeps its offsets apart
+/// from those streams at the same seed, so its first values do not repeat
+/// theirs. A new user of `stream` picks a number not listed here and adds
+/// it to this list.
+pub(crate) const VOICE_SPREAD_STREAM: u32 = 64;
+
 /// The `seed` parameter of every random module (M2 modules, rule 1).
 pub(crate) const fn seed_param(description: &'static str) -> ParamSpec {
     ParamSpec {

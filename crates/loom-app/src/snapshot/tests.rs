@@ -73,6 +73,7 @@ fn the_example_patches_cut_only_these_labels() {
         "fm-feedback-delay1.ron",
         "fm-feedback.ron",
         "plucked-string.ron",
+        "polysynth.ron",
         "sine.ron",
         "subtractive.ron",
     ] {

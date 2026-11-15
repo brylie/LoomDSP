@@ -186,6 +186,11 @@ impl<'a> A11yNode<'a> {
         self.raw().numeric_value()
     }
 
+    /// Its lowest and highest number, for a slider or a knob.
+    pub fn range(&self) -> Option<(f64, f64)> {
+        Some((self.raw().min_numeric_value()?, self.raw().max_numeric_value()?))
+    }
+
     /// Its description, which holds a value's unit and a hover text.
     pub fn description(&self) -> Option<&'a str> {
         self.raw().description()

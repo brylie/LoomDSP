@@ -1544,7 +1544,7 @@ impl Hierarchy {
         skip: &[ModuleId],
     ) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
         // The modules the caller is removing: a fade never takes over an
-        // input of one (ADR-0045), and one with no path is given none.
+        // input of one (ADR-0046), and one with no path is given none.
         let going: BTreeSet<ModuleId> = skip.iter().copied().collect();
         let mut skip = going.clone();
         skip.extend(self.transient_ids());
@@ -1615,7 +1615,7 @@ impl Hierarchy {
             desired.insert((fade_out.clone(), input.clone()));
         }
         // A stack copy's fade takes over an input only while its thru cable
-        // is still wanted, so an edit during the fade wins (ADR-0045).
+        // is still wanted, so an edit during the fade wins (ADR-0046).
         for (thru, input, fade_out) in &wiring.replace {
             let take = match thru {
                 Some(thru) => desired.remove(&(thru.clone(), input.clone())),

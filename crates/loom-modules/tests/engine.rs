@@ -28,6 +28,7 @@ fn renders_are_bit_identical_across_runs() {
         "fm-feedback.ron",
         "plucked-string.ron",
         "modulation.ron",
+        "polysynth.ron",
     ] {
         let a = render(&mut load(patch), 48_000, 256, &one_note());
         let b = render(&mut load(patch), 48_000, 256, &one_note());
@@ -45,6 +46,7 @@ fn output_does_not_depend_on_host_buffer_size() {
         "fm-feedback-delay1.ron",
         "plucked-string.ron",
         "modulation.ron",
+        "polysynth.ron",
     ] {
         let small = render(&mut load(patch), 48_000, 32, &one_note());
         let large = render(&mut load(patch), 48_000, 1024, &one_note());

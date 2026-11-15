@@ -23,6 +23,7 @@ fn panels_follow_the_spec() {
         ("loom.rand.random", "seed"),
         ("loom.route.selector", "seed"),
         ("loom.route.selector", "repeats"),
+        ("loom.voice.spread", "seed"),
         ("loom.midi.note", "channel"),
         ("loom.midi.note", "bend-range"),
         ("loom.ui.button", "mode"),
@@ -90,6 +91,7 @@ fn panels_follow_the_spec() {
             let non_knob = [
                 ("loom.midi.note", "mode"),
                 ("loom.voice.merge", "mode"),
+                ("loom.voice.spread", "mode"),
                 ("loom.io.audio-in", "pair"),
                 ("loom.io.audio-in", "mute"),
                 ("loom.gate.euclid", "source"),
@@ -149,7 +151,8 @@ fn panels_follow_the_spec() {
                 | ("loom.gate.euclid", "steps" | "hits" | "rotation")
                 | ("loom.midi.controller", "controller")
                 | ("loom.logic.divide", "n" | "offset")
-                | ("loom.phase.scale", "multiply" | "divide") => Some(Number),
+                | ("loom.phase.scale", "multiply" | "divide")
+                | ("loom.voice.split", "first") => Some(Number),
                 ("loom.mix.mixer", "level1" | "level2" | "level3" | "level4") => Some(Fader { vertical: true }),
                 ("loom.mix.crossfade", "mix") => Some(Fader { vertical: false }),
                 ("loom.rand.random" | "loom.level.clamp", "low" | "high") => Some(Range {

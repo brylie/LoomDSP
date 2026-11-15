@@ -3,14 +3,14 @@
 How a cable carries one value per voice, how notes are given to voices, which modules make, merge, and spread voices, and what a module author has to do to become polyphonic (nothing, in most cases).
 
 - **Kind:** living specification.
-- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator and bundle engine are implemented. Note input and Voice merge are implemented. Voice split, Voice spread, and Voice assigner remain pending.
-- **Decision behind it:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md) (per-voice signals, bundle as inferred width), refining [ADR-0020](../adr/0020-inferred-channel-count.md) (inferred channel count) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (every cable is `f32`). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of a new copy. [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md) for the allocator's panel.
-- **Use case and requirements:** UC10 (sequence chords and note clips), UC2 (live play). FR-SIG-08, FR-VOICE-01 to FR-VOICE-04, FR-MIDI-03 (MPE), FR-LIB-13, FR-LIB-20, NFR-RT-01, NFR-PERF-01, NFR-PERF-03.
+- **Status:** Agreed. Settled with the maintainer on 2026-11-06. The bundle rules, the voice count, allocation, and the four voice modules are M2. The three sources followed [end to end](#three-sources-end-to-end) are the test of the model; the chord sequencer and the note cycle themselves are M3. The shared allocator and bundle engine are implemented. Note input, Voice merge, Voice split, and Voice spread are implemented. Voice assigner remains pending. Refined on 2026-11-14 and 2026-11-15 for [#675](https://github.com/brylie/LoomDSP/issues/675) and [#677](https://github.com/brylie/LoomDSP/issues/677): Voice split, Voice spread, and the shipped 8-voice example with its benchmark.
+- **Decision behind it:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md) (per-voice signals, bundle as inferred width), refining [ADR-0020](../adr/0020-inferred-channel-count.md) (inferred channel count) and [ADR-0007](../adr/0007-polymorphic-signal-model.md) (every cable is `f32`). [ADR-0022](../adr/0022-copies-take-state-from-the-running-instance.md) for the state of a new copy. [ADR-0030](../adr/0030-panels-hide-controls-a-mode-does-not-use.md) for the allocator's panel. [ADR-0045](../adr/0045-a-seeded-value-of-a-voice-is-the-same-on-both-sides.md) for Voice spread's random offsets on a stereo voice.
+- **Use case and requirements:** UC10 (sequence chords and note clips), UC2 (live play). FR-SIG-08, FR-VOICE-01 to FR-VOICE-05, FR-MIDI-03 (MPE), FR-LIB-13, FR-LIB-20, NFR-RT-01, NFR-PERF-01, NFR-PERF-03.
 - **Builds on:** [Stereo cables](stereo.md) (widths, copies, downmix), [Changing a running patch](live-patching.md) (schedule swaps), [Sub-patches](sub-patches.md) (stack mode is not voices), [Module data](module-data.md) (stored notes and chords), [Scale and tuning](scale-and-tuning.md) (chords as scale steps), [Arrangement](arrangement.md) (the note cycle).
 - **Background:** [Voices and polyphony](../learn/voices-and-polyphony.md): what a voice is, why stealing exists, why a bundle is inferred, and why a gate carries the timing.
 - **Prior art:** per-voice signals are how a modular grid such as Bitwig's Grid carries polyphony. Hardware polysynths settled oldest-note and quietest-note stealing decades ago. Named only to explain the ideas; the rules and modules below are our own.
-- **Issues:** [#665](https://github.com/brylie/LoomDSP/issues/665) (this spec), [#666](https://github.com/brylie/LoomDSP/issues/666) (the note model). Users: [#510](https://github.com/brylie/LoomDSP/issues/510) (MIDI out), [#307](https://github.com/brylie/LoomDSP/issues/307) (multi-lane sequencer), [#50](https://github.com/brylie/LoomDSP/issues/50) (stored notes).
-- **Code:** `crates/loom-dsp/src/voice.rs` (allocator); `crates/loom-core/src/width.rs` and `compile.rs` (bundles and copies). `crates/loom-modules/src/test_modules.rs` supplies the bundle test source. `crates/loom-modules/src/midi.rs` (Note input), `voice.rs` (Voice merge), and `crates/loom-core/src/mpe.rs` (per-input MPE configuration).
+- **Issues:** [#665](https://github.com/brylie/LoomDSP/issues/665) (this spec), [#666](https://github.com/brylie/LoomDSP/issues/666) (the note model), [#675](https://github.com/brylie/LoomDSP/issues/675) (Voice merge, split, and spread), [#677](https://github.com/brylie/LoomDSP/issues/677) (the 8-voice example and its benchmark). Users: [#510](https://github.com/brylie/LoomDSP/issues/510) (MIDI out), [#307](https://github.com/brylie/LoomDSP/issues/307) (multi-lane sequencer), [#50](https://github.com/brylie/LoomDSP/issues/50) (stored notes).
+- **Code:** `crates/loom-dsp/src/voice.rs` (allocator); `crates/loom-core/src/width.rs` and `compile.rs` (bundles and copies). `crates/loom-modules/src/test_modules.rs` supplies the bundle test source. `crates/loom-modules/src/midi.rs` (Note input), `voice.rs` (Voice merge, Voice split, and Voice spread), and `crates/loom-core/src/mpe.rs` (per-input MPE configuration). Voice split's tests are in `crates/loom-modules/tests/voice_split.rs`, its reference render in `tests/reference.rs`, and its engine tests (a modulated `first`, a stereo bundle) in `tests/polyphony.rs`. Voice spread's Even offsets come from `loom_dsp::blend::spread_offset`, which the stack's spread already uses. Its tests are in `crates/loom-modules/tests/voice_spread.rs`, its reference render in `tests/reference.rs`, and its engine test for ADR-0045 in `tests/polyphony.rs`. The shipped example is `examples/patches/polysynth.ron`. Its reference render is tested in `crates/loom-modules/tests/patches.rs`, its compile report and headroom in `tests/polyphony.rs`, what the app and a screen reader show of it in `crates/loom-app/src/polysynth_tests.rs`, that `loom check` accepts it in `crates/loom-cli/tests/check.rs`, and its share of real time is printed by `crates/loom-modules/benches/engine.rs` ([the record](../benchmarks/2026-11-15-polysynth.md)).
 
 ## Goal
 
@@ -38,6 +38,7 @@ What the player sees.
 | Patches an LFO (mono) into the filter cutoff of a polyphonic chain | Every voice gets the same LFO. Nothing to set. |
 | Patches Voice spread after the bundle into the oscillator's detune | Each voice gets its own offset from the one knob. |
 | Cables a polyphonic chain straight into Audio Out | The voices are summed. A Voice merge gives other choices: average, last, lowest, highest. |
+| Patches the pitch bundle into a Voice merge set to Lowest, and the gate bundle into its `gate` | One pitch from a chord: the lowest held key. When that key is released, the next lowest held key takes over. When every key is up, the pitch stays on the last note, so a release after it does not jump. For a gate to go with it today, a second Voice merge in Sum on the gate bundle is high while any key is held; it does not retrigger on each new note. A gate that follows the chosen voice is a follow-up. |
 | Sets Voices from 8 to 4 while playing | Voices 1 to 4 keep sounding. Notes on voices 5 to 8 stop at the swap. |
 | Sets Voices to 1 | The module is a mono source again, with last-note priority, and the **Mode** control shows Legato and Retrigger instead of the stealing rules. |
 | Opens the inspector on a polyphonic module | The module has one set of controls, as a stereo module does. Displays and lights show voice 1. |
@@ -160,7 +161,9 @@ What the player sees.
 
 ### Cost
 
-29. **A bundle costs one module per voice.** Eight voices of an oscillator, a filter, and an envelope are 24 module runs, as 8 mono chains would be. The NFR-PERF-01 reference patch assumes this. SIMD across voices (NFR-PERF-03) is a later engine optimisation that runs copies in lockstep; it needs no change here. *Why not optimise now:* the M2 exit criterion is 8 voices within budget on the reference machine, which per-copy processing meets by the arithmetic in [acceptance criteria](#acceptance-criteria).
+29. **A bundle costs one module per voice.** Eight voices of an oscillator, a filter, and an envelope are 24 module runs, as 8 mono chains would be. The NFR-PERF-01 reference patch assumes this. SIMD across voices (NFR-PERF-03) is a later engine optimisation that runs copies in lockstep; it needs no change here. *Why not optimise now:* the M2 exit criterion is 8 voices within budget on the reference machine, and per-copy processing is expected to meet it: the [sub-patch modes benchmark](../benchmarks/2026-11-09-sub-patch-modes.md) measured 8 copies of a three-module voice at under 1% of one core. The benchmark of [the shipped example](#the-shipped-example) measures it.
+
+    **How it is measured.** The first reference patch is `examples/patches/polysynth.ron` ([NFR-PERF-01](../product/non-functional-requirements.md#performance-perf)). The cost is the engine's mean time per block, with 8 notes held, at 48 kHz and 128 frames, as a share of the block's real time (2.67 ms). The app's UI is not part of it, so the number needs no display. An app run on #643 stays a separate sanity check. Anyone can run the benchmark and get a number for their own machine. Only the number on the reference machine counts against the budget, and a person checks it (Manual QA: M2, [#643](https://github.com/brylie/LoomDSP/issues/643)). *Why the mean:* the budget is a share of a core over time, which is what leaves room for the host and other plugins. Missing the deadline of a single block is a dropout, which the real-time rules (NFR-RT) and the M2 soak tests cover.
 
 30. **The compile report lists the width of every output,** voices and sides, so the canvas and the inspector can show it ([stereo](stereo.md), rule 19).
 
@@ -261,6 +264,13 @@ the control-signal conventions of the stereo specification.
 - `out1` is voice `first`, `out2` is voice `first + 1`, and so on. An output past the bundle's last voice holds the input's default. *Why eight outputs:* a tile with sixteen ports is unusable; a second Split with `first` at 9 reaches the rest.
 - The catalogue's "copies one signal to every voice" needs no module (rule 6). "Sets a fixed value per voice" is Voice spread.
 
+How it is built (technical design, 2026-11-14, [#675](https://github.com/brylie/LoomDSP/issues/675)):
+
+- **Port types.** `in`: `SignalType::Audio`, `Channels::Voices`, default 0. `out1` to `out8`: `SignalType::Audio`, `Channels::PerChannel`, one voice each. Their stereo sides follow rule 5: a bundle-aware module's `PerChannel` outputs take their sides from its first `Voices` input, here `in`. So a stereo bundle gives stereo outputs, with no stereo copies. The module loops each output's sides over `output_width(OUT).sides`.
+- **`first`** is a whole-number parameter (`ParamSpec::integer`), 1 to 16, default 1. It does not shape the graph: the outputs are one voice each whatever it is set to. So it can be modulated, as other whole-number parameters can ([modulation](modulation.md), rule 5: the engine rounds after the clamp). The module reads it per frame with `Param::map_or`, so a modulated `first` moves the outputs on the sample, with no smoothing and no crossfade. A whole-number parameter reports no glide ([modulation](modulation.md), rule 9), so `param_glide` is the trait default. *Why it switches:* it picks which voices reach the outputs, a choice rather than a level.
+- **Each frame:** `outK` reads the zero-based voice `first - 1 + (K - 1)`, computed with saturating arithmetic (`saturating_sub`, `saturating_add`), so a bad value cannot wrap. Before any `voice_input` call, the module compares that voice with `input_width(IN).voices`. At or past it, the output writes the port's declared default, never a literal (ADR-0043), and `voice_input` is not called. *Why the check comes first:* `PortIo::voice_input` fans a one-voice cable out to every voice, as rule 6 does for copies, so calling it for voice 2 of a mono cable would return voice 1. With the check, a one-voice `in` is one voice: `out1` carries it when `first` is 1, and the other outputs hold the default. An unpatched `in` reads its port default, zeros, as one voice, so every output is 0. `first` at 2 on a mono cable gives the default on every output, and `first` at 16 on a 16-voice bundle gives voice 16 on `out1` and the default on `out2` to `out8`. *Why not feed every output:* a split's outputs name voices, and a mono cable has only voice 1.
+- No state, so `copy_state_from` and `reset` are the trait defaults.
+
 ### Voice spread (MT-VOICE-03)
 
 `loom.voice.spread`: a different value per voice from one control.
@@ -270,11 +280,33 @@ the control-signal conventions of the stereo specification.
 | Inputs | `in` (any type, `PerChannel`, default 0) |
 | Outputs | `out` |
 | Parameters | `amount`: -10 to 10, default 0. `mode`: Even (default), Series, Random. `seed` ([M2 modules](p2-modules.md), rule 1) |
-| Panel | A knob for `amount`, a segmented control for `mode`. `seed` in the inspector only. |
+| Panel | A knob for `amount`, a segmented control for `mode`. `seed` in the inspector only, and shown only in Random, the one mode that uses it. |
 
 - The module runs once per voice (rule 4) and reads its voice `i`, from 1 to `V`, and the count `V` (rule 17).
-- **Even:** `out = in + amount × offset`, with offsets evenly spaced from -1 to 1 (voice 1 at -1, voice V at +1, one voice at 0 when V is odd). This is the stack's spread formula ([sub-patches](sub-patches.md#modes), TR-04). **Series:** `out = in + amount × (i - 1) / (V - 1)`, from 0 up to `amount`. **Random:** `out = in + amount × r_i`, where `r_i` is a draw from -1 to 1 from the seed and the voice index, fixed for the session.
+- **Even:** `out = in + amount × offset`, with offsets evenly spaced from -1 to 1 (voice 1 at -1, voice V at +1, one voice at 0 when V is odd). This is the stack's spread formula ([sub-patches](sub-patches.md#modes), TR-04). **Series:** `out = in + amount × (i - 1) / (V - 1)`, from 0 up to `amount`. **Random:** `out = in + amount × r_i`, where `r_i` is a draw from -1 to 1 from the seed and the voice index.
 - With one voice, `out = in`. *Why:* a spread of nothing is nothing, so the module can sit in a patch before it is polyphonic.
+- **What changes the offsets.** Random's offsets are set by the seed: the same seed gives the same offsets on every load and at every block size, and a voice keeps its offset when the voice count changes, as long as the count stays above 1 (one voice always gives `out = in`). Even and Series space their offsets by the count, so changing the count re-spaces them. *Why:* a player who raises the count from 4 to 8 should not hear the four voices already tuned move.
+
+How it is built (technical design, 2026-11-14, [#675](https://github.com/brylie/LoomDSP/issues/675)):
+
+- **Port types.** `in`: `SignalType::Modulation`, `Channels::PerChannel`, default 0. `out`: `SignalType::Modulation`, `Channels::PerChannel`. *Why Modulation:* the module adds an offset to any signal, as Add does.
+- **`amount`** is smoothed over 5 ms (`.smooth(0.005)`, a `loom_rt::Smoothed`) and implements `param_glide`, as Add's `offset` does. Its [control ranges](control-ranges.md) are -0.01 to 0.01, -0.1 to 0.1, -1 to 1, and -10 to 10, and a new Voice spread starts on -0.1 to 0.1. *Why the finer range:* a detune of 10 cents is about 0.00083, which is 0.4% of a -0.1 to 0.1 knob; on -0.01 to 0.01 a 1% arrow-key step is 2.4 cents, and the Shift fine steps go further: Shift with an arrow key moves 0.1% (0.24 cents), and Shift-drag is 10 times finer than a drag ([panels](panels.md)). *Why -0.1 to 0.1 first:* it is ±1 octave on a pitch cable, so a Spread just added to a pitch path stays safe. The smoother ticks every frame in every mode, so a glide takes the same time at any block size.
+- **`mode`** has three choices, Even (default), Series, and Random, shown as a segmented control. The module turns its value into a `Mode` with a `match` that has a fallback arm, and never uses it as an array index, so a value out of range cannot panic.
+- **Offsets,** for voice `i` of `V` (`ProcessContext::voice` and `voice_count`). When V is 1, every mode gives 0. Otherwise:
+  - Even: `loom_dsp::blend::spread_offset(i - 1, V)`, the function the stack's spread uses, so the two agree bit for bit.
+  - Series: `(i - 1) / (V - 1)`.
+  - Random: `2 × d - 1`, where `d` is the first draw of `crate::rand::stream(seed, (i - 1) × 2, N)`: an `Rng` from `loom_dsp::random`, started from the seed, the voice with its side bit at 0, and a stream number `N` that no other module uses. `N` is a named constant beside `stream` in `rand.rs`, with a comment that lists the numbers already taken (Random's outputs, Chance's lanes, and Selector all start at 0). *Why its own number:* `stream(seed, ch, 0)` is already Random's first output and Selector's stream, so at the same seed Voice spread's offsets would repeat their first values. It lies in [-1, 1). It depends on the seed and the voice, not on the side ([ADR-0045](../adr/0045-a-seeded-value-of-a-voice-is-the-same-on-both-sides.md)). Its only dependence on the count is the 0 at one voice.
+- **`seed`** is the shared seed parameter (`seed_param`, [M2 modules](p2-modules.md), rule 1). It is shown only while `mode` is Random (`ParamOptions::shown_when`, ADR-0030), the one mode that reads it. The module has no `reset` input: [M2 modules](p2-modules.md) rule 2 does not apply, because the offsets are one draw per voice, not a sequence that moves on.
+- **When the offsets are computed.** The three offsets are cached with the voice, the count, and the rounded seed they came from. The cache starts at an impossible voice, so the first call fills it, and it is filled again when any of the three changes. With a modulated seed, the rounded seed is compared per frame and a new draw is made only when it changes. So the per-sample path normally reads one cached value. `mode` can be modulated, so it picks among the three per frame.
+- **Each frame:** an offset of exactly 0 writes `in` unchanged (one voice, or Even's middle voice when V is odd), so `out = in` holds bit for bit. Otherwise `out = hold_finite(in + amount × offset)` for a finite `in` (ADR-0037), and the plain sum for a non-finite one.
+- **Count changes.** Even and Series offsets step to their new spacing on the swap frame, with no glide: a count change is an edit (rule 15). Random offsets do not move while the count stays above 1.
+- **Stereo.** `in` is `PerChannel`, so a stereo voice runs as two copies, and both draw the same offset (ADR-0045). A new right side takes its left side's state as it is (`loom_core::copy_state`). A stereo modulation source assigned to `amount` or `seed` still gives each side its own value ([stereo](stereo.md), rule 17), as it does on Selector.
+
+How Voice split and Voice spread are tested (technical design, 2026-11-15, [#675](https://github.com/brylie/LoomDSP/issues/675)):
+
+- **The harness sets the voice and the side.** `Harness::voice(i, count)` and `Harness::channel(c)` set the voice and the side a module runs as, in every render and check. Without them a Voice spread would run as voice 1 of 1, where every offset is 0, which would hide a formula bug. A module with no `Voices` port runs through `loom_core::testing::run_with_context` (`crates/loom-core/src/module.rs`), which takes a `ProcessContext` built with `ProcessContext::with_voice` and `with_channel`. The default is voice 1 of 1 on side 0, so tests that set neither run as before.
+- **Per-voice and per-side claims** are tested through those setters, at block sizes 1, 77, and 512, or through an engine test.
+- **The engine test for ADR-0045** feeds one 8-voice `test.voices` source into both inputs of Join (`loom.mix.join`), so the stereo bundle has equal sides. It runs that through Voice spread in Random mode with a non-zero `amount`, then through Voice split. For each voice it asserts that `out - in` is not zero, that it differs from the other voices' `out - in`, and that it is the same on both sides. *Why `out - in`:* `test.voices` already gives each voice a different value, so "the voices differ" would pass with every offset at 0.
 
 ### Voice assigner (MT-VOICE-04)
 
@@ -310,6 +342,9 @@ inserted delay is exactly Envelope `out` to Note input `level`. This loop runs
 one sample at a time, including the eight envelopes. Choosing `level` regardless
 of creation order is follow-up [#733](https://github.com/brylie/LoomDSP/issues/733),
 outside this change.
+The shipped example leaves this cable out, so its chain has no loop
+([the shipped example](#the-shipped-example)); the 8-mono-chains test keeps it,
+with its delay on `level`.
 
 1. The compiler finds a `Voices` output on Note input, so the Saw, SVF, Envelope, and Amplifier run as 8 copies each (rule 4), and Voice merge and Note input, which have `Voices` inputs, run as one.
 2. Eight keys down: the allocator gives each a voice in the order the notes arrived. Each gate rises on its note's frame and each pitch holds. Velocity is output per voice too; this chain does not patch it, but a second Amplifier with `velocity` on its `level` input would scale each voice by it.
@@ -317,6 +352,48 @@ outside this change.
 4. A key up: its gate drops, the envelope releases, the voice holds its pitch, and the voice is free. The next key takes the voice free longest.
 5. A mono LFO into the SVF's `cutoff` input: every copy reads it (rule 6). A Voice spread between Note input's `pitch` and the Saw's `pitch`: each copy adds its own detune.
 6. Voice merge sums the 8 amplifiers' outputs into one audio cable into Audio Out.
+
+#### The shipped example
+
+`examples/patches/polysynth.ron` is this synth as an example patch ([#677](https://github.com/brylie/LoomDSP/issues/677)), and it is the first reference patch of NFR-PERF-01 ([Cost](#cost), rule 29). What the player finds when they open it:
+
+- **The chain above, with two additions #677 asks for.** A **Voice Spread** sits on the pitch path, as in step 5, with a small detune: Random with the default seed, at `amount` 0.0003, about ±3.6 cents, a value the display shows exactly. *Why Random:* each voice drifts by its own small amount, as the voices of a polysynth do, rather than in an even fan. A **Phase** module sits before the Saw, so each voice's phase is a cable the player can see and re-patch, and the Saw plays from it instead of its own phase ([oscillators](oscillators.md)). **MIDI Note** is at 8 voices in Oldest mode, and its `level` is left unpatched, because that cable closes a loop (above).
+- **How to try Quietest.** The patch comment says how: cable the Envelope's `out` to MIDI Note's `level` and set Mode to Quietest. The status bar then shows "1 feedback loop, 1 automatic 1-sample delay (dashed)", and the dashed cable is the one from the Envelope to `level`.
+- **A gentle filter sweep.** One mono LFO moves the SVF's `cutoff` on every voice, through a Multiply that sets its depth to about ±0.5 octave. *Why the Multiply:* an LFO straight into `cutoff` would sweep about ±10 octaves. The patch comment names the LFO rate, the depth, and the SVF's cutoff and resonance, so a player knows what to turn.
+- **The knobs are each module's own.** The M2 exit criterion's 6-knob panel waits for the panel editor for patches ([#76](https://github.com/brylie/LoomDSP/issues/76)).
+- **It shows its width.** Hover text on an output port in the voice chain says `8 voices`; after **Voice Merge** the cable is one voice.
+- **Eight held notes stay clean.** The Amplifier's gain leaves headroom for all 8 voices at their loudest, so a full chord peaks under -1 dBFS and is not pushed into the output limiter ([output safety](output-safety.md)). A test holds 8 notes for several seconds and checks the peak. The patch comment shows the arithmetic. A single note then plays well below full scale, as on most polysynths; the player can raise the Amplifier's gain when playing fewer notes. *Why 8:* the goal of this spec is to hold a chord and play over it, so the full count is the case to keep clean.
+- **Chords need a source of several notes.** **Hold note** in the toolbar plays one note, and `loom render --note 60 --note 64 --note 67` plays the notes one after another, not together. To hear a chord, play a MIDI keyboard. With no hardware on macOS or Linux, run `loom midi-port "Loom Pad"`, before or after starting the app: the app connects to it on its own. Then type `on 60`, `on 64`, and `on 67`. On Windows, use a MIDI keyboard. The patch comment says so.
+- **It loads in the app and in the CLI** (`loom check`, `loom render`) like every other example.
+
+**Its reference render plays a chord.** Every other example patch plays one note in its reference render, which tests one voice. This one plays four notes, C, E, G, and B up from middle C (MIDI notes 60, 64, 67, and 71). They start on different frames inside one block and are released on different frames, so four voices sound at once and their release tails overlap. The other examples keep their one note, so their references do not change.
+
+**Its benchmark prints a number on any machine.** `cargo bench -p loom-modules --bench engine` runs the example with 8 notes held, at 48 kHz and 128 frames, and prints one line beside criterion's own results, in this form:
+
+```text
+polysynth: 8 voices, 8 notes held, 48 kHz, 128 frames: T µs per block, P% of real time (budget 25%)
+```
+
+`T` is the mean time per block after a warm-up, and `P` is `T` as a share of the block's 2.67 ms. A second line for the Quietest variant, with the `level` cable, is printed too. A line reports and never fails, because the number depends on the machine. CI compiles the benchmark on every change but does not run it: shared runners are too noisy to judge time. The result on the reference machine is recorded by hand in `docs/benchmarks/`, with the machine named (model, CPU, and OS), the patch's module count, and its module runs per block. The check against the budget is on Manual QA: M2 ([#643](https://github.com/brylie/LoomDSP/issues/643)).
+
+How it is built (technical design, 2026-11-14 and 2026-11-15, [#677](https://github.com/brylie/LoomDSP/issues/677)):
+
+- **No `level` cable.** The cable from the Envelope's `out` to Note input's `level` closes a feedback loop that runs one sample at a time, with the eight envelopes in it ([the walk-through](#a-keyboard-into-an-8-voice-synth-m2)). Every cable is an edge of the graph (`successors` in `compile/steps.rs`), so the compiler cannot tell that Note input reads `level` only to choose a voice to steal. Which cable gets the inserted delay follows the module IDs, which is [#733](https://github.com/brylie/LoomDSP/issues/733). So the example leaves `level` unpatched and stays in Oldest mode. A comment in the file says how to try Quietest (cable the Envelope's `out` to `level`, and set Mode to Quietest), that this costs more, and that the status bar will then report one feedback loop.
+- **The patch.** Module IDs run from Note input (1) left to right. Voice spread is in Random mode with the default seed, at `amount` 0.0003 (about ±3.6 cents), saved with the range -0.01 to 0.01. It shows exactly with 4 decimals ([control ranges](control-ranges.md#showing-the-value)).
+- **The filter sweep.** LFO `out` → Multiply `a`, with `gain` 0.05 saved on the -0.1 to 0.1 range → SVF `cutoff`. The LFO's output spans -1 to 1, and the cutoff input is in pitch units (0.1 per octave), so a gain of 0.05 gives about ±0.5 octave around the knob's cutoff.
+- **Headroom by arithmetic.** The Amplifier's `gain` is chosen so that 8 × saw peak × envelope peak × the SVF lowpass's peak gain at its resonance × `gain` ≤ 0.891 (-1 dBFS). The saw and the envelope peak at 1. The SVF's damping is `k = 2 - 1.98 × resonance` (`crates/loom-modules/src/filter.rs`), so `Q = 1/k`, and a second-order lowpass peaks at `Q / √(1 - 1/(4Q²))` when Q is above 1/√2, and at 1 below it. The patch comment shows the numbers. The estimate is not a bound: a resonant filter can ring past its peak gain on a saw's edge, and 8 detuned voices rarely line up. So a test holds it.
+- **The headroom test** (`crates/loom-modules/tests/polyphony.rs`). It loads the example with output safety Off, holds the benchmark's 8 notes for several seconds (at least one full LFO cycle after the envelopes reach sustain), and checks with `loom_analysis::peak` that both sides stay under 0.891. *Why Off:* the limiter would hide an overshoot, and the engine's final clip at 1 would hide a clip.
+- **Reference notes.** `crates/loom-modules/tests/patches.rs` gets `fn notes(patch: &Path) -> &'static [Note]`: `CHORD` for `polysynth.ron`, `[NOTE]` for every other patch. `CHORD` starts notes 60, 64, 67, and 71 on frames 240, 243, 247, and 251, all inside the engine block from frame 128 to 255, and releases them on frames 4,800, 5,600, 6,400, and 7,200.
+- **Compile-report test** (`crates/loom-modules/tests/polyphony.rs`). The loaded example has no feedback loops, no skipped modules, and no stereo copies. Every output from Note input through the Amplifier is 8 voices, mono, and the outputs of Voice merge, the LFO, and the Multiply are one mono voice. The variant with the `level` cable is already tested on `main`: `acceptance_synth_matches_eight_mono_chains` in `tests/polyphonic_midi.rs` builds it with Note input first and asserts the one loop, with the delay on the cable into `level`.
+- **The benchmark.** `crates/loom-modules/benches/engine.rs` replaces `criterion_main!` with its own `main`: the criterion groups, then `polysynth_share()`, then `Criterion::default().configure_from_args().final_summary()`. That is the macro's body with one call added, which `harness = false` allows. `polysynth_share` runs only when the arguments hold `--bench`, hold neither `--list` nor `--test`, and hold either no name filter or one that matches `polysynth`, read the way criterion reads its own filter. So `cargo test --benches`, a listing, and `cargo bench -- modes` stay quick. It:
+  - uses `EngineConfig::default()`: 48 kHz, 128 frames, and output safety at Low latency, as the app plays;
+  - sends 8 note-ons on frame 0 (MIDI notes 48, 52, 55, 59, 60, 64, 67, and 71);
+  - asserts that the compile report has no loops and 8 voices on Note input's `pitch`;
+  - plays 375 blocks (1 s) to warm up, and asserts the output is not silent, so a broken patch cannot report a false low number;
+  - times 3,750 blocks (10 s) with one `std::time::Instant` around the loop, with `black_box` on the output, and prints the line above;
+  - does the same for the patch with the `level` cable and Mode at Quietest, asserting one loop, and prints a second line, `polysynth (Quietest, level loop): ...`.
+
+  `polysynth.ron` also joins criterion's `patch` group, with the same 8 notes. The module doc comment's list of groups names both.
 
 ### A chord sequencer into the same synth (M3)
 
@@ -346,7 +423,7 @@ A MIDI note output module has `pitch`, `gate`, and `velocity` inputs on `Channel
 
 Bundles and copies:
 
-- [x] Given Note input at 8 voices into the chain of [the first source](#a-keyboard-into-an-8-voice-synth-m2), with today's descriptors unchanged, when 8 notes play, then the four modules run as 8 copies each, Voice merge runs as one, and the output is bit-identical to 8 mono chains fed one note each and summed (test).
+- [x] Given Note input at 8 voices into the chain of [the first source](#a-keyboard-into-an-8-voice-synth-m2), with today's descriptors unchanged, when 8 notes play, then the four modules run as 8 copies each, Voice merge runs as one, and the output is bit-identical to 8 mono chains fed one note each and summed (test). The test keeps the `level` cable, which runs Note input and the envelopes one sample at a time with the delay on `level`; the shipped example leaves the cable out.
 - [x] Given a mono LFO into a modulation input of a copied module, then every copy reads the same values (test).
 - [x] Given a 4-voice pitch and an 8-voice gate into one oscillator, then it runs as 8 copies and copies 5 to 8 read the pitch input's default (test).
 - [x] Given a bundle into a `Downmix` or `Stereo` input, then the module runs per voice and no voice is averaged or dropped; given a stereo cable inside one voice into that `Downmix` input, then the stereo downmix of the two sides still applies (test).
@@ -380,14 +457,27 @@ level cables, and Note input processing at these block sizes are covered by
 Voice modules:
 
 - [x] Voice merge: Sum and Average over 8 voices match the arithmetic; Last, Lowest, and Highest follow the gates and change only on a gate edge; a one-voice input passes through in every mode (reference tests).
-- [ ] Voice split: `out1` to `out8` are voices `first` onward, and an output past the last voice holds the default (test).
-- [ ] Voice spread: Even gives the stack's offsets, Series gives 0 up to `amount`, Random differs per voice and repeats per seed; one voice gives `out = in` (reference tests).
+- [x] Voice split: `out1` to `out8` are voices `first` onward, and an output past the last voice holds the default (test).
+- [x] Voice spread: Even gives the stack's offsets, Series gives 0 up to `amount`, and Random differs per voice and repeats per seed, each rendered at a voice past 1 with `Harness::voice`; one voice gives `out = in` bit for bit in each of Even, Series, and Random (reference tests).
+- [x] Voice spread in Random: raising the voice count from 4 to 8 leaves the offsets of voices 1 to 4 unchanged (test).
+- [x] Voice split: a modulated `first` moves the outputs on the sample; a stereo bundle gives stereo outputs (test).
+- [x] Voice split: a mono cable gives `out1` only, `first` at 2 on a mono cable gives the default on every output, and `first` at 16 on a 16-voice bundle gives voice 16 on `out1` (test).
+- [x] Voice spread: given one 8-voice source fed into both inputs of Join, so each voice is stereo with equal sides, into Voice spread in Random mode, which then runs as one copy per side of each voice, and then Voice split, then for each voice `out - in` is the same on the left and right sides, is not zero, and differs from the other voices' (engine test, ADR-0045).
 - [ ] Voice assigner: a mono gate and pitch into 8 voices gives overlapping release tails on distinct voices (reference test).
 - [x] Note input at one voice in Legato mode gives the same output as before this feature on every existing reference render (reference tests).
 
+The shipped example:
+
+- [x] `examples/patches/polysynth.ron` opens in the app, where hover text on an output port in its voice chain says `8 voices`, and a screen reader finds Voice Spread's `amount` and `mode` and Voice Merge's `mode` by name (`Ui` harness).
+- [x] `loom check` passes on it (CLI test).
+- [x] Its reference render of the four-note chord is bit-identical at buffer sizes 1, 77, 256, and 1,000 (reference test).
+- [x] It compiles with no feedback loop and nothing skipped, with 8 voices from Note input through the Amplifier and one voice after Voice merge (test). The loop that the `level` cable would make is already tested on `main` (`tests/polyphonic_midi.rs`).
+- [x] With 8 notes held for several seconds and output safety Off, its output peaks under -1 dBFS (test).
+- [x] The benchmark prints the line above on any machine that runs it, and CI compiles it (bench).
+
 Cost:
 
-- [ ] The 8-voice reference patch runs within the NFR-PERF-01 budget on the reference machine (benchmark; manual, on the machine).
+- [ ] `examples/patches/polysynth.ron`, with 8 notes held, runs within the NFR-PERF-01 budget on the reference machine, and the result is recorded in `docs/benchmarks/` with the machine named (benchmark; manual, on the machine, Manual QA: M2 [#643](https://github.com/brylie/LoomDSP/issues/643)).
 
 ## Out of scope
 
@@ -445,3 +535,5 @@ Cost:
 ## Open points
 
 - **Lockstep copies for SIMD.** Whether the schedule format needs a per-voice stride for NFR-PERF-03, or the optimisation can stay inside the engine. Not before M2's exit criterion is measured.
+- **Where the `level` loop's delay goes.** The inserted delay of the loop a `level` cable makes follows module IDs (see [A keyboard into an 8-voice synth](#a-keyboard-into-an-8-voice-synth-m2)). Choosing `level` whatever the order is [#733](https://github.com/brylie/LoomDSP/issues/733).
+- **Any-type ports fade by their declared type.** Voice merge declares `in` as Audio, and Voice split and Voice spread declare Audio and Modulation, so a gate cable re-patched into them ramps for 5 ms, as one into Selector does. The rule for the editor's mixers (a cable fades by what it carries past them, [live patching](live-patching.md), rule 9) could extend to these modules.

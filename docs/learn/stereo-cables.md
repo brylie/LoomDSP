@@ -102,7 +102,7 @@ A module author never picks the method. They declare an input `Downmix`, and its
 
 ## Copies of random things
 
-Two copies of a noise source with the same seed give the same numbers on both sides. That is mono that only looks like stereo. So a copy can ask which channel it is, and a module with a seed mixes the channel into it. The left and right sides then differ, and the patch still gives the same result every time it runs. Selector is the exception: its numbers choose a route, not a signal, so both sides make the same picks, or a stereo signal would come apart. Both sides make the same picks unless a stereo modulation source is assigned to a Selector parameter ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)).
+Two copies of a noise source with the same seed give the same numbers on both sides. That is mono that only looks like stereo. So a copy can ask which channel it is, and a module with a seed mixes the channel into it. The left and right sides then differ, and the patch still gives the same result every time it runs. There are two exceptions. Selector's numbers choose a route, not a signal, so both sides make the same picks, or a stereo signal would come apart. Both sides make the same picks unless a stereo modulation source is assigned to a Selector parameter ([ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md)). Voice spread's numbers belong to a voice. In Random mode each voice gets one fixed offset, like its own detune, so both sides of a voice get the same offset ([ADR-0045](../adr/0045-a-seeded-value-of-a-voice-is-the-same-on-both-sides.md)). For a wide detune, with the sides apart, use two Voice spreads with different seeds, one per side, into a Join.
 
 ## How other systems do it
 

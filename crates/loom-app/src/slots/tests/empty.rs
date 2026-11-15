@@ -571,7 +571,7 @@ fn one_of(app: &App, kind: &str) -> loom_core::ModuleId {
 /// Checks a removal's fades in [`STACKED`]: copy k's fade takes that
 /// copy's thru source, the sine, on `b`, and its `out` feeds copy k's own
 /// input on the stack's Sum, copy 0's included. No fade takes over another
-/// copy's input or the Audio Out, which still plays the Sum (ADR-0045).
+/// copy's input or the Audio Out, which still plays the Sum (ADR-0046).
 fn check_removal_wiring(app: &App, slot: u32, what: &str) {
     let controller = &app.session.controller;
     let fading = app

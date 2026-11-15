@@ -905,7 +905,7 @@ type SlotEdit = fn(&mut Hierarchy, &mut loom_core::Controller, ModuleId);
 /// Renders `text` at `block`, making `edit` on the stack's slot at
 /// `SWAP_AT` and finishing the fade when copy 0's fade is done, as the app
 /// does. Both commits must report no cable fade: every rewire of an
-/// empty-slot swap is exact, so rule 9 adds no ramp on top (ADR-0045). No
+/// empty-slot swap is exact, so rule 9 adds no ramp on top (ADR-0046). No
 /// fade module and no leaving part is left after the finish.
 fn render_stacked_edit(text: &str, block: usize, edit: SlotEdit) -> Vec<f32> {
     let (mut parts, hierarchy) = load(text);
@@ -952,7 +952,7 @@ fn render_stacked_edit(text: &str, block: usize, edit: SlotEdit) -> Vec<f32> {
 }
 
 /// Remove part inside a stack of four crossfades every copy from its SVF
-/// to its own thru signal over 10 ms, all on the same frame (ADR-0045).
+/// to its own thru signal over 10 ms, all on the same frame (ADR-0046).
 /// Over the fade the output is the exact blend `A·(1 − n/N) + B·n/N` of a
 /// render with no edit (`A`) and one with the slot empty from the start
 /// (`B`), within 1e-6; the copies filter differently (the cutoff is
@@ -1009,7 +1009,7 @@ fn remove_part_inside_a_stack_crossfades_every_copy() {
 /// render to compare with: the step across the swap is bounded by the
 /// signal's own and the Linear fade's change per frame, where a switch to
 /// a reset filter would drop by most of the signal. The same at block
-/// sizes 1, 77, and 512 (ADR-0045).
+/// sizes 1, 77, and 512 (ADR-0046).
 #[test]
 fn a_swap_into_an_empty_slot_inside_a_stack_crossfades_every_copy() {
     let empty = quiet_stacked_slot(true);

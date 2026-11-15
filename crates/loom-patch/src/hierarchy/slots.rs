@@ -245,7 +245,7 @@ pub struct Fading {
     pub copies: Vec<CopyFade>,
     /// Inside a stack, out of an empty thru slot only: copy 0's thru
     /// source, read from the graph before the swap, as each [`CopyFade`]
-    /// holds its own (ADR-0045). Outside a stack copy 0 finds its ends from
+    /// holds its own (ADR-0046). Outside a stack copy 0 finds its ends from
     /// the slot's links at every sync, and this is `None`.
     pub thru_source: Option<End>,
     /// Inside a stack, out of an empty thru slot only: the inputs copy 0's
@@ -267,12 +267,12 @@ pub struct CopyFade {
     pub fades: Vec<(String, ModuleId)>,
     /// Out of an empty thru slot only: the output that fed the leaving
     /// part's `in` in this copy, read from the graph before the swap, or
-    /// `None` when nothing fed it (ADR-0045). The fade's `b` takes it.
+    /// `None` when nothing fed it (ADR-0046). The fade's `b` takes it.
     pub thru_source: Option<End>,
     /// Out of an empty thru slot only: every input the leaving part's role
     /// output fed in this copy, read before the swap. While the fade runs,
     /// its `out` takes over each one whose thru cable is still there, so a
-    /// cable the player moved is never put back (ADR-0045).
+    /// cable the player moved is never put back (ADR-0046).
     pub thru_dests: Vec<End>,
 }
 
@@ -346,7 +346,7 @@ pub(super) struct FadeWiring {
     /// Inputs a fade's `out` takes over only while their thru cable is
     /// still wanted, as `(thru source, input, fade output)`: each stack
     /// copy's part, copy 0's too, fading out to its own thru signal
-    /// (ADR-0045). With no
+    /// (ADR-0046). With no
     /// thru source, it takes over an input whose module is still there
     /// and that nothing else feeds.
     pub replace: Vec<(Option<End>, End, End)>,
@@ -643,7 +643,7 @@ impl Hierarchy {
                 // Out of an empty thru slot, a copy's `b` and the inputs
                 // its fade takes over are its own thru ends, recorded at
                 // the swap: a path cannot name its port on a consumer
-                // outside the stack (ADR-0045). Copy 0's own wiring adds no
+                // outside the stack (ADR-0046). Copy 0's own wiring adds no
                 // `b` for it to move.
                 if state.part.is_none() {
                     self.thru_ends_wiring(graph, &copy.thru_source, &copy.thru_dests, &copy.fades, &mut wiring);
@@ -699,7 +699,7 @@ impl Hierarchy {
                     if self.in_stack(&level) {
                         // Inside a stack, copy 0 takes its own ends from
                         // the graph at the swap, as every copy does
-                        // (ADR-0045).
+                        // (ADR-0046).
                         let own = [(role_out.clone(), *fade)];
                         self.thru_ends_wiring(graph, &fading.thru_source, &fading.thru_dests, &own, &mut wiring);
                         continue;
@@ -740,7 +740,7 @@ impl Hierarchy {
 
     /// The fade wiring of one stack copy, copy 0 or another, whose part fades out to its thru
     /// signal, from the ends `source` and `dests` recorded at the swap
-    /// (ADR-0045): the thru source feeds the copy's fade's `b` while its
+    /// (ADR-0046): the thru source feeds the copy's fade's `b` while its
     /// module is still there, and each recorded input moves onto the
     /// fade's `out` only while its thru cable is still wanted.
     fn thru_ends_wiring(
@@ -769,7 +769,7 @@ impl Hierarchy {
 
     /// The thru ends of the leaving part `lid` of the slot at `level`, in
     /// the copy whose level is `level_k`, read from the graph before the
-    /// swap empties the slot (ADR-0045): the output that feeds the part's
+    /// swap empties the slot (ADR-0046): the output that feeds the part's
     /// `in` there, and every input outside the part that its role output
     /// feeds.
     fn copy_thru_ends(&self, graph: &Graph, level: &ModulePath, lid: u32, level_k: &ModulePath) -> ThruEnds {
@@ -860,7 +860,7 @@ impl Hierarchy {
     /// Adds, in every other copy of the stacks the slot at `slot_path` is
     /// in, the same fades as `fades` (copy 0's), at the same steps under
     /// that copy's slot path and with the same laws (ADR-0044), into an
-    /// empty thru slot as well as out of one (ADR-0045). With a leaving
+    /// empty thru slot as well as out of one (ADR-0046). With a leaving
     /// part, a copy whose leaving part is missing is skipped. On an error
     /// part-way, the caller rolls back by comparing modules, as for
     /// [`Hierarchy::add_fades`].
@@ -969,7 +969,7 @@ impl Hierarchy {
 
     /// True when a swap into or out of the empty slot at `slot_path` fades
     /// from or to its thru signal: a thru role, inside any number of
-    /// stacks, each copy from or to its own thru signal (ADR-0045;
+    /// stacks, each copy from or to its own thru signal (ADR-0046;
     /// sub-patches.md, Empty slots). Any other role changes as a cable
     /// change, which live-patching rule 9 ramps over 5 ms.
     fn fades_with_thru(&self, slot_path: &ModulePath) -> bool {
@@ -1789,7 +1789,7 @@ impl Hierarchy {
     /// assignments from it, have nowhere to go: they are removed, and
     /// their labels returned for the status text. A thru role fades the
     /// part out to the thru signal, Linear, in every stack copy, each to
-    /// its own thru signal (ADR-0045); any other slot lets it go at once,
+    /// its own thru signal (ADR-0046); any other slot lets it go at once,
     /// and `Emptied::gone` names the modules the caller leaves out of its
     /// sync and then removes. When the fades cannot be added, as at the
     /// module limit, the part goes at once too: a removal never fails for
@@ -1821,7 +1821,7 @@ impl Hierarchy {
             .or_else(|| controller.graph().node(old_id).map(|n| n.descriptor.name.to_string()))
             .unwrap_or_default();
         // Worked out while the part is still the slot's: each copy's thru
-        // ends are read from the graph before anything changes (ADR-0045).
+        // ends are read from the graph before anything changes (ADR-0046).
         let fade_outputs = if self.fades_with_thru(&slot_path) {
             Some(self.thru_fade_outputs(controller.graph(), &slot_path, old_lid))
         } else {
@@ -1869,7 +1869,7 @@ impl Hierarchy {
 
     /// Adds the fades that take the leaving part `lid` of the slot at
     /// `slot_path` out to its thru signal, in copy 0 and every stack copy,
-    /// with each copy's thru ends (ADR-0045). `None` when they cannot all
+    /// with each copy's thru ends (ADR-0046). `None` when they cannot all
     /// be added, as when the engine has no slot left for one: whatever was
     /// added is taken away again, and was never sent to the engine.
     fn add_removal_fades(

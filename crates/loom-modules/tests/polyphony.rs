@@ -1,6 +1,8 @@
 //! Bundle compilation and structural edits before the MIDI source exists.
 
-use loom_core::{EngineConfig, EngineParts, MidiControl, OutputSafety, Registry, Width, create_engine};
+mod common;
+
+use loom_core::{EngineConfig, EngineParts, MidiControl, ModuleId, OutputSafety, Registry, Width, create_engine};
 use loom_modules::{register_all, test_modules};
 use std::sync::Arc;
 
@@ -321,54 +323,6 @@ fn stereo_sides_multiply_with_voices_without_downmixing_them() {
     assert_eq!(right, [sum(4); 512]);
 }
 
-/// Selects one input voice so an engine test can inspect every voice independently.
-#[derive(Debug)]
-struct SelectVoice {
-    voice: usize,
-}
-
-impl SelectVoice {
-    const SIGNAL_IN: usize = SELECT_VOICE.input_index("in").unwrap();
-    const SIGNAL_OUT: usize = SELECT_VOICE.output_index("out").unwrap();
-    const SELECT: usize = SELECT_VOICE.param_index("select").unwrap();
-}
-
-/// Bundle-aware sink for inspecting a copied module's individual outputs.
-static SELECT_VOICE: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
-    id: "test.select-voice",
-    name: "Select test voice",
-    outputs: &[loom_core::PortSpec {
-        channels: loom_core::Channels::PerChannel,
-        ..test_modules::VOICES.outputs[0]
-    }],
-    params: &[loom_core::ParamSpec {
-        name: "select",
-        label: "Select",
-        description: "Voice to inspect.",
-        min: 1.0,
-        max: 16.0,
-        default: 1.0,
-        unit: "",
-        options: loom_core::ParamOptions::DEFAULT,
-    }
-    .integer()],
-    panel: loom_core::Panel::EMPTY,
-    role: loom_core::ModuleRole::Dsp(|_| Box::new(SelectVoice { voice: 0 })),
-    ..test_modules::VOICES
-};
-
-impl loom_core::Module for SelectVoice {
-    fn process(&mut self, _: &loom_core::ProcessContext<'_>, io: &mut loom_core::PortIo<'_>) {
-        let input = io.voice_input(Self::SIGNAL_IN, self.voice, 0);
-        io.output(Self::SIGNAL_OUT).copy_from_slice(input);
-    }
-    fn set_param(&mut self, index: usize, value: f32) {
-        if index == Self::SELECT {
-            self.voice = value.round() as usize - 1;
-        }
-    }
-}
-
 /// Eight seeded copies differ and stay repeatable when the engine supplies voice identity.
 #[test]
 fn eight_seeded_voices_differ_and_repeat() {
@@ -376,7 +330,6 @@ fn eight_seeded_voices_differ_and_repeat() {
         let mut registry = Registry::new();
         register_all(&mut registry).unwrap();
         test_modules::register(&mut registry).unwrap();
-        registry.register(&SELECT_VOICE).unwrap();
         let mut parts = create_engine(
             Arc::new(registry),
             EngineConfig {
@@ -387,20 +340,17 @@ fn eight_seeded_voices_differ_and_repeat() {
         let c = &mut parts.controller;
         let source = c.add_module("test.voices").unwrap();
         let random = c.add_module("loom.rand.random").unwrap();
-        let select = c.add_module("test.select-voice").unwrap();
+        let split = c.add_module("loom.voice.split").unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
         c.set_param_named(source, "voices", 8.0).unwrap();
         c.set_param_named(source, "value", 0.7).unwrap();
         c.connect_named(source, "out", random, "trigger").unwrap();
-        c.connect_named(random, "out", select, "in").unwrap();
-        c.connect_named(select, "out", out, "in").unwrap();
+        c.connect_named(random, "out", split, "in").unwrap();
+        c.connect_named(split, "out1", out, "in").unwrap();
         c.commit().unwrap();
         let mut values = Vec::new();
         for voice in 1..=8 {
-            parts
-                .controller
-                .set_param_named(select, "select", voice as f32)
-                .unwrap();
+            parts.controller.set_param_named(split, "first", voice as f32).unwrap();
             values.push(render(&mut parts)[511]);
         }
         values
@@ -410,6 +360,185 @@ fn eight_seeded_voices_differ_and_repeat() {
     for (i, value) in first.iter().enumerate() {
         assert!(!first[..i].contains(value));
     }
+}
+
+/// Voice spread in Random gives both sides of a voice one offset (ADR-0045).
+/// One 8-voice source feeds both inputs of Join, so each voice is stereo with
+/// equal sides, and Voice spread runs as one copy per side of each voice. The
+/// test reads each voice's two sides through Voice split's `out1`, with
+/// `first` set to that voice, into Audio Out's left and right. Per voice, `out - in` is not 0, differs from the
+/// other voices', and is the same on both sides. It compares `out - in`
+/// because the source already differs per voice.
+#[test]
+fn voice_spread_gives_both_sides_of_a_voice_one_random_offset() {
+    let mut registry = Registry::new();
+    register_all(&mut registry).unwrap();
+    test_modules::register(&mut registry).unwrap();
+    let mut parts = create_engine(
+        Arc::new(registry),
+        EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::default()
+        },
+    );
+    let c = &mut parts.controller;
+    let source = c.add_module("test.voices").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    let spread = c.add_module("loom.voice.spread").unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(source, "voices", 8.0).unwrap();
+    c.set_param_named(spread, "mode", 2.0).unwrap();
+    c.set_param_named(spread, "amount", 0.05).unwrap();
+    c.connect_named(source, "out", join, "left").unwrap();
+    c.connect_named(source, "out", join, "right").unwrap();
+    c.connect_named(join, "out", spread, "in").unwrap();
+    c.connect_named(spread, "out", split, "in").unwrap();
+    c.connect_named(split, "out1", out, "in").unwrap();
+    c.commit().unwrap();
+    assert_eq!(
+        c.last_report().width(c.output_ref(spread, "out").unwrap()),
+        Width { voices: 8, sides: 2 }
+    );
+    let mut offsets = Vec::new();
+    for voice in 0..8 {
+        parts
+            .controller
+            .set_param_named(split, "first", voice as f32 + 1.0)
+            .unwrap();
+        let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+        for _ in 0..3 {
+            parts.engine.process(&mut left, &mut right);
+        }
+        let input = 0.01 + voice as f32 * 0.01;
+        let (left, right) = (left[511] - input, right[511] - input);
+        assert_eq!(
+            left.to_bits(),
+            right.to_bits(),
+            "voice {}: {left} and {right}",
+            voice + 1
+        );
+        assert_ne!(left, 0.0, "voice {}", voice + 1);
+        assert!(!offsets.contains(&left), "voice {} repeats {left}", voice + 1);
+        offsets.push(left);
+    }
+}
+
+/// Voice spread places its voices again when a running patch changes its
+/// voice count. A 4-voice source feeds Voice spread, and Voice split reads
+/// voice 2. In Even, voice 2 sits at its share of 4 voices, then at its share
+/// of 8 once the source has 8, on the same running engine. In Random, voice
+/// 2 keeps its offset, since its draw does not depend on the count.
+#[test]
+fn voice_spread_places_its_voices_again_when_the_count_changes() {
+    let play = |mode: f32| {
+        let mut parts = engine();
+        let c = &mut parts.controller;
+        let source = c.add_module("test.voices").unwrap();
+        let spread = c.add_module("loom.voice.spread").unwrap();
+        let split = c.add_module("loom.voice.split").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.set_param_named(source, "voices", 4.0).unwrap();
+        c.set_param_named(spread, "mode", mode).unwrap();
+        c.set_param_named(spread, "amount", 0.1).unwrap();
+        c.set_param_named(split, "first", 2.0).unwrap();
+        c.connect_named(source, "out", spread, "in").unwrap();
+        c.connect_named(spread, "out", split, "in").unwrap();
+        c.connect_named(split, "out1", out, "in").unwrap();
+        c.commit().unwrap();
+        // `test.voices` gives voice 2 0.01 plus 0.01.
+        let input = 0.01 + 0.01;
+        let four = render(&mut parts)[511] - input;
+        parts.controller.set_param_named(source, "voices", 8.0).unwrap();
+        let eight = render(&mut parts)[511] - input;
+        (four, eight)
+    };
+    let (four, eight) = play(0.0);
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-6;
+    let expected = 0.1 * loom_dsp::blend::spread_offset(1, 4);
+    assert!(close(four, expected), "Even, 4 voices: {four}, expected {expected}");
+    let expected = 0.1 * loom_dsp::blend::spread_offset(1, 8);
+    assert!(close(eight, expected), "Even, 8 voices: {eight}, expected {expected}");
+
+    let (four, eight) = play(2.0);
+    assert_ne!(four, 0.0, "Random gives voice 2 an offset");
+    assert_eq!(four, eight, "Random keeps voice 2's offset");
+}
+
+/// A modulated `first` on Voice split moves its outputs on the sample. A gate
+/// from Compare, high while a sine is above 0, raises `first` from 1 to 2, so
+/// `out1` plays voice 2 while the gate is high. Join puts `out1` on the left
+/// and the gate on the right, so the test compares them frame by frame.
+#[test]
+fn a_modulated_first_moves_the_split_outputs_on_the_sample() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let source = c.add_module("test.voices").unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let compare = c.add_module("loom.logic.compare").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(source, "voices", 8.0).unwrap();
+    c.connect_named(source, "out", split, "in").unwrap();
+    c.connect_named(sine, "out", compare, "a").unwrap();
+    // `first` spans 1 to 16, so a fifteenth of the way is one voice.
+    c.add_assignment_named(compare, "gate", split, "first", 1.0 / 15.0)
+        .unwrap();
+    c.connect_named(split, "out1", join, "left").unwrap();
+    c.connect_named(compare, "gate", join, "right").unwrap();
+    c.connect_named(join, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+    for _ in 0..3 {
+        parts.engine.process(&mut left, &mut right);
+    }
+    let mut edges = 0;
+    for frame in 0..512 {
+        let expected = if right[frame] > 0.5 { 0.02 } else { 0.01 };
+        assert_eq!(left[frame], expected, "frame {frame}, gate {}", right[frame]);
+        if frame > 0 && right[frame] != right[frame - 1] {
+            edges += 1;
+        }
+    }
+    assert!(edges >= 4, "the gate changes inside the block: {edges} edges");
+}
+
+/// A stereo bundle into Voice split gives stereo outputs: each output carries
+/// both sides of its voice. Two sources with different values make the sides
+/// differ, and Audio Out shows `out3`'s two sides.
+#[test]
+fn a_stereo_bundle_gives_stereo_split_outputs() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let left_source = c.add_module("test.voices").unwrap();
+    let right_source = c.add_module("test.voices").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(left_source, "voices", 8.0).unwrap();
+    c.set_param_named(right_source, "voices", 8.0).unwrap();
+    c.set_param_named(right_source, "value", 0.5).unwrap();
+    c.set_param_named(split, "first", 2.0).unwrap();
+    c.connect_named(left_source, "out", join, "left").unwrap();
+    c.connect_named(right_source, "out", join, "right").unwrap();
+    c.connect_named(join, "out", split, "in").unwrap();
+    c.connect_named(split, "out3", out, "in").unwrap();
+    c.commit().unwrap();
+    for name in ["out1", "out8"] {
+        assert_eq!(
+            c.last_report().width(c.output_ref(split, name).unwrap()),
+            Width { voices: 1, sides: 2 },
+            "{name}"
+        );
+    }
+    let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+    for _ in 0..3 {
+        parts.engine.process(&mut left, &mut right);
+    }
+    // `out3` is voice 4: 0.03 above each source's value.
+    assert_eq!(left, [0.01 + 0.03; 512]);
+    assert_eq!(right, [0.5 + 0.03; 512]);
 }
 
 /// Queue pressure rejects a structural edit before changing graph values or schedule.
@@ -526,7 +655,6 @@ fn narrower_phase_bundles_pad_with_own_phase() {
     let mut registry = Registry::new();
     register_all(&mut registry).unwrap();
     test_modules::register(&mut registry).unwrap();
-    registry.register(&SELECT_VOICE).unwrap();
     let mut parts = create_engine(
         Arc::new(registry),
         EngineConfig {
@@ -538,18 +666,18 @@ fn narrower_phase_bundles_pad_with_own_phase() {
     let phases = c.add_module("test.voices").unwrap();
     let pitches = c.add_module("test.voices").unwrap();
     let sine = c.add_module("loom.osc.sine").unwrap();
-    let select = c.add_module("test.select-voice").unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.set_param_named(phases, "voices", 4.0).unwrap();
     c.set_param_named(phases, "value", 0.0).unwrap();
     c.set_param_named(pitches, "voices", 8.0).unwrap();
     c.connect_named(phases, "out", sine, "phase").unwrap();
     c.connect_named(pitches, "out", sine, "pitch").unwrap();
-    c.connect_named(sine, "out", select, "in").unwrap();
-    c.connect_named(select, "out", out, "in").unwrap();
+    c.connect_named(sine, "out", split, "in").unwrap();
+    c.connect_named(split, "out1", out, "in").unwrap();
     c.commit().unwrap();
     assert_eq!(render(&mut parts), [0.0; 512], "voice 1 has a real zero phase cable");
-    parts.controller.set_param_named(select, "select", 5.0).unwrap();
+    parts.controller.set_param_named(split, "first", 5.0).unwrap();
     let own = render(&mut parts);
     assert!(own.iter().any(|value| value.abs() > 0.5), "voice 5 runs its own phase");
 }
@@ -559,7 +687,6 @@ fn phase_engine() -> (EngineParts, loom_core::ModuleId, loom_core::ModuleId) {
     let mut registry = Registry::new();
     register_all(&mut registry).unwrap();
     test_modules::register(&mut registry).unwrap();
-    registry.register(&SELECT_VOICE).unwrap();
     let mut parts = create_engine(
         Arc::new(registry),
         EngineConfig {
@@ -570,24 +697,24 @@ fn phase_engine() -> (EngineParts, loom_core::ModuleId, loom_core::ModuleId) {
     let c = &mut parts.controller;
     let source = c.add_module("test.voices").unwrap();
     let phase = c.add_module("loom.phase.generator").unwrap();
-    let select = c.add_module("test.select-voice").unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.set_param_named(source, "voices", 4.0).unwrap();
     c.connect_named(source, "out", phase, "pitch").unwrap();
-    c.connect_named(phase, "phase", select, "in").unwrap();
-    c.connect_named(select, "out", out, "in").unwrap();
+    c.connect_named(phase, "phase", split, "in").unwrap();
+    c.connect_named(split, "out1", out, "in").unwrap();
     c.commit().unwrap();
-    (parts, source, select)
+    (parts, source, split)
 }
 
 /// Increasing width resets added voices while the original voice keeps its running phase.
 #[test]
 fn added_voices_start_reset_and_surviving_voices_keep_state() {
-    let (mut playing, source, select) = phase_engine();
+    let (mut playing, source, split) = phase_engine();
     let (mut reference, _, _) = phase_engine();
     assert_eq!(render(&mut playing), render(&mut reference));
     playing.controller.set_param_named(source, "voices", 8.0).unwrap();
-    playing.controller.set_param_named(select, "select", 5.0).unwrap();
+    playing.controller.set_param_named(split, "first", 5.0).unwrap();
     let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
     #[cfg(debug_assertions)]
     assert_no_alloc::assert_no_alloc(|| playing.engine.process(&mut left, &mut right));
@@ -598,7 +725,7 @@ fn added_voices_start_reset_and_surviving_voices_keep_state() {
     assert_no_alloc::assert_no_alloc(|| reference.engine.process(&mut left, &mut right));
     #[cfg(not(debug_assertions))]
     reference.engine.process(&mut left, &mut right);
-    playing.controller.set_param_named(select, "select", 1.0).unwrap();
+    playing.controller.set_param_named(split, "first", 1.0).unwrap();
     let (mut actual, mut actual_right) = ([0.0; 512], [0.0; 512]);
     #[cfg(debug_assertions)]
     assert_no_alloc::assert_no_alloc(|| playing.engine.process(&mut actual, &mut actual_right));
@@ -825,7 +952,6 @@ fn structural_batches_compile_the_screen_value_after_midi_feedback() {
     let mut registry = Registry::new();
     register_all(&mut registry).unwrap();
     test_modules::register(&mut registry).unwrap();
-    registry.register(&SELECT_VOICE).unwrap();
     registry.register(&MIRROR).unwrap();
     let mut parts = create_engine(
         Arc::new(registry),
@@ -837,11 +963,11 @@ fn structural_batches_compile_the_screen_value_after_midi_feedback() {
     let c = &mut parts.controller;
     let source = c.add_module("test.voices").unwrap();
     let mirror = c.add_module(MIRROR.id).unwrap();
-    let select = c.add_module(SELECT_VOICE.id).unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.connect_named(source, "out", mirror, "in").unwrap();
-    c.connect_named(mirror, "out", select, "in").unwrap();
-    c.connect_named(select, "out", out, "in").unwrap();
+    c.connect_named(mirror, "out", split, "in").unwrap();
+    c.connect_named(split, "out1", out, "in").unwrap();
     c.map_midi_named(
         MidiControl {
             channel: 0,
@@ -862,7 +988,7 @@ fn structural_batches_compile_the_screen_value_after_midi_feedback() {
             (mirror, MIRROR.param_index("level").unwrap(), 0.25),
         ])
         .unwrap();
-    parts.controller.set_param_named(select, "select", 2.0).unwrap();
+    parts.controller.set_param_named(split, "first", 2.0).unwrap();
     let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
     parts.engine.process(&mut left, &mut right);
     assert_eq!(left, [0.25; 512]);
@@ -921,7 +1047,6 @@ fn padded_dynamics_sidechains_use_the_voices_own_signal() {
     let mut registry = Registry::new();
     register_all(&mut registry).unwrap();
     test_modules::register(&mut registry).unwrap();
-    registry.register(&SELECT_VOICE).unwrap();
     let mut parts = create_engine(
         Arc::new(registry),
         EngineConfig {
@@ -933,7 +1058,7 @@ fn padded_dynamics_sidechains_use_the_voices_own_signal() {
     let audio = c.add_module("test.voices").unwrap();
     let side = c.add_module("test.voices").unwrap();
     let dynamics = c.add_module("loom.dyn.dynamics").unwrap();
-    let select = c.add_module(SELECT_VOICE.id).unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.set_param_named(audio, "voices", 8.0).unwrap();
     c.set_param_named(audio, "value", 0.7).unwrap();
@@ -941,15 +1066,15 @@ fn padded_dynamics_sidechains_use_the_voices_own_signal() {
     c.set_param_named(side, "value", 0.0).unwrap();
     c.connect_named(audio, "out", dynamics, "in").unwrap();
     c.connect_named(side, "out", dynamics, "sidechain").unwrap();
-    c.connect_named(dynamics, "gain", select, "in").unwrap();
-    c.connect_named(select, "out", out, "in").unwrap();
+    c.connect_named(dynamics, "gain", split, "in").unwrap();
+    c.connect_named(split, "out1", out, "in").unwrap();
     c.commit().unwrap();
     assert_eq!(
         render(&mut parts),
         [1.0; 512],
         "voice 1 keys from silent external input"
     );
-    parts.controller.set_param_named(select, "select", 5.0).unwrap();
+    parts.controller.set_param_named(split, "first", 5.0).unwrap();
     assert!(
         render(&mut parts).iter().all(|&gain| gain < 0.8),
         "voice 5 keys from its loud signal"
@@ -962,7 +1087,6 @@ fn padded_chance_lanes_follow_the_lane_above() {
     let mut registry = Registry::new();
     register_all(&mut registry).unwrap();
     test_modules::register(&mut registry).unwrap();
-    registry.register(&SELECT_VOICE).unwrap();
     let mut parts = create_engine(
         Arc::new(registry),
         EngineConfig {
@@ -974,7 +1098,7 @@ fn padded_chance_lanes_follow_the_lane_above() {
     let eight = c.add_module("test.voices").unwrap();
     let four = c.add_module("test.voices").unwrap();
     let chance = c.add_module("loom.rand.chance").unwrap();
-    let select = c.add_module(SELECT_VOICE.id).unwrap();
+    let split = c.add_module("loom.voice.split").unwrap();
     let out = c.add_module("loom.io.audio-out").unwrap();
     c.set_param_named(eight, "voices", 8.0).unwrap();
     c.set_param_named(eight, "value", 0.7).unwrap();
@@ -984,13 +1108,13 @@ fn padded_chance_lanes_follow_the_lane_above() {
     c.set_param_named(chance, "chance3", 1.0).unwrap();
     c.connect_named(eight, "out", chance, "trigger1").unwrap();
     c.connect_named(four, "out", chance, "trigger2").unwrap();
-    c.connect_named(chance, "a2", select, "in").unwrap();
-    c.connect_named(select, "out", out, "in").unwrap();
+    c.connect_named(chance, "a2", split, "in").unwrap();
+    c.connect_named(split, "out1", out, "in").unwrap();
     c.commit().unwrap();
     assert_eq!(render(&mut parts), [0.8; 512]);
-    parts.controller.set_param_named(select, "select", 5.0).unwrap();
+    parts.controller.set_param_named(split, "first", 5.0).unwrap();
     assert_eq!(render(&mut parts), [0.7f32 + 4.0 * 0.01; 512]);
-    parts.controller.connect_named(chance, "a3", select, "in").unwrap();
+    parts.controller.connect_named(chance, "a3", split, "in").unwrap();
     parts.controller.commit().unwrap();
     assert_eq!(render(&mut parts), [0.7f32 + 4.0 * 0.01; 512]);
 }
@@ -1103,4 +1227,78 @@ fn merge_reselects_only_when_a_width_edit_removes_its_choice() {
         };
         assert_eq!(render(&mut parts), [expected; 512], "mode {mode}");
     }
+}
+
+/// The polysynth example's voice chain, by module ID: MIDI Note, Voice
+/// Spread, Phase, Saw, SVF, Envelope, and Amplifier.
+const POLYSYNTH_VOICE_CHAIN: [u32; 7] = [1, 2, 3, 4, 7, 8, 9];
+
+/// The polysynth example's one-voice modules, by module ID: the LFO, the
+/// Multiply that sets its depth, and Voice Merge.
+const POLYSYNTH_ONE_VOICE: [u32; 3] = [5, 6, 10];
+
+/// The polysynth example's width of every output of `module`.
+fn output_widths(parts: &EngineParts, module: u32) -> Vec<(&'static str, Width)> {
+    let c = &parts.controller;
+    let node = c.graph().node(ModuleId(module)).expect("module exists");
+    node.descriptor
+        .outputs
+        .iter()
+        .map(|port| {
+            let output = c.output_ref(ModuleId(module), port.name).expect("output exists");
+            (port.name, c.last_report().width(output))
+        })
+        .collect()
+}
+
+/// The shipped polysynth compiles with no feedback loop, nothing skipped, and
+/// no stereo copies. Every output from MIDI Note through the Amplifier is 8
+/// mono voices, and the LFO, its Multiply, and Voice Merge give one mono
+/// voice (polyphony.md, The shipped example). The variant with the `level`
+/// cable is tested in `tests/polyphonic_midi.rs`.
+#[test]
+fn the_polysynth_example_compiles_to_eight_voices_and_no_loop() {
+    let parts = common::load("polysynth.ron");
+    let report = parts.controller.last_report();
+    assert!(report.loops.is_empty(), "no feedback loops: {:?}", report.loops);
+    assert!(report.skipped.is_empty(), "nothing skipped: {:?}", report.skipped);
+    assert!(report.per_channel.is_empty(), "no stereo copies");
+    assert!(report.stereo_outputs.is_empty(), "every output is mono");
+    let eight = Width { voices: 8, sides: 1 };
+    for module in POLYSYNTH_VOICE_CHAIN {
+        for (name, width) in output_widths(&parts, module) {
+            assert_eq!(width, eight, "module {module} output {name}");
+        }
+    }
+    for module in POLYSYNTH_ONE_VOICE {
+        for (name, width) in output_widths(&parts, module) {
+            assert_eq!(width, Width::MONO, "module {module} output {name}");
+        }
+    }
+}
+
+/// -1 dBFS, the most the polysynth may peak with 8 notes held.
+const MINUS_ONE_DBFS: f32 = 0.891;
+
+/// Eight notes held on the polysynth peak under -1 dBFS. The notes are the
+/// benchmark's (polyphony.md, The shipped example), all started on frame 0
+/// and held for 5 s: the envelopes reach sustain in under 1 s, and the LFO's
+/// 4 s cycle then runs once in full. Output safety is off, so the limiter
+/// cannot hide an overshoot. The test also checks the chord is loud enough
+/// to be a real check, so a silent patch cannot pass.
+#[test]
+fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
+    let mut parts = common::load_raw("polysynth.ron");
+    for note in [48, 52, 55, 59, 60, 64, 67, 71] {
+        assert!(parts.midi.send(loom_core::MidiEvent::note_on(0, 0, note, 100)));
+    }
+    let frames = 5 * common::SAMPLE_RATE as usize;
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    for (l, r) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
+        parts.engine.process(l, r);
+    }
+    let peak = loom_analysis::peak(&left).max(loom_analysis::peak(&right));
+    assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
+    assert!(peak > 0.25, "8 notes play: peak {peak}");
 }

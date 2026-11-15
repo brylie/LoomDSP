@@ -84,3 +84,4 @@ Patch(
 - [Pitch at 0.1 per octave](../learn/pitch.md)
 - [Triggers and gates](../learn/triggers-and-gates.md)
 - [Sine patch](../../examples/patches/sine.ron)
+- [Polysynth patch](../../examples/patches/polysynth.ron)

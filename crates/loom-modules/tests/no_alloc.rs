@@ -157,6 +157,7 @@ fn audio_thread_never_allocates() {
         "fm-feedback.ron",
         "fm-feedback-delay1.ron",
         "plucked-string.ron",
+        "polysynth.ron",
     ] {
         let mut parts = load(patch);
         let outputs: Vec<OutputRef> = parts
@@ -860,7 +861,7 @@ fn phase_cable_changes_never_allocate() {
 /// each copy's part and fade on the control thread: the audio thread
 /// allocates nothing through the fade or the finish (ADR-0044), nor
 /// through Remove part and a swap back into the empty slot, which fade in
-/// every copy too (ADR-0045).
+/// every copy too (ADR-0046).
 #[test]
 fn a_slot_swap_inside_a_stack_never_allocates() {
     use loom_patch::{FlatIds, Hierarchy, Layout, ModulePath, Patch};
@@ -924,7 +925,7 @@ fn a_slot_swap_inside_a_stack_never_allocates() {
         assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
     }
     // Out of the slot and back in, each fading in every copy from or to
-    // its own thru signal (ADR-0045).
+    // its own thru signal (ADR-0046).
     let emptied = hierarchy.swap_to_empty(&mut parts.controller, &layout, slot).unwrap();
     assert!(emptied.gone.is_empty(), "every copy fades out");
     hierarchy.sync(&mut parts.controller).unwrap();

@@ -164,6 +164,13 @@ pub struct Harness {
     allow_undocumented: bool,
     /// First bad frame for the non-finite recovery check.
     non_finite_start: usize,
+    /// One-based voice the module runs as, from [`Harness::voice`].
+    voice: usize,
+    /// Number of voices the module's copies process, from [`Harness::voice`].
+    voice_count: usize,
+    /// Which copy of the module runs, from [`Harness::channel`]: 0 for the
+    /// left copy, 1 for the right.
+    channel: usize,
 }
 
 /// The transport from one frame of a render until the next change.
@@ -211,6 +218,9 @@ impl Harness {
             reference_outputs: None,
             allow_undocumented: false,
             non_finite_start: BAD_START,
+            voice: 1,
+            voice_count: 1,
+            channel: 0,
         }
     }
 
@@ -237,6 +247,43 @@ impl Harness {
     /// port defaults. [`Signal::non_finite_busy`] aligns only with the default.
     pub fn non_finite_start(mut self, frame: usize) -> Self {
         self.non_finite_start = frame;
+        self
+    }
+
+    /// Runs the module as voice `voice` of `count`, both counted from 1, as
+    /// the engine runs one copy of a module for each voice of a bundle
+    /// (`ProcessContext::voice`, `ProcessContext::voice_count`). Every render
+    /// and check uses it. Default: voice 1 of 1. Panics unless `count` is
+    /// from 1 to 16 and `voice` from 1 to `count`.
+    #[track_caller]
+    pub fn voice(mut self, voice: usize, count: usize) -> Self {
+        assert!(
+            (1..=16).contains(&count),
+            "{}: a voice count of {count} is not between 1 and 16",
+            self.descriptor.id
+        );
+        assert!(
+            (1..=count).contains(&voice),
+            "{}: voice {voice} is not between 1 and {count}",
+            self.descriptor.id
+        );
+        self.voice = voice;
+        self.voice_count = count;
+        self
+    }
+
+    /// Runs the module as its left copy (0) or its right copy (1), as the
+    /// engine does when stereo reaches a `PerChannel` input (ADR-0020,
+    /// `ProcessContext::channel`). Every render and check uses it, so the
+    /// copy checks can run a right side. Default: 0. Panics on any other value.
+    #[track_caller]
+    pub fn channel(mut self, channel: usize) -> Self {
+        assert!(
+            channel <= 1,
+            "{}: channel {channel} is not 0 (left) or 1 (right)",
+            self.descriptor.id
+        );
+        self.channel = channel;
         self
     }
 
@@ -755,6 +802,8 @@ impl Harness {
                     .collect();
                 let ctx = loom_core::ProcessContext::new(self.sample_rate, len, &block_midi)
                     .with_transport(transport_at_frame(&transport, start))
+                    .with_voice(self.voice, self.voice_count)
+                    .with_channel(self.channel)
                     .with_midi_config(&midi_config);
                 let block_normals: Vec<_> = normals.iter().map(|normal| &normal[start..end]).collect();
                 testing::run_bundles_with_normals(
@@ -770,15 +819,11 @@ impl Harness {
             } else {
                 let mut block_outputs: Vec<&mut [f32]> =
                     outputs.iter_mut().map(|output| &mut output[start..end]).collect();
-                testing::run_with_transport(
-                    module,
-                    self.sample_rate,
-                    transport_at_frame(&transport, start),
-                    &block_inputs,
-                    connected,
-                    &mut block_outputs,
-                    &block_midi,
-                );
+                let ctx = loom_core::ProcessContext::new(self.sample_rate, len, &block_midi)
+                    .with_transport(transport_at_frame(&transport, start))
+                    .with_voice(self.voice, self.voice_count)
+                    .with_channel(self.channel);
+                testing::run_with_context(module, &ctx, &block_inputs, connected, &mut block_outputs);
             }
             start = end;
         }
