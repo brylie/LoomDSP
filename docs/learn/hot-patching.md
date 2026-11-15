@@ -68,6 +68,14 @@ When a cable into an input is plugged, pulled, or moved, the input holds the las
 
 *Why gates, triggers, and phases switch:* a ramped gate crosses its 0.5 threshold late and fires late, and a ramped phase passes through values that look like wraps.
 
+### A phase jump fades downstream
+
+A phase input switches, but the wave made from it still jumps. Plug a new phase cable into a running Sine and the Sine moves to another place in its cycle on one frame: its output steps, and the step is a click. A ramp on the phase cannot fix this. A phase that slides from 0.9 to 0.1 does not go the short way through the wrap; it sweeps back through most of the cycle, so the oscillator plays a fast run through its wave, and it falls out of lock with every module that shares the phase for those 5 ms.
+
+So LoomDSP keeps the phase exact and fades what the phase drives. When a module's phase cable is plugged, pulled, or moved, every audio, modulation, and pitch input its outputs feed fades from its last value over 5 ms, as if its own cable had changed. That includes the audio output, and an assignment whose source is that module. The fade follows phase cables on, so replugging the phase into a Phase Shift also fades whatever the oscillator after it feeds. Gate and trigger inputs on the way still switch, for the reason above (live patching spec, rule 9).
+
+*Cost:* the compiler fades on a phase cable change, not on a jump it has measured. A change that does not move the phase still fades, and a fade into a signal that did not step is a short dip, as for any moved cable. Two gestures meet this: moving a phase cable to a source with the same phase, and inserting a Phase Shift at offset 0 into a running oscillator's phase cable. Each makes a 5 ms dip. A check that skips the fade when the phase does not jump is [a follow-up issue](https://github.com/brylie/LoomDSP/issues/786).
+
 What still steps, and why, is listed in [rule 9 of the live patching spec](../design/live-patching.md#rules).
 
 ## How the measurements work

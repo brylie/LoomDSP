@@ -181,6 +181,30 @@ pub(super) fn input_fades(
     }
 }
 
+/// True when input `port` of the module at `v`, fed from `from`, carries a
+/// phase (rule 9, A phase cable change fades what the phase drives): the
+/// port's own type is a phase, or on a mixer the editor adds, whose ports
+/// carry anything, the first source upstream that is not a mixer makes
+/// one. A Select's member input never does. The port is read with `get`,
+/// so an unknown module's placeholder, which has no ports, never carries a
+/// phase.
+fn carries_phase(layout: &Layout, carried: &mut Carried, v: usize, port: usize, from: Option<OutputRef>) -> bool {
+    let node = layout.nodes[v];
+    if node.unknown.is_some() {
+        return false;
+    }
+    let Some(spec) = node.descriptor.inputs.get(port) else {
+        return false;
+    };
+    if spec.signal == SignalType::Phase {
+        return true;
+    }
+    if MixerKind::of(node.descriptor.id).is_none() || spec.name == SELECT_MEMBER_INPUT {
+        return false;
+    }
+    from.is_some_and(|from| carried.signal(layout, from) == Some(SignalType::Phase))
+}
+
 /// The mixer `id` of `graph`, if it is one.
 fn mixer_of(graph: &Graph, id: ModuleId, node: &Node) -> Option<Mixer> {
     let kind = MixerKind::of(node.descriptor.id)?;
@@ -262,8 +286,8 @@ fn sum_gain(node: &Node) -> Option<f32> {
 /// What fades in the next schedule.
 #[derive(Debug, Default)]
 pub(crate) struct FadePlan {
-    /// Inputs whose cable changed: each of their channels fades from what
-    /// it read last.
+    /// Inputs whose cable changed, and those a changed phase drives: each
+    /// of their channels fades from what it read last.
     fresh: BTreeSet<InputRef>,
     /// Channels carried from the last schedule.
     carried: BTreeSet<u64>,
@@ -340,6 +364,9 @@ impl FadePlan {
             })
         };
         let mut carried_types = Carried::default();
+        // Modules whose phase input changed cable (rule 9, A phase cable
+        // change fades what the phase drives): the walk below starts there.
+        let mut phase_changed = Vec::new();
         for (v, node) in layout.nodes.iter().enumerate() {
             let id = layout.ids[v];
             if !previous.modules.contains(&id) {
@@ -356,6 +383,11 @@ impl FadePlan {
                     && old.is_none_or(|old| input_fades_old(layout, &mut carried_types, v, port, old))
                 {
                     plan.fresh.insert(input);
+                }
+                if carries_phase(layout, &mut carried_types, v, port, new)
+                    || old.is_some_and(|old| carries_phase_old(layout, &mut carried_types, v, port, old))
+                {
+                    phase_changed.push(id);
                 }
             }
         }
@@ -379,6 +411,9 @@ impl FadePlan {
                 }
             }
         }
+        // Before `old_reads`, so a voice only the old schedule read keeps
+        // its fade slot when the walk fades its input.
+        let seeds = plan.follow_phases(previous, layout, &mut carried_types, phase_changed);
         plan.old_reads = previous
             .reads
             .iter()
@@ -400,18 +435,65 @@ impl FadePlan {
                 }
             }
         }
-        plan.add_contributions(previous, layout, compiled, &exact);
+        plan.add_contributions(previous, layout, compiled, &exact, &seeds);
         plan
     }
 
+    /// The walk from the modules whose phase input changed cable (rule 9,
+    /// A phase cable change fades what the phase drives). Every input
+    /// their outputs feed, on a module that is not new, fades if its type
+    /// fades. One that carries a phase makes its module a seed too, so the
+    /// walk goes on from there. Anything else switches, and the walk stops.
+    /// Returns every seed, for the assignments they are the source of.
+    ///
+    /// A worklist and a visited set, not recursion, so a long chain cannot
+    /// overflow the stack and a loop through phase cables ends. Who reads
+    /// each output is worked out once, and only when there is a seed.
+    fn follow_phases(
+        &mut self,
+        previous: &Wiring,
+        layout: &Layout,
+        carried: &mut Carried,
+        mut work: Vec<ModuleId>,
+    ) -> BTreeSet<ModuleId> {
+        let mut seeds: BTreeSet<ModuleId> = work.iter().copied().collect();
+        if seeds.is_empty() {
+            return seeds;
+        }
+        work = seeds.iter().copied().collect();
+        let mut readers: BTreeMap<ModuleId, Vec<(InputRef, OutputRef)>> = BTreeMap::new();
+        for (&to, &from) in &layout.graph.cables {
+            readers.entry(from.module).or_default().push((to, from));
+        }
+        while let Some(module) = work.pop() {
+            for &(to, from) in readers.get(&module).into_iter().flatten() {
+                if !previous.modules.contains(&to.module) {
+                    // A new module has nothing to hold (rule 9, What still
+                    // steps).
+                    continue;
+                }
+                let v = layout.index(to.module);
+                if input_fades(layout, carried, v, to.port, Some(from)) {
+                    self.fresh.insert(to);
+                } else if carries_phase(layout, carried, v, to.port, Some(from)) && seeds.insert(to.module) {
+                    work.push(to.module);
+                }
+            }
+        }
+        seeds
+    }
+
     /// Assignments added, removed, or moved (rule 9, Modulation
-    /// assignments).
+    /// assignments), and those whose source is a module the phase walk
+    /// reached (`seeds`), which ramp from their held contribution as a
+    /// moved source does.
     fn add_contributions(
         &mut self,
         previous: &Wiring,
         layout: &Layout,
         compiled: &[CompiledAssignment],
         exact: &dyn Fn(Option<OutputRef>, Option<OutputRef>) -> bool,
+        seeds: &BTreeSet<ModuleId>,
     ) {
         let graph = layout.graph;
         // A parameter that takes a ramp: continuous, on a module that is
@@ -452,6 +534,9 @@ impl FadePlan {
                     self.live.insert(key, true);
                 }
                 Some(_) => {}
+            }
+            if ramps && seeds.contains(&assignment.source.module) {
+                self.live.insert(key, true);
             }
         }
         let current: BTreeSet<AssignmentId> = compiled.iter().map(|a| a.id).collect();
@@ -535,6 +620,14 @@ fn input_fades_old(layout: &Layout, carried: &mut Carried, v: usize, port: usize
     } else {
         input_fades(layout, carried, v, port, None)
     }
+}
+
+/// True when the old cable `old` into input `port` of the module at `v`
+/// carried a phase. When its source is gone from the graph, only the
+/// input's own type is left to read.
+fn carries_phase_old(layout: &Layout, carried: &mut Carried, v: usize, port: usize, old: OutputRef) -> bool {
+    let old = layout.index_of.contains_key(&old.module).then_some(old);
+    carries_phase(layout, carried, v, port, old)
 }
 
 impl Wiring {

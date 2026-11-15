@@ -3,7 +3,7 @@
 How the oscillators (Sine, Saw, Pulse, Triangle) take a pitch, and how a phase cable takes over from it.
 
 - **Kind:** living specification.
-- **Status:** Implemented (2026-11-09). Rule 2's phase replug fade Agreed ([#763](https://github.com/brylie/LoomDSP/issues/763)), 2026-11-15.
+- **Status:** Implemented (2026-11-09). Rule 2's phase replug fade ([#763](https://github.com/brylie/LoomDSP/issues/763)) Implemented, 2026-11-15.
 - **Decision behind it:** [ADR-0042](../adr/0042-unpatched-phase-inputs-are-wired-for-the-player.md) (unpatched phase inputs are wired for the player). It builds on [ADR-0007](../adr/0007-polymorphic-signal-model.md) (pitch and phase signals) and [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) (one Oscillator type, built as several modules).
 - **Use case and requirements:** UC1, FR-LIB-01, FR-LIB-02. Catalogue entry [MT-SRC-01](../product/module-catalogue.md).
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md) explains what a phase is. [Pitch at 0.1 per octave](../learn/pitch.md) explains the pitch scale.

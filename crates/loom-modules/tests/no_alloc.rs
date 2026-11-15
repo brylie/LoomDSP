@@ -800,6 +800,62 @@ fn assignment_changes_never_allocate() {
     parts.controller.collect_garbage();
 }
 
+/// Phase cable changes add no allocation on the audio thread (live
+/// patching spec, rule 9, #763): a phase plugged into a Phase Shift before
+/// a Sine, moved, and pulled, and the Sine's own phase cable plugged and
+/// pulled, each fading the filter and the assignment the Sine drives, one
+/// of them during another's fade.
+#[test]
+fn phase_cable_changes_never_allocate() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(SAMPLE_RATE));
+    let c = &mut parts.controller;
+    let first = c.add_module("loom.phase.generator").unwrap();
+    let other = c.add_module("loom.phase.generator").unwrap();
+    let shift = c.add_module("loom.phase.shift").unwrap();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let svf = c.add_module("loom.filter.svf").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(shift, "phase", sine, "phase").unwrap();
+    c.connect_named(sine, "out", svf, "in").unwrap();
+    c.connect_named(svf, "lowpass", out, "in").unwrap();
+    c.add_assignment_named(sine, "out", svf, "cutoff", 0.3).unwrap();
+    let probe = c.output_ref(other, "phase").unwrap();
+    c.add_probe(probe, loom_core::ProbeKind::Meter).unwrap();
+    c.commit().unwrap();
+    let shift_in = c.input_ref(shift, "phase").unwrap();
+    let sine_in = c.input_ref(sine, "phase").unwrap();
+    let mut left = [0.0; 256];
+    let mut right = [0.0; 256];
+    for _ in 0..3 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    let edits: [(Option<loom_core::ModuleId>, InputRef); 5] = [
+        (Some(first), shift_in),
+        (Some(other), shift_in),
+        (None, shift_in),
+        (None, sine_in),
+        (Some(other), sine_in),
+    ];
+    for (from, to) in edits {
+        let c = &mut parts.controller;
+        match from {
+            Some(from) => {
+                c.connect(c.output_ref(from, "phase").unwrap(), to).unwrap();
+            }
+            None => {
+                c.disconnect(to).unwrap();
+            }
+        }
+        assert!(c.commit().unwrap().cable_fades > 0, "the Sine's readers fade");
+        // The next edit lands during this one's fade.
+        assert_no_alloc(|| parts.engine.process(&mut left[..16], &mut right[..16]));
+    }
+    for _ in 0..3 {
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    parts.controller.collect_garbage();
+}
+
 /// A swap inside a stack of four, with a spread on the slot's cutoff, adds
 /// each copy's part and fade on the control thread: the audio thread
 /// allocates nothing through the fade or the finish (ADR-0044).

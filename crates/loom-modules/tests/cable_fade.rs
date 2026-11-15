@@ -202,10 +202,12 @@ fn plugging_and_moving_a_cable_fade_from_the_held_value() {
     }
 }
 
-/// Rule 9's second criterion: gate, trigger, and phase inputs switch on
-/// the swap frame, with no ramp.
+/// Rule 9's second criterion: gate and trigger inputs switch on the swap
+/// frame, with no ramp. A phase input switches too, and what it drives
+/// fades instead: see
+/// [`a_phase_cable_plugged_moved_or_pulled_fades_what_the_sine_feeds`].
 #[test]
-fn gate_trigger_and_phase_inputs_switch_on_the_swap_frame() {
+fn gate_and_trigger_inputs_switch_on_the_swap_frame() {
     let frames = 1_000;
     let at = 500;
     for block in BLOCKS {
@@ -252,35 +254,6 @@ fn gate_trigger_and_phase_inputs_switch_on_the_swap_frame() {
         assert!(
             played[at] < played[at - 1],
             "the phase resets on the swap frame, block {block}"
-        );
-
-        // A phase: a sine reads its new phase from the swap frame.
-        let mut parts = engine();
-        let c = &mut parts.controller;
-        let sine = c.add_module("loom.osc.sine").unwrap();
-        let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(sine, "out", out, "in").unwrap();
-        let start = constant(&mut parts, 0.0);
-        let quarter = constant(&mut parts, 0.25);
-        parts.controller.connect_named(start, "out", sine, "phase").unwrap();
-        parts.controller.commit().unwrap();
-        let played = render_changing(&mut parts, frames, at, block, |parts| {
-            parts.controller.connect_named(quarter, "out", sine, "phase").unwrap();
-        });
-        assert_eq!(parts.controller.last_report().cable_fades, 0, "a phase input switches");
-        let mut ideal = engine();
-        let c = &mut ideal.controller;
-        let sine = c.add_module("loom.osc.sine").unwrap();
-        let out = c.add_module("loom.io.audio-out").unwrap();
-        c.connect_named(sine, "out", out, "in").unwrap();
-        let quarter = constant(&mut ideal, 0.25);
-        ideal.controller.connect_named(quarter, "out", sine, "phase").unwrap();
-        ideal.controller.commit().unwrap();
-        let (ideal, _) = render(&mut ideal, frames, block, &[]);
-        assert_eq!(
-            played[at..],
-            ideal[at..],
-            "the new phase from the swap frame, block {block}"
         );
     }
 }
@@ -1955,5 +1928,302 @@ fn a_panic_ends_a_setting_blend() {
         assert_ne!(during.0[..silent], before.0[..silent], "the blend ran before the panic");
         assert_eq!(during.0[silent..], before.0[silent..], "left, block {block}");
         assert_eq!(during.1[silent..], before.1[silent..], "right, block {block}");
+    }
+}
+
+/// A Phase module at `tune` semitones, with a meter on its output so it
+/// runs from the first frame even before a cable reaches it (rule 8).
+fn probed_phase(parts: &mut EngineParts, tune: f32) -> ModuleId {
+    let c = &mut parts.controller;
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    c.set_param_named(phase, "tune", tune).unwrap();
+    let output = c.output_ref(phase, "phase").unwrap();
+    c.add_probe(output, loom_core::ProbeKind::Meter).unwrap();
+    phase
+}
+
+/// A Sine module straight into the audio output.
+fn sine_out(parts: &mut EngineParts) -> ModuleId {
+    let c = &mut parts.controller;
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(sine, "out", out, "in").unwrap();
+    sine
+}
+
+/// What a Sine makes for `frames` frames, fed from a Phase at `tune`, through
+/// a Phase Shift when `shift` is true, or on its own phase for `None`: the
+/// new signal after a replug, as if it had been running all along. It is
+/// read from a scope on the Sine's output, which shows every sample, so the
+/// output's fade-in at the engine's start is not in it.
+fn ideal_sine(tune: Option<f32>, shift: bool, frames: usize, block: usize) -> Vec<f32> {
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        scope_capacity: 2 * frames,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    let mut parts = create_engine(loom_modules::registry(), config);
+    let sine = sine_out(&mut parts);
+    if let Some(tune) = tune {
+        let phase = probed_phase(&mut parts, tune);
+        let c = &mut parts.controller;
+        if shift {
+            let shifter = c.add_module("loom.phase.shift").unwrap();
+            c.connect_named(phase, "phase", shifter, "phase").unwrap();
+            c.connect_named(shifter, "phase", sine, "phase").unwrap();
+        } else {
+            c.connect_named(phase, "phase", sine, "phase").unwrap();
+        }
+    }
+    let output = parts.controller.output_ref(sine, "out").unwrap();
+    parts
+        .controller
+        .add_probe(output, loom_core::ProbeKind::MeterAndScope)
+        .unwrap();
+    parts.controller.commit().unwrap();
+    render(&mut parts, frames, block, &[]);
+    let samples: Vec<f32> = parts
+        .telemetry
+        .scope()
+        .flat_map(|chunk| chunk.samples().to_vec())
+        .collect();
+    assert_eq!(samples.len(), frames, "the scope kept every sample");
+    samples
+}
+
+/// Checks that from frame `at` on the output ramps from what it played on
+/// frame `at - 1` to `new` over 5 ms, exactly, and that there was a jump.
+fn check_phase_ramp(name: &str, block: usize, played: &[f32], at: usize, new: &[f32]) {
+    let held = played[at - 1];
+    assert!(
+        (held - new[0]).abs() > 0.1,
+        "{name}: the phase replug makes a jump, block {block}"
+    );
+    for (k, &new) in new.iter().enumerate() {
+        assert_eq!(played[at + k], faded(held, new, k), "{name}, frame {k}, block {block}");
+    }
+}
+
+/// Rule 9's #763 criterion: a running Sine into the audio output, with a
+/// phase cable plugged into it, moved, or pulled. The phase switches on the
+/// swap frame, so the Sine plays its new phase at once, and the audio
+/// output's input ramps from its last value to that over 5 ms: frame k is
+/// `held · (1 − k/N) + new · k/N`, and from frame N on exactly `new`. A
+/// ramped phase would not give `new`. The same at block sizes 1, 77, and
+/// 512.
+#[test]
+fn a_phase_cable_plugged_moved_or_pulled_fades_what_the_sine_feeds() {
+    let frames = 2_000;
+    let at = 1_000;
+    for block in BLOCKS {
+        // Plugged: from the own phase to a Phase at a fifth above.
+        let fifth = ideal_sine(Some(7.0), false, frames, block);
+        let mut parts = engine();
+        let sine = sine_out(&mut parts);
+        let other = probed_phase(&mut parts, 7.0);
+        parts.controller.commit().unwrap();
+        let played = render_changing(&mut parts, frames, at, block, |parts| {
+            parts.controller.connect_named(other, "phase", sine, "phase").unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 2, "plugged, block {block}");
+        check_phase_ramp("plugged", block, &played, at, &fifth[at..]);
+
+        // Moved: from a Phase at middle C to the one a fifth above.
+        let mut parts = engine();
+        let sine = sine_out(&mut parts);
+        let first = probed_phase(&mut parts, 0.0);
+        let other = probed_phase(&mut parts, 7.0);
+        parts.controller.connect_named(first, "phase", sine, "phase").unwrap();
+        parts.controller.commit().unwrap();
+        let played = render_changing(&mut parts, frames, at, block, |parts| {
+            parts.controller.connect_named(other, "phase", sine, "phase").unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 2, "moved, block {block}");
+        check_phase_ramp("moved", block, &played, at, &fifth[at..]);
+
+        // Pulled: the Sine goes back to its own phase, which held at 0
+        // while the cable was in (oscillators spec, rule 3).
+        let own = ideal_sine(None, false, frames - at, block);
+        let mut parts = engine();
+        let sine = sine_out(&mut parts);
+        let other = probed_phase(&mut parts, 7.0);
+        parts.controller.connect_named(other, "phase", sine, "phase").unwrap();
+        parts.controller.commit().unwrap();
+        let input = parts.controller.input_ref(sine, "phase").unwrap();
+        let played = render_changing(&mut parts, frames, at, block, |parts| {
+            parts.controller.disconnect(input).unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 2, "pulled, block {block}");
+        check_phase_ramp("pulled", block, &played, at, &own);
+    }
+}
+
+/// Rule 9's #763 criterion: Phase into Phase Shift into Sine. When the
+/// Phase Shift's phase cable moves, the fade follows the phase cable on:
+/// the Sine's phase switches, and the audio output it feeds ramps over
+/// 5 ms. A gate input the Sine feeds switches instead, exactly as if the
+/// new phase had been there all along.
+#[test]
+fn a_phase_shift_replug_fades_what_the_sine_after_it_feeds() {
+    let frames = 2_000;
+    let at = 1_000;
+    for block in BLOCKS {
+        let new = ideal_sine(Some(7.0), true, frames, block);
+        let mut parts = engine();
+        let sine = sine_out(&mut parts);
+        let first = probed_phase(&mut parts, 0.0);
+        let other = probed_phase(&mut parts, 7.0);
+        let c = &mut parts.controller;
+        let shifter = c.add_module("loom.phase.shift").unwrap();
+        c.connect_named(first, "phase", shifter, "phase").unwrap();
+        c.connect_named(shifter, "phase", sine, "phase").unwrap();
+        c.commit().unwrap();
+        let played = render_changing(&mut parts, frames, at, block, |parts| {
+            parts
+                .controller
+                .connect_named(other, "phase", shifter, "phase")
+                .unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 2, "block {block}");
+        check_phase_ramp("through a Phase Shift", block, &played, at, &new[at..]);
+
+        // A gate downstream: the Sine into an Or's input, which passes it
+        // on as a gate. It switches.
+        let gated = |parts: &mut EngineParts, tune: f32| {
+            let phase = probed_phase(parts, tune);
+            let c = &mut parts.controller;
+            let shifter = c.add_module("loom.phase.shift").unwrap();
+            let sine = c.add_module("loom.osc.sine").unwrap();
+            let logic = c.add_module("loom.logic.logic").unwrap();
+            let out = c.add_module("loom.io.audio-out").unwrap();
+            c.set_param_named(logic, "op", 1.0).unwrap();
+            c.connect_named(phase, "phase", shifter, "phase").unwrap();
+            c.connect_named(shifter, "phase", sine, "phase").unwrap();
+            c.connect_named(sine, "out", logic, "in1").unwrap();
+            c.connect_named(logic, "out", out, "in").unwrap();
+            shifter
+        };
+        let mut ideal = engine();
+        gated(&mut ideal, 7.0);
+        ideal.controller.commit().unwrap();
+        let (ideal, _) = render(&mut ideal, frames, block, &[]);
+        let mut parts = engine();
+        let shifter = gated(&mut parts, 0.0);
+        let other = probed_phase(&mut parts, 7.0);
+        parts.controller.commit().unwrap();
+        let played = render_changing(&mut parts, frames, at, block, |parts| {
+            parts
+                .controller
+                .connect_named(other, "phase", shifter, "phase")
+                .unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 0, "a gate switches");
+        assert!(
+            ideal[at..].contains(&1.0) && ideal[at..].contains(&0.0),
+            "the gate moves"
+        );
+        assert_eq!(played[at..], ideal[at..], "the gate from the swap frame, block {block}");
+    }
+}
+
+/// Rule 9's #763 criterion: an assignment whose source is a module whose
+/// phase cable changed ramps from its held contribution to the new one
+/// over 5 ms, as a moved source does, at block sizes 1, 77, and 512.
+#[test]
+fn an_assignment_from_a_replugged_module_ramps_its_contribution() {
+    let frames = 2_000;
+    let at = 1_000;
+    let depth = 0.25;
+    for block in BLOCKS {
+        let old = ideal_sine(Some(0.0), false, frames, block);
+        let new = ideal_sine(Some(7.0), false, frames, block);
+        let mut parts = engine();
+        let seen = window(&mut parts);
+        let first = probed_phase(&mut parts, 0.0);
+        let other = probed_phase(&mut parts, 7.0);
+        let c = &mut parts.controller;
+        let sine = c.add_module("loom.osc.sine").unwrap();
+        c.connect_named(first, "phase", sine, "phase").unwrap();
+        c.add_assignment_named(sine, "out", seen, "offset", depth).unwrap();
+        c.commit().unwrap();
+        let played = render_changing(&mut parts, frames, at, block, |parts| {
+            parts.controller.connect_named(other, "phase", sine, "phase").unwrap();
+        });
+        assert_eq!(parts.controller.last_report().cable_fades, 1, "block {block}");
+        let held = f64::from(depth * old[at - 1]);
+        assert!(
+            (held - f64::from(depth * new[at])).abs() > 0.05,
+            "the contribution jumps, block {block}"
+        );
+        for k in 1..frames - at {
+            let t = (k as f64 / fade_length() as f64).min(1.0);
+            let expected = offset_of(held * (1.0 - t) + f64::from(depth * new[at + k]) * t);
+            assert!(
+                (played[at + k] - expected).abs() <= 1e-6,
+                "frame {k}, block {block}: {} != {expected}",
+                played[at + k]
+            );
+        }
+    }
+}
+
+/// A 4-voice phase bundle into a Sine, replugged to a mono phase, so the
+/// Sine narrows to one voice. Voice 1 of the audio output fades to the new
+/// signal, and voices 2 to 4 fade out from their held values. Their fade
+/// slots exist only if the phase walk adds the output's input before the
+/// compiler lists the voices the old schedule read; without them those
+/// voices would stop at once.
+#[test]
+fn a_phase_bundle_replugged_to_mono_fades_the_voices_out() {
+    let mut registry = loom_core::Registry::new();
+    loom_modules::register_all(&mut registry).unwrap();
+    loom_modules::test_modules::register(&mut registry).unwrap();
+    let registry = std::sync::Arc::new(registry);
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(SAMPLE_RATE)
+    };
+    // What a Sine makes of a fixed phase, once the output's fade-in at
+    // the engine's start is over.
+    let sine_of = |phase: f32| {
+        let mut parts = engine();
+        let sine = sine_out(&mut parts);
+        let value = constant(&mut parts, phase);
+        parts.controller.connect_named(value, "out", sine, "phase").unwrap();
+        parts.controller.commit().unwrap();
+        render(&mut parts, 1_000, 64, &[]).0[999]
+    };
+    let at = 500;
+    for block in BLOCKS {
+        let mut parts = create_engine(registry.clone(), config);
+        let sine = sine_out(&mut parts);
+        let c = &mut parts.controller;
+        let voices = c.add_module("test.voices").unwrap();
+        c.set_param_named(voices, "voices", 4.0).unwrap();
+        c.set_param_named(voices, "value", 0.005).unwrap();
+        c.connect_named(voices, "out", sine, "phase").unwrap();
+        let mono = constant(&mut parts, 0.2);
+        parts.controller.commit().unwrap();
+        let played = render_changing(&mut parts, 1_000, at, block, |parts| {
+            parts.controller.connect_named(mono, "out", sine, "phase").unwrap();
+        });
+        // Small phases, so the four voices sum under full scale.
+        let held: Vec<f32> = (0..4).map(|voice| sine_of(0.005 + voice as f32 * 0.01)).collect();
+        let before: f32 = held.iter().sum();
+        assert!(
+            (played[at - 1] - before).abs() < 1e-5,
+            "four voices sum: {} != {before}, {held:?}",
+            played[at - 1]
+        );
+        let new = sine_of(0.2);
+        for k in 0..500 {
+            let expected =
+                faded(held[0], new, k) + faded(held[1], 0.0, k) + faded(held[2], 0.0, k) + faded(held[3], 0.0, k);
+            assert!(
+                (played[at + k] - expected).abs() < 1e-6,
+                "frame {k}, block {block}: {} != {expected}",
+                played[at + k]
+            );
+        }
     }
 }
