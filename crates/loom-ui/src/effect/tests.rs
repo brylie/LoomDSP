@@ -291,3 +291,22 @@ fn unfocus_moves_the_focus_to_nothing() {
     ));
     assert_eq!(list[0].name(), names::FOCUS);
 }
+
+/// The accessibility effect has its stable name, and its debug text gives
+/// the size of the tree and of its changes, not every node.
+#[test]
+fn the_accessibility_effect_names_itself_and_its_size() {
+    let mut window = accesskit::Node::new(accesskit::Role::Window);
+    window.set_label("Tree");
+    let whole = accesskit::TreeUpdate {
+        nodes: vec![(accesskit::NodeId(1), window)],
+        tree: Some(accesskit::TreeInfo::new(accesskit::NodeId(1))),
+        tree_id: accesskit::TreeId::ROOT,
+        focus: accesskit::NodeId(1),
+    };
+    let effects = Effects::<Msg>::accessibility(whole, None);
+    let effect = effects.iter().next().expect("one effect");
+    assert_eq!(effect.name(), names::ACCESSIBILITY);
+    assert_eq!(effect.name(), "accessibility tree");
+    assert_eq!(format!("{effect:?}"), "Accessibility { nodes: 1, changed: None }");
+}

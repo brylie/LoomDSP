@@ -966,3 +966,21 @@ fn a_screen_readers_action_is_a_message_and_the_tree_reaches_the_driver() {
         "an event the app wants no message for runs none"
     );
 }
+
+/// An app with no accessibility tree wants no message for a screen
+/// reader's event, so its turn runs no update (the default
+/// `App::accessibility_event`).
+#[test]
+fn an_app_with_no_tree_hears_no_screen_reader() {
+    let mut runtime = Runtime::new(
+        TestApp::default(),
+        Recorder::default(),
+        WindowState::new(Size::new(100.0, 100.0)),
+        Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    let event = DriverEvent::Accessibility(crate::AccessEvent::Activated);
+    runtime.handle(event, Instant::now(), &mut driver);
+    assert_eq!(runtime.counts().updates, 0);
+    assert!(driver.accessibility().is_none());
+}
