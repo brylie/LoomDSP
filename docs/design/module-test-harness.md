@@ -166,6 +166,7 @@ Golden-audio tests for whole patches, the other half of NFR-OSS-05 ([#93](https:
 - [x] `check_non_finite_recovery` fails for a module that stores a bad input on another input's rising edge, on `Signal::non_finite_busy` (test).
 - [x] Every built-in DSP module passes `check_non_finite_recovery` with the transport playing, on port defaults and on busy inputs.
 - [x] Every built-in DSP module passes `check_copy_state` on port defaults with the transport playing, copied mid-cycle, on the bar wrap, and on the frame after it, except seeded ones other than Selector and Voice spread, which pass the strict check ([stereo](stereo.md), rule 27; Voice spread with [#675](https://github.com/brylie/LoomDSP/issues/675)).
+- [x] `Harness::voice(i, count)` and `Harness::channel(c)` run the module as voice `i` of `count` (1 to 16, counted from 1) and as its left (0) or right (1) copy, in every render and check, the copy checks included. The default is voice 1 of 1 on channel 0. A value out of range fails the test ([#675](https://github.com/brylie/LoomDSP/issues/675)).
 - [x] Every built-in DSP module passes the all-input extreme check at its defaults and in each option of each choice parameter, except modules with a stated exception, which stay bounded.
 - [x] Every built-in DSP module stays finite with its continuous parameters at their maximum, each input in turn and all inputs at once.
 - [x] A parameter change and a transport change land on the same frame at block sizes 1, 77, and 512, for every built-in DSP module.

@@ -1399,3 +1399,141 @@ fn midi_builder_orders_frames_and_preserves_equal_frame_order() {
     assert_eq!(render.output("zone")[125], 3.0);
     assert!(harness.check_copy_state(80));
 }
+
+/// Writes the voice, the voice count, and the channel it runs as to its
+/// outputs, so a test can see what the harness passes in.
+struct VoiceReport;
+
+impl VoiceReport {
+    const VOICE_OUT: usize = VOICE_REPORT.output_index("voice").unwrap();
+    const COUNT_OUT: usize = VOICE_REPORT.output_index("count").unwrap();
+    const CHANNEL_OUT: usize = VOICE_REPORT.output_index("channel").unwrap();
+}
+
+impl Module for VoiceReport {
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        io.output(Self::VOICE_OUT).fill(ctx.voice() as f32);
+        io.output(Self::COUNT_OUT).fill(ctx.voice_count() as f32);
+        io.output(Self::CHANNEL_OUT).fill(ctx.channel() as f32);
+    }
+}
+
+/// A module with no `Voices` port, which the harness runs through
+/// `testing::run_with_context`.
+static VOICE_REPORT: ModuleDescriptor = ModuleDescriptor {
+    id: "test.voice-report",
+    description: "Reports its voice, voice count, and channel.",
+    inputs: &[],
+    outputs: &[
+        port("voice", SignalType::Modulation),
+        port("count", SignalType::Modulation),
+        port("channel", SignalType::Modulation),
+    ],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(VoiceReport)),
+    ..ECHO
+};
+
+/// The same report from a module with a `Voices` input, which the harness
+/// runs through `testing::run_bundles_with_normals`.
+static BUNDLE_VOICE_REPORT: ModuleDescriptor = ModuleDescriptor {
+    id: "test.bundle-voice-report",
+    inputs: &[port("in", SignalType::Modulation).with_channels(Channels::Voices)],
+    ..VOICE_REPORT
+};
+
+/// Renders `harness` at block sizes 1, 77, and 512, and checks that every
+/// frame of each render reports `voice` of `count` on `channel`.
+#[track_caller]
+fn assert_reports(harness: &Harness, voice: usize, count: usize, channel: usize) {
+    harness.check_block_sizes();
+    for block in BLOCK_SIZES {
+        let render = harness.render_with_block(block);
+        let frames = render.frames();
+        assert_eq!(render.output("voice"), vec![voice as f32; frames], "block size {block}");
+        assert_eq!(render.output("count"), vec![count as f32; frames], "block size {block}");
+        assert_eq!(
+            render.output("channel"),
+            vec![channel as f32; frames],
+            "block size {block}"
+        );
+    }
+}
+
+/// A harness runs a module as voice 1 of 1 on channel 0 unless a test says
+/// otherwise, so existing renders and references are unchanged.
+#[test]
+fn the_default_is_voice_one_of_one_on_channel_zero() {
+    assert_reports(&Harness::new(&VOICE_REPORT).frames(1000), 1, 1, 0);
+    assert_reports(&Harness::new(&BUNDLE_VOICE_REPORT).frames(1000), 1, 1, 0);
+}
+
+/// `voice` and `channel` reach a module with no `Voices` port at every block
+/// size.
+#[test]
+fn voice_and_channel_reach_a_module_at_every_block_size() {
+    let harness = Harness::new(&VOICE_REPORT).frames(1000).voice(3, 8).channel(1);
+    assert_reports(&harness, 3, 8, 1);
+}
+
+/// `voice` and `channel` also reach a module with a `Voices` port.
+#[test]
+fn voice_and_channel_reach_a_bundle_module() {
+    let harness = Harness::new(&BUNDLE_VOICE_REPORT)
+        .frames(1000)
+        .input("in", Signal::constant(0.0))
+        .voice(16, 16)
+        .channel(1);
+    assert_reports(&harness, 16, 16, 1);
+}
+
+/// The copy checks run both instances as the chosen voice and channel, so the
+/// strict copy check can run a right side.
+#[test]
+fn the_copy_check_runs_the_chosen_voice_and_channel() {
+    let harness = Harness::new(&VOICE_REPORT).frames(1000).voice(2, 4).channel(1);
+    for block in BLOCK_SIZES {
+        let (_, running, copy) = harness.copied_at(300, block);
+        for outputs in [running, copy] {
+            assert_eq!(outputs[VoiceReport::VOICE_OUT], vec![2.0; 700], "block size {block}");
+            assert_eq!(outputs[VoiceReport::COUNT_OUT], vec![4.0; 700], "block size {block}");
+            assert_eq!(outputs[VoiceReport::CHANNEL_OUT], vec![1.0; 700], "block size {block}");
+        }
+    }
+    harness.check_copy_state(300);
+}
+
+/// Voice 0 does not exist: voices count from 1.
+#[test]
+#[should_panic(expected = "voice 0 is not between 1 and 8")]
+fn voice_zero_fails() {
+    let _ = Harness::new(&VOICE_REPORT).voice(0, 8);
+}
+
+/// A voice past the count fails.
+#[test]
+#[should_panic(expected = "voice 9 is not between 1 and 8")]
+fn a_voice_past_the_count_fails() {
+    let _ = Harness::new(&VOICE_REPORT).voice(9, 8);
+}
+
+/// A voice count outside 1 to 16 fails.
+#[test]
+#[should_panic(expected = "a voice count of 17 is not between 1 and 16")]
+fn a_voice_count_past_sixteen_fails() {
+    let _ = Harness::new(&VOICE_REPORT).voice(1, 17);
+}
+
+/// A voice count of 0 fails.
+#[test]
+#[should_panic(expected = "a voice count of 0 is not between 1 and 16")]
+fn a_voice_count_of_zero_fails() {
+    let _ = Harness::new(&VOICE_REPORT).voice(1, 0);
+}
+
+/// A channel other than left (0) or right (1) fails.
+#[test]
+#[should_panic(expected = "channel 2 is not 0 (left) or 1 (right)")]
+fn a_channel_past_the_right_fails() {
+    let _ = Harness::new(&VOICE_REPORT).channel(2);
+}

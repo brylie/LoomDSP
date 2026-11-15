@@ -185,3 +185,53 @@ fn bundle_layout_maps_flattened_channels_back_to_ports() {
         }
     }
 }
+
+/// Writes the voice, the voice count, and the channel it runs as to its three
+/// outputs.
+struct VoiceReport;
+
+impl Module for VoiceReport {
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        io.output(0).fill(ctx.voice() as f32);
+        io.output(1).fill(ctx.voice_count() as f32);
+        io.output(2).fill(ctx.channel() as f32);
+    }
+}
+
+/// Runs [`VoiceReport`] for 4 frames with `run` and returns its three outputs.
+fn report(run: impl FnOnce(&mut dyn Module, &mut [&mut [f32]])) -> [[f32; 4]; 3] {
+    let mut buffers = [[0.0f32; 4]; 3];
+    let [voice, count, channel] = &mut buffers;
+    run(&mut VoiceReport, &mut [voice, count, channel]);
+    buffers
+}
+
+/// `run_with_context` hands the module the context's voice, voice count, and
+/// channel.
+#[test]
+fn run_with_context_passes_the_voice_and_channel() {
+    let midi = [];
+    let ctx = ProcessContext::new(48_000.0, 4, &midi).with_voice(3, 8).with_channel(1);
+    let outputs = report(|module, outputs| testing::run_with_context(module, &ctx, &[], &[], outputs));
+    assert_eq!(outputs, [[3.0; 4], [8.0; 4], [1.0; 4]]);
+}
+
+/// `run_with_transport_and_channel` still runs voice 1 of 1 on the channel it
+/// is given.
+#[test]
+fn run_with_transport_and_channel_runs_voice_one_of_one() {
+    let outputs = report(|module, outputs| {
+        testing::run_with_transport_and_channel(module, 48_000.0, TransportInfo::default(), &[], &[], outputs, &[], 1);
+    });
+    assert_eq!(outputs, [[1.0; 4], [1.0; 4], [1.0; 4]]);
+}
+
+/// `run_with_context` refuses a buffer whose length is not the context's
+/// frame count.
+#[test]
+#[should_panic(expected = "assertion failed")]
+fn run_with_context_refuses_a_buffer_of_another_length() {
+    let midi = [];
+    let ctx = ProcessContext::new(48_000.0, 5, &midi);
+    report(|module, outputs| testing::run_with_context(module, &ctx, &[], &[], outputs));
+}
