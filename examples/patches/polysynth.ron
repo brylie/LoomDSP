@@ -13,8 +13,10 @@
 // the app. The app connects to it on its own, and the status bar says
 // `MIDI: "Loom Pad" connected.` Then type `on 60`, `on 64`, and `on 67`, and
 // `off 60` and so on to let go. On Windows, use a MIDI keyboard. Hold note
-// in the toolbar plays one note, and `loom render --note 60 --note 64`
-// plays its notes one after another, not together.
+// in the toolbar plays one note, quietly, because the gain leaves room for
+// 8; raise the Amplifier's Gain to hear it louder. And
+// `loom render --note 60 --note 64` plays its notes one after another, not
+// together.
 //
 // What to turn:
 // - Voice Spread detunes each voice by its own small amount: Random mode,
@@ -33,10 +35,11 @@
 //   8 voices x saw peak 1 x envelope peak 1 x SVF peak gain x gain <= 0.891
 // The SVF's damping is k = 2 - 1.98 x 0.4 = 1.208, so Q = 1/k = 0.83, and
 // a lowpass with Q above 0.707 peaks at Q / sqrt(1 - 1/(4 Q^2)) = 1.04.
-// So gain <= 0.891 / (8 x 1.04) = 0.107, and the patch uses 0.1: about
-// 0.83, or -1.6 dBFS, with 8 notes. The estimate is not a bound, since a
-// resonant filter can ring past its peak gain, so a test holds 8 notes and
-// checks the peak. One note then peaks near 0.1, about -20 dBFS. If you
+// So gain <= 0.891 / (8 x 1.04) = 0.107, and the patch uses 0.1. With 8
+// notes the peak is at most about 0.83 (-1.6 dBFS) by this estimate; the
+// test chord measures about 0.56 (-5 dBFS). The estimate is not a bound,
+// since a resonant filter can ring past its peak gain, so a test holds 8
+// notes and checks the peak. One note then peaks near 0.1, about -20 dBFS. If you
 // play fewer notes, raise the Amplifier's gain.
 //
 // Audio Out already sums the voices of a cable. Voice Merge is here to make

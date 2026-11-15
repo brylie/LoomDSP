@@ -206,42 +206,42 @@ pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
         split_out(
             "out1",
             "Out 1",
-            "Voice First. Past the input's last voice it holds the input's default.",
+            "The voice First names. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out2",
             "Out 2",
-            "Voice First plus 1. Past the input's last voice it holds the input's default.",
+            "The voice after Out 1's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out3",
             "Out 3",
-            "Voice First plus 2. Past the input's last voice it holds the input's default.",
+            "The voice after Out 2's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out4",
             "Out 4",
-            "Voice First plus 3. Past the input's last voice it holds the input's default.",
+            "The voice after Out 3's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out5",
             "Out 5",
-            "Voice First plus 4. Past the input's last voice it holds the input's default.",
+            "The voice after Out 4's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out6",
             "Out 6",
-            "Voice First plus 5. Past the input's last voice it holds the input's default.",
+            "The voice after Out 5's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out7",
             "Out 7",
-            "Voice First plus 6. Past the input's last voice it holds the input's default.",
+            "The voice after Out 6's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
         split_out(
             "out8",
             "Out 8",
-            "Voice First plus 7. Past the input's last voice it holds the input's default.",
+            "The voice after Out 7's. Past the input's last voice it is 0, the input's unpatched value.",
         ),
     ],
     params: &[ParamSpec {
@@ -290,7 +290,7 @@ impl Split {
 
     /// A value of `first` as a whole voice number from 1 to 16.
     fn first_from(value: f32) -> usize {
-        value.round().clamp(1.0, 16.0) as usize
+        value.round().clamp(1.0, loom_dsp::voice::MAX_VOICES as f32) as usize
     }
 }
 
@@ -381,7 +381,7 @@ pub static SPREAD: ModuleDescriptor = ModuleDescriptor {
             name: "mode",
             label: "Mode",
             description: "Even spreads the voices from minus to plus the amount, Series steps them from 0 up to the \
-                          amount, and Random gives each voice a fixed random share.",
+                          amount, and Random gives each voice a fixed random offset, from minus to plus the amount.",
             min: 0.0,
             max: 2.0,
             default: 0.0,

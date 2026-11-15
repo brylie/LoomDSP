@@ -304,3 +304,76 @@ fn a_modulated_octave_rounds_to_whole_octaves() {
     assert_eq!(play(Some(0.01)), steady);
     assert_ne!(play(Some(0.05)), steady, "a whole octave more does change it");
 }
+
+/// Voice 2 of an 8-voice bundle through Voice spread, with a gate assigned
+/// to Spread's `param` at `depth`. The gate comes from Compare, high while a
+/// sine is above 0, so it changes several times in one block. Voice split's
+/// `out1`, with `first` 2, goes to the left side, and the gate to the right.
+/// Returns one block of each side, and the input of voice 2.
+fn spread_under_a_gate(mode: f32, param: &str, depth: f32) -> (Vec<f32>, Vec<f32>, f32) {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let voices = module(c, "test.voices", "voices", 8.0);
+    let spread = module(c, "loom.voice.spread", "mode", mode);
+    c.set_param_named(spread, "amount", 0.1).unwrap();
+    let split = module(c, "loom.voice.split", "first", 2.0);
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    let compare = c.add_module("loom.logic.compare").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    c.connect_named(voices, "out", spread, "in").unwrap();
+    c.connect_named(spread, "out", split, "in").unwrap();
+    c.connect_named(sine, "out", compare, "a").unwrap();
+    c.add_assignment_named(compare, "gate", spread, param, depth).unwrap();
+    c.connect_named(split, "out1", join, "left").unwrap();
+    c.connect_named(compare, "gate", join, "right").unwrap();
+    listen(c, join, "out");
+    c.commit().unwrap();
+    let (mut left, mut right) = (vec![0.0; 512], vec![0.0; 512]);
+    for _ in 0..2 {
+        parts.engine.process(&mut left, &mut right);
+    }
+    // `test.voices` gives 0.01, plus 0.01 for each voice after the first.
+    (left, right, 0.01 + 0.01)
+}
+
+/// How many times `gate` changes from one frame to the next.
+fn edges(gate: &[f32]) -> usize {
+    gate.windows(2).filter(|pair| pair[0] != pair[1]).count()
+}
+
+/// Voice spread follows a modulated mode and seed on the sample. A gate on
+/// `mode` at a depth of half its 0 to 2 span moves Even to Series while it is
+/// high, so voice 2 of 8 is offset by its Series share then and by its Even
+/// share otherwise. A gate on `seed` in Random gives voice 2 another offset
+/// while it is high, inside the same block.
+#[test]
+fn voice_spread_follows_a_modulated_mode_and_seed() {
+    let (out, gate, input) = spread_under_a_gate(0.0, "mode", 0.5);
+    assert!(edges(&gate) >= 4, "the gate changes inside the block: {}", edges(&gate));
+    let even = 0.1 * loom_dsp::blend::spread_offset(1, 8);
+    let series = 0.1 * (1.0 / 7.0);
+    for frame in 0..512 {
+        let expected = if gate[frame] > 0.5 { series } else { even };
+        let offset = out[frame] - input;
+        assert!(
+            (offset - expected).abs() < 1e-6,
+            "frame {frame}, gate {}: offset {offset}, expected {expected}",
+            gate[frame]
+        );
+    }
+
+    // The seed spans 1 to 65535, so this depth adds 1 to it.
+    let (out, gate, input) = spread_under_a_gate(2.0, "seed", 1.0 / 65_534.0);
+    let offset_where = |high: bool| {
+        (0..512)
+            .find(|&frame| (gate[frame] > 0.5) == high)
+            .map(|frame| out[frame] - input)
+            .expect("the gate is both high and low in the block")
+    };
+    let (low, high) = (offset_where(false), offset_where(true));
+    assert_ne!(low, high, "a modulated seed changes the offset");
+    for frame in 0..512 {
+        let expected = if gate[frame] > 0.5 { high } else { low };
+        assert_eq!(out[frame] - input, expected, "frame {frame}");
+    }
+}

@@ -3,11 +3,11 @@
 A test harness for module authors: render one module with given inputs and parameters, check it against a stored reference render, and check that block size does not change its output.
 
 - **Kind:** living specification.
-- **Status:** Implemented, M1. [Blind spots in the shared checks](#blind-spots-in-the-shared-checks), [All inputs at once](#all-inputs-at-once), and [Changes during a render](#changes-during-a-render) Implemented, M2 (updated 2026-11-11, [#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)).
+- **Status:** Implemented, M1. [Blind spots in the shared checks](#blind-spots-in-the-shared-checks), [All inputs at once](#all-inputs-at-once), and [Changes during a render](#changes-during-a-render) Implemented, M2 (updated 2026-11-11, [#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96), [#675](https://github.com/brylie/LoomDSP/issues/675)).
 - **Decision behind it:** [ADR-0002](../adr/0002-graph-execution-and-feedback.md) ("The SDK harness must cover this"), [ADR-0037](../adr/0037-finite-inputs-hold-at-the-largest-finite-value.md) (the overflow rule).
 - **Background:** [Block-size invariance](../learn/block-size-invariance.md): why a module must sound the same at any block size, and what breaks it.
 - **Use case and requirements:** FR-SDK-02, NFR-OSS-05.
-- **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules), [#127](https://github.com/brylie/LoomDSP/issues/127) (non-finite inputs), [#552](https://github.com/brylie/LoomDSP/issues/552) (huge inputs), [#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96)
+- **Issues:** [#42](https://github.com/brylie/LoomDSP/issues/42), [#208](https://github.com/brylie/LoomDSP/issues/208) (test modules), [#127](https://github.com/brylie/LoomDSP/issues/127) (non-finite inputs), [#552](https://github.com/brylie/LoomDSP/issues/552) (huge inputs), [#564](https://github.com/brylie/LoomDSP/issues/564), [#632](https://github.com/brylie/LoomDSP/issues/632), [#575](https://github.com/brylie/LoomDSP/issues/575), [#96](https://github.com/brylie/LoomDSP/issues/96), [#675](https://github.com/brylie/LoomDSP/issues/675)
 - **Code:** `crates/loom-test`; the built-in modules use it in `crates/loom-modules/tests/reference.rs`.
 
 ## Goal
@@ -45,6 +45,8 @@ The harness is its own crate, `loom-test`, used as a dev-dependency. *Why:* it r
 | `.transport(settings)` | stopped, 120 BPM, 4/4 | The transport the module sees, starting at position 0. |
 | `.param_at(seconds, name, value)` | none | Changes a parameter during the render. See [Changes during a render](#changes-during-a-render). |
 | `.transport_at(seconds, settings)` | none | Changes the transport during the render. See [Changes during a render](#changes-during-a-render). |
+| `.voice(i, count)` | voice 1 of 1 | Runs the module as voice `i` of `count`, both counted from 1, as the engine runs one copy for each voice of a bundle. `count` is 1 to 16. A value outside that, or `i` above `count`, panics. |
+| `.channel(c)` | 0 | Runs the module as its left (0) or right (1) copy, as the engine does for stereo. Any other value panics. |
 | `.tolerance(t)` | 1e-5 | Largest allowed difference from the reference, per sample. |
 | `.allow_undocumented()` | off | Lets a module with no label or description on a port or parameter render, for a quick experiment. |
 

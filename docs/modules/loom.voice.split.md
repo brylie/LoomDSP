@@ -21,14 +21,14 @@ Takes the voices of a bundle out on separate outputs, from voice First on. For t
 
 | Port | Signal | Polarity | Description |
 |---|---|---|---|
-| **Out 1** (`out1`) | audio | bipolar | Voice First. Past the input's last voice it holds the input's default. |
-| **Out 2** (`out2`) | audio | bipolar | Voice First plus 1. Past the input's last voice it holds the input's default. |
-| **Out 3** (`out3`) | audio | bipolar | Voice First plus 2. Past the input's last voice it holds the input's default. |
-| **Out 4** (`out4`) | audio | bipolar | Voice First plus 3. Past the input's last voice it holds the input's default. |
-| **Out 5** (`out5`) | audio | bipolar | Voice First plus 4. Past the input's last voice it holds the input's default. |
-| **Out 6** (`out6`) | audio | bipolar | Voice First plus 5. Past the input's last voice it holds the input's default. |
-| **Out 7** (`out7`) | audio | bipolar | Voice First plus 6. Past the input's last voice it holds the input's default. |
-| **Out 8** (`out8`) | audio | bipolar | Voice First plus 7. Past the input's last voice it holds the input's default. |
+| **Out 1** (`out1`) | audio | bipolar | The voice First names. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 2** (`out2`) | audio | bipolar | The voice after Out 1's. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 3** (`out3`) | audio | bipolar | The voice after Out 2's. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 4** (`out4`) | audio | bipolar | The voice after Out 3's. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 5** (`out5`) | audio | bipolar | The voice after Out 4's. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 6** (`out6`) | audio | bipolar | The voice after Out 5's. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 7** (`out7`) | audio | bipolar | The voice after Out 6's. Past the input's last voice it is 0, the input's unpatched value. |
+| **Out 8** (`out8`) | audio | bipolar | The voice after Out 7's. Past the input's last voice it is 0, the input's unpatched value. |
 
 ## Parameters
 
@@ -48,7 +48,7 @@ Takes the voices of a bundle out on separate outputs, from voice First on. For t
 
 Use Voice split where one voice of a bundle should go its own way: to a meter, to a separate effect, or to a module that is not polyphonic. `out1` carries the voice that First names, and each output after it carries the next voice. So with First at 3, `out1` is voice 3 and `out2` is voice 4.
 
-An output past the last voice of the bundle holds the input's default, 0. A mono cable is voice 1 only: it reaches `out1`, and the other outputs hold 0. Eight outputs reach eight voices; for voices 9 to 16, add a second Voice split with First at 9.
+An output past the last voice of the bundle is 0, the input's unpatched value. A mono cable is voice 1 only: it reaches `out1`, and the other outputs hold 0. Eight outputs reach eight voices; for voices 9 to 16, add a second Voice split with First at 9.
 
 First can be modulated. It switches on the sample, with no fade, because it picks voices rather than setting a level.
 

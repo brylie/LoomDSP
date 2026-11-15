@@ -86,7 +86,7 @@ These early alpha builds are not signed yet, so macOS and Windows warn the first
 - **Windows:** double-click `loom-app.exe`. On the "Windows protected your PC" screen, choose **More info**, then **Run anyway**.
 - **Linux:** run `./loom-app` in a terminal.
 
-Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard first, or click **Hold note** in the toolbar, then turn the filter's **Cutoff** knob while the note plays. To play chords, open `examples/patches/polysynth.ron`, an 8-voice synth built from primitives, and play a MIDI keyboard. [Getting started](docs/guide/getting-started.md) walks you through your first patch.
+Open `examples/patches/subtractive.ron` from the app. Connect a MIDI keyboard first, or click **Hold note** in the toolbar, then turn the filter's **Cutoff** knob while the note plays. To play chords, open `examples/patches/polysynth.ron`, an 8-voice synth built from primitives, and play a MIDI keyboard. **Hold note** plays one note there, quietly, because the gain leaves room for 8; raise the Amplifier's **Gain** to hear it louder. [Getting started](docs/guide/getting-started.md) walks you through your first patch.
 
 ### Build it yourself
 

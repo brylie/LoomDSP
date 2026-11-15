@@ -118,7 +118,7 @@ Note input only reads `level` to choose a voice to steal, so one sample of delay
 
 ## The polysynth example
 
-`examples/patches/polysynth.ron` puts the ideas on this page in one patch. MIDI Note hands out 8 voices in Oldest mode. Voice Spread detunes each voice by about 3.6 cents in Random mode. A Phase module drives a Saw, then an SVF, an Envelope, and an Amplifier, all as 8 copies. One mono LFO sweeps every voice's filter through a Multiply, because a mono cable into a copied module is free. Voice Merge sums the voices into one cable for Audio Out.
+`examples/patches/polysynth.ron` puts the ideas on this page in one patch. MIDI Note hands out 8 voices in Oldest mode. Voice Spread detunes each voice by its own amount, up to about 3.6 cents sharp or flat, in Random mode. A Phase module drives a Saw, then an SVF, an Envelope, and an Amplifier, all as 8 copies. One mono LFO sweeps every voice's filter through a Multiply, because a mono cable into a copied module is free. Voice Merge sums the voices into one cable for Audio Out.
 
 Hover over an output in the voice chain and it says `8 voices`; after Voice Merge the cable is one voice. To play a chord, use a MIDI keyboard, or, on macOS and Linux, run `loom midi-port "Loom Pad"` and type `on 60`, `on 64`, and `on 67`.
 

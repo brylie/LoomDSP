@@ -199,8 +199,10 @@ fn both_sides_of_a_voice_agree() {
     }
 }
 
-/// A modulated mode switches on the sample, and a seed change picks the new
-/// offset on the frame it arrives.
+/// A mode set during the render switches on its frame, and a seed set
+/// during the render picks the new offset on its frame. These are knob
+/// changes (`set_param`), not modulation: `modulated_choices.rs` checks a
+/// modulated mode and seed.
 #[test]
 fn mode_and_seed_changes_land_on_their_frame() {
     let out = Harness::new(&SPREAD)

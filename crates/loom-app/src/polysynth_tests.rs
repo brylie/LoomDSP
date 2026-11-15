@@ -71,8 +71,9 @@ fn the_polysynth_shows_its_voice_count() {
 }
 
 /// A screen reader finds Voice Spread's `amount` on the tile as a slider
-/// whose description is the tile's text, "0.0003", and an Increment moves
-/// it. The inspector's slider says "0.0003" too. Voice Spread's `mode` is a
+/// over the patch's selected range, -0.01 to 0.01, not the descriptor's -10
+/// to 10. Its description is the tile's text, "0.0003", and an Increment
+/// moves it. The inspector's slider says "0.0003" too. Voice Spread's `mode` is a
 /// radio group of Even, Series, and Random, and Voice Merge's `mode` one of
 /// its five choices.
 #[test]
@@ -81,6 +82,8 @@ fn a_screen_reader_finds_the_voice_controls_on_the_polysynth() {
     let tree = ui.a11y_tree();
     let amount = tile_control(&tree, SPREAD, "Amount");
     assert_eq!(amount.role(), Role::Slider);
+    // The range is an `f32` widened to `f64`, as the tree carries it.
+    assert_eq!(amount.range(), Some((f64::from(-0.01_f32), f64::from(0.01_f32))));
     assert_eq!(shown_text(&ui, SPREAD, "amount"), "0.0003");
     assert_eq!(amount.description(), Some("0.0003"));
     assert!(amount.offers(Action::Increment));
@@ -110,6 +113,26 @@ fn a_screen_reader_finds_the_voice_controls_on_the_polysynth() {
         tile_control(&tree, SPREAD, "Amount").description(),
         Some(shown.as_str())
     );
+}
+
+/// Voice Spread's Seed row in the inspector is named "Seed" while Mode is
+/// Random, the one mode that reads it, as `polysynth.ron` saves it. Once a
+/// screen reader picks Even on the tile, the row says it is not used: its
+/// name becomes "Seed, Not used in Even" (ADR-0030, panels.md).
+#[test]
+fn spreads_seed_row_is_in_use_only_in_random() {
+    let mut ui = Ui::open("polysynth.ron");
+    ui.a11y_action(&tile_id(SPREAD), Action::Click);
+    let seed = row(SPREAD, Kind::Param, "seed");
+    assert_eq!(ui.a11y_tree().node_by_id(&seed).name(), Some("Seed"));
+
+    let tree = ui.a11y_tree();
+    let even = tile_control(&tree, SPREAD, "Mode").node("Even");
+    let even = even.ui_id().expect("the option has a UI ID").clone();
+    ui.a11y_action(&even, Action::Click);
+    let node = ui.app().session.controller.graph().node(ModuleId(SPREAD)).unwrap();
+    assert_eq!(node.params[node.descriptor.param_index("mode").unwrap()], 0.0);
+    assert_eq!(ui.a11y_tree().node_by_id(&seed).name(), Some("Seed, Not used in Even"));
 }
 
 /// A Voice Split tile's `first` is a slider from 1 to 16 whose description

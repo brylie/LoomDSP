@@ -424,6 +424,47 @@ fn voice_spread_gives_both_sides_of_a_voice_one_random_offset() {
     }
 }
 
+/// Voice spread places its voices again when a running patch changes its
+/// voice count. A 4-voice source feeds Voice spread, and Voice split reads
+/// voice 2. In Even, voice 2 sits at its share of 4 voices, then at its share
+/// of 8 once the source has 8, on the same running engine. In Random, voice
+/// 2 keeps its offset, since its draw does not depend on the count.
+#[test]
+fn voice_spread_places_its_voices_again_when_the_count_changes() {
+    let play = |mode: f32| {
+        let mut parts = engine();
+        let c = &mut parts.controller;
+        let source = c.add_module("test.voices").unwrap();
+        let spread = c.add_module("loom.voice.spread").unwrap();
+        let split = c.add_module("loom.voice.split").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.set_param_named(source, "voices", 4.0).unwrap();
+        c.set_param_named(spread, "mode", mode).unwrap();
+        c.set_param_named(spread, "amount", 0.1).unwrap();
+        c.set_param_named(split, "first", 2.0).unwrap();
+        c.connect_named(source, "out", spread, "in").unwrap();
+        c.connect_named(spread, "out", split, "in").unwrap();
+        c.connect_named(split, "out1", out, "in").unwrap();
+        c.commit().unwrap();
+        // `test.voices` gives voice 2 0.01 plus 0.01.
+        let input = 0.01 + 0.01;
+        let four = render(&mut parts)[511] - input;
+        parts.controller.set_param_named(source, "voices", 8.0).unwrap();
+        let eight = render(&mut parts)[511] - input;
+        (four, eight)
+    };
+    let (four, eight) = play(0.0);
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-6;
+    let expected = 0.1 * loom_dsp::blend::spread_offset(1, 4);
+    assert!(close(four, expected), "Even, 4 voices: {four}, expected {expected}");
+    let expected = 0.1 * loom_dsp::blend::spread_offset(1, 8);
+    assert!(close(eight, expected), "Even, 8 voices: {eight}, expected {expected}");
+
+    let (four, eight) = play(2.0);
+    assert_ne!(four, 0.0, "Random gives voice 2 an offset");
+    assert_eq!(four, eight, "Random keeps voice 2's offset");
+}
+
 /// A modulated `first` on Voice split moves its outputs on the sample. A gate
 /// from Compare, high while a sine is above 0, raises `first` from 1 to 2, so
 /// `out1` plays voice 2 while the gate is high. Join puts `out1` on the left

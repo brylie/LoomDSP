@@ -28,7 +28,7 @@ Gives each voice its own offset from one control. On a one-voice cable it does n
 | Parameter | Range | Default | Description |
 |---|---|---|---|
 | **Amount** (`amount`) | -10 to 10. Control ranges -0.01 to 0.01, -0.1 to 0.1, -1 to 1, -10 to 10 (default -0.1 to 0.1) | 0 | How far apart the voices are. Each voice adds its offset times this amount. |
-| **Mode** (`mode`) | Even, Series, or Random | Even | Even spreads the voices from minus to plus the amount, Series steps them from 0 up to the amount, and Random gives each voice a fixed random share. |
+| **Mode** (`mode`) | Even, Series, or Random | Even | Even spreads the voices from minus to plus the amount, Series steps them from 0 up to the amount, and Random gives each voice a fixed random offset, from minus to plus the amount. |
 | **Seed** (`seed`) | 1 to 65535, whole numbers | 1 | Picks the offsets in Random mode. The same seed gives the same offsets. |
 
 ## Panel

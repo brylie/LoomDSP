@@ -425,6 +425,10 @@ const VALUE_OPTIONS: [&str; 20] = [
 /// says it skips benchmarks whose names do not contain the filter, so a
 /// filter matches when `name` contains it, or equals it with `--exact`. So
 /// `cargo test --benches`, a listing, and `cargo bench -- modes` skip it.
+/// The filter is read as a plain word, not a regular expression. Criterion
+/// reads it as one, so `cargo bench -- 'poly.*'` skips these lines, which
+/// do not contain the text `poly.*`, while Criterion still runs
+/// `patch/polysynth.ron`.
 fn runs(name: &str, args: &[String]) -> bool {
     let has = |flag: &str| args.iter().any(|arg| arg == flag);
     if !has("--bench") || has("--list") || has("--test") || has("--ignored") {

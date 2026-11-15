@@ -3,7 +3,7 @@
 On 2026-11-15 the polysynth benchmark ran on the reference machine, for [#677](https://github.com/brylie/LoomDSP/issues/677). It measures the first reference patch of [NFR-PERF-01](../product/non-functional-requirements.md#performance-perf), `examples/patches/polysynth.ron`, as [polyphony rule 29](../design/polyphony.md#cost) says: the engine's mean time per block with 8 notes held, as a share of the block's real time. The app's UI is not part of it.
 
 - **Machine:** Apple M1 Pro, MacBookPro18,1 (10 cores, 32 GB), macOS 27.0.1 (26A434). The maintainer's laptop.
-- **Build:** `cargo bench`, the release profile, at commit `660e3b82` with the benchmark added.
+- **Build:** `cargo bench`, the release profile, on PR #788's branch; the engine, module, and patch code is that of `86650796`.
 - **Engine:** `EngineConfig::default()`: 48 kHz, 128-frame blocks, output safety at Low latency, as the app plays.
 
 ## The patch
