@@ -37,6 +37,10 @@ pub use drag_line::DragLine;
 
 /// The patch canvas as an Iced widget. Draws a [`Scene`] and reports
 /// gestures as [`CanvasEvent`]s, through the message `on_event` makes.
+///
+/// Its builder methods return it, so dropping the result loses the
+/// setting; the compiler warns.
+#[must_use]
 pub struct PatchCanvas<'a, Message> {
     /// What to show this frame.
     model: CanvasModel<'a>,

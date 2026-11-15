@@ -4,7 +4,7 @@ use super::*;
 /// renderer. `None` on a machine without a GPU adapter.
 fn render_window(app: &crate::App) -> Option<Vec<u8>> {
     let mut offscreen = Offscreen::new()?;
-    Some(draw_window(app, &mut offscreen, crate::WINDOW, 1.0))
+    draw_window(app, &mut offscreen, crate::WINDOW, 1.0)
 }
 
 /// The headless app for an example patch, as `--screenshot-window`

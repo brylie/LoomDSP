@@ -233,7 +233,11 @@ impl Surface {
         // until the frame is drawn.
         let pixels = offscreen.pixels(physical, 1.0, theme.palette().background, drawing);
         self.cache = Some(ui.into_cache());
-        Image::new(physical.width, physical.height, 1.0, pixels).ok_or(NoGpu)
+        // A frame that could not be read back answers as the window's
+        // capture does then: with no image (`shell/gpu.rs`, `capture`).
+        pixels
+            .and_then(|pixels| Image::new(physical.width, physical.height, 1.0, pixels))
+            .ok_or(NoGpu)
     }
 }
 

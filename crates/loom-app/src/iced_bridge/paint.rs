@@ -39,13 +39,22 @@ pub(crate) struct Target<'a> {
     pub scale: f32,
 }
 
-/// The canvas's renderer for one target format, and where it last drew.
+/// The canvas's renderer for one target format, and the frame it last
+/// drew.
 pub(crate) struct CanvasPass {
     /// The renderer, with what it last uploaded.
     renderer: CanvasRenderer,
-    /// The bounds it last drew at, in logical pixels, or `None` when the
-    /// last frame had no canvas.
-    last: Option<Rect>,
+    /// The frame last drawn, and the target it was prepared for, or `None`
+    /// when the last frame had no canvas.
+    last: Option<Prepared>,
+}
+
+/// A canvas frame kept after it was drawn, so a capture can draw it again.
+struct Prepared {
+    /// The frame, moved here from the slot: kept, not copied.
+    drawing: CanvasDrawing,
+    /// The target the renderer last prepared it for.
+    target: CanvasTarget,
 }
 
 impl CanvasPass {
@@ -72,26 +81,40 @@ pub(crate) fn draw(
     pass.last = drawing.map(|drawing| {
         let to = canvas_target(drawing.bounds, target);
         pass.renderer.prepare(target.device, target.queue, &drawing.frame, to);
-        drawing.bounds
+        Prepared { drawing, target: to }
     });
     draw_prepared(target, iced, pass, background);
 }
 
-/// Draws the last frame again into `target`, with no upload: the canvas as
-/// it was last prepared, at the bounds it last had, and what Iced's
-/// renderer still holds. A capture of what the window last showed.
+/// Draws the last frame again into `target`: the canvas's last frame, at
+/// the bounds it last had, and what Iced's renderer still holds. A capture
+/// of what the window last showed.
+///
+/// The canvas uploads nothing when the target is the one it was prepared
+/// for. A capture can come after a resize, before any frame at the new
+/// size, so when the target differs the frame is prepared again for it:
+/// the canvas's text cuts its scissors to the target as it is prepared, and
+/// wgpu rejects a scissor larger than the target it draws into.
 pub(crate) fn draw_again(
     target: &Target<'_>,
     iced: &mut iced_wgpu::Renderer,
     pass: &mut CanvasPass,
     background: Color,
 ) {
+    if let Some(last) = pass.last.as_mut() {
+        let to = canvas_target(last.drawing.bounds, target);
+        if to != last.target {
+            pass.renderer
+                .prepare(target.device, target.queue, &last.drawing.frame, to);
+            last.target = to;
+        }
+    }
     draw_prepared(target, iced, pass, background);
 }
 
 /// The three steps, with the canvas as `pass` holds it.
 fn draw_prepared(target: &Target<'_>, iced: &mut iced_wgpu::Renderer, pass: &CanvasPass, background: Color) {
-    let bounds = pass.last;
+    let bounds = pass.last.as_ref().map(|last| last.drawing.bounds);
     let mut encoder = target.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("loom-app canvas"),
     });

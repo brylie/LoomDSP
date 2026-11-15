@@ -357,13 +357,16 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             // capture must not do. A change the turn before is not in it
             // yet: the control channel's `screenshot` asks only after two
             // frames have been shown (`control::FRAMES_BEFORE_ANSWER`), and
-            // the shell holds a capture until the first frame is shown. The
-            // last frame is at the current size too: after a resize the
-            // shell draws before any capture is due.
+            // the shell holds a capture until the first frame is shown.
             //
-            // The canvas is drawn again from what it last uploaded, at the
-            // bounds it last had, so the capture is that frame. After New or
-            // Open it is the new patch's, since a frame of it was shown first.
+            // The last frame may be at an older size: the shell can run a
+            // capture right after a resize, before a frame at the new size.
+            // Iced prepares its layers again for every present, so they fit
+            // the capture. The canvas is drawn again from its last frame, at
+            // the bounds it last had, and prepared again only when the
+            // capture's size differs (`paint::draw_again`). After New or Open
+            // the last frame is the new patch's, since a frame of it was
+            // shown first.
             if let (Some(renderer), Some(pass)) = (self.renderer.as_mut(), self.canvas.as_mut()) {
                 super::paint::draw_again(&target, wgpu(renderer), pass, background);
             }

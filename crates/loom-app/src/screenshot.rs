@@ -32,6 +32,9 @@ use std::str::FromStr;
 /// skip on machines without a GPU.
 pub const NO_GPU: &str = "no GPU adapter for offscreen drawing";
 
+/// The error when the GPU drew a frame but it could not be read back.
+const NO_READ_BACK: &str = "the GPU could not read the frame back";
+
 /// Command-line options for a screenshot.
 #[derive(clap::Args, Debug, Clone)]
 pub struct Options {
@@ -376,16 +379,17 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     app.session.selection.extend(shown.selected);
     app.still = Some(shown.still);
 
-    let pixels = draw_window(&app, &mut offscreen, logical, options.scale);
+    let pixels = draw_window(&app, &mut offscreen, logical, options.scale).ok_or(NO_READ_BACK)?;
     write_png(path, physical, &pixels)
 }
 
-/// Draws one frame of the whole window and returns its RGBA pixels.
+/// Draws one frame of the whole window and returns its RGBA pixels, or
+/// `None` when they could not be read back from the GPU.
 ///
 /// The frame first gets a redraw event, as every frame in the app does.
 /// Iced's buttons choose their look (enabled, hovered, disabled) while they
 /// handle a redraw, and draw as disabled before the first one (#460).
-fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale: f32) -> Vec<u8> {
+fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale: f32) -> Option<Vec<u8>> {
     let physical = physical_size(logical, scale).expect("the caller checked the size");
     // A new cache, so the canvas starts from the still state.
     let theme = app.theme();
@@ -637,7 +641,9 @@ pub fn render(
     let logical = loom_ui_core::Size::new(size.width as f32 / scale, size.height as f32 / scale);
     let bounds = loom_ui_core::Rect::new(Point::ORIGIN, logical);
     let drawing = input.drawing(&model, bounds, &cache);
-    Ok(offscreen.pixels(size, scale, palette.background.to_iced(), Some(drawing)))
+    offscreen
+        .pixels(size, scale, palette.background.to_iced(), Some(drawing))
+        .ok_or_else(|| NO_READ_BACK.to_string())
 }
 
 pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(), String> {

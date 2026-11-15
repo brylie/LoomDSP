@@ -2964,3 +2964,54 @@ fn locate_follows_a_pan_before_release() {
     let after = locate(&mut ui);
     assert!((after.x - during.x).abs() < 0.01 && (after.y - during.y).abs() < 0.01);
 }
+
+/// A capture after a resize, before any frame at the new size, draws the
+/// last frame again into a smaller target. The canvas's text was prepared
+/// with scissors cut to the old size, and wgpu rejects a scissor larger
+/// than its target, so the canvas is prepared again for the new one. The
+/// shell can run a capture right after a resize, before the next frame.
+#[test]
+fn a_capture_after_a_shrink_draws_the_last_frame_again() {
+    use iced::advanced::renderer::Style;
+    use iced_runtime::user_interface::{Cache, UserInterface};
+    let ui = Ui::open("subtractive.ron");
+    let Some(mut offscreen) = crate::iced_bridge::offscreen::Offscreen::new() else {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
+        return;
+    };
+    let app = ui.app();
+    let theme = app.theme();
+    let background = theme.palette().background;
+    let size = crate::WINDOW;
+    let mut built = UserInterface::build(app.view(), size, Cache::default(), &mut offscreen.renderer);
+    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+    let _ = built.update(
+        &[redraw],
+        iced::mouse::Cursor::Unavailable,
+        &mut offscreen.renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut Vec::new(),
+    );
+    app.canvas_drawn.clear();
+    let style = Style {
+        text_color: theme.palette().text,
+    };
+    built.draw(
+        &mut offscreen.renderer,
+        &theme,
+        &style,
+        iced::mouse::Cursor::Unavailable,
+    );
+    let drawing = app.canvas_drawn.take();
+    assert!(drawing.is_some(), "the canvas built a frame");
+    let full = iced::Size::new(size.width as u32, size.height as u32);
+    assert!(offscreen.pixels(full, 1.0, background, drawing).is_some());
+
+    // Half the size: the text's old scissors would run past it.
+    let half = iced::Size::new(full.width / 2, full.height / 2);
+    let again = offscreen
+        .pixels_again(half, 1.0, background)
+        .expect("the frame is read back");
+    assert_eq!(again.len(), (half.width * half.height * 4) as usize);
+    drop(built);
+}

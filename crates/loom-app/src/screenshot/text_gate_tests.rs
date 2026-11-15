@@ -120,7 +120,7 @@ fn window(patch: &std::path::Path) -> Option<(crate::App, CanvasView, Size<u32>,
     app.session.scene = scene;
     app.refresh_values();
     app.still = Some(shown.still);
-    let pixels = draw_window(&app, &mut offscreen, logical, options.scale);
+    let pixels = draw_window(&app, &mut offscreen, logical, options.scale).expect("the frame is read back");
     // The camera the still frame shows, as the canvas reports it.
     let renderer = &mut offscreen.renderer;
     let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);

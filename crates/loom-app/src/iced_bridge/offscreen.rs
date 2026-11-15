@@ -63,7 +63,8 @@ impl Offscreen {
 
     /// Draws a frame `size` physical pixels at `scale` on `background`:
     /// the canvas from `drawing`, then what Iced's renderer was given. Gives
-    /// its RGBA pixels, row by row.
+    /// its RGBA pixels, row by row, or `None` when they could not be read
+    /// back from the GPU.
     ///
     /// # Panics
     ///
@@ -75,7 +76,7 @@ impl Offscreen {
         scale: f32,
         background: Color,
         drawing: Option<CanvasDrawing>,
-    ) -> Vec<u8> {
+    ) -> Option<Vec<u8>> {
         let crate::Renderer::Primary(iced) = &mut self.renderer else {
             unreachable!("only a wgpu renderer draws offscreen");
         };
@@ -108,8 +109,53 @@ impl Offscreen {
     }
 }
 
+impl Offscreen {
+    /// Draws the last frame again, `size` physical pixels at `scale`, as
+    /// the window's capture does (`paint::draw_again`), and gives its RGBA
+    /// pixels.
+    #[cfg(test)]
+    pub(crate) fn pixels_again(&mut self, size: Size<u32>, scale: f32, background: Color) -> Option<Vec<u8>> {
+        let crate::Renderer::Primary(iced) = &mut self.renderer else {
+            unreachable!("only a wgpu renderer draws offscreen");
+        };
+        let extent = wgpu::Extent3d {
+            width: size.width,
+            height: size.height,
+            depth_or_array_layers: 1,
+        };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("loom-app offscreen frame again"),
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target = paint::Target {
+            device: &self.device,
+            queue: &self.queue,
+            view: &view,
+            format: FORMAT,
+            physical: size,
+            scale,
+        };
+        paint::draw_again(&target, iced, &mut self.canvas, background);
+        read_back(&self.device, &self.queue, &texture, extent)
+    }
+}
+
 /// The RGBA rows of `texture`, without the padding wgpu's copies need.
-fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture, extent: wgpu::Extent3d) -> Vec<u8> {
+/// `None` when the GPU could not map the buffer to read it, or failed
+/// while waiting for the copy.
+fn read_back(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    extent: wgpu::Extent3d,
+) -> Option<Vec<u8>> {
     let row = extent.width as usize * 4;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
     let padded = row.div_ceil(align) * align;
@@ -136,13 +182,20 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
     );
     let index = queue.submit([encoder.finish()]);
     let slice = buffer.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    let _ = device.poll(wgpu::PollType::Wait {
-        submission_index: Some(index),
-        timeout: None,
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |mapped| {
+        let _ = sender.send(mapped);
     });
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(index),
+            timeout: None,
+        })
+        .ok()?;
+    // The wait above has run the callback, so its answer is here.
+    receiver.try_recv().ok()?.ok()?;
     let mapped = slice.get_mapped_range();
-    mapped.chunks(padded).flat_map(|line| &line[..row]).copied().collect()
+    Some(mapped.chunks(padded).flat_map(|line| &line[..row]).copied().collect())
 }
 
 /// Finds a GPU and opens a device on it, with no window to draw to.
