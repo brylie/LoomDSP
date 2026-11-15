@@ -34,7 +34,9 @@ pub(crate) struct Measure {
 
 impl Measure {
     /// A renderer with `font` at `size` as its defaults, as the window's
-    /// renderer is made.
+    /// renderer is made. Only the headless harness makes one, so it is
+    /// built only where the harness is.
+    #[cfg(any(test, feature = "test-ui"))]
     pub(crate) fn new(font: Font, size: Pixels) -> Self {
         Self { font, size }
     }
