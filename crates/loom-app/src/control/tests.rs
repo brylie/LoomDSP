@@ -1,6 +1,93 @@
+//! Tests for the control channel. The tests that send `cc` play their app
+//! on a stepped output that only the test advances ([`stepped_app`]), so
+//! they never wait on a real-time engine; the output is cleared when the
+//! app is dropped, since one thread may run many tests in turn.
+
 use super::run::{Region, crop, crop_region, save_screenshot, search};
 use super::transport::*;
 use super::*;
+use std::cell::RefCell;
+
+thread_local! {
+    /// The stepped output the running test's app plays on, while a
+    /// [`Stepped`] app holds it: [`run`] then plays a frame's worth of audio
+    /// on it at each control frame, in place of sleeping a frame. A `cc`
+    /// then waits on the test, not on a real-time clock that a busy machine
+    /// can starve. [`Stepped`] clears it when dropped, because with
+    /// `--test-threads=1` one thread runs every test in turn, and a later
+    /// test must not step an earlier test's output.
+    static TAPE: RefCell<Option<loom_host_desktop::Tape>> = const { RefCell::new(None) };
+}
+
+/// Frames of audio in one control frame: 48 kHz at 60 frames a second.
+const FRAMES_PER_CONTROL_FRAME: usize = 48_000 / 60;
+
+/// An app playing on a stepped output, which this thread's [`run`] steps
+/// while it lives. Use it as the [`App`] it holds.
+struct Stepped(App);
+
+impl std::ops::Deref for Stepped {
+    type Target = App;
+
+    fn deref(&self) -> &App {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Stepped {
+    fn deref_mut(&mut self) -> &mut App {
+        &mut self.0
+    }
+}
+
+impl Drop for Stepped {
+    /// Clears the output, so no later test on this thread steps it.
+    fn drop(&mut self) {
+        TAPE.with(|kept| *kept.borrow_mut() = None);
+    }
+}
+
+/// The subtractive patch, playing on a fake device that plays only when
+/// [`run`] steps it, so the engine takes each `cc` on the test's own time.
+fn stepped_app() -> Stepped {
+    let tape = loom_host_desktop::Tape::new();
+    let host = std::rc::Rc::new(crate::devices::fake::Fake {
+        tape: Some(tape.clone()),
+        ..crate::devices::fake::Fake::new(&[crate::devices::fake::device("Fake A")], &[])
+    });
+    let app = App::boot_with(
+        crate::Args {
+            patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
+            no_audio: false,
+            ..crate::tests::app_args()
+        },
+        std::rc::Rc::new(crate::devices::fake::Shared(host)),
+    );
+    assert!(tape.is_playing(), "the patch plays on the stepped device");
+    TAPE.with(|kept| *kept.borrow_mut() = Some(tape));
+    Stepped(app)
+}
+
+/// A stepped app's output is cleared when the app is dropped, so a later
+/// test on the same thread waits on its own clock, not on this output.
+#[test]
+fn a_stepped_output_is_cleared_with_its_app() {
+    let app = stepped_app();
+    assert!(step_audio(), "the output steps while its app lives");
+    drop(app);
+    assert!(!step_audio(), "and not after");
+}
+
+/// Plays a frame's worth on this test's stepped output. False when the
+/// test has none.
+fn step_audio() -> bool {
+    TAPE.with(|kept| {
+        kept.borrow()
+            .as_ref()
+            .map(|tape| tape.step(FRAMES_PER_CONTROL_FRAME))
+            .is_some()
+    })
+}
 
 fn run(app: &mut App, line: &str) -> Answer {
     let command: Command = serde_json::from_str(line).unwrap();
@@ -17,7 +104,7 @@ fn run(app: &mut App, line: &str) -> Answer {
             return answer;
         }
         let _ = app.send(Message::ControlFrame(Instant::now()));
-        if app.control_waiting() {
+        if app.control_waiting() && !step_audio() {
             std::thread::sleep(Duration::from_millis(16));
         }
     }
@@ -229,12 +316,7 @@ fn an_unset_variable_quits_even_when_stdout_is_closed() {
 
 #[test]
 fn commands_change_the_app_as_the_ui_would() {
-    let mut app = App::new(crate::Args {
-        patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
-        fake_audio: true,
-        no_audio: false,
-        ..crate::tests::app_args()
-    });
+    let mut app = stepped_app();
 
     assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), Ok(Map::new()));
     assert_eq!(app.session.selection, [4].into());
@@ -338,12 +420,7 @@ fn commands_change_the_app_as_the_ui_would() {
 /// send a control change, turn learn mode off, and read the mapping.
 #[test]
 fn a_script_maps_a_control_in_learn_mode() {
-    let mut app = App::new(crate::Args {
-        patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
-        fake_audio: true,
-        no_audio: false,
-        ..crate::tests::app_args()
-    });
+    let mut app = stepped_app();
     let ok = Ok(Map::new());
     assert!(
         run(&mut app, r#"{"cmd": "arm", "target": "4:cutoff"}"#)
@@ -377,13 +454,8 @@ fn a_script_maps_a_control_in_learn_mode() {
 
 /// The app on the subtractive patch, with `cc` 21 learned on the filter's
 /// cutoff (module 4).
-fn app_with_mapped_cutoff() -> App {
-    let mut app = App::new(crate::Args {
-        patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
-        fake_audio: true,
-        no_audio: false,
-        ..crate::tests::app_args()
-    });
+fn app_with_mapped_cutoff() -> Stepped {
+    let mut app = stepped_app();
     let ok = Ok(Map::new());
     assert_eq!(run(&mut app, r#"{"cmd": "toolbar", "button": "learn"}"#), ok);
     assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [4]}"#), ok);
