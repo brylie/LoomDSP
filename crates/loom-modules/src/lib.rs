@@ -83,6 +83,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &io::AUDIO_IN,
     &midi::NOTE_IN,
     &voice::MERGE,
+    &voice::SPLIT,
     &voice::SPREAD,
     &midi::CONTROLLER_IN,
     &display::METER,

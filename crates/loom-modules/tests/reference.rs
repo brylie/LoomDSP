@@ -304,6 +304,24 @@ fn voice_merge() {
         .check(reference!("voice_merge"));
 }
 
+/// Voice split on an 8-voice bundle of tones, one pitch per voice. `first`
+/// steps from 1 to 3 to 8, so the outputs move to later voices, and the ones
+/// past voice 8 hold the default.
+#[test]
+fn voice_split() {
+    Harness::new(&loom_modules::voice::SPLIT)
+        .seconds(0.06)
+        .bundle_input(
+            "in",
+            (0..8)
+                .map(|voice| Signal::from_fn(move |frame| (frame as f32 * 0.01 * (voice as f32 + 1.0)).sin() * 0.25))
+                .collect(),
+        )
+        .param_at(0.02, "first", 3.0)
+        .param_at(0.04, "first", 8.0)
+        .check(reference!("voice_split"));
+}
+
 /// Voice spread as voice 3 of 8, so every mode has an offset that is not 0:
 /// Even, then Series, then Random with seed 7, on a slow sine. The amount
 /// glides from 0.05 to 0.1 in Series, and the mode switches on the sample.
@@ -792,6 +810,7 @@ fn every_dsp_module_has_a_reference_test() {
         &level::AMP,
         &midi::NOTE_IN,
         &loom_modules::voice::MERGE,
+        &loom_modules::voice::SPLIT,
         &loom_modules::voice::SPREAD,
         &midi::CONTROLLER_IN,
         &display::METER,

@@ -170,6 +170,159 @@ impl Module for Merge {
     }
 }
 
+/// One of Voice split's outputs: one voice, with the input's stereo sides.
+const fn split_out(name: &'static str, label: &'static str, description: &'static str) -> PortSpec {
+    PortSpec {
+        name,
+        label,
+        description,
+        signal: SignalType::Audio,
+        default: PortDefault::Value(0.0),
+        range: PortRange::Signal,
+        channels: Channels::PerChannel,
+    }
+}
+
+/// `loom.voice.split` (MT-VOICE-02): the voices of a bundle as separate
+/// outputs.
+pub static SPLIT: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.voice.split",
+    version: 1,
+    name: "Voice Split",
+    category: "Voice",
+    family: loom_core::Family::LevelAndRouting,
+    description: "Takes the voices of a bundle out on separate outputs, from voice First on. For the two sides of a \
+                  stereo cable, use Split.",
+    inputs: &[PortSpec {
+        name: "in",
+        label: "In",
+        description: "The voices to take apart.",
+        signal: SignalType::Audio,
+        default: PortDefault::Value(0.0),
+        range: PortRange::Signal,
+        channels: Channels::Voices,
+    }],
+    outputs: &[
+        split_out(
+            "out1",
+            "Out 1",
+            "Voice First. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out2",
+            "Out 2",
+            "Voice First plus 1. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out3",
+            "Out 3",
+            "Voice First plus 2. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out4",
+            "Out 4",
+            "Voice First plus 3. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out5",
+            "Out 5",
+            "Voice First plus 4. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out6",
+            "Out 6",
+            "Voice First plus 5. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out7",
+            "Out 7",
+            "Voice First plus 6. Past the input's last voice it holds the input's default.",
+        ),
+        split_out(
+            "out8",
+            "Out 8",
+            "Voice First plus 7. Past the input's last voice it holds the input's default.",
+        ),
+    ],
+    params: &[ParamSpec {
+        name: "first",
+        label: "First",
+        description: "The voice on Out 1. Each output after it carries the next voice.",
+        min: 1.0,
+        max: 16.0,
+        default: 1.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()],
+    role: ModuleRole::Dsp(|_| Box::new(Split { first: 1 })),
+    panel: Panel::new(5, 2, &[Widget::number(0, 0, "first")]),
+    displays: &[],
+    roles: &[],
+};
+
+/// State for `loom.voice.split`: only the knob's `first`.
+#[derive(Clone)]
+struct Split {
+    /// The voice on `out1`, from 1.
+    first: usize,
+}
+
+impl Split {
+    const IN: usize = SPLIT.input_index("in").unwrap();
+    const FIRST: usize = SPLIT.param_index("first").unwrap();
+    const OUTS: [usize; 8] = [
+        SPLIT.output_index("out1").unwrap(),
+        SPLIT.output_index("out2").unwrap(),
+        SPLIT.output_index("out3").unwrap(),
+        SPLIT.output_index("out4").unwrap(),
+        SPLIT.output_index("out5").unwrap(),
+        SPLIT.output_index("out6").unwrap(),
+        SPLIT.output_index("out7").unwrap(),
+        SPLIT.output_index("out8").unwrap(),
+    ];
+    /// What an output past the input's last voice holds: `in`'s declared
+    /// default (ADR-0043).
+    const DEFAULT: f32 = match SPLIT.inputs[Self::IN].default {
+        PortDefault::Value(value) => value,
+        _ => panic!("Voice split's `in` has a fixed-value default"),
+    };
+
+    /// A value of `first` as a whole voice number from 1 to 16.
+    fn first_from(value: f32) -> usize {
+        value.round().clamp(1.0, 16.0) as usize
+    }
+}
+
+impl Module for Split {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        // Checked before any `voice_input` call, which fans a one-voice cable
+        // out to every voice: a mono cable is voice 1 only.
+        let voices = io.input_width(Self::IN).voices;
+        let first = io.param(Self::FIRST);
+        for frame in 0..io.frames() {
+            let start = first.map_or(frame, self.first, Self::first_from).saturating_sub(1);
+            for (k, &port) in Self::OUTS.iter().enumerate() {
+                let voice = start.saturating_add(k);
+                for side in 0..io.output_width(port).sides {
+                    let value = if voice < voices {
+                        io.voice_input(Self::IN, voice, side)[frame]
+                    } else {
+                        Self::DEFAULT
+                    };
+                    io.voice_output(port, 0, side)[frame] = value;
+                }
+            }
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        if index == Self::FIRST {
+            self.first = Self::first_from(value);
+        }
+    }
+}
+
 /// The control ranges of Voice spread's `amount`, from the smallest up
 /// (`docs/design/control-ranges.md`). The finest one sets a detune of a few
 /// cents: 10 cents on a pitch cable is about 0.00083.

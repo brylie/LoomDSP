@@ -151,7 +151,8 @@ fn panels_follow_the_spec() {
                 | ("loom.gate.euclid", "steps" | "hits" | "rotation")
                 | ("loom.midi.controller", "controller")
                 | ("loom.logic.divide", "n" | "offset")
-                | ("loom.phase.scale", "multiply" | "divide") => Some(Number),
+                | ("loom.phase.scale", "multiply" | "divide")
+                | ("loom.voice.split", "first") => Some(Number),
                 ("loom.mix.mixer", "level1" | "level2" | "level3" | "level4") => Some(Fader { vertical: true }),
                 ("loom.mix.crossfade", "mix") => Some(Fader { vertical: false }),
                 ("loom.rand.random" | "loom.level.clamp", "low" | "high") => Some(Range {
