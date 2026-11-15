@@ -176,6 +176,7 @@ impl MidiConfigTable {
 /// One configuration change at an absolute frame within the current MIDI buffer.
 struct Change {
     frame: usize,
+    event: usize,
     input: u16,
     config: MidiInputConfig,
 }
@@ -203,7 +204,7 @@ impl MidiConfigTimeline {
         std::mem::swap(&mut self.current, table);
     }
 
-    /// Clears a closed or newly opened input's zone state.
+    /// Clears a closed input's zone state.
     pub fn clear(&mut self, input: u16) {
         self.current.clear(input);
     }
@@ -212,18 +213,37 @@ impl MidiConfigTimeline {
     pub fn begin_block(&mut self, events: &[MidiEvent]) {
         self.start.inputs.copy_from_slice(&self.current.inputs);
         self.changes.clear();
-        for event in events {
+        for (index, event) in events.iter().enumerate() {
             let before = self.current.input(event.input);
             self.current.follow(event);
             let config = self.current.input(event.input);
             if config != before && self.changes.len() < self.changes.capacity() {
                 self.changes.push(Change {
                     frame: event.frame as usize,
+                    event: index,
                     input: event.input,
                     config,
                 });
             }
         }
+    }
+
+    /// Configuration after this event, preserving order between equal-frame events.
+    pub(crate) fn input_at_event(&self, input: u16, event: usize) -> MidiInputConfig {
+        self.changes
+            .iter()
+            .rev()
+            .find(|change| change.input == input && change.event <= event)
+            .map_or_else(|| self.start.input(input), |change| change.config)
+    }
+
+    /// Configuration before the first event on this frame.
+    pub(crate) fn input_before_frame(&self, input: u16, frame: usize) -> MidiInputConfig {
+        self.changes
+            .iter()
+            .rev()
+            .find(|change| change.input == input && change.frame < frame)
+            .map_or_else(|| self.start.input(input), |change| change.config)
     }
 
     /// Configuration at `frame`, including changes on that sample only.

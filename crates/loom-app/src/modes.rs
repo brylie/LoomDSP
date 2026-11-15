@@ -294,19 +294,30 @@ impl App {
         // A count crossing changes the offered mode in the same edit and schedule swap.
         let modes: Vec<_> = changes
             .iter()
-            .filter_map(|&(module, index, value)| {
-                let node = self.session.controller.graph().node(module)?;
-                if node.descriptor.id != "loom.midi.note" || node.descriptor.params[index].name != "voices" {
-                    return None;
+            .flat_map(|&(module, index, value)| {
+                let Some(node) = self.session.controller.graph().node(module) else {
+                    return Vec::new();
+                };
+                let Some(count) = node.descriptor.params.get(index) else {
+                    return Vec::new();
+                };
+                let value = count.clamp(value);
+                if (node.params[index] <= 1.0) == (value <= 1.0) {
+                    return Vec::new();
                 }
-                let count = node.descriptor.params[index].clamp(value);
-                ((node.params[index] <= 1.0) != (count <= 1.0)).then(|| {
-                    (
-                        module,
-                        node.descriptor.param_index("mode").unwrap(),
-                        if count <= 1.0 { 2.0 } else { 0.0 },
-                    )
-                })
+                let mut values = node.params.clone();
+                values[index] = value;
+                node.descriptor
+                    .params
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(choice, spec)| {
+                        if spec.options.count_choices?.param != count.name {
+                            return None;
+                        }
+                        Some((module, choice, node.descriptor.control_spec(choice, &values)?.min))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
         changes.extend(modes);

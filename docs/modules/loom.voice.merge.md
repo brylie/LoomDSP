@@ -40,7 +40,7 @@ Sums or averages voices, or follows one voice selected by its gate.
 
 ## When to use it
 
-Use Voice merge where a bundle should become one signal. Sum adds the voices for audio. Average divides their sum by their count for modulation. Last, Lowest, and Highest follow one playing voice. A gate edge updates the selection; moving signals between edges cannot switch it. With no gates playing, the last selection stays. A stereo voice keeps both sides together.
+Use Voice merge where a bundle should become one signal. Sum adds the voices for audio. Average divides their sum by their count for modulation. Last, Lowest, and Highest follow one playing voice. A gate edge updates the selection; moving signals between edges cannot switch it. Switching into Last, Lowest, or Highest selects an active voice immediately. If a count edit removes the selected voice, an active surviving voice takes over. With no gates playing, the last selection stays. A stereo voice keeps both sides together.
 
 ## Example patch
 

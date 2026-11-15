@@ -258,6 +258,7 @@ fn play_synth(parts: &mut loom_core::EngineParts, block: usize) -> Vec<f32> {
 }
 
 /// Eight automatic copies are bit-identical to eight independent mono chains.
+/// Voice Merge from #675 is an approved dependency of this #674 acceptance synth.
 #[test]
 fn acceptance_synth_matches_eight_mono_chains() {
     let mut expected = vec![0.0f32; 4800];
@@ -437,4 +438,56 @@ fn zone_changes_release_only_affected_channels() {
     );
     assert!(render.voice_output("gate", 1, 0)[10..].iter().all(|v| *v == 1.0));
     assert_eq!(render.voice_output("timbre", 1, 0)[900], 90.0 / 127.0);
+}
+
+/// Mono history evicts the seventeenth-oldest key and retains expression for remembered keys.
+#[test]
+fn mono_held_history_and_expression_cache_evict_the_same_key() {
+    let events = (0..17u8)
+        .map(|note| MidiEvent::note_on(10 + u32::from(note), 0, 48 + note, 100))
+        .chain([MidiEvent::poly_pressure(80, 0, 49, 127)])
+        .chain(
+            (0..17u8)
+                .rev()
+                .map(|note| MidiEvent::note_off(100 + u32::from(16 - note) * 10, 0, 48 + note)),
+        );
+    let render = source(1, events).check_block_sizes();
+    assert_eq!(
+        render.output("pitch")[240],
+        loom_core::signal::pitch::from_midi_note(49.0)
+    );
+    assert_eq!(
+        render.output("pressure")[240],
+        1.0,
+        "the oldest remembered key keeps its pressure"
+    );
+    assert_eq!(render.output("gate")[249], 1.0);
+    assert_eq!(
+        render.output("gate")[250],
+        0.0,
+        "the evicted key must not keep the gate high"
+    );
+    assert_eq!(render.output("gate")[260], 0.0);
+}
+
+/// Range changes refresh held pitches without events, while release values stay frozen.
+#[test]
+fn ordinary_bend_range_changes_refresh_held_notes_without_midi_events() {
+    let render = source(
+        1,
+        [
+            MidiEvent::note_on(10, 0, 60, 100),
+            MidiEvent::pitch_bend(20, 0, 4096),
+            MidiEvent::note_off(200, 0, 60),
+        ],
+    )
+    .param_at(50.0 / 48000.0, "bend-range", 12.0)
+    .param_at(150.0 / 48000.0, "bend-range", 2.0)
+    .param_at(250.0 / 48000.0, "bend-range", 48.0)
+    .check_block_sizes();
+    let semitone = loom_core::signal::pitch::PER_SEMITONE;
+    assert_eq!(render.output("pitch")[49], semitone);
+    assert_eq!(render.output("pitch")[50], 6.0 * semitone);
+    assert_eq!(render.output("pitch")[150], semitone);
+    assert_eq!(render.output("pitch")[300], semitone);
 }

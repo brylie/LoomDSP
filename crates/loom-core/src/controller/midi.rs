@@ -254,12 +254,14 @@ impl Controller {
     /// Starts tracking the notes held on MIDI input `input`. Call it before
     /// events stamped with `input` reach the engine; events from an input
     /// that is not open are dropped. Opening an input that is open releases
-    /// its notes first. Spec: `docs/design/device-changes.md`, Held notes
+    /// its notes first. Tracking preserves the input's MPE configuration, including
+    /// a rig snapshot installed before the first tracking command. Releasing an
+    /// input clears its configuration. Spec: `docs/design/device-changes.md`, Held notes
     /// belong to an input.
     pub fn open_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {
-        let index = check_input_id(input)?;
+        check_input_id(input)?;
         self.send(Command::OpenInput {
-            index,
+            input,
             held: Box::default(),
         })
     }
@@ -269,8 +271,8 @@ impl Controller {
     /// drops later events stamped with it. Call it when the input is closed
     /// or gone.
     pub fn release_midi_input(&mut self, input: crate::MidiInputId) -> Result<(), LoomError> {
-        let index = check_input_id(input)?;
-        self.send(Command::ReleaseInput(index))
+        check_input_id(input)?;
+        self.send(Command::ReleaseInput(input))
     }
 
     /// Sets the MIDI message that runs panic in the engine, or `None` for
@@ -282,12 +284,12 @@ impl Controller {
     }
 }
 
-/// The table index of a MIDI input id, if it is in range.
-fn check_input_id(input: crate::MidiInputId) -> Result<usize, LoomError> {
+/// Refuses an untracked or out-of-range MIDI input id.
+fn check_input_id(input: crate::MidiInputId) -> Result<(), LoomError> {
     if input.0 == 0 || input.0 >= crate::MAX_MIDI_INPUTS {
         return Err(LoomError::InvalidMidiInput(input.0));
     }
-    Ok(usize::from(input.0))
+    Ok(())
 }
 
 /// What the controller knows about MIDI mappings beyond the graph: the

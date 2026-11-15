@@ -12,7 +12,13 @@ const PAD: MidiInputId = MidiInputId(2);
 /// MIDI Note's gate into Audio Out, with no safety stage, so the output is
 /// the gate.
 fn gate() -> EngineParts {
+    gate_with_midi_capacity(EngineConfig::default().midi_capacity)
+}
+
+/// A gate test engine with a deliberately bounded MIDI ingress and event buffer.
+fn gate_with_midi_capacity(midi_capacity: usize) -> EngineParts {
     let config = EngineConfig {
+        midi_capacity,
         output_safety: OutputSafety::Off,
         ..EngineConfig::with_sample_rate(SAMPLE_RATE)
     };
@@ -106,4 +112,71 @@ fn input_ids_are_checked() {
     assert!(parts.controller.open_midi_input(MidiInputId(0)).is_err());
     let max = MidiInputId(loom_core::MAX_MIDI_INPUTS);
     assert!(parts.controller.release_midi_input(max).is_err());
+}
+
+/// Disconnect releases can span buffers without consuming and dropping another input's notes.
+#[test]
+fn disconnect_release_batches_preserve_queued_notes() {
+    for held_count in [3, 4] {
+        let mut parts = gate_with_midi_capacity(2);
+        parts.controller.open_midi_input(KEYS).unwrap();
+        parts.controller.open_midi_input(PAD).unwrap();
+        let notes: Vec<_> = (0..held_count).map(|note| 60 + note).collect();
+        for chunk in notes.chunks(2) {
+            for &note in chunk {
+                assert!(parts.midi.send(MidiEvent::note_on(0, 0, note, 100).from_input(KEYS)));
+            }
+            assert_eq!(run(&mut parts), 1.0);
+        }
+        parts.controller.release_midi_input(KEYS).unwrap();
+        for note in [60, 64] {
+            assert!(parts.midi.send(MidiEvent::note_on(0, 0, note, 100).from_input(PAD)));
+        }
+        run(&mut parts);
+        run(&mut parts);
+        assert_eq!(
+            run(&mut parts),
+            1.0,
+            "{held_count} disconnect releases must leave the new input playable"
+        );
+        assert!(parts.midi.send(MidiEvent::note_off(0, 0, 60).from_input(PAD)));
+        assert_eq!(run(&mut parts), 1.0, "the second queued note must still be held");
+        assert!(parts.midi.send(MidiEvent::note_off(0, 0, 64).from_input(PAD)));
+        assert_eq!(run(&mut parts), 0.0);
+        assert_eq!(
+            parts
+                .controller
+                .stats()
+                .dropped_midi
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+    }
+}
+
+/// Same-frame zone changes release earlier notes, but notes after the change remain held.
+#[test]
+fn mpe_zone_announcement_respects_same_frame_event_order() {
+    for note_first in [true, false] {
+        let mut parts = gate();
+        parts.controller.open_midi_input(KEYS).unwrap();
+        for (controller, value) in [(101, 0), (100, 6)] {
+            assert!(
+                parts
+                    .midi
+                    .send(MidiEvent::control_change(0, 0, controller, value).from_input(KEYS))
+            );
+        }
+        run(&mut parts);
+        let on = MidiEvent::note_on(0, 1, 60, 100).from_input(KEYS);
+        let zone = MidiEvent::control_change(0, 0, 6, 4).from_input(KEYS);
+        for event in if note_first { [on, zone] } else { [zone, on] } {
+            assert!(parts.midi.send(event));
+        }
+        assert_eq!(
+            run(&mut parts),
+            if note_first { 0.0 } else { 1.0 },
+            "note first = {note_first}"
+        );
+    }
 }

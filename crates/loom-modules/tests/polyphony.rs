@@ -1067,3 +1067,40 @@ fn merge_last_recognizes_readded_voices_after_count_edits() {
     parts.controller.set_param_named(source, "voices", 8.0).unwrap();
     assert_eq!(render(&mut parts), [0.01 + 4.0 * 0.01; 512]);
 }
+
+/// Removing the chosen voice selects an active survivor; a still-valid choice stays held.
+#[test]
+fn merge_reselects_only_when_a_width_edit_removes_its_choice() {
+    for mode in [3.0, 4.0] {
+        let mut parts = engine();
+        let c = &mut parts.controller;
+        let source = c.add_module("loom.midi.note").unwrap();
+        let merge = c.add_module("loom.voice.merge").unwrap();
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.set_param_named(source, "voices", 3.0).unwrap();
+        c.set_param_named(source, "bend-range", 24.0).unwrap();
+        c.set_param_named(merge, "mode", mode).unwrap();
+        c.connect_named(source, "pitch", merge, "in").unwrap();
+        c.connect_named(source, "gate", merge, "gate").unwrap();
+        c.connect_named(merge, "out", out, "in").unwrap();
+        c.commit().unwrap();
+        render(&mut parts);
+        for (channel, note) in [(0, 72), (1, 60), (2, 84)] {
+            assert!(parts.midi.send(loom_core::MidiEvent::note_on(0, channel, note, 100)));
+        }
+        render(&mut parts);
+        if mode == 4.0 {
+            assert!(parts.midi.send(loom_core::MidiEvent::note_off(0, 1, 60)));
+        } else {
+            assert!(parts.midi.send(loom_core::MidiEvent::pitch_bend(0, 0, -8192)));
+        }
+        render(&mut parts);
+        parts.controller.set_param_named(source, "voices", 2.0).unwrap();
+        let expected = if mode == 4.0 {
+            loom_core::signal::pitch::from_midi_note(72.0)
+        } else {
+            0.0
+        };
+        assert_eq!(render(&mut parts), [expected; 512], "mode {mode}");
+    }
+}

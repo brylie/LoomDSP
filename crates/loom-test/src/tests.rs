@@ -1348,3 +1348,54 @@ fn bundle_reference_mismatches_name_the_parent_port() {
     rendered.outputs[channel][0] = 0.25;
     harness.compare_or_update(&rendered, &file, false);
 }
+
+/// A bundle-aware observer of the engine-owned configuration timeline.
+#[derive(Clone)]
+struct MpeOrder;
+impl Module for MpeOrder {
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let ([_], [out]) = io.split::<1, 1>();
+        for (frame, value) in out.iter_mut().enumerate() {
+            *value = f32::from(ctx.midi_config(1, frame).lower);
+        }
+    }
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+}
+
+/// Declares bundle IO so the harness supplies the same timeline as the engine.
+static MPE_ORDER: ModuleDescriptor = ModuleDescriptor {
+    id: "test.mpe-order",
+    version: 1,
+    name: "MPE Order",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Reports the announced lower zone count.",
+    inputs: &[port("in", SignalType::Modulation).with_channels(Channels::Voices)],
+    outputs: &[port("zone", SignalType::Modulation)],
+    params: &[],
+    role: ModuleRole::Dsp(|_| Box::new(MpeOrder)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+    roles: &[],
+};
+
+/// Multiple MIDI builder calls sort frames stably, including copy-state prefix playback.
+#[test]
+fn midi_builder_orders_frames_and_preserves_equal_frame_order() {
+    let event = |frame, controller, value| {
+        MidiEvent::control_change(frame, 0, controller, value).from_input(loom_core::MidiInputId(1))
+    };
+    let harness = Harness::new(&MPE_ORDER)
+        .frames(512)
+        .midi([event(0, 101, 0), event(0, 100, 6), event(100, 6, 2)])
+        .midi([event(50, 6, 4), event(100, 6, 3)]);
+    let render = harness.check_block_sizes();
+    assert_eq!(render.output("zone")[49], 0.0);
+    assert_eq!(render.output("zone")[50], 4.0);
+    assert_eq!(render.output("zone")[99], 4.0);
+    assert_eq!(render.output("zone")[100], 3.0);
+    assert_eq!(render.output("zone")[125], 3.0);
+    assert!(harness.check_copy_state(80));
+}

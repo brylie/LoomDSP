@@ -29,6 +29,11 @@ What the app does when a MIDI controller is plugged in or removed, and when the 
 
 Each MIDI event carries the index of its input. The engine keeps, for each open input, a set of the notes it holds (16 channels by 128 notes, 256 bytes), allocated when the input is opened, on the control thread. A removal sends `ReleaseInput(index)`: for every held note on that input, the engine delivers a note off to the modules, then clears the set. *Why:* the modules see only a stream of messages, and "release what this device held" needs to know which device sent what. Note identities include input, channel, and pitch. Two inputs playing the same pitch hold separate notes, so every input delivers its own tagged note off. Removing one keyboard leaves the other keyboard's notes held.
 
+Tracking an already connected input on a replacement engine preserves its MPE
+configuration. The rig may seed that engine before audio starts and re-track its
+inputs after a callback has already run. Only a physical disconnect or connection
+reset clears the retained configuration; beginning note tracking never erases it.
+
 Hold note (the app's own button) is its own source and is not released by a device removal.
 
 ### Acceptance criteria

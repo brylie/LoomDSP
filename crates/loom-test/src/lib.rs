@@ -391,6 +391,7 @@ impl Harness {
     /// MIDI events. Each event's `frame` counts from the start of the render.
     pub fn midi(mut self, events: impl IntoIterator<Item = MidiEvent>) -> Self {
         self.midi.extend(events);
+        self.midi.sort_by_key(|event| event.frame);
         self
     }
 

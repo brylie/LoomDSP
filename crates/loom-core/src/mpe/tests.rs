@@ -82,3 +82,31 @@ fn timeline_keeps_sample_offsets_and_block_history() {
     let ctx = crate::ProcessContext::new(48_000.0, 10, &[]).with_midi_config(&timeline);
     assert_eq!(ctx.midi_config(1, 0).lower, 4);
 }
+
+/// A loop call starting mid-buffer sees each same-frame event's own configuration.
+#[test]
+fn configuration_cursor_preserves_event_order_inside_a_loop_call() {
+    let input = crate::MidiInputId(1);
+    let events = [
+        MidiEvent::control_change(0, 0, 101, 0),
+        MidiEvent::control_change(0, 0, 100, 6),
+        MidiEvent::note_on(10, 1, 60, 100),
+        MidiEvent::control_change(10, 0, 6, 4),
+        MidiEvent::control_change(10, 0, 6, 0),
+    ]
+    .map(|e| e.from_input(input));
+    let mut timeline = MidiConfigTimeline::new(events.len());
+    timeline.begin_block(&events);
+    let mut ctx = crate::ProcessContext::new(48_000.0, 1, &events).with_midi_config(&timeline);
+    ctx.midi_base = 10;
+    assert_eq!(
+        ctx.midi_indexed()
+            .map(|(frame, index, _)| (frame, index))
+            .collect::<Vec<_>>(),
+        [(0, 2), (0, 3), (0, 4)]
+    );
+    assert_eq!(ctx.midi_config_at_event(1, None).lower, 0);
+    assert_eq!(ctx.midi_config_at_event(1, Some(2)).lower, 0);
+    assert_eq!(ctx.midi_config_at_event(1, Some(3)).lower, 4);
+    assert_eq!(ctx.midi_config_at_event(1, Some(4)).lower, 0);
+}

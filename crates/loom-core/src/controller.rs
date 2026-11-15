@@ -128,6 +128,11 @@ pub struct MidiSender {
 impl MidiSender {
     /// Seeds a newly attached engine before any events are sent to it.
     /// The host calls this once while holding its ingress lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns the table unchanged if the one-slot configuration queue still
+    /// contains an earlier table that the engine has not read.
     pub fn seed_config(&mut self, config: Box<crate::MidiConfigTable>) -> Result<(), Box<crate::MidiConfigTable>> {
         self.config.push(config).map_err(|rtrb::PushError::Full(config)| config)
     }

@@ -237,7 +237,10 @@ The [rules for M2 modules](p2-modules.md#rules-for-all-modules-here) apply.
 - **Last**, **Lowest**, and **Highest** pass one voice through: the voice whose gate rose most recently, or the playing voice with the lowest or highest `in` value. With `gate` unconnected its default of 1 makes every voice count as playing, and Last passes voice 1 until a gate edge arrives. The chosen voice changes only on a gate edge, so the output does not jump between voices while they sustain. *Why `in` and not pitch:* the module does not know what `in` is; the player patches the pitch bundle to get the lowest note.
 - A one-voice `in` passes through unchanged in every mode.
 
-Selection decisions for #675's Voice merge (Agreed): all-low gates keep the last
+Selection decisions for #675's Voice merge (Agreed): changing into Last, Lowest,
+or Highest reselects an active voice immediately, including effective mode changes
+from modulation. Removing the selected voice reselects among surviving active
+voices; a selection still in range is preserved across width changes. All-low gates keep the last
 selection, initially voice 1. Ties choose the lowest voice index. Stereo voices
 are compared by their mean and both sides move together. Missing gate voices
 read the declared normal, including beyond a narrower bundle. Within each voice,

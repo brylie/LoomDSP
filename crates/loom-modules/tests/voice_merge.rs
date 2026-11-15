@@ -133,3 +133,36 @@ fn either_stereo_gate_side_can_select_a_voice() {
         .check_block_sizes();
     assert_eq!(render.output("out")[0], 2.0);
 }
+
+/// Switching into a selection mode chooses from the currently active chord.
+#[test]
+fn selection_modes_reselect_immediately_when_the_effective_mode_changes() {
+    let render = Harness::new(&MERGE)
+        .frames(1024)
+        .bundle_input(
+            "in",
+            vec![
+                Signal::constant(0.0),
+                Signal::constant(3.0),
+                Signal::constant(1.0),
+                Signal::constant(2.0),
+            ],
+        )
+        .bundle_input(
+            "gate",
+            vec![
+                Signal::constant(0.0),
+                Signal::from_fn(|f| if f >= 100 { 1.0 } else { 0.0 }),
+                Signal::from_fn(|f| if f >= 150 { 1.0 } else { 0.0 }),
+                Signal::from_fn(|f| if f >= 200 { 1.0 } else { 0.0 }),
+            ],
+        )
+        .param_at(300.0 / 48000.0, "mode", 2.0)
+        .param_at(400.0 / 48000.0, "mode", 3.0)
+        .param_at(500.0 / 48000.0, "mode", 4.0)
+        .check_block_sizes();
+    assert_eq!(render.output("out")[299], 6.0);
+    assert_eq!(render.output("out")[300], 2.0);
+    assert_eq!(render.output("out")[400], 1.0);
+    assert_eq!(render.output("out")[500], 3.0);
+}

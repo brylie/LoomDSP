@@ -672,3 +672,93 @@ fn structural_stack_edits_are_atomic_and_compile_once() {
         swaps + 1
     );
 }
+
+/// A non-MIDI descriptor with differently named count and multiple dependent choices.
+static COUNT_FILTERS: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
+    id: "test.count-filters",
+    version: 1,
+    name: "Count Filters",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Tests generic paired count edits.",
+    inputs: &[],
+    outputs: &[],
+    params: &[
+        loom_core::ParamSpec {
+            name: "layers",
+            label: "Layers",
+            description: "Number of layers.",
+            min: 1.0,
+            max: 4.0,
+            default: 1.0,
+            unit: "",
+            options: loom_core::ParamOptions::DEFAULT,
+        }
+        .integer(),
+        loom_core::ParamSpec {
+            name: "priority",
+            label: "Priority",
+            description: "A count-dependent priority.",
+            min: 5.0,
+            max: 8.0,
+            default: 7.0,
+            unit: "",
+            options: loom_core::ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["P0", "P1", "M0", "M1"])
+        .choices_by_count("layers", 2),
+        loom_core::ParamSpec {
+            name: "articulation",
+            label: "Articulation",
+            description: "A second count-dependent choice.",
+            min: 10.0,
+            max: 12.0,
+            default: 11.0,
+            unit: "",
+            options: loom_core::ParamOptions::DEFAULT,
+        }
+        .integer()
+        .choices(&["P0", "M0", "M1"])
+        .choices_by_count("layers", 1),
+    ],
+    role: loom_core::ModuleRole::Dsp(|_| Box::new(CountFilterModule)),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+    roles: &[],
+};
+
+/// A parameter-only fixture; paired edits are read back from the controller graph.
+struct CountFilterModule;
+impl loom_core::Module for CountFilterModule {
+    fn process(&mut self, _: &loom_core::ProcessContext<'_>, _: &mut loom_core::PortIo<'_>) {}
+}
+
+/// Every count-dependent choice follows its descriptor, without module or parameter names.
+#[test]
+fn count_crossings_update_all_descriptor_dependent_choices() {
+    let mut registry = loom_core::Registry::new();
+    registry.register(&COUNT_FILTERS).unwrap();
+    let mut parts = loom_core::create_engine(std::sync::Arc::new(registry), EngineConfig::default());
+    let module = parts.controller.add_module(COUNT_FILTERS.id).unwrap();
+    parts.controller.commit().unwrap();
+    parts.engine.apply_pending();
+    let mut app = app_with("Patch(version: 1, modules: [])");
+    app.session.controller = parts.controller;
+    const COUNT: usize = COUNT_FILTERS.param_index("layers").unwrap();
+    const PRIORITY: usize = COUNT_FILTERS.param_index("priority").unwrap();
+    const ARTICULATION: usize = COUNT_FILTERS.param_index("articulation").unwrap();
+    let values = |app: &App| app.session.controller.graph().node(module).unwrap().params.clone();
+    app.fan_out_param(module.0, COUNT, 4.0).unwrap();
+    assert_eq!(values(&app), [4.0, 5.0, 10.0]);
+    app.fan_out_param(module.0, PRIORITY, 6.0).unwrap();
+    app.fan_out_param(module.0, ARTICULATION, 10.0).unwrap();
+    app.fan_out_param(module.0, COUNT, 3.0).unwrap();
+    assert_eq!(
+        values(&app),
+        [3.0, 6.0, 10.0],
+        "edits within one count group preserve choices"
+    );
+    app.fan_out_param(module.0, COUNT, 1.0).unwrap();
+    assert_eq!(values(&app), [1.0, 7.0, 11.0]);
+}

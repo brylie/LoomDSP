@@ -659,3 +659,48 @@ fn mpe_ingress_caches_only_accepted_events_and_clears_connections() {
     assert_eq!(midi.lock().unwrap().config.input(1).generation, 1);
     assert_eq!(midi.lock().unwrap().config.input(1).lower, 0);
 }
+
+/// A callback may consume the rig snapshot before the app re-tracks existing inputs.
+#[test]
+fn mpe_snapshot_survives_tracking_after_the_first_audio_callback() {
+    let (parts, _) = mpe_pitch_engine();
+    let midi = share_midi(parts.midi);
+    for (controller, value) in [(101, 0), (100, 6), (6, 4)] {
+        assert!(send_midi(
+            &midi,
+            MidiEvent::control_change(0, 0, controller, value).from_input(loom_core::MidiInputId(1))
+        ));
+    }
+    for listen in [0.0, 1.0] {
+        let mut next = create_engine(
+            loom_modules::registry(),
+            EngineConfig {
+                output_safety: OutputSafety::Off,
+                ..EngineConfig::default()
+            },
+        );
+        let note = next.controller.add_module("loom.midi.note").unwrap();
+        next.controller.set_param_named(note, "channel", listen).unwrap();
+        let out = next.controller.add_module("loom.io.audio-out").unwrap();
+        next.controller.connect_named(note, "pitch", out, "in").unwrap();
+        next.controller.commit().unwrap();
+        midi.lock().unwrap().replace(next.midi);
+        // PatchSession::start can start audio before settle_session re-tracks ports.
+        mpe_pitch(&mut next.engine);
+        next.controller.open_midi_input(loom_core::MidiInputId(1)).unwrap();
+        mpe_pitch(&mut next.engine);
+        assert!(send_midi(
+            &midi,
+            MidiEvent::note_on(0, 1, 60, 100).from_input(loom_core::MidiInputId(1))
+        ));
+        assert!(send_midi(
+            &midi,
+            MidiEvent::pitch_bend(0, 1, 4096).from_input(loom_core::MidiInputId(1))
+        ));
+        assert_eq!(
+            mpe_pitch(&mut next.engine),
+            24.0 * loom_core::signal::pitch::PER_SEMITONE,
+            "channel filter {listen}"
+        );
+    }
+}

@@ -157,6 +157,16 @@ impl<'a> ProcessContext<'a> {
         })
     }
 
+    /// Configuration through an event index from [`Self::midi_indexed`].
+    /// `None` reads the configuration before this call's first event.
+    pub fn midi_config_at_event(&self, input: u16, event: Option<usize>) -> crate::MidiInputConfig {
+        self.midi_config
+            .map_or_else(crate::MidiInputConfig::default, |config| match event {
+                Some(event) => config.input_at_event(input, event),
+                None => config.input_before_frame(input, self.midi_base),
+            })
+    }
+
     /// Creates a context. Mainly useful for testing modules in isolation.
     /// The transport is stopped at position 0, at 120 BPM, in 4/4.
     pub fn new(sample_rate: f32, frames: usize, midi: &'a [MidiEvent]) -> Self {
@@ -229,11 +239,17 @@ impl<'a> ProcessContext<'a> {
     /// MIDI events that fall inside this call, as `(frame, event)`, where
     /// `frame` is relative to the first frame of this call.
     pub fn midi(&self) -> impl Iterator<Item = (usize, &MidiEvent)> + '_ {
+        self.midi_indexed().map(|(frame, _, event)| (frame, event))
+    }
+
+    /// Events for this call with their relative frame and stable index in the buffer.
+    /// Pass the index to [`Self::midi_config_at_event`] to preserve same-frame ordering.
+    pub fn midi_indexed(&self) -> impl Iterator<Item = (usize, usize, &MidiEvent)> + '_ {
         let start = self.midi_base;
         let end = start + self.frames;
-        self.midi.iter().filter_map(move |event| {
+        self.midi.iter().enumerate().filter_map(move |(index, event)| {
             let frame = event.frame as usize;
-            (frame >= start && frame < end).then(|| (frame - start, event))
+            (frame >= start && frame < end).then(|| (frame - start, index, event))
         })
     }
 }

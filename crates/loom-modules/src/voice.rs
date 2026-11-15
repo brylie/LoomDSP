@@ -68,6 +68,7 @@ struct Merge {
     clock: u64,
     selected: usize,
     mode: usize,
+    previous_mode: Option<usize>,
 }
 
 impl Merge {
@@ -92,13 +93,15 @@ impl Module for Merge {
         let voices = io.input_width(Self::IN).voices;
         let sides = io.output_width(Self::OUT).sides;
         let mode = io.param(Self::MODE);
+        let selected_removed = self.selected >= voices;
         self.selected = self.selected.min(voices - 1);
         // Removed voices have no gate history if the bundle later grows again.
         self.high[voices..].fill(false);
         self.order[voices..].fill(0);
         for frame in 0..io.frames() {
             let mode = mode.map_or(frame, self.mode, |value| value.round().clamp(0.0, 4.0) as usize);
-            let mut edge = false;
+            let mut edge = (frame == 0 && selected_removed) || self.previous_mode != Some(mode);
+            self.previous_mode = Some(mode);
             // Simultaneous rises share an age, so ties retain the lowest index.
             self.clock = self.clock.wrapping_add(1);
             for voice in 0..voices {

@@ -170,6 +170,7 @@ struct NoteIn {
     generations: [u64; loom_core::MAX_MIDI_INPUTS as usize],
     channel: u8,
     bend_range: f32,
+    previous_range: Option<f32>,
     mode: usize,
 }
 
@@ -184,6 +185,7 @@ impl Default for NoteIn {
             generations: [0; loom_core::MAX_MIDI_INPUTS as usize],
             channel: 0,
             bend_range: 2.0,
+            previous_range: None,
             mode: 2,
         }
     }
@@ -222,10 +224,16 @@ impl NoteIn {
     }
 
     /// Converts raw expression using configuration at this exact sample.
-    fn note(&self, key: Key, ctx: &ProcessContext<'_>, frame: usize, ordinary_range: f32) -> loom_dsp::voice::Note {
+    fn note(
+        &self,
+        key: Key,
+        ctx: &ProcessContext<'_>,
+        event_position: Option<usize>,
+        ordinary_range: f32,
+    ) -> loom_dsp::voice::Note {
         let input = (key.id.0 >> 11) as u16;
         let channel = ((key.id.0 >> 7) & 15) as u8;
-        let config = ctx.midi_config(input, frame);
+        let config = ctx.midi_config_at_event(input, event_position);
         let member = self.expression[usize::from(input)][usize::from(channel)];
         let mut bend = f32::from(member.bend) / 8192.0 * config.bend_range(channel, ordinary_range);
         let mut pressure = member.pressure.max(key.pressure);
@@ -278,19 +286,19 @@ impl NoteIn {
     }
 
     /// Refreshes held keys only. Released voices retain their last expression.
-    fn refresh(&mut self, ctx: &ProcessContext<'_>, frame: usize, range: f32) {
+    fn refresh(&mut self, ctx: &ProcessContext<'_>, event_position: Option<usize>, range: f32) {
         let mut visited = 0u64;
         for key in self.keys.into_iter().flatten() {
             let input = (key.id.0 >> 11) as u16;
             if visited & (1u64 << input) == 0 {
                 visited |= 1u64 << input;
-                self.sync_input(usize::from(input), ctx.midi_config(input, frame));
+                self.sync_input(usize::from(input), ctx.midi_config_at_event(input, event_position));
             }
         }
         for key in self.keys.into_iter().flatten() {
             let input = (key.id.0 >> 11) as u16;
-            if key.generation == ctx.midi_config(input, frame).generation {
-                self.allocator.update_note(self.note(key, ctx, frame, range));
+            if key.generation == ctx.midi_config_at_event(input, event_position).generation {
+                self.allocator.update_note(self.note(key, ctx, event_position, range));
             }
         }
     }
@@ -306,12 +314,19 @@ impl NoteIn {
     }
 
     /// Consumes one event. Releases do not depend on the current channel filter.
-    fn handle(&mut self, event: &loom_core::MidiEvent, listen: u8, range: f32, ctx: &ProcessContext<'_>, frame: usize) {
+    fn handle(
+        &mut self,
+        event: &loom_core::MidiEvent,
+        listen: u8,
+        range: f32,
+        ctx: &ProcessContext<'_>,
+        event_position: Option<usize>,
+    ) {
         let input = usize::from(event.input);
         if input >= self.expression.len() {
             return;
         }
-        let config = ctx.midi_config(event.input, frame);
+        let config = ctx.midi_config_at_event(event.input, event_position);
         self.sync_input(input, config);
         match event.message() {
             MidiMessage::NoteOn {
@@ -330,7 +345,7 @@ impl NoteIn {
                     pressure: 0,
                     serial: self.serial,
                 };
-                self.allocator.note_on(self.note(key, ctx, frame, range));
+                self.allocator.note_on(self.note(key, ctx, event_position, range));
                 if self.allocator.voices().len() > 1 {
                     self.retain_sounding_keys();
                 }
@@ -350,7 +365,7 @@ impl NoteIn {
                 self.keys[slot] = Some(key);
             }
             MidiMessage::NoteOff { channel, note } => {
-                self.refresh(ctx, frame, range);
+                self.refresh(ctx, event_position, range);
                 let id = Self::identity(event.input, channel, note);
                 self.allocator.note_off(id);
                 for key in &mut self.keys {
@@ -391,12 +406,14 @@ impl Module for NoteIn {
         let channel = io.param(Self::CHANNEL);
         let bend_range = io.param(Self::BEND_RANGE);
         let mode = io.param(Self::MODE);
-        let mut events = ctx.midi().peekable();
+        let mut events = ctx.midi_indexed().peekable();
+        let mut event_position = None;
         for frame in 0..io.frames() {
             let listen = channel.map_or(frame, self.channel, |v| v.round().clamp(0.0, 16.0) as u8);
             let range = bend_range.at_or(frame, self.bend_range);
             let mode = mode.map_or(frame, self.mode, |v| v.round().clamp(0.0, 3.0) as usize);
             let resized = self.allocator.voices().len() != capacity;
+            let mut refresh = resized || self.previous_range != Some(range);
             self.allocator.configure(capacity, Self::mode(mode), 1);
             if resized {
                 self.retain_sounding_keys();
@@ -429,14 +446,19 @@ impl Module for NoteIn {
             }
             self.allocator
                 .begin_frame((!io.uses_default(Self::LEVEL)).then_some(&levels[..capacity]));
-            while let Some((at, event)) = events.peek() {
+            while let Some((at, index, event)) = events.peek() {
                 if *at > frame {
                     break;
                 }
-                self.handle(event, listen, range, ctx, frame);
+                event_position = Some(*index);
+                self.handle(event, listen, range, ctx, event_position);
+                refresh = true;
                 events.next();
             }
-            self.refresh(ctx, frame, range);
+            if refresh {
+                self.refresh(ctx, event_position, range);
+            }
+            self.previous_range = Some(range);
             for (voice, state) in self.allocator.voices().iter().enumerate() {
                 let note = state.note;
                 io.voice_output(Self::PITCH, voice, 0)[frame] = note.map_or(-0.5, |note| note.pitch);
@@ -462,6 +484,7 @@ impl Module for NoteIn {
         self.keys.fill(None);
         self.serial = 0;
         self.mono_velocity = 0.0;
+        self.previous_range = None;
         self.expression.fill([Expression::default(); 16]);
         self.generations.fill(0);
     }

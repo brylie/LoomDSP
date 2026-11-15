@@ -747,7 +747,8 @@ fn refuses_parameters_and_displays_on_non_dsp_modules() {
 
 /// `shown_when` names a choice parameter, or an on and off switch, of
 /// the same module, and choices it has (ADR-0030). A segmented control
-/// binds 2 to 5 named choices. The errors name what is wrong.
+/// binds 2 to 5 named choices. Count filtering needs two nonempty groups
+/// and an integer count that can cross one. The errors name what is wrong.
 #[test]
 fn refuses_bad_mode_conditions_and_segmented_controls() {
     macro_rules! with {
@@ -800,6 +801,55 @@ fn refuses_bad_mode_conditions_and_segmented_controls() {
         .unwrap_err()
         .contains("2 to 5")
     );
+    const COUNT: crate::ParamSpec = param("count", 1.0, 16.0, 1.0, "").integer();
+    assert_eq!(with!(&[COUNT, MODE.choices_by_count("count", 1)], &[]), Ok(()));
+    let bad_count_choices = [
+        (
+            with!(&[COUNT, MODE.choices_by_count("count", 0)], &[]),
+            "both lists nonempty",
+        ),
+        (
+            with!(&[COUNT, MODE.choices_by_count("count", 2)], &[]),
+            "both lists nonempty",
+        ),
+        (
+            with!(&[COUNT, MODE.choices_by_count("count", 3)], &[]),
+            "both lists nonempty",
+        ),
+        (with!(&[MODE.choices_by_count("missing", 1)], &[]), "integer count"),
+        (
+            with!(
+                &[param("count", 1.0, 16.0, 1.0, ""), MODE.choices_by_count("count", 1)],
+                &[]
+            ),
+            "integer count",
+        ),
+        (
+            with!(
+                &[
+                    param("count", 0.0, 16.0, 1.0, "").integer(),
+                    MODE.choices_by_count("count", 1)
+                ],
+                &[]
+            ),
+            "integer count",
+        ),
+        (
+            with!(
+                &[
+                    param("count", 1.0, 1.0, 1.0, "").integer(),
+                    MODE.choices_by_count("count", 1)
+                ],
+                &[]
+            ),
+            "integer count",
+        ),
+    ];
+    for (result, expected) in bad_count_choices {
+        let error = result.unwrap_err();
+        assert!(error.contains("parameter `mode`"), "{error}");
+        assert!(error.contains(expected), "{error}");
+    }
     let refused = [
         (
             with!(&[MODE, param("depth", 0.0, 1.0, 0.0, "").shown_when("nope", &[0])], &[]),

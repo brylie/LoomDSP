@@ -180,13 +180,13 @@ pub(crate) enum Command {
     Panic,
     /// The MIDI message that runs panic, from the player's preferences.
     SetPanicTrigger(Option<PanicTrigger>),
-    /// Start tracking the notes of MIDI input `index`, in `held`.
+    /// Start tracking MIDI input `input`, preserving its retained configuration.
     OpenInput {
-        index: usize,
+        input: crate::MidiInputId,
         held: Box<HeldSet>,
     },
-    /// Release every note MIDI input `index` holds, and stop tracking it.
-    ReleaseInput(usize),
+    /// Release every note MIDI input `input` holds, and stop tracking it.
+    ReleaseInput(crate::MidiInputId),
 }
 
 pub(crate) enum Garbage {
@@ -233,12 +233,13 @@ impl InputNotes {
     }
 
     /// Queues tagged releases for every held identity on this input.
-    fn release(&mut self, index: usize) -> Option<Box<HeldSet>> {
+    fn release(&mut self, input: crate::MidiInputId) -> Option<Box<HeldSet>> {
+        let index = usize::from(input.0);
         let mut held = self.inputs.get_mut(index)?.take()?;
         held.drain(|channel, note| {
             if self.releases.len() < self.releases.capacity() {
                 self.releases
-                    .push(MidiEvent::note_off(0, channel, note).from_input(crate::MidiInputId(index as u16)));
+                    .push(MidiEvent::note_off(0, channel, note).from_input(input));
             }
         });
         Some(held)
@@ -765,11 +766,11 @@ impl Engine {
                 Command::FadeOut => self.safety.fade_out(),
                 Command::Panic => self.start_panic(),
                 Command::SetPanicTrigger(trigger) => self.panic_trigger.set(trigger),
-                Command::OpenInput { index, held } => {
-                    self.midi_config.clear(index as u16);
-                    // An input opened again starts clean: what it held is
-                    // released first.
-                    if let Some(old) = self.input_notes.release(index) {
+                Command::OpenInput { input, held } => {
+                    let index = usize::from(input.0);
+                    // Tracking an input again releases its old held notes.
+                    // Device configuration can already be seeded by the rig.
+                    if let Some(old) = self.input_notes.release(input) {
                         self.discard(Garbage::HeldSet(old));
                     }
                     match self.input_notes.inputs.get_mut(index) {
@@ -777,9 +778,9 @@ impl Engine {
                         None => self.discard(Garbage::HeldSet(held)),
                     }
                 }
-                Command::ReleaseInput(index) => {
-                    self.midi_config.clear(index as u16);
-                    if let Some(old) = self.input_notes.release(index) {
+                Command::ReleaseInput(input) => {
+                    self.midi_config.clear(input.0);
+                    if let Some(old) = self.input_notes.release(input) {
                         self.discard(Garbage::HeldSet(old));
                     }
                 }
@@ -901,10 +902,6 @@ impl Engine {
             .releases
             .drain(..self.input_notes.releases.len().min(self.midi.capacity()))
         {
-            if self.midi.len() == self.midi.capacity() {
-                self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
-                continue;
-            }
             self.midi.push(event);
         }
         // Finish synthetic releases before accepting new notes under a reused id.
@@ -914,12 +911,13 @@ impl Engine {
             return;
         }
         let last = frames.saturating_sub(1) as u32;
-        while let Ok(mut event) = self.midi_in.pop() {
+        // Releases share this buffer with ingress. Leave accepted events queued
+        // once it fills, rather than consuming a note that cannot be delivered.
+        while self.midi.len() < self.midi.capacity() {
+            let Ok(mut event) = self.midi_in.pop() else {
+                break;
+            };
             if !self.input_notes.follow(&event) {
-                continue;
-            }
-            if self.midi.len() == self.midi.capacity() {
-                self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
             event.frame = event.frame.min(last);
