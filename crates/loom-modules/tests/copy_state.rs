@@ -6,8 +6,8 @@
 mod common;
 
 use common::{
-    SEEDED_ROUTES, WRAP_FRAME, busy_each, busy_without_reset, changed, choice_failures, dsp_modules, playing_short_bar,
-    pulses, selector,
+    SEEDED_SIDES_TOGETHER, WRAP_FRAME, busy_each, busy_without_reset, changed, choice_failures, dsp_modules,
+    playing_short_bar, pulses, selector,
 };
 use loom_core::{MidiEvent, ModuleDescriptor, ModuleRole, TransportSettings};
 use loom_test::Harness;
@@ -53,10 +53,10 @@ fn harness(descriptor: &'static ModuleDescriptor, reset_busy: bool) -> Harness {
 }
 
 /// True for a module with a random generator, which re-derives it when it
-/// copies (rule 27). A seeded route copies it as it is (ADR-0036), so it takes
-/// the strict check, which is what proves both sides match.
+/// copies (rule 27). A seeded route (ADR-0036) and a seeded value of a voice
+/// (ADR-0045) copy it as it is, so they take the strict check.
 fn seeded(descriptor: &ModuleDescriptor) -> bool {
-    descriptor.param_index("seed").is_some() && !SEEDED_ROUTES.contains(&descriptor.id)
+    descriptor.param_index("seed").is_some() && !SEEDED_SIDES_TOGETHER.contains(&descriptor.id)
 }
 
 /// Every choice continues identically on distinct busy inputs, including reset.

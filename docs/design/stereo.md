@@ -150,7 +150,7 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 - [x] Given a long chain built so that stereo reaches modules in the reverse of the order they are stored, then inference visits each module and cable at most once.
 - [x] Given a stereo chain, when the stereo cable is removed and the patch recompiles, then copy 1 of each module is freed on the control thread, copy 0 keeps its state, and the `no_alloc` tests pass.
 - [x] Given a copied module, when it is run through the module test harness, then its output is identical at block sizes 1, 77, and 512.
-- [x] Given a copied seeded module, other than the two exceptions of rule 15 (Selector, and Voice spread once [#675](https://github.com/brylie/LoomDSP/issues/675) builds it), then its left and right outputs differ, and both are the same on every run.
+- [x] Given a copied seeded module, other than the two exceptions of rule 15 (Selector and Voice spread), then its left and right outputs differ, and both are the same on every run.
 - [x] Given a Selector on a stereo signal, loaded as stereo or turning stereo while it plays, then both sides make the same picks, unless a stereo modulation source is assigned to one of its parameters.
 - [x] Given each example patch, updated to Audio Out's `in` port, when it loads, then it gives bit-identical output to the patch before this change.
 - [x] Given a mono cable into Audio Out, then both sides of the device output carry it.
@@ -159,8 +159,8 @@ How the canvas shows a stereo cable is FR-CANVAS-12 (M2). See Open points.
 - [x] Given a stereo cable into a port, when the player hovers it, then the hover text says "Stereo". (Manual check.)
 - [x] Given a descriptor with `Downmix` on an output, or a module with a `Stereo` port and a `PerChannel` input, then the registry rejects it.
 - [x] (Rules 25 to 27.) Given a running SVF that turns stereo, with the same signal on both sides, then its right output is bit-identical to its left from the first frame after the swap, and the `no_alloc` tests pass.
-- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, other than the two exceptions of rule 15, which are covered here (Selector, and Voice spread once [#675](https://github.com/brylie/LoomDSP/issues/675) builds it), when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine calls it at the schedule swap.)
-- [x] (Rule 27.) Given a seeded module that turns stereo, other than the two exceptions of rule 15 (Selector, and Voice spread once [#675](https://github.com/brylie/LoomDSP/issues/675) builds it), then its left and right outputs differ after the swap, and are the same on every run.
+- [x] (Rules 25 and 26.) Given each built-in module with state, except seeded modules covered by rule 27, other than the two exceptions of rule 15, which are covered here (Selector and Voice spread), when the harness runs it for N frames, copies its state into a new instance, and runs both on, then both outputs are bit-identical from frame N. (`Harness::check_copy_state`, `loom-modules/tests/copy_state.rs`; no allocation in `no_alloc.rs`. The engine calls it at the schedule swap.)
+- [x] (Rule 27.) Given a seeded module that turns stereo, other than the two exceptions of rule 15 (Selector and Voice spread), then its left and right outputs differ after the swap, and are the same on every run.
 
 ### Verification notes
 

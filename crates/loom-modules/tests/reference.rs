@@ -304,6 +304,23 @@ fn voice_merge() {
         .check(reference!("voice_merge"));
 }
 
+/// Voice spread as voice 3 of 8, so every mode has an offset that is not 0:
+/// Even, then Series, then Random with seed 7, on a slow sine. The amount
+/// glides from 0.05 to 0.1 in Series, and the mode switches on the sample.
+#[test]
+fn voice_spread() {
+    Harness::new(&loom_modules::voice::SPREAD)
+        .seconds(0.06)
+        .voice(3, 8)
+        .input("in", Signal::from_fn(|frame| (frame as f32 * 0.002).sin() * 0.2))
+        .param("amount", 0.05)
+        .param("seed", 7.0)
+        .param_at(0.02, "mode", 1.0)
+        .param_at(0.03, "amount", 0.1)
+        .param_at(0.04, "mode", 2.0)
+        .check(reference!("voice_spread"));
+}
+
 /// Reference render for `loom.midi.controller`: controller 1 moves and
 /// is smoothed, and a message for another controller changes nothing.
 #[test]
@@ -775,6 +792,7 @@ fn every_dsp_module_has_a_reference_test() {
         &level::AMP,
         &midi::NOTE_IN,
         &loom_modules::voice::MERGE,
+        &loom_modules::voice::SPREAD,
         &midi::CONTROLLER_IN,
         &display::METER,
         &display::SCOPE,

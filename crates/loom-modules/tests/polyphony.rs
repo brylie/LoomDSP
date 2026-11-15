@@ -321,7 +321,8 @@ fn stereo_sides_multiply_with_voices_without_downmixing_them() {
     assert_eq!(right, [sum(4); 512]);
 }
 
-/// Selects one input voice so an engine test can inspect every voice independently.
+/// Selects one input voice, with both of its sides, so an engine test can
+/// inspect every voice independently.
 #[derive(Debug)]
 struct SelectVoice {
     voice: usize,
@@ -359,8 +360,10 @@ static SELECT_VOICE: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
 
 impl loom_core::Module for SelectVoice {
     fn process(&mut self, _: &loom_core::ProcessContext<'_>, io: &mut loom_core::PortIo<'_>) {
-        let input = io.voice_input(Self::SIGNAL_IN, self.voice, 0);
-        io.output(Self::SIGNAL_OUT).copy_from_slice(input);
+        for side in 0..io.output_width(Self::SIGNAL_OUT).sides {
+            let input = io.voice_input(Self::SIGNAL_IN, self.voice, side);
+            io.voice_output(Self::SIGNAL_OUT, 0, side).copy_from_slice(input);
+        }
     }
     fn set_param(&mut self, index: usize, value: f32) {
         if index == Self::SELECT {
@@ -409,6 +412,69 @@ fn eight_seeded_voices_differ_and_repeat() {
     assert_eq!(play(), first);
     for (i, value) in first.iter().enumerate() {
         assert!(!first[..i].contains(value));
+    }
+}
+
+/// Voice spread in Random gives both sides of a voice one offset (ADR-0045).
+/// One 8-voice source feeds both inputs of Join, so each voice is stereo with
+/// equal sides, and Voice spread runs as one copy per side of each voice. The
+/// test reads each voice's two sides through `test.select-voice` into Audio
+/// Out's left and right. Per voice, `out - in` is not 0, differs from the
+/// other voices', and is the same on both sides. It compares `out - in`
+/// because the source already differs per voice.
+#[test]
+fn voice_spread_gives_both_sides_of_a_voice_one_random_offset() {
+    let mut registry = Registry::new();
+    register_all(&mut registry).unwrap();
+    test_modules::register(&mut registry).unwrap();
+    registry.register(&SELECT_VOICE).unwrap();
+    let mut parts = create_engine(
+        Arc::new(registry),
+        EngineConfig {
+            output_safety: OutputSafety::Off,
+            ..EngineConfig::default()
+        },
+    );
+    let c = &mut parts.controller;
+    let source = c.add_module("test.voices").unwrap();
+    let join = c.add_module("loom.mix.join").unwrap();
+    let spread = c.add_module("loom.voice.spread").unwrap();
+    let select = c.add_module(SELECT_VOICE.id).unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(source, "voices", 8.0).unwrap();
+    c.set_param_named(spread, "mode", 2.0).unwrap();
+    c.set_param_named(spread, "amount", 0.05).unwrap();
+    c.connect_named(source, "out", join, "left").unwrap();
+    c.connect_named(source, "out", join, "right").unwrap();
+    c.connect_named(join, "out", spread, "in").unwrap();
+    c.connect_named(spread, "out", select, "in").unwrap();
+    c.connect_named(select, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    assert_eq!(
+        c.last_report().width(c.output_ref(spread, "out").unwrap()),
+        Width { voices: 8, sides: 2 }
+    );
+    let mut offsets = Vec::new();
+    for voice in 0..8 {
+        parts
+            .controller
+            .set_param_named(select, "select", voice as f32 + 1.0)
+            .unwrap();
+        let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+        for _ in 0..3 {
+            parts.engine.process(&mut left, &mut right);
+        }
+        let input = 0.01 + voice as f32 * 0.01;
+        let (left, right) = (left[511] - input, right[511] - input);
+        assert_eq!(
+            left.to_bits(),
+            right.to_bits(),
+            "voice {}: {left} and {right}",
+            voice + 1
+        );
+        assert_ne!(left, 0.0, "voice {}", voice + 1);
+        assert!(!offsets.contains(&left), "voice {} repeats {left}", voice + 1);
+        offsets.push(left);
     }
 }
 

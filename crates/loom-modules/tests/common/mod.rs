@@ -83,10 +83,13 @@ pub fn playing_short_bar() -> TransportSettings {
     }
 }
 
-/// Seeded modules whose numbers choose a route, not a signal, so a copy takes the
-/// random stream as it is (ADR-0036). A new one belongs here, or it gets the
-/// check for the other seeded modules.
-pub const SEEDED_ROUTES: &[&str] = &["loom.route.selector"];
+/// Seeded modules that leave the stereo side out of their numbers, so both
+/// sides agree and a copy takes the random state as it is (stereo spec, rule
+/// 15). Selector's numbers choose a route (ADR-0036). Voice spread's numbers
+/// belong to a voice (ADR-0045). These take the strict copy check. A new
+/// seeded module of either kind belongs here, or it gets the check for the
+/// other seeded modules.
+pub const SEEDED_SIDES_TOGETHER: &[&str] = &["loom.route.selector", "loom.voice.spread"];
 
 /// A trigger every 100 frames from frame `first`.
 pub fn pulses(first: usize) -> Signal {

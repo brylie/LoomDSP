@@ -3,7 +3,7 @@
 A choice of ranges for wide controls, such as Multiply's gain, so a player can make a knob fine and safe for the job it does in a patch.
 
 - **Kind:** living specification.
-- **Status:** Implemented ([#122](https://github.com/brylie/LoomDSP/issues/122)), except the manual check below. Refined on 2026-11-15 for [#675](https://github.com/brylie/LoomDSP/issues/675): [Showing the value](#showing-the-value) and Voice spread's `amount` are not built yet.
+- **Status:** Implemented ([#122](https://github.com/brylie/LoomDSP/issues/122)), except the manual check below. Refined on 2026-11-15 for [#675](https://github.com/brylie/LoomDSP/issues/675): [Showing the value](#showing-the-value) and Voice spread's `amount`.
 - **Decision behind it:** none yet. It extends [parameter mapping](modulation.md#parameter-mapping) (Agreed) and does not change a decision.
 - **Use case and requirements:** FR-MOD-09 (proposed here), FR-MOD-03, FR-MOD-08, FR-SIG-03.
 - **Background:** [Why feedback FM turns to noise](../learn/feedback-fm.md): exponential pitch, the one-sample loop, and aliasing at high depth.
@@ -89,7 +89,7 @@ The text that shows a linear parameter's value has enough decimals that one 1% s
 - [x] Every example patch loads with the same values as before. A value outside the default range (for example a gain of 5) loads with the smallest range that holds it.
 - [x] A saved range that does not hold the saved value (gain 5 with -0.1 to 0.1) loads with the value unchanged, the smallest range that holds it (-5 to 5), and a report. The report is a note that `loom` prints and the app shows in its status bar.
 - [x] Two instances of one module keep separate ranges.
-- [ ] [Showing the value](#showing-the-value) (tests in `crates/loom-app`):
+- [x] [Showing the value](#showing-the-value) (tests in `crates/loom-app`):
   - 0.0004 on -0.01 to 0.01 shows "0.0004", and one 1% arrow-key step on the tile knob changes the text;
   - a knob's and an inspector row's accessibility node read the same text the screen shows;
   - 1.0 on 0 to 1 shows "1.00";
