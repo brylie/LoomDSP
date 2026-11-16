@@ -163,3 +163,13 @@ fn a_packed_colour_keeps_its_channels() {
     assert_eq!(packed(Color::rgba(0.25, 0.5, 0.75, 0.4)), [0.25, 0.5, 0.75, 0.4]);
     assert_eq!(packed(Color::TRANSPARENT), [0.0, 0.0, 0.0, 0.0]);
 }
+
+/// At scale 2, a clip edge on a half pixel rounds outward to whole physical
+/// pixels: the scissor covers every pixel the clip touches, so nothing a
+/// hit can reach inside the clip is cut away.
+#[test]
+fn a_half_pixel_clip_rounds_out_at_scale_two() {
+    let clip = Rect::new(Point::new(100.25, 50.75), Size::new(10.5, 10.0));
+    // 200.5 to 221.5 across, 101.5 to 121.5 down.
+    assert_eq!(scissor(clip, target(2.0)), Some([200, 101, 22, 21]));
+}

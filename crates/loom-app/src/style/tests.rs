@@ -40,26 +40,74 @@ fn quiet_text_meets_contrast() {
     }
 }
 
-/// No app source writes a size inline: every `.size(...)` and
-/// `text_size(...)` takes a token from this module, and no view builds
-/// an Iced button, whose default role is primary. Only this module may
-/// (visual-system.md, rule 1).
+/// The app's Rust files under `dir`, in every folder, with `style.rs` and
+/// test files left out: tests may write a value to check it.
+fn app_sources(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(dir).expect("a source folder") {
+        let path = entry.expect("a source entry").path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if path.is_dir() {
+            if name != "tests" {
+                app_sources(&path, files);
+            }
+        } else if path.extension().is_some_and(|e| e == "rs")
+            && name != "style.rs"
+            && name != "tests.rs"
+            && !name.ends_with("_tests.rs")
+        {
+            files.push(path);
+        }
+    }
+}
+
+/// The calls whose first argument is a size, and so must be a token: a
+/// literal number there is written inline.
+const SIZE_CALLS: [&str; 4] = [".size(", "text_size(", ".radius(", ".border("];
+
+/// The calls whose argument is a colour, and so must be a token: a colour
+/// built there is written inline.
+const COLOUR_CALLS: [&str; 2] = [".background(", ".colour("];
+
+/// How a colour is built inline.
+const COLOUR_BUILDERS: [&str; 5] = [
+    "Color::rgb",
+    "Color::from_rgb",
+    "Color::rgba",
+    "Color::from_rgba",
+    "Color {",
+];
+
+/// No app source writes a size or a colour inline: every `.size(...)`,
+/// `text_size(...)`, `.radius(...)`, and `.border(...)` takes a token from
+/// this module, as does every `.background(...)` and `.colour(...)` of a
+/// `loom-ui` element; and no view builds an Iced button, whose default role
+/// is primary. Only this module may (visual-system.md, rule 1). Every file
+/// is read, in every folder.
 #[test]
 fn sizes_and_buttons_come_only_from_this_module() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    app_sources(&dir, &mut files);
+    assert!(files.len() > 50, "the scan found the app's files, not {}", files.len());
     let mut problems = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("the source folder") {
-        let path = entry.expect("a source file").path();
-        if path.extension().is_none_or(|e| e != "rs") || path.ends_with("style.rs") {
-            continue;
-        }
+    for path in files {
         let source = std::fs::read_to_string(&path).expect("a readable source file");
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let name = path.strip_prefix(&dir).unwrap_or(&path).display().to_string();
         for (n, line) in source.lines().enumerate() {
-            for call in [".size(", "text_size("] {
+            for call in SIZE_CALLS {
                 for (at, _) in line.match_indices(call) {
                     let arg = line[at + call.len()..].trim_start();
                     if arg.starts_with(|c: char| c.is_ascii_digit()) {
+                        problems.push(format!("{name}:{}: {}", n + 1, line.trim()));
+                    }
+                }
+            }
+            for call in COLOUR_CALLS {
+                for (at, _) in line.match_indices(call) {
+                    let arg = line[at + call.len()..].trim_start();
+                    let arg = arg.strip_prefix("iced::").unwrap_or(arg);
+                    let arg = arg.strip_prefix("loom_ui_core::").unwrap_or(arg);
+                    if COLOUR_BUILDERS.iter().any(|built| arg.starts_with(built)) {
                         problems.push(format!("{name}:{}: {}", n + 1, line.trim()));
                     }
                 }

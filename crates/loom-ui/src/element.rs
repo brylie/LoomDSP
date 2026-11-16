@@ -28,8 +28,19 @@
 //! An item never shrinks below its narrowest content (its longest word, or
 //! its widest fixed child). Across a row, an item with no alignment set
 //! stretches to the row's height, as in flexbox.
+//!
+//! # Look
+//!
+//! An element may draw a box: a [`background`](Element::background), a
+//! [`border`](Element::border), and a [`radius`](Element::radius). A border
+//! takes room, as CSS's does with border-box sizing: the content sits
+//! inside the border, then inside the padding. An element that
+//! [`clip`](Element::clip)s cuts what is inside it to its bounds, a
+//! rectangle even when its corners are round. Text draws in its
+//! [`colour`](Element::colour), or in the panel style's text colour
+//! ([`PanelStyle`](crate::paint::PanelStyle)).
 
-use loom_ui_core::{IdKey, TextStyle, UiId};
+use loom_ui_core::{Color, IdKey, TextStyle, UiId};
 use std::num::NonZeroU16;
 
 /// How large an element is along one axis.
@@ -114,6 +125,32 @@ impl From<f32> for Padding {
     }
 }
 
+/// How an element is drawn, besides its text: the box it draws and
+/// whether it clips. The default draws nothing and clips nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct Look {
+    /// The colour inside the box.
+    pub(crate) background: Option<Color>,
+    /// The width and colour of the outline, inside the box's edge.
+    pub(crate) border: Option<(f32, Color)>,
+    /// The radius of the box's corners.
+    pub(crate) radius: f32,
+    /// What is inside is cut to the element's bounds.
+    pub(crate) clip: bool,
+}
+
+impl Look {
+    /// True when the element draws a box.
+    pub(crate) fn draws_box(&self) -> bool {
+        self.background.is_some() || self.border.is_some()
+    }
+
+    /// The border's width, or 0.
+    pub(crate) fn border_width(&self) -> f32 {
+        self.border.map_or(0.0, |(width, _)| width)
+    }
+}
+
 /// What kind of element it is.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Kind {
@@ -131,6 +168,8 @@ pub(crate) enum Kind {
         style: TextStyle,
         /// Break lines between words to fit the width it gets.
         wrap: bool,
+        /// The colour of its letters, or the panel style's.
+        colour: Option<Color>,
     },
     /// Empty space.
     Space,
@@ -155,6 +194,7 @@ pub struct Element {
     pub(crate) align_y: Option<Align>,
     pub(crate) wrap: bool,
     pub(crate) opaque: bool,
+    pub(crate) look: Look,
     pub(crate) children: Vec<Element>,
 }
 
@@ -174,6 +214,7 @@ impl Element {
             align_y: None,
             wrap: false,
             opaque: false,
+            look: Look::default(),
             children,
         }
     }
@@ -201,6 +242,7 @@ impl Element {
                 text: text.into(),
                 style,
                 wrap: false,
+                colour: None,
             },
             Vec::new(),
         )
@@ -296,6 +338,44 @@ impl Element {
             *wrap = true;
         } else {
             self.wrap = true;
+        }
+        self
+    }
+
+    /// Draws a box of `colour` over its bounds, under its children.
+    pub fn background(mut self, colour: Color) -> Self {
+        self.look.background = Some(colour);
+        self
+    }
+
+    /// Draws an outline `width` wide, inside its bounds. The outline takes
+    /// room: what is inside sits within it, then within the padding.
+    pub fn border(mut self, width: f32, colour: Color) -> Self {
+        self.look.border = Some((width, colour));
+        self
+    }
+
+    /// Rounds the corners of its box by `radius`.
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.look.radius = radius;
+        self
+    }
+
+    /// Cuts what is inside it to its bounds, when drawn and when hit. The
+    /// cut is a rectangle, even when the corners are round: a GPU scissor
+    /// cannot round.
+    pub fn clip(mut self) -> Self {
+        self.look.clip = true;
+        self
+    }
+
+    /// For text, the colour of its letters. Unset, it is the panel style's
+    /// text colour. Other elements have no letters, so a debug build panics
+    /// on one.
+    pub fn colour(mut self, colour: Color) -> Self {
+        match &mut self.kind {
+            Kind::Text { colour: set, .. } => *set = Some(colour),
+            _ => debug_assert!(false, "only text has a colour"),
         }
         self
     }

@@ -2,8 +2,10 @@
 //!
 //! The app is the countdown of `countdown.rs`, from five, one step every
 //! 200 ms, with a piece of background work that reports through the
-//! waker. Here it runs in a real window. Its layers clear to a dark colour
-//! and draw one bar, as wide as the count that is left.
+//! waker. Here it runs in a real window. It shows one panel, a card with
+//! the count that is left and what the work reported, laid out by the
+//! runtime and painted with `loom_ui::paint`: a rounded box with a border,
+//! and text set with Parley.
 //!
 //! - A click anywhere starts the count again: a pointer event, through the
 //!   routing target, into `update`.
@@ -19,9 +21,11 @@
 //! `cargo run -p loom-ui --example window -- --capture out.png`.
 
 use loom_ui::effect::{FocusTarget, Image, NoGpu, Selection};
+use loom_ui::paint::{ListPainter, PaintList, PaintRenderer, PanelStyle, Target as PaintTarget, Typesetter};
 use loom_ui::shell::{self, Frame, Layers, NoServices, Options, Parts};
-use loom_ui::{App, Context, Deadline, Effects, Layer, Target, View, WindowEvent, WindowSpec};
-use loom_ui_core::{Event, Key, KeyEvent, Point, PointerEvent, Size, UiId};
+use loom_ui::{App, Context, Deadline, Effects, Element, Layer, Length, Target, View, WindowEvent, WindowSpec};
+use loom_ui_core::{Color, Event, Key, KeyEvent, Point, PointerEvent, Rect, Size, TextStyle, UiId, Weight};
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -105,8 +109,12 @@ impl App for Countdown {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel(UiId::panel("left"), Layer::Panels, &self.left);
-        view.panel(UiId::panel("status"), Layer::Panels, &self.status);
+        view.panel_with(
+            UiId::panel("card"),
+            Layer::Panels,
+            &(self.left, self.status.clone()),
+            card,
+        );
     }
 
     fn window(&self) -> WindowSpec {
@@ -154,139 +162,82 @@ impl Target<Message> for Clicks {
     }
 }
 
-/// The bar's shader: two triangles from the vertex index, placed and
-/// coloured by one uniform.
-const SHADER: &str = "
-struct Bar { rect: vec4<f32>, colour: vec4<f32> };
-@group(0) @binding(0) var<uniform> bar: Bar;
+/// The card's text styles: the count, large, and the status under it.
+const COUNT: TextStyle = TextStyle {
+    size: 28.0,
+    line_height: 1.2,
+    weight: Weight::Bold,
+};
+const STATUS: TextStyle = TextStyle {
+    size: 14.0,
+    line_height: 1.3,
+    weight: Weight::Regular,
+};
 
-@vertex
-fn vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
-    var corners = array<vec2<f32>, 6>(
-        vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0),
-        vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
-    );
-    let corner = corners[index];
-    return vec4(mix(bar.rect.x, bar.rect.z, corner.x), mix(bar.rect.y, bar.rect.w, corner.y), 0.0, 1.0);
+/// The card: the count left and the status, in a rounded box with a
+/// border, centred in the window.
+fn card((left, status): &(u32, String)) -> Element {
+    let card = Element::column([
+        Element::text(format!("{left} left"), COUNT),
+        Element::text(status.clone(), STATUS).colour(Color::rgb(0.7, 0.75, 0.8)),
+    ])
+    .spacing(6.0)
+    .padding(16.0)
+    .background(Color::rgb(0.16, 0.17, 0.21))
+    .border(1.0, Color::rgb(0.35, 0.38, 0.45))
+    .radius(10.0);
+    Element::column([card])
+        .width(Length::FILL)
+        .height(Length::FILL)
+        .align_x(loom_ui::Align::Center)
+        .align_y(loom_ui::Align::Center)
 }
 
-@fragment
-fn fs() -> @location(0) vec4<f32> {
-    return bar.colour;
-}
-";
-
-/// What the bar is drawn with, made on the first frame for its format.
-struct Pipeline {
-    format: wgpu::TextureFormat,
-    pipeline: wgpu::RenderPipeline,
-    uniform: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-}
-
-impl Pipeline {
-    /// The bar's pipeline for `format`.
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bar"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bar"),
-            size: 32,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bar"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bar"),
-            layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform.as_entire_binding(),
-            }],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("bar"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bar"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-            cache: None,
-        });
-        Self {
-            format,
-            pipeline,
-            uniform,
-            bind_group,
-        }
-    }
-}
-
-/// The layers: a clear and one bar.
+/// The layers: a clear, then the panels, painted.
 #[derive(Default)]
-struct Bar {
-    pipeline: Option<Pipeline>,
+struct Card {
+    /// The text the panels are measured and drawn with.
+    text: RefCell<Typesetter>,
+    /// The paint renderer, made on the first frame for its format.
+    renderer: Option<(wgpu::TextureFormat, PaintRenderer)>,
 }
 
-impl Layers<Countdown, Clicks> for Bar {
-    fn draw(&mut self, parts: Parts<'_, Countdown, Clicks>, frame: &Frame<'_>) {
-        if self
-            .pipeline
-            .as_ref()
-            .is_none_or(|pipeline| pipeline.format != frame.format)
-        {
-            self.pipeline = Some(Pipeline::new(frame.device, frame.format));
+impl Layers<Countdown, Clicks> for Card {
+    fn draw(&mut self, mut parts: Parts<'_, Countdown, Clicks>, frame: &Frame<'_>) {
+        if self.renderer.as_ref().is_none_or(|(format, _)| *format != frame.format) {
+            self.renderer = Some((frame.format, PaintRenderer::new(frame.device, frame.format)));
         }
-        let Some(pipeline) = &self.pipeline else {
+        let Some((_, renderer)) = &mut self.renderer else {
             return;
         };
-        // In clip space: a bar across the middle, as wide as what is left.
-        let share = parts.app.left as f32 / FROM as f32;
-        let (left, right) = (-0.8, -0.8 + 1.6 * share);
-        let values = [left, -0.2, right, 0.2, 0.3, 0.7, 0.9, 1.0];
-        let bytes: Vec<u8> = values.iter().flat_map(|value: &f32| value.to_ne_bytes()).collect();
-        frame.queue.write_buffer(&pipeline.uniform, 0, &bytes);
+        // Lay out and paint with one typesetter, so what is measured is
+        // what is drawn.
+        self.text.borrow_mut().begin_frame();
+        parts.panels.lay_out(&mut *self.text.borrow_mut());
+        let whole = Rect::new(Point::ORIGIN, frame.size);
+        let mut list = PaintList::new(whole);
+        let style = PanelStyle {
+            text: Color::rgb(0.93, 0.94, 0.96),
+        };
+        parts
+            .panels
+            .paint(Layer::Panels, &mut ListPainter::new(&self.text, &mut list), &style);
+        let target = PaintTarget {
+            size: frame.size,
+            scale: frame.scale,
+            origin: Point::ORIGIN,
+            physical: (
+                (frame.size.width * frame.scale).round() as u32,
+                (frame.size.height * frame.scale).round() as u32,
+            ),
+        };
+        renderer.prepare(frame.device, frame.queue, &list, target);
         let mut encoder = frame
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("bar") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("card") });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("bar"),
+                label: Some("card"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: frame.view,
                     depth_slice: None,
@@ -305,11 +256,7 @@ impl Layers<Countdown, Clicks> for Bar {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            if share > 0.0 {
-                pass.set_pipeline(&pipeline.pipeline);
-                pass.set_bind_group(0, &pipeline.bind_group, &[]);
-                pass.draw(0..6, 0..1);
-            }
+            renderer.draw(&mut pass);
         }
         frame.queue.submit([encoder.finish()]);
     }
@@ -345,7 +292,7 @@ fn main() {
         size: Size::new(480.0, 240.0),
         first: vec![Message::Start],
     };
-    if let Err(error) = shell::run(app, Clicks, Bar::default(), NoServices, options) {
+    if let Err(error) = shell::run(app, Clicks, Card::default(), NoServices, options) {
         eprintln!("window: {error}");
         std::process::exit(1);
     }

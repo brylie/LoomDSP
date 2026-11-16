@@ -37,6 +37,7 @@ pub use gpu::GpuError;
 pub use pacing::Redraw;
 
 use crate::app::{App, WindowSpec};
+use crate::draw::Panels;
 use crate::driver::Driver;
 use crate::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply};
 use crate::event::{AccessEvent, DriverEvent, WindowState};
@@ -92,6 +93,9 @@ pub struct Parts<'a, A: App, T> {
     pub waker: &'a Waker<A::Message>,
     /// The window as the runtime knows it.
     pub window: WindowState,
+    /// The window's panels, to lay out and paint with the typesetter the
+    /// layers draw text with.
+    pub panels: Panels<'a>,
 }
 
 /// The input method, as the layers want it.
@@ -437,7 +441,7 @@ where
         {
             let waker = live.runtime.waker();
             let state = live.runtime.window();
-            let (app, target) = live.runtime.parts();
+            let (app, target, panels) = live.runtime.parts();
             let opened = Opened {
                 window: &live.window,
                 adapter: &live.gpu.adapter,
@@ -451,6 +455,7 @@ where
                     target,
                     waker: &waker,
                     window: state,
+                    panels,
                 },
                 &opened,
             );
@@ -504,7 +509,7 @@ where
         for reply in due_captures(self.shown, &mut self.driver.captures) {
             let waker = live.runtime.waker();
             let window = live.runtime.window();
-            let (app, target) = live.runtime.parts();
+            let (app, target, panels) = live.runtime.parts();
             let layers = &mut self.layers;
             let image = gpu::capture(&live.gpu.device, live.window.inner_size(), window.scale, |frame| {
                 layers.draw(
@@ -513,6 +518,7 @@ where
                         target,
                         waker: &waker,
                         window,
+                        panels,
                     },
                     frame,
                 );
@@ -522,12 +528,13 @@ where
         let report = {
             let waker = live.runtime.waker();
             let window = live.runtime.window();
-            let (app, target) = live.runtime.parts();
+            let (app, target, panels) = live.runtime.parts();
             self.layers.report(Parts {
                 app,
                 target,
                 waker: &waker,
                 window,
+                panels,
             })
         };
         if let Some(pointer) = report.cursor {
@@ -596,7 +603,7 @@ where
         }
         let waker = live.runtime.waker();
         let window = live.runtime.window();
-        let (app, target) = live.runtime.parts();
+        let (app, target, panels) = live.runtime.parts();
         let layers = &mut self.layers;
         let drawn = live.gpu.frame(window.size, window.scale, &live.window, |frame| {
             layers.draw(
@@ -605,6 +612,7 @@ where
                     target,
                     waker: &waker,
                     window,
+                    panels,
                 },
                 frame,
             );
@@ -696,13 +704,14 @@ where
         {
             let waker = live.runtime.waker();
             let window = live.runtime.window();
-            let (app, target) = live.runtime.parts();
+            let (app, target, panels) = live.runtime.parts();
             self.layers.window_event(
                 Parts {
                     app,
                     target,
                     waker: &waker,
                     window,
+                    panels,
                 },
                 &event,
             );
@@ -799,12 +808,13 @@ where
     let message = {
         let waker = runtime.waker();
         let window = runtime.window();
-        let (app, target) = runtime.parts();
+        let (app, target, panels) = runtime.parts();
         layers.alone(Parts {
             app,
             target,
             waker: &waker,
             window,
+            panels,
         })
     };
     if let Some(message) = message {

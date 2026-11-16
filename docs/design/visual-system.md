@@ -116,7 +116,7 @@ Kept problems survive opening another patch, except as the table says.
 
 ## Rules
 
-1. **Sizes come only from the token module.** No `.size(N)` or `text_size(N)` literal appears in `crates/loom-app/src` outside `style.rs`; a test checks the sources. *Why:* five named sizes are easy to keep consistent, and a future theme (FR-PANEL-06) changes them in one place.
+1. **Sizes and colours come only from the token module.** No `.size(N)`, `text_size(N)`, `.radius(N)`, or `.border(N, ...)` literal appears in `crates/loom-app/src`, in any folder, outside `style.rs` and test files, and no `loom-ui` element's `.background(...)` or `.colour(...)` builds a colour inline; a test checks the sources. *Why:* five named sizes are easy to keep consistent, and a future theme (FR-PANEL-06) changes them in one place.
 2. **One primary button per view, at most.** *Why:* orange is the colour of values a user can change on the canvas. When every button is orange, nothing stands out and the chrome competes with the knobs.
 3. **Panic is danger red.** *Why:* it is the one emergency control. On a dark stage it must be found at a glance, without reading.
 4. **Secondary is the default.** A new button is secondary unless this spec gives it another role. *Why:* a quiet default keeps the chrome calm as the app grows.

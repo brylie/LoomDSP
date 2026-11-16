@@ -122,3 +122,37 @@ fn nothing_inside_a_duplicate_is_hit() {
         assert_eq!(hit(&layout, 5.0, 5.0), "p/list/row/value");
     }
 }
+
+/// A child that overflows a clipping parent is hit only inside the clip,
+/// as it is drawn only there. Without the clip it is hit where it runs.
+#[test]
+fn a_clip_cuts_the_hits_of_what_overflows() {
+    let row = |clip: bool| {
+        let row = Element::row([space("wide", 100.0, 20.0).min_width(100.0)])
+            .width(Length::Fixed(40.0))
+            .min_width(0.0)
+            .key("row");
+        let row = if clip { row.clip() } else { row };
+        Element::column([row]).align_x(crate::Align::Start)
+    };
+    let clipped = lay_out(row(true), 200.0, 100.0);
+    assert_eq!(hit(&clipped, 30.0, 10.0), "p/row/wide");
+    assert_eq!(hit(&clipped, 60.0, 10.0), "nothing", "past the clip");
+    let open = lay_out(row(false), 200.0, 100.0);
+    assert_eq!(hit(&open, 60.0, 10.0), "p/row/wide", "nothing clips it");
+}
+
+/// A clip is a rectangle, even on round corners: a point past a corner's
+/// curve and inside the bounds still hits the child there, as the child is
+/// still drawn there.
+#[test]
+fn a_round_clip_cuts_hits_square() {
+    let root = Element::column([Element::stack([space("fill", 40.0, 40.0)])
+        .key("round")
+        .radius(10.0)
+        .background(loom_ui_core::Color::WHITE)
+        .clip()])
+    .align_x(crate::Align::Start);
+    let layout = lay_out(root, 200.0, 100.0);
+    assert_eq!(hit(&layout, 0.5, 0.5), "p/round/fill", "the corner, past its curve");
+}

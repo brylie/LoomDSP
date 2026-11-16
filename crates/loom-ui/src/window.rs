@@ -24,15 +24,14 @@
 //! panels in its slots, in slot order, each after all of its parent's
 //! elements. Hit-testing tries them in the reverse of that order.
 //!
-//! Nothing clips yet: a panel wider than its slot is hit outside the slot.
-//! When drawing clips each panel to its slot, hit-testing must clip it the
-//! same way.
+//! Each panel is cut to its slot, and to every clipping element around the
+//! slot: it is drawn and hit only inside that. A root is cut to the window.
 //!
 //! [`Element::slot`]: crate::Element::slot
 
 use crate::element::Element;
 use crate::hit::Hit;
-use crate::layout::{Constraint, Layout, Measure};
+use crate::layout::{Constraint, Layout, Measure, cut};
 use crate::view::Layer;
 use loom_ui_core::{Point, Rect, Size, TextMeasure, TextStyle, UiId, Vector};
 use std::collections::HashMap;
@@ -68,6 +67,10 @@ struct Record {
     parent: Option<(UiId, usize)>,
     /// Where its slot is in the window, or the window's corner for a root.
     origin: Point,
+    /// What of it shows, in the window: its slot cut by every clip around
+    /// the slot, or the whole window for a root. It is drawn and hit only
+    /// inside this.
+    clip: Rect,
     /// The size it was last laid out in.
     slot: Option<Size>,
     /// Rebuilt since it was last laid out.
@@ -203,6 +206,7 @@ impl Window {
                 layer,
                 parent: None,
                 origin: Point::ORIGIN,
+                clip: Rect::new(Point::ORIGIN, Size::ZERO),
                 slot: None,
                 dirty: true,
                 stale: false,
@@ -337,7 +341,8 @@ impl Window {
         roots.sort_by_key(|(layer, _)| *layer);
         self.drawn.clear();
         for (_, root) in roots {
-            self.place(&root, Point::ORIGIN, size, text, &mut laid);
+            let window = Rect::new(Point::ORIGIN, size);
+            self.place(&root, Point::ORIGIN, size, window, text, &mut laid);
         }
         self.laid_out_at = Some(size);
         laid
@@ -396,7 +401,15 @@ impl Window {
 
     /// Lays the panel keyed `key` out at `size`, if it needs it, places it
     /// at `origin`, and then places the panels in its slots.
-    fn place(&mut self, key: &UiId, origin: Point, size: Size, text: &mut dyn TextMeasure, laid: &mut Laid) {
+    fn place(
+        &mut self,
+        key: &UiId,
+        origin: Point,
+        size: Size,
+        clip: Rect,
+        text: &mut dyn TextMeasure,
+        laid: &mut Laid,
+    ) {
         let Some(mut record) = self.records.remove(key) else {
             return;
         };
@@ -415,13 +428,23 @@ impl Window {
             record.slot = Some(size);
         }
         record.origin = origin;
-        let slots: Vec<(UiId, Rect)> = record.layout.slots().map(|(child, at)| (child.clone(), at)).collect();
+        record.clip = clip;
+        let offset = Vector::new(origin.x, origin.y);
+        let slots: Vec<(UiId, Rect, Rect)> = record
+            .layout
+            .slots()
+            .zip(record.layout.slot_clips())
+            .map(|((child, at), shows)| {
+                let shows = Rect::new(shows.position() + offset, shows.size());
+                (child.clone(), at, cut(clip, shows))
+            })
+            .collect();
         self.records.insert(key.clone(), record);
         self.drawn.push(key.clone());
-        for (index, (child, at)) in slots.into_iter().enumerate() {
+        for (index, (child, at, shows)) in slots.into_iter().enumerate() {
             if self.records.get(&child).is_some_and(|held| held.held_by(key, index)) {
                 let place = Point::new(origin.x + at.x, origin.y + at.y);
-                self.place(&child, place, at.size(), text, laid);
+                self.place(&child, place, at.size(), shows, text, laid);
             }
         }
     }
@@ -458,9 +481,34 @@ impl Window {
     pub(crate) fn hit(&self, point: Point) -> Option<(Layer, Hit<'_>)> {
         self.drawn.iter().rev().find_map(|key| {
             let record = &self.records[key];
+            if !record.clip.contains(point) {
+                return None;
+            }
             let inside = point - Vector::new(record.origin.x, record.origin.y);
             record.layout.hit(inside).map(|hit| (record.layer, hit))
         })
+    }
+
+    /// Paints the panels of `layer` in draw order, each inside a layer cut
+    /// to the part of it that shows.
+    pub(crate) fn paint(
+        &self,
+        layer: Layer,
+        painter: &mut dyn crate::paint::TextPainter,
+        style: &crate::paint::PanelStyle,
+    ) -> crate::draw::Painted {
+        let mut painted = crate::draw::Painted::default();
+        for key in &self.drawn {
+            let record = &self.records[key];
+            if record.layer != layer {
+                continue;
+            }
+            painter.begin_layer(record.clip);
+            painted.elements += record.layout.paint(record.origin, record.clip, painter, style);
+            painted.panels += 1;
+            painter.end_layer();
+        }
+        painted
     }
 
     /// How many times the panel keyed `key` was laid out.

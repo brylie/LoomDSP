@@ -499,3 +499,26 @@ fn a_fill_of_no_shares_cannot_be_built() {
     let shares = std::hint::black_box(0);
     let _ = Length::fill(shares);
 }
+
+/// A clip follows a resize with no rebuild: the clipped child's clip is its
+/// parent's new bounds, and a border takes room inside the box.
+#[test]
+fn a_clip_follows_a_resize_without_a_rebuild() {
+    let root = Element::row([Element::space(Length::FILL, Length::Fixed(10.0)).key("inside")])
+        .width(Length::FILL)
+        .border(2.0, loom_ui_core::Color::WHITE)
+        .clip();
+    let mut layout = Layout::new(UiId::panel("p"));
+    layout.rebuild(root);
+    let mut mono = Mono::default();
+    for width in [100.0, 60.0] {
+        layout.compute(Size::new(width, 50.0), &mut mono);
+        let inside = layout.by_id[&id("inside")];
+        let record = &layout.records()[inside];
+        assert_eq!(record.clip, Some(Rect::new(Point::ORIGIN, Size::new(width, 14.0))));
+        assert_eq!(
+            record.bounds,
+            Rect::new(Point::new(2.0, 2.0), Size::new(width - 4.0, 10.0))
+        );
+    }
+}

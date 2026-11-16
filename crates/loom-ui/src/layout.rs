@@ -40,8 +40,8 @@
 //! The layout engine is `taffy`, behind these types: no taffy type is in
 //! this crate's API.
 
-use crate::element::{Align, Element, Kind, Length, Padding};
-use loom_ui_core::{Point, Rect, Size, TextMeasure, TextStyle, UiId};
+use crate::element::{Align, Element, Kind, Length, Look, Padding};
+use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, TextStyle, UiId};
 use std::collections::HashMap;
 use taffy::style_helpers::line;
 use taffy::{
@@ -149,6 +149,63 @@ pub(crate) struct Record {
     pub(crate) opaque: bool,
     /// Where it is in the panel, after [`Layout::compute`].
     pub(crate) bounds: Rect,
+    /// How it is drawn: its box, and whether it clips what is inside.
+    pub(crate) look: Look,
+    /// Its border and padding, which its content sits inside.
+    pub(crate) inset: Padding,
+    /// What of it shows, cut by every clipping element around it, in the
+    /// panel. `None` when nothing around it clips.
+    pub(crate) clip: Option<Rect>,
+}
+
+impl Record {
+    /// Its content box: its bounds within its border and padding.
+    pub(crate) fn content(&self) -> Rect {
+        let inset = self.inset;
+        Rect::new(
+            Point::new(self.bounds.x + inset.left, self.bounds.y + inset.top),
+            Size::new(
+                (self.bounds.width - inset.left - inset.right).max(0.0),
+                (self.bounds.height - inset.top - inset.bottom).max(0.0),
+            ),
+        )
+    }
+
+    /// The clip for what is inside it: its own bounds when it clips, cut
+    /// by the clip around it.
+    pub(crate) fn inner_clip(&self) -> Option<Rect> {
+        if !self.look.clip {
+            return self.clip;
+        }
+        Some(match self.clip {
+            Some(outer) => cut(outer, self.bounds),
+            None => self.bounds,
+        })
+    }
+
+    /// True when `point` is on the part of it that shows.
+    pub(crate) fn shows(&self, point: Point) -> bool {
+        self.bounds.contains(point) && self.clip.is_none_or(|clip| clip.contains(point))
+    }
+}
+
+/// The part of `a` inside `b`: an empty rectangle at `b`'s corner when they
+/// do not meet, so nothing inside shows or is hit.
+pub(crate) fn cut(a: Rect, b: Rect) -> Rect {
+    a.intersection(b).unwrap_or(Rect::new(b.position(), Size::ZERO))
+}
+
+/// A text element's text, for painting.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TextPaint<'a> {
+    /// The text.
+    pub(crate) text: &'a str,
+    /// How it is set.
+    pub(crate) style: TextStyle,
+    /// Lines break to fit the width.
+    pub(crate) wrap: bool,
+    /// Its colour, or `None` for the panel style's.
+    pub(crate) colour: Option<Color>,
 }
 
 /// What a leaf's node holds: a text, or a slot.
@@ -218,6 +275,7 @@ pub(crate) struct TextLeaf {
     text: String,
     style: TextStyle,
     wrap: bool,
+    colour: Option<Color>,
     /// The size on one line, for text that does not wrap.
     line: Option<Size>,
     /// The last sizes of wrapping text, by the width it was given (`None`
@@ -371,6 +429,11 @@ impl Layout {
                 Point::new(origin.x + layout.location.x, origin.y + layout.location.y),
                 Size::new(layout.size.width, layout.size.height),
             );
+            // The parent's clip for what is inside it is known, since the
+            // parent came first.
+            self.records[index].clip = self.records[index]
+                .parent
+                .and_then(|parent| self.records[parent].inner_clip());
         }
         self.size = self.records.first().map_or(Size::ZERO, |root| root.bounds.size());
     }
@@ -411,6 +474,15 @@ impl Layout {
             .map(|(panel, index)| (panel, self.records[*index].bounds))
     }
 
+    /// The part of each slot that shows, in tree order: its place cut by
+    /// every clipping element around it, in this panel.
+    pub(crate) fn slot_clips(&self) -> impl Iterator<Item = Rect> {
+        self.slots.iter().map(|(_, index)| {
+            let record = &self.records[*index];
+            record.clip.map_or(record.bounds, |clip| cut(clip, record.bounds))
+        })
+    }
+
     /// Forgets the layout around the slot for `panel`, whose size changed,
     /// so the next compute asks it again.
     pub(crate) fn slot_changed(&mut self, panel: &UiId) {
@@ -426,9 +498,22 @@ impl Layout {
         self.records.len()
     }
 
-    /// Every element, in tree order, for hit-testing.
+    /// Every element, in tree order, for hit-testing and painting.
     pub(crate) fn records(&self) -> &[Record] {
         &self.records
+    }
+
+    /// The text of the record at `index`, when it is a text element.
+    pub(crate) fn text(&self, index: usize) -> Option<TextPaint<'_>> {
+        match self.tree.get_node_context(self.records[index].node)? {
+            Leaf::Text(leaf) => Some(TextPaint {
+                text: &leaf.text,
+                style: leaf.style,
+                wrap: leaf.wrap,
+                colour: leaf.colour,
+            }),
+            Leaf::Slot { .. } => None,
+        }
     }
 
     /// Turns off the panic on a duplicate UI ID, as in a release build. For
@@ -450,10 +535,20 @@ impl Layout {
             Kind::Column => Parent::Column,
             _ => Parent::Stack,
         };
+        let inset = {
+            let (border, padding) = (element.look.border_width(), element.padding);
+            Padding {
+                top: padding.top + border,
+                right: padding.right + border,
+                bottom: padding.bottom + border,
+                left: padding.left + border,
+            }
+        };
         let Element {
             kind,
             key,
             opaque,
+            look,
             children,
             ..
         } = element;
@@ -462,11 +557,13 @@ impl Layout {
                 text,
                 style: text_style,
                 wrap,
+                colour,
             } => {
                 let leaf = Leaf::Text(TextLeaf {
                     text,
                     style: text_style,
                     wrap,
+                    colour,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
                 });
@@ -510,6 +607,9 @@ impl Layout {
             id: kept,
             opaque,
             bounds: Rect::new(Point::ORIGIN, Size::ZERO),
+            look,
+            inset,
+            clip: None,
         });
 
         if !children.is_empty() {
@@ -570,6 +670,14 @@ fn style(element: &Element, around: Parent) -> Style {
         height: LengthPercentage::length(element.spacing),
     };
     style.padding = padding(element.padding);
+    // A border takes room, as CSS's does: the content box is inside it.
+    let border = LengthPercentage::length(element.look.border_width());
+    style.border = taffy::Rect {
+        left: border,
+        right: border,
+        top: border,
+        bottom: border,
+    };
     style.min_size = taffy::Size {
         width: limit(element.min.0),
         height: limit(element.min.1),

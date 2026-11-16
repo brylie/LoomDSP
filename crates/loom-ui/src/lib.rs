@@ -26,6 +26,10 @@
 //!   type in its API. See `examples/layout.rs`. Panels compose through
 //!   slots ([`Element::slot`]): the runtime keeps each panel's layout, and
 //!   the driver calls [`Runtime::lay_out`] before it draws.
+//! - **Drawing panels** ([`Runtime::paint`]): each element's box and text,
+//!   in the look it sets, cut to its clips and its slot, which
+//!   hit-testing cuts the same way. A shell layer lays out and paints
+//!   through [`Panels`], lent with the app in [`shell::Parts`].
 //! - **Painting** ([`paint`]): text set with Parley and rounded boxes, in
 //!   layers cut to their clips, drawn by [`paint::PaintRenderer`] (the
 //!   `gpu` feature, which `shell` turns on) from one glyph atlas. It needs
@@ -46,6 +50,7 @@
 //!   deadline is near.
 
 mod app;
+mod draw;
 mod driver;
 pub mod effect;
 mod element;
@@ -63,6 +68,7 @@ mod waker;
 mod window;
 
 pub use app::{App, Context, Deadline, WindowSpec};
+pub use draw::Panels;
 pub use driver::Driver;
 pub use effect::{Effect, Effects};
 pub use element::{Align, Element, Length, Padding};

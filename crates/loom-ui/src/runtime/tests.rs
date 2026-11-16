@@ -813,6 +813,43 @@ fn a_read_before_lay_out_panics() {
     let _ = runtime.bounds(&UiId::panel("toolbar"));
 }
 
+/// Section 5, rule 9: painting a layer counts the panels and elements it
+/// painted, every time it is asked, and a layer with no panels paints
+/// nothing.
+#[test]
+fn paint_counts_what_it_painted() {
+    let mut runtime = composed();
+    runtime.waker().send(vec!["open", "save"]);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
+    runtime.lay_out(&mut crate::layout::tests::Mono::default());
+    let style = crate::paint::PanelStyle {
+        text: loom_ui_core::Color::WHITE,
+    };
+    let mut recorder = crate::paint::testing::Recorder::default();
+    runtime.paint(Layer::Panels, &mut recorder, &style);
+    runtime.paint(Layer::Panels, &mut recorder, &style);
+    runtime.paint(Layer::Overlays, &mut recorder, &style);
+    let counts = runtime.counts();
+    assert_eq!(counts.panels_painted, 2 * 2, "two panels, painted twice");
+    assert_eq!(counts.elements_painted, 2 * (2 + 3));
+}
+
+/// Painting after a change and before `lay_out` would paint an old layout,
+/// so it panics in a debug build, as a read does.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "call Runtime::lay_out first")]
+fn paint_before_lay_out_panics() {
+    let mut runtime = composed();
+    runtime.lay_out(&mut crate::layout::tests::Mono::default());
+    runtime.waker().send(vec!["open"]);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
+    let style = crate::paint::PanelStyle {
+        text: loom_ui_core::Color::WHITE,
+    };
+    runtime.paint(Layer::Panels, &mut crate::paint::testing::Recorder::default(), &style);
+}
+
 /// A resize needs a new `lay_out` too, and then the panels fill the new
 /// size.
 #[test]

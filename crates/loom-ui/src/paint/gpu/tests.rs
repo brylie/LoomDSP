@@ -255,3 +255,105 @@ fn a_layer_clip_cuts_its_text_on_the_gpu() {
     );
     assert!(!has_text(&cut, 0..WIDTH, 80..HEIGHT), "nothing below the clip");
 }
+
+/// True when `LOOM_REQUIRE_GPU` is `1`: then a missing adapter or font is a
+/// failure, not a skip, as in the app's screenshot tests.
+fn gpu_required() -> bool {
+    std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1")
+}
+
+/// The RGBA pixel at `x`, `y`.
+fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let at = ((y * WIDTH + x) * 4) as usize;
+    [pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]]
+}
+
+/// A panel laid out and painted through the runtime's own walk, drawn on
+/// the GPU: a rounded box with a fill and a border, holding a line of text
+/// and a clipped row whose text runs past the clip (ui-layer.md, section 5,
+/// rule 9).
+#[test]
+fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
+    let (Some((device, queue)), Some(text)) = (device(), text()) else {
+        assert!(
+            !gpu_required(),
+            "LOOM_REQUIRE_GPU is set, but there is no GPU adapter or no font"
+        );
+        eprintln!("skipped: no GPU adapter or no system font");
+        return;
+    };
+    let style = TextStyle {
+        size: 24.0,
+        line_height: 1.2,
+        weight: Weight::Regular,
+    };
+    let fill = Color::rgb(1.0, 0.0, 0.0);
+    let border = Color::rgb(0.0, 0.0, 1.0);
+    let root = crate::Element::column([
+        crate::Element::text("Hi", style),
+        crate::Element::row([crate::Element::text("MMMMMMMM", style)])
+            .width(crate::Length::Fixed(40.0))
+            .min_width(0.0)
+            .clip(),
+    ])
+    .background(fill)
+    .border(2.0, border)
+    .radius(8.0)
+    .padding(4.0)
+    .align_x(crate::Align::Start);
+    let mut layout = crate::Layout::new(loom_ui_core::UiId::panel("test"));
+    layout.rebuild(root);
+    layout.compute(Size::new(WIDTH as f32, HEIGHT as f32), &mut *text.borrow_mut());
+    let box_size = layout.size();
+    let whole = Rect::new(Point::ORIGIN, Size::new(WIDTH as f32, HEIGHT as f32));
+    let origin = Point::new(10.0, 10.0);
+    let mut list = PaintList::new(whole);
+    layout.paint(
+        origin,
+        whole,
+        &mut ListPainter::new(&text, &mut list),
+        &crate::paint::PanelStyle { text: Color::WHITE },
+    );
+    let pixels = draw(&device, &queue, list);
+
+    let (left, top) = (10, 10);
+    let (right, bottom) = (10 + box_size.width as u32, 10 + box_size.height as u32);
+    let middle = (top + bottom) / 2;
+    assert_eq!(
+        pixel(&pixels, left, middle),
+        [0, 0, 255, 255],
+        "the border, at the box's edge"
+    );
+    assert_eq!(
+        pixel(&pixels, left + 1, middle),
+        [0, 0, 255, 255],
+        "the border is 2 wide"
+    );
+    assert_eq!(
+        pixel(&pixels, right - 5, bottom - 5),
+        [255, 0, 0, 255],
+        "the fill, in the padding"
+    );
+    assert_eq!(pixel(&pixels, left, top), [0, 0, 0, 255], "the corner, past its curve");
+    let blended = (0..8).any(|k| {
+        let [r, g, b, _] = pixel(&pixels, left + k, top + k);
+        (r, g, b) != (0, 0, 0) && (r, g, b) != (0, 0, 255) && (r, g, b) != (255, 0, 0)
+    });
+    assert!(blended, "a pixel on the corner's curve blends");
+    // The first line: "Hi", inside the border and padding.
+    let line = (style.size * style.line_height) as u32;
+    assert!(
+        has_text(&pixels, left + 6..right, top + 6..top + 6 + line),
+        "the text is drawn"
+    );
+    // The second line is cut at the row's clip, 40 wide from the padding.
+    let (row_top, clip_right) = (top + 6 + line, left + 6 + 40);
+    assert!(
+        has_text(&pixels, left + 6..clip_right, row_top..row_top + line),
+        "the clipped text inside the clip is drawn"
+    );
+    assert!(
+        !has_text(&pixels, clip_right..WIDTH, row_top..row_top + line),
+        "nothing of it past the clip"
+    );
+}

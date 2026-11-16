@@ -13,12 +13,13 @@
 //!   draw order (`window.rs`).
 //! - **Rectangles are half-open,** so a point on the edge two elements
 //!   share hits exactly one of them, the right or the lower one.
-//! - **No clipping yet.** A child that runs past its parent is hit where it
-//!   is, outside the parent's bounds. That is right while nothing clips;
-//!   when scrolling and clipping come with drawing, a clipped part must
-//!   stop being hit outside its clip. The same holds for panels: a panel
-//!   wider than its slot is hit outside the slot until panels are clipped
-//!   to their slots, and then it must be hit-tested the same way.
+//! - **Clipping cuts hits as it cuts drawing.** A part of an element
+//!   outside the clip of a clipping element around it is not hit, as it is
+//!   not drawn. A clip is a rectangle, even on round corners, so a point
+//!   past a corner's curve and inside the bounds is still hit, as it is
+//!   still drawn there. A child that runs past a parent that does not clip
+//!   is hit where it is. Across panels, a panel is cut to its slot
+//!   (`window.rs`).
 
 use crate::layout::Layout;
 use loom_ui_core::{Point, UiId};
@@ -43,7 +44,7 @@ impl Layout {
         // one and a child before its parent: the order they are on top.
         let index = records
             .iter()
-            .rposition(|record| (record.id.is_some() || record.opaque) && record.bounds.contains(point))?;
+            .rposition(|record| (record.id.is_some() || record.opaque) && record.shows(point))?;
         // The element itself, or the nearest keyed element around an
         // opaque one with no key.
         let mut at = Some(index);

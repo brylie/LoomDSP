@@ -60,6 +60,15 @@ pub use loom_ui_core::{TextMeasure, TextStyle, Weight};
 /// part exists once.
 pub const SHADER: &str = include_str!("paint/paint.wgsl");
 
+/// What a host gives the panels it paints, so `loom-ui` decides no
+/// colour of its own: the app fills it from its own style tokens, which
+/// are what its contrast tests check.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelStyle {
+    /// The colour of text that sets none of its own.
+    pub text: Color,
+}
+
 /// How text sits on its anchor, left to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align {

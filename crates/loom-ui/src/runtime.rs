@@ -31,6 +31,7 @@
 //! read the composed window (ui-layer.md, section 5, rule 8).
 
 use crate::app::{App, Context, Deadline, WindowSpec};
+use crate::draw::Panels;
 use crate::driver::Driver;
 use crate::effect::Effect;
 use crate::event::{DriverEvent, WindowEvent, WindowState};
@@ -100,6 +101,11 @@ pub struct Counts {
     /// Keys dropped from rebuilt panels because an earlier element had the
     /// same UI ID (ui-layer.md, section 4, rule 7).
     pub duplicate_keys: u64,
+    /// Panels painted, by [`Runtime::paint`]: each frame paints every
+    /// panel of the layers it draws.
+    pub panels_painted: u64,
+    /// Elements in the panels painted.
+    pub elements_painted: u64,
 }
 
 /// The runtime for one app and its routing target.
@@ -174,10 +180,24 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         &mut self.target
     }
 
-    /// The app to read and the target to use, at once: a driver that draws
-    /// the target's views from the app needs both.
-    pub fn parts(&mut self) -> (&A, &mut T) {
-        (&self.app, &mut self.target)
+    /// The app to read, the target to use, and the panels to lay out and
+    /// paint, at once: a driver that draws the window needs all three.
+    pub fn parts(&mut self) -> (&A, &mut T, Panels<'_>) {
+        (
+            &self.app,
+            &mut self.target,
+            Panels {
+                window: &mut self.panels,
+                counts: &mut self.counts,
+                size: self.window.size,
+            },
+        )
+    }
+
+    /// The panels alone, to lay out and paint.
+    fn panels(&mut self) -> Panels<'_> {
+        let (_, _, panels) = self.parts();
+        panels
     }
 
     /// The window as the runtime knows it.
@@ -221,9 +241,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// changed size, and those whose shrink slot's child changed size. A
     /// driver calls it before it draws, and before it reads bounds or hits.
     pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
-        let laid = self.panels.lay_out(self.window.size, text);
-        self.counts.panels_laid_out += laid.panels;
-        self.counts.elements_laid_out += laid.elements;
+        self.panels().lay_out(text);
     }
 
     /// Where the element with UI ID `id` is in the window, in logical
@@ -247,6 +265,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     pub fn hit(&self, point: Point) -> Option<(Layer, Hit<'_>)> {
         self.check_laid_out();
         self.panels.hit(point)
+    }
+
+    /// Paints the panels of `layer` into `painter`, in draw order, with
+    /// `style` for what they do not set (ui-layer.md, section 5, rule 9).
+    ///
+    /// Lay out first with the same typesetter the painter sets text with
+    /// ([`paint::ListPainter`](crate::paint::ListPainter) over the
+    /// [`Typesetter`](crate::paint::Typesetter) that
+    /// [`Runtime::lay_out`] measured with), so what is measured is what is
+    /// drawn. A driver calls it only for a frame it draws.
+    ///
+    /// # Panics
+    ///
+    /// As [`Runtime::bounds`].
+    pub fn paint(
+        &mut self,
+        layer: Layer,
+        painter: &mut dyn crate::paint::TextPainter,
+        style: &crate::paint::PanelStyle,
+    ) {
+        self.panels().paint(layer, painter, style);
     }
 
     /// Panics in a debug build when a read would be out of date.

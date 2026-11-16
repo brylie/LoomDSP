@@ -19,12 +19,13 @@ fn runtime() -> Runtime<Hosted, IcedTarget> {
 fn report(layers: &mut WindowLayers, runtime: &mut Runtime<Hosted, IcedTarget>) -> Report {
     let waker = runtime.waker();
     let window = runtime.window();
-    let (app, target) = runtime.parts();
+    let (app, target, panels) = runtime.parts();
     layers.report(Parts {
         app,
         target,
         waker: &waker,
         window,
+        panels,
     })
 }
 
@@ -86,12 +87,13 @@ fn a_focus_answer_moves_the_target_then_tells_the_app() {
     });
     let waker = runtime.waker();
     let window = runtime.window();
-    let (app, target) = runtime.parts();
+    let (app, target, panels) = runtime.parts();
     let message = layers.alone(Parts {
         app,
         target,
         waker: &waker,
         window,
+        panels,
     });
     assert!(
         matches!(&message, Some(Message::FocusMoved(Some(part))) if *part == field),
@@ -145,13 +147,14 @@ fn a_touch_moves_the_cursor() {
     });
     let waker = runtime.waker();
     let window = runtime.window();
-    let (app, target) = runtime.parts();
+    let (app, target, panels) = runtime.parts();
     layers.window_event(
         Parts {
             app,
             target,
             waker: &waker,
             window,
+            panels,
         },
         &touch,
     );
