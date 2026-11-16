@@ -232,15 +232,19 @@ fn level_light(app: &crate::App, env: u32) -> crate::lights::Light {
 }
 
 /// Takes and applies what the threads send, as the app does, until `light`
-/// reads above 0.5. Panics after [`DEADLINE`].
+/// reads above 0.5. Panics after [`DEADLINE`]. Each message is acknowledged
+/// once: `apply` acknowledges a light message itself, and any other message
+/// is thrown away and acknowledged here, so no other sender's ledger entry
+/// is released by mistake.
 fn wait_until_lit(app: &mut crate::App, queue: &mpsc::Receiver<Message>, light: crate::lights::Light) {
     let end = std::time::Instant::now() + DEADLINE;
     while app.session.lights.get(&light).is_none_or(|&value| value <= 0.5) {
         let left = end.saturating_duration_since(std::time::Instant::now());
         let message = queue.recv_timeout(left).expect("the light thread sends the light lit");
-        app.watched_message_taken(&message);
         if matches!(message, Message::Lights(_)) {
             app.apply(message);
+        } else {
+            app.watched_message_taken(&message);
         }
     }
 }
