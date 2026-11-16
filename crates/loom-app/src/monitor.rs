@@ -560,8 +560,15 @@ pub struct LineCheck {
 
 /// Checks two scope lines against each other both ways, at `size`: first
 /// the points of `a` against the line of `b`, then the other way round. Both
-/// must run left to right in x, as [`ScopeTrace::canvas_trace`] gives them.
+/// must run left to right in x and have only finite points, as
+/// [`ScopeTrace::canvas_trace`] gives them.
 pub fn line_check(a: &[[f32; 2]], b: &[[f32; 2]], size: DrawnSize) -> LineCheck {
+    // A NaN would never lie near any line, so every read would count as
+    // moved. `ScopeTrace::canvas_trace` gives only finite points.
+    debug_assert!(
+        a.iter().chain(b).flatten().all(|v| v.is_finite()),
+        "a scope trace has only finite points"
+    );
     let mut tests = 0;
     let moved = points_off_line(a, b, size, &mut tests) || points_off_line(b, a, size, &mut tests);
     LineCheck { moved, tests }

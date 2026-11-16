@@ -439,6 +439,12 @@ impl ScopeTrace {
     /// More than [`loom_canvas::MAX_TRACE_POINTS`] samples are reduced by
     /// groups, keeping the lowest and highest sample of each in time order,
     /// so a one-sample trigger always shows (ADR-0007).
+    ///
+    /// Every point has a finite x and y (`docs/design/panels.md`, Drawing
+    /// the scope trace, Values that are not finite). A NaN sample has no
+    /// value, so it adds no point, and the line joins the samples on each
+    /// side. A group of only NaN adds none. An infinite sample is pinned to
+    /// the frame's edge by the clamp, as any value past the range is.
     pub fn canvas_trace(&self, full: bool) -> loom_canvas::Trace {
         let peak = self.trace.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         let level = (normalise(peak) * 255.0).round() / 255.0;
@@ -454,14 +460,17 @@ impl ScopeTrace {
         };
         let n = self.trace.len();
         let max = loom_canvas::MAX_TRACE_POINTS;
+        let has_value = |&i: &usize| !self.trace[i].is_nan();
         let points = if n <= max {
-            (0..n).map(point).collect()
+            (0..n).filter(has_value).map(point).collect()
         } else {
             let group = n.div_ceil(max / 2);
             let mut points = Vec::with_capacity(max);
             for start in (0..n).step_by(group) {
                 let end = (start + group).min(n);
-                let (low, high) = (start..end).fold((start, start), |(lo, hi), i| {
+                let mut values = (start..end).filter(has_value);
+                let Some(first) = values.next() else { continue };
+                let (low, high) = values.fold((first, first), |(lo, hi), i| {
                     let v = self.trace[i];
                     (
                         if v < self.trace[lo] { i } else { lo },
@@ -514,6 +523,12 @@ fn decay(level: f32, target: f32, dt: f32) -> f32 {
 /// history), so noise on a slow edge cannot trigger twice. Returns `None` for
 /// a flat signal or when no edge is found.
 ///
+/// A NaN never makes a crossing, since a comparison with it is false. A
+/// crossing whose fraction is not finite, which an infinity next to it can
+/// give, counts as no trigger, so the trace runs free and no point gets a NaN
+/// x (`docs/design/panels.md`, Drawing the scope trace, Values that are not
+/// finite).
+///
 /// A falling edge is a rising edge of the signal turned upside down, so both
 /// slopes share one search.
 fn find_trigger(samples: &[f32], window: usize, trigger: Trigger, slope: Slope) -> Option<f32> {
@@ -553,7 +568,7 @@ fn find_trigger(samples: &[f32], window: usize, trigger: Trigger, slope: Slope) 
         if let Some(found) = candidate {
             if now < arm {
                 let fraction = (level - at(found - 1)) / (at(found) - at(found - 1));
-                return Some((found - 1) as f32 + fraction);
+                return fraction.is_finite().then_some((found - 1) as f32 + fraction);
             }
             if now >= level {
                 candidate = None;
@@ -582,5 +597,7 @@ fn pick_range(current: f32, peak: f32) -> f32 {
     }
 }
 
+#[cfg(test)]
+mod app_tests;
 #[cfg(test)]
 mod tests;

@@ -186,6 +186,34 @@ fn a_steady_sine_sends_its_trace_once() {
     assert_eq!(traces_sent(&watch, sine_of_period(183.47), 201), 1);
 }
 
+/// A steady sine with one NaN in each window: the NaN is left out of the
+/// trace, so the trace sent has only finite points, and it is sent once,
+/// then not again over 200 reads. A NaN is never a change merely because it
+/// never equals itself (panels.md, Drawing the scope trace, Redraw).
+#[test]
+fn a_steady_signal_with_one_nan_sends_once() {
+    let watch = drawn_scope_watch(240, 432, 240);
+    let probe = ProbeId(3);
+    let sine = sine_of_period(480.0);
+    let value = |frame: u64| if frame % 480 == 120 { f32::NAN } else { sine(frame) };
+    let mut watcher = Watcher::default();
+    let start = Instant::now();
+    let chunk_frames = loom_core::SCOPE_CHUNK as u64;
+    let mut sent = Vec::new();
+    for call in 0..201u64 {
+        let chunks: Vec<ScopeChunk> = (0..12)
+            .map(|i| chunk(probe, (call * 12 + i) * chunk_frames, value))
+            .collect();
+        let update = watcher.take(&watch, &[], chunks, 48_000.0, start + SCOPE_INTERVAL * call as u32);
+        sent.extend(update.traces.iter().map(|(_, trace)| trace.clone()));
+        watcher.sent(&update);
+    }
+    assert_eq!(sent.len(), 1, "sent once, then nothing");
+    let trace = &sent[0];
+    assert!(trace.points.iter().flatten().all(|v| v.is_finite()));
+    assert_eq!(trace.points.len(), 241, "one of 242 samples left out");
+}
+
 /// A triggered 0.5 s window is reduced to groups, and its period is not a
 /// whole number of samples. Drawn at 87 × 48, the smallest size of a full
 /// trace on a 1× screen, it sends nothing over 200 reads once the history
