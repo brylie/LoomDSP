@@ -344,6 +344,7 @@ fn where_the_line_crosses_an_edge_is_tested() {
     // The same at the left edge.
     let starting = |y: f32| full(vec![[-0.01, y], [0.01, 0.0], [1.0, 0.0]]);
     assert!(scope_moved(Some(&starting(0.0)), &starting(0.04), size(100, 100)));
+    assert!(scope_moved(Some(&starting(0.04)), &starting(0.0), size(100, 100)));
     assert!(!scope_moved(Some(&starting(0.0)), &starting(0.01), size(100, 100)));
 }
 
