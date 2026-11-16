@@ -544,17 +544,40 @@ fn a_release_build_lists_the_problems_and_drops_what_has_no_id() {
         space("a", 10.0, 10.0)
             .focusable()
             .access(Access::new(Role::Group, "Second")),
+        Element::slot(UiId::panel("child"))
+            .key("slot")
+            .access(Access::new(Role::Group, "Child")),
     ]));
     assert_eq!(
         layout.access_problems(),
-        [(None, Problem::NoKey), (Some(id("slider")), Problem::NoValue)]
+        [
+            (None, Problem::NoKey),
+            (Some(id("slider")), Problem::NoValue),
+            (Some(id("a")), Problem::StopWithoutAccess),
+            (Some(id("slot")), Problem::SlotWithAccess),
+        ]
     );
     let stops: Vec<bool> = layout.records().iter().map(|record| record.focusable).collect();
-    assert_eq!(stops, [false, false, false, true, false]);
+    assert_eq!(stops, [false, false, false, true, false, false]);
+    assert!(layout.records()[5].access.is_none(), "a slot keeps no Access");
     assert!(
         layout
             .records()
             .iter()
             .all(|record| record.id.is_some() || record.access.is_none())
+    );
+}
+
+/// A focus stop with no Access has no node for a screen reader's focus, so
+/// a debug build stops there (section 7, rule 2).
+#[test]
+#[should_panic(expected = "an element p/b breaks a rule: it is a focus stop with no Access")]
+fn a_focus_stop_needs_an_access() {
+    lay_out(
+        Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+            .key("b")
+            .focusable(),
+        50.0,
+        50.0,
     );
 }

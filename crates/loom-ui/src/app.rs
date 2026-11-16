@@ -124,13 +124,19 @@ impl<'a, M> Context<'a, M> {
     }
 
     /// The nodes of the runtime's own elements, as last laid out, for the
-    /// app to put in the tree it sends: node IDs from `ids`, the app's one
-    /// table for every node in the window, and bounds in physical pixels at
-    /// the window's scale (ui-layer.md, section 7). A screen reader's
-    /// action on one of them reaches the app as any other does, and the app
-    /// turns it into a message by its UI ID (section 7, rule 6); a Focus
-    /// action becomes [`Effects::focus`](crate::Effects::focus). Empty
-    /// outside a runtime.
+    /// app to put in the tree it sends (ui-layer.md, section 7). Node IDs
+    /// come from `ids`, the app's one table for every node in the window,
+    /// and bounds are in physical pixels at the window's scale. The focus is
+    /// the runtime's focused element, when it has a node. It reads the last
+    /// layout, and layout runs after the turn, so in the turn that opens a
+    /// panel its nodes are not there yet: an app whose panels changed builds
+    /// the tree after the draw ([`Effects::after_draw`](crate::Effects::after_draw)).
+    ///
+    /// A screen reader's action on one of these nodes reaches the app as
+    /// any other does, through [`App::accessibility_event`]. The app turns
+    /// it into a message by the UI ID its table gives (section 7, rule 6),
+    /// and a Focus action into [`Effects::focus`](crate::Effects::focus).
+    /// Empty outside a runtime.
     pub fn access_nodes(&self, ids: &mut IdTable) -> AccessNodes {
         self.panels.map_or_else(AccessNodes::default, |panels| {
             panels.access_nodes(ids, self.window.scale, self.focused.as_ref())

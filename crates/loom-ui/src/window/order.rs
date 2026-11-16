@@ -120,8 +120,14 @@ impl Window {
             let tops = self.panel_nodes(key, ids, scale, &mut out.nodes);
             out.roots.push((key.clone(), record.layer, tops));
         }
+        // Only a node that was made: a tree whose focus names no node is
+        // refused by the screen reader's side.
         out.focus = focused
             .filter(|id| self.stops.contains(id))
+            .filter(|id| {
+                self.panel_of(id)
+                    .is_some_and(|panel| self.records[panel].layout.has_node(id))
+            })
             .map(|id| NodeId(ids.number(id)));
         out
     }

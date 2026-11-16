@@ -7,9 +7,9 @@
 //!
 //! [`Access`] is our own type, not AccessKit's node: rule 2 (a role that
 //! can be operated, a non-empty name, a value) is checked against it, and
-//! AccessKit's breaking releases reach only the one method that makes its node. The Focus
-//! action is never set here: every focus stop offers it, and nothing else
-//! does (section 7, rule 22).
+//! AccessKit's breaking releases reach only the one method that makes its
+//! node. The Focus action is never set here: every focus stop offers it,
+//! and nothing else does (section 7, rule 22).
 
 use accesskit::{Action as KitAction, Node, Role as KitRole, Toggled};
 use std::fmt;
@@ -203,6 +203,13 @@ pub struct Access {
 pub enum Problem {
     /// It has no key, so it has no UI ID, which focus and a node need.
     NoKey,
+    /// It is a focus stop with no [`Access`]: a user reaches it with Tab,
+    /// and a screen reader would have no node to put the focus on.
+    StopWithoutAccess,
+    /// It is a slot with an [`Access`]. A slot holds another panel, whose
+    /// own elements say what they are; give the panel's root the
+    /// [`Access`] instead.
+    SlotWithAccess,
     /// It has no name, where its role needs one.
     NoName,
     /// It has no value, or the wrong kind, where its role needs one: a
@@ -217,6 +224,8 @@ impl fmt::Display for Problem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::NoKey => "it has no key, so it has no UI ID",
+            Self::StopWithoutAccess => "it is a focus stop with no Access, so it has no node",
+            Self::SlotWithAccess => "it is a slot with an Access; give the slot's panel the Access",
             Self::NoName => "it has no name",
             Self::NoValue => "it has no value of the kind its role needs",
             Self::NotOperable => "a user acts on it, and it offers no action",

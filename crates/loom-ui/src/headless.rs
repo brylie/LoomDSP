@@ -280,7 +280,6 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
         self.next
     }
 
-    /// The runtime.
     /// Lays the window out, as a driver does before it draws, with `text`
     /// measuring text.
     pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
@@ -293,6 +292,7 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
         self.runtime.focus_at(point)
     }
 
+    /// The runtime.
     pub fn runtime(&self) -> &Runtime<A, T> {
         &self.runtime
     }

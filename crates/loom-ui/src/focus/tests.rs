@@ -241,7 +241,8 @@ fn a_step_enters_at_either_end_and_leaves_past_it() {
 fn a_press_focuses_with_no_ring() {
     let holder = Element::stack([Element::text("label", STYLE).key("label")])
         .key("holder")
-        .focusable();
+        .focusable()
+        .access(Access::new(Role::Group, "Holder"));
     let mut harness = showing(vec![panel("bar", Element::row([stop("a"), holder]))]);
     assert_eq!(harness.focus_at(Point::new(2.0, 2.0)), Some(id("bar", "a")));
     assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
@@ -270,6 +271,73 @@ fn tab_moves_the_focus_with_a_ring() {
     harness.step(tab(true));
     assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
     assert!(harness.runtime().focus_ring().is_some(), "Shift+Tab shows a ring too");
+}
+
+/// Tab from the last stop moves the focus out, and asks for a redraw so
+/// the ring does not stay on screen, though the key goes on to the target.
+#[test]
+fn tab_past_the_last_stop_clears_the_ring_and_redraws() {
+    let mut harness = showing(vec![panel("bar", row(&["a"]))]);
+    harness.send(Message::Focus(id("bar", "a")));
+    assert!(harness.runtime().focus_ring().is_some());
+    let next = harness.step(tab(false));
+    assert!(next.draw, "the ring went, so the window draws");
+    assert_eq!(harness.runtime().focus_ring(), None);
+}
+
+/// A press on one of the runtime's stops takes the focus from the target,
+/// so only one element has it (rule 1).
+#[test]
+fn a_press_takes_the_focus_from_the_target() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(Panels::default(), Toolkit::default(), window, Instant::now());
+    harness.send(Message::Show(vec![panel("bar", row(&["a"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(UiId::panel("inspector").with("name")));
+    assert!(harness.runtime().target().focused.is_some());
+    assert_eq!(harness.focus_at(Point::new(2.0, 2.0)), Some(id("bar", "a")));
+    assert_eq!(harness.runtime().target().focused, None, "the target let go");
+}
+
+/// A focus effect on an element of the runtime's that is no stop, such as
+/// a label, leaves the focus where it was after the layout.
+#[test]
+fn a_focus_effect_on_a_label_keeps_the_focus() {
+    let bar = Element::row([stop("a"), Element::text("label", STYLE).key("label")]);
+    let mut harness = showing(vec![panel("bar", bar)]);
+    harness.send(Message::Focus(id("bar", "a")));
+    harness.send(Message::Focus(id("bar", "label")));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+}
+
+/// A focus effect on a turned-off element of the runtime's, which is no
+/// stop, leaves the focus where it was after the layout.
+#[test]
+fn a_focus_effect_on_a_turned_off_element_keeps_the_focus() {
+    let mut harness = showing(vec![panel("bar", Element::row([stop("a"), off("save")]))]);
+    harness.send(Message::Focus(id("bar", "a")));
+    harness.send(Message::Focus(id("bar", "save")));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+}
+
+/// In a release build, a focus stop with no Access is listed as a problem
+/// and has no node, so the tree's focus is left empty rather than naming a
+/// node that does not exist.
+#[test]
+fn the_focus_never_names_a_node_that_was_not_made() {
+    let mut window = crate::window::Window::default();
+    window.allow_mistakes();
+    let bare = Element::text("bare", STYLE).key("bare").focusable();
+    window.sync(vec![(UiId::panel("bar"), Layer::Panels, Some(Element::row([bare])))]);
+    window.lay_out(Size::new(400.0, 200.0), &mut Mono::default());
+    let focused = id("bar", "bare");
+    assert_eq!(window.stops(), std::slice::from_ref(&focused));
+    let nodes = window.access_nodes(&mut IdTable::new(), 1.0, Some(&focused));
+    assert_eq!(nodes.focus, None);
+    assert!(nodes.nodes.is_empty());
 }
 
 /// Tab past the last stop leaves the runtime's elements, for the router to

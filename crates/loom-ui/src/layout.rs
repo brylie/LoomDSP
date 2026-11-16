@@ -439,14 +439,24 @@ impl Layout {
         self.records.len()
     }
 
+    /// True when the element with UI ID `id` has a node: it has an
+    /// [`Access`].
+    pub(crate) fn has_node(&self, id: &UiId) -> bool {
+        self.by_id
+            .get(id)
+            .is_some_and(|index| self.records[*index].access.is_some())
+    }
+
     /// Every element, in tree order, for hit-testing.
     pub(crate) fn records(&self) -> &[Record] {
         &self.records
     }
 
     /// Focus stops and accessed elements that break a rule, in tree order:
-    /// one with no key ([`Problem::NoKey`]), and an [`Access`] that breaks
-    /// section 7, rule 2. A debug build panics on the first instead, so this
+    /// one with no key ([`Problem::NoKey`]), a stop with no [`Access`]
+    /// ([`Problem::StopWithoutAccess`]), a slot with one
+    /// ([`Problem::SlotWithAccess`]), and an [`Access`] that breaks section
+    /// 7, rule 2. A debug build panics on the first instead, so this
     /// is for a release build and for a test that checks every panel.
     pub fn access_problems(&self) -> &[(Option<UiId>, Problem)] {
         &self.problems
@@ -549,6 +559,15 @@ impl Layout {
         if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
             self.problem(kept.clone(), problem);
         }
+        if stop && access.is_none() {
+            self.problem(kept.clone(), Problem::StopWithoutAccess);
+        }
+        let access = if slot.is_some() && access.is_some() {
+            self.problem(kept.clone(), Problem::SlotWithAccess);
+            None
+        } else {
+            access
+        };
         self.records.push(Record {
             node,
             parent,
