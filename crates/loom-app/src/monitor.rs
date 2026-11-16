@@ -532,9 +532,10 @@ pub const SCOPE_SEGMENT_CAP: usize = 64;
 /// level is drawn), any change of the level's 256 steps counts. When one has
 /// points and the other has none, it moved. Otherwise only the points are
 /// compared, so a level change alone sends nothing: a point of either trace
-/// inside the frame (x from 0 to 1) that lies more than half a pixel, at the
-/// drawn size, from the other trace's whole line has moved. Points outside
-/// the frame still shape the line. A scope trace has no `second` line.
+/// inside the frame (x from 0 to 1), or a point where its line crosses the
+/// frame's left or right edge, that lies more than half a pixel, at the drawn
+/// size, from the other trace's whole line has moved. Points outside the
+/// frame still shape the line. A scope trace has no `second` line.
 pub fn scope_moved(shown: Option<&loom_canvas::Trace>, trace: &loom_canvas::Trace, drawn: Option<DrawnSize>) -> bool {
     let Some(shown) = shown else {
         return true;
@@ -576,9 +577,14 @@ pub fn line_check(a: &[[f32; 2]], b: &[[f32; 2]], size: DrawnSize) -> LineCheck 
     LineCheck { moved, tests }
 }
 
-/// True when a point of `points` inside the frame lies more than
-/// [`SCOPE_TOLERANCE`] pixels from the line through `line`, or reaches the
-/// cap. Adds each segment test to `tests`.
+/// True when a point of `points` inside the frame, or a point where their
+/// line crosses x = 0 or x = 1, lies more than [`SCOPE_TOLERANCE`] pixels
+/// from the line through `line`, or reaches the cap. Adds each segment test
+/// to `tests`.
+///
+/// The crossings matter because a segment from a point inside to a point
+/// outside is drawn up to the edge: when only the outside point moves, the
+/// end of the line at the edge moves, and no point inside does.
 ///
 /// For each point the search keeps a window on the line: the segments whose
 /// x comes within the tolerance of the point's. Both lines run left to right,
@@ -587,8 +593,16 @@ pub fn line_check(a: &[[f32; 2]], b: &[[f32; 2]], size: DrawnSize) -> LineCheck 
 /// neighbours outward, since on a line that held still the nearest segment is
 /// usually there.
 fn points_off_line(points: &[[f32; 2]], line: &[[f32; 2]], size: DrawnSize, tests: &mut usize) -> bool {
+    // Left to right in x: the crossing at the left edge, the points inside,
+    // then the crossing at the right edge.
+    let framed = || {
+        crossing(points, 0.0)
+            .into_iter()
+            .chain(points.iter().copied().filter(|p| (0.0..=1.0).contains(&p[0])))
+            .chain(crossing(points, 1.0))
+    };
     if line.is_empty() {
-        return points.iter().any(|p| (0.0..=1.0).contains(&p[0]));
+        return framed().next().is_some();
     }
     let (width, height) = (size.width as f32, size.height as f32);
     // x from 0 to 1 across the width, y from -1 to 1 up the height.
@@ -602,10 +616,7 @@ fn points_off_line(points: &[[f32; 2]], line: &[[f32; 2]], size: DrawnSize, test
     // whose right end reaches x, and the first whose left end lies past
     // x + tolerance.
     let (mut low, mut under, mut high) = (0, 0, 0);
-    for &point in points {
-        if !(0.0..=1.0).contains(&point[0]) {
-            continue;
-        }
+    for point in framed() {
         let p = pixels(point);
         while low < segments && segment(low).1[0] < p[0] - SCOPE_TOLERANCE {
             low += 1;
@@ -649,6 +660,18 @@ fn points_off_line(points: &[[f32; 2]], line: &[[f32; 2]], size: DrawnSize, test
         }
     }
     false
+}
+
+/// The point where the line through `points`, which runs left to right in
+/// x, crosses the vertical line at `edge`, found by linear interpolation
+/// along the segment that spans it. `None` when no segment has one end on
+/// each side: the line does not reach past the edge, or a point lies on it
+/// and is tested as a point inside the frame.
+fn crossing(points: &[[f32; 2]], edge: f32) -> Option<[f32; 2]> {
+    let pair = points.windows(2).find(|w| w[0][0] < edge && w[1][0] > edge)?;
+    let (a, b) = (pair[0], pair[1]);
+    let t = (edge - a[0]) / (b[0] - a[0]);
+    Some([edge, a[1] + t * (b[1] - a[1])])
 }
 
 /// The distance in pixels from `p` to the segment from `a` to `b`.

@@ -325,6 +325,28 @@ fn only_points_inside_the_frame_are_tested() {
     assert!(scope_moved(Some(&shown), &bent, size(100, 100)));
 }
 
+/// A segment from a point inside the frame to one past its right edge is
+/// drawn up to the edge. When only the point past the edge moves, every point
+/// inside holds still, but the end of the line at the edge moves. A move of
+/// that end by about a pixel counts, and one of a quarter pixel does not.
+#[test]
+fn where_the_line_crosses_an_edge_is_tested() {
+    let ending = |y: f32| full(vec![[0.0, 0.0], [0.99, 0.0], [1.01, y]]);
+    let shown = ending(0.0);
+    // At 100 x 100 the edge lies halfway along the last segment, so its end
+    // at the edge rises by y / 2 of the half height: 50 * y / 2 pixels.
+    assert!(scope_moved(Some(&shown), &ending(0.04), size(100, 100)), "a pixel");
+    assert!(scope_moved(Some(&ending(0.04)), &shown, size(100, 100)), "both ways");
+    assert!(
+        !scope_moved(Some(&shown), &ending(0.01), size(100, 100)),
+        "a quarter pixel"
+    );
+    // The same at the left edge.
+    let starting = |y: f32| full(vec![[-0.01, y], [0.01, 0.0], [1.0, 0.0]]);
+    assert!(scope_moved(Some(&starting(0.0)), &starting(0.04), size(100, 100)));
+    assert!(!scope_moved(Some(&starting(0.0)), &starting(0.01), size(100, 100)));
+}
+
 /// At the middle zoom a trace is its level: any change of its 256 steps is
 /// sent. With full traces the points alone count, so a level change sends
 /// nothing. A trace that gains or loses its points, or the first trace, is a
