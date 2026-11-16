@@ -81,11 +81,14 @@ fn example_patches() -> Vec<PathBuf> {
     patches
 }
 
-/// The notes `patch` plays in its render: [`CHORD`] for the polysynth,
-/// which tests several voices at once, and [`NOTE`] for every other patch,
+/// The notes `patch` plays in its render: [`CHORD`] for the polysynth and
+/// the large reference patch, which test several voices at once, and [`NOTE`] for every other patch,
 /// so their references do not change.
 fn notes(patch: &Path) -> &'static [Note] {
-    if patch.file_name().is_some_and(|name| name == "polysynth.ron") {
+    if patch
+        .file_name()
+        .is_some_and(|name| name == "polysynth.ron" || name == "polysynth-large.ron")
+    {
         &CHORD
     } else {
         &[NOTE]

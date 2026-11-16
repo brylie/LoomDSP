@@ -68,6 +68,7 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 | [Dynamics outputs, 2026-11-04](benchmarks/2026-11-04-dynamics-outputs.md) | Dynamics taking its outputs once per call instead of once per sample (#616) |
 | [Sub-patch modes, 2026-11-09](benchmarks/2026-11-09-sub-patch-modes.md) | A select, a layer, and a stack of 8 voices against one voice |
 | [Polysynth, 2026-11-15](benchmarks/2026-11-15-polysynth.md) | The 8-voice polysynth as a share of real time, shipped and with the Quietest `level` loop (NFR-PERF-01) |
+| [Layered polysynth, 2026-11-16](benchmarks/2026-11-16-polysynth-large.md) | The second reference patch, a layered 8-voice synth of 96 modules and 553 module runs per block, as a share of real time (NFR-PERF-01) |
 
 ## How to read requirement IDs
 

@@ -1288,7 +1288,15 @@ const MINUS_ONE_DBFS: f32 = 0.891;
 /// to be a real check, so a silent patch cannot pass.
 #[test]
 fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
-    let mut parts = common::load_raw("polysynth.ron");
+    let peak = eight_held_notes_peak("polysynth.ron");
+    assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
+    assert!(peak > 0.25, "8 notes play: peak {peak}");
+}
+
+/// The peak of `patch` with the benchmark's 8 notes started on frame 0 and
+/// held for 5 s, with output safety off.
+fn eight_held_notes_peak(patch: &str) -> f32 {
+    let mut parts = common::load_raw(patch);
     for note in [48, 52, 55, 59, 60, 64, 67, 71] {
         assert!(parts.midi.send(loom_core::MidiEvent::note_on(0, 0, note, 100)));
     }
@@ -1298,7 +1306,86 @@ fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
     for (l, r) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
         parts.engine.process(l, r);
     }
-    let peak = loom_analysis::peak(&left).max(loom_analysis::peak(&right));
+    loom_analysis::peak(&left).max(loom_analysis::peak(&right))
+}
+
+/// The large reference patch's voice chain, by module ID: the Voice
+/// Assigner (2) through the voice's output Amplifier (66), and MIDI Note (1)
+/// before it (polyphony.md, The large reference patch).
+const LARGE_VOICE_CHAIN: std::ops::RangeInclusive<u32> = 1..=66;
+
+/// The large reference patch's module runs per block, which its benchmark
+/// record states (docs/benchmarks).
+const LARGE_RUNS_PER_BLOCK: usize = 553;
+
+/// The large reference patch's Voice Merge. Every module from it on, and the
+/// shared noise source and its filter just before it, gives one voice.
+const LARGE_MERGE: u32 = 69;
+
+/// The large reference patch compiles with no feedback loop and nothing
+/// skipped. Every output from MIDI Note to the voice's output Amplifier is 8
+/// mono voices, every other output is one voice, and its only stereo copies
+/// are in the effects after Voice Merge.
+#[test]
+fn the_large_reference_patch_compiles_to_eight_voices_and_no_loop() {
+    let parts = common::load("polysynth-large.ron");
+    let report = parts.controller.last_report();
+    assert!(report.loops.is_empty(), "no feedback loops: {:?}", report.loops);
+    assert!(report.skipped.is_empty(), "nothing skipped: {:?}", report.skipped);
+    for module in &report.per_channel {
+        assert!(
+            module.0 > LARGE_MERGE,
+            "stereo copies only after Voice Merge: module {}",
+            module.0
+        );
+    }
+    let eight = Width { voices: 8, sides: 1 };
+    let modules: Vec<u32> = parts.controller.graph().nodes().map(|(id, _)| id.0).collect();
+    assert!(
+        (90..=110).contains(&modules.len()),
+        "about 100 modules: {}",
+        modules.len()
+    );
+    // Module runs per block, as the benchmark record counts them: a module
+    // with a bundle port runs once, any other once per voice of its widest
+    // output, and twice that when it runs per side.
+    let runs: usize = parts
+        .controller
+        .graph()
+        .nodes()
+        .map(|(id, node)| {
+            let d = node.descriptor;
+            let bundle = d
+                .inputs
+                .iter()
+                .chain(d.outputs)
+                .any(|p| p.channels == loom_core::Channels::Voices);
+            let voices = output_widths(&parts, id.0)
+                .iter()
+                .map(|(_, w)| w.voices)
+                .max()
+                .unwrap_or(1);
+            let sides = if report.per_channel.contains(&id) { 2 } else { 1 };
+            if bundle { 1 } else { voices * sides }
+        })
+        .sum();
+    assert_eq!(runs, LARGE_RUNS_PER_BLOCK, "module runs per block");
+    for module in modules {
+        for (name, width) in output_widths(&parts, module) {
+            if LARGE_VOICE_CHAIN.contains(&module) {
+                assert_eq!(width, eight, "module {module} output {name}");
+            } else {
+                assert_eq!(width.voices, 1, "module {module} output {name}");
+            }
+        }
+    }
+}
+
+/// Eight held notes on the large reference patch peak under -1 dBFS, and are
+/// loud enough that a silent patch cannot pass.
+#[test]
+fn eight_held_notes_on_the_large_reference_patch_peak_under_minus_one_dbfs() {
+    let peak = eight_held_notes_peak("polysynth-large.ron");
     assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
     assert!(peak > 0.25, "8 notes play: peak {peak}");
 }

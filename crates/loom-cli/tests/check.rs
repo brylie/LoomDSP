@@ -156,3 +156,25 @@ fn check_passes_on_the_polysynth_example() {
     assert!(!stdout.contains("unknown module"), "{stdout}");
     assert!(stderr.is_empty(), "the patch loads as saved: {stderr}");
 }
+
+/// `loom check` passes on the large reference patch: it loads with nothing
+/// unknown, every module processed, and no feedback loop (polyphony.md, The
+/// large reference patch).
+#[test]
+fn check_passes_on_the_polysynth_large_example() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/polysynth-large.ron");
+    let out = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("check")
+        .arg(&path)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stdout}{stderr}");
+    assert!(stdout.contains("\"Layered polysynth (benchmark)\""), "{stdout}");
+    assert!(stdout.contains("96 modules, 119 cables"), "{stdout}");
+    assert!(stdout.contains("no feedback loops"), "{stdout}");
+    assert!(!stdout.contains("not processed"), "{stdout}");
+    assert!(!stdout.contains("unknown module"), "{stdout}");
+    assert!(stderr.is_empty(), "the patch loads as saved: {stderr}");
+}

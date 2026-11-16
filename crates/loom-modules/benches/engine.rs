@@ -18,15 +18,18 @@
 //!
 //! The `patch` group runs example patches with a note held:
 //! `subtractive.ron`, `fm-feedback.ron`, and `modulation.ron` with one note,
-//! and `polysynth.ron` with [`POLYSYNTH_NOTES`].
+//! and `polysynth.ron` and `polysynth-large.ron` with [`POLYSYNTH_NOTES`].
 //!
 //! After criterion's groups, `polysynth` prints the polysynth's share of real
 //! time, in two lines: the shipped example, and its Quietest variant with the
 //! `level` cable ([`polysynth_share`], polyphony.md, The shipped example).
+//! `polysynth-large` prints the large reference patch's share in a third
+//! line ([`polysynth_large_share`], polyphony.md, The large reference patch).
 //! The lines report and never fail, since the number depends on the machine.
 //!
 //! Run with: `cargo bench -p loom-modules`, or only the polysynth with
-//! `cargo bench -p loom-modules --bench engine -- polysynth`.
+//! `cargo bench -p loom-modules --bench engine -- polysynth`, which prints all
+//! three lines, or `-- polysynth-large` for the large patch's line alone.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 use loom_core::{EngineConfig, EngineParts, MidiEvent, ModuleId, create_engine};
@@ -142,9 +145,15 @@ fn patches(c: &mut Criterion) {
     let mut right = vec![0.0f32; BLOCK];
     let mut group = c.benchmark_group("patch");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    for name in ["subtractive.ron", "fm-feedback.ron", "modulation.ron", "polysynth.ron"] {
+    for name in [
+        "subtractive.ron",
+        "fm-feedback.ron",
+        "modulation.ron",
+        "polysynth.ron",
+        "polysynth-large.ron",
+    ] {
         let mut parts = example(name);
-        let notes: &[u8] = if name == "polysynth.ron" {
+        let notes: &[u8] = if name.starts_with("polysynth") {
             &POLYSYNTH_NOTES
         } else {
             &[60]
@@ -513,10 +522,33 @@ fn polysynth_share() {
     time_polysynth("polysynth (Quietest, level loop)", parts);
 }
 
+/// The Voice Assigner's module ID in `polysynth-large.ron`.
+const LARGE_ASSIGN: ModuleId = ModuleId(2);
+
+/// The large reference patch's cost as a share of real time (polyphony.md,
+/// rule 29, and The large reference patch), with [`POLYSYNTH_NOTES`] held.
+/// Runs only for a timed run that includes `polysynth-large` ([`runs`]).
+fn polysynth_large_share() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !runs("polysynth-large", &args) {
+        return;
+    }
+    let parts = example("polysynth-large.ron");
+    let report = parts.controller.last_report();
+    assert!(
+        report.loops.is_empty(),
+        "the large reference patch has no feedback loop"
+    );
+    let pitch = parts.controller.output_ref(LARGE_ASSIGN, "pitch").unwrap();
+    assert_eq!(report.width(pitch).voices, 8, "the Voice Assigner's pitch is 8 voices");
+    time_polysynth("polysynth-large", parts);
+}
+
 /// Criterion's groups, then the polysynth's share of real time, then
 /// criterion's summary: what `criterion_main!` does, with one call added.
 fn main() {
     benches();
     polysynth_share();
+    polysynth_large_share();
     Criterion::default().configure_from_args().final_summary();
 }

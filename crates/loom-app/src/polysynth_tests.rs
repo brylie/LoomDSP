@@ -257,3 +257,24 @@ fn voice_assigners_unison_follows_the_mode_that_plays() {
         Some("Unison, Not used in Legato")
     );
 }
+
+/// The Saw of the first layer in `polysynth-large.ron`, inside the voice chain.
+const LARGE_SAW: u32 = 6;
+
+/// Voice Merge's module ID in `polysynth-large.ron`.
+const LARGE_MERGE: u32 = 69;
+
+/// `polysynth-large.ron` opens in the app with all 96 modules. An
+/// output in its voice chain says `8 voices` in its hover text, and Voice
+/// Merge's output, one voice, does not (polyphony.md, The large reference
+/// patch).
+#[test]
+fn the_large_reference_patch_opens_and_shows_its_voice_count() {
+    let ui = Ui::open("polysynth-large.ron");
+    let graph = ui.app().session.controller.graph();
+    assert_eq!(graph.nodes().count(), 96);
+    let saw = output_hover(&ui, LARGE_SAW);
+    assert!(saw.ends_with(" 8 voices."), "{saw}");
+    let merged = output_hover(&ui, LARGE_MERGE);
+    assert!(!merged.contains("voices"), "{merged}");
+}
