@@ -3,7 +3,7 @@ use crate::Message;
 use crate::monitor::Update;
 use crate::ui_test::Ui;
 use loom_canvas::CanvasEvent;
-use loom_core::ModuleId;
+use loom_core::{MeterReading, ModuleId};
 use loom_ui_core::Point;
 
 /// A patch with one Level Meter, with its display on screen.
@@ -30,26 +30,27 @@ fn show(ui: &mut Ui, module: u32) {
         .send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![module])));
 }
 
-/// Sends a peak on the meter's current probe, as the telemetry thread does.
+/// Sends a peak for the meter's widget, as the telemetry thread does.
 fn send_peak(ui: &mut Ui, meter: u32, peak: f32) {
-    let probe = ui
-        .app()
-        .session
-        .engine
-        .live
-        .probe(output(ui, meter))
-        .expect("a probe while on screen");
-    let after = ui.app().peak_resets().get(&probe).copied().unwrap_or(0);
+    assert!(
+        ui.app().session.engine.live.probe(output(ui, meter)).is_some(),
+        "a probe while on screen"
+    );
     let news = PeakNews {
         peak,
         bad: false,
-        after,
+        after: resets(ui, (meter, 0)),
     };
     let _ = ui.app_mut().send(Message::Telemetry(Update {
-        peaks: vec![(probe, news)],
+        peaks: vec![((meter, 0), news)],
         ..Update::default()
     }));
     ui.redraw();
+}
+
+/// A meter's own reset count, as the app tells the telemetry thread.
+fn resets(ui: &Ui, meter: MeterWidget) -> u64 {
+    ui.app().peak_resets().get(&meter).map_or(0, |&(_, count)| count)
 }
 
 /// The Level Meter's output.
@@ -183,17 +184,17 @@ fn a_peak_from_before_a_reset_is_dropped() {
     let old = PeakNews {
         peak: 2.0,
         bad: false,
-        after: ui.app().peak_resets()[&probe],
+        after: resets(&ui, (meter, 0)),
     };
     ui.app_mut().reset_clip((meter, 0), true);
     let _ = ui.app_mut().send(Message::Telemetry(Update {
-        peaks: vec![(probe, old)],
+        peaks: vec![((meter, 0), old)],
         ..Update::default()
     }));
     assert_eq!(drawn(&ui, meter), (false, "--".to_string()));
     assert_eq!(
-        ui.app().session.engine.monitor.watched().peak_resets[&probe],
-        1,
+        ui.app().session.engine.monitor.watched().peak_resets[&(meter, 0)],
+        (probe, 1),
         "the thread is told"
     );
 }
@@ -276,15 +277,14 @@ fn a_reset_of_one_meter_keeps_a_clip_on_another() {
     let _ = ui
         .app_mut()
         .send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![first, second])));
-    let probe = ui.app().session.engine.live.probe(output(&ui, second)).unwrap();
     let news = PeakNews {
         peak: 2.0,
         bad: false,
-        after: ui.app().peak_resets()[&probe],
+        after: resets(&ui, (second, 0)),
     };
     ui.app_mut().reset_clip((first, 0), false);
     let _ = ui.app_mut().send(Message::Telemetry(Update {
-        peaks: vec![(probe, news)],
+        peaks: vec![((second, 0), news)],
         ..Update::default()
     }));
     ui.redraw();
@@ -313,4 +313,107 @@ fn far_zoom_clicks_clear_nothing() {
     click(&mut ui, bar);
     click(&mut ui, bar);
     assert_eq!(drawn(&ui, meter), (true, "+6.0 dB".to_string()), "a double-click");
+}
+
+/// A module with two meters on one output, which only the panel editor can
+/// make for now.
+static TWO_METERS: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
+    id: "test.two-meters",
+    version: 1,
+    name: "Two Meters",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Two meters on one output.",
+    inputs: &[],
+    outputs: &[loom_core::PortSpec {
+        name: "out",
+        label: "Out",
+        signal: loom_core::SignalType::Audio,
+        description: "Silence.",
+        default: loom_core::PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: loom_core::Channels::PerChannel,
+    }],
+    params: &[],
+    role: loom_core::ModuleRole::Dsp(|_| Box::new(Silent)),
+    panel: loom_core::Panel::new(
+        6,
+        6,
+        &[
+            loom_core::Widget::meter(0, 0, "out"),
+            loom_core::Widget::meter(3, 0, "out"),
+        ],
+    ),
+    displays: &[],
+    roles: &[],
+};
+
+/// Makes nothing: only its meters matter here.
+struct Silent;
+impl loom_core::Module for Silent {
+    fn process(&mut self, _: &loom_core::ProcessContext<'_>, _: &mut loom_core::PortIo<'_>) {}
+}
+
+/// Two meters on one output keep their own clip lights. A clip reaches both
+/// through the telemetry thread's `Peaks`; the player resets the left one
+/// while that news is on its way. The left stays dark, and the right still
+/// lights, with its readout raised. The inspector's Reset clip then resets
+/// both (`docs/design/panels.md`, Meter widget, Two meters on one output).
+#[test]
+fn two_meters_on_one_output_keep_their_own_clips() {
+    let mut registry = loom_core::Registry::new();
+    registry.register(&TWO_METERS).unwrap();
+    let mut parts = loom_core::create_engine(std::sync::Arc::new(registry), loom_core::EngineConfig::default());
+    let module = parts.controller.add_module(TWO_METERS.id).unwrap().0;
+    parts.controller.commit().unwrap();
+    let mut app = crate::tests::app_with_text("Patch(version: 1, modules: [])");
+    app.session.controller = parts.controller;
+    app.session.positions.insert(module, (0.0, 0.0));
+    app.commit();
+    let mut ui = Ui::with_app(app);
+    ui.redraw();
+    show(&mut ui, module);
+    let (left, right) = ((module, 0), (module, 1));
+    let watch = ui.app().session.engine.monitor.watched();
+    assert_eq!(watch.peak_resets.len(), 2, "both meters are watched");
+    assert_eq!(watch.peak_resets[&left].0, watch.peak_resets[&right].0, "one probe");
+    let probe = watch.peak_resets[&left].0;
+
+    // The telemetry thread sees a clip and builds its news for both meters.
+    let mut peaks = Peaks::default();
+    let clip = MeterReading {
+        probe,
+        frame: 0,
+        frames: 128,
+        peak: 2.0,
+        rms: 0.5,
+        right: None,
+    };
+    peaks.note(&watch.peak_resets, &[clip]);
+    let on_its_way = peaks.news();
+    assert_eq!(on_its_way.len(), 2);
+
+    // The player resets the left meter before the news arrives.
+    ui.app_mut().reset_clip(left, true);
+    let _ = ui.app_mut().send(Message::Telemetry(Update {
+        peaks: on_its_way,
+        ..Update::default()
+    }));
+    ui.redraw();
+    let holds = &ui.app().session.clip_holds;
+    assert_eq!(holds.get(left), Hold::default(), "the reset one stays dark");
+    assert!(holds.get(right).lit, "the other still lights");
+    assert_eq!(holds.get(right).text(), "+6.0 dB", "and its readout rises");
+
+    // The thread hears of the reset, and clears only the left meter's news.
+    let watch = ui.app().session.engine.monitor.watched();
+    assert_eq!(watch.peak_resets[&left], (probe, 1));
+    assert_eq!(watch.peak_resets[&right], (probe, 0));
+    peaks.note(&watch.peak_resets, &[]);
+    assert!(peaks.news().iter().all(|(meter, _)| *meter == right));
+
+    let _ = ui.app_mut().send(Message::ResetClip(module));
+    let holds = &ui.app().session.clip_holds;
+    assert_eq!(holds.get(left), Hold::default());
+    assert_eq!(holds.get(right), Hold::default(), "Reset clip resets both");
 }

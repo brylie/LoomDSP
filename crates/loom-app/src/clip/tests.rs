@@ -2,6 +2,9 @@ use super::*;
 
 const PROBE: ProbeId = ProbeId(1);
 
+/// The one meter most tests watch, on [`PROBE`].
+const METER: MeterWidget = (1, 0);
+
 /// A mono reading.
 fn reading(peak: f32, rms: f32) -> MeterReading {
     MeterReading {
@@ -14,9 +17,10 @@ fn reading(peak: f32, rms: f32) -> MeterReading {
     }
 }
 
-/// One step of the telemetry thread: readings in, and the news marked sent.
-fn step(peaks: &mut Peaks, resets: u64, readings: &[MeterReading]) -> Vec<(ProbeId, PeakNews)> {
-    peaks.note(&HashMap::from([(PROBE, resets)]), &HashSet::from([PROBE]), readings);
+/// One step of the telemetry thread for [`METER`]: readings in, and the news
+/// marked sent.
+fn step(peaks: &mut Peaks, resets: u64, readings: &[MeterReading]) -> Vec<(MeterWidget, PeakNews)> {
+    peaks.note(&HashMap::from([(METER, (PROBE, resets))]), readings);
     let news = peaks.news();
     peaks.sent(&news);
     news
@@ -62,11 +66,11 @@ fn reaching_the_clip_level_is_always_news() {
 #[test]
 fn a_clip_survives_a_busy_ui() {
     let mut peaks = Peaks::default();
-    let meters = HashSet::from([PROBE]);
-    peaks.note(&HashMap::new(), &meters, &[reading(2.0, 0.5)]);
+    let meters = HashMap::from([(METER, (PROBE, 0))]);
+    peaks.note(&meters, &[reading(2.0, 0.5)]);
     // `try_send` failed: nothing marked sent.
     let _ = peaks.news();
-    peaks.note(&HashMap::new(), &meters, &[reading(0.0, 0.0)]);
+    peaks.note(&meters, &[reading(0.0, 0.0)]);
     let news = peaks.news();
     assert_eq!(news[0].1.peak, 2.0);
     assert!(news[0].1.clips());
@@ -147,18 +151,71 @@ fn clearing_and_resetting() {
 #[test]
 fn a_reset_of_one_meter_keeps_a_clip_on_another() {
     let other = ProbeId(2);
-    let meters = HashSet::from([PROBE, other]);
+    let second: MeterWidget = (2, 0);
+    let meters = |first_resets| HashMap::from([(METER, (PROBE, first_resets)), (second, (other, 0))]);
     let mut peaks = Peaks::default();
     let on_other = MeterReading {
         probe: other,
         ..reading(2.0, 0.5)
     };
-    peaks.note(&HashMap::new(), &meters, &[reading(1.5, 0.5), on_other]);
+    peaks.note(&meters(0), &[reading(1.5, 0.5), on_other]);
     // The UI resets the first meter before the news reaches it.
-    peaks.note(&HashMap::from([(PROBE, 1)]), &meters, &[]);
+    peaks.note(&meters(1), &[]);
     let news = peaks.news();
-    assert_eq!(news.len(), 1, "the first probe starts again");
-    assert_eq!(news[0].0, other);
+    assert_eq!(news.len(), 1, "the first meter starts again");
+    assert_eq!(news[0].0, second);
     assert_eq!(news[0].1.peak, 2.0);
     assert_eq!(news[0].1.after, 0, "the second meter was never reset");
+}
+
+/// Two meters on one probe: each reading reaches both, a reset of one clears
+/// only its news, and the other's news keeps its own count
+/// (`docs/design/panels.md`, Meter widget, Two meters on one output).
+#[test]
+fn two_meters_on_one_probe_keep_their_own_news() {
+    let (left, right): (MeterWidget, MeterWidget) = ((1, 0), (1, 1));
+    let meters = |left_resets| HashMap::from([(left, (PROBE, left_resets)), (right, (PROBE, 0))]);
+    let mut peaks = Peaks::default();
+    peaks.note(&meters(0), &[reading(2.0, 0.5)]);
+    let mut news = peaks.news();
+    news.sort_by_key(|(meter, _)| *meter);
+    assert_eq!(news.len(), 2, "the reading reaches both meters");
+    assert!(news.iter().all(|(_, n)| n.clips() && n.after == 0));
+
+    // The UI resets the left meter while that news is on its way.
+    peaks.note(&meters(1), &[]);
+    let news = peaks.news();
+    assert_eq!(news.len(), 1, "only the left meter starts again");
+    assert_eq!(news[0].0, right);
+    assert!(news[0].1.clips());
+    assert_eq!(news[0].1.after, 0, "the right meter keeps its count");
+
+    // What plays after the reset is news for the left meter, with its count.
+    peaks.sent(&news);
+    peaks.note(&meters(1), &[reading(0.5, 0.2)]);
+    let news = peaks.news();
+    assert_eq!(news.len(), 1);
+    assert_eq!(news[0].0, left);
+    assert_eq!(news[0].1.after, 1);
+    assert!(!news[0].1.clips());
+}
+
+/// A meter whose probe changed starts with no news, and a meter that left
+/// the list is forgotten.
+#[test]
+fn a_new_probe_or_a_meter_gone_starts_again() {
+    let mut peaks = Peaks::default();
+    peaks.note(&HashMap::from([(METER, (PROBE, 0))]), &[reading(2.0, 0.5)]);
+    let other = ProbeId(2);
+    peaks.note(&HashMap::from([(METER, (other, 0))]), &[]);
+    assert!(peaks.news().is_empty(), "a new probe starts with no news");
+    peaks.note(
+        &HashMap::from([(METER, (other, 0))]),
+        &[MeterReading {
+            probe: other,
+            ..reading(2.0, 0.5)
+        }],
+    );
+    peaks.note(&HashMap::new(), &[]);
+    assert!(peaks.news().is_empty(), "a meter gone is forgotten");
 }

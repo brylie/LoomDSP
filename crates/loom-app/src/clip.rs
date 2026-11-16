@@ -7,7 +7,7 @@
 //! change what the UI holds.
 
 use loom_core::{MeterReading, ProbeId};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// The peak at which the light turns on: 1.0 is 0 dB, or 10 V. Cables are
 /// never clipped, so this is what would clip if it reached the output.
@@ -18,15 +18,22 @@ const CLIP: f32 = 1.0;
 /// window.
 const STEP_RATIO: f32 = 1.011_579_4;
 
-/// What one probe has seen since the last reset.
+/// A meter widget: its module and its widget index. Clip lights and peak
+/// holds are kept by meter, not by probe, so two meters on one output keep
+/// their own (`docs/design/panels.md`, Meter widget, Two meters on one
+/// output).
+pub type MeterWidget = (u32, usize);
+
+/// What one meter has seen since its last reset.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PeakNews {
     /// The highest finite peak.
     pub peak: f32,
     /// True if a peak or RMS was not a finite number.
     pub bad: bool,
-    /// The probe's reset count this came after. The UI drops news from before
-    /// its meter's latest reset, which was on its way when it happened.
+    /// The meter's own reset count this came after. The UI drops news from
+    /// before that meter's latest reset, which was on its way when it
+    /// happened.
     pub after: u64,
 }
 
@@ -42,59 +49,66 @@ impl PeakNews {
     }
 }
 
-/// The raw peaks of the meter probes, on the telemetry thread. They build up
-/// until the UI has them, so a one-block clip survives a busy UI.
+/// The raw peaks of the meters on screen, on the telemetry thread, kept per
+/// meter. They build up until the UI has them, so a one-block clip survives
+/// a busy UI.
 #[derive(Debug, Default)]
 pub struct Peaks {
-    seen: HashMap<ProbeId, PeakNews>,
-    shown: HashMap<ProbeId, PeakNews>,
-    /// The reset count each probe was last told.
-    resets: HashMap<ProbeId, u64>,
+    seen: HashMap<MeterWidget, PeakNews>,
+    shown: HashMap<MeterWidget, PeakNews>,
+    /// The probe and the reset count each meter was last told.
+    told: HashMap<MeterWidget, (ProbeId, u64)>,
 }
 
 impl Peaks {
-    /// Takes readings from the probes in `meters`. A new count in `resets` means
-    /// the UI reset that probe's meter, so everything since is news again. Other
-    /// probes keep what they have, so a reset never costs another meter a clip.
-    pub fn note(&mut self, resets: &HashMap<ProbeId, u64>, meters: &HashSet<ProbeId>, readings: &[MeterReading]) {
-        self.seen.retain(|probe, _| meters.contains(probe));
-        self.shown.retain(|probe, _| meters.contains(probe));
-        self.resets.retain(|probe, _| meters.contains(probe));
-        for probe in meters {
-            let count = resets.get(probe).copied().unwrap_or(0);
-            if self.resets.insert(*probe, count).is_some_and(|last| last != count) {
-                self.seen.remove(probe);
-                self.shown.remove(probe);
+    /// Takes readings for the meters in `meters`, each given with the probe
+    /// on its output and its own reset count. Each reading goes to every
+    /// meter on its probe. A new count means the UI reset that meter, so
+    /// everything since is news again for it alone: another meter, even on
+    /// the same probe, keeps what it has, so a reset never costs it a clip.
+    /// A meter that leaves the list is forgotten, and one whose probe
+    /// changed starts with no news.
+    pub fn note(&mut self, meters: &HashMap<MeterWidget, (ProbeId, u64)>, readings: &[MeterReading]) {
+        self.seen.retain(|meter, _| meters.contains_key(meter));
+        self.shown.retain(|meter, _| meters.contains_key(meter));
+        self.told.retain(|meter, _| meters.contains_key(meter));
+        for (&meter, &told) in meters {
+            if self.told.insert(meter, told).is_some_and(|last| last != told) {
+                self.seen.remove(&meter);
+                self.shown.remove(&meter);
             }
         }
-        for reading in readings.iter().filter(|r| meters.contains(&r.probe)) {
-            let news = self.seen.entry(reading.probe).or_default();
+        for reading in readings {
             let (right_peak, right_rms) = reading.right.unwrap_or((0.0, 0.0));
-            for peak in [reading.peak, right_peak] {
-                if peak.is_finite() {
-                    news.peak = news.peak.max(peak);
-                }
-            }
-            news.bad |= ![reading.peak, reading.rms, right_peak, right_rms]
+            let bad = ![reading.peak, reading.rms, right_peak, right_rms]
                 .iter()
                 .all(|x| x.is_finite());
+            for (&meter, _) in meters.iter().filter(|(_, (probe, _))| *probe == reading.probe) {
+                let news = self.seen.entry(meter).or_default();
+                for peak in [reading.peak, right_peak] {
+                    if peak.is_finite() {
+                        news.peak = news.peak.max(peak);
+                    }
+                }
+                news.bad |= bad;
+            }
         }
     }
 
-    /// What the UI has not heard yet.
-    pub fn news(&self) -> Vec<(ProbeId, PeakNews)> {
+    /// What the UI has not heard yet, by meter.
+    pub fn news(&self) -> Vec<(MeterWidget, PeakNews)> {
         self.seen
             .iter()
-            .filter(|(probe, news)| news.beyond(self.shown.get(probe).copied().unwrap_or_default()))
-            .map(|(&probe, &news)| {
-                let after = self.resets.get(&probe).copied().unwrap_or(0);
-                (probe, PeakNews { after, ..news })
+            .filter(|(meter, news)| news.beyond(self.shown.get(meter).copied().unwrap_or_default()))
+            .map(|(&meter, &news)| {
+                let after = self.told.get(&meter).map_or(0, |&(_, count)| count);
+                (meter, PeakNews { after, ..news })
             })
             .collect()
     }
 
     /// Notes that the UI has these.
-    pub fn sent(&mut self, news: &[(ProbeId, PeakNews)]) {
+    pub fn sent(&mut self, news: &[(MeterWidget, PeakNews)]) {
         self.shown.extend(news.iter().copied());
     }
 }
@@ -135,7 +149,8 @@ impl ClipHolds {
         self.holds.get(&meter).copied().unwrap_or_default()
     }
 
-    /// How many times a meter was reset, for [`Peaks::note`].
+    /// How many times a meter was reset, for [`Peaks::note`]. Each meter
+    /// counts its own.
     pub fn resets(&self, meter: (u32, usize)) -> u64 {
         self.resets.get(&meter).copied().unwrap_or(0)
     }

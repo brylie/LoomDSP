@@ -463,7 +463,7 @@ impl App {
                     trace.push(&chunk);
                 }
             }
-            peaks.note(&watch.peak_resets, &watch.meters, &meters);
+            peaks.note(&watch.peak_resets, &meters);
             for reading in &meters {
                 if let Some(history) = histories.get_mut(&reading.probe) {
                     history.push(reading);

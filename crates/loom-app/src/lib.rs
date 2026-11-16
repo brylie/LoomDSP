@@ -1236,37 +1236,34 @@ impl App {
         self.give_traces(traces, &shown);
     }
 
-    /// The reset count of each meter probe: the sum of the counts of the
-    /// meters that show it, so it changes with any reset of one of them.
-    fn peak_resets(&self) -> std::collections::HashMap<ProbeId, u64> {
-        let mut resets = std::collections::HashMap::new();
-        for (widget, output) in scene::meter_outputs(&self.session.controller, &self.session.visible_displays) {
-            if let Some(probe) = self.session.engine.live.probe(output) {
-                *resets.entry(probe).or_default() += self.session.clip_holds.resets(widget);
-            }
-        }
-        resets
+    /// Each meter on screen with the probe on its output and its own reset
+    /// count. Two meters on one output share the probe and keep their own
+    /// counts, so a reset of one clears only its news
+    /// (`docs/design/panels.md`, Meter widget, Two meters on one output).
+    fn peak_resets(&self) -> std::collections::HashMap<clip::MeterWidget, (ProbeId, u64)> {
+        scene::meter_outputs(&self.session.controller, &self.session.visible_displays)
+            .into_iter()
+            .filter_map(|(meter, output)| {
+                let probe = self.session.engine.live.probe(output)?;
+                Some((meter, (probe, self.session.clip_holds.resets(meter))))
+            })
+            .collect()
     }
 
     /// Takes raw peaks from the telemetry thread into the clip lights and peak
-    /// holds of the meters that show their probes. A peak from before its own
-    /// meter's latest reset is dropped, so a reset is not undone by a message
-    /// that was already on its way. Other meters' peaks still count.
-    fn take_peaks(&mut self, peaks: Vec<(ProbeId, clip::PeakNews)>) {
+    /// holds of the meters they are for. News from before its own meter's
+    /// latest reset is dropped, so a reset is not undone by a message that
+    /// was already on its way, and so is news for a meter no longer on
+    /// screen. Another meter's news still counts, even on the same output.
+    fn take_peaks(&mut self, peaks: Vec<(clip::MeterWidget, clip::PeakNews)>) {
         if peaks.is_empty() {
             return;
         }
         let resets = self.peak_resets();
-        let meters = scene::meter_outputs(&self.session.controller, &self.session.visible_displays);
         let mut changed = false;
-        for (probe, news) in peaks {
-            if resets.get(&probe).copied().unwrap_or(0) != news.after {
-                continue;
-            }
-            for &(widget, output) in &meters {
-                if self.session.engine.live.probe(output) == Some(probe) {
-                    changed |= self.session.clip_holds.take(widget, news);
-                }
+        for (meter, news) in peaks {
+            if resets.get(&meter).is_some_and(|&(_, count)| count == news.after) {
+                changed |= self.session.clip_holds.take(meter, news);
             }
         }
         if changed {

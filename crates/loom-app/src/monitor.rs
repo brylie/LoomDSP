@@ -6,7 +6,7 @@
 //! Every message to the app redraws the window, so draining telemetry on a
 //! UI timer would draw frames even when every meter is silent.
 
-use crate::clip::{PeakNews, Peaks};
+use crate::clip::{MeterWidget, PeakNews, Peaks};
 use crate::history::LevelHistory;
 use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
 use crate::spectrum::SpectrumAnalyser;
@@ -59,9 +59,11 @@ pub struct WatchList {
     pub spectra: HashMap<ProbeId, SpectrumWant>,
     /// Paired probes whose XY scope is drawn, with how each draws.
     pub xy: HashMap<ProbeId, XyWant>,
-    /// Counts the UI's resets of clip lights and peak holds, by meter probe, so
-    /// the thread reports that probe's peaks again from there.
-    pub peak_resets: HashMap<ProbeId, u64>,
+    /// Each meter on screen, by module and widget, with the probe on its
+    /// output and its own count of the UI's resets of its clip light and
+    /// peak hold, so the thread reports that meter's peaks again from there.
+    /// Two meters on one output share the probe and keep their own counts.
+    pub peak_resets: HashMap<MeterWidget, (ProbeId, u64)>,
     /// True when scopes draw full traces (close zoom), false for a flat
     /// line at their level (middle zoom).
     pub full_traces: bool,
@@ -151,8 +153,8 @@ pub struct Update {
     pub spectra: Vec<(ProbeId, loom_canvas::Trace)>,
     /// XY traces that changed: a still or silent one sends none.
     pub xy: Vec<(ProbeId, loom_canvas::Trace)>,
-    /// Raw peaks that could change a clip light or a peak hold.
-    pub peaks: Vec<(ProbeId, PeakNews)>,
+    /// Raw peaks that could change a clip light or a peak hold, by meter.
+    pub peaks: Vec<(MeterWidget, PeakNews)>,
     /// Activity probes whose state changed: true for carrying.
     pub activity: Vec<(ProbeId, bool)>,
 }
@@ -216,7 +218,7 @@ impl Watcher {
         now: Instant,
     ) -> Update {
         self.levels.update(readings, now);
-        self.peaks.note(&watch.peak_resets, &watch.meters, readings);
+        self.peaks.note(&watch.peak_resets, readings);
         let current: Vec<(ProbeId, Level)> = self
             .levels
             .all()
