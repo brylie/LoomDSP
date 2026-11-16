@@ -187,7 +187,7 @@ A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answe
 | `stats.playing` | True when a stream plays. Only then does the bar show load and dropouts |
 | `stats.load`, `stats.max_load` | The latest and highest callback load, as a share of the time budget (1.0 is 100%). 0 when nothing plays |
 | `stats.dropouts` | The dropout count the bar shows |
-| `stats.telemetry_dropped` | Meter and scope readings the engine dropped |
+| `stats.telemetry_dropped` | Meter and scope readings the engine dropped. After a `--frames` run it counts only real drops: the run drains the queues after every block of its lead-in, so it never fills them itself. Its meter readings still reach the clip lights, so a clip during the lead-in lights the meter's clip light in the snapshot (Agreed, [#637](https://github.com/brylie/LoomDSP/issues/637)) |
 | `stats.output_silenced`, `stats.output_clipped` | True while the bar shows that output warning ([panels.md](panels.md#audio-load-and-dropouts-in-the-stats-bar)) |
 | `status` | The latest status message |
 | `status_severity` | `info`, `warning`, or `error` ([visual system, Status messages](visual-system.md#status-messages)) |

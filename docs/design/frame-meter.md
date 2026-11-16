@@ -20,7 +20,7 @@ The measure line of `--bench`, `--measure`, and `--measure-idle` says why each f
 Each measure line, and the final line, gains two fields after the existing ones:
 
 ```text
-fps=72.0 avg_ms=13.89 worst_ms=16.70 frames=720 ... causes=tick:20,live:700,meters:0,control:0,input:0,redraw:0,forced:0,other:0 cpu=4.1
+fps=72.0 avg_ms=13.89 worst_ms=16.70 frames=720 ... causes=tick:20,live:700,meters:0,lights:0,control:0,input:0,redraw:0,forced:0,other:0 cpu=4.1
 ```
 
 ### `causes`
@@ -31,7 +31,8 @@ The kinds of message that asked for frames, with how many frames each asked for,
 |---|---|
 | `tick` | The stats bar timer (`Message::Tick`) |
 | `live` | The live value frames for modulated knobs (`Message::LiveFrame`) |
-| `meters` | Telemetry: meters and scopes (`Message::Meters`) |
+| `meters` | Meters and scopes: meter levels (`Message::Meters`), and the telemetry thread's meters, scopes, level histories, spectra, XY scopes, clip news, and activity (`Message::Telemetry`). A running transport's Beat light does not count here: it is a light. |
+| `lights` | Lights and readouts (`Message::Lights`), apart from `meters` (Agreed, [#730](https://github.com/brylie/LoomDSP/issues/730)). A lights message is a live reading like the others: it marks the accessibility tree's live values as waiting (`Touch::Live`) and asks no focus question, as a meters message does (`FrameCause::is_live`, which the two checks in `App::update` use in place of their lists). The frame counters in `loom-canvas/src/stats.rs` hold one count per kind, 9 in all. *Why:* a running transport's Beat light is a real change ([panels, Redraw](panels.md#redraw)), and counting it as meters would make a redraw that is correct look like a meter fault. With lights apart, a check for "no frames caused by meters" means what it says. `--measure-idle` prints it as `lights:N`, between `meters` and `control`. |
 | `control` | The control channel (`Message::ControlFrame`, and commands) |
 | `input` | A window event from the user: pointer, keys, resize, focus |
 | `redraw` | The canvas asked for a redraw itself, with no message (hover text, an animation) |
@@ -57,6 +58,7 @@ The CPU time the whole app process used over the line's interval, user plus syst
 - [x] A patch with an enabled assignment and `--fake-audio` shows `live` frames. Checked with `examples/patches/modulation.ron --fake-audio --measure-idle`: the final line counted 165 live frames.
 - [x] `--measure-idle` on an idle patch, with the stats bar timer off ([#90](https://github.com/brylie/LoomDSP/issues/90)), prints `fps=0.0` after startup.
 - [x] AGENTS.md and [M1 canvas benchmarks](../benchmarks/p1-canvas.md) explain the new fields.
+- [ ] A `Message::Lights` counts as `lights`, not `meters`, and a `Message::Telemetry` as `meters`. A lights message still marks the accessibility tree's live values as waiting (`Touch::Live`) and asks no focus question. The measure line prints `lights:N` between `meters` and `control` ([#730](https://github.com/brylie/LoomDSP/issues/730)).
 
 ## Out of scope
 
