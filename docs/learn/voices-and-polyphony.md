@@ -102,7 +102,7 @@ Why bother, when a mono sequencer can play a mono synth? Because of the release.
 
 **Unison** gives each note several voices, taken and released together. They play the same pitch until a Voice spread after the assigner detunes them. This is a different thing from a [stack](unison.md), which copies one sound inside a module.
 
-Voice merge can go the other way: it takes one voice out of a bundle. In Lowest mode, with the pitch bundle on `in` and the gate bundle on its `gate` input, its `out` is the lowest held note and its `gate` output drives one envelope for the bass. Without the gate bundle every voice counts as playing, so the choice never moves and the envelope never releases. Releasing the lowest key hands the bass to the next one without a new attack, as a mono keyboard does.
+Voice merge can go the other way: it takes one voice out of a bundle. In Lowest mode, with the pitch bundle on `in` and the gate bundle on its `gate` input, its `out` is the lowest held note and its `gate` output drives one envelope for the bass. Releasing the lowest key hands the bass to the next one without a new attack, as a mono keyboard does. Without the gate bundle every voice counts as playing, so the chosen voice never changes and the envelope never releases.
 
 ## Why there is no event cable
 
