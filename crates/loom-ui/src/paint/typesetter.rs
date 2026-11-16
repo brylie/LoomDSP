@@ -1,24 +1,25 @@
-//! Canvas text set with Parley (docs/design/ui-layer.md, section 8).
+//! Text set with Parley (docs/design/ui-layer.md, section 8).
 //!
-//! [`CanvasText`] is the one place the canvas sets text. Measuring reads a
-//! layout's size, and painting places the same layout's glyphs, so the box
-//! the canvas lays out is the box the text is drawn in.
+//! A [`Typesetter`] is the one place its owner sets text. Measuring reads
+//! a layout's size, and painting places the same layout's glyphs, so the
+//! box an element lays out is the box the text is drawn in.
 //!
 //! Layouts are cached by their text and style. A layout no frame used is
-//! dropped one frame later (see [`CanvasText::begin_frame`]), so a still
-//! canvas sets no text again, and a zoom gesture leaves no old sizes behind.
+//! dropped one frame later (see [`Typesetter::begin_frame`]), so a still
+//! view sets no text again, and a zoom gesture leaves no old sizes behind.
 //!
 //! The system's fonts are found once for the whole process: each
-//! `CanvasText` clones one font context, whose collection shares its scan,
-//! so a canvas made again, as on New or Open, scans nothing. Its source
-//! cache shares loaded font files between clones while any of them holds
-//! the file, and each `CanvasText` holds every file it has used. So a font
-//! keeps one identity while its canvas lives, and the glyph atlas reuses
-//! its images (`gpu/atlas.rs`) even after a zoom too far out for text. A
-//! file no canvas holds any more is loaded again when next used, as a font
-//! of a new identity, and the atlas's old images age out.
+//! `Typesetter` clones one font context, whose collection shares its scan,
+//! so one made again, as LoomDSP's canvas is on New or Open, scans
+//! nothing. Its source cache shares loaded font files between clones while
+//! any of them holds the file, and each `Typesetter` holds every file it
+//! has used. So a font keeps one identity while its typesetter lives, and
+//! the glyph atlas reuses its images (`atlas.rs`) even after a zoom too far
+//! out for text. A file no typesetter holds any more is loaded again when
+//! next used, as a font of a new identity, and the atlas's old images age
+//! out.
 
-use crate::painter::{TextMeasure, TextStyle, Weight};
+use super::{TextMeasure, TextStyle, Weight};
 use fontique::{Collection, CollectionOptions, SourceCache};
 use loom_ui_core::Size;
 use parley::{
@@ -28,10 +29,7 @@ use parley::{
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-pub(crate) mod list;
-pub use list::{ListPainter, PaintList};
-
-/// A Parley layout of canvas text. Its brush is empty: the colour of a run
+/// A Parley layout of a piece of text. Its brush is empty: the colour of a run
 /// is the painter's, not the layout's.
 pub(crate) type TextLayout = Layout<()>;
 
@@ -55,7 +53,8 @@ fn shared_fonts() -> FontContext {
 }
 
 /// What decides a layout besides its text. Floats are kept as bits, so the
-/// key can be hashed; text sizes are already quantised by the canvas.
+/// key can be hashed; a host quantises its text sizes, as the canvas does by
+/// zoom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct StyleKey {
     size: u32,
@@ -79,8 +78,8 @@ impl StyleKey {
 /// Layouts by style, then by text, so a lookup needs no new string.
 type Layouts = HashMap<StyleKey, HashMap<String, TextLayout>>;
 
-/// Sets canvas text with Parley and keeps what it set.
-pub struct CanvasText {
+/// Sets text with Parley and keeps what it set.
+pub struct Typesetter {
     fonts: FontContext,
     layouts: LayoutContext<()>,
     /// Layouts used this frame.
@@ -93,31 +92,31 @@ pub struct CanvasText {
     held: Vec<FontData>,
 }
 
-impl Default for CanvasText {
+impl Default for Typesetter {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// The same measure as [`CanvasText::measure`], for a layout that asks
-/// through the trait, such as `loom-ui`'s panels: what a panel lays out is
-/// what the canvas text draws.
-impl TextMeasure for CanvasText {
+/// The same measure as [`Typesetter::measure`], for a layout that asks
+/// through the trait, such as the panels' layout: what a panel lays out is
+/// what the typesetter draws.
+impl TextMeasure for Typesetter {
     fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
-        CanvasText::measure(self, text, style, wrap_width)
+        Typesetter::measure(self, text, style, wrap_width)
     }
 }
 
-impl std::fmt::Debug for CanvasText {
+impl std::fmt::Debug for Typesetter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CanvasText")
+        f.debug_struct("Typesetter")
             .field("current", &self.current.values().map(HashMap::len).sum::<usize>())
             .field("previous", &self.previous.values().map(HashMap::len).sum::<usize>())
             .finish_non_exhaustive()
     }
 }
 
-impl CanvasText {
+impl Typesetter {
     /// Text set in the system's interface font (`system-ui`), with the
     /// optical size at its default (spec section 8, rule 6).
     pub fn new() -> Self {
@@ -155,8 +154,8 @@ impl CanvasText {
         &self.current[&key][text]
     }
 
-    /// The size of `text` in `style`, read from the same cached layout the
-    /// canvas draws.
+    /// The size of `text` in `style`, read from the same cached layout that
+    /// is drawn.
     ///
     /// Spaces at the end of the text count, so a caret after a typed space
     /// moves past it. A space where wrapping breaks a line does not, as it

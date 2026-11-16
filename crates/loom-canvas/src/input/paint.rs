@@ -12,9 +12,8 @@
 use super::*;
 use crate::controls::PanelValues;
 use crate::hover::{HOVER_PADDING, HOVER_TEXT_PX};
-use crate::painter::{Painter, Quad, TextPainter, TextRun, TextStyle, Vertical, Weight};
 use crate::scene::BADGE_TEXT_SIZE;
-use crate::tile_text::Align;
+use loom_ui::paint::{Align, Painter, Quad, TextPainter, TextRun, TextStyle, Vertical, Weight};
 
 /// The style of one line of plain interface text.
 fn plain(size: f32, line_height: f32) -> TextStyle {

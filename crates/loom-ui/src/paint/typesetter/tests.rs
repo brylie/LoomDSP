@@ -1,4 +1,4 @@
-//! Tests for canvas text. They use the machine's own fonts, so they check
+//! Tests for the typesetter. They use the machine's own fonts, so they check
 //! relations between sizes, never a number of pixels: the face differs
 //! from macOS to Windows to Linux (spec section 8, rule 6).
 
@@ -15,8 +15,8 @@ fn style(size: f32) -> TextStyle {
 
 /// Canvas text, or `None` on a machine with no font to set text in, where
 /// these tests skip as the screenshot tests do without a GPU.
-fn text() -> Option<CanvasText> {
-    let mut text = CanvasText::new();
+fn text() -> Option<Typesetter> {
+    let mut text = Typesetter::new();
     if text.measure("x", style(10.0), None).width > 0.0 {
         Some(text)
     } else {
@@ -94,7 +94,7 @@ fn a_check_mark_has_a_width() {
 /// after the last frame that used it.
 #[test]
 fn layouts_are_kept_while_used() {
-    let mut text = CanvasText::new();
+    let mut text = Typesetter::new();
     text.measure("Cutoff", style(10.0), None);
     text.measure("Cutoff", style(10.0), None);
     assert_eq!(text.take_built(), 1, "the same frame reuses it");
@@ -112,7 +112,7 @@ fn layouts_are_kept_while_used() {
 /// Each part of the style keys its own layout.
 #[test]
 fn each_part_of_the_style_keys_a_layout() {
-    let mut text = CanvasText::new();
+    let mut text = Typesetter::new();
     let base = style(10.0);
     text.measure("Mix", base, None);
     text.measure("Mix", style(11.0), None);
@@ -142,7 +142,7 @@ fn each_part_of_the_style_keys_a_layout() {
 #[test]
 fn a_second_canvas_sets_text_the_same() {
     let Some(mut first) = text() else { return };
-    let mut second = CanvasText::new();
+    let mut second = Typesetter::new();
     assert_eq!(
         first.measure("Envelope", style(9.0), None),
         second.measure("Envelope", style(9.0), None)
@@ -152,7 +152,7 @@ fn a_second_canvas_sets_text_the_same() {
 /// The debug view counts layouts kept, not their contents.
 #[test]
 fn debug_counts_the_layouts() {
-    let mut text = CanvasText::default();
+    let mut text = Typesetter::default();
     text.measure("a", style(10.0), None);
     let shown = format!("{text:?}");
     assert!(shown.contains("current: 1"), "{shown}");
@@ -164,7 +164,7 @@ fn debug_counts_the_layouts() {
 #[test]
 fn a_font_stays_loaded_while_its_canvas_lives() {
     let Some(mut text) = text() else { return };
-    let id = |text: &mut CanvasText| {
+    let id = |text: &mut Typesetter| {
         let layout = text.layout("Cutoff", style(10.0), None);
         let line = layout.lines().next().expect("a line");
         match line.items().next() {

@@ -2482,14 +2482,11 @@ name = "loom-canvas"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "etagere",
- "fontique",
  "iced",
  "iced_wgpu",
+ "loom-ui",
  "loom-ui-core",
  "naga",
- "parley",
- "swash",
  "wgpu",
 ]
 
@@ -2590,9 +2587,15 @@ version = "0.1.0"
 dependencies = [
  "accesskit",
  "accesskit_winit",
+ "bytemuck",
+ "etagere",
+ "fontique",
  "loom-ui-core",
+ "naga",
+ "parley",
  "png",
  "pollster",
+ "swash",
  "taffy",
  "wgpu",
  "winit",

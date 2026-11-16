@@ -2,9 +2,9 @@
 //! that records each piece in order and a measure with fixed widths.
 
 use super::*;
-use crate::painter::testing::{Painted, Recorder};
 use crate::scene::{HoverText, ModuleView, PanelView, PortShape, PortView, WidgetView};
 use crate::{Camera, WidgetValue};
+use loom_ui::paint::testing::{Painted, Recorder};
 use loom_ui_core::{Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent};
 
 /// The canvas's place in the tests: not at the window's corner, so a
@@ -493,9 +493,9 @@ fn the_canvas_painter_measures_inside_a_layer_without_a_borrow_clash() {
     let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
     send(&model, &mut input, typed(Key::Character('x'), "x"), centre);
 
-    let text = std::cell::RefCell::new(crate::text::CanvasText::new());
-    let mut list = crate::text::PaintList::new(BOUNDS);
-    input.paint(&model, BOUNDS, &mut crate::text::ListPainter::new(&text, &mut list));
+    let text = std::cell::RefCell::new(loom_ui::paint::Typesetter::new());
+    let mut list = loom_ui::paint::PaintList::new(BOUNDS);
+    input.paint(&model, BOUNDS, &mut loom_ui::paint::ListPainter::new(&text, &mut list));
     assert!(!list.is_empty());
     // The text is free again once painting ends.
     assert!(text.try_borrow_mut().is_ok());

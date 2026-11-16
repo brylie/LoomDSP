@@ -10,6 +10,7 @@
 
 use crate::controls::{fader_drawn, knob_centre, knob_drawn, light_centre, number_box, radio_centre, select_box};
 use crate::scene::{CLOCK_MARK_SPACE, GRID, HEADER, ModuleView, PortRef, WidgetViewKind, fit_label, text_width};
+use loom_ui::paint::Align;
 use loom_ui_core::{Point, Rect, Size};
 use std::borrow::Cow;
 
@@ -17,17 +18,6 @@ use std::borrow::Cow;
 pub const TITLE_SIZE: f32 = 11.0;
 /// Port label and caption size in world units.
 pub const LABEL_SIZE: f32 = 9.0;
-
-/// How text sits on its anchor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Align {
-    /// Starts at the anchor.
-    Left,
-    /// Centred on the anchor.
-    Center,
-    /// Ends at the anchor.
-    Right,
-}
 
 /// What a piece of tile text is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

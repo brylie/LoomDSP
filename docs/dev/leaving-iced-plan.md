@@ -377,6 +377,8 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
 
      **Done (second part):** panels compose (`crates/loom-ui/src/window.rs`, [spec](../design/ui-layer.md), section 5, rule 8): a panel's slot holds another panel, the window is laid out from the roots down when the driver calls `Runtime::lay_out`, each panel keeps its own layout, and `Runtime::bounds` and `Runtime::hit` read the composed window. Still unused by the app. Next: drawing panels.
    - **Drawing:** our instanced rounded-rectangle pipeline (the canvas already has one in `canvas.wgsl`) plus the glyph renderer from 2.4. Clipping by scissor rectangles.
+
+     **Done (first part):** the canvas's painting moved into `loom-ui` as `loom_ui::paint`, with nothing changed in what it draws: the `Painter` types, the `Typesetter` (once `CanvasText`), the paint list, the glyph atlas, the plan of draw steps, and `PaintRenderer`, behind a new `gpu` feature that the shell turns on. `paint.wgsl` holds the globals, the shape stage, and the glyph stage once, and the canvas builds its module from it followed by `canvas.wgsl`; a test validates the two together, and one validates `paint.wgsl` alone. The canvas takes `loom-ui` with `gpu` and without `shell`, which `crates/loom-canvas/tests/purity.rs` checks with `cargo tree`. Next: panels draw with it.
    - **Hit-testing and focus:** a focus order, focus rings, Tab and Shift+Tab, and focus that the accessibility tree reports.
    - **Accessibility:** every widget gives its AccessKit node from the same element, so the tree and the screen cannot disagree.
    - **Cursors:** a cursor type of our own in `loom-ui-core`, in place of winit's `CursorIcon`, which `shell::Report` carries until then.

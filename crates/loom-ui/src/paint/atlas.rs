@@ -3,7 +3,7 @@
 //!
 //! This half is plain code with no GPU: it decides where each glyph's
 //! image goes, makes the images to upload, and turns placed glyphs into
-//! quads. `text.rs` beside it owns the textures and draws.
+//! quads. The renderer (`gpu.rs`) owns the textures and draws.
 //!
 //! - A glyph is rasterised at its size in physical pixels, and placed on
 //!   the baseline at a whole pixel down and a quarter pixel across, so
@@ -15,7 +15,7 @@
 //!   and every glyph of the frame is placed again. At the largest size,
 //!   glyphs that still do not fit are left out and counted, never a panic.
 
-use crate::text::list::{Face, PlacedGlyph};
+use super::list::{Face, PlacedGlyph};
 use bytemuck::{Pod, Zeroable};
 use loom_ui_core::{Point, Rect};
 use std::collections::HashMap;
@@ -124,7 +124,7 @@ pub(crate) struct Upload {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(crate) struct GlyphQuad {
-    /// x, y, width, height in logical pixels from the canvas's corner.
+    /// x, y, width, height in logical pixels from the viewport's corner.
     pub(crate) rect: [f32; 4],
     /// The image's corners in the page, in texels: left, top, right,
     /// bottom.
@@ -226,7 +226,7 @@ impl Atlas {
         true
     }
 
-    /// The quad for one glyph, cut to `clip`, placed for a canvas whose
+    /// The quad for one glyph, cut to `clip`, placed for a viewport whose
     /// corner is at `origin` in the host's logical pixels, at `scale`
     /// physical pixels per logical one. `None` when nothing of it shows.
     pub(crate) fn place(
@@ -257,7 +257,7 @@ impl Atlas {
         if entry.alloc.is_none() {
             return Ok(None);
         }
-        // The image's place, in logical pixels from the canvas's corner.
+        // The image's place, in logical pixels from the viewport's corner.
         let left = (whole + entry.left as f32) / scale - origin.x;
         let top = (baseline - entry.top as f32) / scale - origin.y;
         let image = Rect::new(
@@ -274,7 +274,7 @@ impl Atlas {
         Ok(Some(GlyphQuad {
             rect: [shown.x, shown.y, shown.width, shown.height],
             uv: [u0, v0, u0 + shown.width * scale, v0 + shown.height * scale],
-            colour: crate::gpu::packed(glyph.colour),
+            colour: super::packed(glyph.colour),
             params: [if entry.page == Page::Colour { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         }))
     }

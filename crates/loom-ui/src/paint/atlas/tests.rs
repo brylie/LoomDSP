@@ -1,9 +1,9 @@
 //! Tests for the glyph atlas, with the machine's own fonts and no GPU.
 
 use super::*;
-use crate::painter::{Painter, TextMeasure, TextRun, TextStyle, Vertical, Weight};
-use crate::text::{CanvasText, ListPainter, PaintList};
-use crate::tile_text::Align;
+use crate::paint::{
+    Align, ListPainter, PaintList, Painter, TextMeasure, TextRun, TextStyle, Typesetter, Vertical, Weight,
+};
 use loom_ui_core::{Color, Size};
 use std::cell::RefCell;
 
@@ -18,7 +18,7 @@ const ALL: Rect = Rect {
 /// `text` at 12 px with its top-left at `at`, as a paint list, or `None`
 /// on a machine with no font, where these tests skip.
 fn painted(text: &str, at: Point) -> Option<PaintList> {
-    let canvas = RefCell::new(CanvasText::new());
+    let canvas = RefCell::new(Typesetter::new());
     let style = TextStyle {
         size: 12.0,
         line_height: 1.2,
@@ -92,7 +92,7 @@ fn quarter_pixels_make_their_own_images() {
     let mut atlas = Atlas::new(MAX_SIZE);
     atlas.begin_frame();
     // The lists are kept: a font file no list holds may load again as
-    // another font (see `crate::text`).
+    // another font (see `typesetter.rs`).
     let mut lists = Vec::new();
     for x in [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 7.5] {
         let Some(list) = painted("o", Point::new(x, 0.0)) else {

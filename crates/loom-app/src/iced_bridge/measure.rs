@@ -6,7 +6,7 @@
 //! on the CPU. [`Measure`] uses that same `Paragraph` and `Editor`, so a
 //! view laid out on it is laid out exactly as the window's wgpu renderer
 //! lays it out, and no GPU is needed. The canvas measures its own text with
-//! Parley (`loom_canvas::CanvasText`), which never goes through Iced's
+//! Parley (`loom_ui::paint::Typesetter`), which never goes through Iced's
 //! renderer, so it is the same on both too.
 //!
 //! Every draw call does nothing and never panics. The canvas's shader

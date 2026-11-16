@@ -16,10 +16,12 @@
 //!   says when it next needs to wake (`CanvasInput::next_deadline`).
 //! - **Drawing, with no UI toolkit in it either.** [`CanvasInput::frame`]
 //!   builds a [`CanvasFrame`], and a [`CanvasRenderer`] draws it into a
-//!   `wgpu` render pass that the host gives it, at a [`Target`]. The host
-//!   owns the window, the pass, and its viewport. [`CanvasInput::paint`]
+//!   `wgpu` render pass that the host gives it, at a
+//!   [`Target`](loom_ui::paint::Target). The host owns the window, the
+//!   pass, and its viewport. [`CanvasInput::paint`]
 //!   hands the text, and the boxes of the floating parts, to a
-//!   [`Painter`], and sizes text with a [`TextMeasure`].
+//!   [`Painter`](loom_ui::paint::Painter), and sizes text with a
+//!   [`TextMeasure`](loom_ui::paint::TextMeasure).
 //! - **The Iced widget,** [`PatchCanvas`]. It converts Iced's events through
 //!   [`iced_convert`], calls [`CanvasInput`], applies the [`Reaction`],
 //!   schedules the next deadline, wraps the renderer as Iced shader
@@ -39,12 +41,10 @@ mod gpu;
 mod hover;
 pub mod iced_convert;
 mod input;
-mod painter;
 mod reaction;
 mod scene;
 mod slot;
 pub mod stats;
-mod text;
 mod theme;
 mod tile_text;
 mod trace;
@@ -57,12 +57,11 @@ pub use controls::{
 };
 pub use controls::{arrow_share, arrow_step, option_bounds, part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
-pub use gpu::{CanvasFrame, CanvasRenderer, Target};
+pub use gpu::{CanvasFrame, CanvasRenderer};
 pub use input::{
     CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView, ControlPart,
     EditGroupView, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
-pub use painter::{Painter, Quad, TextMeasure, TextPainter, TextRun, TextStyle, Vertical, Weight};
 pub use reaction::{CursorShape, Reaction};
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
@@ -70,8 +69,7 @@ pub use scene::{
     WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
 pub use slot::{CanvasDrawing, CanvasSlot};
-pub use text::{CanvasText, ListPainter, PaintList};
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
-pub use tile_text::{Align, TextItem, TextKind, for_each as for_each_tile_text};
+pub use tile_text::{TextItem, TextKind, for_each as for_each_tile_text};
 pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace};
 pub use widget::{DragLine, PatchCanvas};

@@ -23,11 +23,13 @@ fn port() -> PortView {
     }
 }
 
-const SHADER: &str = include_str!("../canvas.wgsl");
-
+/// The module the canvas builds: the UI layer's `paint.wgsl`, then
+/// `canvas.wgsl`. Validating them together catches an edit to either half
+/// that breaks the other, such as a renamed global or helper.
 #[test]
 fn shader_is_valid() {
-    let module = naga::front::wgsl::parse_str(SHADER).expect("WGSL parses");
+    let source = shader();
+    let module = naga::front::wgsl::parse_str(&source).expect("WGSL parses");
     let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
         .validate(&module)
         .expect("WGSL validates");
@@ -45,7 +47,7 @@ fn shader_names() {
         "half", "half2", "half3", "half4", "in", "out", "inout", "vector", "matrix", "sample", "texture", "sampler",
         "kernel", "vertex", "fragment", "device", "constant", "thread", "packed",
     ];
-    for (number, line) in SHADER.lines().enumerate() {
+    for (number, line) in include_str!("../canvas.wgsl").lines().enumerate() {
         let code = line.split("//").next().unwrap_or_default();
         // `@vertex` and `@fragment` are WGSL attributes, not names.
         let words = code
@@ -179,7 +181,7 @@ fn each_zoom_draws_the_bars_for_the_text_it_hides() {
     let colours = |range: std::ops::Range<u32>| -> Vec<[f32; 4]> {
         geometry.shapes[range.start as usize..range.end as usize]
             .iter()
-            .map(|s| s.fill)
+            .map(|s| s.fill())
             .collect()
     };
     let label = packed(palette.text_bar);
@@ -284,12 +286,4 @@ fn a_box_text_bar_has_its_own_range() {
         geometry.bars(true, false).end <= middle.start,
         "the other bars come first"
     );
-}
-
-/// A packed colour keeps its four channels as they are, with no change of
-/// colour space.
-#[test]
-fn a_packed_colour_keeps_its_channels() {
-    assert_eq!(packed(Color::rgba(0.25, 0.5, 0.75, 0.4)), [0.25, 0.5, 0.75, 0.4]);
-    assert_eq!(packed(Color::TRANSPARENT), [0.0, 0.0, 0.0, 0.0]);
 }
