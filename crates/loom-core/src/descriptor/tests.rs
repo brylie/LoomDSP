@@ -171,3 +171,25 @@ fn hiding_follows_the_effective_choice() {
         assert_eq!(COUNTED.is_widget_shown(light, &values), shown, "{values:?}");
     }
 }
+
+/// A count parameter whose default is above one, for the missing-count rule.
+static COUNTED_EIGHT: ModuleDescriptor = ModuleDescriptor {
+    params: &[
+        param("voices", 1.0, 16.0, 8.0, "").integer(),
+        param("mode", 0.0, 3.0, 2.0, "")
+            .integer()
+            .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
+            .choices_by_count("voices", 2),
+    ],
+    ..COUNTED
+};
+
+/// A count missing from the values counts as the count parameter's default,
+/// as `effective_value` says of any missing value: at a default of 8 voices,
+/// a missing count offers Oldest and Quietest, so a stored Legato plays Oldest.
+#[test]
+fn a_missing_count_counts_as_its_default() {
+    let mode = COUNTED_EIGHT.param_index("mode").unwrap();
+    assert_eq!(COUNTED_EIGHT.effective_value(mode, &[]), 0.0);
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[]), 2.0);
+}

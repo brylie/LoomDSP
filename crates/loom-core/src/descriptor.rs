@@ -184,14 +184,14 @@ impl ModuleDescriptor {
     }
 
     /// Choice controls filtered by a one-versus-many integer parameter.
-    /// Stored values and the processing parameter range stay unchanged.
+    /// Stored values and the processing parameter range stay unchanged. A
+    /// count missing from `values` counts as the count parameter's default.
     pub fn control_spec(&self, index: usize, values: &[f32]) -> Option<ParamSpec> {
         let spec = *self.params.get(index)?;
         Some(match spec.options.count_choices {
             Some(filter) => spec.for_count(
                 self.param_index(filter.param)
-                    .and_then(|i| values.get(i).copied())
-                    .unwrap_or(1.0),
+                    .map_or(1.0, |i| values.get(i).copied().unwrap_or(self.params[i].default)),
             ),
             None => spec,
         })
