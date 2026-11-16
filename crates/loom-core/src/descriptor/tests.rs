@@ -89,3 +89,85 @@ fn a_range_widgets_parameters_load_with_one_range() {
         "does not hold both"
     );
 }
+
+/// A voice-count module like Voice assigner: `mode` filtered by `voices`, and
+/// `unison` shown only in Oldest and Quietest.
+static COUNTED: ModuleDescriptor = ModuleDescriptor {
+    id: "test.counted",
+    version: 1,
+    name: "Counted",
+    category: "Test",
+    family: crate::Family::Interface,
+    description: "",
+    inputs: &[],
+    outputs: &[],
+    params: &[
+        param("voices", 1.0, 16.0, 1.0, "").integer(),
+        param("mode", 0.0, 3.0, 2.0, "")
+            .integer()
+            .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
+            .choices_by_count("voices", 2),
+        param("unison", 1.0, 4.0, 1.0, "").integer().shown_when("mode", &[0, 1]),
+    ],
+    role: ModuleRole::UnitDelay,
+    panel: Panel::new(
+        12,
+        4,
+        &[
+            Widget::number(0, 0, "unison"),
+            Widget::light(6, 0, "held").shown_when("mode", &[0, 1]),
+        ],
+    ),
+    displays: &[],
+    roles: &[],
+};
+const COUNTED_MODE: usize = COUNTED.param_index("mode").unwrap();
+const COUNTED_UNISON: usize = COUNTED.param_index("unison").unwrap();
+
+/// The effective value of a count-filtered choice is the stored one when the
+/// count offers it, else the first choice offered there.
+#[test]
+fn a_count_filtered_choice_acts_with_the_mode_that_plays() {
+    // 8 voices, stored Legato: plays Oldest.
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[8.0, 2.0, 1.0]), 0.0);
+    // 8 voices, stored Quietest: kept.
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[8.0, 1.0, 1.0]), 1.0);
+    // 1 voice, stored Oldest: plays Legato.
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[1.0, 0.0, 1.0]), 2.0);
+    // 1 voice, stored Retrigger: kept.
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[1.0, 3.0, 1.0]), 3.0);
+    // A parameter with no count filter acts with its stored value.
+    assert_eq!(COUNTED.effective_value(COUNTED_UNISON, &[8.0, 2.0, 3.0]), 3.0);
+}
+
+/// Missing values count as defaults, and an index past the parameters does
+/// not panic.
+#[test]
+fn effective_value_falls_back_on_short_values_and_bad_indices() {
+    // No values: 1 voice, default Legato.
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[]), 2.0);
+    // Only the count: the stored mode is its default, Legato, which falls
+    // back to Oldest at 8 voices.
+    assert_eq!(COUNTED.effective_value(COUNTED_MODE, &[8.0]), 0.0);
+    assert_eq!(COUNTED.effective_value(99, &[8.0, 2.0, 1.0]), 0.0);
+    assert!(COUNTED.is_shown(COUNTED_UNISON, &[8.0]));
+}
+
+/// A control and a display widget hide by the effective choice, not the
+/// stored one, so a control never hides while it still changes the sound.
+#[test]
+fn hiding_follows_the_effective_choice() {
+    let [unison, light] = COUNTED.panel.widgets else {
+        panic!("two widgets");
+    };
+    for (values, shown) in [
+        ([8.0, 0.0, 1.0], true),  // 8 voices, Oldest
+        ([8.0, 2.0, 1.0], true),  // 8 voices, stored Legato plays Oldest
+        ([1.0, 2.0, 1.0], false), // 1 voice, Legato
+        ([1.0, 0.0, 1.0], false), // 1 voice, stored Oldest plays Legato
+    ] {
+        assert_eq!(COUNTED.is_shown(COUNTED_UNISON, &values), shown, "{values:?}");
+        assert_eq!(COUNTED.is_widget_shown(unison, &values), shown, "{values:?}");
+        assert_eq!(COUNTED.is_widget_shown(light, &values), shown, "{values:?}");
+    }
+}

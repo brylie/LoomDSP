@@ -595,11 +595,7 @@ impl App {
         };
         let spec = &filtered;
         let stored = *node.params.get(index)?;
-        let value = if spec.options.count_choices.is_some() && !(spec.min..=spec.max).contains(&stored) {
-            spec.min
-        } else {
-            stored
-        };
+        let value = spec.effective_choice(stored);
         let range = spec.options.ranges.first().filter(|_| show_range).map(|_| RangeRow {
             choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
             selected: node
@@ -660,7 +656,7 @@ impl App {
         };
         let unused = (!d.is_shown(index, &node.params)).then(|| {
             let mode = spec.options.shown_when.and_then(|w| d.param_index(w.param));
-            match mode.map(|m| (&d.params[m], node.params[m])) {
+            match mode.map(|m| (&d.params[m], d.effective_value(m, &node.params))) {
                 Some((mode, value)) => match mode.choice_name(value) {
                     Some(choice) => format!("Not used in {choice}"),
                     // An on and off switch, such as Scope's Auto.

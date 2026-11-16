@@ -698,7 +698,7 @@ impl ModuleDescriptor {
         let Some(mode) = self.param_index(when.param) else {
             return true;
         };
-        let value = values.get(mode).copied().unwrap_or(self.params[mode].default);
+        let value = self.effective_value(mode, values);
         let choice = (value - self.params[mode].min).round();
         when.choices.iter().any(|&c| c as f32 == choice)
     }

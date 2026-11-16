@@ -377,11 +377,7 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
 /// A control's position for the canvas: the knob position from 0 to 1, the
 /// toggle state, or the radio option index.
 pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
-    let value = if spec.options.count_choices.is_some() && !(spec.min..=spec.max).contains(&value) {
-        spec.min
-    } else {
-        value
-    };
+    let value = spec.effective_choice(value);
 
     if kind.is_mapped() {
         spec.normalize(value)
