@@ -219,15 +219,31 @@ fn an_empty_answer_runs_only_the_queue() {
 #[test]
 fn the_pointer_hides_and_shows_again() {
     let mut hidden = false;
-    let arrow = Pointer::Icon(CursorIcon::Default);
+    let arrow = Pointer::Icon(Cursor::Default);
     assert_eq!(pointer_calls(&mut hidden, arrow), (Some(CursorIcon::Default), None));
     assert_eq!(pointer_calls(&mut hidden, Pointer::Hidden), (None, Some(false)));
     assert_eq!(pointer_calls(&mut hidden, Pointer::Hidden), (None, None));
     assert_eq!(
-        pointer_calls(&mut hidden, Pointer::Icon(CursorIcon::Pointer)),
+        pointer_calls(&mut hidden, Pointer::Icon(Cursor::Pointer)),
         (Some(CursorIcon::Pointer), Some(true))
     );
     assert!(!hidden);
+}
+
+/// Each of our shapes becomes its own winit cursor, and the resize shapes
+/// the two-way arrows the canvas asks for.
+#[test]
+fn each_cursor_becomes_its_own_winit_cursor() {
+    let icons: Vec<CursorIcon> = Cursor::ALL.into_iter().map(icon).collect();
+    for (i, a) in icons.iter().enumerate() {
+        for b in &icons[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+    assert_eq!(icon(Cursor::Default), CursorIcon::Default);
+    assert_eq!(icon(Cursor::ResizeHorizontal), CursorIcon::EwResize);
+    assert_eq!(icon(Cursor::ResizeVertical), CursorIcon::NsResize);
+    assert_eq!(icon(Cursor::ResizeDiagonal), CursorIcon::NwseResize);
 }
 
 /// A capture asked for before the first frame waits for it, so it never

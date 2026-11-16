@@ -1127,10 +1127,7 @@ fn fader_scene(vertical: bool) -> (Scene, PanelValues) {
 /// During a drag the cursor shows the drag's own direction, as it did on hover.
 #[test]
 fn a_fader_drag_keeps_its_cursor() {
-    for (vertical, expected) in [
-        (true, CursorShape::ResizeVertical),
-        (false, CursorShape::ResizeHorizontal),
-    ] {
+    for (vertical, expected) in [(true, Cursor::ResizeVertical), (false, Cursor::ResizeHorizontal)] {
         let (scene, values) = fader_scene(vertical);
         let selected = BTreeSet::from([1]);
         let canvas = CanvasModel::new(&scene, &selected).values(&values);
@@ -3252,15 +3249,15 @@ fn the_range_ring_shows_the_resize_cursor_above_the_cell() {
     };
 
     let modulated = CanvasModel::new(&scene, &none).values(&values);
-    assert_eq!(cursor_at(&modulated), CursorShape::ResizeVertical);
+    assert_eq!(cursor_at(&modulated), Cursor::ResizeVertical);
 
     let plain_values = PanelValues::new();
     let plain = CanvasModel::new(&scene, &none).values(&plain_values);
-    assert_eq!(cursor_at(&plain), CursorShape::Grab);
+    assert_eq!(cursor_at(&plain), Cursor::Grab);
 
     let learn = LearnView::default();
     let learning = CanvasModel::new(&scene, &none).values(&values).learn(Some(&learn));
-    assert_eq!(cursor_at(&learning), CursorShape::Grab);
+    assert_eq!(cursor_at(&learning), Cursor::Grab);
 }
 
 /// A knob with no enabled assignment has no ring to grab: a press there
@@ -3985,22 +3982,18 @@ fn the_cursor_follows_what_is_under_the_pointer() {
     let model = CanvasModel::new(&scene, &none);
     let mut input = CanvasInput::default();
     let now = Instant::now();
-    assert_eq!(input.cursor(&model, false), CursorShape::Default);
+    assert_eq!(input.cursor(&model, false), Cursor::Default);
     let tile = scene.module(1).expect("the module").bounds();
     let at = input
         .view(moment(None, now).bounds)
         .to_window(Point::new(tile.center_x(), tile.y + 10.0));
     input.handle(&model, &Event::Pointer(PointerEvent::Moved), moment(Some(at), now));
-    assert_eq!(input.cursor(&model, true), CursorShape::Grab, "a tile can be picked up");
-    assert_eq!(
-        input.cursor(&model, false),
-        CursorShape::Default,
-        "the pointer is elsewhere"
-    );
+    assert_eq!(input.cursor(&model, true), Cursor::Grab, "a tile can be picked up");
+    assert_eq!(input.cursor(&model, false), Cursor::Default, "the pointer is elsewhere");
     input.handle(&model, &click(PointerButton::Left), moment(Some(at), now));
     assert_eq!(
         input.cursor(&model, false),
-        CursorShape::Grabbing,
+        Cursor::Grabbing,
         "a drag keeps its cursor anywhere"
     );
 }

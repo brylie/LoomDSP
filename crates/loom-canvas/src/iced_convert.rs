@@ -223,20 +223,22 @@ impl ToCore for &keyboard::Key {
     }
 }
 
-impl ToIced for crate::CursorShape {
+impl ToIced for loom_ui_core::Cursor {
     type Iced = mouse::Interaction;
 
     fn to_iced(self) -> mouse::Interaction {
-        use crate::CursorShape;
+        use loom_ui_core::Cursor;
         match self {
-            CursorShape::Default => mouse::Interaction::default(),
-            CursorShape::Grab => mouse::Interaction::Grab,
-            CursorShape::Grabbing => mouse::Interaction::Grabbing,
-            CursorShape::Pointer => mouse::Interaction::Pointer,
-            CursorShape::Crosshair => mouse::Interaction::Crosshair,
-            CursorShape::ResizeHorizontal => mouse::Interaction::ResizingHorizontally,
-            CursorShape::ResizeVertical => mouse::Interaction::ResizingVertically,
-            CursorShape::ResizeDiagonal => mouse::Interaction::ResizingDiagonallyDown,
+            Cursor::Default => mouse::Interaction::default(),
+            Cursor::Grab => mouse::Interaction::Grab,
+            Cursor::Grabbing => mouse::Interaction::Grabbing,
+            Cursor::Pointer => mouse::Interaction::Pointer,
+            Cursor::Crosshair => mouse::Interaction::Crosshair,
+            Cursor::Text => mouse::Interaction::Text,
+            Cursor::NotAllowed => mouse::Interaction::NotAllowed,
+            Cursor::ResizeHorizontal => mouse::Interaction::ResizingHorizontally,
+            Cursor::ResizeVertical => mouse::Interaction::ResizingVertically,
+            Cursor::ResizeDiagonal => mouse::Interaction::ResizingDiagonallyDown,
         }
     }
 }

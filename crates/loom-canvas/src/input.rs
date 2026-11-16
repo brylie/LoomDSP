@@ -22,7 +22,7 @@ use crate::controls::{
 use crate::draft::{DraftSubmit, TypedDraft};
 use crate::gpu::{Cable, Overlay, Shape};
 use crate::hover::{HoverTarget, HoverTimer};
-use crate::reaction::{CursorShape, Reaction};
+use crate::reaction::Reaction;
 use crate::scene::{
     GRID, HEADER, Hit, HoverText, PORT_HIT_RADIUS, PORT_RADIUS, PortRef, Scene, TILE_WIDTH, WidgetView, WidgetViewKind,
 };
@@ -30,7 +30,7 @@ use crate::theme::Palette;
 use crate::tile_text::{self, LABEL_SIZE, TITLE_SIZE, TextKind};
 use crate::trace::ScopeTraces;
 use loom_ui_core::{
-    Color, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, Vector,
+    Color, Cursor, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, Vector,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -721,11 +721,11 @@ enum Interaction {
 }
 
 /// The cursor that says which way a value drag goes.
-fn drag_cursor(drag: &ValueDrag) -> CursorShape {
+fn drag_cursor(drag: &ValueDrag) -> Cursor {
     if drag.is_horizontal() {
-        CursorShape::ResizeHorizontal
+        Cursor::ResizeHorizontal
     } else {
-        CursorShape::ResizeVertical
+        Cursor::ResizeVertical
     }
 }
 
@@ -733,13 +733,13 @@ impl Interaction {
     /// The cursor during this gesture, or `None` with no gesture. A value drag
     /// shows its own direction, so a horizontal fader keeps the cursor it had
     /// on hover.
-    fn cursor(&self) -> Option<CursorShape> {
+    fn cursor(&self) -> Option<Cursor> {
         Some(match self {
-            Self::Panning { .. } | Self::Moving { .. } => CursorShape::Grabbing,
-            Self::Resizing { .. } => CursorShape::ResizeDiagonal,
+            Self::Panning { .. } | Self::Moving { .. } => Cursor::Grabbing,
+            Self::Resizing { .. } => Cursor::ResizeDiagonal,
             Self::Turning { drag, .. } | Self::Depth { drag, .. } | Self::Range { drag, .. } => drag_cursor(drag),
-            Self::Holding { .. } => CursorShape::Pointer,
-            Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => CursorShape::Crosshair,
+            Self::Holding { .. } => Cursor::Pointer,
+            Self::Pad { .. } | Self::Wiring { .. } | Self::Selecting { .. } => Cursor::Crosshair,
             Self::Idle => return None,
         })
     }
@@ -894,11 +894,11 @@ impl CanvasInput {
 
     /// The pointer shape to show: the one of the gesture in progress, or
     /// else, with the pointer over the canvas, the one for what is under it.
-    pub fn cursor(&self, model: &CanvasModel<'_>, pointer_over: bool) -> CursorShape {
+    pub fn cursor(&self, model: &CanvasModel<'_>, pointer_over: bool) -> Cursor {
         match self.interaction.cursor() {
             Some(gesture) => gesture,
             None if pointer_over => model.hover_interaction(self),
-            None => CursorShape::default(),
+            None => Cursor::default(),
         }
     }
 

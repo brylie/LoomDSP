@@ -108,9 +108,9 @@ impl CanvasModel<'_> {
     /// The ring of a modulated knob reaches a little past the knob's cell,
     /// so it is checked first, as `press` does: there a press drags depth,
     /// and the cursor says so (modulation.md, Arc drag).
-    pub(super) fn hover_interaction(&self, state: &CanvasInput) -> CursorShape {
+    pub(super) fn hover_interaction(&self, state: &CanvasInput) -> Cursor {
         if state.cursor.is_some_and(|point| self.resize_at(point).is_some()) {
-            return CursorShape::ResizeDiagonal;
+            return Cursor::ResizeDiagonal;
         }
         let on_range = state
             .hover
@@ -130,15 +130,15 @@ impl CanvasModel<'_> {
             return drag_cursor(&self.value_drag(module, widget, state.camera.zoom));
         }
         match state.hover {
-            Some(Hit::Port(_) | Hit::Badge(_)) => CursorShape::Pointer,
+            Some(Hit::Port(_) | Hit::Badge(_)) => Cursor::Pointer,
             Some(Hit::Widget { module, widget }) => match self.widget_kind(module, widget) {
-                Some(WidgetViewKind::XyPad { .. }) => CursorShape::Crosshair,
+                Some(WidgetViewKind::XyPad { .. }) => Cursor::Crosshair,
                 Some(WidgetViewKind::Range { .. }) => drag_cursor(&self.value_drag(module, widget, state.camera.zoom)),
                 Some(kind) if kind.is_one_number() => drag_cursor(&self.value_drag(module, widget, state.camera.zoom)),
-                _ => CursorShape::Pointer,
+                _ => Cursor::Pointer,
             },
-            Some(Hit::Module(_)) => CursorShape::Grab,
-            _ => CursorShape::default(),
+            Some(Hit::Module(_)) => Cursor::Grab,
+            _ => Cursor::default(),
         }
     }
 

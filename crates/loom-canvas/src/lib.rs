@@ -63,7 +63,7 @@ pub use input::{
     EditGroupView, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
 pub use painter::{Painter, Quad, TextMeasure, TextPainter, TextRun, TextStyle, Vertical, Weight};
-pub use reaction::{CursorShape, Reaction};
+pub use reaction::Reaction;
 pub use scene::{
     CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
     PORT_HIT_RADIUS, PanelView, PartText, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal,

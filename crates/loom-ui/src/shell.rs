@@ -45,7 +45,7 @@ use crate::runtime::{Next, Runtime};
 use crate::waker::Waker;
 use events::Held;
 use gpu::Gpu;
-use loom_ui_core::{Rect, Size};
+use loom_ui_core::{Cursor, Rect, Size};
 use pacing::{Drawn, FrameKind, Pacing, Wait};
 use std::fmt;
 use std::path::PathBuf;
@@ -110,8 +110,8 @@ pub enum Ime {
 /// The pointer, as the layers want it shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pointer {
-    /// Shown, with this cursor.
-    Icon(CursorIcon),
+    /// Shown, with this shape.
+    Icon(Cursor),
     /// Hidden, as while typing in some fields.
     Hidden,
 }
@@ -137,15 +137,32 @@ pub struct Report {
 /// setting a cursor does not show it.
 fn pointer_calls(hidden: &mut bool, pointer: Pointer) -> (Option<CursorIcon>, Option<bool>) {
     match pointer {
-        Pointer::Icon(icon) => {
+        Pointer::Icon(cursor) => {
             let show = std::mem::replace(hidden, false).then_some(true);
-            (Some(icon), show)
+            (Some(icon(cursor)), show)
         }
         Pointer::Hidden if *hidden => (None, None),
         Pointer::Hidden => {
             *hidden = true;
             (None, Some(false))
         }
+    }
+}
+
+/// What winit calls `cursor`. This is the only place our shapes meet
+/// winit's, so no winit type is in what the layers report.
+fn icon(cursor: Cursor) -> CursorIcon {
+    match cursor {
+        Cursor::Default => CursorIcon::Default,
+        Cursor::Grab => CursorIcon::Grab,
+        Cursor::Grabbing => CursorIcon::Grabbing,
+        Cursor::Pointer => CursorIcon::Pointer,
+        Cursor::Crosshair => CursorIcon::Crosshair,
+        Cursor::Text => CursorIcon::Text,
+        Cursor::NotAllowed => CursorIcon::NotAllowed,
+        Cursor::ResizeHorizontal => CursorIcon::EwResize,
+        Cursor::ResizeVertical => CursorIcon::NsResize,
+        Cursor::ResizeDiagonal => CursorIcon::NwseResize,
     }
 }
 

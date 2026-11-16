@@ -63,7 +63,7 @@ fn a_stuck_task_leaves_the_report_whole() {
     layers.pointer = (mouse::Interaction::Pointer, false);
     layers.redraw = Redraw::NextFrame;
     let report = report(&mut layers, &mut runtime);
-    assert_eq!(report.cursor, Some(Pointer::Icon(winit::window::CursorIcon::Pointer)));
+    assert_eq!(report.cursor, Some(Pointer::Icon(loom_ui_core::Cursor::Pointer)));
     assert_eq!(report.redraw, Redraw::NextFrame);
     assert!(!report.alone);
     assert_eq!(layers.logged, [true, false, false], "logged as waiting, once");
@@ -113,6 +113,20 @@ fn the_sooner_frame_wins() {
     assert_eq!(sooner(Redraw::No, Redraw::No), Redraw::No);
     assert_eq!(redraw(iced::window::RedrawRequest::Wait), Redraw::No);
     assert_eq!(pointer(mouse::Interaction::Hidden), Pointer::Hidden);
+}
+
+/// Every shape the canvas asks for comes back as itself through Iced's
+/// pointer, so the canvas's cursor reaches the window unchanged. Iced's
+/// plain and unused shapes are the arrow.
+#[test]
+fn the_canvas_cursor_comes_through_iced_unchanged() {
+    use loom_canvas::iced_convert::ToIced;
+    use loom_ui_core::Cursor;
+    for cursor in Cursor::ALL {
+        assert_eq!(pointer(cursor.to_iced()), Pointer::Icon(cursor), "{cursor:?}");
+    }
+    assert_eq!(pointer(mouse::Interaction::None), Pointer::Icon(Cursor::Default));
+    assert_eq!(pointer(mouse::Interaction::Wait), Pointer::Icon(Cursor::Default));
 }
 
 /// A touch moves the cursor to the finger, in logical pixels, as a mouse

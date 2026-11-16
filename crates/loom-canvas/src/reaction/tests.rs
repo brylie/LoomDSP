@@ -51,9 +51,3 @@ fn redraw_stays_true_and_is_its_own_fact() {
     reaction.redraw();
     assert!(reaction.redraw);
 }
-
-/// The default cursor shape is the plain arrow.
-#[test]
-fn the_default_cursor_is_the_plain_arrow() {
-    assert_eq!(CursorShape::default(), CursorShape::Default);
-}

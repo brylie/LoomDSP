@@ -164,12 +164,28 @@ fn sooner(a: Redraw, b: Redraw) -> Redraw {
     }
 }
 
-/// Iced's pointer, as the shell's.
+/// Iced's pointer, as the shell's: our own shape, which the shell turns
+/// into winit's.
 fn pointer(interaction: mouse::Interaction) -> Pointer {
-    match iced_winit::conversion::mouse_interaction(interaction) {
-        Some(icon) => Pointer::Icon(icon),
-        None => Pointer::Hidden,
-    }
+    use loom_ui_core::Cursor;
+    use mouse::Interaction;
+    Pointer::Icon(match interaction {
+        Interaction::Hidden => return Pointer::Hidden,
+        Interaction::Grab => Cursor::Grab,
+        Interaction::Grabbing => Cursor::Grabbing,
+        Interaction::Pointer => Cursor::Pointer,
+        Interaction::Crosshair => Cursor::Crosshair,
+        Interaction::Text => Cursor::Text,
+        Interaction::NotAllowed => Cursor::NotAllowed,
+        Interaction::ResizingHorizontally => Cursor::ResizeHorizontal,
+        Interaction::ResizingVertically => Cursor::ResizeVertical,
+        Interaction::ResizingDiagonallyDown => Cursor::ResizeDiagonal,
+        // `None` and `Idle` are the plain arrow. No part of the app shows
+        // the other shapes Iced has (help, wait, copy, zoom, and the rest),
+        // so they are the arrow too. A shape is added to `Cursor` when a
+        // view needs it.
+        _ => Cursor::Default,
+    })
 }
 
 /// Iced's input method, as the shell's.
