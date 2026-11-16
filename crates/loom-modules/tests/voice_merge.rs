@@ -166,3 +166,58 @@ fn selection_modes_reselect_immediately_when_the_effective_mode_changes() {
     assert_eq!(render.output("out")[400], 1.0);
     assert_eq!(render.output("out")[500], 3.0);
 }
+
+/// A four-voice bundle with every gate high and `first` on voice 1, the
+/// others 2, 3, and 4 (or 4, 3, 2 descending), in the given mode.
+fn ranked(mode: f32, first: f32) -> Harness {
+    Harness::new(&MERGE).frames(1024).param("mode", mode).bundle_input(
+        "in",
+        vec![
+            Signal::constant(first),
+            Signal::constant(3.0),
+            Signal::constant(2.0),
+            Signal::constant(4.0),
+        ],
+    )
+}
+
+/// A non-finite voice never wins Lowest or Highest over a finite one (#794),
+/// wherever it sits in the bundle.
+#[test]
+fn a_non_finite_voice_never_wins_lowest_or_highest() {
+    for (mode, first, expected) in [
+        (3.0, f32::NAN, 2.0),
+        (4.0, f32::NAN, 4.0),
+        (3.0, f32::NEG_INFINITY, 2.0),
+        (4.0, f32::INFINITY, 4.0),
+        // The other sign already loses, and must still lose.
+        (3.0, f32::INFINITY, 2.0),
+        (4.0, f32::NEG_INFINITY, 4.0),
+    ] {
+        let out = ranked(mode, first).check_block_sizes();
+        assert!(
+            out.output("out").iter().all(|v| *v == expected),
+            "mode {mode}, voice 1 {first}"
+        );
+    }
+}
+
+/// With every playing voice NaN, the tie rule picks voice 1 and its NaN passes
+/// through unchanged, at every block size.
+#[test]
+fn all_non_finite_voices_keep_the_lowest_index() {
+    for mode in [3.0, 4.0] {
+        let h = Harness::new(&MERGE)
+            .frames(1024)
+            .param("mode", mode)
+            .bundle_input("in", (0..4).map(|_| Signal::constant(f32::NAN)).collect());
+        let renders: Vec<_> = loom_test::BLOCK_SIZES.iter().map(|&b| h.render_with_block(b)).collect();
+        for render in &renders {
+            assert!(render.output("out").iter().all(|v| v.is_nan()));
+            assert_eq!(
+                render.output("out").iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                renders[0].output("out").iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+            );
+        }
+    }
+}

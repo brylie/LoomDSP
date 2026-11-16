@@ -139,6 +139,19 @@ impl Merge {
     const OUT: usize = MERGE.output_index("out").unwrap();
     const MODE: usize = MERGE.param_index("mode").unwrap();
 
+    /// True when `candidate` should replace `previous` in Lowest (mode 3) or
+    /// Highest (mode 4). A non-finite value never wins over a finite one
+    /// (#794); between finite values the strict comparison keeps the lower
+    /// voice index on a tie.
+    fn better(mode: usize, candidate: f32, previous: f32) -> bool {
+        match (candidate.is_finite(), previous.is_finite()) {
+            (false, _) => false,
+            (true, false) => true,
+            (true, true) if mode == 3 => candidate < previous,
+            (true, true) => candidate > previous,
+        }
+    }
+
     /// Compares stereo voices by their mean while retaining their two sides.
     fn value(io: &PortIo<'_>, voice: usize, frame: usize) -> f32 {
         stereo_mean(io, Self::IN, voice, frame)
@@ -178,12 +191,11 @@ impl Module for Merge {
                     if !self.high[voice] {
                         continue;
                     }
-                    let better = picked.is_none_or(|previous| match mode {
+                    let wins = picked.is_none_or(|previous| match mode {
                         2 => self.order[voice] > self.order[previous],
-                        3 => Self::value(io, voice, frame) < Self::value(io, previous, frame),
-                        _ => Self::value(io, voice, frame) > Self::value(io, previous, frame),
+                        _ => Self::better(mode, Self::value(io, voice, frame), Self::value(io, previous, frame)),
                     });
-                    if better {
+                    if wins {
                         picked = Some(voice);
                     }
                 }
