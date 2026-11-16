@@ -424,6 +424,49 @@ fn delay_and_allpass_never_allocate_while_sweeping_parameters_and_inputs() {
     }
 }
 
+/// Voice assigner at 8 voices and `unison` 2, fed by an 8-voice Note input,
+/// with more notes than voices so stealing runs, and a count edit from 8 to
+/// 4, never allocates on the audio thread. The shared suite runs it only at
+/// its default of one voice.
+#[test]
+fn voice_assigner_never_allocates_at_eight_voices() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let c = &mut parts.controller;
+    let note = c.add_module("loom.midi.note").unwrap();
+    c.set_param_named(note, "voices", 8.0).unwrap();
+    c.set_param_named(note, "mode", 0.0).unwrap();
+    let assign = c.add_module("loom.voice.assign").unwrap();
+    c.set_param_named(assign, "voices", 8.0).unwrap();
+    c.set_param_named(assign, "mode", 0.0).unwrap();
+    c.set_param_named(assign, "unison", 2.0).unwrap();
+    let saw = c.add_module("loom.osc.saw").unwrap();
+    let merge = c.add_module("loom.voice.merge").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    for port in ["pitch", "gate", "velocity", "pressure", "timbre"] {
+        c.connect_named(note, port, assign, port).unwrap();
+    }
+    c.connect_named(assign, "pitch", saw, "pitch").unwrap();
+    c.connect_named(saw, "out", merge, "in").unwrap();
+    c.connect_named(assign, "gate", merge, "gate").unwrap();
+    c.connect_named(merge, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    let mut left = vec![0.0; 512];
+    let mut right = vec![0.0; 512];
+    for i in 0..40usize {
+        if i == 20 {
+            parts.controller.set_param_named(assign, "voices", 4.0).unwrap();
+            parts.controller.commit().unwrap();
+        }
+        let key = 48 + (i % 12) as u8;
+        parts.midi.send(MidiEvent::note_on(0, 0, key, 100));
+        if i % 3 == 0 {
+            parts.midi.send(MidiEvent::note_off(7, 0, key.wrapping_sub(5)));
+        }
+        let frames = [1, 77, 128, 512][i % 4];
+        assert_no_alloc(|| parts.engine.process(&mut left[..frames], &mut right[..frames]));
+    }
+}
+
 /// Installing, reading, and removing an input ring never allocates or frees
 /// on the audio thread, including an underrun and an overrun correction.
 #[test]

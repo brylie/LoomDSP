@@ -4,7 +4,7 @@ What a voice is, why a polysynth has to steal, why LoomDSP infers a bundle inste
 
 - **Specification:** [Polyphony and voice allocation](../design/polyphony.md).
 - **Decision:** [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md).
-- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), `crates/loom-dsp/src/voice.rs` (allocation), `crates/loom-modules/src/midi.rs` (MIDI notes and expression), and `crates/loom-modules/src/voice.rs` (Voice merge, Voice split, and Voice spread).
+- **Code:** `crates/loom-core/src/width.rs` (width inference), `crates/loom-core/src/compile.rs` (copies and buffers), `crates/loom-dsp/src/voice.rs` (allocation), `crates/loom-modules/src/midi.rs` (MIDI notes and expression), and `crates/loom-modules/src/voice.rs` (Voice merge, Voice split, Voice spread, and Voice assigner).
 
 ## A voice is a chain, not a note
 
@@ -89,6 +89,20 @@ is device configuration, rather than part of a patch: replacing a patch must not
 forget it. The rig retains it and seeds each new engine before sending more MIDI.
 Inside a buffer, the engine retains configuration changes at their sample offsets,
 so an announcement later in the buffer cannot change an earlier note.
+
+## From one note stream to many voices
+
+Note input hands out voices to MIDI notes. **Voice assigner** (`loom.voice.assign`) does the same for notes that arrive on cables: a sequencer, a Euclidean pattern, a random melody. Each rising edge on its `gate` input starts a note, and each fall ends it. The allocator gives the note an output voice, exactly as for a key.
+
+Why bother, when a mono sequencer can play a mono synth? Because of the release. On one voice, a new note cuts off the tail of the one before. Into an 8-voice assigner, each note takes a new voice, so its tail rings on while the next note plays. A sequencer that should do this needs a gap between its gates: a tied step, with the gate held while the pitch moves, is one note that glides, on one voice.
+
+**A note is known by its input voice, not its pitch.** Each input voice of `gate` carries one note at a time, so the assigner does not need a note number. Two input voices on the same pitch are two notes, because something upstream already decided they are separate. While a note sounds, its output voice follows its own input voice's pitch, velocity, pressure, and timbre.
+
+**A stolen note stays silent.** When every voice is busy, a new note steals one by the mode. The stolen note does not come back when a voice frees, even if its gate is still high: it would sound like a note nobody played. Its input voice plays again on its next rising edge.
+
+**Unison** gives each note several voices, taken and released together. They play the same pitch until a Voice spread after the assigner detunes them. This is a different thing from a [stack](unison.md), which copies one sound inside a module.
+
+Voice merge can go the other way: it takes one voice out of a bundle. In Lowest mode with the pitch bundle on `in`, its `out` is the lowest held note and its `gate` output plays that note's envelope. Releasing the lowest key hands the bass to the next one without a new attack, as a mono keyboard does.
 
 ## Why there is no event cable
 

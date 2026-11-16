@@ -423,7 +423,8 @@ impl Module for NoteIn {
             self.previous_range = Some(range);
             for (voice, state) in self.allocator.voices().iter().enumerate() {
                 let note = state.note;
-                io.voice_output(Self::PITCH, voice, 0)[frame] = note.map_or(-0.5, |note| note.pitch);
+                io.voice_output(Self::PITCH, voice, 0)[frame] =
+                    note.map_or(crate::voice::UNUSED_PITCH, |note| note.pitch);
                 io.voice_output(Self::GATE, voice, 0)[frame] = if state.gate { 1.0 } else { 0.0 };
                 io.voice_output(Self::VELOCITY, voice, 0)[frame] = note.map_or(0.0, |note| note.velocity);
                 io.voice_output(Self::PRESSURE, voice, 0)[frame] = note.map_or(0.0, |note| note.pressure);

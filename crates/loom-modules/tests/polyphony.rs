@@ -1302,3 +1302,53 @@ fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
     assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
     assert!(peak > 0.25, "8 notes play: peak {peak}");
 }
+
+/// Voice assigner with 8 input voices held, then its note inputs swapped for
+/// 4-voice cables: the notes of input voices 5 to 8 end on the swap frame and
+/// the others keep sounding. Its gate light is lit while a note is held. The
+/// harness keeps one bundle width for a whole render, so this needs the
+/// engine.
+#[test]
+fn voice_assigner_releases_the_input_voices_a_narrower_cable_drops() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let eight = c.add_module("test.voices").unwrap();
+    c.set_param_named(eight, "voices", 8.0).unwrap();
+    c.set_param_named(eight, "value", 1.0).unwrap();
+    let four = c.add_module("test.voices").unwrap();
+    c.set_param_named(four, "voices", 4.0).unwrap();
+    c.set_param_named(four, "value", 1.0).unwrap();
+    let assign = c.add_module("loom.voice.assign").unwrap();
+    c.set_param_named(assign, "voices", 8.0).unwrap();
+    c.set_param_named(assign, "mode", 0.0).unwrap();
+    let merge = c.add_module("loom.voice.merge").unwrap();
+    c.set_param_named(merge, "mode", 1.0).unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(eight, "out", assign, "pitch").unwrap();
+    c.connect_named(eight, "out", assign, "gate").unwrap();
+    c.connect_named(assign, "gate", merge, "in").unwrap();
+    c.connect_named(merge, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    let light = parts
+        .controller
+        .graph()
+        .node(assign)
+        .unwrap()
+        .descriptor
+        .display_index("gate")
+        .unwrap();
+    assert_eq!(parts.controller.display(assign, light), Some(0.0));
+    // All 8 gates high: their average is 1.
+    assert!(render(&mut parts).iter().all(|v| *v == 1.0));
+    assert_eq!(parts.controller.display(assign, light), Some(1.0));
+    let c = &mut parts.controller;
+    c.connect_named(four, "out", assign, "pitch").unwrap();
+    c.connect_named(four, "out", assign, "gate").unwrap();
+    c.commit().unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    parts.engine.process(&mut left, &mut right);
+    // Input voices 5 to 8 end on the swap frame; 4 of 8 voices stay high.
+    assert_eq!(left[0], 0.5);
+    assert!(left.iter().all(|v| *v == 0.5));
+}
