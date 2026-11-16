@@ -122,6 +122,7 @@ fn a_new_reset_count_makes_it_news_again() {
     let news = step(&mut peaks, 1, &[reading(1.5, 0.5)]);
     assert!(news[0].1.clips());
     assert_eq!(news[0].1.after, 1, "news says which reset it came after");
+    assert_eq!(news[0].1.probe, Some(PROBE), "and which probe it came from");
 }
 
 /// A click clears the light and keeps the readout. A double-click resets both.

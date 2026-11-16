@@ -31,6 +31,10 @@ pub struct PeakNews {
     pub peak: f32,
     /// True if a peak or RMS was not a finite number.
     pub bad: bool,
+    /// The probe this was read from. The UI drops news from a probe its
+    /// meter no longer has, which was on its way when the probe changed.
+    /// `None` only before the telemetry thread tags it.
+    pub probe: Option<ProbeId>,
     /// The meter's own reset count this came after. The UI drops news from
     /// before that meter's latest reset, which was on its way when it
     /// happened.
@@ -101,8 +105,11 @@ impl Peaks {
             .iter()
             .filter(|(meter, news)| news.beyond(self.shown.get(meter).copied().unwrap_or_default()))
             .map(|(&meter, &news)| {
-                let after = self.told.get(&meter).map_or(0, |&(_, count)| count);
-                (meter, PeakNews { after, ..news })
+                let (probe, after) = self
+                    .told
+                    .get(&meter)
+                    .map_or((None, 0), |&(probe, count)| (Some(probe), count));
+                (meter, PeakNews { probe, after, ..news })
             })
             .collect()
     }

@@ -32,13 +32,12 @@ fn show(ui: &mut Ui, module: u32) {
 
 /// Sends a peak for the meter's widget, as the telemetry thread does.
 fn send_peak(ui: &mut Ui, meter: u32, peak: f32) {
-    assert!(
-        ui.app().session.engine.live.probe(output(ui, meter)).is_some(),
-        "a probe while on screen"
-    );
+    let probe = ui.app().session.engine.live.probe(output(ui, meter));
+    assert!(probe.is_some(), "a probe while on screen");
     let news = PeakNews {
         peak,
         bad: false,
+        probe,
         after: resets(ui, (meter, 0)),
     };
     let _ = ui.app_mut().send(Message::Telemetry(Update {
@@ -184,6 +183,7 @@ fn a_peak_from_before_a_reset_is_dropped() {
     let old = PeakNews {
         peak: 2.0,
         bad: false,
+        probe: Some(probe),
         after: resets(&ui, (meter, 0)),
     };
     ui.app_mut().reset_clip((meter, 0), true);
@@ -197,6 +197,35 @@ fn a_peak_from_before_a_reset_is_dropped() {
         (probe, 1),
         "the thread is told"
     );
+}
+
+/// News from a probe the meter no longer has is dropped, though its reset
+/// count still matches. The meter leaves the screen and comes back while a
+/// clip from its old probe is on its way: the new probe starts with no news,
+/// so the light stays dark (`docs/design/panels.md`, Meter widget).
+#[test]
+fn a_peak_from_an_old_probe_is_dropped() {
+    let (mut ui, meter) = with_meter();
+    let first = ui.app().session.engine.live.probe(output(&ui, meter)).unwrap();
+    let old = PeakNews {
+        peak: 2.0,
+        bad: false,
+        probe: Some(first),
+        after: resets(&ui, (meter, 0)),
+    };
+    let _ = ui
+        .app_mut()
+        .send(Message::Canvas(CanvasEvent::VisibleDisplays(Vec::new())));
+    show(&mut ui, meter);
+    let second = ui.app().session.engine.live.probe(output(&ui, meter)).unwrap();
+    assert_ne!(first, second, "a new probe");
+    assert_eq!(resets(&ui, (meter, 0)), old.after, "the count did not change");
+    let _ = ui.app_mut().send(Message::Telemetry(Update {
+        peaks: vec![((meter, 0), old)],
+        ..Update::default()
+    }));
+    ui.redraw();
+    assert_eq!(drawn(&ui, meter), (false, "--".to_string()));
 }
 
 /// A meter on a display value has no light and no readout.
@@ -280,6 +309,7 @@ fn a_reset_of_one_meter_keeps_a_clip_on_another() {
     let news = PeakNews {
         peak: 2.0,
         bad: false,
+        probe: ui.app().session.engine.live.probe(output(&ui, second)),
         after: resets(&ui, (second, 0)),
     };
     ui.app_mut().reset_clip((first, 0), false);

@@ -1253,8 +1253,9 @@ impl App {
     /// Takes raw peaks from the telemetry thread into the clip lights and peak
     /// holds of the meters they are for. News from before its own meter's
     /// latest reset is dropped, so a reset is not undone by a message that
-    /// was already on its way, and so is news for a meter no longer on
-    /// screen. Another meter's news still counts, even on the same output.
+    /// was already on its way. So is news from a probe the meter no longer
+    /// has, and news for a meter no longer on screen. Another meter's news
+    /// still counts, even on the same output.
     fn take_peaks(&mut self, peaks: Vec<(clip::MeterWidget, clip::PeakNews)>) {
         if peaks.is_empty() {
             return;
@@ -1262,7 +1263,10 @@ impl App {
         let resets = self.peak_resets();
         let mut changed = false;
         for (meter, news) in peaks {
-            if resets.get(&meter).is_some_and(|&(_, count)| count == news.after) {
+            if resets
+                .get(&meter)
+                .is_some_and(|&(probe, count)| news.probe == Some(probe) && count == news.after)
+            {
                 changed |= self.session.clip_holds.take(meter, news);
             }
         }
