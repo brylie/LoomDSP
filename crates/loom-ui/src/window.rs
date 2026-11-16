@@ -57,6 +57,9 @@ pub(crate) struct Window {
     /// Panic on a slot mistake. On in a debug build; a test turns it off to
     /// check what a release build does.
     panic_on_mistake: bool,
+    /// The focus stops in focus order, after the last [`Window::lay_out`]
+    /// (`order.rs`).
+    stops: Vec<UiId>,
 }
 
 /// One panel, as the window keeps it.
@@ -170,6 +173,7 @@ impl Default for Window {
             drawn: Vec::new(),
             laid_out_at: None,
             panic_on_mistake: cfg!(debug_assertions),
+            stops: Vec::new(),
         }
     }
 }
@@ -340,6 +344,7 @@ impl Window {
             self.place(&root, Point::ORIGIN, size, text, &mut laid);
         }
         self.laid_out_at = Some(size);
+        self.order_stops();
         laid
     }
 
@@ -456,10 +461,19 @@ impl Window {
     /// What is under `point` in the window: the panels are tried in the
     /// reverse of draw order, and the first that takes the point answers.
     pub(crate) fn hit(&self, point: Point) -> Option<(Layer, Hit<'_>)> {
+        self.first_taker(point, |record, inside| {
+            record.layout.hit(inside).map(|hit| (record.layer, hit))
+        })
+    }
+
+    /// The first answer `ask` gives, trying each panel in the reverse of
+    /// draw order with `point` in that panel's own coordinates. Every
+    /// question about what is under a point (a hit, the stop a press
+    /// focuses) walks the panels here, so they all find the same panel.
+    fn first_taker<'a, R>(&'a self, point: Point, ask: impl Fn(&'a Record, Point) -> Option<R>) -> Option<R> {
         self.drawn.iter().rev().find_map(|key| {
             let record = &self.records[key];
-            let inside = point - Vector::new(record.origin.x, record.origin.y);
-            record.layout.hit(inside).map(|hit| (record.layer, hit))
+            ask(record, point - Vector::new(record.origin.x, record.origin.y))
         })
     }
 
@@ -477,5 +491,6 @@ impl Window {
     }
 }
 
+mod order;
 #[cfg(test)]
 mod tests;

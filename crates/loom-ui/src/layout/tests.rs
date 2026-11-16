@@ -499,3 +499,62 @@ fn a_fill_of_no_shares_cannot_be_built() {
     let shares = std::hint::black_box(0);
     let _ = Length::fill(shares);
 }
+
+/// A focus stop with no key has no UI ID to be focused by. A debug build
+/// stops there, naming the panel.
+#[test]
+#[should_panic(expected = "an element in panel p breaks a rule: it has no key")]
+fn a_focus_stop_needs_a_key() {
+    lay_out(
+        Element::space(Length::Fixed(10.0), Length::Fixed(10.0)).focusable(),
+        50.0,
+        50.0,
+    );
+}
+
+/// An element that breaks section 7, rule 2 stops a debug build, naming
+/// its UI ID.
+#[test]
+#[should_panic(expected = "an element p/b breaks a rule: it has no name")]
+fn a_node_that_breaks_rule_2_stops_a_debug_build() {
+    use crate::access::{Access, Action, Role};
+    lay_out(
+        Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+            .key("b")
+            .access(Access::new(Role::Button, "").action(Action::Click)),
+        50.0,
+        50.0,
+    );
+}
+
+/// In a release build, each problem is listed instead, and an element with
+/// no UI ID is neither a focus stop nor a node: a duplicate's focus and
+/// node go with its ID.
+#[test]
+fn a_release_build_lists_the_problems_and_drops_what_has_no_id() {
+    use crate::access::{Access, Problem, Role};
+    let mut layout = Layout::new(UiId::panel("p"));
+    layout.allow_duplicates();
+    layout.rebuild(Element::row([
+        Element::space(Length::Fixed(10.0), Length::Fixed(10.0)).focusable(),
+        Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+            .key("slider")
+            .access(Access::new(Role::Slider, "Gain")),
+        space("a", 10.0, 10.0).focusable(),
+        space("a", 10.0, 10.0)
+            .focusable()
+            .access(Access::new(Role::Group, "Second")),
+    ]));
+    assert_eq!(
+        layout.access_problems(),
+        [(None, Problem::NoKey), (Some(id("slider")), Problem::NoValue)]
+    );
+    let stops: Vec<bool> = layout.records().iter().map(|record| record.focusable).collect();
+    assert_eq!(stops, [false, false, false, true, false]);
+    assert!(
+        layout
+            .records()
+            .iter()
+            .all(|record| record.id.is_some() || record.access.is_none())
+    );
+}

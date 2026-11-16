@@ -18,6 +18,7 @@ use crate::event::{DriverEvent, WindowState};
 use crate::routing::Target;
 use crate::runtime::{Next, Runtime};
 use crate::waker::Waker;
+use loom_ui_core::{Point, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -280,6 +281,18 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
     }
 
     /// The runtime.
+    /// Lays the window out, as a driver does before it draws, with `text`
+    /// measuring text.
+    pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
+        self.runtime.lay_out(text);
+    }
+
+    /// Focuses what a press at `point` reaches, as a router does when the
+    /// runtime's layer takes the press ([`Runtime::focus_at`]).
+    pub fn focus_at(&mut self, point: Point) -> Option<UiId> {
+        self.runtime.focus_at(point)
+    }
+
     pub fn runtime(&self) -> &Runtime<A, T> {
         &self.runtime
     }

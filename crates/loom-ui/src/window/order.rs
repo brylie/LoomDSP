@@ -1,0 +1,191 @@
+//! The window's focus order and its accessibility nodes (ui-layer.md,
+//! section 6, rule 2, and section 7).
+//!
+//! **The focus order** is the reading order:
+//!
+//! 1. by layer, from the top: the question, then the overlays, the panels,
+//!    and the canvas;
+//! 2. inside a layer, root panel by root panel in the order a reader meets
+//!    them: the one whose first focus stop is higher first, then the one
+//!    further left, and the view's order where they are level. Draw order
+//!    is not used, because what is drawn on top is not what is read first;
+//! 3. inside a panel, its elements in the order it builds them, with the
+//!    panel in a slot at the slot's place in that order.
+//!
+//! **The nodes** nest as the elements do: an element's node holds the
+//! nodes of the accessed elements inside it, and a slot's panel's nodes go
+//! in the node around the slot.
+
+use super::Window;
+use crate::focus::AccessNodes;
+use crate::view::Layer;
+use accesskit::{Node, NodeId};
+use loom_ui_core::{IdTable, Point, Rect, UiId};
+
+impl Window {
+    /// Works the focus order out again, after a layout.
+    pub(super) fn order_stops(&mut self) {
+        let mut roots: Vec<(Layer, Option<Point>, usize, &UiId)> = self
+            .order
+            .iter()
+            .enumerate()
+            .filter(|(_, key)| self.records[*key].parent.is_none())
+            .map(|(place, key)| {
+                let mut stops = Vec::new();
+                self.panel_stops(key, &mut stops);
+                let first = stops.first().and_then(|stop| self.bounds(stop)).map(Rect::position);
+                (self.records[key].layer, first, place, key)
+            })
+            .collect();
+        // The top layer first; then the higher, then the further left; then
+        // the view's order. A panel with no stops adds nothing, wherever it
+        // sorts.
+        roots.sort_by(|a, b| {
+            b.0.cmp(&a.0).then_with(|| {
+                let at = |point: Option<Point>| point.map_or((f32::MAX, f32::MAX), |point| (point.y, point.x));
+                let (ay, ax) = at(a.1);
+                let (by, bx) = at(b.1);
+                ay.total_cmp(&by).then(ax.total_cmp(&bx)).then(a.2.cmp(&b.2))
+            })
+        });
+        let keys: Vec<UiId> = roots.into_iter().map(|(_, _, _, key)| key.clone()).collect();
+        let mut stops = Vec::new();
+        for key in &keys {
+            self.panel_stops(key, &mut stops);
+        }
+        self.stops = stops;
+    }
+
+    /// Adds the focus stops of the panel keyed `key` to `stops`, in build
+    /// order, with each slot's panel at the slot's place.
+    fn panel_stops(&self, key: &UiId, stops: &mut Vec<UiId>) {
+        let Some(record) = self.records.get(key) else {
+            return;
+        };
+        let mut slot = 0;
+        for element in record.layout.records() {
+            if element.focusable
+                && let Some(id) = &element.id
+            {
+                stops.push(id.clone());
+            }
+            if let Some(child) = &element.slot {
+                if self.records.get(child).is_some_and(|held| held.held_by(key, slot)) {
+                    self.panel_stops(child, stops);
+                }
+                slot += 1;
+            }
+        }
+    }
+
+    /// The focus stops in focus order, as last laid out.
+    pub(crate) fn stops(&self) -> &[UiId] {
+        &self.stops
+    }
+
+    /// The focus stop a press at `point` focuses. The panels are tried as
+    /// [`Window::hit`] tries them. `None` when no panel takes the point;
+    /// `Some(None)` when one takes it and no stop is there.
+    pub(crate) fn focus_at(&self, point: Point) -> Option<Option<&UiId>> {
+        self.first_taker(point, |record, inside| record.layout.focus_at(inside))
+    }
+
+    /// The panel that holds the element with UI ID `id`: the one whose key
+    /// starts the ID, the longest such key if several do.
+    pub(crate) fn panel_of(&self, id: &UiId) -> Option<&UiId> {
+        self.records
+            .keys()
+            .filter(|key| id == *key || id.is_under(key))
+            .max_by_key(|key| key.keys().len())
+    }
+
+    /// The first focus stop of the panel keyed `panel`, or of the panels in
+    /// its slots, in focus order.
+    pub(crate) fn first_stop_in(&self, panel: &UiId) -> Option<UiId> {
+        let mut stops = Vec::new();
+        self.panel_stops(panel, &mut stops);
+        stops.into_iter().next()
+    }
+
+    /// The nodes of every laid-out panel, with node IDs from `ids`, bounds
+    /// in physical pixels at `scale` (section 7, rule 8), and `focused` as
+    /// the focus.
+    pub(crate) fn access_nodes(&self, ids: &mut IdTable, scale: f32, focused: Option<&UiId>) -> AccessNodes {
+        let mut out = AccessNodes::default();
+        for key in &self.drawn {
+            let record = &self.records[key];
+            if record.parent.is_some() {
+                continue;
+            }
+            let tops = self.panel_nodes(key, ids, scale, &mut out.nodes);
+            out.roots.push((key.clone(), record.layer, tops));
+        }
+        out.focus = focused
+            .filter(|id| self.stops.contains(id))
+            .map(|id| NodeId(ids.number(id)));
+        out
+    }
+
+    /// Adds the nodes of the panel keyed `key`, and of the panels in its
+    /// slots, to `nodes`, and gives the ones no other of its nodes holds.
+    fn panel_nodes(&self, key: &UiId, ids: &mut IdTable, scale: f32, nodes: &mut Vec<(NodeId, Node)>) -> Vec<NodeId> {
+        let record = &self.records[key];
+        let elements = record.layout.records();
+        // Each element's node, as its place in `made`.
+        let mut node_of: Vec<Option<usize>> = vec![None; elements.len()];
+        let mut made: Vec<(NodeId, Node, Vec<NodeId>)> = Vec::new();
+        let mut tops = Vec::new();
+        // The nodes of the panels in its slots. They go after this panel's,
+        // so a parent always comes before its children.
+        let mut later = Vec::new();
+        let mut slot = 0;
+        for (index, element) in elements.iter().enumerate() {
+            // The nearest node around it: parents come before children, so
+            // theirs are made already.
+            let mut holder = element.parent;
+            while let Some(at) = holder {
+                if node_of[at].is_some() {
+                    break;
+                }
+                holder = elements[at].parent;
+            }
+            let holder = holder.and_then(|at| node_of[at]);
+            let mut add = |child: NodeId, made: &mut Vec<(NodeId, Node, Vec<NodeId>)>| match holder {
+                Some(at) => made[at].2.push(child),
+                None => tops.push(child),
+            };
+            if let (Some(access), Some(id)) = (&element.access, &element.id) {
+                let mut node = access.node(element.focusable);
+                let bounds = element.bounds;
+                let origin = record.origin;
+                let scale = f64::from(scale);
+                node.set_bounds(accesskit::Rect {
+                    x0: f64::from(origin.x + bounds.x) * scale,
+                    y0: f64::from(origin.y + bounds.y) * scale,
+                    x1: f64::from(origin.x + bounds.x + bounds.width) * scale,
+                    y1: f64::from(origin.y + bounds.y + bounds.height) * scale,
+                });
+                let node_id = NodeId(ids.number(id));
+                add(node_id, &mut made);
+                node_of[index] = Some(made.len());
+                made.push((node_id, node, Vec::new()));
+            }
+            if let Some(child) = &element.slot {
+                if self.records.get(child).is_some_and(|held| held.held_by(key, slot)) {
+                    for id in self.panel_nodes(child, ids, scale, &mut later) {
+                        add(id, &mut made);
+                    }
+                }
+                slot += 1;
+            }
+        }
+        for (id, mut node, children) in made {
+            if !children.is_empty() {
+                node.set_children(children);
+            }
+            nodes.push((id, node));
+        }
+        nodes.append(&mut later);
+        tops
+    }
+}

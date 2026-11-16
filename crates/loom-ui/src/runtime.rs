@@ -32,14 +32,15 @@
 
 use crate::app::{App, Context, Deadline, WindowSpec};
 use crate::driver::Driver;
-use crate::effect::Effect;
+use crate::effect::{Effect, FocusTarget, Selection};
 use crate::event::{DriverEvent, WindowEvent, WindowState};
+use crate::focus::FocusStep;
 use crate::hit::Hit;
 use crate::routing::Target;
 use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
-use loom_ui_core::{Event, Point, Rect, TextMeasure, UiId};
+use loom_ui_core::{Event, Key, KeyEvent, Point, Rect, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -119,6 +120,16 @@ pub struct Runtime<A: App, T> {
     waiting_for_draw: Vec<A::Message>,
     exited: bool,
     counts: Counts,
+    /// Which of the runtime's own elements has keyboard focus.
+    focus: Option<UiId>,
+    /// The keyboard, or a focus effect, put it there, so a ring shows
+    /// (ui-layer.md, section 6, rule 3). A press does not.
+    ring: bool,
+    /// A focus effect named a UI ID that no laid-out stop has yet, such as
+    /// a field in a panel opened in the same turn. The next layout takes it
+    /// if a focus stop has it by then, and drops it otherwise; a focus that
+    /// moves first drops it too.
+    wanted: Option<UiId>,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -142,6 +153,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             waiting_for_draw: Vec::new(),
             exited: false,
             counts: Counts::default(),
+            focus: None,
+            ring: false,
+            wanted: None,
         }
     }
 
@@ -224,6 +238,169 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let laid = self.panels.lay_out(self.window.size, text);
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
+        self.settle_focus();
+    }
+
+    /// After a layout: takes a focus a focus effect asked for before its
+    /// element was laid out, taking it from the target, and moves a focus whose element is gone to the
+    /// first stop of the panel that held it, or to none when that panel is
+    /// gone too or has no stop (section 6, rule 4).
+    fn settle_focus(&mut self) {
+        if let Some(wanted) = self.wanted.take()
+            && self.panels.stops().contains(&wanted)
+        {
+            if self.target.focused().is_some() {
+                self.target.focus(&FocusTarget::Nothing, Selection::Keep);
+            }
+            self.focus = Some(wanted);
+            self.ring = true;
+            return;
+        }
+        let Some(focus) = &self.focus else {
+            return;
+        };
+        if !self.panels.stops().contains(focus) {
+            self.focus = self
+                .panels
+                .panel_of(focus)
+                .cloned()
+                .and_then(|panel| self.panels.first_stop_in(&panel));
+        }
+    }
+
+    /// The runtime's own element with keyboard focus, if any. Elements a
+    /// toolkit still draws keep theirs in the routing target.
+    pub fn focused(&self) -> Option<&UiId> {
+        self.focus.as_ref()
+    }
+
+    /// Every focus stop of the runtime's elements, in focus order, as last
+    /// laid out (section 6, rule 2). A router reads it to tell the
+    /// runtime's elements from a toolkit's.
+    pub fn focus_stops(&self) -> &[UiId] {
+        self.panels.stops()
+    }
+
+    /// Where a step from `from` lands in the focus order: the next stop,
+    /// or the previous one when `back` is set. With no `from`, or a `from`
+    /// that is not a stop, focus comes in from outside: the first stop, or
+    /// the last when `back` is set. [`FocusStep::PastEnd`] past either end.
+    /// It moves nothing.
+    pub fn focus_step(&self, from: Option<&UiId>, back: bool) -> FocusStep {
+        let stops = self.panels.stops();
+        let at = from.and_then(|from| stops.iter().position(|stop| stop == from));
+        let next = match (at, back) {
+            (None, false) => stops.first(),
+            (None, true) => stops.last(),
+            (Some(at), false) => stops.get(at + 1),
+            (Some(at), true) => at.checked_sub(1).and_then(|at| stops.get(at)),
+        };
+        next.map_or(FocusStep::PastEnd, |stop| FocusStep::To(stop.clone()))
+    }
+
+    /// Focuses what a press at `point` reaches, for a router to call when
+    /// the runtime's layer takes the press: the focus stop under it, or
+    /// around what is under it. Focus from a press shows no ring (section
+    /// 6, rule 3). `None` when no stop is there, and the runtime's focus
+    /// clears. The routing target's focus is not touched.
+    ///
+    /// # Panics
+    ///
+    /// As [`Runtime::bounds`].
+    pub fn focus_at(&mut self, point: Point) -> Option<UiId> {
+        self.check_laid_out();
+        self.wanted = None;
+        self.focus = self.panels.focus_at(point).flatten().cloned();
+        self.ring = false;
+        self.focus.clone()
+    }
+
+    /// The element with focus and where its ring goes, in logical pixels,
+    /// when the keyboard put the focus there. `None` after a press, or with
+    /// no focus.
+    pub fn focus_ring(&self) -> Option<(UiId, Rect)> {
+        let focus = self.focus.as_ref().filter(|_| self.ring)?;
+        Some((focus.clone(), self.panels.bounds(focus)?))
+    }
+
+    /// Moves the runtime's focus to `to`, from the keyboard or an effect,
+    /// so a ring shows. Returns true when it changed.
+    fn focus_to(&mut self, to: Option<UiId>) -> bool {
+        self.wanted = None;
+        let changed = self.focus != to || (to.is_some() && !self.ring);
+        self.focus = to;
+        self.ring = self.focus.is_some();
+        changed
+    }
+
+    /// Carries out a focus effect. One of the runtime's own stops takes the
+    /// focus from the target (section 6, rule 1). A step goes through the
+    /// runtime's order while one of its elements has focus, and past either
+    /// end leaves it for the target. Everything else is the target's, as
+    /// before. Returns true when the runtime's focus changed.
+    fn focus_effect(&mut self, target: &FocusTarget, select: Selection) -> bool {
+        match target {
+            FocusTarget::Element(id) if self.panels.stops().contains(id) => {
+                if self.target.focused().is_some() {
+                    self.target.focus(&FocusTarget::Nothing, Selection::Keep);
+                }
+                self.focus_to(Some(id.clone()))
+            }
+            FocusTarget::Next | FocusTarget::Previous if self.focus.is_some() => {
+                match self.focus_step(self.focus.as_ref(), *target == FocusTarget::Previous) {
+                    FocusStep::To(stop) => self.focus_to(Some(stop)),
+                    FocusStep::PastEnd => {
+                        self.target.focus(target, select);
+                        self.focus_to(None)
+                    }
+                }
+            }
+            FocusTarget::Element(id) => {
+                // Not a stop yet. In one of the runtime's panels, it waits
+                // for the layout. Otherwise it is the target's, as before,
+                // and still waits, in case a panel opened in this turn has
+                // it (`settle_focus`).
+                let changed = self.focus_to(None);
+                if self.panels.panel_of(id).is_none() {
+                    self.target.focus(target, select);
+                }
+                self.wanted = Some(id.clone());
+                changed
+            }
+            FocusTarget::Next | FocusTarget::Previous | FocusTarget::Nothing => {
+                self.target.focus(target, select);
+                self.focus_to(None)
+            }
+        }
+    }
+
+    /// Tab and Shift+Tab while one of the runtime's elements has focus:
+    /// one step through its order. Past either end, focus leaves the
+    /// runtime's elements and the key goes on to the target. Tab with Ctrl
+    /// held is the app's region shortcut, never a step (section 6, rule 7).
+    /// Returns true when the runtime took the key.
+    fn tab(&mut self, event: &Event) -> bool {
+        let Event::Key(KeyEvent::Pressed {
+            key: Key::Tab,
+            modifiers,
+            ..
+        }) = event
+        else {
+            return false;
+        };
+        if self.focus.is_none() || modifiers.control {
+            return false;
+        }
+        match self.focus_step(self.focus.as_ref(), modifiers.shift) {
+            FocusStep::To(stop) => {
+                self.focus_to(Some(stop));
+                true
+            }
+            FocusStep::PastEnd => {
+                self.focus_to(None);
+                false
+            }
+        }
     }
 
     /// Where the element with UI ID `id` is in the window, in logical
@@ -311,7 +488,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
         // 2. Route the event.
         match event {
-            DriverEvent::Input { event, pointer } => self.target.input(&event, pointer, now, &mut batch),
+            DriverEvent::Input { event, pointer } => {
+                if self.tab(&event) {
+                    redraw = true;
+                } else {
+                    self.target.input(&event, pointer, now, &mut batch);
+                }
+            }
             DriverEvent::Window(event) => self.window_event(event, now, &mut batch),
             DriverEvent::Accessibility(event) => batch.extend(self.app.accessibility_event(&event)),
             DriverEvent::RedrawRequested => redraw = true,
@@ -338,6 +521,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if updates > 0 || self.view.is_none() {
             redraw |= self.rebuild(driver);
         }
+
         redraw |= self.target.needs_redraw(updates);
 
         // 5. Draw only when something visible changed.
@@ -389,14 +573,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let cx = Context {
             now,
             waker: &self.waker,
-            focused: self.target.focused(),
+            focused: self.focus.clone().or_else(|| self.target.focused()),
             window: self.window,
+            panels: Some(&self.panels),
         };
         let effects = self.app.update(message, &cx);
         let mut redraw = false;
         for effect in effects {
             match effect {
-                Effect::Focus { target, select } => self.target.focus(&target, select),
+                Effect::Focus { target, select } => redraw |= self.focus_effect(&target, select),
                 Effect::ScrollIntoView(id) => self.target.scroll_into_view(&id),
                 Effect::ClipboardWrite(text) => driver.clipboard_write(text),
                 Effect::ClipboardRead(reply) => driver.clipboard_read(reply, &self.waker),

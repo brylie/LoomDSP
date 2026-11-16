@@ -2,9 +2,11 @@
 
 use crate::effect::Effects;
 use crate::event::{AccessEvent, WindowEvent, WindowState};
+use crate::focus::AccessNodes;
 use crate::view::View;
 use crate::waker::Waker;
-use loom_ui_core::{Size, UiId};
+use crate::window::Window;
+use loom_ui_core::{IdTable, Size, UiId};
 use std::time::Instant;
 
 /// The program built on the runtime: one message type and one `update`.
@@ -80,6 +82,9 @@ pub struct Context<'a, M> {
     pub(crate) waker: &'a Waker<M>,
     pub(crate) focused: Option<UiId>,
     pub(crate) window: WindowState,
+    /// The runtime's panels, as last laid out, for their nodes. None
+    /// outside a runtime.
+    pub(crate) panels: Option<&'a Window>,
 }
 
 impl<'a, M> Context<'a, M> {
@@ -93,6 +98,7 @@ impl<'a, M> Context<'a, M> {
             waker,
             focused,
             window,
+            panels: None,
         }
     }
 
@@ -115,6 +121,20 @@ impl<'a, M> Context<'a, M> {
     /// The window's size, scale, and focus.
     pub fn window(&self) -> WindowState {
         self.window
+    }
+
+    /// The nodes of the runtime's own elements, as last laid out, for the
+    /// app to put in the tree it sends: node IDs from `ids`, the app's one
+    /// table for every node in the window, and bounds in physical pixels at
+    /// the window's scale (ui-layer.md, section 7). A screen reader's
+    /// action on one of them reaches the app as any other does, and the app
+    /// turns it into a message by its UI ID (section 7, rule 6); a Focus
+    /// action becomes [`Effects::focus`](crate::Effects::focus). Empty
+    /// outside a runtime.
+    pub fn access_nodes(&self, ids: &mut IdTable) -> AccessNodes {
+        self.panels.map_or_else(AccessNodes::default, |panels| {
+            panels.access_nodes(ids, self.window.scale, self.focused.as_ref())
+        })
     }
 }
 
