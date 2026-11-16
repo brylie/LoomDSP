@@ -197,3 +197,236 @@ fn every_watcher_starts_from_what_it_reads() {
         app.watched_message_taken(&message);
     }
 }
+
+/// How long a test waits for a watcher thread: far longer than it needs,
+/// so a busy machine does not fail it.
+const DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A waker into a plain queue, for a test to read what the threads send.
+fn queue_waker() -> (Waker<Message>, mpsc::Receiver<Message>) {
+    let (sender, queue) = mpsc::channel();
+    (Waker::new(sender, Arc::new(|| {})), queue)
+}
+
+/// Adds a Constant at 1 feeding an envelope's gate, so the envelope's level
+/// light reads well above 0.5 once the engine runs. Gives the light.
+fn held_envelope(app: &mut crate::App) -> crate::lights::Light {
+    let gate = app.session.controller.add_module("loom.math.constant").unwrap();
+    app.session.controller.set_param_named(gate, "value", 1.0).unwrap();
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap();
+    app.session.controller.connect_named(gate, "out", env, "gate").unwrap();
+    app.commit();
+    level_light(app, env.0)
+}
+
+/// The envelope's level light.
+fn level_light(app: &crate::App, env: u32) -> crate::lights::Light {
+    let d = app
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(env))
+        .unwrap()
+        .descriptor;
+    (env, d.panel.widgets.iter().position(|w| w.binds("level")).unwrap())
+}
+
+/// Takes and applies what the threads send, as the app does, until `light`
+/// reads above 0.5. Panics after [`DEADLINE`].
+fn wait_until_lit(app: &mut crate::App, queue: &mpsc::Receiver<Message>, light: crate::lights::Light) {
+    let end = std::time::Instant::now() + DEADLINE;
+    while app.session.lights.get(&light).is_none_or(|&value| value <= 0.5) {
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        let message = queue.recv_timeout(left).expect("the light thread sends the light lit");
+        app.watched_message_taken(&message);
+        if matches!(message, Message::Lights(_)) {
+            app.apply(message);
+        }
+    }
+}
+
+/// Takes every message waiting now, so each sender has room again.
+fn take_waiting(app: &crate::App, queue: &mpsc::Receiver<Message>) {
+    for message in queue.try_iter() {
+        app.watched_message_taken(&message);
+    }
+}
+
+/// Polls `done` until it holds, or panics after [`DEADLINE`].
+fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+    let end = std::time::Instant::now() + DEADLINE;
+    while !done() {
+        assert!(std::time::Instant::now() < end, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// An app with a Clock Divide and an envelope, each with lights, watching.
+fn two_light_modules() -> (crate::App, u32, u32) {
+    let mut app = app();
+    let divide = app.session.controller.add_module("loom.logic.divide").unwrap().0;
+    let env = app.session.controller.add_module("loom.env.envelope").unwrap().0;
+    app.commit();
+    app.watching = true;
+    (app, divide, env)
+}
+
+/// A zoom that changes which lights are on screen keeps the light thread:
+/// its handle's key covers only the engine, so `keep` keeps it. Hiding every
+/// light stops it, and showing one starts it again (panels.md, Redraw, At
+/// most one thread per engine).
+#[test]
+fn a_zoom_keeps_the_light_thread() {
+    let (waker, _queue) = queue_waker();
+    let (mut app, divide, env) = two_light_modules();
+    app.set_visible_displays(vec![divide]);
+    app.sync_watchers(&waker);
+    let key = app.session.engine.watchers.lights.as_ref().map(Watcher::key);
+    assert!(key.is_some(), "a light on screen is watched");
+    app.set_visible_displays(vec![divide, env]);
+    app.sync_watchers(&waker);
+    assert_eq!(
+        app.session.engine.watchers.lights.as_ref().map(Watcher::key),
+        key,
+        "the same thread"
+    );
+    app.set_visible_displays(Vec::new());
+    app.sync_watchers(&waker);
+    assert!(app.session.engine.watchers.lights.is_none(), "no light, no thread");
+    app.set_visible_displays(vec![env]);
+    app.sync_watchers(&waker);
+    assert!(app.session.engine.watchers.lights.is_some(), "a light again starts one");
+}
+
+/// A light brought into view is read by the thread already running, at
+/// once: the same handle sends a reading for it, and no thread starts.
+#[test]
+fn a_light_brought_into_view_is_read_by_the_same_thread() {
+    let (waker, queue) = queue_waker();
+    let (mut app, divide, env) = two_light_modules();
+    app.set_visible_displays(vec![env]);
+    app.sync_watchers(&waker);
+    let handles = app.session.engine.watchers.light_list().unwrap().handles();
+    let first = loop {
+        match queue.recv_timeout(DEADLINE).expect("the first reading") {
+            Message::Lights(readings) => break readings,
+            other => app.watched_message_taken(&other),
+        }
+    };
+    assert!(first.iter().all(|(light, _)| light.0 == env));
+    app.watched_message_taken(&Message::Lights(first));
+    take_waiting(&app, &queue);
+    app.set_visible_displays(vec![env, divide]);
+    app.sync_watchers(&waker);
+    let next = loop {
+        match queue.recv_timeout(DEADLINE).expect("a reading with the new light") {
+            Message::Lights(readings) if readings.iter().any(|(light, _)| light.0 == divide) => break readings,
+            other => app.watched_message_taken(&other),
+        }
+    };
+    let watcher = app.session.engine.watchers.lights.as_ref().unwrap();
+    assert_eq!(watcher.in_flight(), 1, "the running handle sent it");
+    assert_eq!(
+        app.session.engine.watchers.light_list().unwrap().handles(),
+        handles,
+        "no thread started"
+    );
+    app.watched_message_taken(&Message::Lights(next));
+}
+
+/// Hiding every light and showing one again ends the old thread and starts
+/// a new one that sends a reading. The old thread let go of the shared
+/// list, so its count falls back to the new thread's.
+#[test]
+fn hiding_and_showing_the_lights_ends_the_old_thread() {
+    let (waker, queue) = queue_waker();
+    let (mut app, _divide, env) = two_light_modules();
+    app.sync_watchers(&waker);
+    let before = app.session.engine.watchers.light_list().unwrap().handles();
+    app.set_visible_displays(vec![env]);
+    app.sync_watchers(&waker);
+    let running = app.session.engine.watchers.light_list().unwrap().handles();
+    assert!(running > before, "the thread holds the list");
+    eventually("the first thread sends", || {
+        app.session.engine.watchers.lights.as_ref().unwrap().in_flight() == 1
+    });
+    take_waiting(&app, &queue);
+    app.set_visible_displays(Vec::new());
+    app.sync_watchers(&waker);
+    app.set_visible_displays(vec![env]);
+    app.sync_watchers(&waker);
+    let list = app.session.engine.watchers.light_list().unwrap().clone();
+    // One more for this test's own clone.
+    eventually("the old thread ends", || list.handles() == running + 1);
+    eventually("the new thread sends", || {
+        app.session.engine.watchers.lights.as_ref().unwrap().in_flight() == 1
+    });
+}
+
+/// After New, Open, and a device change, the new engine's light thread
+/// sends the light's value, read from the new engine's table.
+#[test]
+fn lights_update_after_new_open_and_a_device_change() {
+    let (waker, queue) = queue_waker();
+    let mut app = app();
+    app.watching = true;
+
+    // New.
+    assert!(app.replace(crate::Source::Empty));
+    let light = held_envelope(&mut app);
+    app.set_visible_displays(vec![light.0]);
+    app.process(4_800);
+    app.sync_watchers(&waker);
+    wait_until_lit(&mut app, &queue, light);
+
+    // Open.
+    take_waiting(&app, &queue);
+    let dir = crate::recovery::tests::TempDir::new("watching-open");
+    let patch = dir.0.join("held.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1, modules: [
+            PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 1.0}),
+            PatchModule(id: 2, kind: "loom.env.envelope@1"),
+        ], cables: [PatchCable(from: (1, "out"), to: (2, "gate"))])"#,
+    )
+    .unwrap();
+    assert!(app.replace(crate::Source::File(&patch)));
+    let light = level_light(&app, 2);
+    assert!(!app.session.lights.contains_key(&light), "a new session");
+    app.set_visible_displays(vec![light.0]);
+    app.process(4_800);
+    app.sync_watchers(&waker);
+    wait_until_lit(&mut app, &queue, light);
+
+    // A device change, on fake devices that play from a timer.
+    use crate::devices::fake::{self, Fake, Shared};
+    use crate::settings::{Change, Message as Prefs};
+    let fake = std::rc::Rc::new(Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]));
+    let args = crate::Args {
+        no_audio: false,
+        no_recovery: true,
+        ..crate::tests::app_args()
+    };
+    let mut app = crate::App::boot_with(args, std::rc::Rc::new(Shared(fake)));
+    let (waker, queue) = queue_waker();
+    app.watching = true;
+    let light = held_envelope(&mut app);
+    app.set_visible_displays(vec![light.0]);
+    app.sync_watchers(&waker);
+    wait_until_lit(&mut app, &queue, light);
+    take_waiting(&app, &queue);
+    let old = app.session.engine.watchers.light_list().unwrap().clone();
+    let generation = app.generation;
+    app.preferences(Prefs::Open);
+    app.preferences(Prefs::Audio(Change::Device(crate::preferences::DeviceChoice::Named(
+        "Fake B".into(),
+    ))));
+    assert_ne!(app.generation, generation, "a new engine");
+    assert!(!app.session.lights.contains_key(&light), "its values start again");
+    app.sync_watchers(&waker);
+    // Only this test's clone is left once the old thread ends, so no
+    // message of the old engine's can follow.
+    eventually("the old engine's thread ends", || old.handles() == 1);
+    wait_until_lit(&mut app, &queue, light);
+}

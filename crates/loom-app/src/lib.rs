@@ -1157,9 +1157,8 @@ impl App {
             peak_resets: self.peak_resets(),
             full_traces: self.session.full_traces,
         };
-        if self.session.engine.monitor.watched() != list {
-            self.session.engine.monitor.watch(list);
-        }
+        // An equal list changes nothing, so the thread is not woken.
+        self.session.engine.monitor.watch(list);
         // A display that left the screen, or lost its probe, keeps no trace.
         let shown: BTreeSet<(u32, usize)> =
             scene::scope_outputs(&self.session.controller, &self.session.visible_displays)

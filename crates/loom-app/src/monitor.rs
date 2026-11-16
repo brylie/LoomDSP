@@ -10,7 +10,7 @@ use crate::clip::{PeakNews, Peaks};
 use crate::history::LevelHistory;
 use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
 use crate::spectrum::SpectrumAnalyser;
-use crate::watcher::Outlet;
+use crate::watcher::{Outlet, Watched};
 use crate::xy::XyTrace;
 use loom_core::{MeterReading, PairChunk, ProbeId, ScopeChunk, Telemetry};
 use std::collections::{HashMap, HashSet};
@@ -374,7 +374,9 @@ impl Watcher {
 #[derive(Clone)]
 pub struct Monitor {
     telemetry: Arc<Mutex<Option<Telemetry>>>,
-    watch: Arc<Mutex<WatchList>>,
+    /// What the UI draws, which the thread waits on, so a change drains
+    /// early.
+    watch: Watched<WatchList>,
     sample_rate: f32,
     generation: u64,
 }
@@ -386,20 +388,26 @@ impl Monitor {
     pub fn new(telemetry: Telemetry, sample_rate: f32, generation: u64) -> Self {
         Self {
             telemetry: Arc::new(Mutex::new(Some(telemetry))),
-            watch: Arc::new(Mutex::new(WatchList::default())),
+            watch: Watched::default(),
             sample_rate,
             generation,
         }
     }
 
-    /// Tells the thread what the UI draws now.
+    /// Tells the thread what the UI draws now. A list that differs wakes it,
+    /// so it drains at once; an equal one changes nothing.
     pub fn watch(&self, list: WatchList) {
-        *self.watch.lock().unwrap_or_else(PoisonError::into_inner) = list;
+        self.watch.set(list);
     }
 
     /// What the UI draws, as last told.
     pub fn watched(&self) -> WatchList {
-        self.watch.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.watch.get().0
+    }
+
+    /// The watch list the thread waits on.
+    pub(crate) fn list(&self) -> &Watched<WatchList> {
+        &self.watch
     }
 
     /// The engine's sample rate.
@@ -436,7 +444,7 @@ impl Monitor {
 #[cfg(test)]
 impl Monitor {
     /// Reads the meter queues once and turns the readings into levels, as
-    /// `lights::Watch::read` reads the lights. For tests, which have no
+    /// `lights::OnScreen::read` reads the lights. For tests, which have no
     /// telemetry thread. One update, so the levels do not fall.
     pub fn read(&self) -> Vec<(ProbeId, Level)> {
         let mut levels = Levels::default();
@@ -488,40 +496,48 @@ pub fn changed(shown: &HashMap<ProbeId, MeterSteps>, levels: &[(ProbeId, Level)]
 }
 
 /// Drains the queues every [`INTERVAL`], or [`SCOPE_INTERVAL`] while a
-/// scope or a spectrum is on screen, and yields what changed on screen. The thread stops
-/// when the app closes.
+/// scope, a spectrum, or an XY scope is on screen, and yields what changed on
+/// screen. It waits on the watch list for up to that interval, so a change
+/// to what the UI draws drains at once. Each turn goes: wait, check closed,
+/// read the list, drain, compare, and send. The thread stops when the
+/// handle drops.
 pub fn run(monitor: &Monitor, tx: Outlet<Update>) {
     let telemetry = monitor.telemetry.lock().ok().and_then(|mut t| t.take());
-    if let Some(mut telemetry) = telemetry {
-        {
-            let mut watcher = Watcher::default();
-            while !tx.is_closed() {
-                let watch = monitor.watched();
-                let readings: Vec<MeterReading> = telemetry.meters().collect();
-                let mut update = watcher.take(
-                    &watch,
-                    &readings,
-                    telemetry.scope(),
-                    monitor.sample_rate,
-                    Instant::now(),
-                );
-                update.xy = watcher.take_pairs(&watch, telemetry.pairs(), monitor.sample_rate);
-                if !update.is_empty() {
-                    match tx.try_send(update.clone()) {
-                        Ok(()) => watcher.sent(&update),
-                        // The UI has not taken the last one yet: try again
-                        // next time, with fresh values.
-                        Err(e) if e.is_full() => {}
-                        Err(_) => break,
-                    }
-                }
-                std::thread::sleep(
-                    if watch.scopes.is_empty() && watch.spectra.is_empty() && watch.xy.is_empty() {
-                        INTERVAL
-                    } else {
-                        SCOPE_INTERVAL
-                    },
-                );
+    let Some(mut telemetry) = telemetry else {
+        return;
+    };
+    let mut watcher = Watcher::default();
+    // Nothing seen yet, so the first wait returns at once.
+    let mut seen = None;
+    let mut interval = INTERVAL;
+    loop {
+        tx.wait(&monitor.watch, seen, interval);
+        if tx.is_closed() {
+            break;
+        }
+        let (watch, version) = monitor.watch.get();
+        seen = Some(version);
+        interval = if watch.scopes.is_empty() && watch.spectra.is_empty() && watch.xy.is_empty() {
+            INTERVAL
+        } else {
+            SCOPE_INTERVAL
+        };
+        let readings: Vec<MeterReading> = telemetry.meters().collect();
+        let mut update = watcher.take(
+            &watch,
+            &readings,
+            telemetry.scope(),
+            monitor.sample_rate,
+            Instant::now(),
+        );
+        update.xy = watcher.take_pairs(&watch, telemetry.pairs(), monitor.sample_rate);
+        if !update.is_empty() {
+            match tx.try_send(update.clone()) {
+                Ok(()) => watcher.sent(&update),
+                // The UI has not taken the last one yet: try again next
+                // time, with fresh values.
+                Err(e) if e.is_full() => {}
+                Err(_) => break,
             }
         }
     }

@@ -1328,8 +1328,11 @@ fn a_running_engine_lights_the_envelope() {
     app.commit();
     app.process(4_800);
     // A level light draws its value as it is, with no fade.
-    let mut fades = vec![lights::Fade::default(); watch.lights.len()];
-    let _ = app.send(Message::Lights(watch.shown(&mut fades, Instant::now())));
+    let readings: Vec<f32> = watch.read().iter().map(|&(_, r)| r).collect();
+    let change = lights::Tracker::default()
+        .read(&watch.lights, &readings, Instant::now())
+        .expect("a new light's first reading is sent");
+    let _ = app.send(Message::Lights(change.snapshot));
     let level = tile_widget(&app, env, light).position;
     assert!(level > 0.5, "the gate is held: {level}");
 }
@@ -1352,18 +1355,14 @@ fn the_watcher_sends_a_moving_reduction_meter() {
     let entry = watch
         .lights
         .iter()
-        .position(|(light, _)| *light == (dynamics.0, meter))
+        .position(|entry| entry.light == (dynamics.0, meter))
         .unwrap();
-    let readings = |watch: &lights::Watch| watch.read().iter().map(|&(_, r)| r).collect::<Vec<f32>>();
+    let readings = |watch: &lights::OnScreen| watch.read().iter().map(|&(_, r)| r).collect::<Vec<f32>>();
+    let ranges: Vec<_> = watch.lights.iter().map(|entry| entry.range).collect();
+    let readouts: Vec<_> = watch.lights.iter().map(|entry| entry.readout).collect();
 
     app.process(480);
-    let quiet = lights::changed(
-        &vec![None; watch.lights.len()],
-        &readings(&watch),
-        &watch.ranges,
-        &watch.readouts,
-    )
-    .unwrap();
+    let quiet = lights::changed(&vec![None; watch.lights.len()], &readings(&watch), &ranges, &readouts).unwrap();
     assert_eq!(quiet[entry], Some(255), "no signal, no reduction");
 
     app.session
@@ -1372,8 +1371,7 @@ fn the_watcher_sends_a_moving_reduction_meter() {
         .unwrap();
     app.commit();
     app.process(4_800);
-    let loud = lights::changed(&quiet, &readings(&watch), &watch.ranges, &watch.readouts)
-        .expect("the meter moved, so it is sent");
+    let loud = lights::changed(&quiet, &readings(&watch), &ranges, &readouts).expect("the meter moved, so it is sent");
     assert!(loud[entry] < quiet[entry], "the bar moved down: {:?}", loud[entry]);
 }
 
@@ -1886,18 +1884,27 @@ fn a_one_sample_trigger_lights_the_divide_light() {
     let light = d.panel.widgets.iter().position(|w| w.binds("fired")).unwrap();
     let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![divide.0])));
     let watch = app.watched_lights().expect("the trigger light is on screen");
+    let mut tracker = lights::Tracker::default();
+    let shown = |tracker: &mut lights::Tracker, now| {
+        let readings: Vec<f32> = watch.read().iter().map(|&(_, r)| r).collect();
+        tracker
+            .read(&watch.lights, &readings, now)
+            .map(|change| change.snapshot)
+            .unwrap_or_default()
+    };
+    // The light is on the list before the engine runs, as on screen.
+    let start = Instant::now();
+    let _ = app.send(Message::Lights(shown(&mut tracker, start)));
 
     // The constant's rise is one trigger in the first frame, then 4 799
     // frames of 0.
     app.process(4_800);
-    let start = Instant::now();
-    let mut fades = vec![lights::Fade::default(); watch.lights.len()];
-    let _ = app.send(Message::Lights(watch.shown(&mut fades, start)));
+    let _ = app.send(Message::Lights(shown(&mut tracker, start)));
     assert_eq!(tile_widget(&app, divide, light).position, 1.0, "the trigger lit it");
 
     app.process(4_800);
     let later = start + lights::FADE;
-    let _ = app.send(Message::Lights(watch.shown(&mut fades, later)));
+    let _ = app.send(Message::Lights(shown(&mut tracker, later)));
     assert_eq!(
         tile_widget(&app, divide, light).position,
         0.0,

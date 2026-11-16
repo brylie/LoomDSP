@@ -192,3 +192,139 @@ fn keep_restarts_only_on_a_new_key() {
     keep(&mut slot, None::<&str>, start);
     assert!(slot.is_none(), "nothing wanted, nothing runs");
 }
+
+/// How long a test waits on a value, as a thread waits for its interval.
+/// Long enough that a wait that ends early shows it was woken.
+const LONG: Duration = Duration::from_secs(10);
+
+/// How soon a woken wait must end. A wake takes far less, so this holds on
+/// a busy machine too.
+const PROMPT: Duration = Duration::from_millis(100);
+
+/// A changed `set` moves the version, and an equal one leaves it as it was,
+/// so a test can tell from the version alone, with no timing.
+#[test]
+fn only_a_changed_set_moves_the_version() {
+    let value = Watched::<u32>::default();
+    assert_eq!(value.get(), (0, 0));
+    value.set(0);
+    assert_eq!(value.get(), (0, 0), "an equal set changes nothing");
+    value.set(3);
+    assert_eq!(value.get(), (3, 1));
+    value.set(3);
+    assert_eq!(value.get(), (3, 1));
+}
+
+/// A watcher on a watched value, whose thread runs `run` and reports
+/// through the channel it returns.
+fn watching<R: Send + 'static>(
+    value: &Watched<u32>,
+    run: impl FnOnce(Outlet<()>, Watched<u32>, mpsc::Sender<R>) + Send + 'static,
+) -> (Watcher, mpsc::Receiver<R>) {
+    let (waker, _queue) = waker();
+    let (report, reports) = mpsc::channel();
+    let shared = value.clone();
+    let watcher = Watcher::start_on(
+        &Ledger::default(),
+        1,
+        1,
+        waker,
+        |()| Message::Tick,
+        value,
+        move |outlet| run(outlet, shared, report),
+    );
+    (watcher, reports)
+}
+
+/// A new watcher has seen no version, so its first wait returns at once,
+/// as the light thread reads the table straight away.
+#[test]
+fn a_first_wait_returns_at_once() {
+    let value = Watched::<u32>::default();
+    let (_watcher, reports) = watching(&value, |outlet, value, report| {
+        let start = std::time::Instant::now();
+        outlet.wait(&value, None, LONG);
+        let _ = report.send(start.elapsed());
+    });
+    let waited = reports.recv_timeout(LONG).expect("the wait ended");
+    assert!(waited < PROMPT, "waited {waited:?}");
+}
+
+/// A `set` wakes a thread waiting on the value at once, long before its
+/// timeout.
+#[test]
+fn a_set_wakes_a_waiting_thread_at_once() {
+    let value = Watched::<u32>::default();
+    let (ready, waiting) = mpsc::channel();
+    let (_watcher, reports) = watching(&value, move |outlet, value, report| {
+        let (_, seen) = value.get();
+        let _ = ready.send(());
+        outlet.wait(&value, Some(seen), LONG);
+        let _ = report.send((std::time::Instant::now(), value.get().0));
+    });
+    waiting.recv_timeout(LONG).expect("the thread is about to wait");
+    let set_at = std::time::Instant::now();
+    value.set(1);
+    let (woke_at, read) = reports.recv_timeout(LONG).expect("the wait ended");
+    assert_eq!(read, 1, "it reads the new value");
+    assert!(
+        woke_at.duration_since(set_at) < PROMPT,
+        "woke after {:?}",
+        woke_at - set_at
+    );
+}
+
+/// A `set` made while the thread was busy reading is not lost: the version
+/// moved, so its next wait returns at once.
+#[test]
+fn a_set_made_while_reading_makes_the_next_wait_return_at_once() {
+    let value = Watched::<u32>::default();
+    let (reading, busy) = mpsc::channel();
+    let (release, read_done) = mpsc::channel::<()>();
+    let (_watcher, reports) = watching(&value, move |outlet, value, report| {
+        let (_, seen) = value.get();
+        // Busy, as a thread reading the display table is.
+        let _ = reading.send(());
+        let _ = read_done.recv();
+        let start = std::time::Instant::now();
+        outlet.wait(&value, Some(seen), LONG);
+        let _ = report.send(start.elapsed());
+    });
+    busy.recv_timeout(LONG).expect("the thread is reading");
+    value.set(1);
+    release.send(()).unwrap();
+    let waited = reports.recv_timeout(LONG).expect("the wait ended");
+    assert!(waited < PROMPT, "waited {waited:?}");
+}
+
+/// Dropping the handle wakes a thread waiting on its value, so it ends at
+/// once instead of after its timeout. The closed flag is the handle's, so
+/// another watcher on the same value goes on waiting.
+#[test]
+fn a_dropped_handle_ends_the_wait_at_once() {
+    let value = Watched::<u32>::default();
+    let wait = |outlet: Outlet<()>, value: Watched<u32>, report: mpsc::Sender<_>, ready: mpsc::Sender<()>| {
+        let (_, seen) = value.get();
+        let _ = ready.send(());
+        outlet.wait(&value, Some(seen), LONG);
+        let _ = report.send((std::time::Instant::now(), outlet.is_closed()));
+    };
+    let (ready, waiting) = mpsc::channel();
+    let other_ready = ready.clone();
+    let (watcher, reports) = watching(&value, move |outlet, value, report| wait(outlet, value, report, ready));
+    let (_other, others) = watching(&value, move |outlet, value, report| {
+        wait(outlet, value, report, other_ready);
+    });
+    waiting.recv_timeout(LONG).expect("one is about to wait");
+    waiting.recv_timeout(LONG).expect("both are about to wait");
+    let dropped_at = std::time::Instant::now();
+    drop(watcher);
+    let (woke_at, closed) = reports.recv_timeout(LONG).expect("the wait ended");
+    assert!(closed, "it was woken by its own drop");
+    assert!(
+        woke_at.duration_since(dropped_at) < PROMPT,
+        "woke after {:?}",
+        woke_at - dropped_at
+    );
+    assert!(others.recv_timeout(PROMPT).is_err(), "the other watcher still waits");
+}

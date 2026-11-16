@@ -295,7 +295,7 @@ impl App {
             CanvasEvent::ClearClip { module, widget } => self.reset_clip((module, widget), false),
             CanvasEvent::ResetMeter { module, widget } => self.reset_clip((module, widget), true),
             CanvasEvent::VisibleDisplays(ids) => {
-                self.session.visible_displays = ids;
+                self.set_visible_displays(ids);
                 self.sync_probes();
                 self.refresh_values();
             }

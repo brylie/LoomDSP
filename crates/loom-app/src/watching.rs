@@ -12,7 +12,7 @@
 //! by the bridge as it starts). The tests and the offscreen paths never
 //! send it, so no thread delivers a message a test did not ask for.
 
-use crate::watcher::{Ledger, Watcher, keep};
+use crate::watcher::{Ledger, Watched, Watcher, keep};
 use crate::{App, Message, audio_watch, bench, control, devices, input_watch, learn, lights, monitor, preferences};
 use loom_ui::Waker;
 
@@ -32,14 +32,47 @@ pub(crate) struct EngineWatchers {
     input: Option<Watcher>,
     /// The lights and readouts on screen (`lights.rs`).
     lights: Option<Watcher>,
+    /// The list of lights on screen that the light thread follows, and the
+    /// engine generation it was made for. A device change builds a new
+    /// engine but keeps these watchers, so a new generation gets a new list,
+    /// and no list is ever read with another engine's reader.
+    light_list: Option<(u64, Watched<Vec<lights::Entry>>)>,
     /// Meters, scopes, spectra, and pairs (`monitor.rs`).
     monitor: Option<Watcher>,
     /// Control changes, for mappings and learn mode (`learn.rs`).
     learn: Option<Watcher>,
 }
 
+impl EngineWatchers {
+    /// The light watch for `on_screen`, on this engine's shared list, which
+    /// it sets first: a running light thread reads the new list at once,
+    /// and a new one starts from it. None, and an empty list, when no light
+    /// is on screen.
+    fn light_watch(&mut self, generation: u64, on_screen: Option<lights::OnScreen>) -> Option<lights::Watch> {
+        if !matches!(&self.light_list, Some((made_for, _)) if *made_for == generation) {
+            self.light_list = Some((generation, Watched::default()));
+        }
+        let (_, list) = self.light_list.as_ref()?;
+        let Some(on_screen) = on_screen else {
+            list.set(Vec::new());
+            return None;
+        };
+        list.set(on_screen.lights);
+        Some(lights::Watch {
+            reader: on_screen.reader,
+            list: list.clone(),
+            generation,
+        })
+    }
+}
+
 #[cfg(test)]
 impl EngineWatchers {
+    /// The shared list of lights on screen, for a test.
+    pub(crate) fn light_list(&self) -> Option<&Watched<Vec<lights::Entry>>> {
+        self.light_list.as_ref().map(|(_, list)| list)
+    }
+
     /// True while none runs, as for a new engine.
     pub(crate) fn none_running(&self) -> bool {
         [&self.audio, &self.input, &self.lights, &self.monitor, &self.learn]
@@ -108,13 +141,15 @@ impl App {
             engine: self.session.controller.stats().clone(),
         });
         let input = self.input_watch();
-        let lights = self.watched_lights();
+        let on_screen = self.watched_lights();
         let monitor = Some(self.session.engine.monitor.clone());
         let learn = self.learn_watch();
         let midi_ports = self.midi_port_watch();
         let bench = self.reporter.clone();
+        let generation = self.generation;
 
         let engine = &mut self.session.engine.watchers;
+        let lights = engine.light_watch(generation, on_screen);
         let ledgers = &self.watchers.ledgers;
         keep(&mut engine.audio, audio, |key, watch| {
             Watcher::start(
@@ -141,24 +176,28 @@ impl App {
             )
         });
         keep(&mut engine.lights, lights, |key, watch| {
-            Watcher::start(
+            let list = watch.list.clone();
+            Watcher::start_on(
                 &ledgers.lights,
                 key,
                 LATEST,
                 waker.clone(),
                 Message::Lights,
+                &list,
                 move |outlet| {
                     lights::run(&watch, outlet);
                 },
             )
         });
         keep(&mut engine.monitor, monitor, |key, watch| {
-            Watcher::start(
+            let list = watch.list().clone();
+            Watcher::start_on(
                 &ledgers.monitor,
                 key,
                 LATEST,
                 waker.clone(),
                 Message::Telemetry,
+                &list,
                 move |outlet| {
                     monitor::run(&watch, outlet);
                 },

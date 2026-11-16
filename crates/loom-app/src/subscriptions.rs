@@ -49,11 +49,11 @@ impl App {
             .map(|(listening, heard)| heard.message(listening))
     }
 
-    /// The lights on screen and where their values live, or `None` when
-    /// there are none.
-    pub(crate) fn watched_lights(&self) -> Option<lights::Watch> {
+    /// The lights on screen and where their values live, with the reader of
+    /// this engine's table, or `None` when there are none.
+    pub(crate) fn watched_lights(&self) -> Option<lights::OnScreen> {
         let graph = self.session.controller.graph();
-        let (lights, (ranges, readouts)): (Vec<_>, (Vec<_>, Vec<_>)) = self
+        let lights: Vec<lights::Entry> = self
             .session
             .visible_displays
             .iter()
@@ -66,16 +66,39 @@ impl App {
             })
             .filter_map(|(light, display, range, readout)| {
                 let source = self.session.controller.display_source(ModuleId(light.0), display)?;
-                Some(((light, source), (range, readout)))
+                Some(lights::Entry {
+                    light,
+                    source,
+                    range,
+                    readout,
+                })
             })
-            .unzip();
-        (!lights.is_empty()).then(|| lights::Watch {
+            .collect();
+        (!lights.is_empty()).then(|| lights::OnScreen {
             reader: self.session.controller.display_reader(),
-            readouts,
             lights,
-            ranges,
-            generation: self.generation,
         })
+    }
+
+    /// Says which modules' displays are on screen, as the canvas reports. A
+    /// trigger light that leaves the screen is set dark, so it does not draw
+    /// lit for a frame when it comes back, before its first reading. A level
+    /// light keeps its last value, the best guess until then
+    /// (`docs/design/panels.md`, Redraw).
+    pub(crate) fn set_visible_displays(&mut self, ids: Vec<u32>) {
+        let triggers = |app: &App| -> std::collections::BTreeSet<lights::Light> {
+            app.watched_lights()
+                .into_iter()
+                .flat_map(|on| on.lights)
+                .filter(|entry| entry.source.kind() == loom_core::DisplayKind::Trigger)
+                .map(|entry| entry.light)
+                .collect()
+        };
+        let before = triggers(self);
+        self.session.visible_displays = ids;
+        for light in before.difference(&triggers(self)) {
+            self.session.lights.insert(*light, 0.0);
+        }
     }
 }
 

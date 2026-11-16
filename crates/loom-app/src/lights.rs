@@ -12,9 +12,16 @@
 //! fades to dark over [`FADE`]. The watcher is the only reader of trigger
 //! values, because a read takes them (`docs/design/panels.md`, Lights for
 //! one-sample triggers). It sends while a light fades, then nothing.
+//!
+//! Which lights are on screen is a list the app sets after each update
+//! ([`Watch`]). The thread follows the list and keeps each light's state by
+//! light ([`Tracker`]), so a pan or zoom neither restarts it nor disturbs a
+//! light that stays (`docs/design/panels.md`, Redraw, A pan or zoom does not
+//! disturb a light).
 
-use crate::watcher::Outlet;
+use crate::watcher::{Outlet, Watched};
 use loom_core::{DisplayKind, DisplayRange, DisplayReader, DisplaySource, ModuleDescriptor, Widget, WidgetKind};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
@@ -31,56 +38,138 @@ pub const FADE: Duration = Duration::from_millis(120);
 /// A light, by module ID and widget index.
 pub type Light = (u32, usize);
 
-/// The lights to watch, and where their values live.
+/// One light on screen, and where its value lives.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Entry {
+    pub light: Light,
+    pub source: DisplaySource,
+    /// The range a change is measured in, if it has one (see [`range`]). A
+    /// meter on a display value may read outside 0 to 1.
+    pub range: Option<DisplayRange>,
+    /// The range that says how the light writes its value, if it is a
+    /// readout (see [`readout`]).
+    pub readout: Option<DisplayRange>,
+}
+
+/// The lights on screen, with the reader of the engine whose table they
+/// read: what `App::watched_lights` builds.
+#[derive(Clone)]
+pub struct OnScreen {
+    pub reader: DisplayReader,
+    pub lights: Vec<Entry>,
+}
+
+impl OnScreen {
+    /// Reads every light once, as stored, with no thread: for `--frames`. A
+    /// trigger light reads 1.0 if it fired since the last read, with no fade,
+    /// so a trigger that fired during the run shows lit.
+    pub fn read(&self) -> Vec<(Light, f32)> {
+        self.lights
+            .iter()
+            .map(|entry| (entry.light, self.reader.read(entry.source)))
+            .collect()
+    }
+}
+
+/// What the light thread needs for its whole life: the engine's reader, the
+/// engine's generation, and the shared list of lights on screen, which the
+/// app sets after each update. A pan or zoom changes the list, not the
+/// watch, so it starts no thread (`docs/design/panels.md`, Redraw, At most
+/// one thread per engine). The list travels with the reader, so it is never
+/// read with another engine's reader.
 #[derive(Clone)]
 pub struct Watch {
     pub reader: DisplayReader,
-    pub lights: Vec<(Light, DisplaySource)>,
-    /// The range of each entry in `lights` that is a readout (see [`readout`]):
-    /// it says how the readout writes its value.
-    pub readouts: Vec<Option<DisplayRange>>,
-    /// The range of each entry in `lights`, if it has one (see [`range`]). A
-    /// meter on a display value may read outside 0 to 1.
-    pub ranges: Vec<Option<DisplayRange>>,
+    /// The lights on screen, as the app last set them.
+    pub list: Watched<Vec<Entry>>,
     /// Counts the engines the app has built. A new engine numbers its modules
     /// from 1 again, so the same lights can read a different table.
     pub generation: u64,
 }
 
 impl Hash for Watch {
-    // The watcher restarts when the set of lights changes, or when the
-    // engine does.
+    // The watcher restarts only with a new engine. Which lights are on
+    // screen is in the list, which the running thread follows.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.generation.hash(state);
-        self.lights.hash(state);
     }
 }
 
-impl Watch {
-    /// Reads every light once, as stored. A trigger light reads 1.0 if it
-    /// fired since the last read, with no fade.
-    pub fn read(&self) -> Vec<(Light, f32)> {
-        self.lights
-            .iter()
-            .map(|(light, s)| (*light, self.reader.read(*s)))
-            .collect()
+/// What the light thread keeps for one light.
+#[derive(Debug, Clone)]
+struct Kept {
+    /// Where the value was read: a new source starts the light again.
+    source: DisplaySource,
+    /// The step last sent, if any.
+    last: Option<i32>,
+    fade: Fade,
+    hold: ReadoutHold,
+}
+
+/// Each light's state on the light thread, kept by light, not by its place
+/// in the list: its last step sent, its fade, and its readout hold. Pure,
+/// with the time passed in, so a test can step it.
+#[derive(Debug, Default)]
+pub struct Tracker {
+    kept: HashMap<Light, Kept>,
+}
+
+/// What one read shows, when it differs from what was sent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    /// Every light on the list, as drawn.
+    pub snapshot: Vec<(Light, f32)>,
+    /// The step each one shows, in the same order.
+    steps: Vec<Option<i32>>,
+}
+
+impl Tracker {
+    /// Takes one read of `lights` at `now`, `readings` in the list's order,
+    /// and gives what to send if any light shows a different step. A light
+    /// that left the list is forgotten, and so is one whose source changed.
+    /// A light new to the list has no last step, so its first reading is
+    /// sent. A trigger light new to the list throws its first read away and
+    /// starts dark: the latch holds any trigger since it was last read,
+    /// however long ago.
+    pub fn read(&mut self, lights: &[Entry], readings: &[f32], now: Instant) -> Option<Change> {
+        let listed: HashMap<Light, DisplaySource> = lights.iter().map(|entry| (entry.light, entry.source)).collect();
+        self.kept.retain(|light, kept| listed.get(light) == Some(&kept.source));
+        let mut values = Vec::with_capacity(lights.len());
+        let mut last = Vec::with_capacity(lights.len());
+        for (entry, &reading) in lights.iter().zip(readings) {
+            let new = !self.kept.contains_key(&entry.light);
+            let kept = self.kept.entry(entry.light).or_insert_with(|| Kept {
+                source: entry.source,
+                last: None,
+                fade: Fade::default(),
+                hold: ReadoutHold::default(),
+            });
+            let mut value = match entry.source.kind() {
+                DisplayKind::Trigger => kept.fade.brightness(if new { 0.0 } else { reading }, now),
+                DisplayKind::Level => reading,
+            };
+            if let Some(range) = &entry.readout {
+                value = kept.hold.held(value, range, now);
+            }
+            values.push(value);
+            last.push(kept.last);
+        }
+        let ranges: Vec<_> = lights.iter().map(|entry| entry.range).collect();
+        let readouts: Vec<_> = lights.iter().map(|entry| entry.readout).collect();
+        let steps = changed(&last, &values, &ranges, &readouts)?;
+        Some(Change {
+            snapshot: lights.iter().map(|entry| entry.light).zip(values).collect(),
+            steps,
+        })
     }
 
-    /// Reads every light once, as drawn at `now`: a trigger light fades
-    /// after its last flash, with `fades` keeping when each one fired.
-    pub fn shown(&self, fades: &mut [Fade], now: Instant) -> Vec<(Light, f32)> {
-        self.lights
-            .iter()
-            .zip(fades)
-            .map(|((light, s), fade)| {
-                let value = self.reader.read(*s);
-                let shown = match s.kind() {
-                    DisplayKind::Trigger => fade.brightness(value, now),
-                    DisplayKind::Level => value,
-                };
-                (*light, shown)
-            })
-            .collect()
+    /// `change` reached the app: its steps are what the lights show now.
+    pub fn sent(&mut self, change: &Change) {
+        for ((light, _), &step) in change.snapshot.iter().zip(&change.steps) {
+            if let Some(kept) = self.kept.get_mut(light) {
+                kept.last = step;
+            }
+        }
     }
 }
 
@@ -195,44 +284,31 @@ pub fn changed(
     (steps != last).then_some(steps)
 }
 
-/// Holds each readout in a snapshot until its text may change. Pure, with `now`
-/// passed in, so a test can step time.
-pub fn hold_readouts(
-    snapshot: &mut [(Light, f32)],
-    readouts: &[Option<DisplayRange>],
-    holds: &mut [ReadoutHold],
-    now: Instant,
-) {
-    for ((entry, range), hold) in snapshot.iter_mut().zip(readouts).zip(holds) {
-        if let Some(range) = range {
-            entry.1 = hold.held(entry.1, range, now);
-        }
-    }
-}
-
-/// Reads the lights every [`INTERVAL`] and yields their values when one
-/// changes. The first reading is always sent. The thread stops when the
-/// watcher handle drops.
+/// Reads the lights on the watch's list and sends their values when one
+/// visibly changes. The first reading of each light is always sent. Each
+/// turn goes: wait, check closed, read the table, compare, and send. It
+/// waits on the list for up to [`INTERVAL`], so a new list is read at once,
+/// and a dropped handle ends the thread at once.
 pub fn run(watch: &Watch, tx: Outlet<Vec<(Light, f32)>>) {
-    {
-        let mut last = vec![None; watch.lights.len()];
-        let mut fades = vec![Fade::default(); watch.lights.len()];
-        let mut holds = vec![ReadoutHold::default(); watch.lights.len()];
-        while !tx.is_closed() {
-            let now = Instant::now();
-            let mut snapshot = watch.shown(&mut fades, now);
-            hold_readouts(&mut snapshot, &watch.readouts, &mut holds, now);
-            let readings: Vec<f32> = snapshot.iter().map(|&(_, r)| r).collect();
-            if let Some(levels) = changed(&last, &readings, &watch.ranges, &watch.readouts) {
-                match tx.try_send(snapshot) {
-                    Ok(()) => last = levels,
-                    // The UI has not taken the last one yet: try again next
-                    // time, with fresh values.
-                    Err(e) if e.is_full() => {}
-                    Err(_) => break,
-                }
+    let mut tracker = Tracker::default();
+    // Nothing seen yet, so the first wait returns at once.
+    let mut seen = None;
+    loop {
+        tx.wait(&watch.list, seen, INTERVAL);
+        if tx.is_closed() {
+            break;
+        }
+        let (lights, version) = watch.list.get();
+        seen = Some(version);
+        let readings: Vec<f32> = lights.iter().map(|entry| watch.reader.read(entry.source)).collect();
+        if let Some(change) = tracker.read(&lights, &readings, Instant::now()) {
+            match tx.try_send(change.snapshot.clone()) {
+                Ok(()) => tracker.sent(&change),
+                // The UI has not taken the last one yet: try again next
+                // time, with fresh values.
+                Err(e) if e.is_full() => {}
+                Err(_) => break,
             }
-            std::thread::sleep(INTERVAL);
         }
     }
 }
