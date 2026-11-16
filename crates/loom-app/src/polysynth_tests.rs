@@ -53,6 +53,18 @@ fn options(group: A11yNode<'_>) -> Vec<String> {
         .collect()
 }
 
+/// The name of the one checked option inside a radio group.
+fn checked(group: A11yNode<'_>) -> String {
+    let on: Vec<String> = group
+        .children()
+        .iter()
+        .filter(|child| child.toggled() == Some(accesskit::Toggled::True))
+        .filter_map(|child| child.name().map(str::to_string))
+        .collect();
+    assert_eq!(on.len(), 1, "one option is checked: {on:?}");
+    on[0].clone()
+}
+
 /// The control for `param` on `module`'s tile.
 fn tile_control<'a>(tree: &'a A11yTree, module: u32, label: &str) -> A11yNode<'a> {
     tree.node_by_id(&tile_id(module)).node(label)
@@ -215,6 +227,7 @@ fn a_screen_reader_finds_voice_assigners_controls() {
     let assign = add_assigner(&mut ui);
     let tree = ui.a11y_tree();
     assert_eq!(options(tile_control(&tree, assign, "Mode")), ["Legato", "Retrigger"]);
+    assert_eq!(checked(tile_control(&tree, assign, "Mode")), "Legato");
     let voices = tile_control(&tree, assign, "Voices");
     assert_eq!(voices.role(), Role::Slider);
     assert_eq!(voices.range(), Some((1.0, 16.0)));
@@ -231,6 +244,7 @@ fn a_screen_reader_finds_voice_assigners_controls() {
     ui.a11y_set_value(&tile_id(assign).with("param").with("voices"), 8.0);
     let tree = ui.a11y_tree();
     assert_eq!(options(tile_control(&tree, assign, "Mode")), ["Oldest", "Quietest"]);
+    assert_eq!(checked(tile_control(&tree, assign, "Mode")), "Oldest");
     let control = tile_control(&tree, assign, "Unison");
     assert_eq!(control.role(), Role::Slider);
     assert_eq!(control.range(), Some((1.0, 4.0)));
@@ -247,6 +261,9 @@ fn voice_assigners_unison_follows_the_mode_that_plays() {
     let assign = add_assigner(&mut ui);
     store(&mut ui, assign, 8.0, 2.0);
     assert!(unison_on_tile(&mut ui, assign));
+    // A stored Legato plays Oldest, and Mode says so.
+    let tree = ui.a11y_tree();
+    assert_eq!(checked(tile_control(&tree, assign, "Mode")), "Oldest");
     store(&mut ui, assign, 8.0, 0.0);
     assert!(unison_on_tile(&mut ui, assign));
     store(&mut ui, assign, 1.0, 0.0);

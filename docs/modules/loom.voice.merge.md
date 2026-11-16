@@ -45,7 +45,7 @@ Use Voice merge where a bundle should become one signal. Sum adds the voices for
 
 The **Gate** output says whether the voice Out follows is playing. In Last, Lowest, and Highest it carries that voice's gate. When the choice moves from one held voice to another, it stays high and does not retrigger. When every voice stops, it falls, and Out keeps the last choice. In Sum and Average it is high while any voice plays. With nothing patched to the Gate input, every voice counts as playing, so the output is 1.
 
-A voice whose In value is not a number, or is infinite, never wins Lowest or Highest over a voice with a real value. If every playing voice is broken, voice 1 is chosen and its value passes through.
+A voice whose In value is not a number, or is infinite, never wins Lowest or Highest over a voice with a real value. If every playing voice is broken, the lowest playing voice is chosen and its value passes through.
 
 ## A bass line from the lowest note
 

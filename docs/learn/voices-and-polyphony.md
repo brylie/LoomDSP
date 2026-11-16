@@ -94,7 +94,7 @@ so an announcement later in the buffer cannot change an earlier note.
 
 Note input hands out voices to MIDI notes. **Voice assigner** (`loom.voice.assign`) does the same for notes that arrive on cables: a sequencer, a Euclidean pattern, a random melody. Each rising edge on its `gate` input starts a note, and each fall ends it. The allocator gives the note an output voice, exactly as for a key.
 
-Why bother, when a mono sequencer can play a mono synth? Because of the release. On one voice, a new note cuts off the tail of the one before. Into an 8-voice assigner, each note takes a new voice, so its tail rings on while the next note plays. A sequencer that should do this needs a gap between its gates: a tied step, with the gate held while the pitch moves, is one note that glides, on one voice.
+Why bother, when a mono sequencer can play a mono synth? Because of the release. On one voice, a new note cuts off the tail of the one before. Into an 8-voice assigner, each note takes a new voice, so its tail rings on while the next note plays. A sequencer that should do this needs a gap between its gates: a tied step, with the gate held while the pitch moves, is one note on one voice, with no new attack.
 
 **A note is known by its input voice, not its pitch.** Each input voice of `gate` carries one note at a time, so the assigner does not need a note number. Two input voices on the same pitch are two notes, because something upstream already decided they are separate. While a note sounds, its output voice follows its own input voice's pitch, velocity, pressure, and timbre.
 
@@ -102,7 +102,7 @@ Why bother, when a mono sequencer can play a mono synth? Because of the release.
 
 **Unison** gives each note several voices, taken and released together. They play the same pitch until a Voice spread after the assigner detunes them. This is a different thing from a [stack](unison.md), which copies one sound inside a module.
 
-Voice merge can go the other way: it takes one voice out of a bundle. In Lowest mode with the pitch bundle on `in`, its `out` is the lowest held note and its `gate` output plays that note's envelope. Releasing the lowest key hands the bass to the next one without a new attack, as a mono keyboard does.
+Voice merge can go the other way: it takes one voice out of a bundle. In Lowest mode with the pitch bundle on `in`, its `out` is the lowest held note and its `gate` output drives one envelope for the bass. Releasing the lowest key hands the bass to the next one without a new attack, as a mono keyboard does.
 
 ## Why there is no event cable
 

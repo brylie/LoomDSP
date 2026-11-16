@@ -550,10 +550,13 @@ pub fn update_panel_values_dragging(
             } else {
                 match d.control_param(w, &node.params) {
                     Some(p) => {
-                        // The knob spans the selected range (control-ranges.md).
+                        // The knob spans the selected range (control-ranges.md),
+                        // and a choice filtered by a voice count offers only
+                        // the choices for that count (ADR-0030), so its
+                        // position counts from the first one offered.
                         let spec = &node
-                            .spec(p)
-                            .expect("node.spec covers every parameter index of the node");
+                            .control_spec(p)
+                            .expect("node.control_spec covers every parameter index of the node");
                         let value = node.params[p];
                         let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
                         let assigned = match &dragged {

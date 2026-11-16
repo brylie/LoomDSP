@@ -57,11 +57,11 @@ Use Voice assigner to play notes from any source on several voices: a sequencer,
 
 - **Nothing plays with no cable on Gate.** Each rising edge on an input voice's gate starts a note, and its fall ends it.
 - **How many notes can arrive at once** is the widest of the Pitch, Gate, Velocity, Pressure, and Timbre cables. A mono pitch and a mono gate give one note per edge. A 4-voice pitch bundle with a mono gate gives a 4-note chord per edge.
-- **A note follows its input voice.** While its gate stays high, its output voice follows that input voice's pitch, velocity, pressure, and timbre. A pitch that moves while the gate stays high glides on the same voice, with no new attack. So a sequencer needs a gap between its gates for release tails to overlap on different voices.
+- **A note follows its input voice.** While its gate stays high, its output voice follows that input voice's pitch, velocity, pressure, and timbre. A pitch that moves while the gate stays high changes pitch on the same voice, with no new attack. So a sequencer needs a gap between its gates for release tails to overlap on different voices.
 - **A stolen note stays silent** until its input gate rises again.
-- **Voices 1, the default, is a mono pass-through** with last-note priority, in Legato or Retrigger. When the newest note ends, the one held before it returns, at its own velocity. Note input plays a returned note at the velocity of the last key pressed.
-- **Unison** gives each note that many voices, taken and released together. Put a Voice spread after the module to detune them. Unison is hidden in the one-voice modes, where it does nothing.
-- **Quietest** needs the envelopes after the module patched back to Level. With nothing on Level, Quietest steals like Oldest.
+- **At Voices 1, the default, it plays one note at a time,** with last-note priority, in Legato or Retrigger. Set Voices above 1 to let notes overlap. When the newest note ends, the one held before it returns, at its own velocity. Note input plays a returned note at the velocity of the last key pressed.
+- **Unison** gives each note that many voices, taken and released together. Put a Voice spread after the module to detune them. Unison is hidden in the one-voice modes, where it does nothing. Voices counts output voices, so 8 voices at Unison 2 play 4 notes.
+- **Quietest** needs the envelopes after the module patched back to Level. With nothing on Level, Quietest steals like Oldest. The Level cable closes a feedback loop; the compiler reports where it inserts a one-sample delay.
 
 ## Example patch
 
