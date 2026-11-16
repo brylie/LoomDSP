@@ -407,11 +407,17 @@ fn a_late_reading_for_a_trigger_light_that_left_is_ignored() {
     show(&mut ui, Vec::new());
     // Sent before the light left, and delivered after.
     let _ = ui.app_mut().send(crate::Message::Lights(vec![(trigger, 0.6)]));
+    let position = |ui: &crate::ui_test::Ui| {
+        let snapshot = ui.app().ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|t| t.id == trigger.0).expect("a tile");
+        tile.widgets[trigger.1].position
+    };
+    // Off screen, the snapshot and the accessibility tree still read the
+    // light, so the late reading must not reach it there either.
+    assert_eq!(position(&ui), 0.0, "the late reading is ignored off screen");
     show(&mut ui, vec![trigger.0]);
     ui.redraw();
-    let snapshot = ui.app().ui_snapshot();
-    let tile = snapshot.tiles.iter().find(|t| t.id == trigger.0).expect("a tile");
-    assert_eq!(tile.widgets[trigger.1].position, 0.0, "the late reading is ignored");
+    assert_eq!(position(&ui), 0.0, "the light comes back dark");
 }
 
 /// A change that reaches the app after its light left the list does not
