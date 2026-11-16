@@ -557,7 +557,10 @@ pub fn update_panel_values_dragging(
                         let spec = &node
                             .control_spec(p)
                             .expect("node.control_spec covers every parameter index of the node");
-                        let value = node.params[p];
+                        // The value the module plays: a stored choice the
+                        // count does not offer reads as the first one offered,
+                        // so the position and the text agree.
+                        let value = spec.effective_choice(node.params[p]);
                         let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
                         let assigned = match &dragged {
                             Some((key, reach)) if *key == (id, p) => std::slice::from_ref(reach),

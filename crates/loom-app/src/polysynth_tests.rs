@@ -264,6 +264,7 @@ fn voice_assigners_unison_follows_the_mode_that_plays() {
     // A stored Legato plays Oldest, and Mode says so.
     let tree = ui.a11y_tree();
     assert_eq!(checked(tile_control(&tree, assign, "Mode")), "Oldest");
+    assert_eq!(tile_control(&tree, assign, "Mode").description(), Some("Oldest"));
     store(&mut ui, assign, 8.0, 0.0);
     assert!(unison_on_tile(&mut ui, assign));
     store(&mut ui, assign, 1.0, 0.0);
