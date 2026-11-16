@@ -73,3 +73,30 @@ fn space_has_its_sizes_and_no_children() {
     assert!(space.children.is_empty());
     assert_eq!(Element::stack([]).kind, Kind::Stack);
 }
+
+/// Only text has a colour: a debug build panics on `.colour` for any other
+/// element, so a mistake shows at once instead of drawing nothing.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "only text has a colour")]
+fn colour_is_for_text_only() {
+    let _ = Element::row([]).colour(loom_ui_core::Color::WHITE);
+}
+
+/// The look's setters set what they name, and a text keeps its colour.
+#[test]
+fn the_look_setters_set_what_they_name() {
+    let white = loom_ui_core::Color::WHITE;
+    let element = Element::column([])
+        .background(white)
+        .border(2.0, white)
+        .radius(4.0)
+        .clip();
+    assert_eq!(element.look.background, Some(white));
+    assert_eq!(element.look.border, Some((2.0, white)));
+    assert_eq!(element.look.radius, 4.0);
+    assert!(element.look.clip && element.look.draws_box());
+    assert_eq!(element.look.border_width(), 2.0);
+    let text = Element::text("a", STYLE).colour(white);
+    assert!(matches!(text.kind, Kind::Text { colour: Some(c), .. } if c == white));
+}
