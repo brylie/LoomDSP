@@ -295,3 +295,23 @@ fn the_large_reference_patch_opens_and_shows_its_voice_count() {
     let merged = output_hover(&ui, LARGE_MERGE);
     assert!(!merged.contains("voices"), "{merged}");
 }
+
+/// MIDI Note's Mode reads the choice it plays as checked, through the same
+/// tile code as Voice assigner: Oldest at the polysynth's 8 voices, and
+/// Legato on a new MIDI Note at its default of one voice.
+#[test]
+fn midi_notes_mode_reads_its_checked_choice() {
+    let mut ui = Ui::open("polysynth.ron");
+    let tree = ui.a11y_tree();
+    assert_eq!(checked(tile_control(&tree, 1, "Mode")), "Oldest");
+    let note = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("loom.midi.note")
+        .expect("a built-in module");
+    ui.app_mut().commit();
+    ui.redraw();
+    let tree = ui.a11y_tree();
+    assert_eq!(checked(tile_control(&tree, note.0, "Mode")), "Legato");
+}

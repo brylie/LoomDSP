@@ -667,7 +667,7 @@ The large reference patch:
 Cost:
 
 - [ ] `examples/patches/polysynth.ron`, with 8 notes held, runs within the NFR-PERF-01 budget on the reference machine, and the result is recorded in `docs/benchmarks/` with the machine named (benchmark; manual, on the machine, Manual QA: M2 [#643](https://github.com/brylie/LoomDSP/issues/643)).
-- [x] `examples/patches/polysynth-large.ron`, with 8 notes held, is measured on the reference machine and the result is recorded in `docs/benchmarks/` with the machine named, the module count, and the module runs per block, whether or not it is within the budget (benchmark; manual, Manual QA: M2 [#643](https://github.com/brylie/LoomDSP/issues/643)).
+- [x] `examples/patches/polysynth-large.ron`, with 8 notes held, is measured on the reference machine and the result is recorded in `docs/benchmarks/` with the machine named, the module count, and the module runs per block, whether or not it is within the budget (benchmark; recorded in [`docs/benchmarks/2026-11-16-polysynth-large.md`](../benchmarks/2026-11-16-polysynth-large.md); a person's budget check stays on Manual QA: M2 [#643](https://github.com/brylie/LoomDSP/issues/643)).
 
 ## Out of scope
 
