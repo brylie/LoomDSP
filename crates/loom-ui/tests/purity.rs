@@ -2,16 +2,19 @@
 //! section 1, rule 1, and section 2, rule 9).
 //!
 //! 1. **Its required dependencies are `loom-ui-core`, `taffy`, the layout
-//!    engine, and `accesskit`,** the accessibility tree's types, which are
-//!    plain data with no toolkit. No LoomDSP crate. The window shell's
-//!    `winit`, `wgpu`, `pollster`, and `accesskit_winit` are optional, and
-//!    only the `shell` feature turns them on, so a build without it has no
-//!    window toolkit (plan step 2.2).
+//!    engine, `accesskit`, the accessibility tree's types, and the text and
+//!    painting crates `parley`, `fontique`, `swash`, `etagere`, and
+//!    `bytemuck`,** none of them a toolkit. No LoomDSP crate. The window
+//!    shell's `winit`, `wgpu`, `pollster`, and `accesskit_winit` are
+//!    optional, and only the `shell` feature turns them all on, so a build
+//!    without it has no window toolkit (plan step 2.2). The `gpu` feature
+//!    turns on `wgpu` alone, for the paint renderer.
 //!    Only `layout.rs` names taffy, so no taffy type reaches the crate's
 //!    API (decision of 2026-11-14).
 //! 2. **No source file names a window toolkit** (`winit`, `wgpu`, or Iced),
-//!    test files included, except the window shell: `shell.rs` and the
-//!    files under `shell/`. `accesskit_winit` counts as `winit`, so only
+//!    test files included, except the window shell, `shell.rs` and the
+//!    files under `shell/`, and the paint renderer, `paint/gpu.rs` and the
+//!    files under `paint/gpu/`, which name `wgpu` only. `accesskit_winit` counts as `winit`, so only
 //!    the shell names the screen reader adapter; the tree's types
 //!    (`accesskit`) may be named anywhere. Iced is named nowhere.
 //! 3. **No source file reads the clock,** test files aside. Every call
@@ -24,10 +27,15 @@ use std::path::{Path, PathBuf};
 
 /// The dependencies users of the crate get: the required ones, then the
 /// shell's.
-const ALLOWED: [&str; 7] = [
+const ALLOWED: [&str; 12] = [
     "dependencies.loom-ui-core.workspace",
     "dependencies.taffy.workspace",
     "dependencies.accesskit",
+    "dependencies.parley.workspace",
+    "dependencies.fontique.workspace",
+    "dependencies.swash.workspace",
+    "dependencies.etagere.workspace",
+    "dependencies.bytemuck.workspace",
     "dependencies.winit",
     "dependencies.wgpu",
     "dependencies.pollster",
@@ -42,6 +50,10 @@ const TOOLKITS: [&str; 4] = ["winit", "wgpu", "iced::", "iced_"];
 
 /// Iced, which no file names, the shell included.
 const ICED: [&str; 2] = ["iced::", "iced_"];
+
+/// A window toolkit or Iced: what the paint renderer must not name. It
+/// names `wgpu`, and nothing that makes a window.
+const WINDOW: [&str; 3] = ["winit", "iced::", "iced_"];
 
 /// The layout engine, which only `layout.rs` names.
 const TAFFY: [&str; 1] = ["taffy"];
@@ -143,6 +155,12 @@ fn is_shell(path: &Path) -> bool {
     path == Path::new("shell.rs") || path.starts_with("shell")
 }
 
+/// True for the paint renderer's files: `paint/gpu.rs` and those under
+/// `paint/gpu/`.
+fn is_paint_gpu(path: &Path) -> bool {
+    path == Path::new("paint/gpu.rs") || path.starts_with("paint/gpu")
+}
+
 /// The line in `manifest` that declares `name` as a dependency.
 fn dependency_line<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
     manifest
@@ -151,8 +169,9 @@ fn dependency_line<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
         .find(|line| line.split('=').next().is_some_and(|key| key.trim() == name))
 }
 
-/// The crate depends on `loom-ui-core`, `taffy`, and `accesskit`, and on the shell's
-/// crates only as optional ones that the `shell` feature turns on.
+/// The crate depends on `loom-ui-core`, `taffy`, `accesskit`, and the text
+/// and painting crates, and on the shell's crates only as optional ones
+/// that the `shell` feature turns on.
 #[test]
 fn the_required_dependencies_are_loom_ui_core_and_taffy() {
     let manifest = include_str!("../Cargo.toml");
@@ -171,15 +190,30 @@ fn the_required_dependencies_are_loom_ui_core_and_taffy() {
 }
 
 /// No source file names a window toolkit, except the shell, which names
-/// winit and wgpu and never Iced.
+/// winit and wgpu and never Iced, and the paint renderer, which names wgpu
+/// alone.
 #[test]
 fn no_source_file_names_a_window_toolkit() {
-    let (scanned, found) = scan(&TOOLKITS, |path| !is_shell(path));
+    let (scanned, found) = scan(&TOOLKITS, |path| !is_shell(path) && !is_paint_gpu(path));
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
     let (shell, found) = scan(&ICED, is_shell);
     assert!(shell >= 1, "the scan found the shell's files, not {shell}");
     assert_eq!(found, Vec::<String>::new());
+    let (paint, found) = scan(&WINDOW, is_paint_gpu);
+    assert!(paint >= 1, "the scan found the paint renderer's files, not {paint}");
+    assert_eq!(found, Vec::<String>::new());
+}
+
+/// The `gpu` feature turns on wgpu alone, and the shell turns it on, so the
+/// paint renderer needs no window.
+#[test]
+fn the_gpu_feature_is_wgpu_alone() {
+    let manifest = include_str!("../Cargo.toml");
+    let gpu = dependency_line(manifest, "gpu").expect("the gpu feature is declared");
+    assert_eq!(gpu, "gpu = [\"dep:wgpu\"]");
+    let shell = dependency_line(manifest, "shell").expect("the shell feature is declared");
+    assert!(shell.contains("\"gpu\""), "`shell` turns on gpu: {shell}");
 }
 
 /// Only `layout.rs` names taffy, so the crate's API holds no taffy type.
@@ -242,6 +276,14 @@ let due = now + delay;
         ("runtime.rs", false),
     ] {
         assert_eq!(is_shell(Path::new(path)), shell, "{path}");
+    }
+    for (path, paint) in [
+        ("paint/gpu.rs", true),
+        ("paint/gpu/tests.rs", true),
+        ("paint/plan.rs", false),
+        ("paint.rs", false),
+    ] {
+        assert_eq!(is_paint_gpu(Path::new(path)), paint, "{path}");
     }
     assert_eq!(
         dependency_line("winit = { workspace = true, optional = true }", "winit"),

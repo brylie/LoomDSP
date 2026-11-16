@@ -20,7 +20,7 @@ use crate::controls::{
     range_track, select_box, xy_area, xy_bar_at, xy_edge_ring, xy_nearest_edge, xy_position, xy_throw,
 };
 use crate::draft::{DraftSubmit, TypedDraft};
-use crate::gpu::{Cable, Overlay, Shape};
+use crate::gpu::{Cable, Overlay};
 use crate::hover::{HoverTarget, HoverTimer};
 use crate::reaction::Reaction;
 use crate::scene::{
@@ -29,6 +29,7 @@ use crate::scene::{
 use crate::theme::Palette;
 use crate::tile_text::{self, LABEL_SIZE, TITLE_SIZE, TextKind};
 use crate::trace::ScopeTraces;
+use loom_ui::paint::Shape;
 use loom_ui_core::{
     Color, Cursor, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, Vector,
 };

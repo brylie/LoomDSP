@@ -1,8 +1,8 @@
-//! What the canvas paints above its scene, as plain data for its own
-//! renderer: boxes and glyphs in layers, in the order they were painted.
+//! What an element paints, as plain data for the renderer: boxes and
+//! glyphs in layers, in the order they were painted.
 //!
-//! [`ListPainter`] is the [`TextPainter`] the canvas paints through. It
-//! sets text with [`CanvasText`], so a measured box and the glyphs drawn
+//! [`ListPainter`] is the [`TextPainter`] a host paints through. It
+//! sets text with [`Typesetter`], so a measured box and the glyphs drawn
 //! in it come from one layout.
 //!
 //! Order (the `Painter` contract): a later piece is over an earlier one.
@@ -11,9 +11,7 @@
 //! before it. [`Painter::end_layer`] starts a new layer with the clip of
 //! the one before, so what follows is still over what came before.
 
-use super::CanvasText;
-use crate::painter::{Painter, Quad, TextMeasure, TextRun, TextStyle, Vertical};
-use crate::tile_text::Align;
+use super::{Align, Painter, Quad, TextMeasure, TextRun, TextStyle, Typesetter, Vertical};
 use loom_ui_core::{Color, Point, Rect, Size};
 use parley::{FontData, PositionedLayoutItem};
 use std::cell::RefCell;
@@ -89,7 +87,8 @@ pub struct PaintList {
     pub(crate) glyphs: Vec<PlacedGlyph>,
     /// The faces the glyphs name.
     pub(crate) faces: Vec<Face>,
-    /// The layers, back to front. The first is the canvas's own.
+    /// The layers, back to front. The first is cut to the bounds the list
+    /// was made with.
     pub(crate) layers: Vec<Layer>,
     /// The clips of the layers begun and not ended, outermost first.
     open: Vec<Rect>,
@@ -163,19 +162,19 @@ impl PaintList {
     }
 }
 
-/// Paints into a [`PaintList`], setting text with a [`CanvasText`].
+/// Paints into a [`PaintList`], setting text with a [`Typesetter`].
 ///
 /// It borrows the text only inside each call, never across one, so a
 /// paint step may measure between two pieces of text, and nothing it calls
 /// can find the text already borrowed.
 pub struct ListPainter<'a> {
-    text: &'a RefCell<CanvasText>,
+    text: &'a RefCell<Typesetter>,
     list: &'a mut PaintList,
 }
 
 impl<'a> ListPainter<'a> {
     /// Paints into `list` with `text`.
-    pub fn new(text: &'a RefCell<CanvasText>, list: &'a mut PaintList) -> Self {
+    pub fn new(text: &'a RefCell<Typesetter>, list: &'a mut PaintList) -> Self {
         Self { text, list }
     }
 }

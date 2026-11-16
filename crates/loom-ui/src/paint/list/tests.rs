@@ -2,7 +2,7 @@
 //! measuring and painting.
 
 use super::*;
-use crate::painter::Weight;
+use crate::paint::Weight;
 
 /// The canvas's place in the tests.
 const BOUNDS: Rect = Rect {
@@ -42,8 +42,8 @@ fn quad(x: f32) -> Quad {
 }
 
 /// Canvas text, or `None` with no system font, where glyph tests skip.
-fn text() -> Option<RefCell<CanvasText>> {
-    let mut text = CanvasText::new();
+fn text() -> Option<RefCell<Typesetter>> {
+    let mut text = Typesetter::new();
     (text.measure("x", style(), None).width > 0.0).then(|| RefCell::new(text))
 }
 
@@ -76,7 +76,7 @@ fn batches_keep_the_call_order() {
 /// the layer around it, however deep.
 #[test]
 fn layers_nest_and_restore_their_clip() {
-    let text = RefCell::new(CanvasText::new());
+    let text = RefCell::new(Typesetter::new());
     let mut list = PaintList::new(BOUNDS);
     let inner = Rect::new(Point::new(200.0, 200.0), Size::new(50.0, 50.0));
     let innermost = Rect::new(Point::new(210.0, 210.0), Size::new(5.0, 5.0));
@@ -97,7 +97,7 @@ fn layers_nest_and_restore_their_clip() {
 /// A default list paints into a layer with no clip of its own.
 #[test]
 fn a_default_list_starts_a_layer() {
-    let text = RefCell::new(CanvasText::new());
+    let text = RefCell::new(Typesetter::new());
     let mut list = PaintList::default();
     assert!(list.is_empty());
     ListPainter::new(&text, &mut list).quad(quad(0.0));
@@ -165,7 +165,7 @@ fn glyphs_carry_the_run_and_share_a_face() {
 /// out and the glyphs drawn come from one layout.
 #[test]
 fn measure_and_paint_share_one_layout() {
-    let text = RefCell::new(CanvasText::new());
+    let text = RefCell::new(Typesetter::new());
     let mut list = PaintList::new(BOUNDS);
     let mut painter = ListPainter::new(&text, &mut list);
     let measured = painter.measure("Resonance", style(), None);
@@ -193,7 +193,7 @@ fn a_wrapped_run_breaks_at_its_width() {
 /// parent is cut to nothing.
 #[test]
 fn a_nested_layer_is_cut_to_its_parent() {
-    let text = RefCell::new(CanvasText::new());
+    let text = RefCell::new(Typesetter::new());
     let mut list = PaintList::new(BOUNDS);
     let parent = Rect::new(Point::new(200.0, 200.0), Size::new(50.0, 50.0));
     let across = Rect::new(Point::new(240.0, 190.0), Size::new(30.0, 30.0));

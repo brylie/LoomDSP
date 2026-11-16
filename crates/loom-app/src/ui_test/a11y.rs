@@ -196,6 +196,11 @@ impl<'a> A11yNode<'a> {
         self.raw().description()
     }
 
+    /// Its checked state, for a radio option, a toggle, or a check box.
+    pub fn toggled(&self) -> Option<accesskit::Toggled> {
+        self.raw().toggled()
+    }
+
     /// True when it offers `action`.
     pub fn offers(&self, action: Action) -> bool {
         self.raw().supports_action(action)

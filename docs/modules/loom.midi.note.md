@@ -85,3 +85,4 @@ Patch(
 - [Triggers and gates](../learn/triggers-and-gates.md)
 - [Sine patch](../../examples/patches/sine.ron)
 - [Polysynth patch](../../examples/patches/polysynth.ron)
+- [Voice Assigner](loom.voice.assign.md)

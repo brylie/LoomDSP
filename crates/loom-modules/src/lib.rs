@@ -85,6 +85,7 @@ pub static ALL: &[&ModuleDescriptor] = &[
     &voice::MERGE,
     &voice::SPLIT,
     &voice::SPREAD,
+    &voice::ASSIGN,
     &midi::CONTROLLER_IN,
     &display::METER,
     &display::SCOPE,

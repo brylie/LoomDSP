@@ -34,6 +34,11 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "gate",
         "A huge gate is a real rising edge, so the envelope really plays.",
     ),
+    (
+        "loom.voice.assign",
+        "gate",
+        "A huge gate is a real rising edge, so a note really plays, and its released voice holds the note's values until its next note (polyphony spec, rule 24).",
+    ),
     ("loom.osc.pulse", "pitch", OWN_PHASE_PITCH),
     ("loom.osc.saw", "pitch", OWN_PHASE_PITCH),
     ("loom.osc.sine", "pitch", OWN_PHASE_PITCH),
@@ -136,11 +141,13 @@ fn all_input_excused(id: &str, option: Option<(&str, f32)>) -> bool {
         .any(|(entry, excused, _)| *entry == id && (excused.is_none() || *excused == option))
 }
 
-/// Modules from [`ALL_INPUT_EXCEPTIONS`] that keep the huge value with no later
+/// Modules that keep the huge value with no later
 /// input to replace it. On port defaults, a trigger rises once, as the hold
-/// starts, and never again, so Sample and Hold rightly holds what it took. On busy
-/// inputs its next trigger replaces it, so it stays bounded there.
-const HOLDS_UNTIL_NEXT_TRIGGER: &[&str] = &["loom.rand.sample-hold"];
+/// starts, and never again, so Sample and Hold rightly holds what it took, and
+/// Voice assigner's released voice holds its note's pitch (polyphony spec, rule
+/// 24). On busy inputs the next trigger or note replaces it, so it stays bounded
+/// there.
+const HOLDS_UNTIL_NEXT_TRIGGER: &[&str] = &["loom.rand.sample-hold", "loom.voice.assign"];
 
 /// A harness for `descriptor`, on a transport that plays if `running`, with the
 /// check's slow signal on every input if `busy`.

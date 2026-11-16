@@ -1,8 +1,7 @@
-//! `loom-ui`'s layout measuring real text: the canvas's Parley text, which
-//! sets the same text it draws (docs/design/ui-layer.md, section 8). Here,
-//! because this crate depends on both.
+//! `loom-ui`'s layout measuring real text with its Parley typesetter, which
+//! sets the same text it draws (docs/design/ui-layer.md, section 8).
 
-use loom_canvas::CanvasText;
+use loom_ui::paint::Typesetter;
 use loom_ui::{Element, Layout, Length};
 use loom_ui_core::{Size, TextStyle, UiId, Weight};
 
@@ -25,7 +24,7 @@ fn labels() -> Element {
 /// pixel.
 #[test]
 fn a_label_is_as_wide_as_parley_sets_it() {
-    let mut text = CanvasText::new();
+    let mut text = Typesetter::new();
     let mut layout = Layout::new(UiId::panel("p"));
     layout.rebuild(Element::row([Element::text("Cutoff", STYLE).key("label")]));
     layout.compute(Size::new(400.0, 100.0), &mut text);
@@ -41,7 +40,7 @@ fn a_label_is_as_wide_as_parley_sets_it() {
 /// rebuild finds them all in the text's own cache, so it builds none.
 #[test]
 fn a_rebuild_finds_its_text_in_the_cache() {
-    let mut text = CanvasText::new();
+    let mut text = Typesetter::new();
     let mut layout = Layout::new(UiId::panel("p"));
     layout.rebuild(labels());
     layout.compute(Size::new(400.0, 300.0), &mut text);

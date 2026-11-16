@@ -70,3 +70,40 @@ fn the_fixed_measure_wraps_by_whole_characters() {
     );
     assert_eq!(measure.measure("", style(10.0), None), Size::new(0.0, 12.0));
 }
+
+/// The paint shaders validate alone, as the paint renderer builds them, and
+/// translate to Metal, as wgpu does on macOS. A host that appends its own
+/// stages validates the two together in its own tests.
+#[test]
+fn the_paint_shader_is_valid_alone() {
+    let module = naga::front::wgsl::parse_str(SHADER).expect("WGSL parses");
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+        .validate(&module)
+        .expect("WGSL validates");
+    let options = naga::back::msl::Options::default();
+    let pipeline = naga::back::msl::PipelineOptions::default();
+    naga::back::msl::write_string(&module, &info, &options, &pipeline).expect("translates to Metal");
+}
+
+/// wgpu passes some WGSL names straight through to Metal and HLSL, where
+/// they are reserved, so the paint shaders use none of them.
+#[test]
+fn the_paint_shader_uses_no_reserved_names() {
+    const RESERVED: &[&str] = &[
+        "half", "half2", "half3", "half4", "in", "out", "inout", "vector", "matrix", "sample", "texture", "sampler",
+        "kernel", "vertex", "fragment", "device", "constant", "thread",
+    ];
+    for (number, line) in SHADER.lines().enumerate() {
+        let code = line.split("//").next().unwrap_or_default();
+        let words = code
+            .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '@'))
+            .filter(|w| !w.starts_with('@'));
+        for word in words {
+            assert!(
+                !RESERVED.contains(&word),
+                "paint.wgsl line {}: `{word}` is reserved in Metal or HLSL",
+                number + 1
+            );
+        }
+    }
+}

@@ -41,7 +41,9 @@ loom-test = { path = "crates/loom-test", version = "0.1.0" }
 loom-analysis = { path = "crates/loom-analysis", version = "0.1.0" }
 loom-host-desktop = { path = "crates/loom-host-desktop", version = "0.1.0" }
 loom-ui-core = { path = "crates/loom-ui-core", version = "0.1.0" }
-loom-ui = { path = "crates/loom-ui", version = "0.1.0" }
+# Without its default `shell`, so a crate that only paints (loom-canvas)
+# pulls in no window toolkit. The app turns `shell` on.
+loom-ui = { path = "crates/loom-ui", version = "0.1.0", default-features = false }
 loom-canvas = { path = "crates/loom-canvas", version = "0.1.0" }
 
 rtrb = "0.4"

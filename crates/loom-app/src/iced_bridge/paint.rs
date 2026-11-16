@@ -20,7 +20,8 @@
 use iced::Color;
 use iced_wgpu::graphics::Viewport;
 use iced_wgpu::wgpu;
-use loom_canvas::{CanvasDrawing, CanvasRenderer, Target as CanvasTarget};
+use loom_canvas::{CanvasDrawing, CanvasRenderer};
+use loom_ui::paint::Target as CanvasTarget;
 use loom_ui_core::Rect;
 
 /// What a frame draws into: a texture and its GPU.

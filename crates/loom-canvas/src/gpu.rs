@@ -8,6 +8,7 @@ use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
 use crate::trace::{Segment, TraceGeometry};
 use bytemuck::{Pod, Zeroable};
+use loom_ui::paint::{InstanceBuffer, PaintList, PaintRenderer, SHAPE_ATTRIBUTES, Shape, Target, packed};
 use loom_ui_core::{Color, Point, Rect, Size};
 
 /// Corner radius of tiles, in world units.
@@ -17,70 +18,17 @@ const CABLE_WIDTH: f32 = 2.4;
 /// Thinnest a cable is drawn, in physical pixels.
 const CABLE_MIN_PX: f32 = 1.2;
 
-/// A colour as the shaders read it: red, green, blue, and alpha, each
-/// unchanged. The channels stay sRGB-encoded, and the shaders blend in that
-/// space, which is how the rest of the window blends its colours.
-pub(crate) fn packed(colour: Color) -> [f32; 4] {
-    [colour.r, colour.g, colour.b, colour.a]
-}
-
-/// One rounded rectangle.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-pub struct Shape {
-    rect: [f32; 4],
-    fill: [f32; 4],
-    border: [f32; 4],
-    params: [f32; 4],
-}
-
-impl Shape {
-    /// A filled rounded rectangle with an optional border.
-    pub fn new(rect: Rect, radius: f32, fill: Color, border: Color, border_width: f32) -> Self {
-        Self {
-            rect: [rect.x, rect.y, rect.width, rect.height],
-            fill: packed(fill),
-            border: packed(border),
-            params: [radius, border_width, 1.0, 0.0],
-        }
-    }
-
-    /// The rectangle: x, y, width, height in world units.
-    #[cfg(test)]
-    pub fn rect(&self) -> [f32; 4] {
-        self.rect
-    }
-
-    /// The fill colour, as uploaded.
-    #[cfg(test)]
-    pub fn fill(&self) -> [f32; 4] {
-        self.fill
-    }
-
-    /// The border colour, as uploaded.
-    #[cfg(test)]
-    pub fn border(&self) -> [f32; 4] {
-        self.border
-    }
-
-    /// The border width, in world units.
-    #[cfg(test)]
-    pub fn border_width(&self) -> f32 {
-        self.params[1]
-    }
-
-    /// A circle or square marker centred on a point.
-    fn marker(centre: Point, radius: f32, shape: PortShape, fill: Color, border: Color, border_width: f32) -> Self {
-        let rect = Rect::new(
-            Point::new(centre.x - radius, centre.y - radius),
-            Size::new(radius * 2.0, radius * 2.0),
-        );
-        let corner = match shape {
-            PortShape::Round => radius,
-            PortShape::Square => radius * 0.3,
-        };
-        Self::new(rect, corner, fill, border, border_width)
-    }
+/// A circle or square port marker centred on a point.
+fn marker(centre: Point, radius: f32, shape: PortShape, fill: Color, border: Color, border_width: f32) -> Shape {
+    let rect = Rect::new(
+        Point::new(centre.x - radius, centre.y - radius),
+        Size::new(radius * 2.0, radius * 2.0),
+    );
+    let corner = match shape {
+        PortShape::Round => radius,
+        PortShape::Square => radius * 0.3,
+    };
+    Shape::new(rect, corner, fill, border, border_width)
 }
 
 /// Part of a ring, for knobs. Its quad covers only the ring, so the
@@ -290,14 +238,7 @@ impl Geometry {
             for (centre, port, _, _) in module_ports {
                 // Activity fills connected ports from a separate buffer.
                 // The scene's marker remains an outline while silent.
-                markers.push(Shape::marker(
-                    centre,
-                    PORT_RADIUS,
-                    port.shape,
-                    palette.tile,
-                    port.colour,
-                    1.6,
-                ));
+                markers.push(marker(centre, PORT_RADIUS, port.shape, palette.tile, port.colour, 1.6));
             }
             // Assignment count badges sit with the markers, over the
             // cables. Their numbers are text.
@@ -454,22 +395,6 @@ pub struct Overlay {
     pub shapes: Vec<Shape>,
 }
 
-/// Where the canvas draws: the size of its viewport and how dense the
-/// pixels are. The host that owns the window gives it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Target {
-    /// The viewport's size in logical pixels.
-    pub size: Size,
-    /// Physical pixels per logical pixel.
-    pub scale: f32,
-    /// The viewport's top-left corner in the host's logical pixels: where
-    /// painted text and boxes are placed from, and snapped to pixels.
-    pub origin: Point,
-    /// The whole target's size in physical pixels, which scissors are cut
-    /// to.
-    pub physical: (u32, u32),
-}
-
 /// What one frame of the canvas draws: plain data, built by the canvas and
 /// given to [`CanvasRenderer::prepare`].
 #[derive(Debug)]
@@ -489,7 +414,7 @@ pub struct CanvasFrame {
     pub(crate) cable_dim: f32,
     /// Text and floating boxes painted over the scene, in the host's
     /// logical pixels. Empty until the host paints into it.
-    pub(crate) paint: crate::text::PaintList,
+    pub(crate) paint: PaintList,
     /// The canvas background, drawn first over the canvas's place.
     pub(crate) background: Color,
 }
@@ -512,51 +437,6 @@ struct Globals {
     scale: f32,
     cable_dim: f32,
     pad: f32,
-}
-
-/// A vertex buffer that grows as needed and is never shrunk.
-struct InstanceBuffer {
-    buffer: wgpu::Buffer,
-    capacity: u64,
-    len: u32,
-    label: &'static str,
-}
-
-impl InstanceBuffer {
-    fn new(device: &wgpu::Device, label: &'static str) -> Self {
-        Self {
-            buffer: Self::create(device, label, 4096),
-            capacity: 4096,
-            len: 0,
-            label,
-        }
-    }
-
-    fn create(device: &wgpu::Device, label: &'static str, size: u64) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
-    }
-
-    fn upload<T: Pod>(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, items: &[T]) {
-        let bytes: &[u8] = bytemuck::cast_slice(items);
-        let needed = bytes.len() as u64;
-        if needed > self.capacity {
-            self.capacity = needed.next_power_of_two();
-            self.buffer = Self::create(device, self.label, self.capacity);
-        }
-        if !bytes.is_empty() {
-            queue.write_buffer(&self.buffer, 0, bytes);
-        }
-        self.len = items.len() as u32;
-    }
-
-    fn slice(&self) -> wgpu::BufferSlice<'_> {
-        self.buffer.slice(..)
-    }
 }
 
 /// What [`CanvasRenderer::draw`] draws, kept from the frame last prepared.
@@ -621,13 +501,10 @@ pub struct CanvasRenderer {
     markers: u32,
     plan: DrawPlan,
     /// Painted text and boxes, drawn last.
-    text: text::TextRenderer,
+    paint: PaintRenderer,
 }
 
 const FILL_ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4];
-
-const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
 
 impl CanvasRenderer {
     /// Builds the pipelines and empty buffers for a colour target of
@@ -635,7 +512,7 @@ impl CanvasRenderer {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("loom-canvas shaders"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("canvas.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shader().into()),
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("loom-canvas globals"),
@@ -767,9 +644,16 @@ impl CanvasRenderer {
             tiles: 0,
             markers: 0,
             plan: DrawPlan::default(),
-            text: text::TextRenderer::new(device, format, &module, &layout),
+            paint: PaintRenderer::new(device, format),
         }
     }
+}
+
+/// The canvas's shader source: the UI layer's paint shaders, which hold
+/// the globals and the shape stage, then the canvas's own stages, in one
+/// module (`canvas.wgsl`).
+pub(crate) fn shader() -> String {
+    [loom_ui::paint::SHADER, include_str!("canvas.wgsl")].concat()
 }
 
 /// Vertices per cable strip. Must match `SEGMENTS` in the shader.
@@ -861,7 +745,10 @@ impl CanvasRenderer {
             controls: frame.controls.is_some(),
             traces: frame.traces.is_some(),
         };
-        self.text.prepare(device, queue, &frame.paint, target);
+        let painted = self.paint.prepare(device, queue, &frame.paint, target);
+        stats::add(Counter::GlyphRasters, painted.glyph_rasters);
+        stats::add(Counter::TextUploads, painted.uploads);
+        stats::add(Counter::GlyphSkips, painted.glyph_skips);
     }
 
     /// Draws the frame last prepared into `pass`.
@@ -874,7 +761,7 @@ impl CanvasRenderer {
         let plan = &self.plan;
         pass.set_bind_group(0, &self.bind_group, &[]);
 
-        if self.background.len > 0 {
+        if !self.background.is_empty() {
             pass.set_pipeline(&self.fill);
             pass.set_vertex_buffer(0, self.background.slice());
             pass.draw(0..4, 0..1);
@@ -887,17 +774,21 @@ impl CanvasRenderer {
         // ports over every cable end, then panel controls and the preview
         // curves in their frames, then scope traces in theirs, then the
         // selection, hover, and focus outlines.
-        let tiles = self.tiles.min(self.scene_shapes.len);
-        let markers = self.markers.min(self.scene_shapes.len);
+        let tiles = self.tiles.min(self.scene_shapes.len());
+        let markers = self.markers.min(self.scene_shapes.len());
         let bars = plan.bars.start.min(markers)..plan.bars.end.min(markers);
         let value_bars = plan.value_bars.start.min(markers)..plan.value_bars.end.min(markers);
         let (arcs, controls, lines) = if plan.controls {
-            (self.control_arcs.len, self.control_shapes.len, self.control_lines.len)
+            (
+                self.control_arcs.len(),
+                self.control_shapes.len(),
+                self.control_lines.len(),
+            )
         } else {
             (0, 0, 0)
         };
         let (traces, fills) = if plan.traces {
-            (self.trace_segments.len, self.trace_fills.len)
+            (self.trace_segments.len(), self.trace_fills.len())
         } else {
             (0, 0)
         };
@@ -906,7 +797,7 @@ impl CanvasRenderer {
                 &self.cables,
                 &self.scene_cables,
                 CABLE_VERTICES,
-                0..self.scene_cables.len,
+                0..self.scene_cables.len(),
             ),
             (&self.shapes, &self.scene_shapes, 4, 0..tiles),
             (&self.shapes, &self.scene_shapes, 4, bars),
@@ -914,16 +805,16 @@ impl CanvasRenderer {
                 &self.cables,
                 &self.overlay_cables,
                 CABLE_VERTICES,
-                0..self.overlay_cables.len,
+                0..self.overlay_cables.len(),
             ),
-            (&self.shapes, &self.scene_shapes, 4, markers..self.scene_shapes.len),
+            (&self.shapes, &self.scene_shapes, 4, markers..self.scene_shapes.len()),
             (&self.arcs, &self.control_arcs, 4, 0..arcs),
             (&self.shapes, &self.control_shapes, 4, 0..controls),
             (&self.shapes, &self.scene_shapes, 4, value_bars),
             (&self.traces, &self.control_lines, 4, 0..lines),
             (&self.shapes, &self.trace_fills, 4, 0..fills),
             (&self.traces, &self.trace_segments, 4, 0..traces),
-            (&self.shapes, &self.overlay_shapes, 4, 0..self.overlay_shapes.len),
+            (&self.shapes, &self.overlay_shapes, 4, 0..self.overlay_shapes.len()),
         ];
         for (render, buffer, vertices, instances) in layers {
             if !instances.is_empty() {
@@ -933,7 +824,7 @@ impl CanvasRenderer {
             }
         }
         // Text and floating boxes over everything, in the order painted.
-        self.text.draw(pass, &self.shapes);
+        self.paint.draw(pass);
     }
 
     /// Uploads one cable in the target's own coordinates, for a renderer
@@ -972,9 +863,6 @@ impl CanvasRenderer {
         pass.draw(0..CABLE_VERTICES, 0..1);
     }
 }
-
-mod atlas;
-mod text;
 
 #[cfg(test)]
 mod tests;

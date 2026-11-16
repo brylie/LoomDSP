@@ -184,14 +184,14 @@ impl ModuleDescriptor {
     }
 
     /// Choice controls filtered by a one-versus-many integer parameter.
-    /// Stored values and the processing parameter range stay unchanged.
+    /// Stored values and the processing parameter range stay unchanged. A
+    /// count missing from `values` counts as the count parameter's default.
     pub fn control_spec(&self, index: usize, values: &[f32]) -> Option<ParamSpec> {
         let spec = *self.params.get(index)?;
         Some(match spec.options.count_choices {
             Some(filter) => spec.for_count(
                 self.param_index(filter.param)
-                    .and_then(|i| values.get(i).copied())
-                    .unwrap_or(1.0),
+                    .map_or(1.0, |i| values.get(i).copied().unwrap_or(self.params[i].default)),
             ),
             None => spec,
         })
@@ -207,9 +207,25 @@ impl ModuleDescriptor {
         let Some(mode) = self.param_index(when.param) else {
             return true;
         };
-        let value = values.get(mode).copied().unwrap_or(self.params[mode].default);
+        let value = self.effective_value(mode, values);
         let choice = (value - self.params[mode].min).round();
         when.choices.iter().any(|&c| c as f32 == choice)
+    }
+
+    /// The value parameter `index` acts with: for a choice filtered by a voice
+    /// count (`choices_by_count`), the stored value when the count offers it,
+    /// else the first choice offered there, as the allocator falls back; for
+    /// any other parameter, the stored value. A value missing from `values`
+    /// counts as the default, and an `index` past the parameters gives 0.
+    pub fn effective_value(&self, index: usize, values: &[f32]) -> f32 {
+        let Some(spec) = self.params.get(index) else {
+            return 0.0;
+        };
+        let stored = values.get(index).copied().unwrap_or(spec.default);
+        match self.control_spec(index, values) {
+            Some(filtered) => filtered.effective_choice(stored),
+            None => stored,
+        }
     }
 
     /// Index of a display value by name.
