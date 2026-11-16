@@ -372,7 +372,7 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 | Light | 3 × 2 | A display value | Brightness is the value clamped to 0 to 1. Label below. |
 
 - **The registry refuses a panel that does not fit its module:** a binding to a parameter or display value the module does not have, a toggle, radio, or button on a parameter that does not match it (radio buttons need choice names), a button whose mode is missing, out of range, or the same parameter, a widget outside the panel, or two widgets that overlap. *Why:* a third-party module gets the same checks as a built-in one, at registration, not as a broken tile later.
-- **Built-in panels:** a knob for every parameter except the noise seed, MIDI Note's channel and bend range, and Button's `mode`, which stay in the inspector. Button's `on` is the button, not a knob. MIDI Note has a light for its gate, and Envelope a light for its level. Clock Divide and Phase Trigger have a [trigger light](#lights-for-one-sample-triggers) on their output.
+- **Built-in panels:** a knob for every parameter except the noise seed, MIDI Note's channel and bend range, and Button's `mode`, which stay in the inspector. Button's `on` is the button, not a knob. MIDI Note and Voice Assigner each have a light for their gate, and Envelope a light for its level. Clock Divide and Phase Trigger have a [trigger light](#lights-for-one-sample-triggers) on their output.
 
 ### Display values ([#69](https://github.com/brylie/LoomDSP/issues/69))
 
@@ -835,6 +835,12 @@ A choice parameter may list choices shown only while another integer parameter
 is one, or above one. Choice IDs remain stable. The panel is rebuilt when that
 integer changes. The choice's effective value may apply the source's documented
 mode fallback without rewriting its stored value (polyphony.md, Note input).
+Note input and Voice assigner use this for `mode`. A control hidden by
+`shown_when` on such a choice follows the effective choice, the one the control
+shows, not the stored value. So Voice assigner's `unison`, shown only in Oldest
+and Quietest, shows at 8 voices with a stored Legato, because the module plays
+Oldest there. *Why:* a control must not hide while it still changes the sound.
+The inspector's "Not used in" names the effective choice too.
 
 ## Open points
 
