@@ -113,7 +113,8 @@ fn stereo_selection_and_gate_width() {
         .bundle_input("in", vec![Signal::constant(1.0), Signal::constant(2.0)])
         .stereo_bundle_input("gate", vec![[Signal::constant(1.0), Signal::constant(1.0)]])
         .check_block_sizes();
-    assert_eq!(mono.outputs().len(), 1);
+    // A mono `in` gives a mono `out` and a mono `gate`, whatever the gate's width.
+    assert_eq!(mono.outputs().len(), 2);
 }
 
 /// A right-side gate is still the gate of that voice, using stereo gate maximum.
@@ -220,4 +221,105 @@ fn all_non_finite_voices_keep_the_lowest_index() {
             );
         }
     }
+}
+
+/// Two voices: voice 1 plays frames 100 to 400 at the lower value, voice 2
+/// frames 300 to 600 at the higher value.
+fn handed_off(mode: f32) -> loom_test::Render {
+    Harness::new(&MERGE)
+        .frames(1024)
+        .param("mode", mode)
+        .bundle_input("in", vec![Signal::constant(1.0), Signal::constant(2.0)])
+        .bundle_input(
+            "gate",
+            vec![
+                Signal::from_fn(|f| if (100..400).contains(&f) { 1.0 } else { 0.0 }),
+                Signal::from_fn(|f| if (300..600).contains(&f) { 1.0 } else { 0.0 }),
+            ],
+        )
+        .check_block_sizes()
+}
+
+/// The `gate` output follows the chosen voice in the selection modes and any
+/// voice in Sum and Average, and a hand-off between held voices has no low
+/// sample (#793).
+#[test]
+fn the_gate_output_follows_the_voice_out_follows() {
+    for mode in [0.0, 1.0, 2.0, 3.0, 4.0] {
+        let render = handed_off(mode);
+        let gate = render.output("gate");
+        // Low before any gate and after every gate falls.
+        assert_eq!(gate[50], 0.0, "mode {mode}");
+        assert_eq!(gate[700], 0.0, "mode {mode}");
+        // High on every frame from the first rise to the last fall: Lowest
+        // hands off from voice 1 to voice 2 on frame 400 with no low sample.
+        assert!(gate[100..600].iter().all(|v| *v == 1.0), "mode {mode}");
+    }
+    // Lowest follows voice 1 and then hands off to voice 2.
+    let lowest = handed_off(3.0);
+    assert_eq!(lowest.output("out")[350], 1.0);
+    assert_eq!(lowest.output("out")[400], 2.0);
+}
+
+/// Every gate low gives a low output in every mode, and an unpatched `gate`
+/// input gives 1.
+#[test]
+fn the_gate_output_is_low_when_all_are_low_and_one_when_unpatched() {
+    for mode in [0.0, 1.0, 2.0, 3.0, 4.0] {
+        let low = Harness::new(&MERGE)
+            .frames(512)
+            .param("mode", mode)
+            .bundle_input("in", vec![Signal::constant(1.0), Signal::constant(2.0)])
+            .bundle_input("gate", vec![Signal::constant(0.0), Signal::constant(0.0)])
+            .check_block_sizes();
+        assert!(low.output("gate").iter().all(|v| *v == 0.0), "mode {mode}");
+        let unpatched = Harness::new(&MERGE)
+            .frames(512)
+            .param("mode", mode)
+            .bundle_input("in", vec![Signal::constant(1.0), Signal::constant(2.0)])
+            .check_block_sizes();
+        assert!(unpatched.output("gate").iter().all(|v| *v == 1.0), "mode {mode}");
+    }
+}
+
+/// A one-voice `in` passes its gate through, value and all.
+#[test]
+fn a_single_voice_passes_its_gate_through() {
+    for mode in [0.0, 1.0, 2.0, 3.0, 4.0] {
+        let render = Harness::new(&MERGE)
+            .frames(512)
+            .param("mode", mode)
+            .input("in", Signal::constant(0.5))
+            .input("gate", Signal::from_fn(|f| if f % 100 < 50 { 0.8 } else { 0.0 }))
+            .check_block_sizes();
+        let gate = render.output("gate");
+        assert_eq!(gate[10], 0.8, "mode {mode}");
+        assert_eq!(gate[60], 0.0, "mode {mode}");
+    }
+}
+
+/// A stereo `in` makes `gate` stereo, with two equal sides.
+#[test]
+fn a_stereo_input_gives_equal_gate_sides() {
+    let render = Harness::new(&MERGE)
+        .frames(512)
+        .param("mode", 3.0)
+        .stereo_bundle_input(
+            "in",
+            vec![
+                [Signal::constant(1.0), Signal::constant(1.5)],
+                [Signal::constant(2.0), Signal::constant(2.5)],
+            ],
+        )
+        .bundle_input(
+            "gate",
+            vec![
+                Signal::from_fn(|f| if f < 200 { 1.0 } else { 0.0 }),
+                Signal::constant(0.0),
+            ],
+        )
+        .check_block_sizes();
+    assert_eq!(render.voice_output("gate", 0, 0), render.voice_output("gate", 0, 1));
+    assert_eq!(render.voice_output("gate", 0, 0)[100], 1.0);
+    assert_eq!(render.voice_output("gate", 0, 0)[300], 0.0);
 }

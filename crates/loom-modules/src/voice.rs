@@ -95,15 +95,26 @@ pub static MERGE: ModuleDescriptor = ModuleDescriptor {
             channels: Channels::Voices,
         },
     ],
-    outputs: &[PortSpec {
-        name: "out",
-        label: "Out",
-        description: "The merged signal, with the input's stereo sides.",
-        signal: SignalType::Audio,
-        default: PortDefault::Value(0.0),
-        range: PortRange::Signal,
-        channels: Channels::PerChannel,
-    }],
+    outputs: &[
+        PortSpec {
+            name: "out",
+            label: "Out",
+            description: "The merged signal, with the input's stereo sides.",
+            signal: SignalType::Audio,
+            default: PortDefault::Value(0.0),
+            range: PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+        PortSpec {
+            name: "gate",
+            label: "Gate",
+            description: "High while the voice Out follows is playing. In Sum and Average, while any voice plays.",
+            signal: SignalType::Gate,
+            default: PortDefault::Value(0.0),
+            range: PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+    ],
     params: &[ParamSpec {
         name: "mode",
         label: "Mode",
@@ -135,8 +146,9 @@ struct Merge {
 
 impl Merge {
     const IN: usize = MERGE.input_index("in").unwrap();
-    const GATE: usize = MERGE.input_index("gate").unwrap();
+    const GATE_IN: usize = MERGE.input_index("gate").unwrap();
     const OUT: usize = MERGE.output_index("out").unwrap();
+    const GATE_OUT: usize = MERGE.output_index("gate").unwrap();
     const MODE: usize = MERGE.param_index("mode").unwrap();
 
     /// True when `candidate` should replace `previous` in Lowest (mode 3) or
@@ -150,6 +162,12 @@ impl Merge {
             (true, true) if mode == 3 => candidate < previous,
             (true, true) => candidate > previous,
         }
+    }
+
+    /// One voice's gate, its two stereo sides combined by maximum. `f32::max`
+    /// keeps the other side when one is NaN.
+    fn gate(io: &PortIo<'_>, voice: usize, frame: usize) -> f32 {
+        io.voice_input(Self::GATE_IN, voice, 0)[frame].max(io.voice_input(Self::GATE_IN, voice, 1)[frame])
     }
 
     /// Compares stereo voices by their mean while retaining their two sides.
@@ -175,8 +193,7 @@ impl Module for Merge {
             // Simultaneous rises share an age, so ties retain the lowest index.
             self.clock = self.clock.wrapping_add(1);
             for voice in 0..voices {
-                let high =
-                    io.voice_input(Self::GATE, voice, 0)[frame].max(io.voice_input(Self::GATE, voice, 1)[frame]) > 0.5;
+                let high = Self::gate(io, voice, frame) > 0.5;
                 if high != self.high[voice] {
                     edge = true;
                     self.high[voice] = high;
@@ -214,6 +231,18 @@ impl Module for Merge {
                     io.voice_input(Self::IN, self.selected, side)[frame]
                 };
                 io.voice_output(Self::OUT, 0, side)[frame] = value;
+            }
+            // The selection above is already made for this frame, so a hand-off
+            // between held voices has no low sample.
+            let gate = if mode <= 1 {
+                (1..voices).fold(Self::gate(io, 0, frame), |high, voice| {
+                    high.max(Self::gate(io, voice, frame))
+                })
+            } else {
+                Self::gate(io, self.selected, frame)
+            };
+            for side in 0..io.output_width(Self::GATE_OUT).sides {
+                io.voice_output(Self::GATE_OUT, 0, side)[frame] = gate;
             }
         }
     }

@@ -282,6 +282,7 @@ fn note_in() {
 #[test]
 fn voice_merge() {
     Harness::new(&loom_modules::voice::MERGE)
+        .reference_outputs(&["out", "gate"])
         .seconds(0.1)
         .bundle_input(
             "in",

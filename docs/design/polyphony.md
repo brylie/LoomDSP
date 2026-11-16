@@ -641,10 +641,10 @@ Voice modules:
 - [x] Voice split: a mono cable gives `out1` only, `first` at 2 on a mono cable gives the default on every output, and `first` at 16 on a 16-voice bundle gives voice 16 on `out1` (test).
 - [x] Voice spread: given one 8-voice source fed into both inputs of Join, so each voice is stereo with equal sides, into Voice spread in Random mode, which then runs as one copy per side of each voice, and then Voice split, then for each voice `out - in` is the same on the left and right sides, is not zero, and differs from the other voices' (engine test, ADR-0045).
 - [ ] Voice assigner: a mono gate and pitch into 8 voices gives overlapping release tails on distinct voices (reference test).
-- [ ] Voice merge `gate`: in Last, Lowest, and Highest it follows the chosen voice's gate, stays high with no retrigger when the choice moves between held voices, and is low when every voice is low; in Sum and Average it is the largest gate value; with `gate` unconnected it is 1 in every mode; a one-voice bundle passes its gate through (reference tests at block sizes 1, 77, and 512).
-- [ ] Voice merge: with NaN on voice 1 and finite values on voices 2 to 4, all playing, Lowest and Highest choose the right finite voice; with every playing voice non-finite, the lowest voice index is chosen and its value passes through (test at block sizes 1, 77, and 512).
-- [ ] Every example patch and test that uses Voice merge still loads after the `gate` output is added (test).
-- [ ] Voice merge with a stereo `in`: its `gate` output has two equal sides (test).
+- [x] Voice merge `gate`: in Last, Lowest, and Highest it follows the chosen voice's gate, stays high with no retrigger when the choice moves between held voices, and is low when every voice is low; in Sum and Average it is the largest gate value; with `gate` unconnected it is 1 in every mode; a one-voice bundle passes its gate through (reference tests at block sizes 1, 77, and 512).
+- [x] Voice merge: with NaN on voice 1 and finite values on voices 2 to 4, all playing, Lowest and Highest choose the right finite voice; with every playing voice non-finite, the lowest voice index is chosen and its value passes through (test at block sizes 1, 77, and 512).
+- [x] Every example patch and test that uses Voice merge still loads after the `gate` output is added (test).
+- [x] Voice merge with a stereo `in`: its `gate` output has two equal sides (test).
 - [x] Note input at one voice in Legato mode gives the same output as before this feature on every existing reference render (reference tests).
 
 The shipped example:

@@ -23,6 +23,7 @@ Sums or averages voices, or follows one voice selected by its gate.
 | Port | Signal | Polarity | Description |
 |---|---|---|---|
 | **Out** (`out`) | audio | bipolar | The merged signal, with the input's stereo sides. |
+| **Gate** (`gate`) | gate | unipolar | High while the voice Out follows is playing. In Sum and Average, while any voice plays. |
 
 ## Parameters
 
@@ -41,6 +42,14 @@ Sums or averages voices, or follows one voice selected by its gate.
 ## When to use it
 
 Use Voice merge where a bundle should become one signal. Sum adds the voices for audio. Average divides their sum by their count for modulation. Last, Lowest, and Highest follow one playing voice. A gate edge updates the selection; moving signals between edges cannot switch it. Switching into Last, Lowest, or Highest selects an active voice immediately. If a count edit removes the selected voice, an active surviving voice takes over. With no gates playing, the last selection stays. A stereo voice keeps both sides together.
+
+The **Gate** output says whether the voice Out follows is playing. In Last, Lowest, and Highest it carries that voice's gate. When the choice moves from one held voice to another, it stays high and does not retrigger. When every voice stops, it falls, and Out keeps the last choice. In Sum and Average it is high while any voice plays. With nothing patched to the Gate input, every voice counts as playing, so the output is 1.
+
+A voice whose In value is not a number, or is infinite, never wins Lowest or Highest over a voice with a real value. If every playing voice is broken, voice 1 is chosen and its value passes through.
+
+## A bass line from the lowest note
+
+Take the lowest note of a chord as a mono bass. Patch MIDI Note's `pitch` bundle to Voice merge's In and its `gate` bundle to Voice merge's Gate, and set Mode to Lowest. Out is the lowest held pitch, and the Gate output plays one envelope for the bass. Releasing the lowest key hands the bass to the next lowest without a new attack, as on a mono keyboard.
 
 ## Example patch
 
