@@ -8,7 +8,7 @@ The measure line of `--bench`, `--measure`, and `--measure-idle` says why each f
 - **Use case and requirements:** NFR-PERF-04 (no redraw when nothing changes), the Redraw rules of the [panels spec](panels.md).
 - **Background:** none needed.
 - **Prior art:** none needed.
-- **Issues:** [#252](https://github.com/brylie/LoomDSP/issues/252). Related: [#196](https://github.com/brylie/LoomDSP/issues/196) (the `LiveFrame` cause found by hand), [#90](https://github.com/brylie/LoomDSP/issues/90) (stats bar updates).
+- **Issues:** [#252](https://github.com/brylie/LoomDSP/issues/252), [#730](https://github.com/brylie/LoomDSP/issues/730) (the `lights` cause). Related: [#196](https://github.com/brylie/LoomDSP/issues/196) (the `LiveFrame` cause found by hand), [#90](https://github.com/brylie/LoomDSP/issues/90) (stats bar updates).
 - **Code:** the report: `crates/loom-app/src/bench.rs`. The frame counters: `loom_canvas::stats`.
 
 ## Goal

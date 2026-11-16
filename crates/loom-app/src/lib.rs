@@ -2062,7 +2062,7 @@ impl App {
                 }
             }
             Message::Lights(readings) => {
-                self.session.lights.extend(readings);
+                self.take_lights(readings);
                 self.sync_audio_input();
                 self.refresh_values();
             }

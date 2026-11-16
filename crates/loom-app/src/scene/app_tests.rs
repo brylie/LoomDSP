@@ -93,6 +93,25 @@ fn window_bounds(ui: &mut Ui, module: u32, param: &str) -> [f64; 4] {
     [top_left.x, top_left.y, bottom_right.x, bottom_right.y].map(f64::from)
 }
 
+/// The accessible name of the Wide Scope's scope node.
+const SCOPE_NODE: &str = "out";
+
+/// The window bounds of the Wide Scope's scope, its first widget, as the
+/// scene places it.
+fn scope_window_bounds(ui: &mut Ui, module: u32) -> [f64; 4] {
+    let world = ui
+        .app()
+        .session
+        .scene
+        .module(module)
+        .and_then(|m| m.widget_bounds(0))
+        .expect("the scene has the scope");
+    let canvas = ui.canvas();
+    let top_left = canvas.to_window(world.position());
+    let bottom_right = canvas.to_window(loom_ui_core::Point::new(world.x + world.width, world.y + world.height));
+    [top_left.x, top_left.y, bottom_right.x, bottom_right.y].map(f64::from)
+}
+
 /// The names Tab visits in the tile's panel: Enter on the selected tile
 /// focuses the first control, then Tab steps to each of the others.
 fn tab_sequence(ui: &mut Ui, module: u32) -> Vec<String> {
@@ -109,9 +128,10 @@ fn tab_sequence(ui: &mut Ui, module: u32) -> Vec<String> {
     names
 }
 
-/// Widened, the knobs past the scope's right edge move right. Each moved
-/// knob's accessibility node has the bounds `ui.control_bounds` gives, and
-/// Tab visits the same controls in the same order as before the resize.
+/// Widened, the knobs past the scope's right edge move right. Every
+/// widget's accessibility node, the scope's and each knob's, has the
+/// bounds the scene gives it, and Tab visits the same controls in the same
+/// order as before the resize.
 #[test]
 fn a_control_moved_right_keeps_its_node_and_its_place_in_tab_order() {
     let (mut ui, module) = with_wide_scope();
@@ -130,14 +150,18 @@ fn a_control_moved_right_keeps_its_node_and_its_place_in_tab_order() {
 
     let tree = ui.a11y_tree();
     let tile = tree.node_by_id(&crate::a11y::tree::tile_id(module));
-    let found: Vec<_> = ["Beside", "Lower"]
+    let found: Vec<_> = [SCOPE_NODE, "Beside", "Lower", "Below"]
         .iter()
         .map(|name| (name.to_string(), tile.node(name).bounds()))
         .collect();
     drop(tree);
     for (name, bounds) in found {
-        let bounds = bounds.expect("a shown control has bounds");
-        let expected = window_bounds(&mut ui, module, &name.to_lowercase());
+        let bounds = bounds.expect("a shown widget has bounds");
+        let expected = if name == SCOPE_NODE {
+            scope_window_bounds(&mut ui, module)
+        } else {
+            window_bounds(&mut ui, module, &name.to_lowercase())
+        };
         let got = [bounds.x0, bounds.y0, bounds.x1, bounds.y1];
         for (g, e) in got.iter().zip(expected) {
             assert!((g - e).abs() < 1e-3, "{name}: {got:?} against {expected:?}");

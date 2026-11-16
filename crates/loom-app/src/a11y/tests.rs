@@ -4884,9 +4884,16 @@ fn a_lights_message_is_a_live_reading_of_its_own() {
     assert!(app.a11y.live_waits(), "a live reading");
     assert!(!app.focus_question_waits(), "no focus question");
 
+    // The live timer sends what waited, so the telemetry message below
+    // must mark the live values again.
+    app.a11y_event(Event::LiveTick);
+    let _ = app.a11y_changes(&Places::default());
+    assert!(!app.a11y.live_waits(), "nothing waits after the timer");
+
     let _ = app.send(Message::Telemetry(crate::monitor::Update::default()));
     assert_eq!(requests_this_thread(FrameCause::Meters), meters + 1);
     assert_eq!(requests_this_thread(FrameCause::Lights), lights + 1);
+    assert!(app.a11y.live_waits(), "a telemetry message is a live reading too");
     assert!(!app.focus_question_waits());
 
     // Any other message with a focus asks where it went.

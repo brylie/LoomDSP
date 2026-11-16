@@ -39,7 +39,9 @@ use std::time::Duration;
 ///
 /// The values compared are finite, so an equal value never looks like a
 /// change: loading a patch clamps or replaces a parameter that is not
-/// (`loom-patch/src/flatten.rs`). Every lock is held only to clone or
+/// (`loom-patch/src/flatten.rs`), and so does every edit, as
+/// `Controller::set_param` passes each value through `ParamSpec::clamp`
+/// (`loom-core/src/descriptor/param.rs`). Every lock is held only to clone or
 /// replace the value, never across a read of the engine or a wait.
 #[derive(Debug, Default)]
 pub(crate) struct Watched<T>(Arc<(Mutex<Held<T>>, Condvar)>);

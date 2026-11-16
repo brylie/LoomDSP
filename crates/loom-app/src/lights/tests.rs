@@ -377,6 +377,43 @@ fn a_trigger_light_panned_away_comes_back_dark() {
     assert_eq!(drawn(&ui, level), 0.8, "the level light keeps its value");
 }
 
+/// A reading that was still in the queue when its trigger light left the
+/// screen does not light it again: the app ignores it, and the light comes
+/// back dark (panels.md, Redraw).
+#[test]
+fn a_late_reading_for_a_trigger_light_that_left_is_ignored() {
+    let mut ui = crate::ui_test::Ui::open("sine.ron");
+    let trigger = {
+        let app = ui.app_mut();
+        let divide = app.session.controller.add_module("loom.logic.divide").unwrap().0;
+        app.session.positions.insert(divide, (600.0, 0.0));
+        app.commit();
+        let d = app
+            .session
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(divide))
+            .unwrap()
+            .descriptor;
+        (divide, d.panel.widgets.iter().position(|w| w.binds("fired")).unwrap())
+    };
+    ui.redraw();
+    let show = |ui: &mut crate::ui_test::Ui, ids: Vec<u32>| {
+        let _ = ui
+            .app_mut()
+            .send(crate::Message::Canvas(loom_canvas::CanvasEvent::VisibleDisplays(ids)));
+    };
+    show(&mut ui, vec![trigger.0]);
+    show(&mut ui, Vec::new());
+    // Sent before the light left, and delivered after.
+    let _ = ui.app_mut().send(crate::Message::Lights(vec![(trigger, 0.6)]));
+    show(&mut ui, vec![trigger.0]);
+    ui.redraw();
+    let snapshot = ui.app().ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|t| t.id == trigger.0).expect("a tile");
+    assert_eq!(tile.widgets[trigger.1].position, 0.0, "the late reading is ignored");
+}
+
 /// A change that reaches the app after its light left the list does not
 /// bring the light back: the light stays forgotten, so when it returns its
 /// first reading is sent again, as for any light new to the list.
