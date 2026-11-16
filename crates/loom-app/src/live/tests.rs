@@ -137,7 +137,9 @@ fn long_scope_window_keeps_short_peak() {
 #[test]
 fn a_reduced_trace_reaches_both_edges() {
     let mut scope = ScopeTrace::new(48_000.0);
-    let n = loom_canvas::MAX_TRACE_POINTS * 4;
+    // One sample past a whole number of groups, so the constant last group
+    // holds two samples and its one point lies inside the frame.
+    let n = loom_canvas::MAX_TRACE_POINTS * 4 + 1;
     scope.trace = vec![1.0; n];
     scope.trace[0] = -0.5;
     scope.trace[3] = -1.0;
