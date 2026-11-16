@@ -438,7 +438,10 @@ impl ScopeTrace {
     ///
     /// More than [`loom_canvas::MAX_TRACE_POINTS`] samples are reduced by
     /// groups, keeping the lowest and highest sample of each in time order,
-    /// so a one-sample trigger always shows (ADR-0007).
+    /// so a one-sample trigger always shows (ADR-0007). The first and last
+    /// samples are kept too, with room left for them, so the reduced line
+    /// still reaches past both edges of the frame: a group's lowest and
+    /// highest can both lie inside it, as in a constant last group.
     ///
     /// Every point has a finite x and y (`docs/design/panels.md`, Drawing
     /// the scope trace, Values that are not finite). A NaN sample has no
@@ -464,8 +467,22 @@ impl ScopeTrace {
         let points = if n <= max {
             (0..n).filter(has_value).map(point).collect()
         } else {
-            let group = n.div_ceil(max / 2);
-            let mut points = Vec::with_capacity(max);
+            // Two points a group, and two left for the first and last
+            // samples, so the total stays within `max`.
+            let group = n.div_ceil((max - 2) / 2);
+            let mut kept: Vec<usize> = Vec::with_capacity(max);
+            // Keeps sample `i` unless it is already kept, so x keeps
+            // rising.
+            let mut keep = |i: usize| {
+                if kept.last().is_none_or(|&last| i > last) {
+                    kept.push(i);
+                }
+            };
+            // The first and last samples that have a value: a NaN adds no
+            // point.
+            if let Some(first) = (0..n).find(has_value) {
+                keep(first);
+            }
             for start in (0..n).step_by(group) {
                 let end = (start + group).min(n);
                 let mut values = (start..end).filter(has_value);
@@ -477,12 +494,13 @@ impl ScopeTrace {
                         if v > self.trace[hi] { i } else { hi },
                     )
                 });
-                points.push(point(low.min(high)));
-                if low != high {
-                    points.push(point(low.max(high)));
-                }
+                keep(low.min(high));
+                keep(low.max(high));
             }
-            points
+            if let Some(last) = (0..n).rev().find(has_value) {
+                keep(last);
+            }
+            kept.into_iter().map(point).collect()
         };
         loom_canvas::Trace {
             points,

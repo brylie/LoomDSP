@@ -127,6 +127,43 @@ fn long_scope_window_keeps_short_peak() {
     assert!(trace.points.windows(2).all(|pair| pair[0][0] <= pair[1][0]));
 }
 
+/// A reduced triggered trace still reaches past both edges of the frame
+/// (`docs/design/panels.md`, Drawing the scope trace, The line reaches past
+/// both edges). The window is a step: the sample before the trigger, a dip
+/// in the first group that is lower still, then a constant level, so the
+/// first group's lowest and highest lie inside the frame, and so does the
+/// constant last group's only point. The first and last samples are kept,
+/// within the point limit.
+#[test]
+fn a_reduced_trace_reaches_both_edges() {
+    let mut scope = ScopeTrace::new(48_000.0);
+    let n = loom_canvas::MAX_TRACE_POINTS * 4;
+    scope.trace = vec![1.0; n];
+    scope.trace[0] = -0.5;
+    scope.trace[3] = -1.0;
+    scope.offset = 0.5;
+    scope.span = (n - 2) as f32;
+    let trace = scope.canvas_trace(true);
+    assert!(trace.points.len() <= loom_canvas::MAX_TRACE_POINTS);
+    assert!(trace.points[0][0] <= 0.0, "first x: {}", trace.points[0][0]);
+    let last = trace.points.last().unwrap();
+    assert!(last[0] >= 1.0, "last x: {}", last[0]);
+    assert!(trace.points.windows(2).all(|pair| pair[0][0] < pair[1][0]));
+    assert!(trace.points.iter().any(|p| p[1] == -1.0), "the dip still shows");
+
+    // A NaN at either end is skipped: the next sample with a value is kept.
+    scope.trace[0] = f32::NAN;
+    scope.trace[n - 1] = f32::NAN;
+    let trace = scope.canvas_trace(true);
+    assert!(all_finite(&trace));
+    assert_eq!(trace.points[0][0], 0.5 / scope.span, "the first value");
+    assert_eq!(
+        trace.points.last().unwrap()[0],
+        (n as f32 - 2.5) / scope.span,
+        "the last value"
+    );
+}
+
 fn reading(probe: u32, frames: u32, peak: f32, rms: f32) -> MeterReading {
     MeterReading {
         probe: ProbeId(probe),
@@ -471,11 +508,11 @@ fn a_nan_in_the_window_draws_no_point() {
     assert_eq!(trace.points.len(), 240, "one point left out");
     assert!(trace.points.iter().all(|p| (p[0] * 240.0 - 100.0).abs() > 0.5));
 
-    // Reduced in groups of 8: samples 800 to 807 are one group, all NaN.
+    // Reduced in groups of 9: samples 801 to 809 are one group, all NaN.
     let n = loom_canvas::MAX_TRACE_POINTS * 4;
     scope.trace = sine(100.0, 48_000.0, n, 0.0);
     scope.trace[3] = f32::NAN;
-    scope.trace[800..808].fill(f32::NAN);
+    scope.trace[801..810].fill(f32::NAN);
     scope.span = n as f32;
     let trace = scope.canvas_trace(true);
     assert!(all_finite(&trace));
@@ -484,7 +521,7 @@ fn a_nan_in_the_window_draws_no_point() {
         trace.points.iter().any(|p| p[0] * (n as f32) < 8.0),
         "a group with one NaN keeps its points"
     );
-    let in_gap = |p: &&[f32; 2]| (800.0..808.0).contains(&(p[0] * n as f32));
+    let in_gap = |p: &&[f32; 2]| (801.0..810.0).contains(&(p[0] * n as f32));
     assert_eq!(
         trace.points.iter().filter(in_gap).count(),
         0,
