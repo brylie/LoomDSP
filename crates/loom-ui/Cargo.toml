@@ -51,6 +51,13 @@ shell = ["gpu", "dep:winit", "dep:wgpu", "dep:pollster", "dep:accesskit_winit"]
 gpu = ["dep:wgpu"]
 # The recording painter (`paint::testing`), for other crates' tests.
 testing = []
+# Dictionary word and line breaking in Thai, Lao, Khmer, Burmese, Chinese,
+# and Japanese, for word movement in text fields (Parley's
+# `complex-scripts`; ui-layer.md, section 8, rule 8). It adds about 3 MiB
+# of segmenter data to a release build. Cargo turns a feature on for every
+# crate in the build that uses Parley, so with it the canvas's text breaks
+# lines the same way; the example patches draw byte for byte the same.
+complex-scripts = ["parley/complex-scripts"]
 # `Runtime::app_mut`, for a test driver that sets up the app's state between
 # turns. A real driver never changes the app outside `update` (section 2,
 # rule 1), so nothing turns this on outside tests.

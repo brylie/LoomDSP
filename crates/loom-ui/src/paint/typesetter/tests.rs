@@ -177,3 +177,19 @@ fn a_font_stays_loaded_while_its_canvas_lives() {
     text.begin_frame();
     assert_eq!(id(&mut text), before);
 }
+
+/// With `complex-scripts`, words in Thai break by dictionary: "สวัสดีครับ"
+/// has no space, and one word step from its start stops after "สวัสดี",
+/// not at the end of the text. This shows the feature reaches Parley.
+/// Word boundaries come from the text alone, so no Thai font is needed.
+#[cfg(feature = "complex-scripts")]
+#[test]
+fn thai_word_movement_stops_at_a_dictionary_word() {
+    let mut text = Typesetter::new();
+    let mut editor = parley::PlainEditor::<()>::new(16.0);
+    editor.set_text("สวัสดีครับ");
+    let mut driver = editor.driver(&mut text.fonts, &mut text.layouts);
+    driver.move_to_text_start();
+    driver.move_word_right();
+    assert_eq!(editor.raw_selection().focus().index(), "สวัสดี".len());
+}
