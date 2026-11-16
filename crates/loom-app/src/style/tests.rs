@@ -68,14 +68,71 @@ const SIZE_CALLS: [&str; 4] = [".size(", "text_size(", ".radius(", ".border("];
 /// built there is written inline.
 const COLOUR_CALLS: [&str; 2] = [".background(", ".colour("];
 
-/// How a colour is built inline.
-const COLOUR_BUILDERS: [&str; 5] = [
-    "Color::rgb",
-    "Color::from_rgb",
-    "Color::rgba",
-    "Color::from_rgba",
-    "Color {",
-];
+/// How a colour is built inline. Matched by prefix, so `Color::rgb` also
+/// finds `rgba`, `rgb8`, and `rgba8`, and `Color::from_rgb` their `from_`
+/// forms.
+const COLOUR_BUILDERS: [&str; 3] = ["Color::rgb", "Color::from_rgb", "Color {"];
+
+/// The 1-based lines of `source` where a size or a colour is written
+/// inline: a literal number as the first argument of a size call, or a
+/// colour built inside a colour call. When rustfmt breaks a call after its
+/// `(`, the argument is read from the next line that is not empty.
+fn inline_values(source: &str) -> Vec<usize> {
+    let lines: Vec<&str> = source.lines().collect();
+    // The argument after `call` at byte `at` of line `n`.
+    let argument = |n: usize, at: usize, call: &str| -> &str {
+        let rest = lines[n][at + call.len()..].trim_start();
+        if !rest.is_empty() {
+            return rest;
+        }
+        lines[n + 1..]
+            .iter()
+            .map(|line| line.trim_start())
+            .find(|line| !line.is_empty())
+            .unwrap_or("")
+    };
+    let mut found = Vec::new();
+    for (n, line) in lines.iter().enumerate() {
+        let size = SIZE_CALLS.iter().any(|call| {
+            line.match_indices(call)
+                .any(|(at, _)| argument(n, at, call).starts_with(|c: char| c.is_ascii_digit()))
+        });
+        let colour = COLOUR_CALLS.iter().any(|call| {
+            line.match_indices(call).any(|(at, _)| {
+                let arg = argument(n, at, call);
+                let arg = arg.strip_prefix("iced::").unwrap_or(arg);
+                let arg = arg.strip_prefix("loom_ui_core::").unwrap_or(arg);
+                COLOUR_BUILDERS.iter().any(|built| arg.starts_with(built))
+            })
+        });
+        if size || colour {
+            found.push(n + 1);
+        }
+    }
+    found
+}
+
+/// The matcher finds a value on the call's own line and on the next line
+/// when rustfmt split the call, and leaves tokens alone.
+#[test]
+fn the_matcher_finds_inline_values_on_split_lines_too() {
+    let source = "\
+e.radius(4.0)
+e.background(
+    Color::rgba(0.1, 0.2, 0.3, 1.0),
+)
+e.border(
+
+    2.0,
+    style::EDGE,
+)
+e.radius(style::RADIUS).background(style::PANEL)
+e.colour(
+    style::TEXT,
+)
+";
+    assert_eq!(inline_values(source), [1, 2, 5]);
+}
 
 /// No app source writes a size or a colour inline: every `.size(...)`,
 /// `text_size(...)`, `.radius(...)`, and `.border(...)` takes a token from
@@ -93,25 +150,11 @@ fn sizes_and_buttons_come_only_from_this_module() {
     for path in files {
         let source = std::fs::read_to_string(&path).expect("a readable source file");
         let name = path.strip_prefix(&dir).unwrap_or(&path).display().to_string();
+        let lines: Vec<&str> = source.lines().collect();
+        for at in inline_values(&source) {
+            problems.push(format!("{name}:{at}: {}", lines[at - 1].trim()));
+        }
         for (n, line) in source.lines().enumerate() {
-            for call in SIZE_CALLS {
-                for (at, _) in line.match_indices(call) {
-                    let arg = line[at + call.len()..].trim_start();
-                    if arg.starts_with(|c: char| c.is_ascii_digit()) {
-                        problems.push(format!("{name}:{}: {}", n + 1, line.trim()));
-                    }
-                }
-            }
-            for call in COLOUR_CALLS {
-                for (at, _) in line.match_indices(call) {
-                    let arg = line[at + call.len()..].trim_start();
-                    let arg = arg.strip_prefix("iced::").unwrap_or(arg);
-                    let arg = arg.strip_prefix("loom_ui_core::").unwrap_or(arg);
-                    if COLOUR_BUILDERS.iter().any(|built| arg.starts_with(built)) {
-                        problems.push(format!("{name}:{}: {}", n + 1, line.trim()));
-                    }
-                }
-            }
             let imports_button = line.contains("use iced::widget::")
                 && (line.contains("button") || source_import_has_button(&source, n));
             if imports_button {

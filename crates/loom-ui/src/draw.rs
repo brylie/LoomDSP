@@ -124,7 +124,7 @@ impl Layout {
                 });
             }
             if let Some(text) = self.text(index) {
-                let content = moved(record.content(), by);
+                let content = moved(record.content, by);
                 // Its own clip too: a text that clips cuts its own letters.
                 let shows = record.inner_clip().map_or(clip, |inner| cut(clip, moved(inner, by)));
                 painter.text(&TextRun {

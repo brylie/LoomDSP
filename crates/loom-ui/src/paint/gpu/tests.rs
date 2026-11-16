@@ -172,6 +172,10 @@ fn big(text: &str, at: Point) -> TextRun<'_> {
 #[test]
 fn a_floating_box_covers_the_text_under_it_on_the_gpu() {
     let (Some((device, queue)), Some(text)) = (device(), text()) else {
+        assert!(
+            !gpu_required(),
+            "LOOM_REQUIRE_GPU is set, but there is no GPU adapter or no font"
+        );
         eprintln!("skipped: no GPU adapter or no system font");
         return;
     };
@@ -211,6 +215,10 @@ fn a_floating_box_covers_the_text_under_it_on_the_gpu() {
 #[test]
 fn a_layer_clip_cuts_its_text_on_the_gpu() {
     let (Some((device, queue)), Some(text)) = (device(), text()) else {
+        assert!(
+            !gpu_required(),
+            "LOOM_REQUIRE_GPU is set, but there is no GPU adapter or no font"
+        );
         eprintln!("skipped: no GPU adapter or no system font");
         return;
     };

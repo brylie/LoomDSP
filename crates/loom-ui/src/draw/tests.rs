@@ -252,3 +252,162 @@ fn a_panel_is_hit_only_inside_its_slot() {
         "past the slot, though the child reaches there"
     );
 }
+
+/// A test panel: its key, its layer, and how its elements are built.
+type TestPanel = (&'static str, Layer, fn(&u8) -> Element);
+
+/// A window laid out at 300 by 200 from `panels`.
+fn window_of(panels: &[TestPanel]) -> Window {
+    let mut view = View::new();
+    for (key, layer, build) in panels {
+        view.panel_with(panel(key), *layer, &0, *build);
+    }
+    let mut window = Window::default();
+    window.sync(view.built(None));
+    window.lay_out(Size::new(300.0, 200.0), &mut crate::layout::tests::Mono::default());
+    window
+}
+
+/// What a point hits, as text: its UI ID, `"blocked"`, or `"nothing"`.
+fn hit_at(window: &Window, x: f32, y: f32) -> String {
+    match window.hit(Point::new(x, y)) {
+        Some((_, crate::Hit::Element(id))) => id.to_string(),
+        Some((_, crate::Hit::Blocked)) => "blocked".to_string(),
+        None => "nothing".to_string(),
+    }
+}
+
+/// The clips the layers began, in order.
+fn begins(recorder: &Recorder) -> Vec<Rect> {
+    recorder
+        .painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Begin(clip) => Some(*clip),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A slot with a border and padding holds its panel inside them, as CSS
+/// puts a child in the content box: the panel is laid out at the content
+/// size, painted inside it, and a point on the frame hits the parent.
+#[test]
+fn a_framed_slot_holds_its_panel_inside_the_frame() {
+    fn parent(_: &u8) -> Element {
+        Element::stack([Element::slot(panel("child"))
+            .width(Length::Fixed(40.0))
+            .height(Length::Fixed(30.0))
+            .border(2.0, BLUE)
+            .padding(3.0)])
+        .key("frame")
+        .align_x(crate::Align::Start)
+        .align_y(crate::Align::Start)
+    }
+    fn child(_: &u8) -> Element {
+        Element::space(Length::FILL, Length::FILL).key("inside")
+    }
+    let window = window_of(&[("parent", Layer::Panels, parent), ("child", Layer::Panels, child)]);
+    assert_eq!(
+        window.bounds(&panel("child").with("inside")),
+        Some(rect(5.0, 5.0, 30.0, 20.0))
+    );
+    let mut recorder = Recorder::default();
+    window.paint(Layer::Panels, &mut recorder, &PANEL);
+    assert_eq!(
+        begins(&recorder)[1],
+        rect(5.0, 5.0, 30.0, 20.0),
+        "painted inside the frame"
+    );
+    assert_eq!(hit_at(&window, 1.0, 10.0), "parent/frame", "the border is the parent's");
+    assert_eq!(hit_at(&window, 4.0, 10.0), "parent/frame", "so is the padding");
+    assert_eq!(hit_at(&window, 6.0, 10.0), "child/inside");
+}
+
+/// A shrink slot with a border is as large as its panel plus the border,
+/// and the panel is laid out at its own size, not the slot's.
+#[test]
+fn a_shrink_slot_with_a_border_lays_its_panel_out_at_its_own_size() {
+    fn parent(_: &u8) -> Element {
+        Element::row([Element::slot(panel("child")).border(2.0, BLUE)]).align_y(crate::Align::Start)
+    }
+    fn child(_: &u8) -> Element {
+        Element::space(Length::Fixed(20.0), Length::Fixed(10.0)).key("inside")
+    }
+    let window = window_of(&[("parent", Layer::Panels, parent), ("child", Layer::Panels, child)]);
+    assert_eq!(
+        window.bounds(&panel("child").with("inside")),
+        Some(rect(2.0, 2.0, 20.0, 10.0))
+    );
+}
+
+/// A slot inside a clipping element of its parent is cut by that clip too,
+/// when painted and when hit, and the cut carries down to a panel in a slot
+/// of that panel.
+#[test]
+fn a_slot_inside_a_clip_is_cut_by_it_two_levels_down() {
+    fn parent(_: &u8) -> Element {
+        Element::column([Element::row([Element::slot(panel("child"))
+            .width(Length::Fixed(40.0))
+            .height(Length::Fixed(20.0))
+            .min_width(40.0)])
+        .width(Length::Fixed(30.0))
+        .min_width(0.0)
+        .clip()])
+        .align_x(crate::Align::Start)
+    }
+    fn child(_: &u8) -> Element {
+        Element::row([Element::slot(panel("grandchild"))
+            .width(Length::Fixed(40.0))
+            .height(Length::Fixed(20.0))])
+        .align_y(crate::Align::Start)
+    }
+    fn grandchild(_: &u8) -> Element {
+        Element::space(Length::FILL, Length::FILL).key("deep")
+    }
+    let window = window_of(&[
+        ("parent", Layer::Panels, parent),
+        ("child", Layer::Panels, child),
+        ("grandchild", Layer::Panels, grandchild),
+    ]);
+    let mut recorder = Recorder::default();
+    window.paint(Layer::Panels, &mut recorder, &PANEL);
+    let cut = rect(0.0, 0.0, 30.0, 20.0);
+    let begins = begins(&recorder);
+    // The parent, its row's clip, the child, and the grandchild.
+    assert_eq!(begins.len(), 4, "{begins:?}");
+    assert_eq!(begins[2], cut, "the child is cut by the row around its slot");
+    assert_eq!(begins[3], cut, "and so is the grandchild, a level further down");
+    assert_eq!(hit_at(&window, 20.0, 10.0), "grandchild/deep", "inside the clip");
+    assert_eq!(
+        hit_at(&window, 35.0, 10.0),
+        "nothing",
+        "inside the slots, past the clip"
+    );
+}
+
+/// Text sits at its content edge as taffy rounds it: a fractional padding
+/// or border is not added on its own, so the text is where a child at that
+/// edge would be, on a whole pixel.
+#[test]
+fn text_sits_on_the_rounded_content_edge() {
+    let padded = painted(Element::text("ab", STYLE).padding(2.5), Point::ORIGIN);
+    let [Painted::Text { run, .. }] = padded.as_slice() else {
+        panic!("one text: {padded:?}");
+    };
+    assert_eq!(run.anchor, Point::new(3.0, 3.0), "2.5 rounds to the content edge");
+    let framed = painted(
+        Element::column([Element::text("ab", STYLE)])
+            .border(1.5, BLUE)
+            .padding(1.0),
+        Point::ORIGIN,
+    );
+    let text = framed
+        .iter()
+        .find_map(|piece| match piece {
+            Painted::Text { run, .. } => Some(*run),
+            _ => None,
+        })
+        .expect("the text is painted");
+    assert_eq!(text.anchor, Point::new(3.0, 3.0), "1.5 and 1 make 2.5, rounded once");
+}

@@ -41,7 +41,7 @@
 //! this crate's API.
 
 use crate::element::{Align, Element, Kind, Length, Look, Padding};
-use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, TextStyle, UiId};
+use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, TextStyle, UiId, Vector};
 use std::collections::HashMap;
 use taffy::style_helpers::line;
 use taffy::{
@@ -151,26 +151,19 @@ pub(crate) struct Record {
     pub(crate) bounds: Rect,
     /// How it is drawn: its box, and whether it clips what is inside.
     pub(crate) look: Look,
-    /// Its border and padding, which its content sits inside.
-    pub(crate) inset: Padding,
+    /// Its content box: inside its border and padding, where its text and
+    /// a slot's panel go. Rounded as taffy places a child there, so text
+    /// sits where a child at that edge would.
+    pub(crate) content: Rect,
+    /// Where its corner is before rounding, in the panel: the content box
+    /// is rounded from it.
+    unrounded: Point,
     /// What of it shows, cut by every clipping element around it, in the
     /// panel. `None` when nothing around it clips.
     pub(crate) clip: Option<Rect>,
 }
 
 impl Record {
-    /// Its content box: its bounds within its border and padding.
-    pub(crate) fn content(&self) -> Rect {
-        let inset = self.inset;
-        Rect::new(
-            Point::new(self.bounds.x + inset.left, self.bounds.y + inset.top),
-            Size::new(
-                (self.bounds.width - inset.left - inset.right).max(0.0),
-                (self.bounds.height - inset.top - inset.bottom).max(0.0),
-            ),
-        )
-    }
-
     /// The clip for what is inside it: its own bounds when it clips, cut
     /// by the clip around it.
     pub(crate) fn inner_clip(&self) -> Option<Rect> {
@@ -187,6 +180,16 @@ impl Record {
     pub(crate) fn shows(&self, point: Point) -> bool {
         self.bounds.contains(point) && self.clip.is_none_or(|clip| clip.contains(point))
     }
+}
+
+/// `value` rounded to a whole logical pixel as taffy rounds its layout:
+/// halves go up. taffy 0.15 rounds a child's place as
+/// `round(unrounded edge + border + padding)`, with `(v + 0.5).floor()`
+/// (`compute/mod.rs`, `round_layout`, and `util/sys.rs`); the content box
+/// copies that rule. A taffy upgrade that changes it fails
+/// `draw::tests::text_sits_on_the_rounded_content_edge`.
+fn round(value: f32) -> f32 {
+    (value + 0.5).floor()
 }
 
 /// The part of `a` inside `b`: an empty rectangle at `b`'s corner when they
@@ -429,6 +432,25 @@ impl Layout {
                 Point::new(origin.x + layout.location.x, origin.y + layout.location.y),
                 Size::new(layout.size.width, layout.size.height),
             );
+            // The content box, from the unrounded layout, rounded as taffy
+            // rounds a child's place: from the edge inside the border and
+            // the padding together, never each on its own, so the content
+            // box is where a child at its edge sits.
+            let exact = self.tree.unrounded_layout(self.records[index].node);
+            let corner = match self.records[index].parent {
+                Some(parent) => self.records[parent].unrounded,
+                None => Point::ORIGIN,
+            } + Vector::new(exact.location.x, exact.location.y);
+            let (border, padding, size) = (exact.border, exact.padding, exact.size);
+            let left = round(corner.x + border.left + padding.left);
+            let top = round(corner.y + border.top + padding.top);
+            let right = round(corner.x + size.width - border.right - padding.right);
+            let bottom = round(corner.y + size.height - border.bottom - padding.bottom);
+            self.records[index].unrounded = corner;
+            self.records[index].content = Rect::new(
+                Point::new(left, top),
+                Size::new((right - left).max(0.0), (bottom - top).max(0.0)),
+            );
             // The parent's clip for what is inside it is known, since the
             // parent came first.
             self.records[index].clip = self.records[index]
@@ -468,10 +490,13 @@ impl Layout {
 
     /// Each slot's panel and its place in this panel, in tree order; a
     /// slot's number is its place in this order.
+    ///
+    /// A slot's place is its content box: inside its border and padding, as
+    /// CSS puts a child, so a framed slot's panel never covers its frame.
     pub(crate) fn slots(&self) -> impl Iterator<Item = (&UiId, Rect)> {
         self.slots
             .iter()
-            .map(|(panel, index)| (panel, self.records[*index].bounds))
+            .map(|(panel, index)| (panel, self.records[*index].content))
     }
 
     /// The part of each slot that shows, in tree order: its place cut by
@@ -479,7 +504,7 @@ impl Layout {
     pub(crate) fn slot_clips(&self) -> impl Iterator<Item = Rect> {
         self.slots.iter().map(|(_, index)| {
             let record = &self.records[*index];
-            record.clip.map_or(record.bounds, |clip| cut(clip, record.bounds))
+            record.clip.map_or(record.content, |clip| cut(clip, record.content))
         })
     }
 
@@ -534,15 +559,6 @@ impl Layout {
             Kind::Row => Parent::Row,
             Kind::Column => Parent::Column,
             _ => Parent::Stack,
-        };
-        let inset = {
-            let (border, padding) = (element.look.border_width(), element.padding);
-            Padding {
-                top: padding.top + border,
-                right: padding.right + border,
-                bottom: padding.bottom + border,
-                left: padding.left + border,
-            }
         };
         let Element {
             kind,
@@ -608,7 +624,8 @@ impl Layout {
             opaque,
             bounds: Rect::new(Point::ORIGIN, Size::ZERO),
             look,
-            inset,
+            content: Rect::new(Point::ORIGIN, Size::ZERO),
+            unrounded: Point::ORIGIN,
             clip: None,
         });
 
