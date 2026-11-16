@@ -1,4 +1,5 @@
-//! Unit tests for the voice modules' value conversions.
+//! Unit tests for the voice modules: value conversions, shared parameter
+//! specs, and the assigner's port builders.
 
 use super::Assign;
 
@@ -51,11 +52,16 @@ fn note_input_and_voice_assigner_share_voices_and_mode() {
     }
 }
 
-/// Every Voice assigner port is a bundle, and each input's declared default
-/// is the one its note values start from.
+/// Every Voice assigner port is a bundle, the port builder makes one, and
+/// each note input's declared default is the value its notes start from.
 #[test]
 fn voice_assigners_ports_are_bundles_with_their_defaults() {
-    let port = super::assign_port(
+    use loom_core::{Channels, PortDefault};
+    let assign = &super::ASSIGN;
+    for port in assign.inputs.iter().chain(assign.outputs) {
+        assert_eq!(port.channels, Channels::Voices, "{}", port.name);
+    }
+    let built = super::assign_port(
         "pitch",
         "Pitch",
         "A test port.",
@@ -63,15 +69,19 @@ fn voice_assigners_ports_are_bundles_with_their_defaults() {
         0.25,
         loom_core::PortRange::Signal,
     );
-    assert_eq!(port.channels, loom_core::Channels::Voices);
-    assert!(matches!(port.default, loom_core::PortDefault::Value(v) if v == 0.25));
+    assert_eq!(built.channels, Channels::Voices);
+    assert!(matches!(built.default, PortDefault::Value(v) if v == 0.25));
     for (name, value) in [
         ("pitch", Assign::DEFAULTS.pitch),
         ("velocity", Assign::DEFAULTS.velocity),
         ("pressure", Assign::DEFAULTS.pressure),
         ("timbre", Assign::DEFAULTS.timbre),
     ] {
-        let index = super::ASSIGN.input_index(name).unwrap();
-        assert_eq!(Assign::port_default(index), value, "{name}");
+        let index = assign.input_index(name).unwrap();
+        let PortDefault::Value(declared) = assign.inputs[index].default else {
+            panic!("{name} has a fixed-value default");
+        };
+        assert_eq!(value, declared, "{name}");
+        assert_eq!(Assign::port_default(index), declared, "{name}");
     }
 }
