@@ -1,6 +1,6 @@
 use super::*;
-use crate::gpu::packed;
 use crate::scene::{ModuleView, PanelView, WidgetView};
+use loom_ui::paint::packed;
 
 fn scene() -> Scene {
     scene_with(vec![

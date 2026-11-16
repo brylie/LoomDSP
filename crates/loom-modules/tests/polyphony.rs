@@ -1288,7 +1288,15 @@ const MINUS_ONE_DBFS: f32 = 0.891;
 /// to be a real check, so a silent patch cannot pass.
 #[test]
 fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
-    let mut parts = common::load_raw("polysynth.ron");
+    let peak = eight_held_notes_peak("polysynth.ron");
+    assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
+    assert!(peak > 0.25, "8 notes play: peak {peak}");
+}
+
+/// The peak of `patch` with the benchmark's 8 notes started on frame 0 and
+/// held for 5 s, with output safety off.
+fn eight_held_notes_peak(patch: &str) -> f32 {
+    let mut parts = common::load_raw(patch);
     for note in [48, 52, 55, 59, 60, 64, 67, 71] {
         assert!(parts.midi.send(loom_core::MidiEvent::note_on(0, 0, note, 100)));
     }
@@ -1298,7 +1306,136 @@ fn eight_held_notes_on_the_polysynth_peak_under_minus_one_dbfs() {
     for (l, r) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
         parts.engine.process(l, r);
     }
-    let peak = loom_analysis::peak(&left).max(loom_analysis::peak(&right));
+    loom_analysis::peak(&left).max(loom_analysis::peak(&right))
+}
+
+/// The large reference patch's voice chain, by module ID: the Voice
+/// Assigner (2) through the voice's output Amplifier (66), and MIDI Note (1)
+/// before it (polyphony.md, The large reference patch).
+const LARGE_VOICE_CHAIN: std::ops::RangeInclusive<u32> = 1..=66;
+
+/// The large reference patch's module runs per block, which its benchmark
+/// record states (docs/benchmarks).
+const LARGE_RUNS_PER_BLOCK: usize = 553;
+
+/// The large reference patch's Voice Merge. Every module from it on, and the
+/// shared noise source and its filter just before it, gives one voice.
+const LARGE_MERGE: u32 = 69;
+
+/// The large reference patch compiles with no feedback loop and nothing
+/// skipped. Every output from MIDI Note to the voice's output Amplifier is 8
+/// mono voices, every other output is one voice, and its only stereo copies
+/// are in the effects after Voice Merge.
+#[test]
+fn the_large_reference_patch_compiles_to_eight_voices_and_no_loop() {
+    let parts = common::load("polysynth-large.ron");
+    let report = parts.controller.last_report();
+    assert!(report.loops.is_empty(), "no feedback loops: {:?}", report.loops);
+    assert!(report.skipped.is_empty(), "nothing skipped: {:?}", report.skipped);
+    for module in &report.per_channel {
+        assert!(
+            module.0 > LARGE_MERGE,
+            "stereo copies only after Voice Merge: module {}",
+            module.0
+        );
+    }
+    let eight = Width { voices: 8, sides: 1 };
+    let modules: Vec<u32> = parts.controller.graph().nodes().map(|(id, _)| id.0).collect();
+    assert!(
+        (90..=110).contains(&modules.len()),
+        "about 100 modules: {}",
+        modules.len()
+    );
+    // Module runs per block, as the benchmark record counts them: a module
+    // with a bundle port runs once, any other once per voice of its widest
+    // output, and twice that when it runs per side.
+    let runs: usize = parts
+        .controller
+        .graph()
+        .nodes()
+        .map(|(id, node)| {
+            let d = node.descriptor;
+            let bundle = d
+                .inputs
+                .iter()
+                .chain(d.outputs)
+                .any(|p| p.channels == loom_core::Channels::Voices);
+            let voices = output_widths(&parts, id.0)
+                .iter()
+                .map(|(_, w)| w.voices)
+                .max()
+                .unwrap_or(1);
+            let sides = if report.per_channel.contains(&id) { 2 } else { 1 };
+            if bundle { 1 } else { voices * sides }
+        })
+        .sum();
+    assert_eq!(runs, LARGE_RUNS_PER_BLOCK, "module runs per block");
+    for module in modules {
+        for (name, width) in output_widths(&parts, module) {
+            if LARGE_VOICE_CHAIN.contains(&module) {
+                assert_eq!(width, eight, "module {module} output {name}");
+            } else {
+                assert_eq!(width.voices, 1, "module {module} output {name}");
+            }
+        }
+    }
+}
+
+/// Eight held notes on the large reference patch peak under -1 dBFS, and are
+/// loud enough that a silent patch cannot pass.
+#[test]
+fn eight_held_notes_on_the_large_reference_patch_peak_under_minus_one_dbfs() {
+    let peak = eight_held_notes_peak("polysynth-large.ron");
     assert!(peak < MINUS_ONE_DBFS, "8 notes peak at {peak}");
     assert!(peak > 0.25, "8 notes play: peak {peak}");
+}
+
+/// Voice assigner with 8 input voices held, then its note inputs swapped for
+/// 4-voice cables: the notes of input voices 5 to 8 end on the swap frame and
+/// the others keep sounding. Its gate light is lit while a note is held. The
+/// harness keeps one bundle width for a whole render, so this needs the
+/// engine.
+#[test]
+fn voice_assigner_releases_the_input_voices_a_narrower_cable_drops() {
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let eight = c.add_module("test.voices").unwrap();
+    c.set_param_named(eight, "voices", 8.0).unwrap();
+    c.set_param_named(eight, "value", 1.0).unwrap();
+    let four = c.add_module("test.voices").unwrap();
+    c.set_param_named(four, "voices", 4.0).unwrap();
+    c.set_param_named(four, "value", 1.0).unwrap();
+    let assign = c.add_module("loom.voice.assign").unwrap();
+    c.set_param_named(assign, "voices", 8.0).unwrap();
+    c.set_param_named(assign, "mode", 0.0).unwrap();
+    let merge = c.add_module("loom.voice.merge").unwrap();
+    c.set_param_named(merge, "mode", 1.0).unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.connect_named(eight, "out", assign, "pitch").unwrap();
+    c.connect_named(eight, "out", assign, "gate").unwrap();
+    c.connect_named(assign, "gate", merge, "in").unwrap();
+    c.connect_named(merge, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    let light = parts
+        .controller
+        .graph()
+        .node(assign)
+        .unwrap()
+        .descriptor
+        .display_index("gate")
+        .unwrap();
+    assert_eq!(parts.controller.display(assign, light), Some(0.0));
+    // All 8 gates high: their average is 1.
+    assert!(render(&mut parts).iter().all(|v| *v == 1.0));
+    assert_eq!(parts.controller.display(assign, light), Some(1.0));
+    let c = &mut parts.controller;
+    c.connect_named(four, "out", assign, "pitch").unwrap();
+    c.connect_named(four, "out", assign, "gate").unwrap();
+    c.commit().unwrap();
+    let mut left = [0.0; 512];
+    let mut right = [0.0; 512];
+    parts.engine.process(&mut left, &mut right);
+    // Input voices 5 to 8 end on the swap frame; 4 of 8 voices stay high.
+    assert_eq!(left[0], 0.5);
+    assert!(left.iter().all(|v| *v == 0.5));
 }

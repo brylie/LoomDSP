@@ -90,6 +90,7 @@ fn panels_follow_the_spec() {
             // Choice controls that stand in for a knob on these modules.
             let non_knob = [
                 ("loom.midi.note", "mode"),
+                ("loom.voice.assign", "mode"),
                 ("loom.voice.merge", "mode"),
                 ("loom.voice.spread", "mode"),
                 ("loom.io.audio-in", "pair"),
@@ -147,6 +148,7 @@ fn panels_follow_the_spec() {
             use loom_core::WidgetKind::{Fader, Number, Range};
             let moved = match (descriptor.id, param.name) {
                 ("loom.midi.note", "voices")
+                | ("loom.voice.assign", "voices" | "unison")
                 | ("loom.clock.transport", "tempo")
                 | ("loom.gate.euclid", "steps" | "hits" | "rotation")
                 | ("loom.midi.controller", "controller")
@@ -176,7 +178,7 @@ fn panels_follow_the_spec() {
             .map(|w| w.bind())
             .collect();
         let expected: &[&str] = match descriptor.id {
-            "loom.midi.note" => &["gate"],
+            "loom.midi.note" | "loom.voice.assign" => &["gate"],
             "loom.io.audio-in" => &["active"],
             "loom.env.envelope" => &["level"],
             "loom.logic.memory" => &["state"],

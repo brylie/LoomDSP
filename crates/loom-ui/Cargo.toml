@@ -23,9 +23,19 @@ taffy.workspace = true
 # (docs/design/ui-layer.md, section 7). The version `loom-app` builds the tree
 # with.
 accesskit = "0.25"
+# Painting (`paint`): text set with Parley over fontique's font collection,
+# glyphs rasterised with swash and packed with etagere, and the instance
+# types laid out with bytemuck (docs/design/ui-layer.md, section 8, rule 8).
+# None of them is a window toolkit, and the GPU renderer is behind `gpu`.
+parley.workspace = true
+fontique.workspace = true
+swash.workspace = true
+etagere.workspace = true
+bytemuck.workspace = true
 winit = { workspace = true, optional = true }
 # wgpu's own defaults, which hold its backends: the app gets them through Iced,
-# and the shell alone needs them too. No crate beyond what Iced brings.
+# and the shell and the paint renderer alone need them too. No crate beyond
+# what Iced brings.
 wgpu = { workspace = true, optional = true, features = ["default"] }
 pollster = { workspace = true, optional = true }
 # The platform's screen reader adapter in the shell's window: macOS, Windows,
@@ -36,13 +46,19 @@ accesskit_winit = { version = "0.34", optional = true }
 default = ["shell"]
 # The winit shell: a window, its GPU surface, and the loop that drives the
 # runtime (`loom_ui::shell`).
-shell = ["dep:winit", "dep:wgpu", "dep:pollster", "dep:accesskit_winit"]
+shell = ["gpu", "dep:winit", "dep:wgpu", "dep:pollster", "dep:accesskit_winit"]
+# The paint renderer (`paint::PaintRenderer`): wgpu, and no window.
+gpu = ["dep:wgpu"]
+# The recording painter (`paint::testing`), for other crates' tests.
+testing = []
 # `Runtime::app_mut`, for a test driver that sets up the app's state between
 # turns. A real driver never changes the app outside `update` (section 2,
 # rule 1), so nothing turns this on outside tests.
 test-driver = []
 
 [dev-dependencies]
+# Same version as wgpu's own shader translator, to validate paint.wgsl in tests.
+naga = { version = "27", features = ["wgsl-in", "msl-out"] }
 # Saves the window example's `--capture` frame.
 png.workspace = true
 

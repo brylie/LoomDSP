@@ -1,12 +1,74 @@
 //! Bundle routing. Spec: `docs/design/polyphony.md`.
 
+#[cfg(test)]
+mod tests;
+
 use crate::rand::{VOICE_SPREAD_STREAM, seed_from, seed_param, stream};
 use loom_core::signal::hold_finite;
 use loom_core::{
-    Channels, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec,
-    PortDefault, PortIo, PortRange, PortSpec, ProcessContext, SignalType, Widget,
+    Channels, DisplayKind, DisplayRange, DisplaySpec, Module, ModuleConfig, ModuleDescriptor, ModuleRole, Panel,
+    ParamOptions, ParamRange, ParamSpec, PortDefault, PortIo, PortRange, PortSpec, ProcessContext, SignalType, Widget,
 };
 use loom_rt::Smoothed;
+
+/// The `voices` parameter that Note input and Voice assigner share: how many
+/// output voices the module has. It shapes the graph, so it is not modulated.
+pub(crate) const fn voices_param() -> ParamSpec {
+    ParamSpec {
+        name: "voices",
+        label: "Voices",
+        description: "Number of simultaneous voices.",
+        min: 1.0,
+        max: 16.0,
+        default: 1.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()
+    .shapes_graph()
+}
+
+/// The `mode` parameter that Note input and Voice assigner share (polyphony
+/// spec, rule 20). Its choices are filtered by the voice count (ADR-0030).
+pub(crate) const fn mode_param() -> ParamSpec {
+    ParamSpec {
+        name: "mode",
+        label: "Mode",
+        description: "How notes steal voices, or how a single voice articulates notes.",
+        min: 0.0,
+        max: 3.0,
+        default: 2.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()
+    .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
+    .choices_by_count("voices", 2)
+}
+
+/// Maps a stored `mode` choice to the allocator's mode. Stored values stay
+/// stable; the allocator falls back when a mode does not fit the voice count.
+pub(crate) fn allocator_mode(value: usize) -> loom_dsp::voice::Mode {
+    use loom_dsp::voice::Mode;
+    match value {
+        0 => Mode::Oldest,
+        1 => Mode::Quietest,
+        3 => Mode::Retrigger,
+        _ => Mode::Legato,
+    }
+}
+
+/// One voice of an input read as one value: the mean of a stereo voice's two
+/// sides, or its only side. Kept as exactly `left * 0.5 + right * 0.5`: it
+/// cannot overflow, so it is finite exactly when both sides are.
+pub(crate) fn stereo_mean(io: &PortIo<'_>, port: usize, voice: usize, frame: usize) -> f32 {
+    let left = io.voice_input(port, voice, 0)[frame];
+    if io.input_width(port).sides == 2 {
+        left * 0.5 + io.voice_input(port, voice, 1)[frame] * 0.5
+    } else {
+        left
+    }
+}
 
 /// `loom.voice.merge`: sums, averages, or selects a voice from a bundle.
 pub static MERGE: ModuleDescriptor = ModuleDescriptor {
@@ -36,15 +98,26 @@ pub static MERGE: ModuleDescriptor = ModuleDescriptor {
             channels: Channels::Voices,
         },
     ],
-    outputs: &[PortSpec {
-        name: "out",
-        label: "Out",
-        description: "The merged signal, with the input's stereo sides.",
-        signal: SignalType::Audio,
-        default: PortDefault::Value(0.0),
-        range: PortRange::Signal,
-        channels: Channels::PerChannel,
-    }],
+    outputs: &[
+        PortSpec {
+            name: "out",
+            label: "Out",
+            description: "The merged signal, with the input's stereo sides.",
+            signal: SignalType::Audio,
+            default: PortDefault::Value(0.0),
+            range: PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+        PortSpec {
+            name: "gate",
+            label: "Gate",
+            description: "High while the voice Out follows is playing. In Sum and Average, while any voice plays.",
+            signal: SignalType::Gate,
+            default: PortDefault::Value(0.0),
+            range: PortRange::Signal,
+            channels: Channels::PerChannel,
+        },
+    ],
     params: &[ParamSpec {
         name: "mode",
         label: "Mode",
@@ -76,18 +149,33 @@ struct Merge {
 
 impl Merge {
     const IN: usize = MERGE.input_index("in").unwrap();
-    const GATE: usize = MERGE.input_index("gate").unwrap();
+    const GATE_IN: usize = MERGE.input_index("gate").unwrap();
     const OUT: usize = MERGE.output_index("out").unwrap();
+    const GATE_OUT: usize = MERGE.output_index("gate").unwrap();
     const MODE: usize = MERGE.param_index("mode").unwrap();
+
+    /// True when `candidate` should replace `previous` in Lowest (mode 3) or
+    /// Highest (mode 4). A non-finite value never wins over a finite one
+    /// (#794); between finite values the strict comparison keeps the lower
+    /// voice index on a tie.
+    fn better(mode: usize, candidate: f32, previous: f32) -> bool {
+        match (candidate.is_finite(), previous.is_finite()) {
+            (false, _) => false,
+            (true, false) => true,
+            (true, true) if mode == 3 => candidate < previous,
+            (true, true) => candidate > previous,
+        }
+    }
+
+    /// One voice's gate, its two stereo sides combined by maximum. `f32::max`
+    /// keeps the other side when one is NaN.
+    fn gate(io: &PortIo<'_>, voice: usize, frame: usize) -> f32 {
+        io.voice_input(Self::GATE_IN, voice, 0)[frame].max(io.voice_input(Self::GATE_IN, voice, 1)[frame])
+    }
 
     /// Compares stereo voices by their mean while retaining their two sides.
     fn value(io: &PortIo<'_>, voice: usize, frame: usize) -> f32 {
-        let left = io.voice_input(Self::IN, voice, 0)[frame];
-        if io.input_width(Self::IN).sides == 2 {
-            left * 0.5 + io.voice_input(Self::IN, voice, 1)[frame] * 0.5
-        } else {
-            left
-        }
+        stereo_mean(io, Self::IN, voice, frame)
     }
 }
 
@@ -108,8 +196,7 @@ impl Module for Merge {
             // Simultaneous rises share an age, so ties retain the lowest index.
             self.clock = self.clock.wrapping_add(1);
             for voice in 0..voices {
-                let high =
-                    io.voice_input(Self::GATE, voice, 0)[frame].max(io.voice_input(Self::GATE, voice, 1)[frame]) > 0.5;
+                let high = Self::gate(io, voice, frame) > 0.5;
                 if high != self.high[voice] {
                     edge = true;
                     self.high[voice] = high;
@@ -124,12 +211,11 @@ impl Module for Merge {
                     if !self.high[voice] {
                         continue;
                     }
-                    let better = picked.is_none_or(|previous| match mode {
+                    let wins = picked.is_none_or(|previous| match mode {
                         2 => self.order[voice] > self.order[previous],
-                        3 => Self::value(io, voice, frame) < Self::value(io, previous, frame),
-                        _ => Self::value(io, voice, frame) > Self::value(io, previous, frame),
+                        _ => Self::better(mode, Self::value(io, voice, frame), Self::value(io, previous, frame)),
                     });
-                    if better {
+                    if wins {
                         picked = Some(voice);
                     }
                 }
@@ -148,6 +234,18 @@ impl Module for Merge {
                     io.voice_input(Self::IN, self.selected, side)[frame]
                 };
                 io.voice_output(Self::OUT, 0, side)[frame] = value;
+            }
+            // The selection above is already made for this frame, so a hand-off
+            // between held voices has no low sample.
+            let gate = if mode <= 1 {
+                (1..voices).fold(Self::gate(io, 0, frame), |high, voice| {
+                    high.max(Self::gate(io, voice, frame))
+                })
+            } else {
+                Self::gate(io, self.selected, frame)
+            };
+            for side in 0..io.output_width(Self::GATE_OUT).sides {
+                io.voice_output(Self::GATE_OUT, 0, side)[frame] = gate;
             }
         }
     }
@@ -572,5 +670,372 @@ impl Module for Spread {
     fn reset(&mut self) {
         let target = self.amount.target();
         self.amount.reset(target);
+    }
+}
+
+/// What an output voice that never had a note writes for its pitch, on Note
+/// input and Voice assigner alike, so the two sources agree on an unused voice.
+pub(crate) const UNUSED_PITCH: f32 = -0.5;
+
+/// A `Voices` port of Voice assigner.
+const fn assign_port(
+    name: &'static str,
+    label: &'static str,
+    description: &'static str,
+    signal: SignalType,
+    default: f32,
+    range: PortRange,
+) -> PortSpec {
+    PortSpec {
+        name,
+        label,
+        description,
+        signal,
+        default: PortDefault::Value(default),
+        range,
+        channels: Channels::Voices,
+    }
+}
+
+/// `loom.voice.assign` (MT-VOICE-04): gives notes from any source to this
+/// module's own voices, with unison. Spec: `docs/design/polyphony.md`, Voice
+/// assigner.
+pub static ASSIGN: ModuleDescriptor = ModuleDescriptor {
+    id: "loom.voice.assign",
+    version: 1,
+    name: "Voice Assigner",
+    category: "Voice",
+    family: loom_core::Family::LevelAndRouting,
+    description: "Gives notes from any source to this module's own voices, with unison.",
+    inputs: &[
+        assign_port(
+            "pitch",
+            "Pitch",
+            "The pitch of each input voice's note. 0 is middle C.",
+            SignalType::Pitch,
+            0.0,
+            PortRange::Signal,
+        ),
+        assign_port(
+            "gate",
+            "Gate",
+            "Each rising edge starts a note on this input voice. Nothing plays without a cable here.",
+            SignalType::Gate,
+            0.0,
+            PortRange::Signal,
+        ),
+        assign_port(
+            "velocity",
+            "Velocity",
+            "The velocity of each input voice's note, from 0 to 1.",
+            SignalType::Modulation,
+            1.0,
+            PortRange::Span(0.0, 1.0),
+        ),
+        assign_port(
+            "pressure",
+            "Pressure",
+            "The pressure of each input voice's note, from 0 to 1. It follows the note while it sounds.",
+            SignalType::Modulation,
+            0.0,
+            PortRange::Span(0.0, 1.0),
+        ),
+        assign_port(
+            "timbre",
+            "Timbre",
+            "The timbre of each input voice's note, from 0 to 1. It follows the note while it sounds.",
+            SignalType::Modulation,
+            0.0,
+            PortRange::Span(0.0, 1.0),
+        ),
+        assign_port(
+            "level",
+            "Level",
+            "The loudness of each output voice, patched back from its envelope, for Quietest stealing.",
+            SignalType::Modulation,
+            0.0,
+            PortRange::Signal,
+        ),
+    ],
+    outputs: &[
+        assign_port(
+            "pitch",
+            "Pitch",
+            "The pitch of this voice's note. 0 is middle C.",
+            SignalType::Pitch,
+            0.0,
+            PortRange::Signal,
+        ),
+        assign_port(
+            "gate",
+            "Gate",
+            "High while this voice holds a note.",
+            SignalType::Gate,
+            0.0,
+            PortRange::Signal,
+        ),
+        assign_port(
+            "velocity",
+            "Velocity",
+            "The velocity of this voice's note, from 0 to 1.",
+            SignalType::Modulation,
+            0.0,
+            PortRange::Span(0.0, 1.0),
+        ),
+        assign_port(
+            "pressure",
+            "Pressure",
+            "The pressure of this voice's note, from 0 to 1.",
+            SignalType::Modulation,
+            0.0,
+            PortRange::Span(0.0, 1.0),
+        ),
+        assign_port(
+            "timbre",
+            "Timbre",
+            "The timbre of this voice's note, from 0 to 1.",
+            SignalType::Modulation,
+            0.0,
+            PortRange::Span(0.0, 1.0),
+        ),
+    ],
+    params: &[
+        voices_param(),
+        mode_param(),
+        ParamSpec {
+            name: "unison",
+            label: "Unison",
+            description: "How many voices each note plays.",
+            min: 1.0,
+            max: 4.0,
+            default: 1.0,
+            unit: "",
+            options: ParamOptions::DEFAULT,
+        }
+        .integer()
+        .shown_when("mode", &[0, 1]),
+    ],
+    role: ModuleRole::Dsp(|_| Box::new(Assign::default())),
+    panel: Panel::new(
+        12,
+        6,
+        &[
+            Widget::segmented(0, 0, 12, "mode"),
+            Widget::number(0, 2, "voices"),
+            Widget::light(9, 2, "gate"),
+            Widget::number(0, 4, "unison"),
+        ],
+    ),
+    displays: &[DisplaySpec {
+        name: "gate",
+        label: "Gate",
+        description: "Lit while a note is held.",
+        kind: DisplayKind::Level,
+        range: DisplayRange::UNIT,
+    }],
+    roles: &[],
+};
+
+/// An input voice's latest finite note values.
+#[derive(Clone, Copy)]
+struct Values {
+    pitch: f32,
+    velocity: f32,
+    pressure: f32,
+    timbre: f32,
+}
+
+/// Voice assigner's state, all fixed-size (hard rule 1).
+#[derive(Clone)]
+struct Assign {
+    allocator: loom_dsp::voice::Allocator,
+    /// Whether each input voice's gate was high on the last frame.
+    high: [bool; loom_dsp::voice::MAX_VOICES],
+    /// Each input voice's latest finite values, held after its note-off.
+    last: [Values; loom_dsp::voice::MAX_VOICES],
+    mode: usize,
+    unison: usize,
+}
+
+impl Default for Assign {
+    fn default() -> Self {
+        Self {
+            allocator: loom_dsp::voice::Allocator::default(),
+            high: [false; loom_dsp::voice::MAX_VOICES],
+            last: [Self::DEFAULTS; loom_dsp::voice::MAX_VOICES],
+            mode: ASSIGN.params[Self::MODE].default as usize,
+            unison: ASSIGN.params[Self::UNISON].default as usize,
+        }
+    }
+}
+
+impl Assign {
+    const PITCH_IN: usize = ASSIGN.input_index("pitch").unwrap();
+    const GATE_IN: usize = ASSIGN.input_index("gate").unwrap();
+    const VELOCITY_IN: usize = ASSIGN.input_index("velocity").unwrap();
+    const PRESSURE_IN: usize = ASSIGN.input_index("pressure").unwrap();
+    const TIMBRE_IN: usize = ASSIGN.input_index("timbre").unwrap();
+    const LEVEL_IN: usize = ASSIGN.input_index("level").unwrap();
+    const PITCH_OUT: usize = ASSIGN.output_index("pitch").unwrap();
+    const GATE_OUT: usize = ASSIGN.output_index("gate").unwrap();
+    const VELOCITY_OUT: usize = ASSIGN.output_index("velocity").unwrap();
+    const PRESSURE_OUT: usize = ASSIGN.output_index("pressure").unwrap();
+    const TIMBRE_OUT: usize = ASSIGN.output_index("timbre").unwrap();
+    const MODE: usize = ASSIGN.param_index("mode").unwrap();
+    const UNISON: usize = ASSIGN.param_index("unison").unwrap();
+    /// The inputs that set how many input voices can play (rule 4). `level`
+    /// is indexed by output voice, so it does not count.
+    const NOTE_INPUTS: [usize; 5] = [
+        Self::PITCH_IN,
+        Self::GATE_IN,
+        Self::VELOCITY_IN,
+        Self::PRESSURE_IN,
+        Self::TIMBRE_IN,
+    ];
+    /// The note inputs' declared defaults (ADR-0043), never literals.
+    const DEFAULTS: Values = Values {
+        pitch: Self::port_default(Self::PITCH_IN),
+        velocity: Self::port_default(Self::VELOCITY_IN),
+        pressure: Self::port_default(Self::PRESSURE_IN),
+        timbre: Self::port_default(Self::TIMBRE_IN),
+    };
+
+    /// An input's fixed-value default.
+    const fn port_default(port: usize) -> f32 {
+        match ASSIGN.inputs[port].default {
+            PortDefault::Value(value) => value,
+            _ => panic!("Voice assigner's inputs have fixed-value defaults"),
+        }
+    }
+
+    /// A `unison` value as a voice count from 1 to 4. NaN gives the default
+    /// of 1, since `NaN as usize` would quietly give 0.
+    fn unison_from(value: f32) -> usize {
+        if value.is_nan() {
+            1
+        } else {
+            value.round().clamp(1.0, 4.0) as usize
+        }
+    }
+
+    /// A `mode` value as a stored choice from 0 to 3.
+    fn mode_from(value: f32) -> usize {
+        if value.is_nan() {
+            ASSIGN.params[Self::MODE].default as usize
+        } else {
+            value.round().clamp(0.0, 3.0) as usize
+        }
+    }
+
+    /// Input voice `voice`'s note, from its latest finite values.
+    fn note(&self, voice: usize) -> loom_dsp::voice::Note {
+        let values = self.last[voice];
+        loom_dsp::voice::Note {
+            id: loom_dsp::voice::NoteId(voice as u64),
+            pitch: values.pitch,
+            velocity: values.velocity,
+            pressure: values.pressure,
+            timbre: values.timbre,
+        }
+    }
+}
+
+impl Module for Assign {
+    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        use loom_dsp::voice::MAX_VOICES;
+        // Capped so a broken width rule loses a voice instead of panicking.
+        let capacity = io.output_width(Self::PITCH_OUT).voices.clamp(1, MAX_VOICES);
+        let inputs = Self::NOTE_INPUTS
+            .iter()
+            .map(|&port| io.input_width(port).voices)
+            .max()
+            .unwrap_or(1)
+            .clamp(1, MAX_VOICES);
+        let mode = io.param(Self::MODE);
+        let unison = io.param(Self::UNISON);
+        let level_patched = !io.uses_default(Self::LEVEL_IN);
+        for frame in 0..io.frames() {
+            let mode = mode.map_or(frame, self.mode, Self::mode_from);
+            let unison = unison.map_or(frame, self.unison, Self::unison_from);
+            self.allocator.configure(capacity, allocator_mode(mode), unison);
+            let mut levels = [0.0; MAX_VOICES];
+            for (voice, level) in levels[..capacity].iter_mut().enumerate() {
+                *level = stereo_mean(io, Self::LEVEL_IN, voice, frame);
+            }
+            self.allocator.begin_frame(level_patched.then_some(&levels[..capacity]));
+            let mut rises = [false; MAX_VOICES];
+            let mut falls = [false; MAX_VOICES];
+            if frame == 0 {
+                // Input voices a narrower cable dropped release their notes.
+                for voice in inputs..MAX_VOICES {
+                    falls[voice] = std::mem::take(&mut self.high[voice]);
+                }
+            }
+            for voice in 0..inputs {
+                let gate =
+                    io.voice_input(Self::GATE_IN, voice, 0)[frame].max(io.voice_input(Self::GATE_IN, voice, 1)[frame]);
+                let high = loom_core::signal::gate_is_high(gate);
+                rises[voice] = high && !self.high[voice];
+                falls[voice] = !high && self.high[voice];
+                self.high[voice] = high;
+                let values = &mut self.last[voice];
+                for (port, value) in [
+                    (Self::PITCH_IN, &mut values.pitch),
+                    (Self::VELOCITY_IN, &mut values.velocity),
+                    (Self::PRESSURE_IN, &mut values.pressure),
+                    (Self::TIMBRE_IN, &mut values.timbre),
+                ] {
+                    let read = stereo_mean(io, port, voice, frame);
+                    if read.is_finite() {
+                        *value = read;
+                    }
+                }
+            }
+            // Note-offs first, so an ending note frees its voice for a new one.
+            for voice in (0..MAX_VOICES).filter(|&v| falls[v]) {
+                self.allocator.note_off(loom_dsp::voice::NoteId(voice as u64));
+            }
+            for voice in (0..inputs).filter(|&v| rises[v]) {
+                self.allocator.note_on(self.note(voice));
+            }
+            // A stolen note's voice is no longer held, so this changes nothing there.
+            for voice in (0..inputs).filter(|&v| self.high[v]) {
+                self.allocator.update_note(self.note(voice));
+            }
+            for (voice, state) in self.allocator.voices().iter().enumerate() {
+                let note = state.note;
+                io.voice_output(Self::PITCH_OUT, voice, 0)[frame] = note.map_or(UNUSED_PITCH, |note| note.pitch);
+                io.voice_output(Self::GATE_OUT, voice, 0)[frame] = if state.gate { 1.0 } else { 0.0 };
+                io.voice_output(Self::VELOCITY_OUT, voice, 0)[frame] = note.map_or(0.0, |note| note.velocity);
+                io.voice_output(Self::PRESSURE_OUT, voice, 0)[frame] = note.map_or(0.0, |note| note.pressure);
+                io.voice_output(Self::TIMBRE_OUT, voice, 0)[frame] = note.map_or(0.0, |note| note.timbre);
+            }
+        }
+    }
+
+    fn set_param(&mut self, index: usize, value: f32) {
+        match index {
+            Self::MODE => self.mode = Self::mode_from(value),
+            Self::UNISON => self.unison = Self::unison_from(value),
+            _ => {}
+        }
+    }
+
+    fn reset(&mut self) {
+        self.allocator.reset();
+        self.high = [false; loom_dsp::voice::MAX_VOICES];
+        self.last = [Self::DEFAULTS; loom_dsp::voice::MAX_VOICES];
+    }
+
+    fn copy_state_from(&mut self, other: &dyn Module) -> bool {
+        loom_core::copy_state(self, other)
+    }
+
+    fn displays(&self, values: &mut [f32]) {
+        values[0] = if self.allocator.voices().iter().any(|voice| voice.gate) {
+            1.0
+        } else {
+            0.0
+        };
     }
 }

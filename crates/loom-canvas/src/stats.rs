@@ -167,11 +167,20 @@ thread_local! {
     static LOCAL: [Cell<u64>; COUNTERS] = const { [const { Cell::new(0) }; COUNTERS] };
 }
 
+/// Adds one to `counter`, for this thread and for the process.
 pub(crate) fn count(counter: Counter) {
-    GLOBAL[counter as usize].fetch_add(1, Ordering::Relaxed);
+    add(counter, 1);
+}
+
+/// Adds `by` to `counter`, for this thread and for the process.
+pub(crate) fn add(counter: Counter, by: u64) {
+    if by == 0 {
+        return;
+    }
+    GLOBAL[counter as usize].fetch_add(by, Ordering::Relaxed);
     LOCAL.with(|local| {
         let cell = &local[counter as usize];
-        cell.set(cell.get() + 1);
+        cell.set(cell.get() + by);
     });
 }
 

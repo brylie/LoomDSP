@@ -4,11 +4,12 @@
 //! Values live apart from the [`Scene`]. Changing one rebuilds only the
 //! controls' instances, never the tiles, ports, or cables (ADR-0010).
 
-use crate::gpu::{Arc as ArcShape, Shape};
+use crate::gpu::Arc as ArcShape;
 use crate::input::ControlPart;
 use crate::scene::{GRID, Scene, WidgetViewKind};
 use crate::theme::Palette;
 use crate::trace::Segment;
+use loom_ui::paint::Shape;
 use loom_ui_core::{Color, Point, Rect, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

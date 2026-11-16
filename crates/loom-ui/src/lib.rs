@@ -26,6 +26,11 @@
 //!   type in its API. See `examples/layout.rs`. Panels compose through
 //!   slots ([`Element::slot`]): the runtime keeps each panel's layout, and
 //!   the driver calls [`Runtime::lay_out`] before it draws.
+//! - **Painting** ([`paint`]): text set with Parley and rounded boxes, in
+//!   layers cut to their clips, drawn by [`paint::PaintRenderer`] (the
+//!   `gpu` feature, which `shell` turns on) from one glyph atlas. It needs
+//!   no window, so a crate that only paints, such as LoomDSP's canvas,
+//!   takes `gpu` without `shell`.
 //! - **Time comes from the driver.** Every call takes the current moment,
 //!   and the runtime never reads the clock, so a test decides what time it
 //!   is.
@@ -48,6 +53,7 @@ mod event;
 pub mod headless;
 mod hit;
 mod layout;
+pub mod paint;
 mod routing;
 mod runtime;
 #[cfg(feature = "shell")]

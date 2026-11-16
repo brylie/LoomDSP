@@ -115,3 +115,26 @@ fn delay_lines_do_not_keep_bad_values() {
         .input("in", Signal::non_finite_busy())
         .check_non_finite_recovery();
 }
+
+/// Voice assigner's `unison` at its extremes, end to end: the harness clamps
+/// a parameter first, so NaN and minus infinity arrive as 1 and plus infinity
+/// as 4, and the module plays that many voices per note with finite output.
+/// The conversion of a raw non-finite value is unit-tested in
+/// `src/voice/tests.rs`.
+#[test]
+fn voice_assigner_unison_survives_non_finite_values() {
+    for (value, voices) in [(f32::NAN, 1), (f32::NEG_INFINITY, 1), (f32::INFINITY, 4)] {
+        let render = Harness::new(&loom_modules::voice::ASSIGN)
+            .frames(1024)
+            .param("voices", 8.0)
+            .param("mode", 0.0)
+            .param("unison", value)
+            .input(
+                "gate",
+                Signal::from_fn(|f| if (100..400).contains(&f) { 1.0 } else { 0.0 }),
+            )
+            .check_block_sizes();
+        let sounding = (0..8).filter(|&v| render.voice_output("gate", v, 0)[200] > 0.5).count();
+        assert_eq!(sounding, voices, "unison {value}");
+    }
+}

@@ -282,6 +282,7 @@ fn note_in() {
 #[test]
 fn voice_merge() {
     Harness::new(&loom_modules::voice::MERGE)
+        .reference_outputs(&["out", "gate"])
         .seconds(0.1)
         .bundle_input(
             "in",
@@ -302,6 +303,24 @@ fn voice_merge() {
         .param_at(0.06, "mode", 3.0)
         .param_at(0.08, "mode", 4.0)
         .check(reference!("voice_merge"));
+}
+
+/// Voice assigner: a mono pitch and gate step through 6 notes into 8 voices,
+/// so each note's release overlaps the next on another voice.
+#[test]
+fn voice_assign() {
+    Harness::new(&loom_modules::voice::ASSIGN)
+        .reference_outputs(&["pitch", "gate", "velocity"])
+        .seconds(0.1)
+        .param("voices", 8.0)
+        .param("mode", 0.0)
+        .input("pitch", Signal::from_fn(|frame| (frame / 800) as f32 * 0.02))
+        .input(
+            "gate",
+            Signal::from_fn(|frame| if frame % 800 < 500 && frame < 4800 { 1.0 } else { 0.0 }),
+        )
+        .input("velocity", Signal::from_fn(|frame| 0.5 + (frame / 800) as f32 * 0.05))
+        .check(reference!("voice_assign"));
 }
 
 /// Voice split on an 8-voice bundle of tones, one pitch per voice. `first`
@@ -812,6 +831,7 @@ fn every_dsp_module_has_a_reference_test() {
         &loom_modules::voice::MERGE,
         &loom_modules::voice::SPLIT,
         &loom_modules::voice::SPREAD,
+        &loom_modules::voice::ASSIGN,
         &midi::CONTROLLER_IN,
         &display::METER,
         &display::SCOPE,

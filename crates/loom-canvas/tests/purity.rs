@@ -13,9 +13,14 @@
 //! 2. **Canvas input never reads the clock:** `src/input.rs`, files under
 //!    `src/input/`, and `src/reaction.rs`, without their test files. The
 //!    time arrives in a `Moment`, so a test chooses it.
+//! 3. **The canvas takes `loom-ui` without its window shell:** only the
+//!    `gpu` feature, for the paint renderer. So no window toolkit reaches
+//!    the canvas through `loom-ui`. Until phase 4, Iced still brings
+//!    `winit`; that path is Iced's, not ours.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// A path into Iced or one of its crates: `iced::`, `iced_wgpu`,
 /// `iced_core`, `iced_convert::`, and the like.
@@ -193,4 +198,39 @@ fn the_scan_sorts_files_into_the_right_rule() {
         assert_eq!(is_widget_side(path), widget, "{path:?} widget side");
         assert_eq!(is_input(path), input, "{path:?} input");
     }
+}
+
+/// What `cargo tree` prints for this crate with `args`, one package or
+/// feature per line, from the lock file alone.
+fn tree(args: &[&str]) -> String {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let output = Command::new(cargo)
+        .args(["tree", "--frozen", "--prefix", "none", "--manifest-path"])
+        .arg(&manifest)
+        .args(["-p", "loom-canvas"])
+        .args(args)
+        .output()
+        .expect("cargo runs");
+    assert!(
+        output.status.success(),
+        "cargo tree failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("cargo tree prints UTF-8")
+}
+
+/// The canvas turns on `loom-ui`'s `gpu` feature and not its `shell`, and
+/// no path from the canvas to `winit` goes through `loom-ui`.
+#[test]
+fn loom_ui_comes_without_its_shell() {
+    let features = tree(&["-e", "normal,features", "-i", "loom-ui"]);
+    assert!(features.contains("loom-ui feature \"gpu\""), "{features}");
+    assert!(!features.contains("loom-ui feature \"shell\""), "{features}");
+    assert!(!features.contains("loom-ui feature \"default\""), "{features}");
+    let winit = tree(&["-e", "normal", "-i", "winit"]);
+    assert!(
+        !winit.lines().any(|line| line.starts_with("loom-ui ")),
+        "winit reaches the canvas through loom-ui:\n{winit}"
+    );
 }

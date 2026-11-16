@@ -5,6 +5,7 @@ use super::*;
 use crate::controls::{ControlGeometry, PanelValues};
 use crate::gpu::{CanvasFrame, Geometry};
 use crate::trace::TraceGeometry;
+use loom_ui::paint::{ListPainter, PaintList, Typesetter};
 use std::sync::Arc;
 
 /// The drawing data last built from the scene, the control values, and the
@@ -18,8 +19,8 @@ pub struct FrameCache {
     traces: RefCell<Option<Arc<TraceGeometry>>>,
     lines: LinesCache,
     /// The canvas's text and its layouts. Borrowed only inside each call
-    /// that sets text (`crate::text::ListPainter`).
-    text: RefCell<crate::text::CanvasText>,
+    /// that sets text (`loom_ui::paint::ListPainter`).
+    text: RefCell<Typesetter>,
 }
 
 impl CanvasInput {
@@ -96,7 +97,7 @@ impl CanvasInput {
             value_bars,
             camera,
             cable_dim: CABLE_OPACITY,
-            paint: crate::text::PaintList::default(),
+            paint: PaintList::default(),
             background: model.palette.background,
         }
     }
@@ -114,14 +115,10 @@ impl CanvasInput {
     /// Paints the frame's text and floating boxes (see [`CanvasInput::paint`])
     /// with the canvas's own text, for a canvas at `bounds` in the host's
     /// logical pixels. A layout no frame used since the last is dropped.
-    pub fn paint_list(&self, model: &CanvasModel<'_>, bounds: Rect, cache: &FrameCache) -> crate::text::PaintList {
+    pub fn paint_list(&self, model: &CanvasModel<'_>, bounds: Rect, cache: &FrameCache) -> PaintList {
         cache.text.borrow_mut().begin_frame();
-        let mut list = crate::text::PaintList::new(bounds);
-        self.paint(
-            model,
-            bounds,
-            &mut crate::text::ListPainter::new(&cache.text, &mut list),
-        );
+        let mut list = PaintList::new(bounds);
+        self.paint(model, bounds, &mut ListPainter::new(&cache.text, &mut list));
         list
     }
 }

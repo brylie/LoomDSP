@@ -377,11 +377,7 @@ pub fn mode_key(controller: &Controller) -> Vec<(u32, usize, i64)> {
 /// A control's position for the canvas: the knob position from 0 to 1, the
 /// toggle state, or the radio option index.
 pub fn control_position(kind: WidgetKind, spec: &ParamSpec, value: f32) -> f32 {
-    let value = if spec.options.count_choices.is_some() && !(spec.min..=spec.max).contains(&value) {
-        spec.min
-    } else {
-        value
-    };
+    let value = spec.effective_choice(value);
 
     if kind.is_mapped() {
         spec.normalize(value)
@@ -554,11 +550,17 @@ pub fn update_panel_values_dragging(
             } else {
                 match d.control_param(w, &node.params) {
                     Some(p) => {
-                        // The knob spans the selected range (control-ranges.md).
+                        // The knob spans the selected range (control-ranges.md),
+                        // and a choice filtered by a voice count offers only
+                        // the choices for that count (ADR-0030), so its
+                        // position counts from the first one offered.
                         let spec = &node
-                            .spec(p)
-                            .expect("node.spec covers every parameter index of the node");
-                        let value = node.params[p];
+                            .control_spec(p)
+                            .expect("node.control_spec covers every parameter index of the node");
+                        // The value the module plays: a stored choice the
+                        // count does not offer reads as the first one offered,
+                        // so the position and the text agree.
+                        let value = spec.effective_choice(node.params[p]);
                         let all = reaches.get(&(id, p)).map_or(&[][..], Vec::as_slice);
                         let assigned = match &dragged {
                             Some((key, reach)) if *key == (id, p) => std::slice::from_ref(reach),

@@ -6,7 +6,7 @@
 //! For each example patch it
 //!
 //! 1. measures every tile label with Iced's paragraph (today's measure,
-//!    still a dependency until phase 4) and with `CanvasText`, and reports
+//!    still a dependency until phase 4) and with `Typesetter`, and reports
 //!    the change in width per label: least, greatest, and median;
 //! 2. reports every label whose new width leaves its tile text box, which
 //!    `fit_label` sizes by an estimate;
@@ -33,7 +33,8 @@ use super::*;
 use clap::Parser as _;
 use iced::advanced::text::{self, Paragraph as _};
 use iced::{Font, Pixels};
-use loom_canvas::{Align, CanvasText, TextKind, TextStyle, Weight, for_each_tile_text};
+use loom_canvas::{TextKind, for_each_tile_text};
+use loom_ui::paint::{Align, TextStyle, Typesetter, Weight};
 use loom_ui_core::Rect;
 
 /// Physical pixels per logical pixel for the gate's images.
@@ -150,7 +151,7 @@ fn spread(mut values: Vec<f32>) -> (f32, f32, f32) {
 #[ignore = "a tool for the text gate, run by hand"]
 fn text_gate() {
     let started = std::time::Instant::now();
-    let mut text = CanvasText::new();
+    let mut text = Typesetter::new();
     text.measure("Cutoff", style(9.0), None);
     println!(
         "first layout, with the font scan: {:.1} ms",

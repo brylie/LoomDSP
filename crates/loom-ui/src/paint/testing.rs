@@ -1,11 +1,14 @@
 //! A test double for painting: a painter that records what it is given and
 //! measures with a fixed width for each character.
+//!
+//! Built for this crate's tests, and for other crates' tests through the
+//! `testing` feature, which only a dev-dependency turns on.
 
 use super::*;
 
 /// One thing a [`Recorder`] was given, in order.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Painted {
+pub enum Painted {
     /// A piece of text, with its text copied.
     Text {
         /// The text.
@@ -23,7 +26,7 @@ pub(crate) enum Painted {
 
 impl Painted {
     /// The text, when this is a piece of text.
-    pub(crate) fn as_text(&self) -> Option<&str> {
+    pub fn as_text(&self) -> Option<&str> {
         match self {
             Painted::Text { text, .. } => Some(text),
             _ => None,
@@ -34,14 +37,14 @@ impl Painted {
 /// A painter that keeps everything it is given, in order, and measures
 /// every character as half the font size wide.
 #[derive(Debug, Default)]
-pub(crate) struct Recorder {
+pub struct Recorder {
     /// What was painted, first to last.
-    pub(crate) painted: Vec<Painted>,
+    pub painted: Vec<Painted>,
 }
 
 impl Recorder {
     /// Every piece of text painted, in order.
-    pub(crate) fn texts(&self) -> Vec<&str> {
+    pub fn texts(&self) -> Vec<&str> {
         self.painted.iter().filter_map(Painted::as_text).collect()
     }
 }

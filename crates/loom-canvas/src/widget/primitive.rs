@@ -7,8 +7,9 @@
 //! layer of the window above the canvas, and Iced draws its layers after
 //! the host's canvas pass.
 
-use crate::gpu::{Cable, CanvasRenderer, Target};
+use crate::gpu::{Cable, CanvasRenderer};
 use iced::widget::shader::{Pipeline, Primitive, Viewport};
+use loom_ui::paint::Target;
 use loom_ui_core::{Point, Size};
 
 /// The window-wide output drag as an Iced shader primitive. Its renderer is

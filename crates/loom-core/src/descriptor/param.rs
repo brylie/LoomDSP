@@ -547,6 +547,19 @@ impl ParamSpec {
         self
     }
 
+    /// The value a count-filtered control shows for `value`: `value` when it
+    /// is one of this spec's choices, else the first one offered. Call it on
+    /// the spec `ModuleDescriptor::control_spec` gives. For any other spec it
+    /// returns `value`. This matches the allocator's fallback
+    /// (`Mode::for_capacity`), so the control shows the mode that plays.
+    pub fn effective_choice(&self, value: f32) -> f32 {
+        if self.options.count_choices.is_some() && !(self.min..=self.max).contains(&value) {
+            self.min
+        } else {
+            value
+        }
+    }
+
     /// Control-only view of the choice list. Processing retains the full parameter.
     pub fn for_count(mut self, count: f32) -> Self {
         if let Some(filter) = self.options.count_choices {

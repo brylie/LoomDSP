@@ -7,10 +7,10 @@
 //! (ADR-0010). The frame around the trace is drawn with the controls, so a
 //! still scope costs nothing per frame.
 
-use crate::gpu::{Shape, packed};
 use crate::scene::{Scene, WidgetViewKind};
 use crate::theme::Palette;
 use bytemuck::{Pod, Zeroable};
+use loom_ui::paint::{Shape, packed};
 use loom_ui_core::{Color, Point, Rect, Size};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
