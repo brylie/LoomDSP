@@ -376,3 +376,21 @@ fn a_trigger_light_panned_away_comes_back_dark() {
     assert_eq!(drawn(&ui, trigger), 0.0, "the trigger light comes back dark");
     assert_eq!(drawn(&ui, level), 0.8, "the level light keeps its value");
 }
+
+/// A change that reaches the app after its light left the list does not
+/// bring the light back: the light stays forgotten, so when it returns its
+/// first reading is sent again, as for any light new to the list.
+#[test]
+fn a_late_change_for_a_light_that_left_keeps_it_forgotten() {
+    let (_app, lights) = lights_on_screen();
+    let level = lights.levels[0];
+    let start = Instant::now();
+    let mut tracker = Tracker::default();
+    let late = tracker.read(&[level], &[0.5], start).expect("its first reading");
+    assert_eq!(tracker.read(&[], &[], start + INTERVAL), None, "it left");
+    tracker.sent(&late);
+    let back = tracker
+        .read(&[level], &[0.5], start + INTERVAL * 2)
+        .expect("new again, so its reading is sent");
+    assert_eq!(shown(&back, level.light), 0.5);
+}

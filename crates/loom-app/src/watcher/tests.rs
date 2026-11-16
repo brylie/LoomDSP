@@ -328,3 +328,20 @@ fn a_dropped_handle_ends_the_wait_at_once() {
     );
     assert!(others.recv_timeout(PROMPT).is_err(), "the other watcher still waits");
 }
+
+/// A handle's debug text says whether its drop wakes a watched value, so a
+/// dump of the app's watchers shows which threads end at once on a drop and
+/// which wait out their interval.
+#[test]
+fn a_handle_says_whether_it_waits_on_a_value() {
+    let value = Watched::<u32>::default();
+    let (on_a_value, _reports) = watching(&value, |_, _, _: mpsc::Sender<()>| {});
+    let (waker, _queue) = waker();
+    let plain = Watcher::start(&Ledger::default(), 2, 1, waker, |()| Message::Tick, |_| {});
+    let text = format!("{on_a_value:?}");
+    assert!(
+        text.contains("waits_on_a_value: true") && text.contains("key: 1"),
+        "{text}"
+    );
+    assert!(format!("{plain:?}").contains("waits_on_a_value: false"));
+}
