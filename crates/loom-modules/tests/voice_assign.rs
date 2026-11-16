@@ -261,3 +261,22 @@ fn the_harness_checks_recovery_and_copied_state() {
     h.check_non_finite_recovery();
     h.check_copy_state(389);
 }
+
+/// At one voice the assigner is a mono source with last-note priority across
+/// its input voices: a second note moves the pitch with no retrigger, and
+/// when it ends the earlier note returns at its own velocity, not that of the
+/// last note-on as on Note input (polyphony.md, Voice assigner, At one voice).
+#[test]
+fn one_voice_returns_to_the_held_note_at_its_own_velocity() {
+    let render = assigner(1.0, 2.0)
+        .bundle_input("pitch", vec![Signal::constant(0.1), Signal::constant(0.2)])
+        .bundle_input("velocity", vec![Signal::constant(0.3), Signal::constant(0.9)])
+        .bundle_input("gate", vec![gate(100, 800), gate(300, 500)])
+        .check_block_sizes();
+    assert!(render.voice_output("gate", 0, 0)[100..800].iter().all(|v| *v == 1.0));
+    assert_eq!(rises(&render, 1), 1);
+    assert_eq!(render.voice_output("pitch", 0, 0)[400], 0.2);
+    assert_eq!(render.voice_output("velocity", 0, 0)[400], 0.9);
+    assert_eq!(render.voice_output("pitch", 0, 0)[600], 0.1);
+    assert_eq!(render.voice_output("velocity", 0, 0)[600], 0.3);
+}

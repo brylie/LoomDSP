@@ -1,5 +1,8 @@
 //! Bundle routing. Spec: `docs/design/polyphony.md`.
 
+#[cfg(test)]
+mod tests;
+
 use crate::rand::{VOICE_SPREAD_STREAM, seed_from, seed_param, stream};
 use loom_core::signal::hold_finite;
 use loom_core::{
@@ -861,7 +864,7 @@ impl Default for Assign {
             high: [false; loom_dsp::voice::MAX_VOICES],
             last: [Self::DEFAULTS; loom_dsp::voice::MAX_VOICES],
             mode: ASSIGN.params[Self::MODE].default as usize,
-            unison: 1,
+            unison: ASSIGN.params[Self::UNISON].default as usize,
         }
     }
 }

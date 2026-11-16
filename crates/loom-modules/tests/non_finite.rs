@@ -116,8 +116,11 @@ fn delay_lines_do_not_keep_bad_values() {
         .check_non_finite_recovery();
 }
 
-/// Voice assigner's `unison` from a direct `set_param`: NaN and minus infinity
-/// give 1 voice per note, plus infinity 4, with no panic and finite output.
+/// Voice assigner's `unison` at its extremes, end to end: the harness clamps
+/// a parameter first, so NaN and minus infinity arrive as 1 and plus infinity
+/// as 4, and the module plays that many voices per note with finite output.
+/// The conversion of a raw non-finite value is unit-tested in
+/// `src/voice/tests.rs`.
 #[test]
 fn voice_assigner_unison_survives_non_finite_values() {
     for (value, voices) in [(f32::NAN, 1), (f32::NEG_INFINITY, 1), (f32::INFINITY, 4)] {
