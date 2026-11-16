@@ -71,31 +71,8 @@ pub static NOTE_IN: ModuleDescriptor = ModuleDescriptor {
         },
     ],
     params: &[
-        ParamSpec {
-            name: "voices",
-            label: "Voices",
-            description: "Number of simultaneous voices.",
-            min: 1.0,
-            max: 16.0,
-            default: 1.0,
-            unit: "",
-            options: ParamOptions::DEFAULT,
-        }
-        .integer()
-        .shapes_graph(),
-        ParamSpec {
-            name: "mode",
-            label: "Mode",
-            description: "How notes steal voices, or how a single voice articulates notes.",
-            min: 0.0,
-            max: 3.0,
-            default: 2.0,
-            unit: "",
-            options: ParamOptions::DEFAULT,
-        }
-        .integer()
-        .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
-        .choices_by_count("voices", 2),
+        crate::voice::voices_param(),
+        crate::voice::mode_param(),
         ParamSpec {
             name: "channel",
             label: "Channel",
@@ -210,17 +187,6 @@ impl NoteIn {
     /// Packs all three identity parts without collisions, including untracked input 0.
     fn identity(input: u16, channel: u8, note: u8) -> loom_dsp::voice::NoteId {
         loom_dsp::voice::NoteId((u64::from(input) << 11) | (u64::from(channel) << 7) | u64::from(note))
-    }
-
-    /// Stored choice values remain stable even when their effective mode falls back.
-    fn mode(value: usize) -> loom_dsp::voice::Mode {
-        use loom_dsp::voice::Mode;
-        match value {
-            0 => Mode::Oldest,
-            1 => Mode::Quietest,
-            3 => Mode::Retrigger,
-            _ => Mode::Legato,
-        }
     }
 
     /// Converts raw expression using configuration at this exact sample.
@@ -414,7 +380,8 @@ impl Module for NoteIn {
             let mode = mode.map_or(frame, self.mode, |v| v.round().clamp(0.0, 3.0) as usize);
             let resized = self.allocator.voices().len() != capacity;
             let mut refresh = resized || self.previous_range != Some(range);
-            self.allocator.configure(capacity, Self::mode(mode), 1);
+            self.allocator
+                .configure(capacity, crate::voice::allocator_mode(mode), 1);
             if resized {
                 self.retain_sounding_keys();
                 // Preserve the surviving output when crossing mono's last-note velocity rule.
@@ -437,12 +404,7 @@ impl Module for NoteIn {
             }
             let mut levels = [0.0; 16];
             for (voice, level) in levels[..capacity].iter_mut().enumerate() {
-                let left = io.voice_input(Self::LEVEL, voice, 0)[frame];
-                *level = if io.input_width(Self::LEVEL).sides == 2 {
-                    left * 0.5 + io.voice_input(Self::LEVEL, voice, 1)[frame] * 0.5
-                } else {
-                    left
-                };
+                *level = crate::voice::stereo_mean(io, Self::LEVEL, voice, frame);
             }
             self.allocator
                 .begin_frame((!io.uses_default(Self::LEVEL)).then_some(&levels[..capacity]));

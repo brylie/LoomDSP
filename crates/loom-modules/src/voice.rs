@@ -8,6 +8,65 @@ use loom_core::{
 };
 use loom_rt::Smoothed;
 
+/// The `voices` parameter that Note input and Voice assigner share: how many
+/// output voices the module has. It shapes the graph, so it is not modulated.
+pub(crate) const fn voices_param() -> ParamSpec {
+    ParamSpec {
+        name: "voices",
+        label: "Voices",
+        description: "Number of simultaneous voices.",
+        min: 1.0,
+        max: 16.0,
+        default: 1.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()
+    .shapes_graph()
+}
+
+/// The `mode` parameter that Note input and Voice assigner share (polyphony
+/// spec, rule 20). Its choices are filtered by the voice count (ADR-0030).
+pub(crate) const fn mode_param() -> ParamSpec {
+    ParamSpec {
+        name: "mode",
+        label: "Mode",
+        description: "How notes steal voices, or how a single voice articulates notes.",
+        min: 0.0,
+        max: 3.0,
+        default: 2.0,
+        unit: "",
+        options: ParamOptions::DEFAULT,
+    }
+    .integer()
+    .choices(&["Oldest", "Quietest", "Legato", "Retrigger"])
+    .choices_by_count("voices", 2)
+}
+
+/// Maps a stored `mode` choice to the allocator's mode. Stored values stay
+/// stable; the allocator falls back when a mode does not fit the voice count.
+pub(crate) fn allocator_mode(value: usize) -> loom_dsp::voice::Mode {
+    use loom_dsp::voice::Mode;
+    match value {
+        0 => Mode::Oldest,
+        1 => Mode::Quietest,
+        3 => Mode::Retrigger,
+        _ => Mode::Legato,
+    }
+}
+
+/// One voice of an input read as one value: the mean of a stereo voice's two
+/// sides, or its only side. Kept as exactly `left * 0.5 + right * 0.5`: it
+/// cannot overflow, so it is finite exactly when both sides are.
+pub(crate) fn stereo_mean(io: &PortIo<'_>, port: usize, voice: usize, frame: usize) -> f32 {
+    let left = io.voice_input(port, voice, 0)[frame];
+    if io.input_width(port).sides == 2 {
+        left * 0.5 + io.voice_input(port, voice, 1)[frame] * 0.5
+    } else {
+        left
+    }
+}
+
 /// `loom.voice.merge`: sums, averages, or selects a voice from a bundle.
 pub static MERGE: ModuleDescriptor = ModuleDescriptor {
     id: "loom.voice.merge",
@@ -82,12 +141,7 @@ impl Merge {
 
     /// Compares stereo voices by their mean while retaining their two sides.
     fn value(io: &PortIo<'_>, voice: usize, frame: usize) -> f32 {
-        let left = io.voice_input(Self::IN, voice, 0)[frame];
-        if io.input_width(Self::IN).sides == 2 {
-            left * 0.5 + io.voice_input(Self::IN, voice, 1)[frame] * 0.5
-        } else {
-            left
-        }
+        stereo_mean(io, Self::IN, voice, frame)
     }
 }
 
