@@ -417,25 +417,38 @@ impl App {
     /// lights, meter levels, and scope traces it left, through the same
     /// messages the window uses. With no window to say what is on screen,
     /// every module counts as shown.
+    ///
+    /// The run plays block by block and reads the telemetry queues after
+    /// every block, so it never fills them, and `telemetry_dropped` counts
+    /// only real drops (`docs/design/control-channel.md`, Stats and cut
+    /// labels in the snapshot). Before the last second, the lead-in, it
+    /// keeps only the meter readings, for the clip lights and peak holds, so
+    /// a clip in the lead-in lights its light; it throws the scope and pair
+    /// chunks away. The meters show the end of the run, and the scopes and
+    /// XY scopes its last second.
     pub(crate) fn run_engine(&mut self, frames: usize) {
         self.session.visible_displays = self.session.controller.graph().nodes().map(|(id, _)| id.0).collect();
         // Meters and scopes need their probes before the engine runs.
         self.sync_probes();
         let window = frames.min(SCOPE_WINDOW);
-        self.process(frames - window);
-        // The meters show the end of the run, and the scopes its last
-        // second: earlier telemetry is dropped.
-        let _ = self.session.engine.monitor.take_telemetry();
-        let _ = self.session.engine.monitor.take_pairs();
         let watch = self.session.engine.monitor.watched();
         let rate = self.session.engine.monitor.sample_rate();
+        let block = self.session.controller.config().max_block;
+        let mut peaks = crate::clip::Peaks::default();
+        let mut remaining = frames - window;
+        while remaining > 0 {
+            let n = remaining.min(block);
+            self.process(n);
+            let (meters, _) = self.session.engine.monitor.take_telemetry();
+            let _ = self.session.engine.monitor.take_pairs();
+            peaks.note(&watch.peak_resets, &meters);
+            remaining -= n;
+        }
         let mut scopes: std::collections::HashMap<loom_core::ProbeId, crate::live::ScopeTrace> = watch
             .scopes
             .keys()
             .map(|&probe| (probe, crate::live::ScopeTrace::new(rate)))
             .collect();
-        // The queues are read after every block, so they never fill.
-        let block = self.session.controller.config().max_block;
         let mut histories: std::collections::HashMap<loom_core::ProbeId, crate::history::LevelHistory> = watch
             .histories
             .iter()
@@ -451,7 +464,6 @@ impl App {
             .keys()
             .map(|&probe| (probe, crate::xy::XyTrace::new(rate)))
             .collect();
-        let mut peaks = crate::clip::Peaks::default();
         let mut readings = Vec::new();
         let mut remaining = window;
         while remaining > 0 {

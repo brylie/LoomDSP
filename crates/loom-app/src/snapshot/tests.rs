@@ -215,3 +215,57 @@ fn trace_snapshot_bounds() {
     });
     assert_eq!((shown.points, shown.low, shown.high, shown.level), (2, -0.5, 0.75, 0.8));
 }
+
+/// `--frames` for longer than the telemetry queues hold, with a scope and an
+/// XY scope on screen, drops nothing: the run reads the queues after every
+/// block of its lead-in too (control-channel.md, Stats and cut labels in the
+/// snapshot). Four seconds is past what each queue holds: about 1.4 s of
+/// scope or pair chunks, and 2.7 s of meter readings at 128 frames a block.
+#[test]
+fn a_long_run_drops_no_telemetry() {
+    let mut app = open("subtractive.ron");
+    let c = &mut app.session.controller;
+    let xy = c.add_module("loom.display.xy").unwrap();
+    let lfo = c.add_module("loom.mod.lfo").unwrap();
+    let meter = c.add_module("loom.display.meter").unwrap();
+    c.connect_named(lfo, "out", xy, "x").unwrap();
+    c.connect_named(lfo, "out90", xy, "y").unwrap();
+    c.connect_named(lfo, "out", meter, "in").unwrap();
+    assert!(app.commit());
+    app.run_engine(4 * 48_000);
+    let watch = app.session.engine.monitor.watched();
+    assert!(
+        !watch.scopes.is_empty() && !watch.xy.is_empty(),
+        "a scope and an XY scope on screen"
+    );
+    assert!(!watch.meters.is_empty(), "and meters");
+    assert_eq!(app.ui_snapshot().stats.telemetry_dropped, 0);
+}
+
+/// A clip during the lead-in lights the meter's clip light, and its peak
+/// stays in the readout. An AD envelope fires once as its gate goes high at
+/// the start, added to itself so it peaks at 2.0, and is back at 0 after a
+/// fifth of a second. The last second of a 3 s run is silent, so only the
+/// lead-in can light the light.
+#[test]
+fn a_clip_in_the_lead_in_lights_the_meter() {
+    let mut app = crate::tests::app();
+    let c = &mut app.session.controller;
+    let gate = c.add_module("loom.math.constant").unwrap();
+    c.set_param_named(gate, "value", 1.0).unwrap();
+    let envelope = c.add_module("loom.env.envelope").unwrap();
+    c.set_param_named(envelope, "mode", 1.0).unwrap(); // AD: once
+    let twice = c.add_module("loom.math.add").unwrap();
+    let meter = c.add_module("loom.display.meter").unwrap();
+    c.connect_named(gate, "out", envelope, "gate").unwrap();
+    c.connect_named(envelope, "out", twice, "a").unwrap();
+    c.connect_named(envelope, "out", twice, "b").unwrap();
+    c.connect_named(twice, "out", meter, "in").unwrap();
+    assert!(app.commit());
+    app.run_engine(3 * 48_000);
+    let tile = app.ui_snapshot().tiles.into_iter().find(|t| t.id == meter.0).unwrap();
+    assert_eq!(tile.widgets[0].position, 0.0, "the run ends silent");
+    let hold = app.session.clip_holds.get((meter.0, 0));
+    assert!(hold.lit, "the lead-in's clip lights the light");
+    assert!(hold.peak > 1.9, "the readout holds the lead-in's peak: {}", hold.peak);
+}
