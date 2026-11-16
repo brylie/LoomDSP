@@ -1487,4 +1487,6 @@ pub fn build(
 }
 
 #[cfg(test)]
+mod app_tests;
+#[cfg(test)]
 mod tests;

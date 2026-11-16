@@ -937,3 +937,127 @@ fn note_mode_choices_follow_voice_count() {
         &["Oldest", "Quietest", "Legato", "Retrigger"]
     );
 }
+
+/// Where widget `index` sat on a resized tile under the growth rule before
+/// the far-edge rule (#637), kept here so the test below can show that no
+/// built-in panel changed. The lowest trace display took the extra height,
+/// every trace display took the extra width, a widget below the lowest one
+/// moved down, and a meter grew as far as no widget stopped it, also when it
+/// moved.
+fn bounds_before_637(tile: &ModuleView, index: usize) -> Option<loom_ui_core::Rect> {
+    use loom_canvas::{GRID, WidgetViewKind};
+    use loom_ui_core::{Rect, Size};
+    let widgets = &tile.panel.widgets;
+    let widget = widgets.get(index).filter(|w| !w.hidden)?;
+    let extra = tile.bounds().size() - tile.minimum_size();
+    let lowest = (0..widgets.len())
+        .filter(|&i| !widgets[i].hidden && widgets[i].kind.draws_a_trace())
+        .max_by_key(|&i| widgets[i].y + widgets[i].size().1);
+    let (w, h) = widget.size();
+    let grow = if widget.kind.draws_a_trace() {
+        Size::new(extra.width, if lowest == Some(index) { extra.height } else { 0.0 })
+    } else if matches!(widget.kind, WidgetViewKind::Meter { .. }) {
+        let (right, bottom) = (widget.x + w, widget.y + h);
+        let others = || {
+            widgets
+                .iter()
+                .filter(|o| !o.hidden || o.x < tile.panel.width)
+                .map(|o| (o, o.size()))
+        };
+        let below = others().any(|(o, (ow, _))| o.y >= bottom && o.x < right && o.x + ow > widget.x);
+        let beside = others().any(|(o, (_, oh))| o.x >= right && o.y < bottom && o.y + oh > widget.y);
+        let past_corner = !below && others().any(|(o, _)| o.x >= right && o.y >= bottom);
+        Size::new(
+            if beside || past_corner { 0.0 } else { extra.width },
+            if below { 0.0 } else { extra.height },
+        )
+    } else {
+        Size::ZERO
+    };
+    let pushed = lowest.is_some_and(|d| widget.y >= widgets[d].y + widgets[d].size().1);
+    let origin = tile.panel_origin();
+    Some(Rect::new(
+        Point::new(
+            origin.x + f32::from(widget.x) * GRID,
+            origin.y + f32::from(widget.y) * GRID + if pushed { extra.height } else { 0.0 },
+        ),
+        Size::new(f32::from(w) * GRID + grow.width, f32::from(h) * GRID + grow.height),
+    ))
+}
+
+/// A scene with one tile of each kind in `kinds`, every one resized to
+/// `size` grid units, or its minimum if that is larger. Returns the scene
+/// and the module IDs, in order.
+fn resized_tiles(kinds: &[&str], size: (u8, u8)) -> (Scene, Vec<u32>) {
+    let mut parts = loom_core::create_engine(crate::registry(true), loom_core::EngineConfig::default());
+    let c = &mut parts.controller;
+    let ids: Vec<u32> = kinds.iter().map(|kind| c.add_module(kind).unwrap().0).collect();
+    c.commit().unwrap();
+    let sizes = ids.iter().map(|&id| (id, size)).collect();
+    (build_flat(c, &BTreeMap::new(), &sizes), ids)
+}
+
+/// Every module in the registry, widened, made taller, or both, lays out
+/// where the rule before the far-edge rule put it: none has two trace
+/// displays, or a widget past a trace display's right edge, or a meter below
+/// or beside one (panels.md, Resizable tiles).
+#[test]
+fn every_built_in_panel_lays_out_as_before_when_resized() {
+    let kinds: Vec<&str> = loom_modules::registry().browsable().map(|d| d.id).collect();
+    for size in [(64, 20), (20, 64), (64, 64)] {
+        let (scene, ids) = resized_tiles(&kinds, size);
+        for (kind, id) in kinds.iter().zip(ids) {
+            let tile = scene.module(id).unwrap();
+            for index in 0..tile.panel.widgets.len() {
+                assert_eq!(
+                    tile.widget_bounds(index),
+                    bounds_before_637(tile, index),
+                    "{kind} widget {index} at {size:?}"
+                );
+            }
+        }
+    }
+}
+
+/// `test.panel` widened takes the far-edge rule's new look: its far right
+/// edge is 27, where the level history and the spectrum end, so only they
+/// grow wider. The scope at (0, 8) and the XY scope keep their declared
+/// width, so the scope no longer grows over the select, the fader, and the
+/// spectrum. Its lowest edge is 18, where the XY scope ends, so only the XY
+/// scope grows taller. No two widgets overlap (panels.md, Resizable tiles).
+#[test]
+fn the_test_panel_widened_grows_only_its_far_edge_displays() {
+    use loom_canvas::{GRID, WidgetViewKind};
+    let (scene, ids) = resized_tiles(&["test.panel"], (64, 64));
+    let tile = scene.module(ids[0]).unwrap();
+    let extra = tile.bounds().size() - tile.minimum_size();
+    assert!(extra.width > 0.0 && extra.height > 0.0);
+    let find = |kind: WidgetViewKind| {
+        let index = tile.panel.widgets.iter().position(|w| w.kind == kind).unwrap();
+        (tile.panel.widgets[index].size(), tile.widget_bounds(index).unwrap())
+    };
+    let declared = |(w, h): (u8, u8)| (f32::from(w) * GRID, f32::from(h) * GRID);
+    for kind in [WidgetViewKind::LevelHistory, WidgetViewKind::Spectrum] {
+        let (size, rect) = find(kind.clone());
+        let (w, h) = declared(size);
+        assert_eq!((rect.width, rect.height), (w + extra.width, h), "{kind:?} widens only");
+    }
+    let (size, scope) = find(WidgetViewKind::Scope);
+    assert_eq!((scope.width, scope.height), declared(size), "the scope keeps its size");
+    let (size, xy) = find(WidgetViewKind::XyScope);
+    let (w, h) = declared(size);
+    assert_eq!(
+        (xy.width, xy.height),
+        (w, h + extra.height),
+        "the XY scope grows taller only"
+    );
+
+    let rects: Vec<_> = (0..tile.panel.widgets.len())
+        .filter_map(|i| tile.widget_bounds(i).map(|r| (i, r)))
+        .collect();
+    for (n, &(i, a)) in rects.iter().enumerate() {
+        for &(j, b) in &rects[n + 1..] {
+            assert!(a.intersection(b).is_none(), "widgets {i} and {j} overlap");
+        }
+    }
+}

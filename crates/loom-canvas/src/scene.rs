@@ -441,6 +441,16 @@ pub struct ModuleView {
     pub panel: PanelView,
 }
 
+/// The far edges of a panel's shown trace displays, in grid units: where
+/// the extra size of a resized tile goes. `None` with no shown trace display.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DisplayEdges {
+    /// The furthest right edge: `x` plus width.
+    right: Option<u16>,
+    /// The lowest bottom edge: `y` plus height.
+    bottom: Option<u16>,
+}
+
 impl ModuleView {
     /// Whether the panel contains a display that can grow.
     pub fn is_growable(&self) -> bool {
@@ -521,58 +531,91 @@ impl ModuleView {
     }
 
     /// The world bounds of panel widget `index`.
+    ///
+    /// On a resized tile, the trace displays on the far edges take the extra
+    /// size, and the widgets past those edges move with them
+    /// (`docs/design/panels.md`, Resizable tiles): every shown trace display
+    /// whose right edge is level with the furthest right one grows wider, and
+    /// every one whose bottom edge is level with the lowest one grows taller.
+    /// A meter moved by an edge keeps its declared size in that direction.
     pub fn widget_bounds(&self, index: usize) -> Option<Rect> {
         let widget = self.panel.widgets.get(index).filter(|w| !w.hidden)?;
         let origin = self.panel_origin();
         let (w, h) = widget.size();
+        let push = self.display_push(widget);
         let extra = match widget.kind {
             WidgetViewKind::Scope
             | WidgetViewKind::LevelHistory
             | WidgetViewKind::Spectrum
             | WidgetViewKind::XyScope => {
                 let extra = self.size() - self.minimum_size();
-                let height = if self.lowest_display() == Some(index) {
-                    extra.height
-                } else {
-                    0.0
-                };
-                Size::new(extra.width, height)
+                let edges = self.display_edges();
+                let on = |edge: Option<u16>, end: u16, room: f32| if edge == Some(end) { room } else { 0.0 };
+                Size::new(
+                    on(edges.right, u16::from(widget.x) + u16::from(w), extra.width),
+                    on(edges.bottom, u16::from(widget.y) + u16::from(h), extra.height),
+                )
             }
-            WidgetViewKind::Meter { .. } => self.meter_growth(widget),
+            WidgetViewKind::Meter { .. } => {
+                // The room it moved into is the room it would grow into.
+                let growth = self.meter_growth(widget);
+                Size::new(
+                    if push.x > 0.0 { 0.0 } else { growth.width },
+                    if push.y > 0.0 { 0.0 } else { growth.height },
+                )
+            }
             _ => Size::ZERO,
         };
         Some(Rect::new(
             Point::new(
-                origin.x + f32::from(widget.x) * GRID,
-                origin.y + f32::from(widget.y) * GRID + self.display_push(widget),
+                origin.x + f32::from(widget.x) * GRID + push.x,
+                origin.y + f32::from(widget.y) * GRID + push.y,
             ),
             Size::new(f32::from(w) * GRID + extra.width, f32::from(h) * GRID + extra.height),
         ))
     }
 
-    /// The trace display whose bottom edge is lowest, by widget index. Only it
-    /// takes a resized tile's extra height, so displays stacked in a column
-    /// never grow over each other. Displays side by side are not handled yet:
-    /// each takes all the extra width (`docs/design/panels.md`, Resizable tiles).
-    fn lowest_display(&self) -> Option<usize> {
-        let widgets = &self.panel.widgets;
-        (0..widgets.len())
-            .filter(|&i| !widgets[i].hidden && widgets[i].kind.draws_a_trace())
-            .max_by_key(|&i| widgets[i].y + widgets[i].size().1)
+    /// The far edges of the shown trace displays, in grid units as declared:
+    /// the furthest right edge and the lowest bottom edge. There is no single
+    /// chosen display and no tie-break: every display level with an edge
+    /// grows across it (`docs/design/panels.md`, Resizable tiles, How the
+    /// rule is built).
+    fn display_edges(&self) -> DisplayEdges {
+        let displays = self
+            .panel
+            .widgets
+            .iter()
+            .filter(|w| !w.hidden && w.kind.draws_a_trace());
+        displays.fold(DisplayEdges::default(), |edges, w| {
+            let (width, height) = w.size();
+            DisplayEdges {
+                right: edges.right.max(Some(u16::from(w.x) + u16::from(width))),
+                bottom: edges.bottom.max(Some(u16::from(w.y) + u16::from(height))),
+            }
+        })
     }
 
-    /// How far a growing display above `widget` moves it down, so the display
-    /// does not cover it (`docs/design/panels.md`, Resizable tiles).
-    fn display_push(&self, widget: &WidgetView) -> f32 {
-        let below = self.lowest_display().is_some_and(|display| {
-            let display = &self.panel.widgets[display];
-            widget.y >= display.y + display.size().1
-        });
-        if below {
-            (self.size() - self.minimum_size()).height
-        } else {
-            0.0
-        }
+    /// How far the growing trace displays move `widget`: right by the extra
+    /// width when its left edge is at or past the far right edge, whatever
+    /// its rows, and down by the extra height when its top edge is at or
+    /// below the lowest bottom edge, whatever its columns. Each shift moves a
+    /// whole half of the panel, so the widgets in it keep their places among
+    /// themselves and nothing can overlap (`docs/design/panels.md`, Resizable
+    /// tiles).
+    fn display_push(&self, widget: &WidgetView) -> Vector {
+        let extra = self.size() - self.minimum_size();
+        let edges = self.display_edges();
+        let past = |edge: Option<u16>, start: u8, room: f32| {
+            if edge.is_some_and(|edge| u16::from(start) >= edge) {
+                room
+            } else {
+                0.0
+            }
+        };
+        Vector::new(
+            past(edges.right, widget.x, extra.width),
+            past(edges.bottom, widget.y, extra.height),
+        )
     }
 
     /// The tile's extra size that `meter` can take without covering another

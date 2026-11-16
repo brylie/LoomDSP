@@ -588,6 +588,202 @@ fn stacked_displays_never_cover_each_other() {
     assert!(lower.y + lower.height <= tile.bounds().y + tile.bounds().height);
 }
 
+/// A shown widget of `kind` at (`x`, `y`) in grid units.
+fn placed(kind: WidgetViewKind, x: u8, y: u8) -> WidgetView {
+    WidgetView {
+        kind,
+        x,
+        y,
+        label: String::new(),
+        hover: HoverText::default(),
+        hidden: false,
+        exposed: false,
+        inert: false,
+    }
+}
+
+/// A tile whose panel, `width` × `height` grid units, holds `widgets`.
+fn tile_of(width: u8, height: u8, widgets: Vec<WidgetView>) -> ModuleView {
+    let mut tile = module(1, 0.0, 0.0);
+    tile.panel = PanelView { width, height, widgets };
+    tile
+}
+
+/// The tile's extra width and height in world units.
+fn extra(tile: &ModuleView) -> Size {
+    tile.size() - tile.minimum_size()
+}
+
+/// Panics if two shown widgets overlap, or one leaves the tile.
+fn assert_laid_out(tile: &ModuleView) {
+    let tile_bounds = tile.bounds();
+    let rects: Vec<(usize, Rect)> = (0..tile.panel.widgets.len())
+        .filter_map(|i| tile.widget_bounds(i).map(|r| (i, r)))
+        .collect();
+    for &(i, a) in &rects {
+        assert!(
+            a.x >= tile_bounds.x
+                && a.y >= tile_bounds.y
+                && a.x + a.width <= tile_bounds.x + tile_bounds.width + 0.01
+                && a.y + a.height <= tile_bounds.y + tile_bounds.height + 0.01,
+            "widget {i} at {a:?} leaves the tile {tile_bounds:?}"
+        );
+        for &(j, b) in rects.iter().filter(|(j, _)| *j > i) {
+            let apart = a.x + a.width <= b.x + 0.01
+                || b.x + b.width <= a.x + 0.01
+                || a.y + a.height <= b.y + 0.01
+                || b.y + b.height <= a.y + 0.01;
+            assert!(apart, "widgets {i} at {a:?} and {j} at {b:?} overlap");
+        }
+    }
+}
+
+/// Two trace displays side by side with level bottoms: on a wide tile the
+/// right one grows wider and the left one keeps its width, both grow taller,
+/// and they do not overlap (`docs/design/panels.md`, Resizable tiles).
+#[test]
+fn displays_side_by_side_share_a_wide_tile() {
+    let mut tile = tile_of(
+        19,
+        5,
+        vec![
+            placed(WidgetViewKind::Scope, 0, 0),
+            placed(WidgetViewKind::Spectrum, 10, 0),
+        ],
+    );
+    tile.size = Some((50, 40));
+    let (left, right) = (tile.widget_bounds(0).unwrap(), tile.widget_bounds(1).unwrap());
+    assert_eq!(left.width, 9.0 * GRID, "the left one keeps its width");
+    assert_eq!(
+        right.width,
+        9.0 * GRID + extra(&tile).width,
+        "the right one grows wider"
+    );
+    assert_eq!(left.height, 5.0 * GRID + extra(&tile).height, "both grow taller");
+    assert_eq!(right.height, left.height);
+    assert_laid_out(&tile);
+}
+
+/// Two stacked displays of equal width both grow wider, and only the lower
+/// grows taller.
+#[test]
+fn stacked_displays_of_equal_width_both_widen() {
+    let mut tile = tile_of(
+        9,
+        12,
+        vec![
+            placed(WidgetViewKind::LevelHistory, 0, 0),
+            placed(WidgetViewKind::Spectrum, 0, 7),
+        ],
+    );
+    tile.size = Some((40, 40));
+    let (upper, lower) = (tile.widget_bounds(0).unwrap(), tile.widget_bounds(1).unwrap());
+    let extra = extra(&tile);
+    assert_eq!(upper.width, 9.0 * GRID + extra.width);
+    assert_eq!(lower.width, upper.width);
+    assert_eq!(upper.height, 6.0 * GRID, "the upper keeps its height");
+    assert_eq!(lower.height, 5.0 * GRID + extra.height);
+    assert_laid_out(&tile);
+}
+
+/// A widget whose left edge is at or past the far right edge moves right by
+/// the extra width, whatever its rows: one beside the display, one that
+/// shares only some of its rows, and one past its lower right corner, which
+/// also moves down.
+#[test]
+fn a_widget_past_the_far_right_edge_moves_right() {
+    let mut tile = tile_of(
+        15,
+        11,
+        vec![placed(WidgetViewKind::Scope, 0, 0), knob(9, 0), knob(9, 4), knob(12, 8)],
+    );
+    let before: Vec<Rect> = (1..4).map(|i| tile.widget_bounds(i).unwrap()).collect();
+    tile.size = Some((50, 40));
+    let extra = extra(&tile);
+    let after: Vec<Rect> = (1..4).map(|i| tile.widget_bounds(i).unwrap()).collect();
+    for (b, a) in before.iter().zip(&after) {
+        assert_eq!(a.x, b.x + extra.width, "moved right");
+        assert_eq!(a.size(), b.size(), "a knob does not grow");
+    }
+    assert_eq!(after[0].y, before[0].y, "beside the display: not moved down");
+    assert_eq!(after[1].y, before[1].y, "some of its rows: not moved down");
+    assert_eq!(after[2].y, before[2].y + extra.height, "below the display too");
+    assert_laid_out(&tile);
+}
+
+/// On a wide tile, a row of controls below a narrower display splits at the
+/// display's right edge: the controls past it move right, and the others
+/// stay. All of them move down, with no overlap.
+#[test]
+fn a_row_below_a_narrower_display_splits_at_its_edge() {
+    let mut widgets = vec![placed(WidgetViewKind::Scope, 0, 0)];
+    widgets.extend((0..5).map(|i| knob(3 * i, 5)));
+    let mut tile = tile_of(15, 8, widgets);
+    let before: Vec<Rect> = (1..6).map(|i| tile.widget_bounds(i).unwrap()).collect();
+    tile.size = Some((50, 40));
+    let extra = extra(&tile);
+    for (i, b) in before.iter().enumerate() {
+        let a = tile.widget_bounds(i + 1).unwrap();
+        let right = if 3 * i >= 9 { extra.width } else { 0.0 };
+        assert_eq!(
+            a.position(),
+            b.position() + Vector::new(right, extra.height),
+            "knob {i}"
+        );
+    }
+    assert_laid_out(&tile);
+}
+
+/// A meter moved right by a display's edge keeps its declared width, and one
+/// moved down keeps its declared height, so neither leaves the tile. Each
+/// still grows the other way when nothing stops it.
+#[test]
+fn a_meter_moved_by_a_display_keeps_that_size() {
+    let meter = || WidgetViewKind::Meter {
+        zero: 0.0,
+        clips: false,
+    };
+    let mut right = tile_of(12, 6, vec![placed(WidgetViewKind::Scope, 0, 0), placed(meter(), 9, 0)]);
+    right.size = Some((50, 40));
+    let moved = right.widget_bounds(1).unwrap();
+    assert_eq!(moved.width, 3.0 * GRID, "keeps its width");
+    assert_eq!(moved.height, 6.0 * GRID + extra(&right).height, "still grows taller");
+    assert_laid_out(&right);
+
+    let mut down = tile_of(9, 11, vec![placed(WidgetViewKind::Scope, 0, 0), placed(meter(), 0, 5)]);
+    down.size = Some((50, 40));
+    let moved = down.widget_bounds(1).unwrap();
+    assert_eq!(moved.height, 6.0 * GRID, "keeps its height");
+    assert_eq!(moved.width, 3.0 * GRID + extra(&down).width, "still grows wider");
+    assert_laid_out(&down);
+}
+
+/// On a panel with displays both stacked and side by side, a meter, and
+/// controls, no two widgets overlap after a resize, and none leaves the
+/// tile, at several sizes.
+#[test]
+fn mixed_displays_never_overlap_after_a_resize() {
+    let mut tile = tile_of(
+        22,
+        15,
+        vec![
+            placed(WidgetViewKind::LevelHistory, 0, 0),
+            placed(WidgetViewKind::Spectrum, 0, 7),
+            placed(WidgetViewKind::Scope, 10, 0),
+            placed(WidgetViewKind::XyScope, 10, 7),
+            placed(WidgetViewKind::Meter { zero: 0.0, clips: true }, 16, 7),
+            knob(19, 0),
+            knob(0, 12),
+            placed(WidgetViewKind::Toggle, 3, 13),
+        ],
+    );
+    assert_laid_out(&tile);
+    for size in [(30, 20), (40, 30), (64, 64), (64, 20), (30, 64)] {
+        tile.size = Some(size);
+        assert_laid_out(&tile);
+    }
+}
+
 /// A growing XY scope moves the controls below it down, so it does not cover
 /// them (`docs/design/panels.md`, Resizable tiles).
 #[test]

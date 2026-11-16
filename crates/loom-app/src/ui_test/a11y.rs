@@ -196,6 +196,11 @@ impl<'a> A11yNode<'a> {
         self.raw().description()
     }
 
+    /// Where it is in the window, in physical pixels, if it has a place.
+    pub fn bounds(&self) -> Option<accesskit::Rect> {
+        self.raw().bounds()
+    }
+
     /// True when it offers `action`.
     pub fn offers(&self, action: Action) -> bool {
         self.raw().supports_action(action)
