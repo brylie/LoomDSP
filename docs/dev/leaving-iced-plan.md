@@ -386,7 +386,7 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
 
 ### 3.2 The order of views
 
-Move the simplest views first. One pull request per row, each passing the parity gates. Each row also moves its parts' bounds, for `locate` and the accessibility tree, from Iced's named containers to our layout by UI ID. The last row removes the `Find` and `Places` window questions and `places.rs` (spec section 10, rule 6).
+Move the simplest views first. One pull request per row, each passing the parity gates. Each row also moves its parts' bounds, for `locate` and the accessibility tree, from Iced's named containers to our layout by UI ID. The canvas is not a row of its own, since it already draws itself (step 2.2c), but its place and live camera still reach `locate` through `Find`. They move in the last row, before `Find` goes: our layout places the canvas in the window, so its bounds come from that layout, and the camera comes from the canvas's own input state (`CanvasInput`), which then lives in our widget, not in an Iced widget's state. The last row removes the `Find` and `Places` window questions and `places.rs` (spec section 10, rule 6).
 
 | Order | View | Widgets it needs |
 |---|---|---|
