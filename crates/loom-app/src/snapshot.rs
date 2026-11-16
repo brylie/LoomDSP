@@ -309,7 +309,10 @@ pub struct TraceShown {
     pub low: f32,
     /// The highest point, from -1 to 1.
     pub high: f32,
-    /// The signal's level, from 0 to 1 (-60 dB to 0 dB).
+    /// The signal's level, from 0 to 1 (-60 dB to 0 dB). While the full
+    /// trace is drawn only its points are compared, so this is the level
+    /// last sent; it is exact at the middle zoom, where the level is all
+    /// that is drawn (`docs/design/panels.md`, Drawing the scope trace).
     pub level: f32,
 }
 

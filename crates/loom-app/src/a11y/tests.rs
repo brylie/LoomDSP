@@ -4860,3 +4860,36 @@ fn a_screen_reader_takes_the_windows_scale() {
     assert!(app.a11y.is_active());
     assert_eq!(app.a11y.scale, 2.0);
 }
+
+/// A lights message counts as its own frame cause, apart from the meters,
+/// and a telemetry message counts as meters. A lights message is still a
+/// live reading: it marks the tree's live values as waiting and asks no
+/// focus question, as a meters message does (frame-meter.md, Causes).
+#[test]
+fn a_lights_message_is_a_live_reading_of_its_own() {
+    use loom_canvas::stats::{FrameCause, requests_this_thread};
+    let mut app = app_with_every_widget();
+    listen(&mut app);
+    let _ = app.send(Message::FocusMoved(Some(UiId::panel("inspector"))));
+    let _ = app.take_focus_question();
+    assert!(!app.a11y.live_waits());
+
+    let (lights, meters) = (
+        requests_this_thread(FrameCause::Lights),
+        requests_this_thread(FrameCause::Meters),
+    );
+    let _ = app.send(Message::Lights(Vec::new()));
+    assert_eq!(requests_this_thread(FrameCause::Lights), lights + 1);
+    assert_eq!(requests_this_thread(FrameCause::Meters), meters, "not meters");
+    assert!(app.a11y.live_waits(), "a live reading");
+    assert!(!app.focus_question_waits(), "no focus question");
+
+    let _ = app.send(Message::Telemetry(crate::monitor::Update::default()));
+    assert_eq!(requests_this_thread(FrameCause::Meters), meters + 1);
+    assert_eq!(requests_this_thread(FrameCause::Lights), lights + 1);
+    assert!(!app.focus_question_waits());
+
+    // Any other message with a focus asks where it went.
+    let _ = app.send(Message::CloseHelp);
+    assert!(app.focus_question_waits());
+}

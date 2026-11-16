@@ -230,6 +230,7 @@ impl App {
             watching: false,
             timers: crate::timers::Timers::default(),
             control_frame_asked: false,
+            window_scale: 1.0,
             watchers: crate::watching::AppWatchers::default(),
             waiting: None,
             recovery_offer: None,

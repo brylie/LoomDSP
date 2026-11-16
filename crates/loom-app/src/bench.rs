@@ -273,7 +273,7 @@ fn line(w: &Window) -> String {
         "fps={fps:.1} avg_ms={average_ms:.2} worst_ms={:.2} frames={} scene_builds={} control_builds={} \
          scene_uploads={} control_uploads={} overlay_uploads={} trace_uploads={} \
          text_uploads={} glyph_rasters={} glyph_skips={} \
-         causes=tick:{},live:{},meters:{},control:{},input:{},redraw:{},forced:{},other:{} cpu={:.1}",
+         causes=tick:{},live:{},meters:{},lights:{},control:{},input:{},redraw:{},forced:{},other:{} cpu={:.1}",
         w.worst.as_secs_f64() * 1000.0,
         t.frames,
         t.scene_builds,
@@ -293,6 +293,7 @@ fn line(w: &Window) -> String {
         w.causes.0[5],
         w.causes.0[6],
         w.causes.0[7],
+        w.causes.0[8],
         w.cpu
     )
 }

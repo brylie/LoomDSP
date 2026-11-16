@@ -76,6 +76,43 @@ pub struct ScopeWant {
     pub trigger: Trigger,
     /// The edge that starts it.
     pub slope: Slope,
+    /// The scope's size as drawn, in physical pixels, so a trace is sent
+    /// only when its line moves by more than half a pixel
+    /// (`docs/design/panels.md`, Drawing the scope trace, The drawn size).
+    /// `None` until the app knows it: then any change is sent. Two scopes
+    /// on one probe share one want, with each side the larger of the two.
+    pub drawn: Option<DrawnSize>,
+}
+
+/// A display's size on screen in physical pixels: whole pixels, each side
+/// at least 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawnSize {
+    /// Pixels across.
+    pub width: u32,
+    /// Pixels down.
+    pub height: u32,
+}
+
+impl DrawnSize {
+    /// A size from a width and height in physical pixels, each rounded to a
+    /// whole pixel and at least 1. Rounding keeps a small zoom step from
+    /// changing the watch list when no side moved by a pixel.
+    pub fn new(width: f32, height: f32) -> Self {
+        let side = |x: f32| if x.is_finite() { x.round().max(1.0) as u32 } else { 1 };
+        Self {
+            width: side(width),
+            height: side(height),
+        }
+    }
+
+    /// Each side the larger of the two, for two scopes on one probe.
+    pub fn max(self, other: Self) -> Self {
+        Self {
+            width: self.width.max(other.width),
+            height: self.height.max(other.height),
+        }
+    }
 }
 
 /// What one spectrum on screen draws.
@@ -103,8 +140,9 @@ pub struct XyWant {
 pub struct Update {
     /// Meter levels that changed by at least one of 256 steps.
     pub levels: Vec<(ProbeId, Level)>,
-    /// Scope traces that changed: only what is drawn, so a still or silent
-    /// signal sends none.
+    /// Scope traces whose line moved by more than half a pixel as drawn, or
+    /// whose level changed at the middle zoom ([`scope_moved`]): a still or
+    /// silent signal, or a steady smooth wave, sends none.
     pub traces: Vec<(ProbeId, loom_canvas::Trace)>,
     /// Level histories that moved: a still or silent one sends none.
     pub histories: Vec<(ProbeId, loom_canvas::Trace)>,
@@ -221,7 +259,7 @@ impl Watcher {
             };
             scope.update(want.window, want.trigger, want.slope);
             let trace = scope.canvas_trace(watch.full_traces);
-            if self.shown_traces.get(probe) != Some(&trace) {
+            if scope_moved(self.shown_traces.get(probe), &trace, want.drawn) {
                 traces.push((*probe, trace));
             }
         }
@@ -471,6 +509,150 @@ pub fn moved(shown: Option<&loom_canvas::Trace>, trace: &loom_canvas::Trace, tol
         a.len() != b.len() || a.iter().zip(b).any(|(a, b)| (a[1] - b[1]).abs() > tolerance)
     };
     apart(&shown.points, &trace.points) || apart(&shown.second, &trace.second)
+}
+
+/// How far a scope's line must move before the UI hears of it: half a
+/// pixel as drawn, which nobody can see.
+const SCOPE_TOLERANCE: f32 = 0.5;
+
+/// The most segments of the other line tried for one point of a scope
+/// trace, the window included. A point that reaches it counts as moved, so
+/// the check never stalls the telemetry thread, which also carries the meters
+/// and the clip news (`docs/design/panels.md`, Drawing the scope trace,
+/// Bounded cost).
+pub const SCOPE_SEGMENT_CAP: usize = 64;
+
+/// True when a scope's `trace` differs on screen from what the UI has
+/// (`docs/design/panels.md`, Drawing the scope trace, What counts as moved).
+///
+/// Nothing shown yet counts as moved. With no drawn size known, any change
+/// counts. When both traces have no points (the middle zoom, where only the
+/// level is drawn), any change of the level's 256 steps counts. When one has
+/// points and the other has none, it moved. Otherwise only the points are
+/// compared, so a level change alone sends nothing: a point of either trace
+/// inside the frame (x from 0 to 1) that lies more than half a pixel, at the
+/// drawn size, from the other trace's whole line has moved. Points outside
+/// the frame still shape the line. A scope trace has no `second` line.
+pub fn scope_moved(shown: Option<&loom_canvas::Trace>, trace: &loom_canvas::Trace, drawn: Option<DrawnSize>) -> bool {
+    let Some(shown) = shown else {
+        return true;
+    };
+    let Some(size) = drawn else {
+        return shown != trace;
+    };
+    match (shown.points.is_empty(), trace.points.is_empty()) {
+        (true, true) => shown.level != trace.level,
+        (false, false) => line_check(&shown.points, &trace.points, size).moved,
+        _ => true,
+    }
+}
+
+/// What a check of two scope lines found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineCheck {
+    /// True when a point lies more than half a pixel from the other line,
+    /// or reached [`SCOPE_SEGMENT_CAP`].
+    pub moved: bool,
+    /// The segment tests it took. The check stops at the first point that
+    /// moved.
+    pub tests: usize,
+}
+
+/// Checks two scope lines against each other both ways, at `size`: first
+/// the points of `a` against the line of `b`, then the other way round. Both
+/// must run left to right in x, as [`ScopeTrace::canvas_trace`] gives them.
+pub fn line_check(a: &[[f32; 2]], b: &[[f32; 2]], size: DrawnSize) -> LineCheck {
+    let mut tests = 0;
+    let moved = points_off_line(a, b, size, &mut tests) || points_off_line(b, a, size, &mut tests);
+    LineCheck { moved, tests }
+}
+
+/// True when a point of `points` inside the frame lies more than
+/// [`SCOPE_TOLERANCE`] pixels from the line through `line`, or reaches the
+/// cap. Adds each segment test to `tests`.
+///
+/// For each point the search keeps a window on the line: the segments whose
+/// x comes within the tolerance of the point's. Both lines run left to right,
+/// so the window only moves forward, and the whole check is close to linear.
+/// Inside the window it tries the segment under the point first, then its
+/// neighbours outward, since on a line that held still the nearest segment is
+/// usually there.
+fn points_off_line(points: &[[f32; 2]], line: &[[f32; 2]], size: DrawnSize, tests: &mut usize) -> bool {
+    if line.is_empty() {
+        return points.iter().any(|p| (0.0..=1.0).contains(&p[0]));
+    }
+    let (width, height) = (size.width as f32, size.height as f32);
+    // x from 0 to 1 across the width, y from -1 to 1 up the height.
+    let pixels = |p: [f32; 2]| [p[0] * width, p[1] * height * 0.5];
+    let last = line.len() - 1;
+    // Segment j joins point j and point j + 1. A line of one point is one
+    // segment of no length.
+    let segments = last.max(1);
+    let segment = |j: usize| (pixels(line[j]), pixels(line[(j + 1).min(last)]));
+    // The first segment whose right end reaches x - tolerance, the first
+    // whose right end reaches x, and the first whose left end lies past
+    // x + tolerance.
+    let (mut low, mut under, mut high) = (0, 0, 0);
+    for &point in points {
+        if !(0.0..=1.0).contains(&point[0]) {
+            continue;
+        }
+        let p = pixels(point);
+        while low < segments && segment(low).1[0] < p[0] - SCOPE_TOLERANCE {
+            low += 1;
+        }
+        under = under.max(low);
+        while under < segments && segment(under).1[0] < p[0] {
+            under += 1;
+        }
+        high = high.max(under);
+        while high < segments && segment(high).0[0] <= p[0] + SCOPE_TOLERANCE {
+            high += 1;
+        }
+        if low >= high {
+            // No part of the line comes near this point's x.
+            return true;
+        }
+        let start = under.clamp(low, high - 1);
+        let mut tried = 0;
+        let mut near = false;
+        'search: for step in 0.. {
+            let above = start + step;
+            let below = start.checked_sub(step).filter(|&j| step > 0 && j >= low);
+            if above >= high && below.is_none() {
+                break;
+            }
+            for j in [Some(above).filter(|&j| j < high), below].into_iter().flatten() {
+                if tried == SCOPE_SEGMENT_CAP {
+                    break 'search;
+                }
+                tried += 1;
+                *tests += 1;
+                let (from, to) = segment(j);
+                if distance_to_segment(p, from, to) <= SCOPE_TOLERANCE {
+                    near = true;
+                    break 'search;
+                }
+            }
+        }
+        if !near {
+            return true;
+        }
+    }
+    false
+}
+
+/// The distance in pixels from `p` to the segment from `a` to `b`.
+fn distance_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let length = dx * dx + dy * dy;
+    let t = if length > 0.0 {
+        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let (x, y) = (a[0] + t * dx - p[0], a[1] + t * dy - p[1]);
+    (x * x + y * y).sqrt()
 }
 
 /// The quantised left and optional right meter levels.

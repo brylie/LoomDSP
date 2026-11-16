@@ -430,3 +430,66 @@ fn lights_update_after_new_open_and_a_device_change() {
     eventually("the old engine's thread ends", || old.handles() == 1);
     wait_until_lit(&mut app, &queue, light);
 }
+
+/// A scope's drawn size in the watch list follows a zoom, a change of the
+/// window's scale, and a tile resize: its widget's bounds, times the zoom,
+/// times the scale. Each republishes the list in place, so the monitor
+/// thread keeps running (panels.md, Drawing the scope trace, The drawn
+/// size).
+#[test]
+fn a_scope_drawn_size_follows_the_zoom_the_scale_and_a_resize() {
+    use loom_canvas::{Camera, CanvasEvent};
+    let (waker, _queue) = queue_waker();
+    let mut app = app();
+    let scope = app.session.controller.add_module("loom.display.scope").unwrap().0;
+    app.commit();
+    app.watching = true;
+    app.sync_watchers(&waker);
+    let key = app.session.engine.watchers.monitor.as_ref().map(Watcher::key);
+    assert!(key.is_some(), "the monitor runs");
+    let widget = crate::scene::scope_outputs(&app.session.controller, &[scope])[0]
+        .widget
+        .1;
+    let drawn = |app: &crate::App| {
+        let scopes = app.session.engine.monitor.watched().scopes;
+        assert_eq!(scopes.len(), 1);
+        scopes.values().next().unwrap().drawn
+    };
+    let expected = |app: &crate::App, times: f32| {
+        let bounds = app.session.scene.module(scope).unwrap().widget_bounds(widget).unwrap();
+        Some(crate::monitor::DrawnSize::new(
+            bounds.width * times,
+            bounds.height * times,
+        ))
+    };
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![scope])));
+    assert_eq!(drawn(&app), None, "no camera yet, so no size");
+
+    let camera = Camera {
+        zoom: 2.0,
+        ..Camera::default()
+    };
+    let _ = app.send(Message::Canvas(CanvasEvent::Camera(camera)));
+    assert_eq!(drawn(&app), expected(&app, 2.0), "the zoom");
+
+    let _ = app.send_scaled(Message::Tick, 2.0);
+    assert_eq!(drawn(&app), expected(&app, 4.0), "the window's scale");
+
+    let before = drawn(&app).unwrap();
+    let tile = app.session.scene.module(scope).unwrap();
+    let size = (
+        (tile.width() / loom_canvas::GRID) as u8 + 6,
+        (tile.height() / loom_canvas::GRID) as u8 + 4,
+    );
+    let _ = app.send_scaled(Message::Canvas(CanvasEvent::Resize { module: scope, size }), 2.0);
+    let after = drawn(&app).unwrap();
+    assert_eq!(Some(after), expected(&app, 4.0), "the tile's new size");
+    assert!(after.width > before.width && after.height > before.height);
+
+    app.sync_watchers(&waker);
+    assert_eq!(
+        app.session.engine.watchers.monitor.as_ref().map(Watcher::key),
+        key,
+        "the same monitor thread"
+    );
+}

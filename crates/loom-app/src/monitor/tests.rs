@@ -103,6 +103,7 @@ fn scope_watch(probe: ProbeId, full: bool) -> WatchList {
                 window: 480,
                 trigger: Trigger::Auto,
                 slope: Slope::Rising,
+                drawn: None,
             },
         )]),
         full_traces: full,
@@ -114,18 +115,24 @@ fn scope_watch(probe: ProbeId, full: bool) -> WatchList {
 /// 60 fps with 48 kHz audio, and returns how many updates carried a
 /// trace.
 fn traces_sent(watch: &WatchList, value: impl Fn(u64) -> f32 + Copy, calls: u64) -> usize {
+    traces_sent_after(watch, value, 0, calls)
+}
+
+/// As [`traces_sent`], after `lead_in` calls whose traces are sent but not
+/// counted, so a test can start once the history is full.
+fn traces_sent_after(watch: &WatchList, value: impl Fn(u64) -> f32 + Copy, lead_in: u64, calls: u64) -> usize {
     let probe = *watch.scopes.keys().next().unwrap();
     let mut watcher = Watcher::default();
     let start = Instant::now();
     let mut sent = 0;
     let chunk_frames = loom_core::SCOPE_CHUNK as u64;
     let per_call = 12; // 768 frames, 16 ms
-    for call in 0..calls {
+    for call in 0..lead_in + calls {
         let chunks: Vec<ScopeChunk> = (0..per_call)
             .map(|i| chunk(probe, (call * per_call + i) * chunk_frames, value))
             .collect();
         let update = watcher.take(watch, &[], chunks, 48_000.0, start + SCOPE_INTERVAL * call as u32);
-        if !update.traces.is_empty() {
+        if call >= lead_in && !update.traces.is_empty() {
             sent += 1;
         }
         watcher.sent(&update);
@@ -149,6 +156,200 @@ fn a_moving_signal_sends_traces_close_up_and_only_its_level_further_out() {
     let saw = |frame: u64| (std::f32::consts::TAU * 440.0 * frame as f32 / 48_000.0).sin();
     assert!(traces_sent(&scope_watch(ProbeId(3), true), saw, 30) > 20);
     assert_eq!(traces_sent(&scope_watch(ProbeId(3), false), saw, 30), 1);
+}
+
+/// A full-trace scope of `window` samples, drawn at `width` × `height`
+/// physical pixels.
+fn drawn_scope_watch(window: usize, width: u32, height: u32) -> WatchList {
+    let mut watch = scope_watch(ProbeId(3), true);
+    let want = watch.scopes.get_mut(&ProbeId(3)).unwrap();
+    want.window = window;
+    want.drawn = Some(DrawnSize { width, height });
+    watch
+}
+
+/// A sine with a period of `period` samples, worked out in `f64` so a late
+/// frame is as exact as an early one.
+fn sine_of_period(period: f64) -> impl Fn(u64) -> f32 + Copy {
+    move |frame| ((frame as f64 / period).fract() * std::f64::consts::TAU).sin() as f32
+}
+
+/// Middle C at 48 kHz has a period of 183.47 samples, so each read samples
+/// the wave at a new phase and its points slide along the curve. Drawn at
+/// 432 × 240 (a 9 × 5 scope at zoom 2 on a 2× screen), its line holds still,
+/// so it sends once, then nothing over 200 reads. With `window + 1` samples
+/// the right end of the line slides and wakes the UI (panels.md, Drawing the
+/// scope trace, What counts as moved).
+#[test]
+fn a_steady_sine_sends_its_trace_once() {
+    let watch = drawn_scope_watch(240, 432, 240);
+    assert_eq!(traces_sent(&watch, sine_of_period(183.47), 201), 1);
+}
+
+/// A triggered 0.5 s window is reduced to groups, and its period is not a
+/// whole number of samples. Drawn at 87 × 48, the smallest size of a full
+/// trace on a 1× screen, it sends nothing over 200 reads once the history
+/// is full. A point that reached the segment cap would count as moved, so
+/// this also shows a still trace never reaches it.
+#[test]
+fn a_long_steady_window_sends_nothing_once_settled() {
+    let watch = drawn_scope_watch(24_000, 87, 48);
+    let period = 3590.13;
+    assert!(24_000.0 / period > 6.0, "several cycles in the window");
+    // One second of lead-in fills the history, so the trace triggers.
+    assert_eq!(traces_sent_after(&watch, sine_of_period(period), 63, 200), 0);
+}
+
+/// A drawn size and some points, for the line checks below.
+fn size(width: u32, height: u32) -> Option<DrawnSize> {
+    Some(DrawnSize { width, height })
+}
+
+/// A full trace of `points`, with the level a scope would give it.
+fn full(points: Vec<[f32; 2]>) -> loom_canvas::Trace {
+    loom_canvas::Trace {
+        points,
+        second: Vec::new(),
+        level: 1.0,
+    }
+}
+
+/// `count` points along `curve`, from x = 0 to 1.
+fn along(count: usize, mut curve: impl FnMut(f32) -> f32) -> Vec<[f32; 2]> {
+    (0..count)
+        .map(|i| {
+            let x = i as f32 / (count - 1) as f32;
+            [x, curve(x)]
+        })
+        .collect()
+}
+
+/// A steep edge that holds still is not a change, even when its points
+/// move. A shift of the edge by 0.2 pixels is not either, though a compare
+/// at fixed columns would read it as a jump of the frame's height. A shift by
+/// a whole pixel is a change.
+#[test]
+fn a_still_steep_edge_does_not_count() {
+    let edge = |shift: f32| {
+        full(vec![
+            [-0.01, -1.0],
+            [0.5 + shift, -1.0],
+            [0.5 + shift + 0.0005, 1.0],
+            [1.01, 1.0],
+        ])
+    };
+    let pixel = 1.0 / 432.0;
+    let shown = edge(0.0);
+    assert!(!scope_moved(Some(&shown), &edge(0.0), size(432, 240)));
+    assert!(!scope_moved(Some(&shown), &edge(0.2 * pixel), size(432, 240)));
+    assert!(scope_moved(Some(&shown), &edge(pixel), size(432, 240)));
+    // The same edge, with more points along its flat parts.
+    let mut more = edge(0.0).points;
+    more.insert(1, [0.25, -1.0]);
+    more.insert(4, [0.75, 1.0]);
+    assert!(!scope_moved(Some(&shown), &full(more), size(432, 240)));
+}
+
+/// A reduced trace can gain or lose one point between reads. Along the
+/// same line that is no change.
+#[test]
+fn one_point_more_on_the_same_line_does_not_count() {
+    let curve = |x: f32| 0.8 * (std::f32::consts::TAU * 3.0 * x).sin();
+    let shown = full(along(1022, curve));
+    let next = full(along(1023, curve));
+    assert!(!scope_moved(Some(&shown), &next, size(87, 48)));
+    assert!(!scope_moved(Some(&next), &shown, size(87, 48)));
+}
+
+/// A move under half a pixel is not sent and one over it is, both ways. The
+/// same move sends at a larger drawn size where it did not at the smaller.
+/// With no drawn size known, any change sends.
+#[test]
+fn half_a_pixel_is_the_line() {
+    let curve = |x: f32| 0.5 * (std::f32::consts::TAU * x).sin();
+    let shown = full(along(240, curve));
+    // 0.004 of the half height: 0.48 pixels at 240 high, 0.96 at 480.
+    let raised = full(along(240, |x| curve(x) + 0.004));
+    assert!(!scope_moved(Some(&shown), &raised, size(432, 240)));
+    assert!(scope_moved(Some(&shown), &raised, size(432, 480)));
+    let higher = full(along(240, |x| curve(x) + 0.006));
+    assert!(scope_moved(Some(&shown), &higher, size(432, 240)));
+    assert!(scope_moved(Some(&higher), &shown, size(432, 240)));
+    assert!(scope_moved(Some(&shown), &raised, None), "no size: any change");
+    assert!(!scope_moved(Some(&shown), &shown.clone(), None));
+}
+
+/// A point inside the frame far from the other line is a change, but a
+/// point past the frame's edge is not tested, since the frame clips it. It
+/// still shapes the line a point inside is measured against.
+#[test]
+fn only_points_inside_the_frame_are_tested() {
+    let shown = full(vec![[-0.5, 0.0], [1.0, 0.0]]);
+    // Only the point past the left edge moved.
+    let next = full(vec![[-0.5, 1.0], [0.0, 0.0], [1.0, 0.0]]);
+    assert!(!scope_moved(Some(&shown), &next, size(100, 100)));
+    // The point at x = 0 lies on the shown line only because the shown
+    // point past the edge reaches it.
+    let start = full(vec![[0.0, 0.0], [1.0, 0.0]]);
+    assert!(!scope_moved(Some(&shown), &start, size(100, 100)));
+    // A point inside, 25 pixels off the shown line.
+    let bent = full(vec![[-0.5, 1.0], [0.0, 0.5], [0.5, 0.0], [1.0, 0.0]]);
+    assert!(scope_moved(Some(&shown), &bent, size(100, 100)));
+}
+
+/// At the middle zoom a trace is its level: any change of its 256 steps is
+/// sent. With full traces the points alone count, so a level change sends
+/// nothing. A trace that gains or loses its points, or the first trace, is a
+/// change.
+#[test]
+fn levels_and_empty_traces() {
+    let level = |level: f32| loom_canvas::Trace {
+        level,
+        ..loom_canvas::Trace::default()
+    };
+    assert!(scope_moved(Some(&level(0.5)), &level(0.5 + 1.0 / 255.0), size(87, 48)));
+    assert!(!scope_moved(Some(&level(0.5)), &level(0.5), size(87, 48)));
+    let line = full(along(10, |_| 0.0));
+    let quieter = loom_canvas::Trace {
+        level: 0.5,
+        ..line.clone()
+    };
+    assert!(
+        !scope_moved(Some(&line), &quieter, size(87, 48)),
+        "the points alone count"
+    );
+    assert!(scope_moved(Some(&level(1.0)), &line, size(87, 48)));
+    assert!(scope_moved(Some(&line), &level(1.0), size(87, 48)));
+    assert!(scope_moved(None, &level(0.0), size(87, 48)), "nothing shown yet");
+}
+
+/// 1024 points at a drawn size of 1 × 1 put the whole line in every
+/// point's window, yet the check tries at most [`SCOPE_SEGMENT_CAP`]
+/// segments for each point, each way. A point that reaches the cap counts as
+/// moved (panels.md, Drawing the scope trace, Bounded cost).
+#[test]
+fn the_check_is_bounded_at_any_size() {
+    let tiny = DrawnSize { width: 1, height: 1 };
+    let bound = 2 * 1024 * SCOPE_SEGMENT_CAP;
+    let noise = |seed: u32| -> Vec<[f32; 2]> {
+        let mut state = seed;
+        along(1024, |_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+        })
+    };
+    for (a, b) in [
+        (noise(1), noise(1)),
+        (noise(1), noise(2)),
+        (along(1024, |_| 1.0), along(1024, |_| -1.0)),
+    ] {
+        let check = line_check(&a, &b, tiny);
+        assert!(check.tests <= bound, "{} tests", check.tests);
+    }
+    // Two flat lines a pixel apart: the first point tries the cap and moved.
+    let check = line_check(&along(1024, |_| 1.0), &along(1024, |_| -1.0), tiny);
+    assert!(check.moved);
+    assert_eq!(check.tests, SCOPE_SEGMENT_CAP);
 }
 
 /// panels.md, Signal activity on ports: carrying within one read of a
@@ -402,6 +603,7 @@ fn a_scope_and_a_spectrum_on_one_probe_stay_apart() {
             window: 480,
             trigger: Trigger::Auto,
             slope: Slope::Rising,
+            drawn: None,
         },
     );
     watch.full_traces = true;

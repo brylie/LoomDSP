@@ -147,6 +147,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         timers: _,
         // The window's, as the commands waiting for a draw are.
         control_frame_asked: _,
+        // The window's: a new patch's scopes are drawn at the same scale.
+        window_scale: _,
         // The window's: a dialog's answer may itself replace the patch, and
         // what waited is taken before it does (`dialogs.rs`).
         waiting: _,

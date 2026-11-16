@@ -62,9 +62,9 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 
 **With a screen reader.** `--measure-tree`, with any of the three flags, runs the accessibility layer as if a screen reader were listening from the start, and ends each line with `tree_builds`, `tree_avg_ms`, and `tree_worst_ms`: how many times the tree was built, and the average and longest build. Compare a run with it against the same run without it. A normal run never sets it.
 
-Each line also prints `causes=tick:N,live:N,meters:N,control:N,input:N,redraw:N,forced:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
+Each line also prints `causes=tick:N,live:N,meters:N,lights:N,control:N,input:N,redraw:N,forced:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
 
-A patch that plays is not idle, even with the camera still. A scope on screen changes every frame, so it draws every frame. Lights and signal activity on ports change a few times a second, and so do live values on modulated controls. These frames are counted under `meters` and are by design. To measure a truly idle app, run without audio or MIDI:
+A patch that plays is not always idle, even with the camera still. A scope draws only when its line moves by more than half a pixel, so a still smooth wave draws nothing ([panels spec, Drawing the scope trace](../design/panels.md#drawing-the-scope-trace)). A running transport's Beat light flashes on every beat, so it still draws a few frames a beat ([panels spec, Redraw](../design/panels.md#redraw), A running transport is not idle). Signal activity on ports changes a few times a second, and so do live values on modulated controls. Meter levels, scope traces, and activity count under `meters`, lights under `lights`, and live values under `live`. All of these frames are by design. To measure a truly idle app, run without audio or MIDI:
 
 ```sh
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10 --no-audio --no-midi
@@ -72,7 +72,7 @@ cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-id
 
 After start-up, each line prints `fps=0.0`, and `frames` stops counting up. The final line can show one or two more frames, from closing the window.
 
-To see what a scope costs, run the same patch with an audio device: `subtractive.ron` has a scope, so it draws about 30 frames a second, nearly all under `meters` (MacBook, 2026-11-01). `fm-feedback.ron` has no scope, but its signal activity still draws about 10 frames a second:
+To see what a playing patch costs, run the same patch with an audio device or `--fake-audio`. `subtractive.ron` has a scope on a still wave and a running transport. With `--fake-audio --measure-idle --bench-seconds 6` it draws 69 frames: `meters:5`, all in the first second, and `lights:56`, about 10 a second from the Beat light (development Mac, 2026-11-16, [#730](https://github.com/brylie/LoomDSP/issues/730)). Before #730 the same run drew 175 frames, 168 of them counted as meters, since the scope woke the UI on every read and lights counted as meters. With its transport stopped it draws 16 to 18 frames: after the first second, none for meters or lights, and about one a second for `other`. `fm-feedback.ron` has no scope, but its signal activity still draws about 10 frames a second:
 
 ```sh
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10

@@ -79,7 +79,11 @@ fn engine_telemetry_reaches_levels_and_traces() {
 
     trace.update(960, Trigger::Auto, Slope::Rising);
     assert!(trace.triggered);
-    assert_eq!(trace.trace.len(), 961, "20 ms at 48 kHz, plus one sample");
+    assert_eq!(
+        trace.trace.len(),
+        962,
+        "20 ms at 48 kHz, plus two samples so the line reaches past both edges"
+    );
     assert_eq!(trace.range, 1.0);
     assert!(
         trace.trace[0] <= 0.0 && trace.trace[1] >= 0.0,
@@ -422,4 +426,28 @@ fn a_falling_edge_near_the_top_still_arms() {
     trace.history.push(0, &samples);
     trace.update(480, Trigger::Level(0.99), Slope::Falling);
     assert!(trace.triggered);
+}
+
+/// A triggered trace takes `window + 2` samples, so after the shift by its
+/// fraction its first point lies at or left of x = 0 and its last at or
+/// right of x = 1. A short history has no start that leaves that many, so it
+/// runs free (panels.md, Drawing the scope trace, The line reaches past both
+/// edges).
+#[test]
+fn a_triggered_line_reaches_past_both_edges() {
+    let samples = sine(261.63, 48_000.0, 4800, 0.0);
+    let mut scope = ScopeTrace::new(48_000.0);
+    scope.history.push(0, &samples);
+    scope.update(240, Trigger::Auto, Slope::Rising);
+    assert!(scope.triggered);
+    assert_eq!(scope.trace.len(), 242);
+    let trace = scope.canvas_trace(true);
+    assert!(trace.points[0][0] <= 0.0);
+    assert!(trace.points.last().unwrap()[0] >= 1.0);
+
+    // One rising edge between samples 1 and 2. From the sample before it,
+    // 241 samples are too few for a window of 240, and 242 are enough.
+    let step: Vec<f32> = (0..243).map(|i| if i < 2 { -1.0 } else { 1.0 }).collect();
+    assert_eq!(find_trigger(&step[..242], 240, Trigger::Auto, Slope::Rising), None);
+    assert_eq!(find_trigger(&step, 240, Trigger::Auto, Slope::Rising), Some(1.5));
 }

@@ -801,6 +801,9 @@ struct App {
     /// True while a `ControlFrame` waits for a frame to be shown, so a
     /// waiting command asks for one at a time.
     control_frame_asked: bool,
+    /// The window's scale factor as last read from an update's context, for
+    /// a scope's drawn size in physical pixels (`App::publish_watch`).
+    window_scale: f32,
     /// The watcher threads that outlive a patch (`watching.rs`).
     watchers: watching::AppWatchers,
     /// What waits for a native dialog's answer (`dialogs.rs`). It belongs
@@ -1096,9 +1099,11 @@ impl App {
         self.publish_watch();
     }
 
-    /// Tells the telemetry thread which meters and scopes are drawn, and
-    /// how each scope triggers. Runs after probes or scope parameters
-    /// change.
+    /// Tells the telemetry thread which meters and scopes are drawn, how
+    /// each scope triggers, and the size it is drawn at. Runs after probes
+    /// or scope parameters change, after a camera change, a new window
+    /// scale, and a scene change such as a tile resize (through
+    /// `refresh_values`). An equal list wakes nothing.
     fn publish_watch(&mut self) {
         let meters = self
             .metered_outputs()
@@ -1106,18 +1111,24 @@ impl App {
             .filter_map(|output| self.session.engine.live.probe(output))
             .collect();
         let rate = self.session.engine.monitor.sample_rate();
-        let scopes = scene::scope_outputs(&self.session.controller, &self.session.visible_displays)
-            .into_iter()
-            .filter_map(|scope| {
-                let probe = self.session.engine.live.scope_probe(scope.output)?;
-                let want = monitor::ScopeWant {
+        let mut scopes = std::collections::HashMap::<ProbeId, monitor::ScopeWant>::new();
+        for scope in scene::scope_outputs(&self.session.controller, &self.session.visible_displays) {
+            let Some(probe) = self.session.engine.live.scope_probe(scope.output) else {
+                continue;
+            };
+            let drawn = self.scope_drawn_size(scope.widget);
+            scopes
+                .entry(probe)
+                // Two scopes on one probe share a want: each side the
+                // larger, so neither lags by more than half a pixel.
+                .and_modify(|want| want.drawn = want.drawn.zip(drawn).map(|(a, b)| a.max(b)))
+                .or_insert(monitor::ScopeWant {
                     window: (scope.window * rate).round().max(1.0) as usize,
                     trigger: scope.trigger,
                     slope: scope.slope,
-                };
-                Some((probe, want))
-            })
-            .collect();
+                    drawn,
+                });
+        }
         let histories = scene::history_outputs(&self.session.controller, &self.session.visible_displays)
             .into_iter()
             .filter_map(|history| Some((self.session.engine.live.probe(history.output)?, history.window)))
@@ -1187,6 +1198,18 @@ impl App {
         self.session
             .traces
             .retain(|module, widget| shown.contains(&(module, widget)));
+    }
+
+    /// A scope widget's size as drawn, in physical pixels: its bounds on the
+    /// tile, times the camera's zoom, times the window's scale
+    /// (`docs/design/panels.md`, Drawing the scope trace, The drawn size).
+    /// `None` before the canvas has reported a camera for this level, or for
+    /// a widget not drawn.
+    fn scope_drawn_size(&self, (module, widget): (u32, usize)) -> Option<monitor::DrawnSize> {
+        let zoom = self.session.cameras.get(&self.session.level)?.zoom;
+        let bounds = self.session.scene.module(module)?.widget_bounds(widget)?;
+        let scale = zoom * self.window_scale;
+        Some(monitor::DrawnSize::new(bounds.width * scale, bounds.height * scale))
     }
 
     /// Gives each new trace from the telemetry thread to the widgets that show
@@ -1371,6 +1394,12 @@ impl App {
         );
         let now = cx.now();
         self.timers.set_frame(cx.window().frame);
+        // A scope's drawn size follows the window's scale, so a new scale
+        // tells the telemetry thread the new sizes.
+        if cx.window().scale != self.window_scale {
+            self.window_scale = cx.window().scale;
+            self.publish_watch();
+        }
         // A screen reader that starts gets bounds at the window's scale
         // from its first tree; later changes come with `Rescaled`.
         if matches!(message, Message::A11y(a11y::Event::Activated)) {
@@ -1417,7 +1446,8 @@ impl App {
         let cause = match &message {
             Message::Tick => FrameCause::Tick,
             Message::LiveFrame => FrameCause::Live,
-            Message::Meters(_) | Message::Telemetry(_) | Message::Lights(_) => FrameCause::Meters,
+            Message::Meters(_) | Message::Telemetry(_) => FrameCause::Meters,
+            Message::Lights(_) => FrameCause::Lights,
             Message::Control(_)
             | Message::ControlReply
             | Message::ControlFrame(_)
@@ -1445,7 +1475,7 @@ impl App {
             (Message::AudioPoll | Message::MidiPoll | Message::Autosave | Message::MidiGhosts, _) => {
                 a11y::Touch::Poll(self.a11y.is_active().then(|| self.a11y_poll_key()))
             }
-            (_, FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced) => a11y::Touch::Live,
+            (_, cause) if cause.is_live() => a11y::Touch::Live,
             _ => a11y::Touch::Changed,
         };
         // A field can go with the view, so any input while one has focus asks
@@ -1456,10 +1486,7 @@ impl App {
         let ask_focus = matches!(message, Message::TextFocusCheck)
             || (self.focus.is_some()
                 && !matches!(message, Message::FocusMoved(_) | Message::A11y(_))
-                && !matches!(
-                    cause,
-                    FrameCause::Tick | FrameCause::Live | FrameCause::Meters | FrameCause::Forced
-                ));
+                && !cause.is_live());
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {

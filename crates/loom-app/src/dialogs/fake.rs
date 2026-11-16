@@ -70,9 +70,17 @@ impl App {
     /// - Window questions are dropped: there is no window to ask
     ///   (`window_question.rs`). The `Ui` harness answers them.
     pub(crate) fn send(&mut self, message: Message) -> Effects<Message> {
+        self.send_scaled(message, 1.0)
+    }
+
+    /// As [`App::send`], in a window at the scale factor `scale`.
+    pub(crate) fn send_scaled(&mut self, message: Message, scale: f32) -> Effects<Message> {
         let (sender, queue) = mpsc::channel();
         let waker = Waker::new(sender, Arc::new(|| {}));
-        let window = WindowState::new(loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height));
+        let window = WindowState {
+            scale,
+            ..WindowState::new(loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height))
+        };
         let mut unrun = Effects::none();
         let mut pending = VecDeque::from(crate::input_owner::route(message));
         while let Some(message) = pending.pop_front() {

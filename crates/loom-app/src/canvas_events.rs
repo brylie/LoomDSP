@@ -313,6 +313,9 @@ impl App {
             // Each level keeps its camera for the session.
             CanvasEvent::Camera(camera) => {
                 self.session.cameras.insert(self.session.level.clone(), camera);
+                // A scope's drawn size follows the zoom. The list is updated
+                // in place, so no thread restarts.
+                self.publish_watch();
             }
         }
     }

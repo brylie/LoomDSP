@@ -47,7 +47,11 @@ pub struct RenderCounts {
 pub enum FrameCause {
     Tick,
     Live,
+    /// Meter levels and scope, history, spectrum, and XY traces.
     Meters,
+    /// Lights and readouts, apart from meters, so a running transport's
+    /// Beat light is not read as a meter fault (frame-meter.md, Causes).
+    Lights,
     Control,
     Input,
     Redraw,
@@ -55,9 +59,25 @@ pub enum FrameCause {
     Other,
 }
 
+impl FrameCause {
+    /// True for a live reading or a frame that changes no view: a tick, a
+    /// live frame, meters, lights, or a forced frame. The app marks the
+    /// accessibility tree's live values as waiting for these, and asks no
+    /// focus question.
+    pub fn is_live(self) -> bool {
+        matches!(
+            self,
+            Self::Tick | Self::Live | Self::Meters | Self::Lights | Self::Forced
+        )
+    }
+}
+
+/// How many kinds of [`FrameCause`] there are.
+pub const CAUSE_COUNT: usize = 9;
+
 /// Frame totals by cause, in the order printed by the measure report.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct FrameCauses(pub [u64; 8]);
+pub struct FrameCauses(pub [u64; CAUSE_COUNT]);
 
 impl FrameCauses {
     /// Totals for the whole process.
@@ -72,13 +92,13 @@ impl FrameCauses {
 }
 
 static PENDING_CAUSES: AtomicU64 = AtomicU64::new(0);
-static CAUSES: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static CAUSES: [AtomicU64; CAUSE_COUNT] = [const { AtomicU64::new(0) }; CAUSE_COUNT];
 
 thread_local! {
     /// How many times this thread asked for a frame, by cause. `CAUSES` is for
     /// the whole process and counts frames, so tests running side by side
     /// cannot read a request of their own from it.
-    static REQUESTS: [Cell<u64>; 8] = const { [const { Cell::new(0) }; 8] };
+    static REQUESTS: [Cell<u64>; CAUSE_COUNT] = const { [const { Cell::new(0) }; CAUSE_COUNT] };
 }
 
 /// Marks a message as a cause of the next rendered frame.

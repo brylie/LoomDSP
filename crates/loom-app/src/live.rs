@@ -362,7 +362,10 @@ impl Trigger {
 /// once per frame with the window to show and the trigger.
 pub struct ScopeTrace {
     history: History,
-    /// Samples to draw: one window plus one sample.
+    /// Samples to draw. A triggered trace has one window plus two samples,
+    /// from the sample before the trigger, so after the shift by `offset`
+    /// its line reaches past both edges of the frame. A free-running trace
+    /// has one window plus one sample, which spans the frame exactly.
     pub trace: Vec<f32>,
     /// How far the trigger lies past `trace[0]`, as a fraction of a sample.
     /// Shift the drawing left by this much, so the wave stays still even when
@@ -411,7 +414,7 @@ impl ScopeTrace {
                 let start = position.floor() as usize;
                 self.offset = position - start as f32;
                 self.trace
-                    .extend_from_slice(&samples[start..(start + window + 1).min(samples.len())]);
+                    .extend_from_slice(&samples[start..(start + window + 2).min(samples.len())]);
                 self.triggered = true;
             }
             None => {
@@ -500,8 +503,9 @@ fn decay(level: f32, target: f32, dt: f32) -> f32 {
     if next < 0.001 { 0.0 } else { next }
 }
 
-/// The latest edge of `slope` through the trigger level that still has a
-/// full window after it, as a sample position with a fraction.
+/// The latest edge of `slope` through the trigger level that still has
+/// `window + 2` samples from the sample before it, as a sample position
+/// with a fraction.
 ///
 /// With [`Trigger::Auto`] the level is halfway between the lowest and
 /// highest sample in the history, so signals with an offset (envelopes,
@@ -514,7 +518,9 @@ fn decay(level: f32, target: f32, dt: f32) -> f32 {
 /// slopes share one search.
 fn find_trigger(samples: &[f32], window: usize, trigger: Trigger, slope: Slope) -> Option<f32> {
     let n = samples.len();
-    let last_start = n.checked_sub(window + 1)?;
+    // A start that leaves `window + 2` samples, so the line still reaches
+    // the right edge after the shift by the trigger's fraction.
+    let last_start = n.checked_sub(window + 2)?;
     let sign = match slope {
         Slope::Rising => 1.0,
         Slope::Falling => -1.0,

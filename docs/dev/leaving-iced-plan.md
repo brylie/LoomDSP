@@ -231,7 +231,7 @@ The window and the loop become ours. Iced's widgets still draw the panels around
 
    While nothing is due, the loop sleeps (NFR-PERF-04, control channel rule 7).
 
-   **Not met at today's baseline:** phase 2's idle criterion asks for no redraws in 10 idle seconds. On `main` at `085f217a`, `--measure-idle` on `subtractive.ron` draws 266 frames, 263 of them for meter messages that arrive while nothing plays. That is section 3, rule 7's work (live values outside `update`), not this step's.
+   **Not met at today's baseline:** phase 2's idle criterion asks for no redraws in 10 idle seconds, with the transport stopped or no light it drives on screen ([panels, Redraw](../design/panels.md#redraw)). On `main` at `085f217a`, `--measure-idle` on `subtractive.ron` drew 266 frames, 263 of them for meter messages that arrive while nothing plays. Since [#730](https://github.com/brylie/LoomDSP/issues/730), a scope on a still wave wakes nothing, and lights count apart from meters. On `claude/telemetry-redraws` (2026-11-16), `--fake-audio --measure-idle --bench-seconds 6` on `subtractive.ron` draws 69 frames: `meters:5`, all in the first second, and `lights:56`, from the running transport's Beat light, which is a real change. With its transport stopped it draws 16 to 18 frames, none for meters or lights after the first second, and about one a second of cause `other`, which still stands between it and the criterion. Draw-time live values are still section 3, rule 7's work.
 
 ### 2.2 The winit shell
 
@@ -310,7 +310,7 @@ Gates for 2.2b and 2.2c, with main as the base:
    - Widths, 424 tile labels: -1.7% to +5.3%, median +3.4%. One label now leaves its box: "Out +90°" in `modulation.ron`, by 0.27 world units of 37 (#120).
    - The first layout, with the font scan: about 80 ms.
    - `--generate 300 --bench --bench-seconds 10`, four runs each, base then new: CPU 19.2% to 25.8% before, 16.6% to 19.1% after; worst frame 22 to 28 ms before, 23 to 30 ms after; 60 fps both (one base run at 72, as the display's rate moved). Glyph instances upload on frames where the camera moves, as Iced's text did; scene geometry still uploads once.
-   - `--measure-idle` on `subtractive.ron`, two runs each: CPU 7.4% and 7.8% before, 5.3% and 5.6% after; frame causes unchanged (meters, #730); one text upload per run.
+   - `--measure-idle` on `subtractive.ron`, two runs each: CPU 7.4% and 7.8% before, 5.3% and 5.6% after; frame causes unchanged (meters, before #730 split lights from them and stopped a still scope waking the UI); one text upload per run.
    - The atlas: about 840 lines with its shader, 670 without comments.
 
 ### 2.5 The agent tools on the new shell
@@ -334,7 +334,7 @@ Gates for 2.2b and 2.2c, with main as the base:
        - the window, ended by a script that quits;
        - `--bench`: 118 fps with 300 modules;
        - `--measure`;
-       - `--measure-idle`: frames only from meters, as #730 says;
+       - `--measure-idle`: frames only from meters, as #730 said before its fix (since #730, a still scope draws nothing, and a running transport's Beat light counts as lights);
        - `--measure-tree`: 20 tree builds, 1.7 ms each on average;
        - `--fake-audio --record`;
        - `--preferences` with `--device MOTU --buffer 128`: no MOTU device here, so the app starts on the default output;
