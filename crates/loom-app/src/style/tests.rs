@@ -73,10 +73,22 @@ const COLOUR_CALLS: [&str; 2] = [".background(", ".colour("];
 /// forms.
 const COLOUR_BUILDERS: [&str; 3] = ["Color::rgb", "Color::from_rgb", "Color {"];
 
+/// The call whose second argument is a colour, after a size.
+const BORDER: &str = ".border(";
+
+/// True when `arg` starts by building a colour inline, with or without the
+/// crate's path in front.
+fn built_inline(arg: &str) -> bool {
+    let arg = arg.strip_prefix("iced::").unwrap_or(arg);
+    let arg = arg.strip_prefix("loom_ui_core::").unwrap_or(arg);
+    COLOUR_BUILDERS.iter().any(|built| arg.starts_with(built))
+}
+
 /// The 1-based lines of `source` where a size or a colour is written
 /// inline: a literal number as the first argument of a size call, or a
-/// colour built inside a colour call. When rustfmt breaks a call after its
-/// `(`, the argument is read from the next line that is not empty.
+/// colour built inside a colour call or as a border's colour. When rustfmt
+/// breaks a call after its `(`, the argument is read from the next line
+/// that is not empty.
 fn inline_values(source: &str) -> Vec<usize> {
     let lines: Vec<&str> = source.lines().collect();
     // The argument after `call` at byte `at` of line `n`.
@@ -98,14 +110,20 @@ fn inline_values(source: &str) -> Vec<usize> {
                 .any(|(at, _)| argument(n, at, call).starts_with(|c: char| c.is_ascii_digit()))
         });
         let colour = COLOUR_CALLS.iter().any(|call| {
-            line.match_indices(call).any(|(at, _)| {
-                let arg = argument(n, at, call);
-                let arg = arg.strip_prefix("iced::").unwrap_or(arg);
-                let arg = arg.strip_prefix("loom_ui_core::").unwrap_or(arg);
-                COLOUR_BUILDERS.iter().any(|built| arg.starts_with(built))
-            })
+            line.match_indices(call)
+                .any(|(at, _)| built_inline(argument(n, at, call)))
         });
-        if size || colour {
+        // `.border(width, colour)`: its colour is the argument after the
+        // first comma, on the same line or on a later one.
+        let border_colour = line.match_indices(BORDER).any(|(at, _)| {
+            let rest = std::iter::once(&lines[n][at + BORDER.len()..])
+                .chain(lines[n + 1..].iter().copied().take(3))
+                .collect::<Vec<_>>()
+                .join(" ");
+            rest.split_once(',')
+                .is_some_and(|(_, after)| built_inline(after.trim_start()))
+        });
+        if size || colour || border_colour {
             found.push(n + 1);
         }
     }
@@ -130,8 +148,14 @@ e.radius(style::RADIUS).background(style::PANEL)
 e.colour(
     style::TEXT,
 )
+e.border(style::EDGE, Color::rgb(1.0, 0.0, 0.0))
+e.border(
+    style::EDGE,
+    loom_ui_core::Color::rgb(1.0, 0.0, 0.0),
+)
+e.border(style::EDGE, style::LINE)
 ";
-    assert_eq!(inline_values(source), [1, 2, 5]);
+    assert_eq!(inline_values(source), [1, 2, 5, 14, 15]);
 }
 
 /// The focus ring stands out at 3:1 or more against every background a

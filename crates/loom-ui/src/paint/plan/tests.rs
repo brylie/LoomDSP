@@ -70,6 +70,12 @@ fn a_clip_becomes_a_scissor_in_the_target() {
     assert_eq!(scissor(past, target(1.0)), Some([900, 700, 100, 100]));
     let away = Rect::new(Point::new(2000.0, 0.0), Size::new(5.0, 5.0));
     assert_eq!(scissor(away, target(1.0)), None);
+    // Two clips that do not overlap cut to an empty one, at a place that
+    // a fractional scale would round outward into a pixel.
+    let empty = Rect::new(Point::new(1.0, 1.0), Size::ZERO);
+    assert_eq!(scissor(empty, target(1.25)), None, "an empty clip shows nothing");
+    let flat = Rect::new(Point::new(1.0, 1.0), Size::new(5.0, 0.0));
+    assert_eq!(scissor(flat, target(1.25)), None);
 }
 
 /// The plan draws layer by layer and batch by batch in the order painted,

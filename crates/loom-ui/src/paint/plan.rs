@@ -113,8 +113,13 @@ pub(crate) struct PaintPlan {
 }
 
 /// A clip in the host's logical pixels as a scissor in the target's
-/// physical pixels, cut to the target. `None` when nothing of it is in it.
+/// physical pixels, cut to the target. `None` when nothing of it is in it,
+/// or when it is empty: rounding outward would grow an empty clip at a
+/// fractional place into a pixel that shows.
 pub(crate) fn scissor(clip: Rect, target: Target) -> Option<[u32; 4]> {
+    if clip.width <= 0.0 || clip.height <= 0.0 {
+        return None;
+    }
     let (width, height) = (target.physical.0 as f32, target.physical.1 as f32);
     let x0 = (clip.x * target.scale).floor().clamp(0.0, width);
     let y0 = (clip.y * target.scale).floor().clamp(0.0, height);
