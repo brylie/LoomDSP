@@ -386,6 +386,27 @@ fn a_slot_inside_a_clip_is_cut_by_it_two_levels_down() {
     );
 }
 
+/// A wrapping text is wrapped at the width it was measured at, before
+/// rounding, so painting cannot break a line the measure kept whole.
+#[test]
+fn a_wrapping_text_wraps_at_its_measured_width() {
+    let leaf = Element::text("ab cd", STYLE)
+        .wrap()
+        .width(Length::Fixed(40.4))
+        .min_width(0.0)
+        .padding(0.3);
+    let painted = painted(leaf, Point::ORIGIN);
+    let [Painted::Text { run, .. }] = painted.as_slice() else {
+        panic!("one text: {painted:?}");
+    };
+    assert!(run.wrap, "the run wraps");
+    assert!(
+        (run.bounds.width - 39.8).abs() < 1e-4,
+        "40.4 less two paddings of 0.3, not the rounded 40: {}",
+        run.bounds.width
+    );
+}
+
 /// Text sits at its content edge as taffy rounds it: a fractional padding
 /// or border is not added on its own, so the text is where a child at that
 /// edge would be, on a whole pixel.

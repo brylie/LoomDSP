@@ -130,7 +130,12 @@ impl Layout {
                 painter.text(&TextRun {
                     text: text.text,
                     anchor: content.position(),
-                    bounds: content.size(),
+                    // A wrapping text breaks its lines at the width it was
+                    // measured at, so it fits the height it was given.
+                    bounds: Size::new(
+                        if text.wrap { record.wrap_width } else { content.width },
+                        content.height,
+                    ),
                     align: Align::Left,
                     vertical: Vertical::Top,
                     style: text.style,

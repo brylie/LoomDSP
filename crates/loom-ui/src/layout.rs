@@ -158,6 +158,11 @@ pub(crate) struct Record {
     /// Where its corner is before rounding, in the panel: the content box
     /// is rounded from it.
     unrounded: Point,
+    /// Its content width before rounding: the width a wrapping text was
+    /// measured at, so it wraps there when painted too. The rounded width
+    /// could break a line the measure kept whole, and the extra line would
+    /// spill out of its box.
+    pub(crate) wrap_width: f32,
     /// What of it shows, cut by every clipping element around it, in the
     /// panel. `None` when nothing around it clips.
     pub(crate) clip: Option<Rect>,
@@ -447,6 +452,8 @@ impl Layout {
             let right = round(corner.x + size.width - border.right - padding.right);
             let bottom = round(corner.y + size.height - border.bottom - padding.bottom);
             self.records[index].unrounded = corner;
+            self.records[index].wrap_width =
+                (size.width - border.left - border.right - padding.left - padding.right).max(0.0);
             self.records[index].content = Rect::new(
                 Point::new(left, top),
                 Size::new((right - left).max(0.0), (bottom - top).max(0.0)),
@@ -626,6 +633,7 @@ impl Layout {
             look,
             content: Rect::new(Point::ORIGIN, Size::ZERO),
             unrounded: Point::ORIGIN,
+            wrap_width: 0.0,
             clip: None,
         });
 
