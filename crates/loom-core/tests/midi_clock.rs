@@ -122,3 +122,24 @@ fn output_orders_stop_locate_and_resume() {
     assert_eq!(output.pop().unwrap().message, ClockMessage::Pulse);
     assert!(output.pop().is_none());
 }
+
+/// The first pulse after Continue must not measure time spent stopped.
+#[test]
+fn continued_clock_ignores_the_stopped_interval() {
+    let mut parts = engine();
+    let input = MidiInputId(1);
+    parts.controller.open_midi_input(input).unwrap();
+    parts.controller.select_midi_clock(Some(input), false).unwrap();
+    send(&mut parts, 0, input, &[0xfa], None);
+    send(&mut parts, 0, input, &[0xf8], Some(0));
+    send(&mut parts, 0, input, &[0xf8], Some(20_833));
+    step(&mut parts, 128);
+    let tempo = parts.controller.rendered_tempo().unwrap();
+
+    send(&mut parts, 0, input, &[0xfc], None);
+    step(&mut parts, 128);
+    send(&mut parts, 0, input, &[0xfb], None);
+    send(&mut parts, 0, input, &[0xf8], Some(9_000_000));
+    step(&mut parts, 128);
+    assert_eq!(parts.controller.rendered_tempo(), Some(tempo));
+}

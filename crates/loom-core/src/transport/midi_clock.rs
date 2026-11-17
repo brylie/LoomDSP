@@ -92,6 +92,7 @@ impl MidiClock {
                 transport.release_limit(frame);
                 self.pending = None;
                 self.lost = false;
+                self.clear_intervals();
             }
             MidiMessage::SongPosition(sixteenths) => {
                 self.origin = f64::from(sixteenths) / 4.0;

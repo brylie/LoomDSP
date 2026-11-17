@@ -12,6 +12,7 @@ pub const PULSE_BEATS: f64 = 1.0 / PULSES_PER_QUARTER as f64;
 
 /// A decoded short MIDI message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MidiMessage {
     /// Note on with velocity above zero.
     NoteOn {
@@ -112,32 +113,33 @@ pub fn decode(data: [u8; 3], len: u8) -> MidiMessage {
         }
         _ => {}
     }
-    if len < 2 {
-        return MidiMessage::Other;
-    }
-    let status = data[0] & 0xF0;
-    let channel = data[0] & 0x0F;
+    let status = data[0] & 0xf0;
     let a = data[1];
     let b = data[2];
+    let expected_len = if status == 0xd0 { 2 } else { 3 };
+    if len != expected_len || a >= 128 || (len == 3 && b >= 128) {
+        return MidiMessage::Other;
+    }
+    let channel = data[0] & 0x0f;
     match status {
-        0x90 if len == 3 && b > 0 => MidiMessage::NoteOn {
+        0x90 if b > 0 => MidiMessage::NoteOn {
             channel,
             note: a,
             velocity: b,
         },
-        0x90 | 0x80 if len == 3 => MidiMessage::NoteOff { channel, note: a },
-        0xB0 if len == 3 => MidiMessage::ControlChange {
+        0x90 | 0x80 => MidiMessage::NoteOff { channel, note: a },
+        0xB0 => MidiMessage::ControlChange {
             channel,
             controller: a,
             value: b,
         },
-        0xA0 if len == 3 => MidiMessage::PolyPressure {
+        0xA0 => MidiMessage::PolyPressure {
             channel,
             note: a,
             value: b,
         },
         0xD0 => MidiMessage::ChannelPressure { channel, value: a },
-        0xE0 if len == 3 => MidiMessage::PitchBend {
+        0xE0 => MidiMessage::PitchBend {
             channel,
             value: ((i16::from(b) << 7) | i16::from(a)) - 8192,
         },
@@ -147,6 +149,7 @@ pub fn decode(data: [u8; 3], len: u8) -> MidiMessage {
 
 /// Clock messages that can be sent to a MIDI output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ClockMessage {
     /// Timing Clock.
     Pulse,

@@ -1,6 +1,7 @@
 //! Bounded MIDI clock egress. The host maps sample frames to playback time.
 
 use crate::TransportInfo;
+use core::time::Duration;
 use loom_midi::{ClockMessage, PULSES_PER_QUARTER};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::Arc;
@@ -15,8 +16,8 @@ pub struct ClockEvent {
     pub message: ClockMessage,
     /// Transport position at this event, in quarter notes.
     pub position: f64,
-    /// Duration of one pulse interval in seconds at the current tempo.
-    pub pulse_seconds: f64,
+    /// Duration of one pulse interval at the current tempo.
+    pub pulse_period: Duration,
 }
 
 /// The host end of the bounded MIDI clock queue.
@@ -98,12 +99,12 @@ impl ClockOutput {
             self.playing = false;
             return false;
         }
-        let pulse_seconds = 60.0 / transport.tempo() / f64::from(PULSES_PER_QUARTER);
+        let pulse_period = Duration::from_secs_f64(60.0 / transport.tempo() / f64::from(PULSES_PER_QUARTER));
         if !playing && self.playing {
-            self.send(frame, ClockMessage::Stop, position, pulse_seconds);
+            self.send(frame, ClockMessage::Stop, position, pulse_period);
         }
         if located || (playing && !self.playing && position != 0.0) {
-            self.send(frame, ClockMessage::at_position(position), position, pulse_seconds);
+            self.send(frame, ClockMessage::at_position(position), position, pulse_period);
         }
         if playing && !self.playing {
             self.send(
@@ -114,7 +115,7 @@ impl ClockOutput {
                     ClockMessage::Continue
                 },
                 position,
-                pulse_seconds,
+                pulse_period,
             );
         }
         if located || (playing && !self.playing) {
@@ -129,8 +130,11 @@ impl ClockOutput {
         if !self.transition(frame, transport) {
             return;
         }
-        let pulse_seconds = 60.0 / transport.tempo() / f64::from(PULSES_PER_QUARTER);
+        let pulse_period = Duration::from_secs_f64(60.0 / transport.tempo() / f64::from(PULSES_PER_QUARTER));
         let end = transport.position_at(frames - 1);
+        if !end.is_finite() {
+            return;
+        }
         let mut start = 0;
         loop {
             let beat = self.next_pulse as f64 / f64::from(PULSES_PER_QUARTER);
@@ -151,7 +155,7 @@ impl ClockOutput {
                 frame + lo as u64,
                 ClockMessage::Pulse,
                 transport.position_at(lo),
-                pulse_seconds,
+                pulse_period,
             );
             self.next_pulse += 1;
             start = lo;
@@ -159,14 +163,14 @@ impl ClockOutput {
     }
 
     /// Queues a message or records overflow for the host to recover.
-    fn send(&mut self, frame: u64, message: ClockMessage, position: f64, pulse_seconds: f64) {
+    fn send(&mut self, frame: u64, message: ClockMessage, position: f64, pulse_period: Duration) {
         if self
             .events
             .push(ClockEvent {
                 frame,
                 message,
                 position,
-                pulse_seconds,
+                pulse_period,
             })
             .is_err()
         {

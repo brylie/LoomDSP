@@ -1832,6 +1832,11 @@ fn midi_clock_preferences_follow_a_reconnected_port() {
     app.poll_midi();
     assert_eq!(app.rig.following_clock.as_deref(), Some("Drums"));
     assert_eq!(app.rig.clock_input, Some(MidiInputId(0)));
+    let model = app.preferences_model().unwrap();
+    let Some(Part::Picks(clock)) = model.midi.first() else {
+        panic!("the clock source comes first");
+    };
+    assert_eq!(clock.chosen_text(), Some("Drums (not connected)"));
     fake.plug("Drums");
     app.poll_midi();
     assert_ne!(app.rig.clock_input, old_id);
@@ -1880,6 +1885,16 @@ fn external_clock_disables_local_edits_and_reports_signal_loss() {
     let tempo_row = rows.params.iter().find(|row| row.index == tempo).unwrap();
     assert!(matches!(tempo_row.mode, crate::inspector::ParamMode::MidiClock));
     assert!(tempo_row.field.is_none());
+    let update = app.a11y_tree(&crate::places::Places::default());
+    let (_, tempo_node) = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == accesskit::Role::Slider && node.label() == Some("Tempo"))
+        .expect("the Transport tile has a Tempo slider");
+    assert!(tempo_node.is_disabled());
+    assert!((tempo_node.numeric_value().unwrap() - 120.0).abs() < 0.01);
+    assert!(tempo_node.description().unwrap().contains("BPM"));
+    assert!(!tempo_node.supports_action(accesskit::Action::SetValue));
 
     tape.step(48_000);
     app.poll_midi();

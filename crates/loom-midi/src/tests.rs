@@ -34,3 +34,23 @@ fn interval_history() {
     }
     assert_eq!(history.pulse(620), Some(20.0));
 }
+
+/// Channel data never uses the status bit, and short messages use their own length.
+#[test]
+fn decoder_rejects_invalid_channel_data() {
+    for (data, len) in [
+        ([0x90, 60, 255], 3),
+        ([0x80, 188, 0], 3),
+        ([0xb3, 0, 128], 3),
+        ([0xa0, 144, 0], 3),
+        ([0xd0, 128, 0], 2),
+        ([0xd0, 3, 0], 3),
+        ([0xe0, 0, 128], 3),
+    ] {
+        assert_eq!(decode(data, len), MidiMessage::Other);
+    }
+    assert_eq!(
+        decode([0xd3, 127, 255], 2),
+        MidiMessage::ChannelPressure { channel: 3, value: 127 }
+    );
+}

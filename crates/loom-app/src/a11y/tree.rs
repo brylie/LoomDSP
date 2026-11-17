@@ -460,13 +460,21 @@ pub(crate) fn tree(
             if let Some(reason) = &widget.inert {
                 // The role its kind gives a live control, so the role does
                 // not change under the focus when the slot fills.
-                let role = ids
-                    .detail(tile.id, index)
-                    .map_or(Role::Slider, |d| control_role(&d.kind));
+                let detail = ids.detail(tile.id, index);
+                let role = detail.map_or(Role::Slider, |d| control_role(&d.kind));
                 let mut w = Node::new(role);
                 w.set_label(widget.label.clone());
                 w.set_description(reason.clone());
-                if !widget.text.is_empty() {
+                if role == Role::Slider {
+                    if let Some(detail) = detail
+                        && let Some(spec) = &detail.main
+                    {
+                        slider_value(&mut w, &detail.kind, Some(spec), widget.position);
+                    }
+                    if !widget.text.is_empty() {
+                        w.set_description(format!("{reason}. {}", widget.text));
+                    }
+                } else if !widget.text.is_empty() {
                     w.set_value(widget.text.clone());
                 }
                 w.set_disabled();
@@ -958,6 +966,15 @@ impl Frame<'_> {
 /// still move what an arrow key moves.
 fn slider(kind: &WidgetViewKind, spec: Option<&ParamSpec>, position: f32) -> Node {
     let mut node = Node::new(Role::Slider);
+    slider_value(&mut node, kind, spec, position);
+    node.add_action(Action::Increment);
+    node.add_action(Action::Decrement);
+    node.add_action(Action::SetValue);
+    node
+}
+
+/// Sets a slider's number and range without making it interactive.
+fn slider_value(node: &mut Node, kind: &WidgetViewKind, spec: Option<&ParamSpec>, position: f32) {
     match spec {
         Some(spec) => {
             node.set_numeric_value(f64::from(spec.denormalize(position)));
@@ -974,10 +991,6 @@ fn slider(kind: &WidgetViewKind, spec: Option<&ParamSpec>, position: f32) -> Nod
             node.set_max_numeric_value(1.0);
         }
     }
-    node.add_action(Action::Increment);
-    node.add_action(Action::Decrement);
-    node.add_action(Action::SetValue);
-    node
 }
 
 /// What a scope's trace shows, in words: its lowest and highest points,

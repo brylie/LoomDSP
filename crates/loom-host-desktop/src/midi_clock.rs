@@ -6,7 +6,8 @@ use midir::{MidiOutput, MidiOutputPort};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -35,18 +36,22 @@ impl ClockPorts {
 
 /// Lists the system's MIDI outputs using the same naming scheme as inputs.
 pub fn midi_clock_outputs() -> Result<Vec<String>, HostError> {
-    discover().map(|(_, ports)| ports.into_iter().map(|(name, _)| name).collect())
+    discover().map(|ports| ports.into_iter().map(|(endpoint, _)| endpoint.name).collect())
 }
 
 /// Lists MIDI outputs together with the port handles needed to open them.
-fn discover() -> Result<(MidiOutput, Vec<(String, MidiOutputPort)>), HostError> {
+fn discover() -> Result<Vec<(Endpoint, MidiOutputPort)>, HostError> {
     let output = MidiOutput::new("LoomDSP clock").map_err(|error| HostError::Midi(error.to_string()))?;
     let ports = output.ports();
     let names: Vec<_> = ports
         .iter()
         .map(|port| output.port_name(port).unwrap_or_else(|_| "<unnamed port>".into()))
         .collect();
-    Ok((output, unique_names(&names).into_iter().zip(ports).collect()))
+    Ok(unique_names(&names)
+        .into_iter()
+        .zip(ports)
+        .map(|(name, port)| (Endpoint { name, id: port.id() }, port))
+        .collect())
 }
 
 /// The audio callback's time mapping for the first frame of one render.
@@ -74,7 +79,21 @@ impl ClockWorker {
         let worker = thread::Builder::new()
             .name("loom-midi-clock".into())
             .spawn(move || {
-                Worker::new(reader, receive, sample_rate, ports).run(&done);
+                thread::scope(|scope| {
+                    let (updates, routes) = mpsc::sync_channel(1);
+                    let scanner = thread::Builder::new()
+                        .name("loom-midi-ports".into())
+                        .spawn_scoped(scope, || {
+                            scan_ports(&done, &ports, updates);
+                        });
+                    if scanner.is_err() {
+                        ports.0.failures.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Worker::new(reader, receive, sample_rate, ports.clone()).run(&done, &routes);
+                    if let Ok(scanner) = scanner {
+                        scanner.thread().unpark();
+                    }
+                });
             })
             .ok()?;
         Some((
@@ -97,12 +116,83 @@ impl Drop for ClockWorker {
     }
 }
 
-/// A connected output and its synchronization state.
-struct Connection {
+/// A name from Preferences and the current identity supplied by the MIDI service.
+#[derive(Clone, PartialEq, Eq)]
+struct Endpoint {
     name: String,
     id: String,
-    send_message: Box<dyn FnMut(ClockMessage) -> bool>,
+}
+
+/// The routes discovered and opened away from the deadline thread.
+#[derive(Default)]
+struct Scan {
+    wanted: Vec<String>,
+    /// Absent when the MIDI service could not list ports. Keep live routes then.
+    available: Option<Vec<Endpoint>>,
+    opened: Vec<Connection>,
+}
+
+/// Discovers and opens outputs without holding up MIDI deadlines.
+fn scan_ports(stop: &AtomicBool, ports: &ClockPorts, updates: SyncSender<Scan>) {
+    let mut known = Vec::new();
+    while !stop.load(Ordering::Relaxed) {
+        let wanted = ports.0.enabled.lock().unwrap_or_else(|err| err.into_inner()).clone();
+        // At most one update queues. The next scan retries handles that
+        // were dropped because the worker still had an update waiting.
+        match updates.try_send(prepare_scan(wanted, &mut known)) {
+            Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
+            Err(mpsc::TrySendError::Disconnected(_)) => break,
+        }
+        if !stop.load(Ordering::Relaxed) {
+            thread::park_timeout(Duration::from_millis(250));
+        }
+    }
+}
+
+/// Opens newly seen outputs and retries ones the scheduler lost.
+fn prepare_scan(wanted: Vec<String>, known: &mut Vec<(Endpoint, Weak<()>)>) -> Scan {
+    known.retain(|(_, lifetime)| lifetime.strong_count() != 0);
+    let mut scan = Scan {
+        wanted,
+        ..Scan::default()
+    };
+    if scan.wanted.is_empty() {
+        return scan;
+    }
+    let Ok(ports) = discover() else { return scan };
+    let mut available = Vec::new();
+    for (endpoint, port) in ports {
+        if !scan.wanted.contains(&endpoint.name) {
+            continue;
+        }
+        available.push(endpoint.clone());
+        if known.iter().any(|(live, _)| *live == endpoint) {
+            continue;
+        }
+        if let Ok(output) = MidiOutput::new("LoomDSP clock")
+            && let Ok(mut connection) = output.connect(&port, "loomdsp-clock")
+        {
+            let lifetime = Arc::new(());
+            known.push((endpoint.clone(), Arc::downgrade(&lifetime)));
+            scan.opened.push(Connection {
+                endpoint,
+                send_message: Box::new(move |message| message.encode(|bytes| connection.send(bytes)).is_ok()),
+                needs_state: true,
+                _lifetime: lifetime,
+            });
+        }
+    }
+    scan.available = Some(available);
+    scan
+}
+
+/// A connected output and its synchronization state.
+struct Connection {
+    endpoint: Endpoint,
+    send_message: Box<dyn FnMut(ClockMessage) -> bool + Send>,
     needs_state: bool,
+    /// Lets the scanner detect a dropped connection and retry the same endpoint.
+    _lifetime: Arc<()>,
 }
 
 impl Connection {
@@ -134,7 +224,6 @@ struct Worker {
     connections: Vec<Connection>,
     pending: Option<ClockEvent>,
     dropped: u64,
-    next_scan: Instant,
 }
 
 impl Worker {
@@ -149,17 +238,14 @@ impl Worker {
             connections: Vec::new(),
             pending: None,
             dropped: 0,
-            next_scan: Instant::now(),
         }
     }
 
-    /// Refreshes endpoints, processes deadlines, and releases ports on shutdown.
-    fn run(&mut self, stop: &AtomicBool) {
+    /// Applies prepared routes, processes deadlines, and stops outputs on shutdown.
+    fn run(&mut self, stop: &AtomicBool, routes: &Receiver<Scan>) {
         while !stop.load(Ordering::Relaxed) {
-            let now = Instant::now();
-            if now >= self.next_scan {
-                self.scan();
-                self.next_scan = now + Duration::from_millis(250);
+            if let Ok(scan) = routes.try_recv() {
+                self.apply_scan(scan);
             }
             while let Ok(anchor) = self.incoming.pop() {
                 if self.anchors.len() == 1024 {
@@ -168,11 +254,10 @@ impl Worker {
                 self.anchors.push_back(anchor);
             }
             let wait = self.dispatch(Instant::now);
-            let max_wait = if self.connections.is_empty() { 25 } else { 1 };
             thread::park_timeout(if self.connections.is_empty() {
-                Duration::from_millis(max_wait)
+                Duration::from_millis(25)
             } else {
-                wait.min(Duration::from_millis(max_wait))
+                wait.min(Duration::from_millis(1))
             });
         }
         for connection in &mut self.connections {
@@ -180,51 +265,23 @@ impl Worker {
         }
     }
 
-    /// Opens enabled outputs and removes ports that vanished or were disabled.
-    fn scan(&mut self) {
-        let wanted = self
-            .ports
-            .0
-            .enabled
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .clone();
+    /// Installs already-opened routes without calling the MIDI discovery API.
+    fn apply_scan(&mut self, scan: Scan) {
         self.connections.retain_mut(|connection| {
-            let keep = wanted.contains(&connection.name);
-            if !keep {
+            if !scan.wanted.contains(&connection.endpoint.name) {
                 connection.send(ClockMessage::Stop);
+                return false;
             }
-            keep
+            scan.available
+                .as_ref()
+                .is_none_or(|available| available.contains(&connection.endpoint))
         });
-        if wanted.is_empty() {
-            self.reader.set_enabled(false);
+        self.connections.extend(scan.opened);
+        self.reader.set_enabled(!self.connections.is_empty());
+        if self.connections.is_empty() {
             self.pending = None;
             while self.reader.pop().is_some() {}
-            return;
         }
-        let Ok((_, ports)) = discover() else { return };
-        self.connections.retain(|connection| {
-            ports
-                .iter()
-                .any(|(name, port)| *name == connection.name && port.id() == connection.id)
-        });
-        for (name, port) in ports {
-            if !wanted.contains(&name) || self.connections.iter().any(|connection| connection.name == name) {
-                continue;
-            }
-            let id = port.id();
-            if let Ok(output) = MidiOutput::new("LoomDSP clock")
-                && let Ok(mut connection) = output.connect(&port, "loomdsp-clock")
-            {
-                self.connections.push(Connection {
-                    name,
-                    id,
-                    send_message: Box::new(move |message| message.encode(|bytes| connection.send(bytes)).is_ok()),
-                    needs_state: true,
-                });
-            }
-        }
-        self.reader.set_enabled(!self.connections.is_empty());
     }
 
     /// Handles pending frames in order. Timing faults discard the overdue backlog.
@@ -260,7 +317,7 @@ impl Worker {
             }
             self.pending = None;
             let lateness = now.duration_since(due);
-            let interval = Duration::from_secs_f64(event.pulse_seconds);
+            let interval = event.pulse_period;
             if !self.connections.is_empty() && event.message == ClockMessage::Pulse && lateness >= interval {
                 self.recover();
                 return idle;
@@ -298,5 +355,5 @@ impl Worker {
     }
 }
 
-#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+#[cfg(test)]
 mod tests;

@@ -395,6 +395,11 @@ impl App {
                 .iter()
                 .map(|port| (Some(port.name().to_string()), port.name().to_string())),
         );
+        if let Some(name) = &self.rig.following_clock
+            && !self.rig.ports.iter().any(|port| port.name() == name)
+        {
+            sources.push((Some(name.clone()), format!("{name} (not connected)")));
+        }
         let mut parts = vec![Part::Picks(picks(
             None,
             "clock-source",

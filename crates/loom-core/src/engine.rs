@@ -20,7 +20,9 @@ use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, PAIR_CHUNK, PairChunk, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
-use crate::transport::{MidiClock, TRANSPORT_GRID, TimeSignature, Transport, TransportRequest, TransportSettings};
+use crate::transport::{
+    MidiClock, TRANSPORT_GRID, TimeSignature, Transport, TransportRequest, TransportSettings, clamp_tempo,
+};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -585,7 +587,7 @@ impl Engine {
     /// Records local settings and applies the ones the active source allows.
     fn apply_local_transport(&mut self, request: TransportRequest) {
         if let Some(tempo) = request.tempo {
-            self.local_transport.tempo = tempo;
+            self.local_transport.tempo = clamp_tempo(tempo);
         }
         let request = if self.midi_clock.input.is_some() {
             TransportRequest {
@@ -1487,3 +1489,6 @@ fn fill_param(fill: &mut ParamFill, assignments: &[AssignmentRuntime], offset: u
         };
     }
 }
+
+#[cfg(test)]
+mod tests;
