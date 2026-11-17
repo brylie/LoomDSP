@@ -1839,3 +1839,57 @@ fn midi_clock_preferences_follow_a_reconnected_port() {
     assert!(!app.session.controller.follows_midi_clock());
     assert!(app.rig.store.saved().midi.clock_source.is_none());
 }
+
+/// External clock holds local transport controls and reports a loss and recovery.
+#[test]
+fn external_clock_disables_local_edits_and_reports_signal_loss() {
+    let dir = folder("clock-loss");
+    let tape = loom_host_desktop::Tape::new();
+    let fake = Rc::new(Fake {
+        tape: Some(tape.clone()),
+        ..Fake::new(&[fake::device("Fake A")], &["Drums"])
+    });
+    let mut app = start(args(&dir), &fake);
+    app.preferences(Message::ClockSource(Some("Drums".into())));
+    let transport = app.session.controller.transport_module().unwrap();
+    app.session.selection.insert(transport.0);
+    let tempo = app
+        .session
+        .controller
+        .graph()
+        .node(transport)
+        .unwrap()
+        .descriptor
+        .param_index("tempo")
+        .unwrap();
+
+    app.set_param(transport.0, tempo, 160.0);
+    app.toggle_run();
+    assert_eq!(
+        app.session.controller.graph().node(transport).unwrap().params[tempo],
+        120.0
+    );
+    fake.play("Drums", &[0xfa]);
+    fake.play("Drums", &[0xf8]);
+    tape.step(128);
+    app.poll_midi();
+    assert_eq!(crate::transport_running(&app.session.controller), Some(true));
+    let crate::inspector::Inspector::Module(rows) = app.inspector_model() else {
+        panic!("the Transport is selected");
+    };
+    let tempo_row = rows.params.iter().find(|row| row.index == tempo).unwrap();
+    assert!(matches!(tempo_row.mode, crate::inspector::ParamMode::MidiClock));
+    assert!(tempo_row.field.is_none());
+
+    tape.step(48_000);
+    app.poll_midi();
+    assert_eq!(
+        app.alerts.status(),
+        "MIDI clock from \"Drums\" stopped. Running at 120.0 BPM."
+    );
+    assert_eq!(crate::transport_running(&app.session.controller), Some(true));
+    fake.play("Drums", &[0xf8]);
+    tape.step(128);
+    app.poll_midi();
+    assert_eq!(app.alerts.status(), "Following Drums clock");
+}

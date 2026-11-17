@@ -238,3 +238,22 @@ fn a_step_back_from_a_failed_device_goes_on_down() {
     down(&mut app);
     assert_eq!(app.rig.shown_audio().device, DeviceChoice::SystemDefault, "on past it");
 }
+
+/// A screen reader can select an external source and switch clock sending on.
+#[test]
+fn midi_clock_preferences_are_operable_with_a_screen_reader() {
+    let (mut app, fake) = open("midi-clock", Fake::new(&[fake::device("Fake A")], &["Drums"]));
+    fake.midi_outputs.borrow_mut().push("Synth".into());
+    app.poll_midi();
+    let source = preferences_id().with("clock-source");
+    assert_eq!(part(&dialog(&app), &source).value.as_deref(), Some("Internal"));
+    step_up(&mut app, "clock-source");
+    assert_eq!(part(&dialog(&app), &source).value.as_deref(), Some("Drums"));
+    let output = preferences_id().with("midi-output").with("Synth");
+    let window = dialog(&app);
+    let switch = part(&window, &output);
+    assert_eq!(switch.label.as_deref(), Some("Send clock to Synth"));
+    assert_eq!(switch.on, Some(false));
+    let _ = app.send(switch.click.clone().unwrap());
+    assert_eq!(part(&dialog(&app), &output).on, Some(true));
+}
