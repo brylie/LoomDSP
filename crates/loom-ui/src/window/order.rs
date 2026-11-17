@@ -18,6 +18,7 @@
 //! in the node around the slot.
 
 use super::Window;
+use crate::field::run_id;
 use crate::focus::AccessNodes;
 use crate::view::Layer;
 use accesskit::{Node, NodeId};
@@ -183,11 +184,6 @@ impl Window {
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
                 let mut node = access.node(element.focusable);
-                // A text field's value is its text as it is now, which may
-                // be ahead of the app's by the edits of this turn.
-                if let Some(field) = self.fields.get(id) {
-                    node.set_value(field.text().to_owned());
-                }
                 let bounds = element.bounds;
                 let origin = record.origin;
                 let scale = f64::from(scale);
@@ -200,7 +196,63 @@ impl Window {
                 let node_id = NodeId(ids.number(id));
                 add(node_id, &mut made);
                 node_of[index] = Some(made.len());
-                made.push((node_id, node, Vec::new()));
+                // A text field: its text as it is now, which may be ahead
+                // of the app's by this turn's edits, its runs, and its
+                // selection in them (section 7, rule 10).
+                let runs = self.fields.get(id).map(|field| {
+                    node.set_value(field.text().to_owned());
+                    if !access.is_disabled() {
+                        node.add_action(accesskit::Action::SetValue);
+                        node.add_action(accesskit::Action::SetTextSelection);
+                        node.add_action(accesskit::Action::ReplaceSelectedText);
+                    }
+                    let content = element.content;
+                    let left = origin.x + content.x - field.scroll();
+                    let top = origin.y + content.y;
+                    let runs: Vec<(NodeId, Node)> = field
+                        .runs()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(at, run)| {
+                            let mut node = Node::new(accesskit::Role::TextRun);
+                            node.set_bounds(accesskit::Rect {
+                                x0: f64::from(left + run.x) * scale,
+                                y0: f64::from(top) * scale,
+                                x1: f64::from(left + run.x + run.width) * scale,
+                                y1: f64::from(top + content.height) * scale,
+                            });
+                            let physical = |values: &[f32]| -> Vec<f32> {
+                                values.iter().map(|value| value * scale as f32).collect()
+                            };
+                            node.set_character_positions(physical(&run.positions));
+                            node.set_character_widths(physical(&run.widths));
+                            node.set_character_lengths(run.lengths);
+                            node.set_word_starts(run.word_starts);
+                            node.set_text_direction(accesskit::TextDirection::LeftToRight);
+                            node.set_value(run.text);
+                            (NodeId(ids.number(&run_id(id, at))), node)
+                        })
+                        .collect();
+                    let ((anchor_run, anchor), (focus_run, focus)) = field.reader_selection();
+                    node.set_text_selection(accesskit::TextSelection {
+                        anchor: accesskit::TextPosition {
+                            node: runs[anchor_run].0,
+                            character_index: anchor,
+                        },
+                        focus: accesskit::TextPosition {
+                            node: runs[focus_run].0,
+                            character_index: focus,
+                        },
+                    });
+                    runs
+                });
+                let children = runs
+                    .as_ref()
+                    .map_or_else(Vec::new, |runs| runs.iter().map(|(id, _)| *id).collect());
+                made.push((node_id, node, children));
+                for (run, node) in runs.into_iter().flatten() {
+                    made.push((run, node, Vec::new()));
+                }
             }
             if let Some(child) = &element.slot {
                 if self.records.get(child).is_some_and(|held| held.held_by(key, slot)) {

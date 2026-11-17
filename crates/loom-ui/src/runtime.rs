@@ -34,8 +34,8 @@ use crate::app::{App, Context, Deadline, WindowSpec};
 use crate::draw::Panels;
 use crate::driver::Driver;
 use crate::effect::{Effect, FocusTarget, Selection};
-use crate::event::{DriverEvent, WindowEvent, WindowState};
-use crate::field::FieldEvent;
+use crate::event::{AccessEvent, DriverEvent, WindowEvent, WindowState};
+use crate::field::{FieldAction, FieldEvent};
 use crate::focus::{Focus, FocusStep};
 use crate::hit::Hit;
 use crate::pointer::Pointer;
@@ -43,6 +43,7 @@ use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
+use accesskit::{Action as KitAction, ActionData};
 use loom_ui_core::{Event, Key, KeyEvent, Platform, Point, PointerEvent, Rect, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
@@ -511,6 +512,59 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         (used.taken, used.redraw)
     }
 
+    /// A screen reader's text action on one of the runtime's fields
+    /// (section 7, rule 10): SetValue, ReplaceSelectedText, or
+    /// SetTextSelection, on a field's node or one of its runs. The runtime
+    /// carries it out, and an edit becomes the app's
+    /// [`FieldEvent::Edited`], in `batch`. Returns whether what the field
+    /// reports changed, or `None` for an event that is not such an action,
+    /// which goes to the app. A request with the wrong data, or naming a
+    /// place past the text, does nothing. It never moves focus: only Focus
+    /// does (rule 9).
+    fn field_action(&mut self, event: &AccessEvent, now: Instant, batch: &mut Vec<A::Message>) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        if !matches!(
+            request.action,
+            KitAction::SetValue | KitAction::ReplaceSelectedText | KitAction::SetTextSelection
+        ) {
+            return None;
+        }
+        let target = self.app.access_target(request.target_node)?;
+        let field = self.panels.fields.owner_of(&target)?.clone();
+        let place = |node: accesskit::NodeId, index: usize| {
+            let id = self.app.access_target(node)?;
+            Some((crate::field::run_index(&field, &id)?, index))
+        };
+        let action = match (request.action, &request.data) {
+            (KitAction::SetValue, Some(ActionData::Value(text))) => Some(FieldAction::SetValue(text.to_string())),
+            (KitAction::ReplaceSelectedText, Some(ActionData::Value(text))) => {
+                Some(FieldAction::ReplaceSelection(text.to_string()))
+            }
+            (KitAction::SetTextSelection, Some(ActionData::SetTextSelection(selection))) => {
+                place(selection.anchor.node, selection.anchor.character_index)
+                    .zip(place(selection.focus.node, selection.focus.character_index))
+                    .map(|(anchor, focus)| FieldAction::Select { anchor, focus })
+            }
+            _ => None,
+        };
+        let Some(action) = action else {
+            return Some(false);
+        };
+        let used = self.panels.fields.act(&field, action, now);
+        if used.edited {
+            let text = self
+                .panels
+                .fields
+                .get(&field)
+                .map(|state| state.text().to_owned())
+                .unwrap_or_default();
+            batch.extend(self.app.field_event(&field, &FieldEvent::Edited(text)));
+        }
+        Some(used.changed)
+    }
+
     /// When focus has moved off the text field that had it: the field
     /// forgets its undo steps, and the app hears [`FieldEvent::Left`], in
     /// `batch`. The window losing the keys moves no focus, so it is not
@@ -636,9 +690,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     ) -> Next {
         self.counts.turns += 1;
         self.release_if_owed();
-        // A layout between turns may have moved focus off a field.
+        // A layout between turns may have moved focus off a field, or
+        // changed what a field reports.
         self.field_left(&mut batch);
         let mut redraw = false;
+        let mut reported = self.panels.fields.take_changed();
 
         // 2. Route the event.
         match event {
@@ -650,6 +706,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 } else {
                     let (used, changed) = self.field_key(&event, now, driver, &mut batch);
                     redraw |= changed;
+                    reported |= changed;
                     if used {
                         // A key a field took is the field's alone, so a
                         // toolkit that heard it first drops it too.
@@ -665,7 +722,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
             }
             DriverEvent::Window(event) => self.window_event(event, now, &mut batch),
-            DriverEvent::Accessibility(event) => batch.extend(self.app.accessibility_event(&event)),
+            DriverEvent::Accessibility(event) => match self.field_action(&event, now, &mut batch) {
+                Some(changed) => {
+                    redraw |= changed;
+                    reported |= changed;
+                }
+                None => batch.extend(self.app.accessibility_event(&event)),
+            },
             DriverEvent::RedrawRequested => redraw = true,
             DriverEvent::Frame => {
                 self.counts.frames += 1;
@@ -678,6 +741,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // Tab, or a press the target handed back, may have moved focus off
         // a field: the app hears of it in this turn.
         self.field_left(&mut batch);
+        // What a field reports changed: one notice, after the field's own
+        // messages, so the app's update for it sees the new text.
+        if reported {
+            batch.extend(self.app.access_changed());
+        }
 
         // 3. One update per message, each followed by its own effects. A
         // focus effect that moves focus off a field is looked at as it

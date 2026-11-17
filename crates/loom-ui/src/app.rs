@@ -95,6 +95,26 @@ pub trait App {
         None
     }
 
+    /// The UI ID of the node `node` names, from the app's node table, so
+    /// the runtime can carry out a screen reader's text actions on its own
+    /// fields (ui-layer.md, section 7, rule 10). An app with no table, or
+    /// none of the runtime's fields, gives `None`, and every action goes
+    /// to [`App::accessibility_event`].
+    fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
+        let _ = node;
+        None
+    }
+
+    /// The message for "what a field reports to a screen reader changed
+    /// with no message of its own": its caret, its selection, or its
+    /// scroll (section 7, rule 7). The runtime asks at most once per turn,
+    /// after that turn's own field messages, so the app can send a new
+    /// tree. An app with no screen reader listening gives `None`, which
+    /// costs nothing.
+    fn access_changed(&self) -> Option<Self::Message> {
+        None
+    }
+
     /// True while something on screen moves and needs a frame each display
     /// refresh. A frame draws and runs no update.
     fn animating(&self) -> bool {
