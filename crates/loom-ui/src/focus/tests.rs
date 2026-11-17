@@ -200,6 +200,26 @@ fn level_panels_read_left_to_right_then_in_view_order() {
     );
 }
 
+/// Brylie's decision, 2026-11-17: two first stops are level when they
+/// overlap from top to bottom. A stop one pixel lower but further left
+/// still reads first; a stop wholly below the others reads after them,
+/// however far left it is.
+#[test]
+fn overlapping_first_stops_are_level() {
+    let lower =
+        |pixels: f32, key: &str| Element::column([Element::space(Length::Shrink, Length::Fixed(pixels)), stop(key)]);
+    let right = Element::row([Element::space(Length::Fixed(200.0), Length::Shrink), stop("b")]);
+    let harness = showing(vec![
+        panel("right", right),
+        panel("below", lower(100.0, "c")),
+        panel("left", lower(1.0, "a")),
+    ]);
+    assert_eq!(
+        harness.runtime().focus_stops(),
+        [id("left", "a"), id("right", "b"), id("below", "c")]
+    );
+}
+
 /// A panel in a slot is read at the slot's place in its parent's build
 /// order: between the stops before and after the slot.
 #[test]

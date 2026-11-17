@@ -6,9 +6,10 @@
 //! 1. by layer, from the top: the question, then the overlays, the panels,
 //!    and the canvas;
 //! 2. inside a layer, root panel by root panel in the order a reader meets
-//!    them: the one whose first focus stop is higher first, then the one
-//!    further left, and the view's order where they are level. Draw order
-//!    is not used, because what is drawn on top is not what is read first;
+//!    them, by where each one's first focus stop is: the higher first, and
+//!    where two are level (their first stops overlap from top to bottom),
+//!    the one further left, then the view's order. Draw order is not used,
+//!    because what is drawn on top is not what is read first;
 //! 3. inside a panel, its elements in the order it builds them, with the
 //!    panel in a slot at the slot's place in that order.
 //!
@@ -25,7 +26,7 @@ use loom_ui_core::{IdTable, Point, Rect, UiId};
 impl Window {
     /// Works the focus order out again, after a layout.
     pub(super) fn order_stops(&mut self) {
-        let mut roots: Vec<(Layer, Option<Point>, usize, &UiId)> = self
+        let mut roots: Vec<(Layer, Option<Rect>, usize, &UiId)> = self
             .order
             .iter()
             .enumerate()
@@ -33,21 +34,33 @@ impl Window {
             .map(|(place, key)| {
                 let mut stops = Vec::new();
                 self.panel_stops(key, &mut stops);
-                let first = stops.first().and_then(|stop| self.bounds(stop)).map(Rect::position);
+                let first = stops.first().and_then(|stop| self.bounds(stop));
                 (self.records[key].layer, first, place, key)
             })
             .collect();
-        // The top layer first; then the higher, then the further left; then
-        // the view's order. A panel with no stops adds nothing, wherever it
-        // sorts.
+        // The top layer first, then by the top of each first stop, then the
+        // view's order. A panel with no stops adds nothing, wherever it sorts.
         roots.sort_by(|a, b| {
-            b.0.cmp(&a.0).then_with(|| {
-                let at = |point: Option<Point>| point.map_or((f32::MAX, f32::MAX), |point| (point.y, point.x));
-                let (ay, ax) = at(a.1);
-                let (by, bx) = at(b.1);
-                ay.total_cmp(&by).then(ax.total_cmp(&bx)).then(a.2.cmp(&b.2))
-            })
+            let top = |first: Option<Rect>| first.map_or(f32::MAX, |first| first.y);
+            b.0.cmp(&a.0).then(top(a.1).total_cmp(&top(b.1))).then(a.2.cmp(&b.2))
         });
+        // Then each line of level panels, left to right: a panel is level
+        // with the first of the line when their first stops overlap from
+        // top to bottom, so a stop one pixel lower does not read first.
+        let mut start = 0;
+        while start < roots.len() {
+            let (layer, first) = (roots[start].0, roots[start].1);
+            let end = start
+                + roots[start..]
+                    .iter()
+                    .take_while(|root| root.0 == layer && level(first, root.1))
+                    .count();
+            roots[start..end].sort_by(|a, b| {
+                let left = |first: Option<Rect>| first.map_or(f32::MAX, |first| first.x);
+                left(a.1).total_cmp(&left(b.1)).then(a.2.cmp(&b.2))
+            });
+            start = end.max(start + 1);
+        }
         let keys: Vec<UiId> = roots.into_iter().map(|(_, _, _, key)| key.clone()).collect();
         let mut stops = Vec::new();
         for key in &keys {
@@ -193,5 +206,15 @@ impl Window {
         }
         nodes.append(&mut later);
         tops
+    }
+}
+
+/// True when two first stops are level: their spans from top to bottom
+/// overlap. Two panels with no stop are level with each other.
+fn level(a: Option<Rect>, b: Option<Rect>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.y < b.y + b.height && b.y < a.y + a.height,
+        (None, None) => true,
+        _ => false,
     }
 }
