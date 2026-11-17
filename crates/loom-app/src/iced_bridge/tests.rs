@@ -85,7 +85,7 @@ fn a_dialog_result_names_its_button() {
 /// The hosted app's window spec carries the title Iced shows.
 #[test]
 fn the_hosted_app_describes_its_window() {
-    let hosted = Hosted(app(), None);
+    let hosted = Hosted(app(), None, super::Extra::default());
     let spec = loom_ui::App::window(&hosted);
     assert_eq!(spec.title, hosted.0.title());
 }
@@ -319,7 +319,7 @@ fn a_future_deadline_wakes_a_turn() {
 #[test]
 fn a_screen_readers_events_become_the_apps() {
     use loom_ui::App as _;
-    let hosted = Hosted(app(), None);
+    let hosted = Hosted(app(), None, super::Extra::default());
     let request = accesskit::ActionRequest {
         action: accesskit::Action::Click,
         target_tree: accesskit::TreeId::ROOT,

@@ -3,7 +3,7 @@
 use crate::effect::Effects;
 use crate::event::{AccessEvent, WindowEvent, WindowState};
 use crate::focus::AccessNodes;
-use crate::view::View;
+use crate::view::{Layer, View};
 use crate::waker::Waker;
 use crate::window::Window;
 use loom_ui_core::{IdTable, Size, UiId};
@@ -50,10 +50,64 @@ pub trait App {
         None
     }
 
+    /// Which layers take input now, and whether the canvas has the
+    /// keyboard (ui-layer.md, section 5, rule 2). Read before each pointer
+    /// event and each Tab. The default lets every layer take input, with
+    /// the canvas not focused.
+    fn input(&self) -> InputState {
+        InputState::default()
+    }
+
+    /// The message for a click on the runtime's element with UI ID `id`,
+    /// if a click there does something. A click is a left press and a left
+    /// release on the same element. The app turns it into a message by the
+    /// UI ID, as it does a screen reader's Click action on the same node
+    /// (section 7, rule 6). It reads state and changes none.
+    fn clicked(&self, id: &UiId) -> Option<Self::Message> {
+        let _ = id;
+        None
+    }
+
+    /// The message for a move of the runtime's keyboard focus, if the app
+    /// wants to know: to rebuild its accessibility tree, which reports the
+    /// focus (section 7, rule 7). `focus` is the runtime's element that has
+    /// it now, or `None`. The runtime reports each change of the focused
+    /// element once, whatever moved it (Tab, a press, a layout that settled
+    /// it, or a focus effect), on the turn after the change; a ring shown
+    /// or hidden on the same element is no change. It reads state and
+    /// changes none.
+    fn focus_moved(&self, focus: Option<&UiId>) -> Option<Self::Message> {
+        let _ = focus;
+        None
+    }
+
     /// True while something on screen moves and needs a frame each display
     /// refresh. A frame draws and runs no update.
     fn animating(&self) -> bool {
         false
+    }
+}
+
+/// Who takes input now, as the app says ([`App::input`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputState {
+    /// The lowest layer that takes input. A layer below it takes no pointer
+    /// event, shows no hover, and is not reached by Tab: an open question
+    /// says [`Layer::Question`], an open overlay [`Layer::Overlays`]. The
+    /// default, [`Layer::Canvas`], lets every layer take input.
+    pub layer: Layer,
+    /// True while the canvas has the keyboard: it keeps its own Tab, so
+    /// Tab does not enter the runtime's stops (section 6, rule 1). The
+    /// default is false.
+    pub canvas_focused: bool,
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        Self {
+            layer: Layer::Canvas,
+            canvas_focused: false,
+        }
     }
 }
 

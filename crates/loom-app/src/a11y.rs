@@ -243,6 +243,11 @@ impl Access {
         self.focus = control;
     }
 
+    /// The canvas control with keyboard focus, as the canvas last said.
+    pub(crate) fn focus(&self) -> Option<(u32, usize)> {
+        self.focus
+    }
+
     /// The focus request the canvas is shown: its key and its control.
     pub(crate) fn focus_request(&self) -> (u64, Option<(u32, usize)>) {
         self.focus_request

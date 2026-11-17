@@ -26,25 +26,33 @@
 //! The walk paints a whole layer each time it is asked: it runs only for
 //! frames that are drawn, and a still window draws none (NFR-PERF-04).
 
+use crate::app::App;
 use crate::focus::Focus;
 use crate::layout::{Layout, Record, cut};
 use crate::paint::{Align, PanelStyle, Quad, TextPainter, TextRun, Vertical};
+use crate::pointer::Pointer;
 use crate::runtime::Counts;
 use crate::view::Layer;
+use crate::waker::Waker;
 use crate::window::Window;
 use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, Vector};
 
 /// The window's panels, lent to a driver's drawing code with the app and
 /// the target ([`Runtime::parts`](crate::Runtime::parts)): it lays them out
 /// and paints them, with the typesetter it draws text with.
-pub struct Panels<'a> {
+pub struct Panels<'a, A: App> {
     pub(crate) window: &'a mut Window,
     pub(crate) counts: &'a mut Counts,
     pub(crate) size: Size,
     pub(crate) focus: &'a mut Focus,
+    pub(crate) pointer: &'a mut Pointer,
+    /// The app, for what its elements mean: a click's message.
+    pub(crate) app: &'a A,
+    /// Posts a message for the next turn and wakes the driver.
+    pub(crate) waker: &'a Waker<A::Message>,
 }
 
-impl Panels<'_> {
+impl<A: App> Panels<'_, A> {
     /// Lays out what changed since the last call, and settles the focus
     /// on what is laid out, as [`Runtime::lay_out`](crate::Runtime::lay_out)
     /// does. When that gives one of the runtime's elements the focus, the
@@ -54,6 +62,26 @@ impl Panels<'_> {
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
         self.focus.settle(self.window);
+        self.report_focus();
+    }
+
+    /// Tells the app the focused element changed since it was last told,
+    /// through [`App::focus_moved`], for the next turn. Each change is told
+    /// once; a ring alone is no change.
+    pub(crate) fn report_focus(&mut self) {
+        if let Some(message) = self.focus_report() {
+            self.waker.send(message);
+        }
+    }
+
+    /// The app's message for a focus move it has not been told of yet,
+    /// marking it told. `None` when nothing moved, or the app does not ask.
+    pub(crate) fn focus_report(&mut self) -> Option<A::Message> {
+        if self.focus.id == self.focus.reported {
+            return None;
+        }
+        self.focus.reported = self.focus.id.clone();
+        self.app.focus_moved(self.focus.id.as_ref())
     }
 
     /// Paints the panels of `layer`, as

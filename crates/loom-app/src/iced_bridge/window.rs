@@ -48,10 +48,17 @@ pub(crate) struct WindowLayers {
     renderer: Option<crate::Renderer>,
     /// The canvas's renderer, built with Iced's, for the window's format.
     canvas: Option<super::paint::CanvasPass>,
+    /// The renderers for the runtime's own panels, below and above Iced.
+    panels: Option<super::paint::PanelPass>,
+    /// The text the runtime's panels are measured and drawn with: one
+    /// typesetter for both, so what is measured is what is drawn.
+    text: RefCell<loom_ui::paint::Typesetter>,
     /// The widget tree's state between builds.
     cache: Option<Cache>,
     /// Window events since the last report, as Iced's.
     events: Vec<iced::Event>,
+    /// The pointer events among `events`, for the runtime's layers.
+    pointers: super::pointers::Pointers,
     /// Where the pointer is, in logical pixels.
     cursor: mouse::Cursor,
     /// The modifiers held, for converting events.
@@ -78,8 +85,11 @@ impl WindowLayers {
         Self {
             renderer: None,
             canvas: None,
+            panels: None,
+            text: RefCell::new(loom_ui::paint::Typesetter::new()),
             cache: Some(Cache::default()),
             events: Vec::new(),
+            pointers: super::pointers::Pointers::default(),
             cursor: mouse::Cursor::Unavailable,
             modifiers: ModifiersState::default(),
             scale: 1.0,
@@ -249,11 +259,12 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             iced::Pixels(16.0),
         )));
         self.canvas = Some(super::paint::CanvasPass::new(opened.device, opened.format));
+        self.panels = Some(super::paint::PanelPass::new(opened.device, opened.format));
         *self.clipboard.borrow_mut() = Some(iced_winit::Clipboard::connect(opened.window.clone()));
         self.scale = opened.window.scale_factor() as f32;
     }
 
-    fn window_event(&mut self, _parts: Parts<'_, Hosted, IcedTarget>, event: &WinitEvent) {
+    fn window_event(&mut self, parts: Parts<'_, Hosted, IcedTarget>, event: &WinitEvent) {
         match event {
             WinitEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WinitEvent::ScaleFactorChanged { scale_factor, .. } => self.scale = *scale_factor as f32,
@@ -271,25 +282,33 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             WinitEvent::RedrawRequested => return,
             _ => {}
         }
-        if let Some(event) = iced_winit::conversion::window_event(event.clone(), self.scale, self.modifiers) {
-            self.events.push(event);
+        if let Some(converted) = iced_winit::conversion::window_event(event.clone(), self.scale, self.modifiers) {
+            // The shell hands the runtime the event itself.
+            let _ = self.pointers.before(&parts.panels, converted, &mut self.events);
         }
     }
 
-    fn report(&mut self, parts: Parts<'_, Hosted, IcedTarget>) -> Report {
+    fn report(&mut self, mut parts: Parts<'_, Hosted, IcedTarget>) -> Report {
         let app = &parts.app.0;
         // Iced's subscriptions hear a batch as the app stood before it.
         let listeners = app.listeners();
         let events = std::mem::take(&mut self.events);
-        if !events.is_empty() {
-            let mut messages = Vec::new();
-            let updated = self.with_ui(app, size(&parts), |ui, renderer, cursor, clipboard| {
-                ui.update(&events, cursor, renderer, clipboard, &mut messages)
-            });
-            if let Some((state, statuses)) = updated {
-                self.take_state(&state);
-                parts.waker.send_all(batch(messages, &events, &statuses, listeners));
-            }
+        let mut pointers = std::mem::take(&mut self.pointers);
+        let size = size(&parts);
+        let mut iced = WindowIced {
+            layers: self,
+            app,
+            size,
+            listeners,
+            messages: Vec::new(),
+        };
+        let redraw = pointers.update(events, parts.target, &mut parts.panels, &mut iced);
+        // Iced's messages after what the pointer step queued, so a focus
+        // our elements took is the first thing the next turn hears.
+        parts.waker.send_all(iced.messages);
+        self.pointers = pointers;
+        if redraw {
+            self.redraw = Redraw::NextFrame;
         }
         // The turn's window work, one after another, as the bridge chained
         // it: focus and scrolls, the window questions, then the focus query.
@@ -300,7 +319,6 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         if app.take_focus_question() {
             window = window.chain(focus_query(Bridged::Focus));
         }
-        let size = size(&parts);
         let ran = tasks::run(
             window,
             &mut WindowSink {
@@ -345,7 +363,7 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         Some(Message::FocusMoved(part))
     }
 
-    fn draw(&mut self, parts: Parts<'_, Hosted, IcedTarget>, frame: &Frame<'_>) {
+    fn draw(&mut self, mut parts: Parts<'_, Hosted, IcedTarget>, frame: &Frame<'_>) {
         let app = &parts.app.0;
         let theme = app.theme();
         let background = theme.palette().background;
@@ -384,11 +402,18 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             // the last frame is the new patch's, since a frame of it was
             // shown first.
             if let (Some(renderer), Some(pass)) = (self.renderer.as_mut(), self.canvas.as_mut()) {
-                super::paint::draw_again(&target, wgpu(renderer), pass, background);
+                super::paint::draw_again(&target, wgpu(renderer), pass, background, self.panels.as_mut());
             }
             return;
         }
         let Some(mut pass) = self.canvas.take() else { return };
+        // The runtime's own panels: laid out, then painted below and above
+        // Iced, with the one typesetter (ui-layer.md, section 5, rule 9).
+        let mut panels = self.panels.take();
+        if let Some(panels) = panels.as_mut() {
+            let (below, above) = self.paint_panels(&mut parts, frame, &theme);
+            panels.set(&target, below, above);
+        }
         let mut messages = Vec::new();
         let window = size(&parts);
         let drawn = self.with_ui(app, window, |ui, renderer, cursor, clipboard| {
@@ -417,10 +442,11 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
                 super::preedit::draw(renderer, composed, *caret, window, &theme, crate::style::BODY);
             }
             let drawing = app.canvas_drawn.take();
-            super::paint::draw(&target, wgpu(renderer), &mut pass, drawing, background);
+            super::paint::draw(&target, wgpu(renderer), &mut pass, drawing, background, panels.as_ref());
             state
         });
         self.canvas = Some(pass);
+        self.panels = panels;
         if let Some(state) = drawn {
             self.take_state(&state);
             if let State::Updated { input_method, .. } = &state {
@@ -434,6 +460,84 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             let routed: Vec<Message> = messages.into_iter().flat_map(crate::input_owner::route).collect();
             parts.waker.send_all(routed);
         }
+    }
+}
+
+/// Iced in the window, for [`super::pointers::Pointers::update`].
+struct WindowIced<'a> {
+    layers: &'a mut WindowLayers,
+    app: &'a App,
+    size: iced::Size,
+    /// The listeners as the app stood before the batch.
+    listeners: crate::subscriptions::Listeners,
+    /// The update's messages, routed, sent after the pointer step.
+    messages: Vec<Message>,
+}
+
+impl super::pointers::IcedSide for WindowIced<'_> {
+    /// A release the runtime owes, on the window's widgets; Iced's word on
+    /// focus after it runs alone, as every focus answer does.
+    fn run(&mut self, task: Task<Bridged>) {
+        let ran = tasks::run(
+            task,
+            &mut WindowSink {
+                layers: self.layers,
+                app: self.app,
+                size: self.size,
+            },
+        );
+        for output in ran.outputs {
+            if let Bridged::Focus(answer) = output {
+                self.layers.answers.push_back(answer);
+            }
+        }
+    }
+
+    fn update(&mut self, events: &[iced::Event]) -> Option<Vec<iced::event::Status>> {
+        let mut messages = Vec::new();
+        let (state, statuses) = self
+            .layers
+            .with_ui(self.app, self.size, |ui, renderer, cursor, clipboard| {
+                ui.update(events, cursor, renderer, clipboard, &mut messages)
+            })?;
+        self.layers.take_state(&state);
+        self.messages.extend(batch(messages, events, &statuses, self.listeners));
+        Some(statuses)
+    }
+}
+
+impl WindowLayers {
+    /// Lays out the runtime's own panels and paints them into two lists:
+    /// the canvas and panels layers, drawn below Iced, and the overlays
+    /// and question layers, drawn above it. Text with no colour of its own
+    /// takes the theme's text colour.
+    fn paint_panels(
+        &self,
+        parts: &mut Parts<'_, Hosted, IcedTarget>,
+        frame: &Frame<'_>,
+        theme: &iced::Theme,
+    ) -> (loom_ui::paint::PaintList, loom_ui::paint::PaintList) {
+        use loom_canvas::iced_convert::ToCore as _;
+        use loom_ui::Layer;
+        use loom_ui::paint::{ListPainter, PaintList, PanelStyle};
+        self.text.borrow_mut().begin_frame();
+        parts.panels.lay_out(&mut *self.text.borrow_mut());
+        let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, frame.size);
+        let style = PanelStyle {
+            text: theme.palette().text.to_core(),
+        };
+        let mut lists = (PaintList::new(whole), PaintList::new(whole));
+        for (layers, list) in [
+            ([Layer::Canvas, Layer::Panels], &mut lists.0),
+            ([Layer::Overlays, Layer::Question], &mut lists.1),
+        ] {
+            for layer in layers {
+                parts
+                    .panels
+                    .paint(layer, &mut ListPainter::new(&self.text, list), &style);
+            }
+        }
+        lists
     }
 }
 

@@ -300,6 +300,75 @@ impl Sink for HarnessSink<'_> {
     }
 }
 
+/// Iced in the harness, for [`super::pointers::Pointers::update`]: the
+/// surface, with the messages and the task outputs it gives kept for the
+/// bridge, which the update's caller holds the parts of meanwhile.
+pub(crate) struct HarnessIced<'a> {
+    /// The app the view is built from.
+    pub(crate) app: &'a App,
+    /// The renderer, the widget cache, and the cursor.
+    pub(crate) surface: &'a mut Surface,
+    /// The clipboard Iced's widgets use in this frame.
+    pub(crate) clipboard: &'a mut dyn iced::advanced::Clipboard,
+    /// The listeners as the app stood before the batch.
+    pub(crate) listeners: crate::subscriptions::Listeners,
+    /// The widgets' and the listeners' messages, in order.
+    pub(crate) messages: Vec<Message>,
+    /// What the release task gave: Iced's answer on focus.
+    pub(crate) outputs: Vec<Bridged>,
+}
+
+impl super::pointers::IcedSide for HarnessIced<'_> {
+    /// Runs the release on the surface. It is a focus operation and its
+    /// question, so it reads no clipboard and needs no bridge.
+    fn run(&mut self, task: Pending) {
+        let ran = tasks::run(
+            task,
+            &mut SurfaceSink {
+                app: self.app,
+                surface: self.surface,
+            },
+        );
+        assert!(ran.stuck.is_none(), "Ui: the release task stopped early");
+        self.outputs.extend(ran.outputs);
+    }
+
+    fn update(&mut self, events: &[iced::Event]) -> Option<Vec<iced::event::Status>> {
+        let (messages, listeners, clipboard) = (&mut self.messages, self.listeners, &mut *self.clipboard);
+        let mut statuses = Vec::new();
+        self.surface.with_ui(self.app, |ui, renderer, cursor| {
+            let (_, heard) = ui.update(events, cursor, renderer, clipboard, messages);
+            for (event, status) in events.iter().zip(&heard) {
+                messages.extend(listeners.messages(event, *status));
+            }
+            statuses = heard;
+        });
+        Some(statuses)
+    }
+}
+
+/// Where a release task acts in the harness: the surface alone.
+struct SurfaceSink<'a> {
+    app: &'a App,
+    surface: &'a mut Surface,
+}
+
+impl Sink for SurfaceSink<'_> {
+    fn operate(&mut self, operation: Box<dyn Operation>) {
+        self.surface.operate(self.app, operation);
+    }
+
+    /// A focus operation reads no clipboard.
+    fn clipboard_read(&mut self) -> Option<String> {
+        unreachable!("a release moves focus and reads no clipboard")
+    }
+
+    /// A focus operation writes no clipboard.
+    fn clipboard_write(&mut self, _contents: String) {
+        unreachable!("a release moves focus and writes no clipboard")
+    }
+}
+
 /// Runs one task to its end and gives its outputs. Panics on a task that
 /// stops early, naming why, so no test passes by skipping one.
 fn run(task: Pending, bridge: &mut Bridge<UiDriver>, surface: &mut Surface) -> Vec<Bridged> {

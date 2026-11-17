@@ -289,7 +289,7 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
     /// The app, the target, and the panels, as a driver that draws holds
     /// them ([`Runtime::parts`]): a layout through these settles the focus
     /// as [`Harness::lay_out`] does, and owes the target any release.
-    pub fn parts(&mut self) -> (&A, &mut T, crate::Panels<'_>) {
+    pub fn parts(&mut self) -> (&A, &mut T, crate::Panels<'_, A>) {
         self.runtime.parts()
     }
 

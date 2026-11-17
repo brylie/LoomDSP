@@ -147,7 +147,15 @@ impl App for Log {
 struct Focus(Option<loom_ui_core::UiId>);
 
 impl Target<u32> for Focus {
-    fn input(&mut self, _: &loom_ui_core::Event, _: Option<loom_ui_core::Point>, _: Instant, _: &mut Vec<u32>) {}
+    fn input(
+        &mut self,
+        _: &loom_ui_core::Event,
+        _: Option<loom_ui_core::Point>,
+        _: Instant,
+        _: &mut Vec<u32>,
+    ) -> crate::Routed {
+        crate::Routed::Passed
+    }
 
     fn focus(&mut self, _: &crate::effect::FocusTarget, _: crate::effect::Selection) {}
 

@@ -73,6 +73,11 @@ pub struct Ui {
     bridge: Bridge<UiDriver>,
     /// The renderer, the widget cache, and the cursor.
     surface: Surface,
+    /// The pointer events between Iced and the runtime's layers, as the
+    /// window keeps them (`iced_bridge/pointers.rs`).
+    pointers: crate::iced_bridge::Pointers,
+    /// Lays out the runtime's own panels, as the window's draw does.
+    text: loom_ui::paint::Typesetter,
 }
 
 /// The clipboard Iced's widgets use during one frame: a copy of the
@@ -189,7 +194,7 @@ impl Ui {
     /// or `None` with no GPU adapter (`Surface::places_on_both`).
     #[cfg(test)]
     pub(crate) fn places_on_both(&mut self) -> Option<(crate::places::Places, crate::places::Places)> {
-        let Self { bridge, surface } = self;
+        let Self { bridge, surface, .. } = self;
         surface.places_on_both(bridge.app())
     }
 
@@ -224,6 +229,8 @@ impl Ui {
         let mut ui = Self {
             bridge,
             surface: Surface::new(WINDOW),
+            pointers: crate::iced_bridge::Pointers::default(),
+            text: loom_ui::paint::Typesetter::new(),
         };
         ui.settle(vec![first]);
         // The canvas frames the patch on its first redraw.
@@ -236,19 +243,59 @@ impl Ui {
     /// runs, and the new view is drawn. Returns every message `update` got,
     /// in order, with input as the messages it was routed to.
     pub(crate) fn step(&mut self, events: &[Event]) -> Vec<Message> {
-        let mut messages = Vec::new();
+        // As the window: Iced keeps each event first, then the runtime
+        // routes it. Iced hears what the runtime's layers above it leave,
+        // and no key the runtime took.
+        let mut kept = Vec::new();
+        for event in events {
+            let pointer = {
+                let (_, _, panels) = self.bridge.runtime_mut().parts();
+                self.pointers.before(&panels, event.clone(), &mut kept)
+            };
+            let routed = match (pointer, event) {
+                (Some((event, point)), _) => Some((event, Some(point))),
+                (None, Event::Keyboard(_)) => loom_canvas::iced_convert::event_to_core(event).map(|key| (key, None)),
+                _ => None,
+            };
+            if let Some((event, point)) = routed {
+                let task = self.bridge.input(event, point);
+                self.settle(vec![task]);
+                // The runtime took this key: Iced does not hear it.
+                if self.bridge.runtime_mut().target_mut().take_drop_keys()
+                    && let Some(at) = kept.len().checked_sub(1)
+                {
+                    self.pointers.drop_key_at(at, &mut kept);
+                }
+            }
+        }
+        // Then Iced's update, in the window's order (`Pointers::update`).
         let listeners = self.app().listeners();
         let mut clipboard = Memory(self.clipboard().map(str::to_string));
-        self.with_ui(|ui, renderer, cursor| {
-            let (_, statuses) = ui.update(events, cursor, renderer, &mut clipboard, &mut messages);
-            for (event, status) in events.iter().zip(statuses) {
-                messages.extend(listeners.messages(event, status));
-            }
-        });
+        let (outputs, messages) = {
+            let Self {
+                bridge,
+                surface,
+                pointers,
+                ..
+            } = self;
+            let (app, target, mut panels) = bridge.runtime_mut().parts();
+            let mut iced = crate::iced_bridge::headless::HarnessIced {
+                app: &app.0,
+                surface,
+                clipboard: &mut clipboard,
+                listeners,
+                messages: Vec::new(),
+                outputs: Vec::new(),
+            };
+            let _ = pointers.update(kept, target, &mut panels, &mut iced);
+            (iced.outputs, iced.messages)
+        };
         self.set_clipboard(clipboard.0);
-        let tasks = messages
+        // The release's focus answer first, then the update's messages.
+        let tasks = outputs
             .into_iter()
-            .map(|message| self.bridge.update(Bridged::App(message)))
+            .chain(messages.into_iter().map(Bridged::App))
+            .map(|bridged| self.bridge.update(bridged))
             .collect();
         self.settle(tasks);
         // Something outside a turn may have asked where focus is, such as a
@@ -258,9 +305,32 @@ impl Ui {
             let task = self.bridge.update(Bridged::Woken);
             self.settle(vec![task]);
         }
-        let Self { bridge, surface } = self;
+        self.lay_out_panels();
+        let Self { bridge, surface, .. } = self;
         surface.draw(bridge.app());
         self.bridge.take_log()
+    }
+
+    /// Lays out the runtime's own panels, as the window does before each
+    /// frame, so hits and focus read what was drawn.
+    fn lay_out_panels(&mut self) {
+        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
+        panels.lay_out(&mut self.text);
+    }
+
+    /// The runtime the bridge runs, to read its own focus and hover.
+    pub(crate) fn runtime(&self) -> &loom_ui::Runtime<crate::iced_bridge::Hosted, crate::iced_bridge::IcedTarget> {
+        self.bridge.runtime()
+    }
+
+    /// Adds `loom-ui` panels to the window for a routing test, and lays
+    /// them out. The app's own views stay Iced's.
+    pub(crate) fn with_test_panels(&mut self, panels: crate::iced_bridge::TestPanels) {
+        self.bridge.runtime_mut().app_mut().2.panels = Some(panels);
+        // The runtime builds its view after a turn that ran an update, so
+        // one harmless message brings the panels in.
+        let _ = self.deliver(Message::Tick);
+        self.lay_out_panels();
     }
 
     /// Runs what the bridge returned until nothing is left.
@@ -308,7 +378,7 @@ impl Ui {
         &mut self,
         f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, crate::Renderer>, &mut crate::Renderer, mouse::Cursor),
     ) {
-        let Self { bridge, surface } = self;
+        let Self { bridge, surface, .. } = self;
         surface.with_ui(bridge.app(), f);
     }
 
@@ -652,7 +722,7 @@ pub(crate) fn key_pressed(key: keyboard::Key, repeat: bool) -> Event {
 
 /// A key press with `modifiers` held, carrying `text` when the key types
 /// a character.
-fn key_press(key: keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>, repeat: bool) -> Event {
+pub(crate) fn key_press(key: keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>, repeat: bool) -> Event {
     Event::Keyboard(keyboard::Event::KeyPressed {
         key: key.clone(),
         modified_key: key,

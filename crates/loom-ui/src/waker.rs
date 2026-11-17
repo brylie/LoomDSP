@@ -50,7 +50,12 @@ impl<M> Waker<M> {
     /// that hands the loop several messages that belong together from
     /// outside a turn, such as the messages one input event becomes. Inside
     /// `update`, the next-turn effect does this.
+    ///
+    /// With no messages it queues nothing and does not wake the loop: a
+    /// wake with nothing to run is a turn for nothing, and a driver that
+    /// sends a batch after every turn would wake itself forever.
     pub fn send_all(&self, messages: impl IntoIterator<Item = M>) -> bool {
+        let mut sent = false;
         {
             // A poisoned lock guards nothing but order, so it is used as is.
             let _order = self.order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -58,9 +63,12 @@ impl<M> Waker<M> {
                 if self.queue.send(message).is_err() {
                     return false;
                 }
+                sent = true;
             }
         }
-        (self.wake)();
+        if sent {
+            (self.wake)();
+        }
         true
     }
 }

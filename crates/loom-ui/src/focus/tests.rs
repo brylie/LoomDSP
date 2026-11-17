@@ -12,7 +12,7 @@ use crate::event::{AccessEvent, DriverEvent, WindowState};
 use crate::focus::AccessNodes;
 use crate::headless::Harness;
 use crate::layout::tests::{Mono, STYLE};
-use crate::routing::{NoTarget, Target};
+use crate::routing::{NoTarget, Routed, Target};
 use crate::view::{Layer, View};
 use accesskit::{ActionRequest, NodeId, Role as KitRole};
 use loom_ui_core::{Event, IdTable, Key, KeyEvent, Modifiers, Point, Rect, Size, UiId};
@@ -32,6 +32,11 @@ enum Message {
     ShowAndFocus(Vec<Panel>, UiId),
     /// Make the nodes from the last layout and keep them.
     Describe,
+    /// Show these panels, and make the nodes after the draw, as an app
+    /// whose panels changed does (`Context::access_nodes`).
+    ShowThenDescribe(Vec<Panel>),
+    /// The runtime's focus moved here (`App::focus_moved`).
+    Moved(Option<UiId>),
 }
 
 /// An app that shows whatever panels a test gives it, and turns a screen
@@ -43,6 +48,13 @@ struct Panels {
     ids: IdTable,
     nodes: Option<AccessNodes>,
     focused_in_update: Option<UiId>,
+    /// The app asks to hear of focus moves (`App::focus_moved`).
+    reports: bool,
+    /// Every focus the runtime reported, in order.
+    moves: Vec<Option<UiId>>,
+    /// When the focus is reported on the first, the app moves it to the
+    /// second.
+    redirect: Option<(UiId, UiId)>,
 }
 
 impl App for Panels {
@@ -64,6 +76,15 @@ impl App for Panels {
                 self.nodes = Some(cx.access_nodes(&mut self.ids));
                 Effects::none()
             }
+            Message::ShowThenDescribe(panels) => {
+                self.panels = panels;
+                Effects::after_draw(Message::Describe)
+            }
+            Message::Moved(focus) => {
+                let redirect = self.redirect.clone().filter(|(from, _)| focus.as_ref() == Some(from));
+                self.moves.push(focus);
+                redirect.map_or_else(Effects::none, |(_, to)| Effects::focus(to))
+            }
         }
     }
 
@@ -78,6 +99,10 @@ impl App for Panels {
             title: "Focus".into(),
             min_size: None,
         }
+    }
+
+    fn focus_moved(&self, focus: Option<&UiId>) -> Option<Message> {
+        self.reports.then(|| Message::Moved(focus.cloned()))
     }
 
     fn accessibility_event(&self, event: &AccessEvent) -> Option<Message> {
@@ -361,15 +386,17 @@ fn the_focus_never_names_a_node_that_was_not_made() {
 }
 
 /// Tab past the last stop leaves the runtime's elements, for the router to
-/// hand on; Tab with no focus here, and Ctrl+Tab, are not steps (rule 7).
+/// hand on, and the next Tab, with nothing focused in either toolkit,
+/// enters the first stop again (rule 2, between the two toolkits). Ctrl+Tab
+/// is not a step (rule 7).
 #[test]
 fn tab_past_the_end_and_ctrl_tab_leave_the_focus_alone() {
     let mut harness = showing(vec![panel("bar", row(&["a", "b"]))]);
     harness.step(tab(false));
     assert_eq!(
         harness.runtime().focused(),
-        None,
-        "with no focus here, Tab is the target's"
+        Some(&id("bar", "a")),
+        "with nothing focused, Tab enters the first stop"
     );
     harness.focus_at(Point::new(10.0, 2.0));
     harness.step(tab_with(Modifiers {
@@ -383,6 +410,8 @@ fn tab_past_the_end_and_ctrl_tab_leave_the_focus_alone() {
     );
     harness.step(tab(false));
     assert_eq!(harness.runtime().focused(), None, "past the end, focus leaves");
+    harness.step(tab(false));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")), "and comes back");
 }
 
 /// A focus effect on one of the runtime's stops focuses it with a ring,
@@ -408,8 +437,9 @@ struct Toolkit {
 }
 
 impl Target<Message> for Toolkit {
-    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<Message>) {
+    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<Message>) -> Routed {
         self.heard_with.push(self.focused.clone());
+        Routed::Passed
     }
 
     fn focus(&mut self, target: &FocusTarget, _select: Selection) {
@@ -696,4 +726,192 @@ fn a_layout_through_the_parts_settles_the_focus_before_the_next_key() {
     let target = harness.runtime().target();
     assert_eq!(target.heard_with, [None], "let go before the key reached it");
     assert_eq!(target.told.last(), Some(&FocusTarget::Nothing));
+}
+
+/// Section 7, as decided for PR 2: a focus the layout settles reaches the
+/// screen reader in the tree an app builds after the draw. The focused
+/// element goes in an update; the layout after it moves the focus to the
+/// first stop of its panel; the tree built once the frame is shown reports
+/// focus on that stop, with no turn in between.
+#[test]
+fn a_tree_built_after_the_draw_shows_the_settled_focus() {
+    let mut harness = showing(vec![panel("bar", row(&["a", "b"]))]);
+    harness.focus_at(Point::new(10.0, 2.0));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "b")));
+    harness.send(Message::ShowThenDescribe(vec![panel("bar", row(&["a"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.step(DriverEvent::Presented);
+    let app = harness.app();
+    let nodes = app.nodes.as_ref().expect("described after the draw");
+    let focus = nodes.focus.expect("a node has the focus");
+    assert_eq!(app.ids.id(focus.0), Some(&id("bar", "a")), "the settled focus");
+}
+
+/// Section 7, rule 7: every change of the runtime's focus reaches the app
+/// once, on the next turn, through `App::focus_moved`, whatever moved it:
+/// a press, Tab, a focus effect, and a layout that settled it. A ring
+/// shown on the element that already had the focus is no change.
+#[test]
+fn every_focus_move_is_reported_once() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![panel("bar", row(&["a", "b"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.focus_at(Point::new(2.0, 2.0));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves, [Some(id("bar", "a"))], "a press");
+    harness.send(Message::Focus(id("bar", "a")));
+    assert!(harness.runtime().focus_ring().is_some());
+    assert_eq!(harness.app().moves.len(), 1, "the ring alone is no change");
+    harness.step(tab(false));
+    assert_eq!(harness.app().moves.last(), Some(&Some(id("bar", "b"))), "Tab");
+    harness.send(Message::Focus(id("bar", "a")));
+    assert_eq!(harness.app().moves.last(), Some(&Some(id("bar", "a"))), "an effect");
+    harness.send(Message::Show(vec![panel("bar", row(&["b"]))]));
+    harness.parts().2.lay_out(&mut Mono::default());
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves.last(), Some(&Some(id("bar", "b"))), "a settle");
+    assert_eq!(harness.app().moves.len(), 4, "each once");
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves.len(), 4, "nothing moved, nothing told");
+}
+
+/// An app that answers a report by moving the focus again hears of that
+/// move once more, and then nothing: the reports end.
+#[test]
+fn a_report_answered_with_a_focus_effect_settles() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        redirect: Some((id("bar", "a"), id("bar", "b"))),
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![panel("bar", row(&["a", "b"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.focus_at(Point::new(2.0, 2.0));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves, [Some(id("bar", "a")), Some(id("bar", "b"))]);
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "b")));
+}
+
+/// What `Copy` hears.
+#[derive(Debug, Clone, PartialEq)]
+enum Heard {
+    /// Focus this element.
+    Focus(UiId),
+    /// The runtime reported its focus here.
+    Moved(Option<UiId>),
+    /// A key reached the target.
+    Key,
+}
+
+/// An app that keeps a copy of the focus from the runtime's reports, and
+/// checks it in every other update, as `loom-app` does.
+struct Copy {
+    copy: Option<UiId>,
+    heard: Vec<Heard>,
+}
+
+impl App for Copy {
+    type Message = Heard;
+
+    fn update(&mut self, message: Heard, cx: &Context<'_, Heard>) -> Effects<Heard> {
+        self.heard.push(message.clone());
+        match message {
+            Heard::Moved(focus) => {
+                self.copy = focus;
+                Effects::none()
+            }
+            other => {
+                assert_eq!(cx.focused(), self.copy.as_ref(), "the copy drifted before {other:?}");
+                match other {
+                    Heard::Focus(id) => Effects::focus(id),
+                    _ => Effects::none(),
+                }
+            }
+        }
+    }
+
+    fn view(&self, view: &mut View) {
+        view.panel_with(UiId::panel("bar"), Layer::Panels, &(), |_| row(&["a", "b"]));
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn focus_moved(&self, focus: Option<&UiId>) -> Option<Heard> {
+        Some(Heard::Moved(focus.cloned()))
+    }
+}
+
+/// A target that turns every key into `Heard::Key`.
+struct Keys;
+
+impl Target<Heard> for Keys {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, out: &mut Vec<Heard>) -> Routed {
+        if matches!(event, Event::Key(_)) {
+            out.push(Heard::Key);
+        }
+        Routed::Passed
+    }
+
+    fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
+
+    fn scroll_into_view(&mut self, _id: &UiId) {}
+
+    fn focused(&self) -> Option<UiId> {
+        None
+    }
+
+    fn needs_redraw(&mut self, _updates: usize) -> bool {
+        false
+    }
+}
+
+/// A focus effect moves the runtime's focus inside an update, and its
+/// report waits in the queue. When the very next driver event is a key,
+/// the report runs before the key's update, since a turn takes what waits
+/// first: the app's copy never drifts (section 7, rule 7).
+#[test]
+fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
+    use crate::headless::Headless;
+    let mut runtime = crate::Runtime::new(
+        Copy {
+            copy: None,
+            heard: Vec::new(),
+        },
+        Keys,
+        WindowState::new(Size::new(400.0, 200.0)),
+        std::sync::Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    runtime.lay_out(&mut Mono::default());
+    runtime.waker().send(Heard::Focus(id("bar", "b")));
+    let next = runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    assert!(next.again, "the report waits for the next turn");
+    let key = DriverEvent::Input {
+        event: Event::Key(KeyEvent::Pressed {
+            key: Key::Character('k'),
+            modifiers: Modifiers::NONE,
+            repeat: false,
+            text: Some("k".into()),
+        }),
+        pointer: None,
+    };
+    runtime.handle(key, Instant::now(), &mut driver);
+    assert_eq!(
+        runtime.app().heard,
+        [
+            Heard::Focus(id("bar", "b")),
+            Heard::Moved(Some(id("bar", "b"))),
+            Heard::Key
+        ]
+    );
 }

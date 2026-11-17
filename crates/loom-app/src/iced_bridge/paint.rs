@@ -1,11 +1,20 @@
-//! One frame of the window, in three steps on one queue (plan for leaving
-//! Iced, step 2.2, item 2):
+//! One frame of the window, in five steps on one queue (plan for leaving
+//! Iced, step 2.2, item 2, and step 3.1, item 2):
 //!
 //! 1. clear, in the theme's background;
 //! 2. the patch canvas, with [`CanvasRenderer`], in the same pass, with the
 //!    viewport and scissor Iced gave its primitive until step 2.2c: the
 //!    canvas's bounds times the scale, and that cut to the target;
-//! 3. Iced's own layers, with no clear, over the same texture.
+//! 3. the runtime's own panels below Iced (the canvas and panels layers),
+//!    with one [`PaintRenderer`], with no clear;
+//! 4. Iced's own layers, with no clear, over the same texture;
+//! 5. the runtime's own panels above Iced (the overlays and question
+//!    layers), with a second [`PaintRenderer`], with no clear.
+//!
+//! Each renderer keeps the one list it last prepared, and its own glyph
+//! atlas, which is why there are two. A side with nothing painted
+//! prepares nothing and starts no pass, so a window with no panels of the
+//! runtime's draws what it drew before (ui-layer.md, section 5, rule 10).
 //!
 //! The window, its captures, `--screenshot-window`, and the harness's
 //! captures all draw through [`draw`], each into its own texture.
@@ -21,7 +30,7 @@ use iced::Color;
 use iced_wgpu::graphics::Viewport;
 use iced_wgpu::wgpu;
 use loom_canvas::{CanvasDrawing, CanvasRenderer};
-use loom_ui::paint::Target as CanvasTarget;
+use loom_ui::paint::{PaintList, PaintRenderer, Target as CanvasTarget};
 use loom_ui_core::Rect;
 
 /// What a frame draws into: a texture and its GPU.
@@ -68,23 +77,134 @@ impl CanvasPass {
     }
 }
 
+/// The runtime's own panels in the frame: one renderer for those below
+/// Iced and one for those above it, each with what it last prepared.
+pub(crate) struct PanelPass {
+    /// The canvas and panels layers, drawn before Iced.
+    below: Side,
+    /// The overlays and question layers, drawn after Iced.
+    above: Side,
+}
+
+/// One side of Iced: its renderer, and the list it last prepared and for
+/// which target, or `None` when nothing was painted there.
+struct Side {
+    renderer: PaintRenderer,
+    last: Option<(PaintList, CanvasTarget)>,
+}
+
+impl Side {
+    /// A side with nothing prepared.
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        Self {
+            renderer: PaintRenderer::new(device, format),
+            last: None,
+        }
+    }
+
+    /// Takes this frame's list and prepares it, unless it is empty.
+    fn set(&mut self, target: &Target<'_>, list: PaintList) {
+        if list.is_empty() {
+            self.last = None;
+            return;
+        }
+        let to = whole(target);
+        let _ = self.renderer.prepare(target.device, target.queue, &list, to);
+        self.last = Some((list, to));
+    }
+
+    /// Prepares the last list again when `target` differs from the one it
+    /// was prepared for, as the canvas does for a capture after a resize.
+    fn again(&mut self, target: &Target<'_>) {
+        let to = whole(target);
+        if let Some((list, last)) = self.last.as_mut()
+            && *last != to
+        {
+            let _ = self.renderer.prepare(target.device, target.queue, list, to);
+            *last = to;
+        }
+    }
+
+    /// Draws what was prepared over `target`, with no clear. Nothing, and
+    /// no pass, when nothing was painted.
+    fn draw(&self, target: &Target<'_>, encoder: &mut wgpu::CommandEncoder) {
+        if self.last.is_none() {
+            return;
+        }
+        let mut render = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("loom-app panels pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        self.renderer.draw(&mut render);
+    }
+}
+
+impl PanelPass {
+    /// Renderers for targets of `format`.
+    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        Self {
+            below: Side::new(device, format),
+            above: Side::new(device, format),
+        }
+    }
+
+    /// Takes this frame's two lists, painted from the runtime's panels.
+    pub(crate) fn set(&mut self, target: &Target<'_>, below: PaintList, above: PaintList) {
+        self.below.set(target, below);
+        self.above.set(target, above);
+    }
+}
+
+/// The whole of `target` for the panels' renderers: they draw in window
+/// coordinates, from its corner.
+fn whole(target: &Target<'_>) -> CanvasTarget {
+    CanvasTarget {
+        size: iced_to_size(target),
+        scale: target.scale,
+        origin: loom_ui_core::Point::ORIGIN,
+        physical: (target.physical.width, target.physical.height),
+    }
+}
+
+/// `target`'s size in logical pixels.
+fn iced_to_size(target: &Target<'_>) -> loom_ui_core::Size {
+    loom_ui_core::Size::new(
+        target.physical.width as f32 / target.scale,
+        target.physical.height as f32 / target.scale,
+    )
+}
+
 /// Draws one frame into `target`: the clear, the canvas from `drawing`,
-/// then Iced's layers. The caller has run Iced's draw call on `iced`
+/// the runtime's panels below Iced, Iced's layers, then the runtime's
+/// panels above Iced. The caller has run Iced's draw call on `iced`
 /// already, which built the canvas's frame; `None` when the view drew no
-/// canvas.
+/// canvas. `panels` holds this frame's lists, set already; `None` where
+/// there is no runtime to draw from, such as an offscreen capture.
 pub(crate) fn draw(
     target: &Target<'_>,
     iced: &mut iced_wgpu::Renderer,
     pass: &mut CanvasPass,
     drawing: Option<CanvasDrawing>,
     background: Color,
+    panels: Option<&PanelPass>,
 ) {
     pass.last = drawing.map(|drawing| {
         let to = canvas_target(drawing.bounds, target);
         pass.renderer.prepare(target.device, target.queue, &drawing.frame, to);
         Prepared { drawing, target: to }
     });
-    draw_prepared(target, iced, pass, background);
+    draw_prepared(target, iced, pass, background, panels);
 }
 
 /// Draws the last frame again into `target`: the canvas's last frame, at
@@ -101,7 +221,12 @@ pub(crate) fn draw_again(
     iced: &mut iced_wgpu::Renderer,
     pass: &mut CanvasPass,
     background: Color,
+    mut panels: Option<&mut PanelPass>,
 ) {
+    if let Some(panels) = panels.as_deref_mut() {
+        panels.below.again(target);
+        panels.above.again(target);
+    }
     if let Some(last) = pass.last.as_mut() {
         let to = canvas_target(last.drawing.bounds, target);
         if to != last.target {
@@ -110,11 +235,18 @@ pub(crate) fn draw_again(
             last.target = to;
         }
     }
-    draw_prepared(target, iced, pass, background);
+    draw_prepared(target, iced, pass, background, panels.as_deref());
 }
 
-/// The three steps, with the canvas as `pass` holds it.
-fn draw_prepared(target: &Target<'_>, iced: &mut iced_wgpu::Renderer, pass: &CanvasPass, background: Color) {
+/// The five steps, with the canvas as `pass` holds it and the panels as
+/// `panels` holds them.
+fn draw_prepared(
+    target: &Target<'_>,
+    iced: &mut iced_wgpu::Renderer,
+    pass: &CanvasPass,
+    background: Color,
+    panels: Option<&PanelPass>,
+) {
     let bounds = pass.last.as_ref().map(|last| last.drawing.bounds);
     let mut encoder = target.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("loom-app canvas"),
@@ -158,9 +290,19 @@ fn draw_prepared(target: &Target<'_>, iced: &mut iced_wgpu::Renderer, pass: &Can
             pass.renderer.draw(&mut render);
         }
     }
+    if let Some(panels) = panels {
+        panels.below.draw(target, &mut encoder);
+    }
     target.queue.submit([encoder.finish()]);
     let viewport = Viewport::with_physical_size(target.physical, target.scale);
     iced.present(None, target.format, target.view, &viewport);
+    if let Some(panels) = panels.filter(|panels| panels.above.last.is_some()) {
+        let mut encoder = target.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("loom-app panels above"),
+        });
+        panels.above.draw(target, &mut encoder);
+        target.queue.submit([encoder.finish()]);
+    }
 }
 
 /// Where the canvas renderer draws, for a canvas at `bounds`.

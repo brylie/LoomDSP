@@ -76,6 +76,8 @@ pub(crate) struct Focus {
     /// through the driver's parts cannot reach the target, which the driver
     /// holds then, so the runtime carries it out before it routes again.
     pub(crate) release_owed: bool,
+    /// The focus the app was last told of ([`App::focus_moved`](crate::App::focus_moved)).
+    pub(crate) reported: Option<UiId>,
 }
 
 impl Focus {

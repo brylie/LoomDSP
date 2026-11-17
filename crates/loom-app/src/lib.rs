@@ -260,7 +260,7 @@ pub fn run() -> Result<(), loom_ui::shell::Error> {
     // The window and its services share the clipboard once it opens.
     let clipboard = iced_bridge::SharedClipboard::default();
     let result = loom_ui::shell::run(
-        iced_bridge::Hosted(app, None),
+        iced_bridge::Hosted(app, None, iced_bridge::Extra::default()),
         iced_bridge::IcedTarget::default(),
         iced_bridge::WindowLayers::new(clipboard.clone()),
         iced_bridge::AppServices::new(clipboard),

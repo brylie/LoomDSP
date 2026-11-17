@@ -489,6 +489,17 @@ impl Window {
         })
     }
 
+    /// What is under `point` in the panels of the layers `keep` allows,
+    /// tried as [`Window::hit`] tries them. A panel in another layer is
+    /// passed over, as if it were not there.
+    pub(crate) fn hit_in(&self, point: Point, keep: impl Fn(Layer) -> bool) -> Option<(Layer, Hit<'_>)> {
+        self.first_taker(point, |record, inside| {
+            keep(record.layer)
+                .then(|| record.layout.hit(inside).map(|hit| (record.layer, hit)))
+                .flatten()
+        })
+    }
+
     /// The first answer `ask` gives, trying each panel in the reverse of
     /// draw order with `point` in that panel's own coordinates. Every
     /// question about what is under a point (a hit, the stop a press

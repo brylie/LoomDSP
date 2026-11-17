@@ -8,11 +8,37 @@ use std::sync::Arc;
 fn runtime() -> Runtime<Hosted, IcedTarget> {
     let size = loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height);
     Runtime::new(
-        Hosted(app(), None),
+        Hosted(app(), None, crate::iced_bridge::Extra::default()),
         IcedTarget::default(),
         WindowState::new(size),
         Arc::new(|| {}),
     )
+}
+
+/// A report after a turn with no events queues nothing and wakes nothing.
+/// The shell asks for a report after every turn, so a report that woke the
+/// loop would start the next turn itself and spin with no frame drawn.
+#[test]
+fn a_report_with_no_events_wakes_nothing() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&wakes);
+    let size = loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height);
+    let mut runtime = Runtime::new(
+        Hosted(app(), None, crate::iced_bridge::Extra::default()),
+        IcedTarget::default(),
+        WindowState::new(size),
+        Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    let mut layers = WindowLayers::new(SharedClipboard::default());
+    for _ in 0..2 {
+        let report = report(&mut layers, &mut runtime);
+        assert!(!report.alone);
+        assert_eq!(report.redraw, Redraw::No);
+    }
+    assert_eq!(wakes.load(Ordering::SeqCst), 0, "no report woke the loop");
 }
 
 /// The layers' report, lent `runtime`'s parts.

@@ -1,0 +1,358 @@
+//! Tests for pointer routing in the runtime's layers (ui-layer.md,
+//! section 5, rule 10), with a fake target that answers as a test says.
+
+use crate::access::{Access, Action, Role};
+use crate::app::{App, Context, InputState, WindowSpec};
+use crate::effect::{Effects, FocusTarget, Selection};
+use crate::element::{Element, Length};
+use crate::event::{DriverEvent, WindowState};
+use crate::headless::Harness;
+use crate::layout::tests::{Mono, STYLE};
+use crate::routing::{Routed, Target};
+use crate::view::{Layer, View};
+use loom_ui_core::{Event, Point, PointerButton, PointerEvent, Size, UiId};
+use std::time::Instant;
+
+/// What the test app hears.
+#[derive(Debug, Clone, PartialEq)]
+enum Message {
+    /// A click on the element with this UI ID.
+    Clicked(UiId),
+    /// A key reached the target.
+    Key,
+    /// Set the input layer.
+    Input(Layer),
+}
+
+/// An app that shows a bar of two buttons in the panels layer, across the
+/// top, and, when `overlay` is set, a button in the overlays layer over
+/// the first.
+struct Layers {
+    overlay: bool,
+    input: Layer,
+    heard: Vec<Message>,
+}
+
+impl App for Layers {
+    type Message = Message;
+
+    fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
+        if let Message::Input(layer) = message {
+            self.input = layer;
+        }
+        self.heard.push(message);
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        view.panel_with(UiId::panel("bar"), Layer::Panels, &(), |_| {
+            Element::row([button("a", 40.0), button("b", 40.0)]).width(Length::FILL)
+        });
+        if self.overlay {
+            view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
+                Element::row([button("item", 20.0)])
+            });
+        }
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn input(&self) -> InputState {
+        InputState {
+            layer: self.input,
+            canvas_focused: false,
+        }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        Some(Message::Clicked(id.clone()))
+    }
+}
+
+/// A button `width` wide and 16 high, keyed `key`.
+fn button(key: &str, width: f32) -> Element {
+    Element::text(key, STYLE)
+        .key(key)
+        .width(Length::Fixed(width))
+        .min_width(width)
+        .focusable()
+        .access(Access::new(Role::Button, key).action(Action::Click))
+}
+
+/// A target that answers every pointer event with `answer`, except those
+/// at `x` of `taken_from` or more, which it takes, as a toolkit's widget at
+/// the right of the window would. It records what reached it.
+struct Fake {
+    answer: Routed,
+    taken_from: f32,
+    heard: Vec<Event>,
+}
+
+impl Target<Message> for Fake {
+    fn input(&mut self, event: &Event, pointer: Option<Point>, _now: Instant, out: &mut Vec<Message>) -> Routed {
+        self.heard.push(event.clone());
+        match event {
+            Event::Pointer(_) if pointer.is_some_and(|at| at.x >= self.taken_from) => Routed::Taken,
+            Event::Pointer(_) => self.answer,
+            _ => {
+                out.push(Message::Key);
+                Routed::Taken
+            }
+        }
+    }
+
+    fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
+
+    fn scroll_into_view(&mut self, _id: &UiId) {}
+
+    fn focused(&self) -> Option<UiId> {
+        None
+    }
+
+    fn needs_redraw(&mut self, _updates: usize) -> bool {
+        false
+    }
+}
+
+/// A harness with the bar, the overlay when `overlay` is set, and a target
+/// that answers `answer`, laid out in a 400 by 200 window.
+fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
+    let app = Layers {
+        overlay,
+        input: Layer::Canvas,
+        heard: Vec::new(),
+    };
+    let target = Fake {
+        answer,
+        taken_from: 350.0,
+        heard: Vec::new(),
+    };
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(app, target, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    harness
+}
+
+/// A pointer event at `(x, y)`.
+fn at(x: f32, y: f32, event: PointerEvent) -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Pointer(event),
+        pointer: Some(Point::new(x, y)),
+    }
+}
+
+/// A left click at `(x, y)`: press, then release.
+fn click(harness: &mut Harness<Layers, Fake>, x: f32, y: f32) {
+    harness.step(at(x, y, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(x, y, PointerEvent::Released(PointerButton::Left)));
+}
+
+/// A key press, which the fake target takes and turns into `Key`.
+fn key() -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Character('k'),
+            modifiers: loom_ui_core::Modifiers::NONE,
+            repeat: false,
+            text: Some("k".into()),
+        }),
+        pointer: None,
+    }
+}
+
+/// The clicks the app heard.
+fn clicks(harness: &Harness<Layers, Fake>) -> Vec<UiId> {
+    harness
+        .app()
+        .heard
+        .iter()
+        .filter_map(|message| match message {
+            Message::Clicked(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The order: a layer above the target takes a point before the target,
+/// and the target before a layer below it. The overlay's button is over
+/// the bar's first, so a click there is the overlay's and the target never
+/// hears it.
+#[test]
+fn layers_above_the_target_come_first() {
+    let mut harness = harness(true, Routed::Passed);
+    click(&mut harness, 5.0, 5.0);
+    assert_eq!(clicks(&harness), [UiId::panel("menu").with("item")]);
+    assert!(harness.runtime().target().heard.is_empty(), "the target heard nothing");
+    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("menu").with("item")));
+    assert_eq!(harness.runtime().focus_ring(), None, "a press shows no ring");
+}
+
+/// What the target answers decides the layers below it: Taken stops the
+/// event, Passed hands it on, and Later leaves it for the driver.
+#[test]
+fn the_target_answer_decides_the_layers_below() {
+    let mut taken = harness(false, Routed::Taken);
+    click(&mut taken, 5.0, 5.0);
+    assert!(clicks(&taken).is_empty(), "taken by the target");
+    assert_eq!(taken.runtime().target().heard.len(), 2);
+
+    let mut passed = harness(false, Routed::Passed);
+    click(&mut passed, 5.0, 5.0);
+    assert_eq!(clicks(&passed), [UiId::panel("bar").with("a")]);
+    assert_eq!(passed.runtime().focused(), Some(&UiId::panel("bar").with("a")));
+
+    let mut later = harness(false, Routed::Later);
+    click(&mut later, 5.0, 5.0);
+    assert!(clicks(&later).is_empty(), "nothing until the driver hands it on");
+    assert_eq!(later.runtime().focused(), None);
+}
+
+/// A late answer goes through `pointer_below`, the same step the runtime
+/// runs for Passed: a press and a release there click, and the message
+/// runs on the next turn, once, before a key that comes after it.
+#[test]
+fn pointer_below_runs_the_same_step_for_a_late_answer() {
+    let mut harness = harness(false, Routed::Later);
+    for event in [
+        PointerEvent::Pressed(PointerButton::Left),
+        PointerEvent::Released(PointerButton::Left),
+    ] {
+        let (_, _, mut panels) = harness.parts();
+        let heard = panels.pointer_below(&Event::Pointer(event), Point::new(45.0, 5.0));
+        assert!(heard.taken);
+    }
+    assert!(harness.app().heard.is_empty(), "not in the turn that found it");
+    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("bar").with("b")));
+    harness.step(key());
+    assert_eq!(
+        harness.app().heard,
+        [Message::Clicked(UiId::panel("bar").with("b")), Message::Key],
+        "the click once, then the key"
+    );
+}
+
+/// `over_target` agrees with the first step: true over the overlay's
+/// button, false over the bar below the target and over nothing.
+#[test]
+fn over_target_agrees_with_the_layers_above() {
+    let mut harness = harness(true, Routed::Passed);
+    let (_, _, panels) = harness.parts();
+    assert!(panels.over_target(Point::new(5.0, 5.0)));
+    assert!(!panels.over_target(Point::new(45.0, 5.0)), "the bar is below");
+    assert!(!panels.over_target(Point::new(300.0, 100.0)));
+}
+
+/// The press holds while the pointer leaves the element and comes back,
+/// so letting go on it still clicks, as on macOS and Windows (Brylie's
+/// decision, 2026-11-17), over nothing of ours or over a widget of the
+/// target's that takes the move. Leaving the window ends the press.
+#[test]
+fn a_press_holds_while_the_pointer_leaves_and_comes_back() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(300.0, 100.0, PointerEvent::Moved));
+    harness.step(at(45.0, 5.0, PointerEvent::Moved));
+    harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert_eq!(clicks(&harness), [UiId::panel("bar").with("a")]);
+
+    // Across a widget of the target's that takes the move, and back.
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(380.0, 100.0, PointerEvent::Moved));
+    assert_eq!(harness.runtime().hovered(), None, "the target holds the hover");
+    harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert_eq!(clicks(&harness).len(), 2, "still a click, once");
+
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::LeftWindow),
+        pointer: None,
+    });
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert_eq!(clicks(&harness).len(), 2, "leaving the window ended the press");
+}
+
+/// A release on another element than the press clicks nothing: letting go
+/// anywhere else cancels a button's press (Brylie's decision, 2026-11-17).
+#[test]
+fn a_release_elsewhere_clicks_nothing() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(45.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    harness.step(at(300.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert!(clicks(&harness).is_empty());
+}
+
+/// One layer holds the hover. A move onto a button hovers it, a move the
+/// target takes clears it, a move over nothing of ours clears it, and the
+/// pointer leaving the window clears it. Hover runs no update.
+#[test]
+fn one_layer_holds_the_hover() {
+    let mut harness = harness(false, Routed::Passed);
+    let next = harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("bar").with("a")));
+    assert!(next.draw, "the hover redraws");
+    assert!(harness.app().heard.is_empty(), "and runs no update");
+    harness.step(at(300.0, 100.0, PointerEvent::Moved));
+    assert_eq!(harness.runtime().hovered(), None, "over nothing of ours");
+
+    harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::LeftWindow),
+        pointer: None,
+    });
+    assert_eq!(harness.runtime().hovered(), None, "the pointer left");
+
+    let mut taken = self::harness(false, Routed::Taken);
+    taken.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(taken.runtime().hovered(), None, "the target took the move");
+}
+
+/// A layer below the input layer takes nothing and keeps no hover: with
+/// the input on the overlays, the bar's buttons are neither hovered nor
+/// clicked, and the event goes to the target. A hover there clears when
+/// the input layer rises above it.
+#[test]
+fn nothing_below_the_input_layer_takes_the_pointer() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert!(harness.runtime().hovered().is_some());
+    harness.send(Message::Input(Layer::Overlays));
+    assert_eq!(harness.runtime().hovered(), None, "cleared as the input rose");
+    click(&mut harness, 5.0, 5.0);
+    harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert!(clicks(&harness).is_empty());
+    assert_eq!(harness.runtime().hovered(), None);
+    assert_eq!(harness.runtime().focused(), None);
+    assert_eq!(harness.runtime().target().heard.len(), 4, "the target heard every one");
+}
+
+/// Tab enters the runtime's first stop with nothing focused, but not while
+/// the input layer is above the panels.
+#[test]
+fn tab_enters_from_nothing_only_while_the_panels_take_input() {
+    let tab = DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Tab,
+            modifiers: loom_ui_core::Modifiers::NONE,
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    };
+    let mut harness = harness(false, Routed::Passed);
+    harness.send(Message::Input(Layer::Question));
+    harness.step(tab.clone());
+    assert_eq!(harness.runtime().focused(), None, "a question holds the window");
+    harness.send(Message::Input(Layer::Canvas));
+    harness.step(tab);
+    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("bar").with("a")));
+    assert!(
+        harness.runtime().focus_ring().is_some(),
+        "from the keyboard, with a ring"
+    );
+}

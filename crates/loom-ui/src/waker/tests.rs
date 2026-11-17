@@ -40,6 +40,16 @@ fn a_waker_whose_runtime_is_gone_returns_false() {
     assert_eq!(format!("{waker:?}"), "Waker");
 }
 
+/// An empty batch queues nothing and wakes nothing, so a driver that
+/// sends what each turn left, even nothing, does not wake itself again.
+#[test]
+fn an_empty_batch_does_not_wake_the_loop() {
+    let (waker, receiver, wakes) = counted();
+    assert!(waker.send_all(Vec::new()));
+    assert_eq!(receiver.try_iter().count(), 0);
+    assert_eq!(wakes.load(Ordering::SeqCst), 0);
+}
+
 /// A batch from `send_all` is queued whole and in order, with no message
 /// from another thread inside it, and wakes the loop once.
 #[test]

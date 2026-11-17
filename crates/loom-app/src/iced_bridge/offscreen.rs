@@ -36,6 +36,8 @@ pub(crate) struct Offscreen {
     pub(crate) renderer: crate::Renderer,
     /// The canvas's renderer.
     canvas: CanvasPass,
+    /// The renderers for `loom-ui` panels below and above Iced.
+    panels: paint::PanelPass,
 }
 
 impl Offscreen {
@@ -55,6 +57,7 @@ impl Offscreen {
         );
         Some(Self {
             canvas: CanvasPass::new(&device, FORMAT),
+            panels: paint::PanelPass::new(&device, FORMAT),
             renderer: crate::Renderer::Primary(iced_wgpu::Renderer::new(engine, Font::DEFAULT, Pixels(16.0))),
             device,
             queue,
@@ -76,6 +79,20 @@ impl Offscreen {
         scale: f32,
         background: Color,
         drawing: Option<CanvasDrawing>,
+    ) -> Option<Vec<u8>> {
+        self.pixels_with(size, scale, background, drawing, None)
+    }
+
+    /// [`pixels`](Self::pixels), with `loom-ui` panels painted into two
+    /// lists: those below Iced, and those above it. `None` draws none, as
+    /// the app's views have no panel of the runtime's yet.
+    pub(crate) fn pixels_with(
+        &mut self,
+        size: Size<u32>,
+        scale: f32,
+        background: Color,
+        drawing: Option<CanvasDrawing>,
+        panels: Option<(loom_ui::paint::PaintList, loom_ui::paint::PaintList)>,
     ) -> Option<Vec<u8>> {
         let crate::Renderer::Primary(iced) = &mut self.renderer else {
             unreachable!("only a wgpu renderer draws offscreen");
@@ -104,7 +121,11 @@ impl Offscreen {
             physical: size,
             scale,
         };
-        paint::draw(&target, iced, &mut self.canvas, drawing, background);
+        let panels = panels.map(|(below, above)| {
+            self.panels.set(&target, below, above);
+            &self.panels
+        });
+        paint::draw(&target, iced, &mut self.canvas, drawing, background, panels);
         read_back(&self.device, &self.queue, &texture, extent)
     }
 }
@@ -142,7 +163,7 @@ impl Offscreen {
             physical: size,
             scale,
         };
-        paint::draw_again(&target, iced, &mut self.canvas, background);
+        paint::draw_again(&target, iced, &mut self.canvas, background, None);
         read_back(&self.device, &self.queue, &texture, extent)
     }
 }

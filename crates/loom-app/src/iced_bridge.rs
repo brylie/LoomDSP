@@ -187,8 +187,70 @@ pub(crate) fn focus_moves<T: Send + 'static>(target: &FocusTarget, select: Selec
 /// never share a name on one type. It goes at 2.2, when the app
 /// implements the trait itself.
 // The second field logs each message `update` gets, for the `Ui` harness,
-// whose tests read what ran. `None` in the app, so nothing is copied.
-pub(crate) struct Hosted(pub(crate) App, pub(crate) Option<Vec<Message>>);
+// whose tests read what ran. `None` in the app, so nothing is copied. The
+// third holds panels a test adds; it is empty outside tests.
+pub(crate) struct Hosted(pub(crate) App, pub(crate) Option<Vec<Message>>, pub(crate) Extra);
+
+/// `loom-ui` panels a test adds to the window, to check routing and drawing
+/// between Iced and the runtime's layers before any real view moves there
+/// (plan step 3.1). Empty outside tests, so the app shows no panel.
+#[derive(Default)]
+pub(crate) struct Extra {
+    /// The test's panels: what they show and what a click on them means.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) panels: Option<TestPanels>,
+}
+
+/// A test's panels for [`Extra`].
+#[cfg(any(test, feature = "test-ui"))]
+pub(crate) struct TestPanels {
+    /// Adds the panels to the view.
+    pub(crate) view: fn(&mut loom_ui::View),
+    /// The message for a click on one of their elements.
+    pub(crate) clicked: fn(&UiId) -> Option<Message>,
+    /// The element a message moves the focus to, by a focus effect after
+    /// the app's own, as one of the app's panels would ask.
+    pub(crate) focuses: fn(&Message) -> Option<UiId>,
+}
+
+#[cfg(any(test, feature = "test-ui"))]
+impl Extra {
+    /// The test's panels, if it added any.
+    fn view(&self, view: &mut loom_ui::View) {
+        if let Some(panels) = &self.panels {
+            (panels.view)(view);
+        }
+    }
+
+    /// The message for a click on a test panel's element.
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        self.panels.as_ref().and_then(|panels| (panels.clicked)(id))
+    }
+
+    /// The test's focus effect for `message`, after the app's own.
+    fn answer(&self, message: &Message) -> Effects<Message> {
+        self.panels
+            .as_ref()
+            .and_then(|panels| (panels.focuses)(message))
+            .map_or_else(Effects::none, Effects::focus)
+    }
+}
+
+#[cfg(not(any(test, feature = "test-ui")))]
+impl Extra {
+    /// No panels outside tests.
+    fn view(&self, _view: &mut loom_ui::View) {}
+
+    /// Nothing to click outside tests.
+    fn clicked(&self, _id: &UiId) -> Option<Message> {
+        None
+    }
+
+    /// No effects of its own outside tests.
+    fn answer(&self, _message: &Message) -> Effects<Message> {
+        Effects::none()
+    }
+}
 
 impl loom_ui::App for Hosted {
     type Message = Message;
@@ -197,11 +259,37 @@ impl loom_ui::App for Hosted {
         if let Some(log) = &mut self.1 {
             log.push(message.clone());
         }
-        self.0.update(message, cx)
+        let extra = self.2.answer(&message);
+        // The app keeps one copy of what has the keyboard in either toolkit:
+        // the runtime's own element first, as `cx.focused()` gives it, then
+        // Iced's field. Iced's answer names only its own field, so the copy
+        // is taken from the context. With no element of the runtime's
+        // focused, as in the app today, it is Iced's answer unchanged.
+        let message = match message {
+            Message::FocusMoved(_) => Message::FocusMoved(cx.focused().cloned()),
+            message => message,
+        };
+        self.0.update(message, cx).and(extra)
     }
 
-    /// No panels yet: Iced draws every view until phase 3.
-    fn view(&self, _view: &mut loom_ui::View) {}
+    /// No panels yet: Iced draws every view until phase 3. A test may add
+    /// some ([`Extra`]).
+    fn view(&self, view: &mut loom_ui::View) {
+        self.2.view(view);
+    }
+
+    /// What a click on one of the runtime's elements means. None of the
+    /// app's own views is one yet.
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        self.2.clicked(id)
+    }
+
+    /// The runtime's focus moved: the app keeps one copy of what has the
+    /// keyboard, whichever toolkit holds it, so it hears this as it hears
+    /// Iced's word on focus (`FocusMoved`).
+    fn focus_moved(&self, focus: Option<&UiId>) -> Option<Message> {
+        Some(Message::FocusMoved(focus.cloned()))
+    }
 
     fn window(&self) -> WindowSpec {
         WindowSpec {
@@ -212,6 +300,22 @@ impl loom_ui::App for Hosted {
 
     fn next_deadline(&self) -> Option<Deadline<Message>> {
         self.0.next_deadline()
+    }
+
+    /// The input owner as a layer: an open question holds the window, and
+    /// every other panel or menu Iced draws over the canvas is an overlay
+    /// (ui-layer.md, section 5, rule 2). The canvas has the keyboard while
+    /// one of its controls has focus.
+    fn input(&self) -> loom_ui::InputState {
+        use crate::input_owner::InputOwner;
+        loom_ui::InputState {
+            layer: match self.0.input_owner() {
+                InputOwner::Question => loom_ui::Layer::Question,
+                InputOwner::Canvas => loom_ui::Layer::Canvas,
+                _ => loom_ui::Layer::Overlays,
+            },
+            canvas_focused: self.0.a11y.focus().is_some(),
+        }
     }
 
     /// A screen reader's start, request, or departure, as the accessibility
@@ -274,7 +378,7 @@ impl<D: BridgeDriver> Bridge<D> {
             Sleeper::start(move || wake())
         };
         let mut bridge = Self {
-            runtime: Runtime::new(Hosted(app, None), IcedTarget::default(), window, wake),
+            runtime: Runtime::new(Hosted(app, None, Extra::default()), IcedTarget::default(), window, wake),
             driver: D::default(),
             quiet,
             wakes: WakeSource(Arc::new(Mutex::new(Some(receiver)))),
@@ -364,6 +468,24 @@ impl<D: BridgeDriver> Bridge<D> {
         Task::batch(tasks)
     }
 
+    /// Routes one input event through the runtime, as the window's shell
+    /// hands it over before Iced hears it, and returns what Iced must do
+    /// for that turn.
+    pub(crate) fn input(&mut self, event: loom_ui_core::Event, pointer: Option<loom_ui_core::Point>) -> Task<Bridged> {
+        self.turn(DriverEvent::Input { event, pointer })
+    }
+
+    /// The runtime, to read: its focus, hover, and panels.
+    pub(crate) fn runtime(&self) -> &Runtime<Hosted, IcedTarget> {
+        &self.runtime
+    }
+
+    /// The runtime, for the harness to reach the panels and the target as
+    /// the window's layers do.
+    pub(crate) fn runtime_mut(&mut self) -> &mut Runtime<Hosted, IcedTarget> {
+        &mut self.runtime
+    }
+
     /// The app, to read.
     pub(crate) fn app(&self) -> &App {
         &self.runtime.app().0
@@ -448,9 +570,26 @@ pub(crate) struct IcedTarget {
     scrolls: Option<Task<Bridged>>,
     /// The part with focus, from Iced's last answer.
     focused: Option<UiId>,
+    /// One of the runtime's elements took the focus, so Iced's field lets
+    /// go of it before Iced hears the turn's events (`release_focus`).
+    release_first: bool,
+    /// The runtime took this turn's key, so Iced must not hear it (`kept`).
+    drop_keys: bool,
 }
 
 impl IcedTarget {
+    /// True once per turn whose key the runtime took: the report then
+    /// leaves it out of what Iced hears.
+    pub(crate) fn take_drop_keys(&mut self) -> bool {
+        std::mem::take(&mut self.drop_keys)
+    }
+
+    /// The release owed before Iced hears the turn's events, once.
+    fn take_release(&mut self) -> Option<Task<Bridged>> {
+        std::mem::take(&mut self.release_first)
+            .then(|| focus_task(&FocusTarget::Nothing, Selection::Keep, Bridged::Focus))
+    }
+
     /// This turn's tasks for Iced, the scrolls last and in order.
     fn take_tasks(&mut self) -> Vec<Task<Bridged>> {
         let mut tasks = std::mem::take(&mut self.tasks);
@@ -460,8 +599,38 @@ impl IcedTarget {
 }
 
 impl loom_ui::Target<Message> for IcedTarget {
-    /// Iced routes its own events to its widgets.
-    fn input(&mut self, _: &loom_ui_core::Event, _: Option<loom_ui_core::Point>, _: Instant, _: &mut Vec<Message>) {}
+    /// Iced routes its own events to its widgets after the turn, in the
+    /// window's report, so a pointer event's answer comes then: the report
+    /// hands each one Iced leaves unused to the runtime's layers below it
+    /// (`Panels::pointer_below`). Keys go by focus.
+    fn input(
+        &mut self,
+        event: &loom_ui_core::Event,
+        _: Option<loom_ui_core::Point>,
+        _: Instant,
+        _: &mut Vec<Message>,
+    ) -> loom_ui::Routed {
+        match event {
+            loom_ui_core::Event::Pointer(_) => loom_ui::Routed::Later,
+            _ => loom_ui::Routed::Passed,
+        }
+    }
+
+    /// Iced applies focus changes after it has routed the turn's events, so
+    /// a release from the runtime waits for the report, which applies it
+    /// before those events: the key after it never reaches Iced's field.
+    fn release_focus(&mut self) {
+        self.release_first = true;
+    }
+
+    /// Iced heard the window's key already; the report leaves it out of
+    /// Iced's update, so Tab among the runtime's stops never also moves an
+    /// Iced field.
+    fn kept(&mut self, event: &loom_ui_core::Event) {
+        if matches!(event, loom_ui_core::Event::Key(_)) {
+            self.drop_keys = true;
+        }
+    }
 
     fn focus(&mut self, target: &FocusTarget, select: Selection) {
         self.tasks.push(focus_task(target, select, Bridged::Focus));
@@ -611,7 +780,10 @@ pub(crate) mod headless;
 mod measure;
 pub(crate) mod offscreen;
 pub(crate) mod paint;
+mod pointers;
 pub(crate) use measure::Measure;
+#[cfg(any(test, feature = "test-ui"))]
+pub(crate) use pointers::Pointers;
 mod preedit;
 mod services;
 #[cfg(any(test, feature = "test-ui"))]

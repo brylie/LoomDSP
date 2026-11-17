@@ -37,11 +37,12 @@ use crate::effect::{Effect, FocusTarget, Selection};
 use crate::event::{DriverEvent, WindowEvent, WindowState};
 use crate::focus::{Focus, FocusStep};
 use crate::hit::Hit;
-use crate::routing::Target;
+use crate::pointer::Pointer;
+use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
-use loom_ui_core::{Event, Key, KeyEvent, Point, Rect, TextMeasure, UiId};
+use loom_ui_core::{Event, Key, KeyEvent, Point, PointerEvent, Rect, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -128,6 +129,8 @@ pub struct Runtime<A: App, T> {
     counts: Counts,
     /// Which of the runtime's own elements has keyboard focus.
     focus: Focus,
+    /// What is hovered and pressed among the runtime's own elements.
+    pointer: Pointer,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -152,6 +155,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             exited: false,
             counts: Counts::default(),
             focus: Focus::default(),
+            pointer: Pointer::default(),
         }
     }
 
@@ -186,7 +190,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
     /// The app to read, the target to use, and the panels to lay out and
     /// paint, at once: a driver that draws the window needs all three.
-    pub fn parts(&mut self) -> (&A, &mut T, Panels<'_>) {
+    pub fn parts(&mut self) -> (&A, &mut T, Panels<'_, A>) {
         (
             &self.app,
             &mut self.target,
@@ -195,12 +199,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 counts: &mut self.counts,
                 size: self.window.size,
                 focus: &mut self.focus,
+                pointer: &mut self.pointer,
+                app: &self.app,
+                waker: &self.waker,
             },
         )
     }
 
     /// The panels alone, to lay out and paint.
-    fn panels(&mut self) -> Panels<'_> {
+    fn panels(&mut self) -> Panels<'_, A> {
         let (_, _, panels) = self.parts();
         panels
     }
@@ -292,13 +299,17 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// As [`Runtime::bounds`].
     pub fn focus_at(&mut self, point: Point) -> Option<UiId> {
         self.check_laid_out();
-        self.focus.wanted = None;
-        self.focus.id = self.panels.focus_at(point).flatten().cloned();
-        self.focus.ring = false;
-        if self.focus.id.is_some() {
-            self.release_target();
-        }
+        let mut panels = self.panels();
+        panels.focus_at(point);
+        panels.report_focus();
+        self.release_if_owed();
         self.focus.id.clone()
+    }
+
+    /// The runtime's element under the pointer, if one of its layers holds
+    /// the hover: what hover text reads (section 5, rule 10).
+    pub fn hovered(&self) -> Option<&UiId> {
+        self.pointer.hovered.as_ref().map(|(_, id)| id)
     }
 
     /// The element with focus and where its ring goes, in logical pixels,
@@ -316,7 +327,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// waited for its layout. A target with no focus is told nothing.
     fn release_target(&mut self) {
         if self.target.focused().is_some() {
-            self.target.focus(&FocusTarget::Nothing, Selection::Keep);
+            self.target.release_focus();
         }
     }
 
@@ -384,10 +395,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
     /// Tab and Shift+Tab while one of the runtime's elements has focus:
     /// one step through its order. Past either end, focus leaves the
-    /// runtime's elements and the key goes on to the target. Tab with Ctrl
-    /// held is the app's region shortcut, never a step (section 6, rule 7).
-    /// Returns whether the runtime took the key, and whether its focus
-    /// changed, which needs a redraw even when the key goes on.
+    /// runtime's elements and the key goes on to the target. With nothing
+    /// focused in either toolkit and the canvas not focused, Tab enters
+    /// the first stop and Shift+Tab the last, unless the input layer is
+    /// above the panels (section 6, rule 2). Tab with Ctrl held is the
+    /// app's region shortcut, never a step (rule 7). Returns whether the
+    /// runtime took the key, and whether its focus changed, which needs a
+    /// redraw even when the key goes on.
     fn tab(&mut self, event: &Event) -> (bool, bool) {
         let Event::Key(KeyEvent::Pressed {
             key: Key::Tab,
@@ -397,8 +411,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         else {
             return (false, false);
         };
-        if self.focus.id.is_none() || modifiers.control {
+        if modifiers.control {
             return (false, false);
+        }
+        if self.focus.id.is_none() {
+            let input = self.app.input();
+            let enters = input.layer <= Layer::Panels && !input.canvas_focused && self.target.focused().is_none();
+            return match self.focus_step(None, modifiers.shift) {
+                FocusStep::To(stop) if enters => (true, self.focus_to(Some(stop))),
+                _ => (false, false),
+            };
         }
         match self.focus_step(self.focus.id.as_ref(), modifiers.shift) {
             FocusStep::To(stop) => (true, self.focus_to(Some(stop))),
@@ -516,8 +538,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             DriverEvent::Input { event, pointer } => {
                 let (taken, moved) = self.tab(&event);
                 redraw |= moved;
-                if !taken {
-                    self.target.input(&event, pointer, now, &mut batch);
+                if taken {
+                    self.target.kept(&event);
+                } else {
+                    redraw |= self.route(&event, pointer, now, &mut batch);
+                }
+                // A focus the event moved is the first thing the app hears
+                // this turn, so no update reads a focus it was not told of.
+                if let Some(report) = self.panels().focus_report() {
+                    batch.insert(0, report);
                 }
             }
             DriverEvent::Window(event) => self.window_event(event, now, &mut batch),
@@ -545,6 +574,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // 4. What changed.
         if updates > 0 || self.view.is_none() {
             redraw |= self.rebuild(driver);
+            // A layer the input layer rose above holds no hover or press.
+            redraw |= self.pointer.below(self.app.input().layer);
         }
 
         redraw |= self.target.needs_redraw(updates);
@@ -556,7 +587,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.waiting_for_draw.append(&mut self.after_draw);
         }
 
-        // 6. What comes next.
+        // 6. What comes next: a moved focus is reported for the next turn.
+        self.panels().report_focus();
         self.drain_queue();
         Next {
             draw,
@@ -568,6 +600,38 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 self.deadline.as_ref().map(|deadline| deadline.at)
             },
         }
+    }
+
+    /// Routes one input event that Tab did not take (section 5, rule 10).
+    /// A pointer event goes to the runtime's layers above the target, then
+    /// to the target, then to the layers below it; whatever else, to the
+    /// target. Returns true when the hover moved.
+    fn route(&mut self, event: &Event, pointer: Option<Point>, now: Instant, batch: &mut Vec<A::Message>) -> bool {
+        let point = match (event, pointer) {
+            (Event::Pointer(PointerEvent::LeftWindow), _) => {
+                let redraw = self.pointer.clear();
+                self.target.input(event, pointer, now, batch);
+                return redraw;
+            }
+            (Event::Pointer(_), Some(point)) => point,
+            _ => {
+                self.target.input(event, pointer, now, batch);
+                return false;
+            }
+        };
+        let (app, target, mut panels) = self.parts();
+        let input = app.input();
+        let above = panels.pointer_above(input, event, point);
+        let mut redraw = above.redraw;
+        if !above.taken {
+            redraw |= match target.input(event, pointer, now, batch) {
+                Routed::Taken => panels.pointer_left().redraw,
+                Routed::Passed => panels.pointer_below(event, point).redraw,
+                Routed::Later => false,
+            };
+        }
+        self.release_if_owed();
+        redraw
     }
 
     /// Moves everything wakers sent into `pending`, in order.

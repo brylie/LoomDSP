@@ -13,13 +13,46 @@ use crate::effect::{FocusTarget, Selection, names};
 use loom_ui_core::{Event, Point, UiId};
 use std::time::Instant;
 
+/// What the target did with an input event, which says whether the
+/// runtime's layers below it hear it (ui-layer.md, section 5, rule 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Routed {
+    /// The target used it, so nothing below hears it.
+    Taken,
+    /// The target did not use it, so the runtime offers it to its layers
+    /// below the target.
+    Passed,
+    /// The target decides after this turn: a toolkit that routes its own
+    /// events later. For each pointer event it then leaves unused, the
+    /// driver hands it on with [`Panels::pointer_below`](crate::Panels::pointer_below).
+    Later,
+}
+
 /// What holds the elements: it takes their events and their focus.
 pub trait Target<M> {
-    /// Routes one element event, adding any messages it gives to `out`.
-    fn input(&mut self, event: &Event, pointer: Option<Point>, now: Instant, out: &mut Vec<M>);
+    /// Routes one element event, adding any messages it gives to `out`,
+    /// and says what it did with it.
+    fn input(&mut self, event: &Event, pointer: Option<Point>, now: Instant, out: &mut Vec<M>) -> Routed;
+
+    /// The runtime's elements took `event` before it reached the target:
+    /// Tab moving among their stops. A toolkit that hears the window's
+    /// events before the runtime does drops it, so one owner acts on a key
+    /// (section 6, rule 1). The default does nothing.
+    fn kept(&mut self, event: &Event) {
+        let _ = event;
+    }
 
     /// Moves the keyboard focus.
     fn focus(&mut self, target: &FocusTarget, select: Selection);
+
+    /// Lets go of the keyboard focus because one of the runtime's own
+    /// elements takes it (section 6, rule 1). It must be done before the
+    /// next input event reaches the target, so a key never reaches two
+    /// owners. A toolkit that applies focus changes after it has routed its
+    /// events overrides this to apply the release first.
+    fn release_focus(&mut self) {
+        self.focus(&FocusTarget::Nothing, Selection::Keep);
+    }
 
     /// Scrolls so the element with `id` is in view.
     fn scroll_into_view(&mut self, id: &UiId);
@@ -39,7 +72,9 @@ pub trait Target<M> {
 pub struct NoTarget;
 
 impl<M> Target<M> for NoTarget {
-    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<M>) {}
+    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<M>) -> Routed {
+        Routed::Passed
+    }
 
     fn focus(&mut self, _target: &FocusTarget, _select: Selection) {
         panic!("{}: there are no elements to {}", NO_ELEMENTS, names::FOCUS);

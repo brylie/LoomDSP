@@ -4,7 +4,7 @@
 use super::*;
 use crate::effect::{Choice, Effects, FocusTarget, Selection};
 use crate::headless::{Harness, Headless};
-use crate::routing::NoTarget;
+use crate::routing::{NoTarget, Routed};
 use crate::view::Layer;
 use loom_ui_core::{Key, KeyEvent, Modifiers, Point, Size, UiId};
 use std::path::PathBuf;
@@ -178,11 +178,12 @@ struct Recorder {
 }
 
 impl Target<Msg> for Recorder {
-    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, out: &mut Vec<Msg>) {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, out: &mut Vec<Msg>) -> Routed {
         self.events.push(event.clone());
         if matches!(event, Event::Key(KeyEvent::Pressed { .. })) {
             out.push(Msg::Add(1));
         }
+        Routed::Taken
     }
 
     fn focus(&mut self, target: &FocusTarget, select: Selection) {

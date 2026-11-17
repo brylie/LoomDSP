@@ -95,7 +95,7 @@ pub struct Parts<'a, A: App, T> {
     pub window: WindowState,
     /// The window's panels, to lay out and paint with the typesetter the
     /// layers draw text with.
-    pub panels: Panels<'a>,
+    pub panels: Panels<'a, A>,
 }
 
 /// The input method, as the layers want it.

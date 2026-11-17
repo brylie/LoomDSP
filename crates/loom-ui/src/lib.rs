@@ -68,6 +68,7 @@ pub mod headless;
 mod hit;
 mod layout;
 pub mod paint;
+mod pointer;
 mod routing;
 mod runtime;
 #[cfg(feature = "shell")]
@@ -76,7 +77,7 @@ mod view;
 mod waker;
 mod window;
 
-pub use app::{App, Context, Deadline, WindowSpec};
+pub use app::{App, Context, Deadline, InputState, WindowSpec};
 pub use draw::Panels;
 pub use driver::Driver;
 pub use effect::{Effect, Effects};
@@ -85,7 +86,8 @@ pub use event::{AccessEvent, DriverEvent, WindowEvent, WindowState};
 pub use focus::{AccessNodes, FocusStep, RingStyle};
 pub use hit::Hit;
 pub use layout::Layout;
-pub use routing::{NO_ELEMENTS, NoTarget, Target};
+pub use pointer::Heard;
+pub use routing::{NO_ELEMENTS, NoTarget, Routed, Target};
 pub use runtime::{Counts, Next, Runtime};
 pub use view::{Layer, View};
 pub use waker::{Wake, Waker};

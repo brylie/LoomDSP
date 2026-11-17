@@ -23,7 +23,7 @@
 use loom_ui::effect::{FocusTarget, Image, NoGpu, Selection};
 use loom_ui::paint::{ListPainter, PaintList, PaintRenderer, PanelStyle, Target as PaintTarget, Typesetter};
 use loom_ui::shell::{self, Frame, Layers, NoServices, Options, Parts};
-use loom_ui::{App, Context, Deadline, Effects, Element, Layer, Length, Target, View, WindowEvent, WindowSpec};
+use loom_ui::{App, Context, Deadline, Effects, Element, Layer, Length, Routed, Target, View, WindowEvent, WindowSpec};
 use loom_ui_core::{Color, Event, Key, KeyEvent, Point, PointerEvent, Rect, Size, TextStyle, UiId, Weight};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -141,12 +141,13 @@ impl App for Countdown {
 struct Clicks;
 
 impl Target<Message> for Clicks {
-    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, out: &mut Vec<Message>) {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, out: &mut Vec<Message>) -> Routed {
         match event {
             Event::Pointer(PointerEvent::Pressed(_)) => out.push(Message::Start),
             Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) => out.push(Message::Quit),
-            _ => {}
+            _ => return Routed::Passed,
         }
+        Routed::Taken
     }
 
     fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
