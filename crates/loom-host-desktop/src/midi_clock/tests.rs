@@ -112,3 +112,55 @@ fn disabling_the_last_output_stops_the_receiver() {
     parts.engine.process(&mut [0.0; 2048], &mut [0.0; 2048]);
     assert!(worker.reader.pop().is_none(), "the engine stopped producing events");
 }
+
+/// A live receiver that loses its numbered name stops. Unchanged outputs keep playing.
+#[test]
+fn reconciliation_stops_renamed_receiver_only() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let (_, anchors) = RingBuffer::new(1);
+    let mut worker = Worker::new(
+        parts.engine.attach_clock_output(),
+        anchors,
+        48_000.0,
+        ClockPorts::default(),
+    );
+    let (sent, received) = mpsc::channel();
+    let renamed = Endpoint {
+        name: "Synth (2)".into(),
+        id: "second".into(),
+    };
+    let unchanged = Endpoint {
+        name: "Drums".into(),
+        id: "drums".into(),
+    };
+    for endpoint in [renamed.clone(), unchanged.clone()] {
+        let sent = sent.clone();
+        let id = endpoint.id.clone();
+        worker.connections.push(Connection {
+            endpoint,
+            _lifetime: Arc::new(()),
+            needs_state: false,
+            send_message: Box::new(move |message| sent.send((id.clone(), message)).is_ok()),
+        });
+    }
+
+    // The first Synth disappeared. Its surviving peer now has the bare name.
+    worker.apply_scan(Scan {
+        wanted: vec![renamed.name, unchanged.name.clone()],
+        available: Some(vec![
+            Endpoint {
+                name: "Synth".into(),
+                id: renamed.id,
+            },
+            unchanged.clone(),
+        ]),
+        ..Scan::default()
+    });
+    assert_eq!(
+        received.try_iter().collect::<Vec<_>>(),
+        [("second".into(), ClockMessage::Stop)]
+    );
+    assert_eq!(worker.connections.len(), 1);
+    assert!(worker.connections[0].endpoint == unchanged);
+    assert!(!worker.connections[0].needs_state);
+}

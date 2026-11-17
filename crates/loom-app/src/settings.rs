@@ -115,6 +115,8 @@ pub struct Rig {
     /// Last published clock loss state and output failure count.
     clock_lost: bool,
     clock_failures: u64,
+    /// Last reported discovery or connection error.
+    clock_routing_error: Option<String>,
     /// Last displayed tempo and Run state, to refresh values only when needed.
     clock_display: Option<(u64, bool)>,
     /// The audio input stream, and what the player was told about it.
@@ -235,6 +237,7 @@ impl Rig {
             clock_input: None,
             clock_lost: false,
             clock_failures: 0,
+            clock_routing_error: None,
             clock_display: None,
             input: InputSession::new(),
             playing: None,
@@ -1525,6 +1528,13 @@ impl App {
         if display != self.rig.clock_display {
             self.rig.clock_display = display;
             self.refresh_values();
+        }
+        let routing_error = self.rig.clock_ports.routing_error();
+        if routing_error != self.rig.clock_routing_error {
+            if let Some(error) = &routing_error {
+                self.alerts.warn(error.clone());
+            }
+            self.rig.clock_routing_error = routing_error;
         }
         let failures = self.rig.clock_ports.failures();
         if failures != self.rig.clock_failures {

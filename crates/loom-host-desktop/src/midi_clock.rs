@@ -20,12 +20,22 @@ pub struct ClockPorts(Arc<Ports>);
 struct Ports {
     enabled: Mutex<Vec<String>>,
     failures: AtomicU64,
+    routing_error: Mutex<Option<String>>,
 }
 
 impl ClockPorts {
     /// Replaces the list of output names enabled for clock.
     pub fn set_enabled(&self, names: &[String]) {
         *self.0.enabled.lock().unwrap_or_else(|err| err.into_inner()) = names.to_vec();
+    }
+
+    /// The current discovery or connection error, if the worker is retrying one.
+    pub fn routing_error(&self) -> Option<String> {
+        self.0
+            .routing_error
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
     }
 
     /// Timing and device send failures since the rig started.
@@ -130,6 +140,7 @@ struct Scan {
     /// Absent when the MIDI service could not list ports. Keep live routes then.
     available: Option<Vec<Endpoint>>,
     opened: Vec<Connection>,
+    error: Option<String>,
 }
 
 /// Discovers and opens outputs without holding up MIDI deadlines.
@@ -137,9 +148,11 @@ fn scan_ports(stop: &AtomicBool, ports: &ClockPorts, updates: SyncSender<Scan>) 
     let mut known = Vec::new();
     while !stop.load(Ordering::Relaxed) {
         let wanted = ports.0.enabled.lock().unwrap_or_else(|err| err.into_inner()).clone();
+        let mut scan = prepare_scan(wanted, &mut known);
+        *ports.0.routing_error.lock().unwrap_or_else(|err| err.into_inner()) = scan.error.take();
         // At most one update queues. The next scan retries handles that
         // were dropped because the worker still had an update waiting.
-        match updates.try_send(prepare_scan(wanted, &mut known)) {
+        match updates.try_send(scan) {
             Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
             Err(mpsc::TrySendError::Disconnected(_)) => break,
         }
@@ -159,7 +172,13 @@ fn prepare_scan(wanted: Vec<String>, known: &mut Vec<(Endpoint, Weak<()>)>) -> S
     if scan.wanted.is_empty() {
         return scan;
     }
-    let Ok(ports) = discover() else { return scan };
+    let ports = match discover() {
+        Ok(ports) => ports,
+        Err(error) => {
+            scan.error = Some(format!("Could not list MIDI clock outputs: {error}"));
+            return scan;
+        }
+    };
     let mut available = Vec::new();
     for (endpoint, port) in ports {
         if !scan.wanted.contains(&endpoint.name) {
@@ -169,18 +188,28 @@ fn prepare_scan(wanted: Vec<String>, known: &mut Vec<(Endpoint, Weak<()>)>) -> S
         if known.iter().any(|(live, _)| *live == endpoint) {
             continue;
         }
-        if let Ok(output) = MidiOutput::new("LoomDSP clock")
-            && let Ok(mut connection) = output.connect(&port, "loomdsp-clock")
-        {
-            let lifetime = Arc::new(());
-            known.push((endpoint.clone(), Arc::downgrade(&lifetime)));
-            scan.opened.push(Connection {
-                endpoint,
-                send_message: Box::new(move |message| message.encode(|bytes| connection.send(bytes)).is_ok()),
-                needs_state: true,
-                _lifetime: lifetime,
-            });
-        }
+        let mut connection = match MidiOutput::new("LoomDSP clock")
+            .map_err(|error| error.to_string())
+            .and_then(|output| {
+                output
+                    .connect(&port, "loomdsp-clock")
+                    .map_err(|error| error.to_string())
+            }) {
+            Ok(connection) => connection,
+            Err(error) => {
+                scan.error
+                    .get_or_insert_with(|| format!("Could not open MIDI clock output \"{}\": {error}", endpoint.name));
+                continue;
+            }
+        };
+        let lifetime = Arc::new(());
+        known.push((endpoint.clone(), Arc::downgrade(&lifetime)));
+        scan.opened.push(Connection {
+            endpoint,
+            send_message: Box::new(move |message| message.encode(|bytes| connection.send(bytes)).is_ok()),
+            needs_state: true,
+            _lifetime: lifetime,
+        });
     }
     scan.available = Some(available);
     scan
@@ -268,13 +297,15 @@ impl Worker {
     /// Installs already-opened routes without calling the MIDI discovery API.
     fn apply_scan(&mut self, scan: Scan) {
         self.connections.retain_mut(|connection| {
-            if !scan.wanted.contains(&connection.endpoint.name) {
+            let keep = scan.wanted.contains(&connection.endpoint.name)
+                && scan
+                    .available
+                    .as_ref()
+                    .is_none_or(|available| available.contains(&connection.endpoint));
+            if !keep {
                 connection.send(ClockMessage::Stop);
-                return false;
             }
-            scan.available
-                .as_ref()
-                .is_none_or(|available| available.contains(&connection.endpoint))
+            keep
         });
         self.connections.extend(scan.opened);
         self.reader.set_enabled(!self.connections.is_empty());
