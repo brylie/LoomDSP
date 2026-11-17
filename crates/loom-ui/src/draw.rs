@@ -26,6 +26,7 @@
 //! The walk paints a whole layer each time it is asked: it runs only for
 //! frames that are drawn, and a still window draws none (NFR-PERF-04).
 
+use crate::focus::Focus;
 use crate::layout::{Layout, Record, cut};
 use crate::paint::{Align, PanelStyle, Quad, TextPainter, TextRun, Vertical};
 use crate::runtime::Counts;
@@ -40,15 +41,19 @@ pub struct Panels<'a> {
     pub(crate) window: &'a mut Window,
     pub(crate) counts: &'a mut Counts,
     pub(crate) size: Size,
+    pub(crate) focus: &'a mut Focus,
 }
 
 impl Panels<'_> {
-    /// Lays out what changed since the last call, as
-    /// [`Runtime::lay_out`](crate::Runtime::lay_out) does.
+    /// Lays out what changed since the last call, and settles the focus
+    /// on what is laid out, as [`Runtime::lay_out`](crate::Runtime::lay_out)
+    /// does. When that gives one of the runtime's elements the focus, the
+    /// routing target lets go of its own before the runtime routes again.
     pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
         let laid = self.window.lay_out(self.size, text);
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
+        self.focus.settle(self.window);
     }
 
     /// Paints the panels of `layer`, as

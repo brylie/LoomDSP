@@ -40,6 +40,7 @@
 //! [`colour`](Element::colour), or in the panel style's text colour
 //! ([`PanelStyle`](crate::paint::PanelStyle)).
 
+use crate::access::Access;
 use loom_ui_core::{Color, IdKey, TextStyle, UiId};
 use std::num::NonZeroU16;
 
@@ -195,6 +196,8 @@ pub struct Element {
     pub(crate) wrap: bool,
     pub(crate) opaque: bool,
     pub(crate) look: Look,
+    pub(crate) focusable: bool,
+    pub(crate) access: Option<Access>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -215,6 +218,8 @@ impl Element {
             wrap: false,
             opaque: false,
             look: Look::default(),
+            focusable: false,
+            access: None,
             children,
         }
     }
@@ -377,6 +382,31 @@ impl Element {
             Kind::Text { colour: set, .. } => *set = Some(colour),
             _ => debug_assert!(false, "only text has a colour"),
         }
+        self
+    }
+
+    /// Makes it a focus stop: Tab and Shift+Tab reach it, a press on it
+    /// focuses it, and its node offers the Focus action (ui-layer.md,
+    /// section 6). Focus is by UI ID, so it needs a key.
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, when the panel is laid out, if it has no key.
+    pub fn focusable(mut self) -> Self {
+        self.focusable = true;
+        self
+    }
+
+    /// What it is to a screen reader: its node comes from this element, so
+    /// the node and the box laid out cannot disagree (section 7, rule 1).
+    /// A node needs a UI ID, so it needs a key.
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, when the panel is laid out, if it has no key or
+    /// `access` breaks section 7, rule 2 ([`Access::problem`]).
+    pub fn access(mut self, access: Access) -> Self {
+        self.access = Some(access);
         self
     }
 

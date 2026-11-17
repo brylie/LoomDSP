@@ -40,6 +40,7 @@
 //! The layout engine is `taffy`, behind these types: no taffy type is in
 //! this crate's API.
 
+use crate::access::{Access, Problem};
 use crate::element::{Align, Element, Kind, Length, Look, Padding};
 use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, TextStyle, UiId, Vector};
 use std::collections::HashMap;
@@ -66,13 +67,17 @@ pub struct Layout {
     by_id: HashMap<UiId, usize>,
     /// Elements whose UI ID an earlier element already had.
     duplicates: usize,
-    /// Panic on a duplicate UI ID. On in a debug build; a test turns it off
+    /// Panic on a duplicate UI ID, and on a focus stop or an accessed
+    /// element that breaks a rule. On in a debug build; a test turns it off
     /// to check what a release build does.
     panic_on_duplicate: bool,
     /// The panel's size, after [`Layout::compute`].
     size: Size,
     /// The slots, in tree order: the panel each names, and its record.
     slots: Vec<(UiId, usize)>,
+    /// Focus stops and accessed elements that break a rule, in tree order:
+    /// its UI ID where it has one, and what is wrong.
+    problems: Vec<(Option<UiId>, Problem)>,
 }
 
 /// The space offered along one axis.
@@ -147,6 +152,12 @@ pub(crate) struct Record {
     pub(crate) id: Option<UiId>,
     /// It takes the pointer even where no keyed element is.
     pub(crate) opaque: bool,
+    /// It is a focus stop. Only an element with a UI ID is one.
+    pub(crate) focusable: bool,
+    /// What it is to a screen reader. Only an element with a UI ID has it.
+    pub(crate) access: Option<Access>,
+    /// The panel this record's slot holds, for a slot.
+    pub(crate) slot: Option<UiId>,
     /// Where it is in the panel, after [`Layout::compute`].
     pub(crate) bounds: Rect,
     /// How it is drawn: its box, and whether it clips what is inside.
@@ -348,6 +359,7 @@ impl Layout {
             panic_on_duplicate: cfg!(debug_assertions),
             size: Size::ZERO,
             slots: Vec::new(),
+            problems: Vec::new(),
         }
     }
 
@@ -363,6 +375,7 @@ impl Layout {
         self.records.clear();
         self.by_id.clear();
         self.slots.clear();
+        self.problems.clear();
         self.duplicates = 0;
         let (width, height) = (root.width, root.height);
         let scope = self.panel.clone();
@@ -530,6 +543,14 @@ impl Layout {
         self.records.len()
     }
 
+    /// True when the element with UI ID `id` has a node: it has an
+    /// [`Access`].
+    pub(crate) fn has_node(&self, id: &UiId) -> bool {
+        self.by_id
+            .get(id)
+            .is_some_and(|index| self.records[*index].access.is_some())
+    }
+
     /// Every element, in tree order, for hit-testing and painting.
     pub(crate) fn records(&self) -> &[Record] {
         &self.records
@@ -548,7 +569,27 @@ impl Layout {
         }
     }
 
-    /// Turns off the panic on a duplicate UI ID, as in a release build. For
+    /// Focus stops and accessed elements that break a rule, in tree order:
+    /// one with no key ([`Problem::NoKey`]), a stop with no [`Access`]
+    /// ([`Problem::StopWithoutAccess`]), a slot with one
+    /// ([`Problem::SlotWithAccess`]), and an [`Access`] that breaks section
+    /// 7, rule 2. A debug build panics on the first instead, so this
+    /// is for a release build and for a test that checks every panel.
+    pub fn access_problems(&self) -> &[(Option<UiId>, Problem)] {
+        &self.problems
+    }
+
+    /// Notes a problem, and panics on it in a debug build.
+    fn problem(&mut self, id: Option<UiId>, problem: Problem) {
+        let at = id
+            .as_ref()
+            .map_or_else(|| format!("in panel {}", self.panel), ToString::to_string);
+        assert!(!self.panic_on_duplicate, "an element {at} breaks a rule: {problem}");
+        self.problems.push((id, problem));
+    }
+
+    /// Turns off the panic on a duplicate UI ID, and on a focus stop or an
+    /// accessed element that breaks a rule, as in a release build. For
     /// tests, and for a window whose own checks are off.
     pub(crate) fn allow_duplicates(&mut self) {
         self.panic_on_duplicate = false;
@@ -572,9 +613,15 @@ impl Layout {
             key,
             opaque,
             look,
+            focusable,
+            access,
             children,
             ..
         } = element;
+        let slot = match &kind {
+            Kind::Slot(panel) => Some(panel.clone()),
+            _ => None,
+        };
         let node = match kind {
             Kind::Text {
                 text,
@@ -624,9 +671,29 @@ impl Layout {
                 kept = Some(id.clone());
             }
         }
+        if (focusable || access.is_some()) && id.is_none() {
+            self.problem(None, Problem::NoKey);
+        }
+        let access = access.filter(|_| kept.is_some());
+        let stop = kept.is_some() && is_stop(focusable, access.as_ref());
+        if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
+            self.problem(kept.clone(), problem);
+        }
+        if stop && access.is_none() {
+            self.problem(kept.clone(), Problem::StopWithoutAccess);
+        }
+        let access = if slot.is_some() && access.is_some() {
+            self.problem(kept.clone(), Problem::SlotWithAccess);
+            None
+        } else {
+            access
+        };
         self.records.push(Record {
             node,
             parent,
+            focusable: stop,
+            access,
+            slot,
             id: kept,
             opaque,
             bounds: Rect::new(Point::ORIGIN, Size::ZERO),
@@ -647,6 +714,15 @@ impl Layout {
         }
         node
     }
+}
+
+/// Whether an element its panel marked `focusable`, with `access`, is a
+/// focus stop. This is the one place that says so (ui-layer.md, section
+/// 6, rule 2). A turned-off element is not one, as on macOS and Windows:
+/// Tab passes over it. Its node stays in the tree with its description
+/// (section 7, rule 23), and offers no Focus.
+fn is_stop(focusable: bool, access: Option<&Access>) -> bool {
+    focusable && !access.is_some_and(Access::is_disabled)
 }
 
 /// The root's size along one axis, in `space`. A fill root takes a

@@ -382,7 +382,11 @@ Now replace Iced's widgets with a small widget layer of our own, view by view. I
 
      **Done (second part):** panels draw ([spec](../design/ui-layer.md), section 5, rule 9). Elements set a background, a border that takes room, a radius, a rectangular clip, and a text colour; `Runtime::paint` walks one layer's panels in draw order into a `TextPainter`, with `PanelStyle` for the text colour the app gives. Hit-testing clips as drawing does, and a panel is cut to its slot. The shell lends the panels to the layers (`Parts::panels`), so a layer lays out and paints with its own typesetter; `examples/window.rs` draws its card that way. A headless test paints a panel on the GPU and checks its fill, border, corner, text, and clip. The app paints no panel yet. Next: stacking by layer (item 2), then row 1.
    - **Hit-testing and focus:** a focus order, focus rings, Tab and Shift+Tab, and focus that the accessibility tree reports.
+
+     **Done:** `Element::focusable` makes a keyed element a focus stop. The runtime keeps the focus among its own elements, in reading order (spec section 6, rule 2, as decided 2026-11-16), and moves it with Tab and Shift+Tab, which a focused element passes on with Ctrl held. A router reads `Runtime::focus_stops` and `Runtime::focus_step`, which says `PastEnd` past either end, and calls `Runtime::focus_at` for a press its layer took, which shows no ring. The ring is data (`Runtime::focus_ring`, and `RingStyle`, which the app fills from `style.rs`, checked at 3:1 against the panel backgrounds); `Runtime::paint` draws it. No view uses any of it yet.
    - **Accessibility:** every widget gives its AccessKit node from the same element, so the tree and the screen cannot disagree.
+
+     **Done:** `Element::access` takes an `Access` (`access.rs`), our own type, checked against spec section 7, rule 2 at layout. `Context::access_nodes` gives each laid-out panel's nodes, nested as the elements are, with IDs from the app's table, bounds in physical pixels, and the focus. The app splices them into its tree until phase 4. No view uses them yet.
    - **Cursors:** a cursor type of our own in `loom-ui-core`, in place of winit's `CursorIcon`, which `shell::Report` carries until then.
 
      **Done:** `loom_ui_core::Cursor` holds the shapes the app shows today: the canvas's, which were `CursorShape` in `loom-canvas`, and the text beam and not-allowed sign that Iced's text fields and turned-off switches show. `shell::Pointer` carries it, and the shell alone turns it into winit's `CursorIcon` (`shell.rs`, `icon`). The bridge maps Iced's `mouse::Interaction` onto it, and Iced's shapes no part of the app shows become the arrow. A shape is added when a view needs it.
@@ -427,6 +431,7 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
 
 1. Remove `iced`, `iced_wgpu`, and `iced_runtime` from `Cargo.toml` files. Depend on `winit`, `wgpu`, Parley, `swash`, `accesskit`, and `accesskit_winit` directly. With Iced gone, `cosmic-text` and `cryoglyph` leave the tree, and the canvas and the panels share one Parley font context. Once our `wgpu` is free to move, weigh Vello against our glyph atlas.
 2. Run `cargo deny check` and `cargo tree -d`, and remove duplicates.
+   - The runtime builds the whole accessibility tree and keeps the table of node IDs (`IdTable`), which the app keeps until then (spec section 7, Behaviour). The app's tree code in `a11y/` is left only for the canvas's custom element.
 3. Update the documents:
    - `AGENTS.md` (App and Canvas paragraphs, commands);
    - `docs/dev/architecture.md`;

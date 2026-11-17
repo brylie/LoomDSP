@@ -134,6 +134,35 @@ e.colour(
     assert_eq!(inline_values(source), [1, 2, 5]);
 }
 
+/// The focus ring stands out at 3:1 or more against every background a
+/// panel part sits on: the panel, a card, and the highlighted row (WCAG
+/// 2.2, 1.4.11 and 2.4.13), and is at least 2 logical pixels wide.
+#[test]
+fn the_focus_ring_stands_out() {
+    use loom_canvas::contrast_ratio;
+    use loom_canvas::iced_convert::ToCore as _;
+    let ring = super::focus_ring();
+    assert!(ring.width >= 2.0, "{} px", ring.width);
+    let app = crate::tests::app();
+    let theme = app.theme();
+    let palette = theme.extended_palette();
+    let highlight = crate::browser::row_style(&theme, true)
+        .background
+        .map(|b| match b {
+            iced::Background::Color(c) => c,
+            _ => panic!("a flat highlight"),
+        })
+        .expect("a highlight fill");
+    for (name, fill) in [
+        ("the panel", palette.background.base.color),
+        ("a card", palette.background.weak.color),
+        ("the highlighted row", highlight),
+    ] {
+        let ratio = contrast_ratio(ring.color, fill.to_core());
+        assert!(ratio >= 3.0, "on {name}: {ratio:.2}:1");
+    }
+}
+
 /// No app source writes a size or a colour inline: every `.size(...)`,
 /// `text_size(...)`, `.radius(...)`, and `.border(...)` takes a token from
 /// this module, as does every `.background(...)` and `.colour(...)` of a

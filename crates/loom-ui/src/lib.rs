@@ -30,6 +30,13 @@
 //!   in the look it sets, cut to its clips and its slot, which
 //!   hit-testing cuts the same way. A shell layer lays out and paints
 //!   through [`Panels`], lent with the app in [`shell::Parts`].
+//! - **Focus and the accessibility tree** ([`Element::focusable`],
+//!   [`Element::access`], [`access`]): a keyed element can be a focus stop
+//!   and say what it is to a screen reader. The runtime keeps the focus
+//!   among its own elements, moves it with Tab and Shift+Tab in reading
+//!   order ([`Runtime::focus_step`]), and gives each laid-out element's
+//!   node from that same element ([`Context::access_nodes`]). See
+//!   `examples/focus.rs`.
 //! - **Painting** ([`paint`]): text set with Parley and rounded boxes, in
 //!   layers cut to their clips, drawn by [`paint::PaintRenderer`] (the
 //!   `gpu` feature, which `shell` turns on) from one glyph atlas. It needs
@@ -49,12 +56,14 @@
 //! - **The loop sleeps** when nothing is queued, nothing animates, and no
 //!   deadline is near.
 
+pub mod access;
 mod app;
 mod draw;
 mod driver;
 pub mod effect;
 mod element;
 mod event;
+mod focus;
 pub mod headless;
 mod hit;
 mod layout;
@@ -73,6 +82,7 @@ pub use driver::Driver;
 pub use effect::{Effect, Effects};
 pub use element::{Align, Element, Length, Padding};
 pub use event::{AccessEvent, DriverEvent, WindowEvent, WindowState};
+pub use focus::{AccessNodes, FocusStep, RingStyle};
 pub use hit::Hit;
 pub use layout::Layout;
 pub use routing::{NO_ELEMENTS, NoTarget, Target};

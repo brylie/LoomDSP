@@ -2,9 +2,11 @@
 
 use crate::effect::Effects;
 use crate::event::{AccessEvent, WindowEvent, WindowState};
+use crate::focus::AccessNodes;
 use crate::view::View;
 use crate::waker::Waker;
-use loom_ui_core::{Size, UiId};
+use crate::window::Window;
+use loom_ui_core::{IdTable, Size, UiId};
 use std::time::Instant;
 
 /// The program built on the runtime: one message type and one `update`.
@@ -80,6 +82,9 @@ pub struct Context<'a, M> {
     pub(crate) waker: &'a Waker<M>,
     pub(crate) focused: Option<UiId>,
     pub(crate) window: WindowState,
+    /// The runtime's panels, as last laid out, for their nodes. None
+    /// outside a runtime.
+    pub(crate) panels: Option<&'a Window>,
 }
 
 impl<'a, M> Context<'a, M> {
@@ -93,6 +98,7 @@ impl<'a, M> Context<'a, M> {
             waker,
             focused,
             window,
+            panels: None,
         }
     }
 
@@ -115,6 +121,26 @@ impl<'a, M> Context<'a, M> {
     /// The window's size, scale, and focus.
     pub fn window(&self) -> WindowState {
         self.window
+    }
+
+    /// The nodes of the runtime's own elements, as last laid out, for the
+    /// app to put in the tree it sends (ui-layer.md, section 7). Node IDs
+    /// come from `ids`, the app's one table for every node in the window,
+    /// and bounds are in physical pixels at the window's scale. The focus is
+    /// the runtime's focused element, when it has a node. It reads the last
+    /// layout, and layout runs after the turn, so in the turn that opens a
+    /// panel its nodes are not there yet: an app whose panels changed builds
+    /// the tree after the draw ([`Effects::after_draw`](crate::Effects::after_draw)).
+    ///
+    /// A screen reader's action on one of these nodes reaches the app as
+    /// any other does, through [`App::accessibility_event`]. The app turns
+    /// it into a message by the UI ID its table gives (section 7, rule 6),
+    /// and a Focus action into [`Effects::focus`](crate::Effects::focus).
+    /// Empty outside a runtime.
+    pub fn access_nodes(&self, ids: &mut IdTable) -> AccessNodes {
+        self.panels.map_or_else(AccessNodes::default, |panels| {
+            panels.access_nodes(ids, self.window.scale, self.focused.as_ref())
+        })
     }
 }
 

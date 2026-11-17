@@ -40,14 +40,9 @@ impl Layout {
     /// below the panel.
     pub fn hit(&self, point: Point) -> Option<Hit<'_>> {
         let records = self.records();
-        // Tree order, backwards, visits a later sibling before an earlier
-        // one and a child before its parent: the order they are on top.
-        let index = records
-            .iter()
-            .rposition(|record| (record.id.is_some() || record.opaque) && record.shows(point))?;
         // The element itself, or the nearest keyed element around an
         // opaque one with no key.
-        let mut at = Some(index);
+        let mut at = Some(self.hit_record(point)?);
         while let Some(index) = at {
             if let Some(id) = &records[index].id {
                 return Some(Hit::Element(id));
@@ -55,6 +50,31 @@ impl Layout {
             at = records[index].parent;
         }
         Some(Hit::Blocked)
+    }
+
+    /// The focus stop a press at `point` focuses: the hit element, or the
+    /// nearest focus stop around it. `None` when the panel does not take
+    /// the point; `Some(None)` when it takes it and no stop is there.
+    pub(crate) fn focus_at(&self, point: Point) -> Option<Option<&UiId>> {
+        let records = self.records();
+        let mut at = Some(self.hit_record(point)?);
+        while let Some(index) = at {
+            if records[index].focusable {
+                return Some(records[index].id.as_ref());
+            }
+            at = records[index].parent;
+        }
+        Some(None)
+    }
+
+    /// The topmost record that takes `point`: a keyed or an opaque one,
+    /// where it shows, so a part a clip cuts away is not hit.
+    fn hit_record(&self, point: Point) -> Option<usize> {
+        // Tree order, backwards, visits a later sibling before an earlier
+        // one and a child before its parent: the order they are on top.
+        self.records()
+            .iter()
+            .rposition(|record| (record.id.is_some() || record.opaque) && record.shows(point))
     }
 }
 
