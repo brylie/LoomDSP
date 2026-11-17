@@ -12,8 +12,10 @@ use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Element, Layer, Length, View};
 use loom_ui_core::{Point, UiId};
 
-/// The pop-up's size, from the window's top-left corner.
-const POP: (f32, f32) = (220.0, 48.0);
+/// The pop-up's size, from the window's top-left corner. Wide enough to
+/// cover Open whatever the system font's widths (its centre is near 200 on
+/// macOS and 226 on Linux), and far short of Undo, near 1150.
+const POP: (f32, f32) = (400.0, 48.0);
 
 /// The bar's button: its key, and its size, at the window's bottom left.
 const GO: (f32, f32) = (60.0, 16.0);
