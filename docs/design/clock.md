@@ -270,7 +270,7 @@ These details were settled while building the module.
 
 #### Portable MIDI crate
 
-The workspace's `loom-midi` crate owns short MIDI message encoding and decoding, clock units, and fixed-size interval calculations. It takes timestamps from its callers and can build for `wasm32-unknown-unknown`. `loom-core` owns input selection, the patch transport, and scheduled clock events. `loom-host-desktop` owns device connections, timestamps, and timed sending.
+[ADR-0047](../adr/0047-portable-midi-protocol.md) puts short MIDI message encoding and decoding, clock units, and fixed-size interval calculations in `loom-midi`. The crate takes timestamps from its callers and can build for `wasm32-unknown-unknown`. `loom-core` owns input selection, the patch transport, and scheduled clock events. `loom-host-desktop` owns device connections, timestamps, and timed sending.
 
 #### Acceptance checks: timing details
 

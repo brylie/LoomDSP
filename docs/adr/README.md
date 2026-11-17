@@ -82,3 +82,4 @@ The status line holds one of these values and nothing else. The date line is the
 | [0044](0044-swap-fades-are-transient-at-every-copy.md) | Swap fades are transient at every copy | Accepted |
 | [0045](0045-a-seeded-value-of-a-voice-is-the-same-on-both-sides.md) | A seeded value that belongs to a voice is the same on both of its sides | Accepted |
 | [0046](0046-empty-slot-swaps-fade-at-every-copy.md) | Empty-slot swaps fade at every copy, from each copy's own thru ends | Accepted |
+| [0047](0047-portable-midi-protocol.md) | Portable MIDI protocol code lives in `loom-midi` | Accepted |
