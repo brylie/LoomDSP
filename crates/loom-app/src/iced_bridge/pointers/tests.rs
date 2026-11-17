@@ -127,6 +127,28 @@ fn a_press_iced_captures_leaves_our_focus() {
     assert_eq!(ui.runtime().focused(), Some(&go()), "Iced took that press");
 }
 
+/// One element has the keyboard across the window (section 6, rule 1):
+/// with our button focused, a click into an Iced value field moves the
+/// keyboard there, and the runtime lets go of its focus, so the app's one
+/// copy of focus is the field.
+#[test]
+fn an_iced_field_taking_the_keyboard_ends_our_focus() {
+    let mut ui = ui_with(bar);
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.redraw();
+    // Focused as one of the app's panels would ask, with no click, which
+    // the test's hook would turn into opening Help.
+    ui.send(Message::MidiGhosts);
+    assert_eq!(ui.runtime().focused(), Some(&go()));
+    let field = ui.value_field(4, 0);
+    click(&mut ui, field);
+    ui.redraw();
+    let part = ui.focused_field();
+    assert!(part.is_some(), "the value field has the keyboard");
+    assert_eq!(ui.runtime().focused(), None, "ours let go");
+    assert_eq!(ui.app().focus, part, "the app's copy is the field");
+}
+
 /// A layer above Iced takes its point before Iced hears it: a click on the
 /// pop-up over the toolbar is the pop-up's, and the toolbar under it hears
 /// nothing. A move onto it hovers it; a move off, onto the bar below Iced,

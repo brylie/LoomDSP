@@ -135,6 +135,9 @@ pub struct Runtime<A: App, T> {
     /// The text field that had focus when the runtime last looked, so it
     /// can tell the app when focus leaves it ([`FieldEvent::Left`]).
     field_focus: Option<UiId>,
+    /// The target's focus as last seen, to tell when one of its own
+    /// elements takes the keyboard ([`Runtime::follow_target`]).
+    target_seen: Option<UiId>,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -161,6 +164,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             focus: Focus::default(),
             pointer: Pointer::default(),
             field_focus: None,
+            target_seen: None,
         }
     }
 
@@ -362,6 +366,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if std::mem::take(&mut self.focus.release_owed) {
             self.release_target();
         }
+    }
+
+    /// Lets go of the runtime's focus when one of the target's own elements
+    /// took the keyboard since the last turn, as a click on a toolkit's
+    /// field or the toolkit's own Tab does: one element has focus across
+    /// the window (section 6, rule 1). The target's focus only changing to
+    /// nothing leaves the runtime's as it is. Returns true when the focus
+    /// changed.
+    fn follow_target(&mut self) -> bool {
+        let now = self.target.focused();
+        if now == self.target_seen {
+            return false;
+        }
+        self.target_seen = now;
+        if self.target_seen.is_none() || self.focus.id.is_none() {
+            return false;
+        }
+        self.focus.wanted = None;
+        self.focus.id = None;
+        self.focus.ring = false;
+        true
     }
 
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
@@ -636,9 +661,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     ) -> Next {
         self.counts.turns += 1;
         self.release_if_owed();
-        // A layout between turns may have moved focus off a field.
+        // The target's own element may have taken the keyboard since the
+        // last turn; then a layout between turns, or that, may have moved
+        // focus off a field.
+        let mut redraw = self.follow_target();
         self.field_left(&mut batch);
-        let mut redraw = false;
 
         // 2. Route the event.
         match event {
