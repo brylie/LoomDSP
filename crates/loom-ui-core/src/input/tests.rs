@@ -130,3 +130,15 @@ fn events_compare_by_content() {
     );
     assert_ne!(Event::Redraw, Event::WindowUnfocused);
 }
+
+/// The word key is Option (Alt) on a Mac and Control elsewhere, and the
+/// other platform's word key does not count.
+#[test]
+fn the_word_key_is_alt_on_a_mac_and_control_elsewhere() {
+    let alt = held(false, false, true, false);
+    let control = held(false, true, false, false);
+    assert!(alt.word_on(Platform::Mac));
+    assert!(!control.word_on(Platform::Mac));
+    assert!(control.word_on(Platform::Other));
+    assert!(!alt.word_on(Platform::Other));
+}

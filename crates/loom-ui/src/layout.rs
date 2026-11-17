@@ -225,6 +225,8 @@ pub(crate) struct TextPaint<'a> {
     pub(crate) wrap: bool,
     /// Its colour, or `None` for the panel style's.
     pub(crate) colour: Option<Color>,
+    /// It is a text field's text, which the field paints from its editor.
+    pub(crate) field: bool,
 }
 
 /// What a leaf's node holds: a text, or a slot.
@@ -295,6 +297,9 @@ pub(crate) struct TextLeaf {
     style: TextStyle,
     wrap: bool,
     colour: Option<Color>,
+    /// It is a text field's: one line, at least one em wide and one line
+    /// tall, so an empty field still has room for its caret and a press.
+    field: bool,
     /// The size on one line, for text that does not wrap.
     line: Option<Size>,
     /// The last sizes of wrapping text, by the width it was given (`None`
@@ -312,9 +317,18 @@ impl TextLeaf {
         measure: &mut dyn Measure,
     ) -> Size {
         if !self.wrap {
-            return *self
-                .line
-                .get_or_insert_with(|| measure.text(&self.text, self.style, None));
+            let (text, style, field) = (&self.text, self.style, self.field);
+            return *self.line.get_or_insert_with(|| {
+                let size = measure.text(text, style, None);
+                if field {
+                    Size::new(
+                        size.width.max(style.size),
+                        size.height.max(style.size * style.line_height),
+                    )
+                } else {
+                    size
+                }
+            });
         }
         // The narrowest it can be is its longest word, which is what
         // breaking at every space gives.
@@ -564,6 +578,7 @@ impl Layout {
                 style: leaf.style,
                 wrap: leaf.wrap,
                 colour: leaf.colour,
+                field: leaf.field,
             }),
             Leaf::Slot { .. } => None,
         }
@@ -634,6 +649,22 @@ impl Layout {
                     style: text_style,
                     wrap,
                     colour,
+                    field: false,
+                    line: None,
+                    wrapped: [None; WRAPPED_SIZES],
+                });
+                self.tree.new_leaf_with_context(style, leaf)
+            }
+            Kind::Field {
+                text,
+                style: text_style,
+            } => {
+                let leaf = Leaf::Text(TextLeaf {
+                    text,
+                    style: text_style,
+                    wrap: false,
+                    colour: None,
+                    field: true,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
                 });
@@ -761,7 +792,7 @@ fn style(element: &Element, around: Parent) -> Style {
             style.justify_items = element.align_x.map_or(AlignItems::NORMAL, items);
             style.align_items = element.align_y.map_or(AlignItems::NORMAL, items);
         }
-        Kind::Text { .. } | Kind::Space | Kind::Slot(_) => {}
+        Kind::Text { .. } | Kind::Field { .. } | Kind::Space | Kind::Slot(_) => {}
     }
     if element.wrap {
         style.flex_wrap = FlexWrap::Wrap;

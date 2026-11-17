@@ -250,3 +250,94 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     assert!(pressed(&heard, &x) && pressed(&heard, &q), "{heard:?}");
     assert!(!pressed(&heard, &tab), "{heard:?}");
 }
+
+/// A field of the runtime's, in the panels layer, below Iced.
+fn bar_with_field(view: &mut View) {
+    use loom_ui::paint::{TextStyle, Weight};
+    const STYLE: TextStyle = TextStyle {
+        size: 13.0,
+        line_height: 1.25,
+        weight: Weight::Regular,
+    };
+    view.panel_with(UiId::panel("test-bar"), Layer::Panels, &(), |_| {
+        Element::row([Element::field(String::new(), STYLE)
+            .key("go")
+            .width(Length::Fixed(120.0))
+            .access(Access::new(Role::TextInput, "Name"))])
+    });
+}
+
+/// The meeting point of the field and the layers (ui-layer.md, section 6,
+/// rule 1): a key the runtime's field takes is kept from Iced, with Iced's
+/// toolbar and canvas below it. Typing, an arrow, and Backspace are the
+/// field's and never reach Iced's key listener, so Backspace never deletes
+/// a selected module, and the shortcut for undo never reaches the patch.
+/// (The panel has no model, so the field's text goes back to empty at each
+/// layout; loom-ui's own tests check the editing.) Their releases go on
+/// to Iced by design. A field takes no Tab:
+/// with the field the only stop, Tab steps past the end and focus leaves
+/// the runtime's elements for Iced's (section 6, rule 2). Escape, which the field passes on,
+/// still reaches Iced. The field is focused by a focus effect, so the test
+/// needs nothing of Iced's focus.
+#[test]
+fn a_key_our_field_takes_is_kept_from_iced() {
+    use crate::ui_test::key_press;
+    let none = keyboard::Modifiers::default();
+    let named = |key| keyboard::Key::Named(key);
+    let a = keyboard::Key::Character("a".into());
+    let b = keyboard::Key::Character("b".into());
+    let z = keyboard::Key::Character("z".into());
+    let left = named(keyboard::key::Named::ArrowLeft);
+    let backspace = named(keyboard::key::Named::Backspace);
+    let tab = named(keyboard::key::Named::Tab);
+    let escape = named(keyboard::key::Named::Escape);
+
+    let mut ui = ui_with(bar_with_field);
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.send(Message::MidiGhosts);
+    assert_eq!(ui.runtime().focused(), Some(&go()), "our field has the focus");
+    let modules = ui.app().session.controller.graph().len();
+
+    let heard = iced_heard(&ui.step(&[
+        key_press(a.clone(), none, Some("a"), false),
+        key_press(b.clone(), none, Some("b"), false),
+        key_press(left.clone(), none, None, false),
+        key_press(backspace.clone(), none, None, false),
+    ]));
+    for key in [&a, &b, &left, &backspace] {
+        assert!(!pressed(&heard, key), "{key:?} reached Iced: {heard:?}");
+    }
+    assert_eq!(
+        ui.app().session.controller.graph().len(),
+        modules,
+        "Backspace deleted no module"
+    );
+
+    // Only presses are kept (`Target::kept`): a release goes on to Iced by
+    // design, so nothing in Iced holds a key down.
+    let heard = iced_heard(&ui.step(&[
+        crate::ui_test::key_released(a.clone(), none),
+        crate::ui_test::key_released(backspace.clone(), none),
+    ]));
+    let released = |key: &keyboard::Key| {
+        heard
+            .iter()
+            .any(|event| matches!(event, keyboard::Event::KeyReleased { key: got, .. } if got == key))
+    };
+    assert!(released(&a) && released(&backspace), "{heard:?}");
+    assert_eq!(ui.runtime().focused(), Some(&go()), "a release moves no focus");
+
+    let heard = iced_heard(&ui.step(&[key_press(z.clone(), keyboard::Modifiers::COMMAND, None, false)]));
+    assert!(!pressed(&heard, &z), "{heard:?}");
+
+    let heard = iced_heard(&ui.step(&[key_press(escape.clone(), none, None, false)]));
+    assert!(pressed(&heard, &escape), "{heard:?}");
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&go()),
+        "Escape left the focus on our field"
+    );
+
+    ui.step(&[key_press(tab.clone(), none, None, false)]);
+    assert_eq!(ui.runtime().focused(), None, "Tab left our field, past our last stop");
+}

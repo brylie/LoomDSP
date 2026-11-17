@@ -12,6 +12,8 @@ use loom_ui_core::{Color, Point, Rect, Size, UiId};
 /// The style the tests paint with: its text colour is one no element sets.
 const PANEL: PanelStyle = PanelStyle {
     text: Color::rgb(0.5, 0.5, 0.5),
+    caret: Color::rgb(0.9, 0.9, 0.9),
+    selection: Color::rgb(0.2, 0.3, 0.6),
 };
 
 /// A red the tests set on boxes and text.
@@ -30,7 +32,7 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
 fn painted(root: Element, origin: Point) -> Vec<Painted> {
     let layout = lay_out(root, 200.0, 100.0);
     let mut recorder = Recorder::default();
-    let count = layout.paint(origin, rect(0.0, 0.0, 1000.0, 1000.0), &mut recorder, &PANEL);
+    let count = layout.paint(origin, rect(0.0, 0.0, 1000.0, 1000.0), &mut recorder, &PANEL, None);
     assert_eq!(count, layout.element_count() as u64, "every element is counted");
     recorder.painted
 }
@@ -197,7 +199,7 @@ fn window() -> Window {
 fn a_layer_paints_its_panels_in_draw_order_cut_to_their_slots() {
     let window = window();
     let mut recorder = Recorder::default();
-    let painted = window.paint(Layer::Panels, &mut recorder, &PANEL);
+    let painted = window.paint(Layer::Panels, &mut recorder, &PANEL, None, 1.0);
     assert_eq!(
         (painted.panels, painted.elements),
         (2, 4),
@@ -313,7 +315,7 @@ fn a_framed_slot_holds_its_panel_inside_the_frame() {
         Some(rect(5.0, 5.0, 30.0, 20.0))
     );
     let mut recorder = Recorder::default();
-    window.paint(Layer::Panels, &mut recorder, &PANEL);
+    window.paint(Layer::Panels, &mut recorder, &PANEL, None, 1.0);
     assert_eq!(
         begins(&recorder)[1],
         rect(5.0, 5.0, 30.0, 20.0),
@@ -371,7 +373,7 @@ fn a_slot_inside_a_clip_is_cut_by_it_two_levels_down() {
         ("grandchild", Layer::Panels, grandchild),
     ]);
     let mut recorder = Recorder::default();
-    window.paint(Layer::Panels, &mut recorder, &PANEL);
+    window.paint(Layer::Panels, &mut recorder, &PANEL, None, 1.0);
     let cut = rect(0.0, 0.0, 30.0, 20.0);
     let begins = begins(&recorder);
     // The parent, its row's clip, the child, and the grandchild.

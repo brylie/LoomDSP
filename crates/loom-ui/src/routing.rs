@@ -35,7 +35,12 @@ pub trait Target<M> {
     fn input(&mut self, event: &Event, pointer: Option<Point>, now: Instant, out: &mut Vec<M>) -> Routed;
 
     /// The runtime's elements took `event` before it reached the target:
-    /// Tab moving among their stops. A toolkit that hears the window's
+    /// Tab moving among their stops, or a key a focused text field took
+    /// (ui-layer.md, section 8). Only a press is ever kept: the release of
+    /// a key the runtime took goes on to the target as usual. A release
+    /// acts on nothing in a field or a toolkit's widget, and a toolkit
+    /// that tracks held keys must still hear it, or it would hold the key
+    /// down forever. A toolkit that hears the window's
     /// events before the runtime does drops it, so one owner acts on a key
     /// (section 6, rule 1). The default does nothing.
     fn kept(&mut self, event: &Event) {

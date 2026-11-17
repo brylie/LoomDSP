@@ -825,6 +825,8 @@ fn paint_counts_what_it_painted() {
     runtime.lay_out(&mut crate::layout::tests::Mono::default());
     let style = crate::paint::PanelStyle {
         text: loom_ui_core::Color::WHITE,
+        caret: loom_ui_core::Color::WHITE,
+        selection: loom_ui_core::Color::BLACK,
     };
     let mut recorder = crate::paint::testing::Recorder::default();
     runtime.paint(Layer::Panels, &mut recorder, &style);
@@ -847,6 +849,8 @@ fn paint_before_lay_out_panics() {
     runtime.handle(DriverEvent::Woken, Instant::now(), &mut Headless::new());
     let style = crate::paint::PanelStyle {
         text: loom_ui_core::Color::WHITE,
+        caret: loom_ui_core::Color::WHITE,
+        selection: loom_ui_core::Color::BLACK,
     };
     runtime.paint(Layer::Panels, &mut crate::paint::testing::Recorder::default(), &style);
 }

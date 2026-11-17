@@ -523,8 +523,13 @@ impl WindowLayers {
         self.text.borrow_mut().begin_frame();
         parts.panels.lay_out(&mut *self.text.borrow_mut());
         let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, frame.size);
+        // A field of the runtime's looks like one of Iced's while both
+        // draw: the caret in the text colour, the selection in the theme's
+        // weak primary.
         let style = PanelStyle {
             text: theme.palette().text.to_core(),
+            caret: theme.palette().text.to_core(),
+            selection: theme.extended_palette().primary.weak.color.to_core(),
         };
         let mut lists = (PaintList::new(whole), PaintList::new(whole));
         for (layers, list) in [

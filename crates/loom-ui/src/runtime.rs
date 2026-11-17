@@ -35,6 +35,7 @@ use crate::draw::Panels;
 use crate::driver::Driver;
 use crate::effect::{Effect, FocusTarget, Selection};
 use crate::event::{DriverEvent, WindowEvent, WindowState};
+use crate::field::FieldEvent;
 use crate::focus::{Focus, FocusStep};
 use crate::hit::Hit;
 use crate::pointer::Pointer;
@@ -42,7 +43,7 @@ use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
-use loom_ui_core::{Event, Key, KeyEvent, Point, PointerEvent, Rect, TextMeasure, UiId};
+use loom_ui_core::{Event, Key, KeyEvent, Platform, Point, PointerEvent, Rect, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -131,6 +132,9 @@ pub struct Runtime<A: App, T> {
     focus: Focus,
     /// What is hovered and pressed among the runtime's own elements.
     pointer: Pointer,
+    /// The text field that had focus when the runtime last looked, so it
+    /// can tell the app when focus leaves it ([`FieldEvent::Left`]).
+    field_focus: Option<UiId>,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -156,6 +160,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             counts: Counts::default(),
             focus: Focus::default(),
             pointer: Pointer::default(),
+            field_focus: None,
         }
     }
 
@@ -202,6 +207,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 pointer: &mut self.pointer,
                 app: &self.app,
                 waker: &self.waker,
+                scale: self.window.scale,
             },
         )
     }
@@ -454,6 +460,71 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// A key while one of the runtime's text fields has focus: the field
+    /// gets it first (section 6, rule 6), after Tab has had its turn. Copy
+    /// and cut write the clipboard, and an edit or Enter becomes the app's
+    /// message, in this turn's batch. Returns whether the field used the
+    /// key, so it goes no further, and whether it needs a redraw.
+    ///
+    /// A key the field used does not reach the routing target. When the
+    /// runtime has a panel step (rule 6, step 4), it goes between the field
+    /// and the target, and hears every key, with word of what the field
+    /// used, so a panel that moves by Up and Down still hears them.
+    fn field_key(
+        &mut self,
+        event: &Event,
+        now: Instant,
+        driver: &mut impl Driver<A::Message>,
+        batch: &mut Vec<A::Message>,
+    ) -> (bool, bool) {
+        let Event::Key(key) = event else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id.clone().filter(|id| self.panels.fields.has(id)) else {
+            return (false, false);
+        };
+        let used = self.panels.fields.key(&id, key, now, Platform::current());
+        if let Some(text) = used.copy {
+            driver.clipboard_write(text);
+        }
+        let text = || {
+            self.panels
+                .fields
+                .get(&id)
+                .map(|field| field.text().to_owned())
+                .unwrap_or_default()
+        };
+        if used.edited {
+            batch.extend(self.app.field_event(&id, &FieldEvent::Edited(text())));
+        }
+        if used.committed {
+            batch.extend(self.app.field_event(&id, &FieldEvent::Committed(text())));
+        }
+        (used.taken, used.redraw)
+    }
+
+    /// When focus has moved off the text field that had it: the field
+    /// forgets its undo steps, and the app hears [`FieldEvent::Left`], in
+    /// `batch`. The window losing the keys moves no focus, so it is not
+    /// this (section 8, rule 3).
+    fn field_left(&mut self, batch: &mut Vec<A::Message>) {
+        if let Some(field) = self.field_focus.take() {
+            if self.focus.id.as_ref() == Some(&field) {
+                self.field_focus = Some(field);
+                return;
+            }
+            self.panels.fields.left(&field);
+            batch.extend(self.app.field_event(&field, &FieldEvent::Left));
+        }
+        self.field_focus = self.focus.id.clone().filter(|id| self.panels.fields.has(id));
+    }
+
+    /// The text the field with UI ID `id` shows now, for tests.
+    #[cfg(test)]
+    pub(crate) fn field_text(&self, id: &UiId) -> Option<&str> {
+        self.panels.fields.get(id).map(crate::field::FieldState::text)
+    }
+
     /// Where the element with UI ID `id` is in the window, in logical
     /// pixels, as last laid out. A panel's own key gives the whole panel.
     ///
@@ -557,6 +628,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     ) -> Next {
         self.counts.turns += 1;
         self.release_if_owed();
+        // A layout between turns may have moved focus off a field.
+        self.field_left(&mut batch);
         let mut redraw = false;
 
         // 2. Route the event.
@@ -567,7 +640,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 if taken {
                     self.target.kept(&event);
                 } else {
-                    redraw |= self.route(&event, pointer, now, &mut batch);
+                    let (used, changed) = self.field_key(&event, now, driver, &mut batch);
+                    redraw |= changed;
+                    if used {
+                        // A key a field took is the field's alone, so a
+                        // toolkit that heard it first drops it too.
+                        self.target.kept(&event);
+                    } else {
+                        redraw |= self.route(&event, pointer, now, &mut batch);
+                    }
                 }
                 // A focus the event moved is the first thing the app hears
                 // this turn, so no update reads a focus it was not told of.
@@ -586,6 +667,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             DriverEvent::Woken | DriverEvent::DeadlineReached => {}
         }
 
+        // Tab, or a press the target handed back, may have moved focus off
+        // a field: the app hears of it in this turn.
+        self.field_left(&mut batch);
+
         // 3. One update per message, each followed by its own effects.
         let mut updates = 0;
         for message in batch {
@@ -596,6 +681,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             redraw |= self.update(message, now, driver);
         }
         self.counts.updates += updates as u64;
+        // A focus effect may have moved focus off a field: the app hears
+        // of it on the next turn.
+        let mut later = Vec::new();
+        self.field_left(&mut later);
+        self.pending.extend(later);
 
         // 4. What changed.
         if updates > 0 || self.view.is_none() {

@@ -219,6 +219,8 @@ impl Layers<Countdown, Clicks> for Card {
         let mut list = PaintList::new(whole);
         let style = PanelStyle {
             text: Color::rgb(0.93, 0.94, 0.96),
+            caret: Color::rgb(0.93, 0.94, 0.96),
+            selection: Color::rgb(0.25, 0.4, 0.65),
         };
         parts
             .panels

@@ -320,7 +320,12 @@ fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
         origin,
         whole,
         &mut ListPainter::new(&text, &mut list),
-        &crate::paint::PanelStyle { text: Color::WHITE },
+        &crate::paint::PanelStyle {
+            text: Color::WHITE,
+            caret: Color::WHITE,
+            selection: Color::BLACK,
+        },
+        None,
     );
     let pixels = draw(&device, &queue, list);
 

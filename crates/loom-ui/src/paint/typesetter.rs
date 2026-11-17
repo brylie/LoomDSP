@@ -52,6 +52,31 @@ fn shared_fonts() -> FontContext {
     .clone()
 }
 
+/// How text in `style` is set: the family, size, line height, and weight.
+/// The one place that says so, for the typesetter's layouts and a text
+/// field's editor alike, so a field's caret sits where its drawn text puts
+/// the letters (ui-layer.md, section 8, rule 9).
+pub(crate) fn properties(style: TextStyle) -> impl Iterator<Item = StyleProperty<'static, ()>> {
+    [
+        Some(StyleProperty::FontFamily(FontFamily::from(GenericFamily::SystemUi))),
+        Some(StyleProperty::FontSize(style.size)),
+        Some(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+            style.line_height,
+        ))),
+        (style.weight == Weight::Bold).then_some(StyleProperty::FontWeight(parley::FontWeight::BOLD)),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+/// The system's fonts and a layout context of their own, for a text field's
+/// editor ([`crate::field`]). A key reaches a field in a turn, where no
+/// typesetter is at hand, and moving by word walks the shaped layout, so
+/// the runtime keeps these. The fonts are the process's one scan.
+pub(crate) fn editing_contexts() -> (FontContext, LayoutContext<()>) {
+    (shared_fonts(), LayoutContext::new())
+}
+
 /// What decides a layout besides its text. Floats are kept as bits, so the
 /// key can be hashed; a host quantises its text sizes, as the canvas does by
 /// zoom.
@@ -173,13 +198,8 @@ impl Typesetter {
     /// Sets `text` from nothing.
     fn build(&mut self, text: &str, style: TextStyle, wrap: Option<f32>) -> TextLayout {
         let mut builder = self.layouts.ranged_builder(&mut self.fonts, text, 1.0, true);
-        builder.push_default(StyleProperty::FontFamily(FontFamily::from(GenericFamily::SystemUi)));
-        builder.push_default(StyleProperty::FontSize(style.size));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-            style.line_height,
-        )));
-        if style.weight == Weight::Bold {
-            builder.push_default(StyleProperty::FontWeight(parley::FontWeight::BOLD));
+        for property in properties(style) {
+            builder.push_default(property);
         }
         let mut layout = builder.build(text);
         layout.break_all_lines(wrap);

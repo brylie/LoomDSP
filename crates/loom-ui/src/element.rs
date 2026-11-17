@@ -172,6 +172,14 @@ pub(crate) enum Kind {
         /// The colour of its letters, or the panel style's.
         colour: Option<Color>,
     },
+    /// A single-line text field: the app's text, edited in place
+    /// ([`crate::field`]).
+    Field {
+        /// The text the app holds.
+        text: String,
+        /// How it is set.
+        style: TextStyle,
+    },
     /// Empty space.
     Space,
     /// The place of another panel, named by its key.
@@ -251,6 +259,29 @@ impl Element {
             },
             Vec::new(),
         )
+    }
+
+    /// A single-line text field showing `text`, the text the app holds,
+    /// set in `style`. It is a focus stop, unless it is turned off, and a
+    /// screen reader meets it as a text input: give it its name with
+    /// [`Element::access`] and `Role::TextInput`. It needs a key.
+    ///
+    /// The field edits in place and tells the app each change through
+    /// [`App::field_event`](crate::App::field_event). The text stays the
+    /// app's: whenever a layout shows a text other than the field's, the
+    /// field takes it, so an edit the app does not take goes back
+    /// (ui-layer.md, section 8, rule 2).
+    pub fn field(text: impl Into<String>, style: TextStyle) -> Self {
+        let mut field = Self::new(
+            Kind::Field {
+                text: text.into(),
+                style,
+            },
+            Vec::new(),
+        );
+        field.focusable = true;
+        field.look.clip = true;
+        field
     }
 
     /// Empty space, `width` by `height`.

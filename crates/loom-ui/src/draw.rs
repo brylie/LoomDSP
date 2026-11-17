@@ -16,6 +16,11 @@
 //!   inside its border and padding, in its own colour or the panel style's.
 //!   A text box taller than its lines keeps its text at the top, as in
 //!   flexbox; centring is the parent's alignment;
+//! - a text field paints, in a layer cut to its content box, its
+//!   selection, then its text slid left by its scroll, then its caret while
+//!   it has focus and nothing is selected. The caret is one logical pixel
+//!   wide, snapped to whole physical pixels so it stays sharp at any scale,
+//!   and steady, so a still window draws nothing;
 //! - an element that clips starts a layer cut to its bounds, and ends it
 //!   after its last child. The cut is a rectangle, even on round corners.
 //!
@@ -27,6 +32,7 @@
 //! frames that are drawn, and a still window draws none (NFR-PERF-04).
 
 use crate::app::App;
+use crate::field::{FieldState, Fields};
 use crate::focus::Focus;
 use crate::layout::{Layout, Record, cut};
 use crate::paint::{Align, PanelStyle, Quad, TextPainter, TextRun, Vertical};
@@ -35,7 +41,7 @@ use crate::runtime::Counts;
 use crate::view::Layer;
 use crate::waker::Waker;
 use crate::window::Window;
-use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, Vector};
+use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, UiId, Vector};
 
 /// The window's panels, lent to a driver's drawing code with the app and
 /// the target ([`Runtime::parts`](crate::Runtime::parts)): it lays them out
@@ -50,6 +56,19 @@ pub struct Panels<'a, A: App> {
     pub(crate) app: &'a A,
     /// Posts a message for the next turn and wakes the driver.
     pub(crate) waker: &'a Waker<A::Message>,
+    /// Physical pixels per logical pixel, for the caret.
+    pub(crate) scale: f32,
+}
+
+/// What painting a text field needs besides its layout: the fields'
+/// state, which one has focus, and the window's scale.
+pub(crate) struct FieldPaint<'a> {
+    /// The fields' state.
+    pub(crate) fields: &'a Fields,
+    /// The element with focus.
+    pub(crate) focus: Option<&'a UiId>,
+    /// Physical pixels per logical pixel.
+    pub(crate) scale: f32,
 }
 
 impl<A: App> Panels<'_, A> {
@@ -96,7 +115,9 @@ impl<A: App> Panels<'_, A> {
             self.window.is_settled(self.size),
             "the window changed since it was last laid out: call Runtime::lay_out first"
         );
-        let painted = self.window.paint(layer, painter, style);
+        let painted = self
+            .window
+            .paint(layer, painter, style, self.focus.id.as_ref(), self.scale);
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
     }
@@ -131,7 +152,14 @@ fn is_around(records: &[Record], ancestor: usize, index: usize) -> bool {
 impl Layout {
     /// Paints the panel with its corner at `origin` in the host, inside
     /// `clip`, there too. Returns how many elements it painted.
-    pub(crate) fn paint(&self, origin: Point, clip: Rect, painter: &mut dyn TextPainter, style: &PanelStyle) -> u64 {
+    pub(crate) fn paint(
+        &self,
+        origin: Point,
+        clip: Rect,
+        painter: &mut dyn TextPainter,
+        style: &PanelStyle,
+        fields: Option<&FieldPaint<'_>>,
+    ) -> u64 {
         let by = Vector::new(origin.x, origin.y);
         let records = self.records();
         // The clipping elements whose layers are open, outermost first.
@@ -160,6 +188,32 @@ impl Layout {
                 let content = moved(record.content, by);
                 // Its own clip too: a text that clips cuts its own letters.
                 let shows = record.inner_clip().map_or(clip, |inner| cut(clip, moved(inner, by)));
+                let field = record
+                    .id
+                    .as_ref()
+                    .filter(|_| text.field)
+                    .zip(fields)
+                    .and_then(|(id, fields)| {
+                        let state = fields.fields.get(id)?;
+                        Some((state, fields.focus == Some(id), fields.scale))
+                    });
+                if let Some((state, focused, scale)) = field {
+                    paint_field(
+                        state,
+                        focused,
+                        content,
+                        cut(shows, content),
+                        text,
+                        painter,
+                        style,
+                        scale,
+                    );
+                    if look.clip {
+                        painter.begin_layer(bounds);
+                        open.push(index);
+                    }
+                    continue;
+                }
                 painter.text(&TextRun {
                     text: text.text,
                     anchor: content.position(),
@@ -187,6 +241,65 @@ impl Layout {
         }
         records.len() as u64
     }
+}
+
+/// `value` in logical pixels, moved to the nearest whole physical pixel
+/// at `scale`.
+fn snap(value: f32, scale: f32) -> f32 {
+    (value * scale).round() / scale
+}
+
+/// Paints a text field: its selection, its text, and its caret when
+/// `focused`, from its editor's layout, in a layer cut to `shows`, with its
+/// text's start at the corner of `content`, slid left by its scroll.
+#[allow(clippy::too_many_arguments)]
+fn paint_field(
+    state: &FieldState,
+    focused: bool,
+    content: Rect,
+    shows: Rect,
+    text: crate::layout::TextPaint<'_>,
+    painter: &mut dyn TextPainter,
+    style: &PanelStyle,
+    scale: f32,
+) {
+    let start = Point::new(content.x - state.scroll(), content.y);
+    painter.begin_layer(shows);
+    for rect in state.selection() {
+        painter.quad(Quad {
+            rect: Rect::new(Point::new(start.x + rect.x, start.y + rect.y), rect.size()),
+            fill: style.selection,
+            border: Color::TRANSPARENT,
+            border_width: 0.0,
+            radius: 0.0,
+        });
+    }
+    painter.text(&TextRun {
+        text: state.text(),
+        anchor: start,
+        bounds: Size::new(state.text_width().max(content.width), content.height),
+        align: Align::Left,
+        vertical: Vertical::Top,
+        style: text.style,
+        wrap: false,
+        colour: style.text,
+        clip: shows,
+    });
+    if focused && let Some(caret) = state.caret() {
+        let scale = if scale > 0.0 { scale } else { 1.0 };
+        let width = scale.round().max(1.0) / scale;
+        painter.quad(Quad {
+            rect: Rect::new(
+                Point::new(snap(start.x + caret.x, scale), snap(start.y + caret.y, scale)),
+                Size::new(width, snap(caret.height, scale)),
+            ),
+            fill: style.caret,
+            border: Color::TRANSPARENT,
+            border_width: 0.0,
+            radius: 0.0,
+        });
+    }
+    painter.end_layer();
 }
 
 #[cfg(test)]

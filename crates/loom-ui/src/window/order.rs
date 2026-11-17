@@ -183,6 +183,11 @@ impl Window {
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
                 let mut node = access.node(element.focusable);
+                // A text field's value is its text as it is now, which may
+                // be ahead of the app's by the edits of this turn.
+                if let Some(field) = self.fields.get(id) {
+                    node.set_value(field.text().to_owned());
+                }
                 let bounds = element.bounds;
                 let origin = record.origin;
                 let scale = f64::from(scale);

@@ -219,6 +219,17 @@ impl Modifiers {
         }
     }
 
+    /// Whether the key that moves and deletes by word in a text field is
+    /// held, on the given platform: Option (Alt) on a Mac and Control
+    /// everywhere else, each platform's own convention for its text fields.
+    #[must_use]
+    pub const fn word_on(self, platform: Platform) -> bool {
+        match platform {
+            Platform::Mac => self.alt,
+            Platform::Other => self.control,
+        }
+    }
+
     /// Whether the key for shortcuts is held, on the platform this program
     /// was built for.
     #[must_use]

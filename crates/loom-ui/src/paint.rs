@@ -48,6 +48,7 @@ pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
 pub use typesetter::Typesetter;
+pub(crate) use typesetter::{editing_contexts, properties};
 
 // The style and the measuring trait live in `loom-ui-core`, so the layout
 // measures text with the same types (docs/design/ui-layer.md, section 1).
@@ -67,6 +68,10 @@ pub const SHADER: &str = include_str!("paint/paint.wgsl");
 pub struct PanelStyle {
     /// The colour of text that sets none of its own.
     pub text: Color,
+    /// The colour of a text field's caret.
+    pub caret: Color,
+    /// The colour behind a text field's selected text.
+    pub selection: Color,
 }
 
 /// How text sits on its anchor, left to right.

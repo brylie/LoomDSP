@@ -81,6 +81,20 @@ pub trait App {
         None
     }
 
+    /// The message for something a text field of the runtime's did, if
+    /// the app wants one: `id` is the field's UI ID. The field's text is
+    /// the app's (ui-layer.md, section 8, rule 2): an app that wants an
+    /// edit to stay takes [`FieldEvent::Edited`] into its model, so the next
+    /// view shows it; one that does not, by giving `None`, sees the field go
+    /// back to its old text at the next layout. It reads state and changes
+    /// none.
+    ///
+    /// [`FieldEvent::Edited`]: crate::FieldEvent::Edited
+    fn field_event(&self, id: &UiId, event: &crate::FieldEvent) -> Option<Self::Message> {
+        let _ = (id, event);
+        None
+    }
+
     /// True while something on screen moves and needs a frame each display
     /// refresh. A frame draws and runs no update.
     fn animating(&self) -> bool {

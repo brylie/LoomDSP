@@ -56,6 +56,9 @@ pub(crate) struct Window {
     /// Panic on a slot mistake. On in a debug build; a test turns it off to
     /// check what a release build does.
     panic_on_mistake: bool,
+    /// The text fields' editing state, by UI ID, after the last
+    /// [`Window::lay_out`] (`field.rs`).
+    pub(crate) fields: crate::field::Fields,
     /// The focus stops in focus order, after the last [`Window::lay_out`]
     /// (`order.rs`).
     stops: Vec<UiId>,
@@ -177,6 +180,7 @@ impl Default for Window {
             laid_out_at: None,
             panic_on_mistake: cfg!(debug_assertions),
             stops: Vec::new(),
+            fields: crate::field::Fields::default(),
         }
     }
 }
@@ -355,7 +359,30 @@ impl Window {
         }
         self.laid_out_at = Some(size);
         self.order_stops();
+        self.sync_fields();
         laid
+    }
+
+    /// Gives the fields what this layout found: each field's text, style,
+    /// and width. A field whose element went loses its state.
+    fn sync_fields(&mut self) {
+        let mut seen = Vec::new();
+        for key in &self.order {
+            let layout = &self.records[key].layout;
+            for (index, element) in layout.records().iter().enumerate() {
+                if let (Some(id), Some(text)) = (&element.id, layout.text(index))
+                    && text.field
+                {
+                    seen.push(crate::field::Seen {
+                        id: id.clone(),
+                        text: text.text.to_owned(),
+                        style: text.style,
+                        width: element.content.width,
+                    });
+                }
+            }
+        }
+        self.fields.sync(seen);
     }
 
     /// Measures each rebuilt panel again in the spaces its shrink slot
@@ -528,6 +555,8 @@ impl Window {
         layer: Layer,
         painter: &mut dyn crate::paint::TextPainter,
         style: &crate::paint::PanelStyle,
+        focus: Option<&UiId>,
+        scale: f32,
     ) -> crate::draw::Painted {
         let mut painted = crate::draw::Painted::default();
         for key in &self.drawn {
@@ -536,7 +565,14 @@ impl Window {
                 continue;
             }
             painter.begin_layer(record.clip);
-            painted.elements += record.layout.paint(record.origin, record.clip, painter, style);
+            let fields = crate::draw::FieldPaint {
+                fields: &self.fields,
+                focus,
+                scale,
+            };
+            painted.elements += record
+                .layout
+                .paint(record.origin, record.clip, painter, style, Some(&fields));
             painted.panels += 1;
             painter.end_layer();
         }
