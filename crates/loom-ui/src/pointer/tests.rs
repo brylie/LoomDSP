@@ -88,6 +88,8 @@ struct Fake {
     answer: Routed,
     taken_from: f32,
     heard: Vec<Event>,
+    /// The target's own element with the keyboard, as a test sets it.
+    focus: Option<UiId>,
 }
 
 impl Target<Message> for Fake {
@@ -108,7 +110,7 @@ impl Target<Message> for Fake {
     fn scroll_into_view(&mut self, _id: &UiId) {}
 
     fn focused(&self) -> Option<UiId> {
-        None
+        self.focus.clone()
     }
 
     fn needs_redraw(&mut self, _updates: usize) -> bool {
@@ -128,6 +130,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         answer,
         taken_from: 350.0,
         heard: Vec::new(),
+        focus: None,
     };
     let window = WindowState::new(Size::new(400.0, 200.0));
     let mut harness = Harness::new(app, target, window, Instant::now());
@@ -424,4 +427,40 @@ fn tab_skips_the_stops_below_the_input_layer() {
         "left as it was"
     );
     assert_eq!(bar.app().heard.last(), Some(&Message::Key), "the key went on");
+}
+
+/// One element has focus across the window (section 6, rule 1): when the
+/// target's own field takes the keyboard, the runtime lets go of its
+/// focus, so the context names the field. The target's focus going to
+/// nothing changes nothing of the runtime's.
+#[test]
+fn the_targets_field_taking_the_keyboard_ends_our_focus() {
+    let tab = DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Tab,
+            modifiers: loom_ui_core::Modifiers::NONE,
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    };
+    let a = UiId::panel("bar").with("a");
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(tab.clone());
+    assert_eq!(harness.runtime().focused(), Some(&a));
+    let field = UiId::panel("toolkit").with("field");
+    harness.parts().1.focus = Some(field);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), None, "the field has the keyboard now");
+    assert_eq!(harness.runtime().focus_ring(), None);
+
+    harness.parts().1.focus = None;
+    harness.step(tab);
+    assert_eq!(harness.runtime().focused(), Some(&a));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&a),
+        "no new focus of the target's, so ours stays"
+    );
 }
