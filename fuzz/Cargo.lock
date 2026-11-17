@@ -82,10 +82,16 @@ dependencies = [
 name = "loom-core"
 version = "0.1.0"
 dependencies = [
+ "loom-dsp",
+ "loom-midi",
  "loom-rt",
  "rtrb",
  "thiserror",
 ]
+
+[[package]]
+name = "loom-dsp"
+version = "0.1.0"
 
 [[package]]
 name = "loom-fuzz"
@@ -98,10 +104,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom-midi"
+version = "0.1.0"
+
+[[package]]
 name = "loom-modules"
 version = "0.1.0"
 dependencies = [
  "loom-core",
+ "loom-dsp",
  "loom-rt",
 ]
 
@@ -110,8 +121,10 @@ name = "loom-patch"
 version = "0.1.0"
 dependencies = [
  "loom-core",
+ "loom-dsp",
  "ron",
  "serde",
+ "spdx",
  "thiserror",
 ]
 
@@ -204,6 +217,21 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "smallvec"
+version = "1.16.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
+
+[[package]]
+name = "spdx"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "646c5a367da914e3babcb9cd8e91c37ccaac42325b8f86f036513ad103f2a716"
+dependencies = [
+ "smallvec",
+]
 
 [[package]]
 name = "syn"
