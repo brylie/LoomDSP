@@ -287,6 +287,32 @@ fn a_release_elsewhere_clicks_nothing() {
     assert!(clicks(&harness).is_empty());
 }
 
+/// A release the target takes cancels the press too, as a release over
+/// nothing does: a press on our button, a release on the target's widget,
+/// then a press there and a release on our button click nothing. The same
+/// for a late answer the bridge hands back as taken (`pointer_taken`).
+#[test]
+fn a_release_the_target_takes_cancels_the_press() {
+    let mut passed = harness(false, Routed::Passed);
+    passed.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    passed.step(at(380.0, 100.0, PointerEvent::Released(PointerButton::Left)));
+    passed.step(at(380.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
+    passed.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert!(clicks(&passed).is_empty(), "{:?}", clicks(&passed));
+
+    let mut late = harness(false, Routed::Later);
+    let press = Event::Pointer(PointerEvent::Pressed(PointerButton::Left));
+    let release = Event::Pointer(PointerEvent::Released(PointerButton::Left));
+    let on_a = Point::new(5.0, 5.0);
+    let (_, _, mut panels) = late.parts();
+    assert!(panels.pointer_below(&press, on_a).taken);
+    let _ = panels.pointer_taken(&release);
+    let _ = panels.pointer_taken(&press);
+    assert!(panels.pointer_below(&release, on_a).taken);
+    late.step(key());
+    assert!(clicks(&late).is_empty(), "{:?}", clicks(&late));
+}
+
 /// One layer holds the hover. A move onto a button hovers it, a move the
 /// target takes clears it, a move over nothing of ours clears it, and the
 /// pointer leaving the window clears it. Hover runs no update.
@@ -355,4 +381,47 @@ fn tab_enters_from_nothing_only_while_the_panels_take_input() {
         harness.runtime().focus_ring().is_some(),
         "from the keyboard, with a ring"
     );
+}
+
+/// Tab moves only among the stops of the layers that take input. With
+/// focus on the bar and the input raised to the overlays, Tab goes to the
+/// overlay's button, not to the bar's next one. With no stop of the input
+/// layer, the focus below is left as it is and the key goes on.
+#[test]
+fn tab_skips_the_stops_below_the_input_layer() {
+    let tab = DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Tab,
+            modifiers: loom_ui_core::Modifiers::NONE,
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    };
+    let mut menu = harness(true, Routed::Passed);
+    menu.send(Message::Input(Layer::Canvas));
+    menu.step(tab.clone());
+    assert_eq!(menu.runtime().focused(), Some(&UiId::panel("menu").with("item")));
+    menu.step(tab.clone());
+    assert_eq!(menu.runtime().focused(), Some(&UiId::panel("bar").with("a")));
+    menu.send(Message::Input(Layer::Overlays));
+    menu.step(tab.clone());
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&UiId::panel("menu").with("item")),
+        "the overlay's button, not the bar's next"
+    );
+
+    let mut bar = harness(false, Routed::Passed);
+    bar.send(Message::Input(Layer::Canvas));
+    bar.step(tab.clone());
+    assert_eq!(bar.runtime().focused(), Some(&UiId::panel("bar").with("a")));
+    bar.send(Message::Input(Layer::Overlays));
+    bar.step(tab);
+    assert_eq!(
+        bar.runtime().focused(),
+        Some(&UiId::panel("bar").with("a")),
+        "left as it was"
+    );
+    assert_eq!(bar.app().heard.last(), Some(&Message::Key), "the key went on");
 }

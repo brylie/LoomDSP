@@ -141,7 +141,7 @@ impl Pointers {
             let Some((event, point)) = pointer else { continue };
             let heard = match status {
                 Status::Ignored => panels.pointer_below(event, *point),
-                Status::Captured => panels.pointer_left(),
+                Status::Captured => panels.pointer_taken(event),
             };
             redraw |= heard.redraw;
         }

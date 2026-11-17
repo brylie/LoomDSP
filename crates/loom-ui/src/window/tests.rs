@@ -324,6 +324,23 @@ fn a_removed_panel_is_gone() {
     assert!(screen.at("window").is_some());
 }
 
+/// A panel removed by a turn is out of the hit tests at once, before the
+/// next layout: a pointer routed between the turn and its frame finds
+/// nothing there, and does not read the removed panel's record.
+#[test]
+fn a_removed_panel_is_not_hit_before_the_next_layout() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("menu"), Layer::Overlays, &(), |_| {
+        Element::space(Length::Fixed(50.0), Length::Fixed(50.0)).key("item")
+    });
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert!(screen.window.hit(Point::new(10.0, 10.0)).is_some());
+    screen.show_view(View::new());
+    assert!(screen.window.hit(Point::new(10.0, 10.0)).is_none());
+}
+
 /// A view with the slot mistakes `mistake` names: a slot for a panel in
 /// another layer, a panel in two slots, or two panels in each other's
 /// slots.

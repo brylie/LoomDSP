@@ -116,11 +116,19 @@ impl<A: App> Panels<'_, A> {
         heard
     }
 
-    /// The pointer went where none of the runtime's layers is: another
-    /// toolkit took it. The hover clears, so one layer in one toolkit holds
-    /// it. A press stays: dragging across the other toolkit and coming back
-    /// still clicks (section 3, rule 4).
-    pub fn pointer_left(&mut self) -> Heard {
+    /// Another toolkit took `event`, a pointer event none of the runtime's
+    /// layers heard. The hover clears, so one layer in one toolkit holds
+    /// it. A press stays through a move: dragging across the other toolkit
+    /// and coming back still clicks. A left release there cancels it, and
+    /// so does a new left press, which can only follow a release the
+    /// runtime missed (section 3, rule 4).
+    pub fn pointer_taken(&mut self, event: &Event) -> Heard {
+        if matches!(
+            event,
+            Event::Pointer(PointerEvent::Pressed(PointerButton::Left) | PointerEvent::Released(PointerButton::Left))
+        ) {
+            self.pointer.pressed = None;
+        }
         Heard {
             taken: false,
             redraw: self.pointer.hovered.take().is_some(),

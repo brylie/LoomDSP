@@ -78,4 +78,12 @@ fn panels_draw_below_and_above_and_empty_lists_draw_nothing() {
     let at = |x: usize, y: usize| &drawn[(y * 64 + x) * 4..(y * 64 + x) * 4 + 3];
     assert_eq!(at(4, 4), [0, 0, 255], "above covers below");
     assert_eq!(at(40, 20), [255, 0, 0], "below shows where nothing is above");
+    let again = offscreen.pixels_again(size, 1.0, background).expect("read back");
+    assert_eq!(again, drawn, "drawing the last frame again draws its panels");
+    let none = offscreen
+        .pixels_with(size, 1.0, background, None, None)
+        .expect("read back");
+    assert_eq!(none, plain);
+    let again = offscreen.pixels_again(size, 1.0, background).expect("read back");
+    assert_eq!(again, plain, "a frame with no panels draws none again");
 }

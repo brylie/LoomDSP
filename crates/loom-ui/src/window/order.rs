@@ -115,6 +115,11 @@ impl Window {
             .max_by_key(|key| key.keys().len())
     }
 
+    /// The layer of the panel that holds the element with UI ID `id`.
+    pub(crate) fn layer_of(&self, id: &UiId) -> Option<Layer> {
+        self.panel_of(id).map(|panel| self.records[panel].layer)
+    }
+
     /// The first focus stop of the panel keyed `panel`, or of the panels in
     /// its slots, in focus order.
     pub(crate) fn first_stop_in(&self, panel: &UiId) -> Option<UiId> {

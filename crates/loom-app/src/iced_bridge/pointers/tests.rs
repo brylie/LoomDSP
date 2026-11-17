@@ -136,6 +136,10 @@ fn a_layer_above_iced_keeps_its_points_from_iced() {
     let mut ui = ui_with(bar_and_pop);
     let open = ui.text("Open").expect("the toolbar shows Open").center();
     assert!(open.x < POP.0 && open.y < POP.1, "the pop-up covers Open at {open:?}");
+    // The other half of what the pop-up's size assumes: Undo, where the
+    // hover goes back to Iced below, starts past its right edge.
+    let undo_box = ui.text("Undo").expect("the toolbar shows Undo");
+    assert!(undo_box.x >= POP.0, "the pop-up leaves Undo out, at {undo_box:?}");
     let heard = click(&mut ui, open);
     assert!(heard.iter().any(|m| matches!(m, Message::ShowShortcuts)), "{heard:?}");
     assert!(!heard.iter().any(|m| matches!(m, Message::File(_))), "{heard:?}");

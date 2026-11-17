@@ -276,15 +276,32 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// the last when `back` is set. [`FocusStep::PastEnd`] past either end.
     /// It moves nothing.
     pub fn focus_step(&self, from: Option<&UiId>, back: bool) -> FocusStep {
-        let stops = self.panels.stops();
-        let at = from.and_then(|from| stops.iter().position(|stop| stop == from));
+        self.step_among(self.panels.stops().iter().collect(), from, back)
+    }
+
+    /// [`Runtime::focus_step`] among `stops` only, in focus order.
+    fn step_among(&self, stops: Vec<&UiId>, from: Option<&UiId>, back: bool) -> FocusStep {
+        let at = from.and_then(|from| stops.iter().position(|stop| *stop == from));
         let next = match (at, back) {
             (None, false) => stops.first(),
             (None, true) => stops.last(),
             (Some(at), false) => stops.get(at + 1),
             (Some(at), true) => at.checked_sub(1).and_then(|at| stops.get(at)),
         };
-        next.map_or(FocusStep::PastEnd, |stop| FocusStep::To(stop.clone()))
+        next.map_or(FocusStep::PastEnd, |stop| FocusStep::To((*stop).clone()))
+    }
+
+    /// The focus stops Tab moves among now: those in the layers that take
+    /// input (section 5, rule 10), so Tab never reaches a stop under an
+    /// open overlay or question. A focus below them steps in from outside.
+    fn tab_step(&self, input: Layer, back: bool) -> FocusStep {
+        let stops = self
+            .panels
+            .stops()
+            .iter()
+            .filter(|stop| self.panels.layer_of(stop).is_some_and(|layer| layer >= input))
+            .collect();
+        self.step_among(stops, self.focus.id.as_ref(), back)
     }
 
     /// Focuses what a press at `point` reaches, for a router to call when
@@ -414,16 +431,25 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if modifiers.control {
             return (false, false);
         }
+        let input = self.app.input();
         if self.focus.id.is_none() {
-            let input = self.app.input();
             let enters = input.layer <= Layer::Panels && !input.canvas_focused && self.target.focused().is_none();
-            return match self.focus_step(None, modifiers.shift) {
+            return match self.tab_step(input.layer, modifiers.shift) {
                 FocusStep::To(stop) if enters => (true, self.focus_to(Some(stop))),
                 _ => (false, false),
             };
         }
-        match self.focus_step(self.focus.id.as_ref(), modifiers.shift) {
+        // A focus in a layer that takes no input now is left where it is
+        // when Tab finds no stop above it: the key goes on to the target.
+        let below = self
+            .focus
+            .id
+            .as_ref()
+            .and_then(|id| self.panels.layer_of(id))
+            .is_some_and(|layer| layer < input.layer);
+        match self.tab_step(input.layer, modifiers.shift) {
             FocusStep::To(stop) => (true, self.focus_to(Some(stop))),
+            FocusStep::PastEnd if below => (false, false),
             FocusStep::PastEnd => (false, self.focus_to(None)),
         }
     }
@@ -625,7 +651,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let mut redraw = above.redraw;
         if !above.taken {
             redraw |= match target.input(event, pointer, now, batch) {
-                Routed::Taken => panels.pointer_left().redraw,
+                Routed::Taken => panels.pointer_taken(event).redraw,
                 Routed::Passed => panels.pointer_below(event, point).redraw,
                 Routed::Later => false,
             };

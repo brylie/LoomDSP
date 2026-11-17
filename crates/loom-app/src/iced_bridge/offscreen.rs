@@ -38,6 +38,8 @@ pub(crate) struct Offscreen {
     canvas: CanvasPass,
     /// The renderers for `loom-ui` panels below and above Iced.
     panels: paint::PanelPass,
+    /// The last frame drew panels, so drawing it again draws them too.
+    drew_panels: bool,
 }
 
 impl Offscreen {
@@ -58,6 +60,7 @@ impl Offscreen {
         Some(Self {
             canvas: CanvasPass::new(&device, FORMAT),
             panels: paint::PanelPass::new(&device, FORMAT),
+            drew_panels: false,
             renderer: crate::Renderer::Primary(iced_wgpu::Renderer::new(engine, Font::DEFAULT, Pixels(16.0))),
             device,
             queue,
@@ -121,6 +124,7 @@ impl Offscreen {
             physical: size,
             scale,
         };
+        self.drew_panels = panels.is_some();
         let panels = panels.map(|(below, above)| {
             self.panels.set(&target, below, above);
             &self.panels
@@ -163,7 +167,8 @@ impl Offscreen {
             physical: size,
             scale,
         };
-        paint::draw_again(&target, iced, &mut self.canvas, background, None);
+        let panels = self.drew_panels.then_some(&mut self.panels);
+        paint::draw_again(&target, iced, &mut self.canvas, background, panels);
         read_back(&self.device, &self.queue, &texture, extent)
     }
 }
