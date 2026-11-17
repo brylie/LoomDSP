@@ -595,7 +595,14 @@ pub fn update_panel_values_dragging(
                         });
                         // While a cable drives the Transport's run input, the
                         // Run toggle shows the state it sets (clock.md).
-                        let value = driven_run(controller, id, w).unwrap_or(value);
+                        let value = if controller.follows_midi_clock()
+                            && d.id == loom_core::TRANSPORT_MODULE
+                            && w.binds("tempo")
+                        {
+                            ((controller.rendered_tempo().unwrap_or(f64::from(value)) * 10.0).round() / 10.0) as f32
+                        } else {
+                            driven_run(controller, id, w).unwrap_or(value)
+                        };
                         WidgetValue {
                             position: control_position(w.kind, spec, value),
                             peak: 0.0,
@@ -667,7 +674,7 @@ fn driven_run(controller: &Controller, id: ModuleId, w: &loom_core::Widget) -> O
         .graph()
         .cables()
         .any(|(_, to)| to == InputRef { module: id, port: 0 });
-    if !driven {
+    if !driven && !controller.follows_midi_clock() {
         return None;
     }
     let d = controller.graph().node(id)?.descriptor;
@@ -1026,6 +1033,18 @@ pub fn build(
     positions: &BTreeMap<u32, (f32, f32)>,
     sizes: &BTreeMap<u32, (u8, u8)>,
 ) -> Scene {
+    build_with_clock(controller, hierarchy, level, positions, sizes, None)
+}
+
+/// Builds the level with the current rig clock shown on the Transport tile.
+pub fn build_with_clock(
+    controller: &Controller,
+    hierarchy: &Hierarchy,
+    level: &ModulePath,
+    positions: &BTreeMap<u32, (f32, f32)>,
+    sizes: &BTreeMap<u32, (u8, u8)>,
+    clock_source: Option<&str>,
+) -> Scene {
     let graph = controller.graph();
     // Follows through slots and ports, kept for this build, so a long chain
     // of empty thru slots is walked once, not once per end on it.
@@ -1100,7 +1119,13 @@ pub fn build(
                 // Only a placeholder shows its label for now; known modules
                 // keep theirs without showing it (clipboard.md, rule 9, #526).
                 title: node.unknown.as_ref().map_or_else(
-                    || d.name.to_string(),
+                    || {
+                        if let Some(source) = clock_source.filter(|_| d.id == loom_core::TRANSPORT_MODULE) {
+                            format!("Following {source} clock")
+                        } else {
+                            d.name.to_string()
+                        }
+                    },
                     |unknown| node.label.clone().unwrap_or_else(|| unknown.kind.clone()),
                 ),
                 accent: family_colour(d.family),
@@ -1126,6 +1151,13 @@ pub fn build(
                     // mark and says so in its hover text (sub-patches.md,
                     // Exposing).
                     for (w, view) in d.panel.widgets.iter().zip(panel.widgets.iter_mut()) {
+                        if clock_source.is_some()
+                            && d.id == loom_core::TRANSPORT_MODULE
+                            && ["tempo", "run", "reset"].iter().any(|param| w.binds(param))
+                        {
+                            view.inert = true;
+                            view.hover.description = "Controlled by MIDI clock".into();
+                        }
                         if w.is_control()
                             && let Some((_, surface_name)) = hierarchy.exposure_of(id, w.bind())
                         {

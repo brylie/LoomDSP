@@ -4,6 +4,7 @@ members = [
     "crates/loom-rt",
     "crates/loom-dsp",
     "crates/loom-core",
+    "crates/loom-midi",
     "crates/loom-modules",
     "crates/loom-patch",
     "crates/loom-test",
@@ -34,6 +35,7 @@ readme = "README.md"
 [workspace.dependencies]
 loom-rt = { path = "crates/loom-rt", version = "0.1.0" }
 loom-dsp = { path = "crates/loom-dsp", version = "0.1.0" }
+loom-midi = { path = "crates/loom-midi", version = "0.1.0" }
 loom-core = { path = "crates/loom-core", version = "0.1.0" }
 loom-modules = { path = "crates/loom-modules", version = "0.1.0" }
 loom-patch = { path = "crates/loom-patch", version = "0.1.0" }

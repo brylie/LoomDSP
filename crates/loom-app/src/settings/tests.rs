@@ -1788,3 +1788,54 @@ fn a_save_as_answer_after_a_device_change_is_used() {
     assert!(path.is_file(), "the save happened");
     let _ = crate::files::fake::asked();
 }
+
+/// An absent saved source starts on Internal and takes over when its port opens.
+#[test]
+fn midi_clock_preferences_follow_a_reconnected_port() {
+    let dir = folder("midi-clock");
+    write(&dir, "(midi: (clock_source: Some(\"Drums\")))");
+    let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+    fake.midi_outputs.borrow_mut().push("Synth".into());
+    let mut app = start(args(&dir), &fake);
+    assert!(!app.session.controller.follows_midi_clock());
+    app.preferences(Message::Open);
+    fake.plug("Drums");
+    app.poll_midi();
+    assert_eq!(app.rig.following_clock.as_deref(), Some("Drums"));
+    let old_id = app.rig.clock_input;
+    assert_ne!(old_id, Some(MidiInputId(0)));
+    let snapshot = app.ui_snapshot();
+    let tile = snapshot
+        .tiles
+        .iter()
+        .find(|tile| tile.title == "Following Drums clock")
+        .unwrap();
+    assert!(
+        tile.widgets
+            .iter()
+            .any(|widget| widget.label == "Tempo" && widget.inert.is_some())
+    );
+    assert!(
+        tile.widgets
+            .iter()
+            .any(|widget| widget.label == "Run" && widget.inert.is_some())
+    );
+    app.preferences(Message::SendClock("Synth".into(), true));
+    assert_eq!(
+        crate::preferences::load(&dir.join(FILE_NAME))
+            .preferences
+            .midi
+            .send_clock,
+        ["Synth"]
+    );
+    fake.unplug("Drums");
+    app.poll_midi();
+    assert_eq!(app.rig.following_clock.as_deref(), Some("Drums"));
+    assert_eq!(app.rig.clock_input, Some(MidiInputId(0)));
+    fake.plug("Drums");
+    app.poll_midi();
+    assert_ne!(app.rig.clock_input, old_id);
+    app.preferences(Message::ClockSource(None));
+    assert!(!app.session.controller.follows_midi_clock());
+    assert!(app.rig.store.saved().midi.clock_source.is_none());
+}

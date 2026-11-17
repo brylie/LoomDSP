@@ -466,6 +466,9 @@ pub(crate) fn tree(
                 let mut w = Node::new(role);
                 w.set_label(widget.label.clone());
                 w.set_description(reason.clone());
+                if !widget.text.is_empty() {
+                    w.set_value(widget.text.clone());
+                }
                 w.set_disabled();
                 if let Some(bounds) = widget.bounds {
                     place(&mut w, bounds);

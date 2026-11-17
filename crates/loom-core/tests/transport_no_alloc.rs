@@ -63,3 +63,29 @@ fn transport_never_allocates_on_the_audio_thread() {
         });
     }
 }
+
+/// Following and queueing clock events do not allocate, even when the host falls behind.
+#[test]
+fn midi_clock_never_allocates_on_the_audio_thread() {
+    let mut parts = engine(128);
+    let input = loom_core::MidiInputId(1);
+    parts.controller.open_midi_input(input).unwrap();
+    parts.controller.select_midi_clock(Some(input), false).unwrap();
+    let output = parts.engine.attach_clock_output();
+    let mut left = [0.0; 1000];
+    let mut right = [0.0; 1000];
+    assert!(
+        parts
+            .midi
+            .send(loom_core::MidiEvent::from_bytes(0, &[0xfa]).from_input(input))
+    );
+    for _ in 0..300 {
+        assert!(
+            parts
+                .midi
+                .send(loom_core::MidiEvent::from_bytes(0, &[0xf8]).from_input(input))
+        );
+        assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
+    }
+    assert!(output.dropped() > 0);
+}

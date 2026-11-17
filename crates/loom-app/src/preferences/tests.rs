@@ -20,6 +20,8 @@ fn a_full_file_reads_back() {
         },
         panic: Some(PanicPref::Cc(0, 123)),
         midi: MidiPrefs {
+            clock_source: Some("Keys".into()),
+            send_clock: vec!["Synth".into()],
             off: vec!["Pad Controller MIDI 1".into()],
         },
         author: "Ada Lovelace".into(),

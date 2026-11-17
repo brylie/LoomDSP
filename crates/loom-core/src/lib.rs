@@ -29,6 +29,7 @@ mod live;
 mod midi;
 mod mpe;
 pub use mpe::{MidiConfigTable, MidiConfigTimeline, MidiInputConfig};
+mod clock_output;
 mod midi_map;
 mod module;
 mod names;
@@ -39,6 +40,8 @@ pub mod safety;
 pub mod signal;
 mod telemetry;
 pub mod transport;
+pub use clock_output::{ClockEvent, ClockReader};
+pub use loom_midi::ClockMessage;
 mod width;
 
 pub use compile::{CompileReport, FeedbackLoop};

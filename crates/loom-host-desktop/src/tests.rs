@@ -546,7 +546,7 @@ fn render_ptr_delegates_render() {
     let mut buffer = [0.0f32; 64];
     // SAFETY: render_ptr is uniquely owned in this test and freed after render completes.
     unsafe {
-        ptr.render(&mut buffer);
+        ptr.render(&mut buffer, Duration::ZERO);
         drop(Box::from_raw(render_ptr));
     }
 }

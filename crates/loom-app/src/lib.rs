@@ -967,12 +967,13 @@ impl App {
         // the hierarchy must know (ADR-0039, invariant 1).
         self.session.hierarchy.adopt(self.session.controller.graph());
         layout::auto_layout(&self.session.controller, &mut self.session.positions);
-        self.session.scene = scene::build(
+        self.session.scene = scene::build_with_clock(
             &self.session.controller,
             &self.session.hierarchy,
             &self.session.level,
             &self.session.positions,
             &self.session.sizes,
+            self.rig.following_clock.as_deref(),
         );
         self.session.mode_key = scene::mode_key(&self.session.controller);
         self.refresh_values();
@@ -987,12 +988,13 @@ impl App {
         // (ADR-0030). Rare: a mode click, never a knob turn.
         let mode_key = scene::mode_key(&self.session.controller);
         if mode_key != self.session.mode_key {
-            self.session.scene = scene::build(
+            self.session.scene = scene::build_with_clock(
                 &self.session.controller,
                 &self.session.hierarchy,
                 &self.session.level,
                 &self.session.positions,
                 &self.session.sizes,
+                self.rig.following_clock.as_deref(),
             );
             self.session.mode_key = mode_key;
         }
@@ -2147,6 +2149,9 @@ impl App {
     /// drives `run`, the input decides, so Space changes nothing. Without a
     /// Transport, it starts or stops the engine's transport directly.
     fn toggle_run(&mut self) {
+        if self.rig.following_clock.is_some() {
+            return;
+        }
         let Some((transport, index)) = transport_run(&self.session.controller) else {
             let running = !self.session.controller.transport().running;
             if let Err(e) = self.session.controller.set_running(running) {
@@ -2173,7 +2178,8 @@ impl App {
     /// takes that state, so it shows the truth and works again.
     fn keep_run_state(&mut self) {
         let driven = run_is_driven(&self.session.controller);
-        if self.session.run_driven
+        if self.rig.following_clock.is_none()
+            && self.session.run_driven
             && !driven
             && let Some((transport, index)) = transport_run(&self.session.controller)
             && let Some(running) = transport_running(&self.session.controller)

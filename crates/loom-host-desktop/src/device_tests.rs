@@ -377,7 +377,7 @@ fn a_manually_resumed_stream_fades_on_the_loopback() {
             config,
             move |data, _| {
                 // SAFETY: the StreamHandle owns the render until the callback stops.
-                unsafe { ptr.render(data) }
+                unsafe { ptr.render(data, std::time::Duration::ZERO) }
             },
             |_| {},
             None,

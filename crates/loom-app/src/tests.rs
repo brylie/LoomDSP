@@ -1673,7 +1673,7 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
     };
     let control = |row: &inspector::ParamRow| match &row.mode {
         inspector::ParamMode::Edit { control, .. } => control.clone(),
-        inspector::ParamMode::Learn { .. } => panic!("not in learn mode"),
+        _ => panic!("expected an editable parameter"),
     };
     let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(button.0)));
     let params = rows(&app, button);

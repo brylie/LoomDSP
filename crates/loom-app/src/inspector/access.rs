@@ -463,6 +463,10 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
         parts.push(expose(exposure, &ids::expose(ui, own)));
     }
     match &p.mode {
+        ParamMode::MidiClock => parts.push(Item::text(
+            ids::part(ui, "clock"),
+            format!("{label} {}, controlled by MIDI clock", p.value),
+        )),
         ParamMode::Learn { armed, detail } => {
             parts.push(Item {
                 label: Some(format!("Learn {label} {detail}").trim_end().to_string()),

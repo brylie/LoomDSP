@@ -225,7 +225,7 @@ These details were settled while building the module.
 - **The source is a preference** (settled). Preferences > MIDI has **Clock source**: Internal (default), or one open MIDI input. *Why:* which device sends the clock is part of the rig and its cables, like the devices themselves ([preferences](preferences.md#audio-and-midi-devices)). A patch opened on another rig never follows a device that is not there.
 - **It replaces the internal transport completely** (rule 7). The Transport tile shows `Following <input> clock` and disables its tempo number and Run toggle; the `run` and `reset` inputs are ignored while following.
 - **Messages:** Start sets the position to bar 1 and runs. Continue runs from the current position. Stop stops and holds. Song Position Pointer sets the position in sixteenth notes, as a jump (rule 8).
-- **Tempo** is the mean pulse interval over the last 24 pulses (one beat), shown on the tile. *Why:* single pulse intervals jitter by up to a buffer, because the desktop host stamps live MIDI at the start of a buffer ([MIDI learn](midi-learn.md#rules), rule 4).
+- **Tempo** is measured over the latest 24 pulse intervals (one beat), shown on the tile. See [Measuring tempo and losing pulses](#measuring-tempo-and-losing-pulses) for arrival timestamps and startup.
 - **Position** follows the pulse count: each pulse is 1/24 of a beat. Between pulses the position moves at the smoothed tempo, and it never passes the next pulse's position before that pulse arrives. Position is still computed from an anchor (rule 5); each pulse moves the anchor.
 - **Clock loss** (settled): after 2 beats with no pulse and no Stop, the transport keeps running at the last tempo, and the status bar says `MIDI clock from "<input>" stopped. Running at 122.0 BPM.` When pulses return, it locks to them again at the next pulse, as a jump if the position differs by more than one pulse. *Why:* a loose cable must not stop the music on stage.
 - If the chosen input disconnects, the same rule applies, and the source returns to the input when it connects again ([device changes](device-changes.md)).
@@ -237,6 +237,49 @@ These details were settled while building the module.
 - The engine computes each pulse's frame and writes it to a fixed-size queue; a host thread sends it at that time, offset by the output latency. *Why:* the audio thread does no I/O (AGENTS.md rule 1).
 - MIDI output devices, and sending notes and control changes, are FR-MIDI-04; this section opens outputs for clock only.
 
+### MIDI clock timing details
+
+**Status:** Agreed ([#77](https://github.com/brylie/LoomDSP/issues/77)). This section defines the timing details for the rules above. The acceptance checks here are additions to the MIDI clock checks below.
+
+#### Choosing and changing the source
+
+- Selecting a different MIDI input holds the current position, stops playback, and uses the current tempo until there is a measurement from the new input. Clear the old input's pulse history. Only messages from the selected input affect the transport. Pulses can measure tempo while stopped. Start or Continue begins playback.
+- A saved input that is absent when the app starts leaves the transport on Internal until the input opens. Keep the saved choice. If an input disappears after it has taken over, keep the current play state and apply the clock loss rule. Reopening that same input retains the pulse count and last tempo, but starts a fresh interval history. Turning the input off in Preferences counts as a disconnect.
+- Choosing Internal keeps the current position and restores the patch's local tempo and Run settings. If the run input has a cable, its gate takes over on the next transport grid step. The switch itself does not fire a jump. The local settings are kept separately from the followed values, so saving while following preserves them.
+- While following, ignore local tempo, Run, and Reset requests. Time signature stays local. MIDI Clock and Song Position Pointer use quarter notes and sixteenth notes in every time signature.
+
+#### Applying incoming messages
+
+- Process messages in arrival order, including when several land on one audio frame. Stop holds the position at the frame it is applied. Song Position Pointer sets the exact position and fires a jump on its application frame, whether playing or stopped. It preserves the play state.
+- Start and Continue take effect on the next Timing Clock pulse, including a pulse later in the same buffer. Until then, hold the current position with playback stopped. Start starts at zero and fires a jump. Continue resumes from the held position. A Song Position Pointer after Start or Continue and before that pulse supplies the starting position and fires its jump when received. Fire a jump at the first pulse only if it moves the position or applies a Start that has not received a pointer. A Stop before the first pulse cancels the pending run.
+- The first pulse marks the starting position. Each subsequent pulse adds 1/24 quarter note. In 4/4, the bar wraps on the pulse 96 intervals after a Start from zero. This defines the origin for the 96th-pulse acceptance check below.
+- After a Song Position Pointer during playback, the next pulse marks the new position. Between an anchor and the next pulse, hold just below the next pulse position if the estimate reaches it early. The phase must not round to a wrap before the pulse. Normal pulse anchors do not fire a jump.
+
+#### Measuring tempo and losing pulses
+
+- Measure intervals from monotonic MIDI arrival timestamps when the host provides them. Live messages still take effect at the start of an audio buffer. For a host or test with no arrival timestamps, use the sample positions where messages take effect. This keeps buffer jitter out of the measurement when the host has better timing, without changing when the patch hears live input.
+- Keep the previous tempo until there is a measurable interval. After that, use the mean of the available intervals, up to the latest 24. Retain the measured tempo across Start, Stop, Continue, and Song Position Pointer. For pulses with identical timestamps, count every pulse for position and use the elapsed time across the history divided by the number of intervals. If the whole history spans zero time, hold the previous estimate. Omit the gap across clock loss or disconnection from the estimate.
+- While playing, start free running two quarter notes after the last pulse at the last measured tempo. Resume movement from the held position and show the clock loss message once. A Stop cancels free running. The first returning pulse clears the loss status and anchors to the next counted position. Mark it as a jump if the difference from the free running position exceeds 1/24 quarter note. Use the last tempo until the new interval history gives an estimate.
+
+#### Sending clock and recovering an output
+
+- While playing, send one Timing Clock pulse per crossed 1/24 quarter note. A jump skips the intervening pulses. Send Start before the first pulse of a run from zero. For a run from elsewhere, send Song Position Pointer, then Continue, then the first pulse. On a jump during playback, send the pointer before the next pulse. On a stopped jump, send the pointer and wait for playback. When a stop and a jump occur on the same frame, send Stop before the pointer.
+- Song Position Pointer carries an unsigned 14-bit count of sixteenth notes, with zero at bar 1. On output, round down to the preceding sixteenth and saturate at 16,383. The transport and output pulse timing keep their full precision. A receiver that relies on the pointer can only locate within this range and resolution. See the [MIDI Association message summary](https://midi.org/summary-of-midi-1-0-messages).
+- When an output first opens, or reopens after a disconnect, send its current transport state at the next available playback deadline. While stopped, send Stop and the current pointer. While playing, use the same sequence as a new run from the current position. When the player turns Send clock off, send Stop before closing an output that is still reachable. Keep the saved setting on a disconnect and reopen the port if it returns.
+- The host schedules messages against audio playback time. If a deadline is late by less than one pulse interval, send the message promptly in order. If a pulse is at least one interval late or the queue overflows, discard the stale backlog, report the timing failure once per incident, and resync from the current transport state. Send Stop first on a still-open output, then the same state sequence as on reconnect. A slow or missing MIDI output does not hold up audio.
+
+#### Portable MIDI crate
+
+The workspace's `loom-midi` crate owns short MIDI message encoding and decoding, clock units, and fixed-size interval calculations. It takes timestamps from its callers and can build for `wasm32-unknown-unknown`. `loom-core` owns input selection, the patch transport, and scheduled clock events. `loom-host-desktop` owns device connections, timestamps, and timed sending.
+
+#### Acceptance checks: timing details
+
+- [ ] Clock from a second input leaves the selected source's tempo and position alone. Selecting a source while playing holds position until Start or Continue and its first pulse. Returning to Internal restores the patch settings without a jump.
+- [ ] Irregular audio buffers and several messages on the same frame keep message order and pulse count. With uniform arrival timestamps at 120 BPM, the estimate is within 0.1 BPM after 24 intervals, even when messages share an application frame.
+- [ ] Start plus a first pulse gives bar 1. In 4/4, the pulse 96 intervals later wraps the bar exactly once. A late pulse never causes an early wrap. Stop before the first pulse cancels a pending run. Song Position Pointer followed by Continue resumes from the requested position.
+- [ ] With identical sample positions and message order, follows, jumps, and scheduled output frames agree across block sizes 1, 77, and 512. Loss and reconnection omit the missing interval from the tempo estimate.
+- [ ] A fake output records the ordered messages for initial enable, running and stopped jumps, disable, and reconnect. It verifies pointer rounding and saturation, that an overflow or a missed deadline does not replay a burst, and that sending resumes in sync within the pointer's range and resolution.
+
 ### Acceptance criteria: clock to phase
 
 - [ ] Triggers every 1000 samples give a phase that rises by 0.001 per sample and wraps on each trigger; Phase Scale ×4 and Phase Trigger then fire every 250 samples (test).
@@ -247,7 +290,7 @@ These details were settled while building the module.
 ### Acceptance criteria: MIDI clock
 
 - [ ] A fake input sending pulses at 120 BPM gives a transport tempo of 120 within 0.1 BPM after one beat; Start, Stop, Continue, and Song Position Pointer act as above (tests with the fake host).
-- [ ] Following a clock, the bar phase reaches 0 within one buffer of the 96th pulse after Start (test).
+- [ ] Following a clock, the bar phase reaches 0 within one buffer of the pulse 96 intervals after the starting pulse (test).
 - [ ] Pulses that stop without a Stop leave the transport running at the last tempo, with the status message; returning pulses lock it again (test).
 - [ ] With Send clock on, a running transport at 120 BPM sends 48 pulses per second, and Start, Stop, Continue, and Song Position Pointer follow the transport (test with a fake output).
 - [ ] Following and sending add no allocation on the audio thread (`no_alloc` test).

@@ -206,6 +206,8 @@ Two new fields in `preferences.ron`. They hold the player's choice, not what the
     ),
     midi: (
         off: ["Pad Controller MIDI 1"],
+        clock_source: Some("Drum machine"),
+        send_clock: ["Synth"],
     ),
 )
 ```
@@ -216,6 +218,8 @@ Two new fields in `preferences.ron`. They hold the player's choice, not what the
 | `audio.sample_rate` | `DeviceDefault`, or `Hz(<rate>)` | `DeviceDefault` |
 | `audio.buffer` | `DeviceDefault`, or `Frames(<size>)` | `DeviceDefault` |
 | `midi.off` | A list of full MIDI input names | `[]` (every input on) |
+| `midi.clock_source` | `None` or one full input name | `None` (Internal) |
+| `midi.send_clock` | A list of full MIDI output names | `[]` (every output off) |
 | `panic` | `None`, `Some(Cc(<channel>, <controller>))`, or `Some(Note(<channel>, <note>))`, channels from 0 ([panic](panic.md#midi-trigger)) | `None` |
 
 - `SystemDefault` follows the operating system's choice, and changes when the player changes it there. `Named` sticks to one device. *Why:* a laptop player wants "whatever macOS is set to". A studio player wants "the interface, never the speakers". They are different choices, and both need a way to say so.
@@ -244,6 +248,8 @@ The device list is read when the window opens, and again from a **Refresh** butt
 One row per MIDI input, with a check box: checked is on. Under them: `New MIDI inputs are on until you turn them off.` An input that is in `midi.off` but not plugged in now is not listed. It stays in the file.
 
 With no MIDI inputs: `No MIDI inputs found.`
+
+**Clock source** offers Internal and the open MIDI inputs. Under the MIDI inputs, each MIDI output has a **Send clock** check box. The rig remembers these choices even when a device is absent. See [MIDI clock](clock.md#midi-clock) for transport and reconnection rules.
 
 There is no channel filter here. *Why:* the MIDI Note module already has a Channel parameter, and a MIDI learn mapping matches one channel ([midi-learn.md](midi-learn.md), rule 5). A second filter on the input would be a second place to look when a note does not play.
 

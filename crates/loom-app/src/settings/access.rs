@@ -69,7 +69,7 @@ pub(crate) fn items(model: &Model) -> Item {
                 }
             }
             Part::Note(line) => parts.push(note(&id, line)),
-            Part::Midi { .. } => {}
+            Part::Midi { .. } | Part::SendClock { .. } => {}
         }
     }
 
@@ -82,7 +82,13 @@ pub(crate) fn items(model: &Model) -> Item {
                 ..Item::new(id.clone(), Kind::Check)
             }),
             Part::Note(line) => parts.push(note(&id, line)),
-            Part::Picks(_) => {}
+            Part::Picks(picks) => parts.push(choice(&id, picks)),
+            Part::SendClock { name, on } => parts.push(Item {
+                label: Some(format!("Send clock to {name}")),
+                on: Some(*on),
+                click: Some(send(Message::SendClock(name.clone(), !on))),
+                ..Item::new(id.clone().with("midi-output").with(name.as_str()), Kind::Check)
+            }),
         }
     }
 

@@ -37,6 +37,8 @@ pub struct Fake {
     /// test plugs and unplugs them with [`Fake::plug`] and
     /// [`Fake::unplug`].
     pub midi: RefCell<Vec<(String, String)>>,
+    /// Available fake MIDI output names.
+    pub midi_outputs: RefCell<Vec<String>>,
     /// Counts identities, so a port plugged in again gets a new one.
     pub next_id: std::cell::Cell<u32>,
     /// MIDI inputs, by listed name, that fail to open.
@@ -367,6 +369,10 @@ impl Host for Shared {
             self.0.stall_tape.step(block * STALL_AFTER);
         }
         Ok(running)
+    }
+
+    fn midi_clock_outputs(&self) -> Result<Vec<String>, String> {
+        Ok(self.0.midi_outputs.borrow().clone())
     }
 
     fn midi_list(&self) -> Result<Vec<MidiInputInfo>, String> {

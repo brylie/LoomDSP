@@ -104,6 +104,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         revision: 0,
         last_report: CompileReport::default(),
         transport: TransportSettings::default(),
+        following_midi_clock: false,
         config,
         stats,
         cable_fades: CableFades::default(),
@@ -184,6 +185,7 @@ pub struct Controller {
     last_report: CompileReport,
     /// What the engine's transport is set to, as of the last command sent.
     transport: TransportSettings,
+    following_midi_clock: bool,
     config: EngineConfig,
     stats: Arc<EngineStats>,
     /// What the next compile needs to fade the changes since the last one.

@@ -166,6 +166,14 @@ pub trait Host {
     /// The MIDI inputs now: names made unique by order, and port
     /// identities (`docs/design/device-changes.md`).
     fn midi_list(&self) -> Result<Vec<MidiInputInfo>, String>;
+    /// The outputs available for MIDI clock.
+    fn midi_clock_outputs(&self) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
+    /// Whether playback is connected to the desktop MIDI service.
+    fn system_clock_outputs(&self) -> bool {
+        false
+    }
     /// The names of the MIDI inputs, unique by order.
     fn midi_inputs(&self) -> Result<Vec<String>, String> {
         Ok(self.midi_list()?.into_iter().map(|input| input.name).collect())
@@ -236,6 +244,14 @@ pub fn watch_midi(watch: &MidiWatch, tx: crate::watcher::Outlet<()>) {
 pub struct System;
 
 impl Host for System {
+    fn midi_clock_outputs(&self) -> Result<Vec<String>, String> {
+        loom_host_desktop::midi_clock_outputs().map_err(|err| err.to_string())
+    }
+
+    fn system_clock_outputs(&self) -> bool {
+        true
+    }
+
     fn outputs(&self) -> Result<Outputs, String> {
         loom_host_desktop::outputs().map_err(|e| e.to_string())
     }

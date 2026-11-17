@@ -267,3 +267,41 @@ fn run_edited_off_and_on_after_the_cable_goes_starts() {
     let (playing, _) = render(&mut parts, 1024, 256, &[]);
     assert_eq!(*playing.last().unwrap(), 1.0, "Run is on, so it plays");
 }
+
+/// A deliberately late final pulse wraps the bar once, at its frame, even at odd block sizes.
+#[test]
+fn midi_clock_does_not_wrap_until_the_bar_pulse() {
+    let render_clock = |block| {
+        let (mut parts, _) = engine(block, |c, t| listen(c, (t, "bar-phase"), (t, "bar")));
+        let input = loom_core::MidiInputId(1);
+        parts.controller.open_midi_input(input).unwrap();
+        parts.controller.select_midi_clock(Some(input), false).unwrap();
+        let start = 1024;
+        let end_of_bar = start + BAR + 125;
+        let end = end_of_bar + 1;
+        let events: Vec<_> = std::iter::once((start, 0xfa))
+            .chain((0..=96).map(|pulse| (if pulse == 96 { end_of_bar } else { start + pulse * 1000 }, 0xf8)))
+            .collect();
+        let mut out = (vec![0.0; end], vec![0.0; end]);
+        let mut next = events.into_iter().peekable();
+        for frame in (0..end).step_by(block) {
+            let limit = (frame + block).min(end);
+            while next.peek().is_some_and(|&(at, _)| at < limit) {
+                let (at, byte) = next.next().unwrap();
+                assert!(
+                    parts
+                        .midi
+                        .send(loom_core::MidiEvent::from_bytes((at - frame) as u32, &[byte]).from_input(input))
+                );
+            }
+            parts.engine.process(&mut out.0[frame..limit], &mut out.1[frame..limit]);
+        }
+        assert!(out.0[end_of_bar - 1] > 0.99);
+        assert_eq!(out.0[end_of_bar], 0.0);
+        assert_eq!(highs(&out.1), [start, end_of_bar]);
+        out
+    };
+    let reference = render_clock(1);
+    assert_eq!(reference, render_clock(77));
+    assert_eq!(reference, render_clock(512));
+}

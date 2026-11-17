@@ -154,6 +154,10 @@ impl BufferChoice {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MidiPrefs {
     pub off: Vec<String>,
+    /// The preferred external clock input. None chooses Internal.
+    pub clock_source: Option<String>,
+    /// Outputs with Send clock enabled.
+    pub send_clock: Vec<String>,
 }
 
 impl MidiPrefs {
@@ -240,12 +244,19 @@ fn parse(text: &str) -> Result<(Preferences, Vec<String>), String> {
                 });
             }
             "midi" => {
-                let off = section(&mut notes, "midi", &raw, |notes, name, raw| {
-                    (name == "off").then(|| field::<Vec<String>>(notes, "midi.off", raw, &Vec::new(), |_| true))
+                section(&mut notes, "midi", &raw, |notes, name, raw| {
+                    match name {
+                        "off" => preferences.midi.off = field(notes, "midi.off", raw, &Vec::new(), |_| true),
+                        "clock_source" => {
+                            preferences.midi.clock_source = field(notes, "midi.clock_source", raw, &None, |_| true)
+                        }
+                        "send_clock" => {
+                            preferences.midi.send_clock = field(notes, "midi.send_clock", raw, &Vec::new(), |_| true)
+                        }
+                        _ => return None,
+                    }
+                    Some(())
                 });
-                if let Some(off) = off.into_iter().next_back() {
-                    preferences.midi.off = off;
-                }
             }
             "author" => {
                 preferences.author = field(&mut notes, "author", &raw, &String::new(), |_| true);

@@ -20,7 +20,7 @@ use crate::module::{Module, PortIo, ProcessContext};
 use crate::panic::{PanicState, PanicTrigger, TriggerWatch};
 use crate::safety::{OutputSafety, SafetyStage};
 use crate::telemetry::{MeterReading, PAIR_CHUNK, PairChunk, SCOPE_CHUNK, ScopeChunk, TelemetrySender, measure};
-use crate::transport::{TRANSPORT_GRID, TimeSignature, Transport};
+use crate::transport::{MidiClock, TRANSPORT_GRID, TimeSignature, Transport, TransportRequest, TransportSettings};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -107,6 +107,10 @@ pub struct EngineStats {
     pub schedule_swaps: AtomicU64,
     /// MIDI events dropped because the per-buffer list was full.
     pub dropped_midi: AtomicU64,
+    /// Effective tempo in BPM, encoded as f64 bits.
+    pub transport_tempo: AtomicU64,
+    /// The selected MIDI clock is free running after a loss.
+    pub clock_lost: std::sync::atomic::AtomicBool,
     /// Objects the engine could not return for freeing (garbage queue full).
     /// They are leaked rather than freed on the audio thread.
     pub leaked: AtomicU64,
@@ -169,6 +173,7 @@ pub(crate) enum Command {
     },
     /// Already clamped by the controller.
     SetTempo(f64),
+    SelectMidiClock(Option<crate::MidiInputId>, bool),
     /// Already checked by the controller.
     SetTimeSignature(TimeSignature),
     SetRunning(bool),
@@ -288,6 +293,11 @@ pub struct Engine {
     /// The patch transport (ADR-0015). Not part of the schedule, so editing
     /// the patch never moves it.
     transport: Transport,
+    midi_clock: MidiClock,
+    local_transport: TransportSettings,
+    run_gate: bool,
+    restore_run_gate: bool,
+    clock_output: Option<crate::clock_output::ClockOutput>,
     /// Frames rendered since the engine started. Stamps telemetry and
     /// anchors the transport.
     frame: u64,
@@ -345,6 +355,11 @@ impl Engine {
             feedback_sequence: 0,
             telemetry,
             transport: Transport::new(config.sample_rate),
+            midi_clock: MidiClock::default(),
+            local_transport: TransportSettings::default(),
+            run_gate: false,
+            restore_run_gate: false,
+            clock_output: None,
             frame: 0,
             last_frames: 0,
             fades_settled: true,
@@ -443,6 +458,7 @@ impl Engine {
             self.panic_reset();
         }
         let mut position = 0;
+        let mut midi_cursor = 0;
         while position < frames {
             let mut n = (frames - position).min(self.config.max_block);
             // The reset is sample-exact: the block ends at the frame where
@@ -457,6 +473,29 @@ impl Engine {
             if self.schedule.transport.grid {
                 let into = (self.frame % TRANSPORT_GRID as u64) as usize;
                 n = n.min(TRANSPORT_GRID - into);
+            }
+            let mut sent_jump = false;
+            if self.midi_clock.input.is_some() {
+                while let Some(event) = self.midi.get(midi_cursor).copied() {
+                    if event.frame as usize != position {
+                        n = n.min(event.frame as usize - position);
+                        break;
+                    }
+                    midi_cursor += 1;
+                    let before = self.transport.info(self.frame);
+                    let jumped = self.midi_clock.receive(&mut self.transport, self.frame, event);
+                    let after = self.transport.info(self.frame);
+                    if (jumped || before.playing() != after.playing())
+                        && let Some(output) = &mut self.clock_output
+                    {
+                        output.transition(self.frame, after.with_jump(jumped));
+                        sent_jump |= jumped;
+                    }
+                }
+                self.midi_clock.check_loss(&mut self.transport, self.frame);
+                if let Some(deadline) = self.midi_clock.deadline(&self.transport) {
+                    n = n.min((deadline - self.frame).min(n as u64) as usize);
+                }
             }
             self.input_channels = 0;
             if let Some(input) = &mut self.input {
@@ -473,6 +512,10 @@ impl Engine {
                     .fetch_add(input.overruns() - overruns, Ordering::Relaxed);
             }
             self.apply_transport_request();
+            if let Some(output) = &mut self.clock_output {
+                let transport = self.transport.info(self.frame);
+                output.render(self.frame, n, transport.with_jump(transport.jumped() && !sent_jump));
+            }
             self.run_block(
                 position,
                 n,
@@ -493,6 +536,10 @@ impl Engine {
                 _ => {}
             }
         }
+        self.stats
+            .transport_tempo
+            .store(self.transport.info(self.frame).tempo().to_bits(), Ordering::Relaxed);
+        self.stats.clock_lost.store(self.midi_clock.lost, Ordering::Relaxed);
         self.stats.buffers.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -518,10 +565,61 @@ impl Engine {
             return;
         };
         let grid = self.frame.is_multiple_of(TRANSPORT_GRID as u64);
-        let request = module.transport_request(grid, self.schedule.transport.run_cable);
-        if !request.is_empty() {
-            self.transport.apply(self.frame, request);
+        let cable = self.schedule.transport.run_cable;
+        let mut request = module.transport_request(grid, cable);
+        if let Some(run) = request.local_running.or(if cable { None } else { request.running }) {
+            self.local_transport.running = run;
         }
+        if let Some(run) = request.running.filter(|_| cable) {
+            self.run_gate = run;
+        }
+        if self.midi_clock.input.is_none() && self.restore_run_gate && (grid || !cable) {
+            self.restore_run_gate = false;
+            if cable && request.running.is_none() {
+                request.running = Some(self.run_gate);
+            }
+        }
+        self.apply_local_transport(request);
+    }
+
+    /// Records local settings and applies the ones the active source allows.
+    fn apply_local_transport(&mut self, request: TransportRequest) {
+        if let Some(tempo) = request.tempo {
+            self.local_transport.tempo = tempo;
+        }
+        let request = if self.midi_clock.input.is_some() {
+            TransportRequest {
+                time_signature: request.time_signature,
+                ..TransportRequest::default()
+            }
+        } else {
+            request
+        };
+        self.transport.apply(self.frame, request);
+    }
+
+    /// Selects the clock source and restores the local settings on return.
+    fn select_midi_clock(&mut self, input: Option<crate::MidiInputId>, reconnect: bool) {
+        let following = self.midi_clock.input.is_some();
+        self.midi_clock
+            .select(input, reconnect, &mut self.transport, self.frame);
+        if following && input.is_none() {
+            self.restore_run_gate = self.schedule.transport.run_cable;
+            self.transport.set_tempo(self.frame, self.local_transport.tempo);
+            self.transport.set_running(self.frame, self.local_transport.running);
+        }
+    }
+
+    /// Frames rendered so far, for the host's playback time mapping.
+    pub fn rendered_frames(&self) -> u64 {
+        self.frame
+    }
+
+    /// Attaches an output queue before the engine starts. Allocates on the caller's thread.
+    pub fn attach_clock_output(&mut self) -> crate::ClockReader {
+        let (writer, reader) = crate::clock_output::channel();
+        self.clock_output = Some(writer);
+        reader
     }
 
     /// Starts a panic, unless one is running (panic.md, rule 3) or the
@@ -763,10 +861,23 @@ impl Engine {
                         }
                     }
                 }
-                Command::SetTempo(tempo) => self.transport.set_tempo(self.frame, tempo),
+                Command::SelectMidiClock(input, reconnect) => self.select_midi_clock(input, reconnect),
+                Command::SetTempo(tempo) => self.apply_local_transport(TransportRequest {
+                    tempo: Some(tempo),
+                    ..TransportRequest::default()
+                }),
                 Command::SetTimeSignature(time_signature) => self.transport.set_time_signature(time_signature),
-                Command::SetRunning(running) => self.transport.set_running(self.frame, running),
-                Command::ResetTransport => self.transport.reset(self.frame),
+                Command::SetRunning(running) => {
+                    self.local_transport.running = running;
+                    self.apply_local_transport(TransportRequest {
+                        running: Some(running),
+                        ..TransportRequest::default()
+                    });
+                }
+                Command::ResetTransport => self.apply_local_transport(TransportRequest {
+                    reset: true,
+                    ..TransportRequest::default()
+                }),
                 Command::SetOutputSafety(mode) => self.safety.set_mode(mode),
                 Command::FadeOut => self.safety.fade_out(),
                 Command::Panic => self.start_panic(),

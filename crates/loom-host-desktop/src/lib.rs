@@ -23,9 +23,11 @@
 #![warn(missing_docs)]
 
 mod capture;
+mod midi_clock;
 mod record;
 mod stepped;
 mod virtual_midi;
+pub use midi_clock::{ClockPorts, midi_clock_outputs};
 
 mod input;
 pub use input::AudioInput;
@@ -414,6 +416,7 @@ pub struct AudioOutput {
     name: String,
     /// Where the stream sends what it plays, if it is recorded.
     record: Option<Tap>,
+    midi_clock: Option<ClockPorts>,
 }
 
 /// What plays the engine.
@@ -451,6 +454,7 @@ impl AudioOutput {
             kind: Kind::Device { device, config },
             name,
             record: None,
+            midi_clock: None,
         })
     }
 
@@ -466,6 +470,7 @@ impl AudioOutput {
             },
             name: "no device (clock)".to_string(),
             record: None,
+            midi_clock: None,
         }
     }
 
@@ -483,6 +488,7 @@ impl AudioOutput {
             },
             name: "no device (stepped)".to_string(),
             record: None,
+            midi_clock: None,
         }
     }
 
@@ -540,6 +546,11 @@ impl AudioOutput {
         }
     }
 
+    /// Attaches the rig's clock outputs when this audio stream starts.
+    pub fn set_midi_clock(&mut self, ports: ClockPorts) {
+        self.midi_clock = Some(ports);
+    }
+
     /// Starts audio. The engine moves to the audio thread. On failure,
     /// [`StartError`] returns both the [`AudioOutput`] and the [`Engine`] so
     /// the session can keep the engine and retry. It is boxed: the engine is
@@ -553,6 +564,12 @@ impl AudioOutput {
             let sender = engine.restart_fade_sender();
             (engine, sender)
         };
+        let mut engine = engine;
+        let (clock_worker, clock_anchors) = self
+            .midi_clock
+            .clone()
+            .and_then(|ports| midi_clock::ClockWorker::spawn(&mut engine, ports))
+            .map_or((None, None), |(worker, anchors)| (Some(worker), Some(anchors)));
         let mut render = Render::new(
             engine,
             usize::from(self.channels().max(1)),
@@ -560,6 +577,7 @@ impl AudioOutput {
             stats.clone(),
             self.record.take(),
         );
+        render.clock_anchors = clock_anchors;
         // A late block on the clock cannot be heard: it is not a dropout.
         render.count_overruns = matches!(self.kind, Kind::Device { .. });
 
@@ -568,10 +586,12 @@ impl AudioOutput {
                 let render_box = Box::new(render);
                 let render_ptr = Box::into_raw(render_box);
                 let ptr = RenderPtr(render_ptr);
-                let data_callback = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let data_callback = move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+                    let stamp = info.timestamp();
+                    let latency = stamp.playback.duration_since(stamp.callback);
                     // SAFETY: render_ptr is kept alive until StreamHandle drops.
                     unsafe {
-                        ptr.render(data);
+                        ptr.render(data, latency);
                     }
                 };
                 let error_stats = stats.clone();
@@ -646,6 +666,7 @@ impl AudioOutput {
         };
         Ok(RunningAudio {
             player: Some(player),
+            _clock_worker: clock_worker,
             stats,
             name: self.name,
             sample_rate,
@@ -747,6 +768,7 @@ pub(crate) struct Render {
     tap: Option<Tap>,
     /// Count blocks that took longer than their duration as overruns.
     count_overruns: bool,
+    clock_anchors: Option<rtrb::Producer<midi_clock::Anchor>>,
 }
 
 /// Frames the scratch buffers hold. Larger device buffers are rendered in
@@ -765,12 +787,24 @@ impl Render {
             stats,
             tap,
             count_overruns: true,
+            clock_anchors: None,
         }
     }
 
     pub(crate) fn render(&mut self, data: &mut [f32]) {
+        self.render_at(data, Duration::ZERO);
+    }
+
+    /// Renders with the device's reported output latency.
+    fn render_at(&mut self, data: &mut [f32], latency: Duration) {
         let _ftz = ScopedFlushDenormals::new();
         let started = Instant::now();
+        if let Some(anchors) = &mut self.clock_anchors {
+            let _ = anchors.push(midi_clock::Anchor {
+                frame: self.engine.rendered_frames(),
+                playback: started + latency,
+            });
+        }
         let channels = self.channels;
         let frames = data.len() / channels;
         // A buffer that starts silent stays silent: the fade-out has ended.
@@ -820,10 +854,10 @@ unsafe impl Send for RenderPtr {}
 
 impl RenderPtr {
     /// Calls render on the underlying Render pointer.
-    unsafe fn render(&self, data: &mut [f32]) {
+    unsafe fn render(&self, data: &mut [f32], latency: Duration) {
         // SAFETY: caller guarantees the pointee is valid and exclusively accessed.
         unsafe {
-            (*self.0).render(data);
+            (*self.0).render_at(data, latency);
         }
     }
 }
@@ -877,7 +911,7 @@ impl Clock {
                 while !thread_stop.load(Ordering::Relaxed) {
                     // SAFETY: render_ptr stays valid until Clock drops.
                     unsafe {
-                        ptr.render(&mut buffer);
+                        ptr.render(&mut buffer, Duration::ZERO);
                     }
                     next += period;
                     let now = Instant::now();
@@ -949,6 +983,7 @@ pub fn stop_limit(minimum: Duration, frames: u64, sample_rate: u32) -> Duration 
 /// ([`loom_core::Controller::fade_out`]) and call [`RunningAudio::stop`].
 pub struct RunningAudio {
     player: Option<Player>,
+    _clock_worker: Option<midi_clock::ClockWorker>,
     stats: Arc<CallbackStats>,
     name: String,
     sample_rate: u32,
@@ -1312,6 +1347,11 @@ impl MidiInputState {
     /// Sends one message from the input to the engine, applied at the start
     /// of the next audio buffer. SysEx and longer messages are dropped.
     pub fn receive(&mut self, bytes: &[u8]) {
+        self.receive_stamped(bytes, None);
+    }
+
+    /// Receives live MIDI with its backend-provided arrival time.
+    fn receive_stamped(&mut self, bytes: &[u8], arrival_micros: Option<u64>) {
         let Some(&status) = bytes.first() else { return };
         if status == 0xF0 || bytes.len() > 3 {
             return;
@@ -1319,7 +1359,9 @@ impl MidiInputState {
         self.held.track(bytes);
         // Frame 0: applied at the start of the next audio buffer
         // (NFR-PERF-07). Sub-buffer timestamps come later.
-        send_midi(&self.midi, MidiEvent::from_bytes(0, bytes).from_input(self.input));
+        let mut event = MidiEvent::from_bytes(0, bytes).from_input(self.input);
+        event.arrival_micros = arrival_micros;
+        send_midi(&self.midi, event);
     }
 
     /// Sends a note off for every note held on this input.
@@ -1392,7 +1434,7 @@ fn open_port_as(
         .connect(
             port,
             "loomdsp-in",
-            |_timestamp, bytes, state: &mut MidiInputState| state.receive(bytes),
+            |timestamp, bytes, state: &mut MidiInputState| state.receive_stamped(bytes, Some(timestamp)),
             MidiInputState::for_input(midi, id),
         )
         .map_err(|e| HostError::Midi(format!("{port_name}: {e}")))?;

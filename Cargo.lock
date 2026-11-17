@@ -2511,6 +2511,7 @@ version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
  "loom-dsp",
+ "loom-midi",
  "loom-rt",
  "rtrb",
  "thiserror 2.0.21",
@@ -2540,6 +2541,10 @@ dependencies = [
  "rtrb",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "loom-midi"
+version = "0.1.0"
 
 [[package]]
 name = "loom-modules"

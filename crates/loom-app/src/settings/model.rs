@@ -114,6 +114,13 @@ pub(crate) enum Part {
         #[serde(serialize_with = "crate::snapshot::display")]
         id: loom_ui_core::UiId,
     },
+    /// A MIDI output and its Send clock switch.
+    SendClock {
+        /// The output name.
+        name: String,
+        /// Whether the output is enabled for clock.
+        on: bool,
+    },
     /// A line of text.
     Note(Note),
 }
@@ -380,7 +387,32 @@ impl App {
 
     /// The MIDI section: a switch per input, and its notes.
     fn midi_parts(&self, window: &Window) -> Vec<Part> {
-        let mut parts = Vec::new();
+        let midi = &self.rig.store.saved().midi;
+        let mut sources = vec![(None, "Internal".to_string())];
+        sources.extend(
+            self.rig
+                .ports
+                .iter()
+                .map(|port| (Some(port.name().to_string()), port.name().to_string())),
+        );
+        let mut parts = vec![Part::Picks(picks(
+            None,
+            "clock-source",
+            "Clock source",
+            sources,
+            Some(&self.rig.following_clock),
+            Message::ClockSource,
+        ))];
+        if let Some(name) = midi
+            .clock_source
+            .as_ref()
+            .filter(|name| !self.rig.ports.iter().any(|port| port.name() == *name))
+        {
+            parts.push(note(
+                "clock-waiting",
+                format!("Waiting for MIDI clock input \"{name}\"."),
+            ));
+        }
         match &window.lists.midi {
             Err(error) => parts.push(note("midi-error", format!("Could not list the MIDI inputs: {error}"))),
             Ok(names) if names.is_empty() => parts.push(note("midi-none", "No MIDI inputs found.")),
@@ -397,6 +429,16 @@ impl App {
                 }
                 parts.push(note("midi-new", "New MIDI inputs are on until you turn them off."));
             }
+        }
+        match &window.lists.midi_outputs {
+            Ok(names) => parts.extend(names.iter().map(|name| Part::SendClock {
+                name: name.clone(),
+                on: midi.send_clock.contains(name),
+            })),
+            Err(error) => parts.push(note(
+                "midi-output-error",
+                format!("Could not list MIDI outputs: {error}"),
+            )),
         }
         if self.rig.flags.no_midi {
             parts.push(note("midi-flag", "Set by --no-midi for this run."));

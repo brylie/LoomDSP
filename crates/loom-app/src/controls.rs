@@ -542,6 +542,23 @@ impl App {
 
     /// Sets a parameter from a control on a tile or in the inspector.
     pub(crate) fn set_param(&mut self, module: u32, index: usize, value: f32) {
+        if self.session.controller.follows_midi_clock()
+            && self
+                .session
+                .controller
+                .graph()
+                .node(ModuleId(module))
+                .is_some_and(|node| {
+                    node.descriptor.id == loom_core::TRANSPORT_MODULE
+                        && node
+                            .descriptor
+                            .params
+                            .get(index)
+                            .is_some_and(|param| matches!(param.name, "tempo" | "run" | "reset"))
+                })
+        {
+            return;
+        }
         // A parameter a sub-patch surface exposes with a narrower range
         // stays in it, whichever control, field, or row wrote it
         // (sub-patches.md, Exposing).

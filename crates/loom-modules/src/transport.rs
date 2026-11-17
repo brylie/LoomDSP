@@ -372,7 +372,11 @@ impl Module for Transport {
         // an edit then is dropped. An edit after the cable goes is compared
         // with what the engine was last asked, so turning Run off and on
         // again within one buffer still starts it (#413 review).
-        if std::mem::take(&mut self.run_edited) && !self.run_connected && self.sent_run != Some(run) {
+        let run_edited = std::mem::take(&mut self.run_edited);
+        if run_edited {
+            request.local_running = Some(run);
+        }
+        if run_edited && !self.run_connected && self.sent_run != Some(run) {
             self.sent_run = Some(run);
             request.running = Some(run);
         }

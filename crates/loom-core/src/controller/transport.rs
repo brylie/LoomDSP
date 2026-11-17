@@ -7,6 +7,31 @@ use super::*;
 /// The patch transport: tempo, time signature, running, and reset
 /// (`docs/design/clock.md`).
 impl Controller {
+    /// Selects a MIDI clock input or returns to Internal with `None`.
+    ///
+    /// Use input zero with `reconnect` to preserve state when a selected port is unavailable.
+    /// On its return, pass the new input ID with `reconnect`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the engine's command queue is full.
+    pub fn select_midi_clock(&mut self, input: Option<crate::MidiInputId>, reconnect: bool) -> Result<(), LoomError> {
+        self.send(Command::SelectMidiClock(input, reconnect))?;
+        self.following_midi_clock = input.is_some();
+        Ok(())
+    }
+
+    /// Whether timing is owned by MIDI, including while its source is absent.
+    pub fn follows_midi_clock(&self) -> bool {
+        self.following_midi_clock
+    }
+
+    /// The effective clock tempo last published by the engine, once it has rendered.
+    pub fn rendered_tempo(&self) -> Option<f64> {
+        let tempo = f64::from_bits(self.stats.transport_tempo.load(Ordering::Relaxed));
+        (tempo > 0.0).then_some(tempo)
+    }
+
     /// The transport settings last sent to the engine (ADR-0015).
     pub fn transport(&self) -> TransportSettings {
         self.transport

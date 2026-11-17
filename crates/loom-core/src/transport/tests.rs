@@ -92,6 +92,7 @@ fn a_time_signature_change_is_a_jump() {
             time_signature: Some(TimeSignature::new(7, 3)),
             running: Some(false),
             reset: false,
+            local_running: None,
         },
     );
     let info = transport.info(200);

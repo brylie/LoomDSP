@@ -27,6 +27,10 @@ use std::time::{Duration, Instant};
 /// A message for the Preferences window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
+    /// Selects Internal or a named MIDI clock input.
+    ClockSource(Option<String>),
+    /// Turns MIDI clock on or off for an output.
+    SendClock(String, bool),
     Open,
     Close,
     /// Read the device lists again.
@@ -102,6 +106,17 @@ pub struct Rig {
     /// the first engine is attached.
     pub midi_in: Option<SharedMidi>,
     pub ports: Vec<Box<dyn MidiPort>>,
+    /// Output routing shared with the playback worker.
+    pub(crate) clock_ports: loom_host_desktop::ClockPorts,
+    /// Selected external name once it has taken over, including while absent.
+    pub(crate) following_clock: Option<String>,
+    /// Last input ID sent to the current engine. Zero means disconnected.
+    clock_input: Option<MidiInputId>,
+    /// Last published clock loss state and output failure count.
+    clock_lost: bool,
+    clock_failures: u64,
+    /// Last displayed tempo and Run state, to refresh values only when needed.
+    clock_display: Option<(u64, bool)>,
     /// The audio input stream, and what the player was told about it.
     pub(crate) input: InputSession,
     /// The device playing now, when one is.
@@ -157,6 +172,7 @@ pub struct DeviceLists {
     outputs: Result<Outputs, String>,
     inputs: Result<devices::Inputs, String>,
     midi: Result<Vec<String>, String>,
+    midi_outputs: Result<Vec<String>, String>,
 }
 
 impl DeviceLists {
@@ -165,6 +181,7 @@ impl DeviceLists {
             outputs: host.outputs(),
             inputs: host.audio_inputs(),
             midi: host.midi_inputs(),
+            midi_outputs: host.midi_clock_outputs(),
         }
     }
 }
@@ -203,6 +220,8 @@ impl Window {
 
 impl Rig {
     pub fn new(host: Rc<dyn Host>, store: Store, flags: devices::Options, safety_flag: bool) -> Self {
+        let clock_ports = loom_host_desktop::ClockPorts::default();
+        clock_ports.set_enabled(&store.saved().midi.send_clock);
         Self {
             recent: crate::recent::RecentList::in_memory(),
             host,
@@ -211,6 +230,12 @@ impl Rig {
             safety_flag,
             midi_in: None,
             ports: Vec::new(),
+            clock_ports,
+            following_clock: None,
+            clock_input: None,
+            clock_lost: false,
+            clock_failures: 0,
+            clock_display: None,
             input: InputSession::new(),
             playing: None,
             borrowed_lists: None,
@@ -420,6 +445,8 @@ impl App {
             Message::Activity(on) => self.choose_activity(on),
             Message::Audio(change) => self.change_audio(change),
             Message::Input(choice) => self.choose_audio_input(choice),
+            Message::ClockSource(name) => self.choose_clock_source(name),
+            Message::SendClock(name, on) => self.choose_clock_output(name, on),
             Message::Midi(name, on) => self.set_midi_input(&name, on),
             Message::PanicLearn => self.learn_panic(),
             Message::PanicClear => self.set_panic_pref(None),
@@ -941,6 +968,9 @@ impl App {
         self.session.engine.stream.prepare(output.sample_rate() as f32);
         self.session.engine.holding = false;
         let refused = self.rig.record_into(&mut output);
+        if self.rig.host.system_clock_outputs() {
+            output.set_midi_clock(self.rig.clock_ports.clone());
+        }
         let started = self.rig.host.start(output, engine);
         // Set on success; on an error this returns early.
         let record_error;
@@ -1283,6 +1313,7 @@ impl App {
         match self.rig.host.open_midi(name, midi, input) {
             Ok(port) => {
                 self.rig.ports.push(port);
+                self.sync_clock_source(false);
                 Ok(())
             }
             Err(e) => {
@@ -1304,6 +1335,7 @@ impl App {
                 .clear_input(input);
         }
         let _ = self.session.controller.release_midi_input(input);
+        self.sync_clock_source(false);
     }
 
     /// After a new engine is attached: tracks the open inputs on it, or the
@@ -1314,6 +1346,7 @@ impl App {
         for input in self.rig.ports.iter().map(|port| port.input()).collect::<Vec<_>>() {
             let _ = self.session.controller.open_midi_input(input);
         }
+        self.sync_clock_source(true);
         if !(first && connect) {
             return None;
         }
@@ -1339,6 +1372,7 @@ impl App {
     /// identity is opened again as a new connection. The window's list
     /// follows too.
     pub(crate) fn poll_midi(&mut self) {
+        self.poll_midi_clock();
         let Ok(list) = self.rig.host.midi_list() else { return };
         if let Some(window) = self.overlays.preferences_mut() {
             window.lists.midi = Ok(list.iter().map(|input| input.name.clone()).collect());
@@ -1403,6 +1437,100 @@ impl App {
         preferences.midi.set(name, on);
         if let Some(error) = self.rig.save(preferences) {
             self.alerts.warn(error);
+        }
+    }
+
+    /// Applies an explicit clock source choice and remembers it for this rig.
+    fn choose_clock_source(&mut self, name: Option<String>) {
+        if name
+            .as_ref()
+            .is_some_and(|name| !self.rig.ports.iter().any(|port| port.name() == name))
+        {
+            return;
+        }
+        let mut prefs = self.rig.store.saved().clone();
+        prefs.midi.clock_source = name;
+        if let Some(error) = self.rig.save(prefs) {
+            self.alerts.warn(error);
+        }
+        self.sync_clock_source(false);
+    }
+
+    /// Keeps the display name across reconnects and assigns the engine's input ID.
+    fn sync_clock_source(&mut self, new_engine: bool) {
+        let wanted = self.rig.store.saved().midi.clock_source.as_ref();
+        let same = wanted.is_some() && wanted == self.rig.following_clock.as_ref();
+        let open = wanted.and_then(|name| self.rig.ports.iter().find(|port| port.name() == name));
+        let input = open
+            .map(|port| port.input())
+            .or_else(|| (same && !new_engine).then_some(MidiInputId(0)));
+        if !new_engine && input == self.rig.clock_input {
+            return;
+        }
+        if let Err(error) = self.session.controller.select_midi_clock(input, same && !new_engine) {
+            self.alerts.warn(error.to_string());
+            return;
+        }
+        let following = input.and(wanted).cloned();
+        let changed = self.rig.following_clock != following;
+        self.rig.clock_input = input;
+        self.rig.following_clock = following;
+        if changed || (new_engine && self.rig.following_clock.is_some()) {
+            self.rig.clock_display = None;
+            self.refresh();
+        }
+    }
+
+    /// Persists and applies one output's Send clock setting.
+    fn choose_clock_output(&mut self, name: String, on: bool) {
+        let mut prefs = self.rig.store.saved().clone();
+        prefs.midi.send_clock.retain(|output| output != &name);
+        if on {
+            prefs.midi.send_clock.push(name);
+        }
+        if let Some(error) = self.rig.save(prefs) {
+            self.alerts.warn(error);
+        }
+        self.rig
+            .clock_ports
+            .set_enabled(&self.rig.store.saved().midi.send_clock);
+    }
+
+    /// Reads new clock status from the engine and desktop worker.
+    fn poll_midi_clock(&mut self) {
+        self.sync_clock_source(false);
+        if let Some(window) = self.overlays.preferences_mut() {
+            window.lists.midi_outputs = self.rig.host.midi_clock_outputs();
+        }
+        let stats = self.session.controller.stats();
+        let lost = stats.clock_lost.load(std::sync::atomic::Ordering::Relaxed);
+        let tempo = stats.transport_tempo.load(std::sync::atomic::Ordering::Relaxed);
+        let display = self.rig.following_clock.as_ref().map(|_| {
+            (
+                (f64::from_bits(tempo) * 10.0).round() as u64,
+                crate::transport_running(&self.session.controller).unwrap_or(false),
+            )
+        });
+        if let Some(name) = &self.rig.following_clock {
+            if lost && !self.rig.clock_lost {
+                self.alerts.say(format!(
+                    "MIDI clock from \"{name}\" stopped. Running at {:.1} BPM.",
+                    f64::from_bits(tempo)
+                ));
+            } else if !lost && self.rig.clock_lost {
+                self.alerts.say(format!("Following {name} clock"));
+            }
+        }
+        self.rig.clock_lost = lost;
+        if display != self.rig.clock_display {
+            self.rig.clock_display = display;
+            self.refresh_values();
+        }
+        let failures = self.rig.clock_ports.failures();
+        if failures != self.rig.clock_failures {
+            self.rig.clock_failures = failures;
+            self.alerts
+                .warn("MIDI clock output missed its deadline or could not send. Resynchronizing.");
         }
     }
 
@@ -1490,7 +1618,7 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
             )),
             Part::Picks(picks) => audio.push(labelled(picks.label, pick_list_of(picks))),
             Part::Note(line) => audio.push(note_of(line)),
-            Part::Midi { .. } => audio,
+            Part::Midi { .. } | Part::SendClock { .. } => audio,
         };
     }
 
@@ -1506,7 +1634,18 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
                 id,
             )),
             Part::Note(line) => midi.push(note_of(line)),
-            Part::Picks(_) => midi,
+            Part::Picks(picks) => midi.push(labelled(picks.label, pick_list_of(picks))),
+            Part::SendClock { name, on } => {
+                let id = part_id("midi-output").with(name.as_str());
+                midi.push(named(
+                    checkbox(on)
+                        .label(format!("Send clock to {name}"))
+                        .on_toggle(move |on| msg(Message::SendClock(name.clone(), on)))
+                        .size(style::SWITCH)
+                        .text_size(style::CONTROL),
+                    id,
+                ))
+            }
         };
     }
 

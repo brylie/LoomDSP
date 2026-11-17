@@ -18,6 +18,8 @@ pub struct MidiEvent {
     /// input goes away (`docs/design/device-changes.md`, Held notes belong
     /// to an input).
     pub input: u16,
+    /// Monotonic arrival timestamp in microseconds, when supplied by the host.
+    pub arrival_micros: Option<u64>,
 }
 
 /// A MIDI input the engine tracks, from 1 to [`MAX_MIDI_INPUTS`] - 1.
@@ -61,60 +63,7 @@ impl HeldSet {
     }
 }
 
-/// A decoded channel message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MidiMessage {
-    /// Note on with velocity above zero.
-    NoteOn {
-        /// Channel, 0 to 15.
-        channel: u8,
-        /// Note number.
-        note: u8,
-        /// Velocity, 1 to 127.
-        velocity: u8,
-    },
-    /// Note off (or note on with velocity zero).
-    NoteOff {
-        /// Channel, 0 to 15.
-        channel: u8,
-        /// Note number.
-        note: u8,
-    },
-    /// Control change.
-    ControlChange {
-        /// Channel, 0 to 15.
-        channel: u8,
-        /// Controller number.
-        controller: u8,
-        /// Value, 0 to 127.
-        value: u8,
-    },
-    /// Pressure for one note on a channel.
-    PolyPressure {
-        /// Channel, 0 to 15.
-        channel: u8,
-        /// Note number.
-        note: u8,
-        /// Pressure, 0 to 127.
-        value: u8,
-    },
-    /// Channel pressure (aftertouch for the whole channel).
-    ChannelPressure {
-        /// Channel, 0 to 15.
-        channel: u8,
-        /// Pressure, 0 to 127.
-        value: u8,
-    },
-    /// Pitch bend, -8192 to 8191.
-    PitchBend {
-        /// Channel, 0 to 15.
-        channel: u8,
-        /// Bend amount.
-        value: i16,
-    },
-    /// Anything else.
-    Other,
-}
+pub use loom_midi::MidiMessage;
 
 impl MidiEvent {
     /// Builds an event from raw bytes. Extra bytes beyond 3 are ignored.
@@ -127,6 +76,7 @@ impl MidiEvent {
             data,
             len: len as u8,
             input: 0,
+            arrival_micros: None,
         }
     }
 
@@ -136,71 +86,65 @@ impl MidiEvent {
         Self { input: input.0, ..self }
     }
 
+    /// Wraps an encoded channel message in an engine event.
+    fn channel(frame: u32, message: MidiMessage) -> Self {
+        let (data, len) = loom_midi::encode_channel(message).expect("a channel message");
+        Self {
+            frame,
+            data,
+            len,
+            input: 0,
+            arrival_micros: None,
+        }
+    }
+
     /// A note-on event.
     pub fn note_on(frame: u32, channel: u8, note: u8, velocity: u8) -> Self {
-        Self::from_bytes(frame, &[0x90 | (channel & 0x0F), note & 0x7F, velocity & 0x7F])
+        Self::channel(
+            frame,
+            MidiMessage::NoteOn {
+                channel,
+                note,
+                velocity,
+            },
+        )
     }
 
     /// A note-off event.
     pub fn note_off(frame: u32, channel: u8, note: u8) -> Self {
-        Self::from_bytes(frame, &[0x80 | (channel & 0x0F), note & 0x7F, 0])
+        Self::channel(frame, MidiMessage::NoteOff { channel, note })
     }
 
     /// A control change event.
     pub fn control_change(frame: u32, channel: u8, controller: u8, value: u8) -> Self {
-        Self::from_bytes(frame, &[0xB0 | (channel & 0x0F), controller & 0x7F, value & 0x7F])
+        Self::channel(
+            frame,
+            MidiMessage::ControlChange {
+                channel,
+                controller,
+                value,
+            },
+        )
     }
 
-    /// A pitch bend event. `value` is from -8192 to 8191, with 0 at the
-    /// centre.
+    /// A pitch bend event. `value` is from -8192 to 8191, with 0 at the centre.
     pub fn pitch_bend(frame: u32, channel: u8, value: i16) -> Self {
-        let raw = (i32::from(value).clamp(-8192, 8191) + 8192) as u16;
-        Self::from_bytes(frame, &[0xE0 | (channel & 0x0F), (raw & 0x7F) as u8, (raw >> 7) as u8])
+        Self::channel(frame, MidiMessage::PitchBend { channel, value })
     }
 
     /// A polyphonic key pressure event.
     pub fn poly_pressure(frame: u32, channel: u8, note: u8, value: u8) -> Self {
-        Self::from_bytes(frame, &[0xA0 | (channel & 15), note & 127, value & 127])
+        Self::channel(frame, MidiMessage::PolyPressure { channel, note, value })
     }
 
     /// A channel pressure (aftertouch) event.
     pub fn channel_pressure(frame: u32, channel: u8, value: u8) -> Self {
-        Self::from_bytes(frame, &[0xD0 | (channel & 0x0F), value & 0x7F])
+        Self::channel(frame, MidiMessage::ChannelPressure { channel, value })
     }
 
     /// Decodes the event.
     pub fn message(&self) -> MidiMessage {
-        if self.len < 2 {
-            return MidiMessage::Other;
-        }
-        let status = self.data[0] & 0xF0;
-        let channel = self.data[0] & 0x0F;
-        let a = self.data[1];
-        let b = self.data[2];
-        match status {
-            0x90 if self.len == 3 && b > 0 => MidiMessage::NoteOn {
-                channel,
-                note: a,
-                velocity: b,
-            },
-            0x90 | 0x80 if self.len == 3 => MidiMessage::NoteOff { channel, note: a },
-            0xB0 if self.len == 3 => MidiMessage::ControlChange {
-                channel,
-                controller: a,
-                value: b,
-            },
-            0xA0 if self.len == 3 => MidiMessage::PolyPressure {
-                channel,
-                note: a,
-                value: b,
-            },
-            0xD0 => MidiMessage::ChannelPressure { channel, value: a },
-            0xE0 if self.len == 3 => MidiMessage::PitchBend {
-                channel,
-                value: ((i16::from(b) << 7) | i16::from(a)) - 8192,
-            },
-            _ => MidiMessage::Other,
-        }
+        loom_midi::decode(self.data, self.len)
     }
 }
 

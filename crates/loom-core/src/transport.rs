@@ -9,6 +9,9 @@
 
 use std::fmt;
 
+mod midi_clock;
+pub(crate) use midi_clock::MidiClock;
+
 /// Slowest tempo, in beats per minute.
 pub const MIN_TEMPO: f64 = 20.0;
 /// Fastest tempo, in beats per minute.
@@ -38,6 +41,8 @@ pub struct TransportRequest {
     pub time_signature: Option<TimeSignature>,
     /// Start (true) or stop (false).
     pub running: Option<bool>,
+    /// The local Run setting even when a cable overrides it.
+    pub local_running: Option<bool>,
     /// Return to bar 1, as a jump.
     pub reset: bool,
 }
@@ -139,6 +144,7 @@ pub struct TransportInfo {
     /// Frames from the anchor to the first frame of this call.
     offset: u64,
     jumped: bool,
+    limit: Option<f64>,
 }
 
 impl TransportInfo {
@@ -168,6 +174,7 @@ impl TransportInfo {
             anchor_position: position,
             offset: 0,
             jumped: false,
+            limit: None,
         }
     }
 
@@ -197,7 +204,8 @@ impl TransportInfo {
     /// transport's anchor. The same frame gets the same value for any block
     /// size.
     pub fn position_at(&self, frame: usize) -> f64 {
-        self.anchor_position + (self.offset + frame as u64) as f64 * self.beats_per_sample
+        let position = self.anchor_position + (self.offset + frame as u64) as f64 * self.beats_per_sample;
+        self.limit.map_or(position, |next| position.min(next.next_down()))
     }
 
     /// How far the position moves per frame. 0 while stopped, so a module
@@ -219,7 +227,7 @@ impl TransportInfo {
 
     /// Beat phase at frame `frame` of this call, from 0 up to 1.
     pub fn beat_phase_at(&self, frame: usize) -> f32 {
-        phase(self.position_at(frame))
+        self.phase_at(frame, 1.0)
     }
 
     /// Bar phase at frame `frame` of this call, from 0 up to 1.
@@ -235,7 +243,15 @@ impl TransportInfo {
     /// bar phase does, so a cycle of exactly one bar gives the bar phase bit
     /// for bit.
     pub fn phase_at(&self, frame: usize, beats: f64) -> f32 {
-        phase(self.position_at(frame) / beats)
+        let position = self.position_at(frame) / beats;
+        let position = self
+            .limit
+            .map_or(position, |next| position.min((next / beats).next_down()));
+        let fraction = position - position.floor();
+        if self.limit.is_some() && fraction as f32 >= 1.0 {
+            return 1.0_f32.next_down();
+        }
+        phase(position)
     }
 
     /// The transport for a call that starts `frames` frames later. Only a
@@ -292,6 +308,7 @@ pub(crate) struct Transport {
     anchor_position: f64,
     /// A reset happened. The next block starts with a jump.
     jump_pending: bool,
+    limit: Option<f64>,
 }
 
 impl Transport {
@@ -302,6 +319,7 @@ impl Transport {
             anchor_sample: 0,
             anchor_position: 0.0,
             jump_pending: false,
+            limit: None,
         }
     }
 
@@ -317,6 +335,7 @@ impl Transport {
             anchor_position: self.anchor_position,
             offset: sample - self.anchor_sample,
             jumped: self.jump_pending,
+            limit: self.limit,
         }
     }
 
@@ -376,9 +395,20 @@ impl Transport {
 
     /// Returns to bar 1 at `sample`, running or stopped, and marks a jump.
     pub fn reset(&mut self, sample: u64) {
-        self.anchor_position = 0.0;
+        self.locate(sample, 0.0, true);
+    }
+
+    /// Moves the anchor to a specified position and clears its interpolation limit.
+    fn locate(&mut self, sample: u64, position: f64, jump: bool) {
+        self.anchor_position = position;
         self.anchor_sample = sample;
-        self.jump_pending = true;
+        self.jump_pending |= jump;
+        self.limit = None;
+    }
+
+    /// Continues from the current position without the next-pulse limit.
+    fn release_limit(&mut self, sample: u64) {
+        self.locate(sample, self.info(sample).position(), false);
     }
 
     /// Called after each block: a jump lasts one frame.

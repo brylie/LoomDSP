@@ -377,6 +377,8 @@ pub struct RangeRow {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParamMode {
+    /// The value is governed by the selected external clock.
+    MidiClock,
     /// MIDI learn mode: the row arms its parameter, and shows `detail` in
     /// place of the value (`docs/design/midi-learn.md`).
     Learn { armed: bool, detail: String },
@@ -595,7 +597,18 @@ impl App {
         };
         let spec = &filtered;
         let stored = *node.params.get(index)?;
-        let value = spec.effective_choice(stored);
+        let clock = d.id == loom_core::TRANSPORT_MODULE
+            && self.session.controller.follows_midi_clock()
+            && matches!(spec.name, "tempo" | "run" | "reset");
+        let value = match spec.name {
+            "tempo" if clock => self
+                .session
+                .controller
+                .rendered_tempo()
+                .map_or(stored, |tempo| (tempo * 10.0).round() as f32 / 10.0),
+            "run" if clock => f32::from(crate::transport_running(&self.session.controller).unwrap_or(false)),
+            _ => spec.effective_choice(stored),
+        };
         let range = spec.options.ranges.first().filter(|_| show_range).map(|_| RangeRow {
             choices: spec.options.ranges.iter().map(ToString::to_string).collect(),
             selected: node
@@ -634,7 +647,9 @@ impl App {
                 options: m.options,
             }
         });
-        let mode = if self.session.learn.is_on() && !spec.options.shapes_graph {
+        let mode = if clock {
+            ParamMode::MidiClock
+        } else if self.session.learn.is_on() && !spec.options.shapes_graph {
             // In learn mode a row arms its parameter, and its value
             // does not change (midi-learn.md).
             let armed = self.session.learn.is_armed((id, index));
@@ -1433,6 +1448,10 @@ fn param_row_view<'a>(
     let unmap = AppMessage::Learn(crate::learn::Message::Unmap { module: id, index });
     let ghost = p.mapping_options.as_ref().and_then(|row| row.ghost);
     let line: Element<'a, AppMessage> = match p.mode {
+        ParamMode::MidiClock => ids::named(
+            &ui,
+            text(format!("{label}   {}   ·   MIDI clock", p.value)).size(style::BODY),
+        ),
         ParamMode::Learn { armed, detail } => {
             let arm = button(row![
                 text(label.clone()).size(style::BODY),

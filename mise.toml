@@ -85,7 +85,7 @@ description = "Build the engine crates for WebAssembly (hard rule 6)"
 # Warnings as errors, as in CI. This target is built only here, so the flag
 # does not cause rebuilds of the native build.
 env = { RUSTFLAGS = "-D warnings" }
-run = "cargo build --target wasm32-unknown-unknown -p loom-rt -p loom-dsp -p loom-core -p loom-modules -p loom-patch"
+run = "cargo build --target wasm32-unknown-unknown -p loom-rt -p loom-dsp -p loom-midi -p loom-core -p loom-modules -p loom-patch"
 
 [tasks.msrv]
 description = "Check that the workspace still builds with the minimum Rust version"

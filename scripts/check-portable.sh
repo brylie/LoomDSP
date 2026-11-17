@@ -28,7 +28,7 @@
 set -eu
 
 if [ "$#" -eq 0 ]; then
-    set -- crates/loom-core crates/loom-dsp crates/loom-modules crates/loom-patch crates/loom-rt
+    set -- crates/loom-core crates/loom-midi crates/loom-dsp crates/loom-modules crates/loom-patch crates/loom-rt
 fi
 
 word='([^A-Za-z0-9_]|$)'

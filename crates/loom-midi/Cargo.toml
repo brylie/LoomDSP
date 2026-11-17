@@ -1,0 +1,15 @@
+[package]
+name = "loom-midi"
+description = "Portable MIDI messages and clock arithmetic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme.workspace = true
+keywords = ["midi", "clock", "audio"]
+categories = ["multimedia::audio", "no-std"]
+
+[lints]
+workspace = true
