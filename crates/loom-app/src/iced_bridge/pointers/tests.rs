@@ -177,15 +177,23 @@ fn a_layer_above_iced_keeps_its_points_from_iced() {
 }
 
 /// Section 6, rule 2, between the toolkits: with nothing focused in
-/// either, Tab enters the runtime's first stop, and Iced never hears it,
-/// so no field of Iced's takes it too.
+/// either, Tab is the canvas's, which reads first, and Shift+Tab enters
+/// the runtime's last stop. Iced never hears a Tab the runtime took, so no
+/// field of Iced's takes it too.
 #[test]
-fn tab_from_nothing_enters_our_first_stop_and_not_iced() {
+fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
     let mut ui = ui_with(bar);
     assert_eq!(ui.focused_field(), None);
     ui.tap(
         keyboard::Key::Named(keyboard::key::Named::Tab),
         keyboard::Modifiers::default(),
+    );
+    assert_eq!(ui.runtime().focused(), None, "Tab from nothing is the canvas's");
+    ui.app_mut().session.selection.clear();
+    ui.redraw();
+    ui.tap(
+        keyboard::Key::Named(keyboard::key::Named::Tab),
+        keyboard::Modifiers::SHIFT,
     );
     assert_eq!(ui.runtime().focused(), Some(&go()));
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
@@ -235,9 +243,9 @@ fn pressed(heard: &[keyboard::Event], key: &keyboard::Key) -> bool {
         .any(|event| matches!(event, keyboard::Event::KeyPressed { key: got, .. } if got == key))
 }
 
-/// Only the key the runtime took is kept from Iced. A Tab the runtime
+/// Only the key the runtime took is kept from Iced. A Shift+Tab the runtime
 /// takes, then a modifier change and a key in the same batch: Iced hears
-/// the last two. A taken Tab between two kept keys: Iced hears both keys.
+/// the last two. A taken Shift+Tab between two kept keys: Iced hears both.
 #[test]
 fn only_the_key_the_runtime_took_is_kept_from_iced() {
     use crate::ui_test::key_press;
@@ -246,9 +254,10 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     let x = keyboard::Key::Character("x".into());
     let q = keyboard::Key::Character("q".into());
 
+    let shift = keyboard::Modifiers::SHIFT;
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
-        key_press(tab.clone(), none, None, false),
+        key_press(tab.clone(), shift, None, false),
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT)),
         key_press(x.clone(), none, Some("x"), false),
     ]));
@@ -265,7 +274,7 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
         key_press(x.clone(), none, Some("x"), false),
-        key_press(tab.clone(), none, None, false),
+        key_press(tab.clone(), shift, None, false),
         key_press(q.clone(), none, Some("q"), false),
     ]));
     assert_eq!(ui.runtime().focused(), Some(&go()));

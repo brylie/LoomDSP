@@ -312,9 +312,20 @@ impl Ui {
     /// canvas and the window's parts where this view placed them.
     pub fn a11y_tree(&mut self) -> A11yTree {
         let places = self.places();
+        self.read_runtime_nodes();
         let update = self.app_mut().a11y_tree(&places);
         let app = self.app();
         A11yTree::new(update, |node| app.a11y_ui_id(node))
+    }
+
+    /// Reads the runtime's own nodes (the stats bar) into the app, with the
+    /// app's table of node IDs, as the window's rebuild reads them through
+    /// its context: for a test that builds the tree itself.
+    pub fn read_runtime_nodes(&mut self) {
+        self.lay_out_panels();
+        let mut ids = self.app_mut().a11y_lend_ids();
+        let ours = self.runtime().access_nodes(&mut ids);
+        self.app_mut().a11y_return_ids(ids, ours);
     }
 
     /// Performs `action` on the node `target` names, as a screen reader's

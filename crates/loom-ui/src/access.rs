@@ -278,6 +278,22 @@ impl Access {
         self
     }
 
+    /// True when it has a description of its own.
+    pub(crate) fn has_description(&self) -> bool {
+        self.description.is_some()
+    }
+
+    /// True when `text` only repeats its name or its text value, so as a
+    /// description it would be read twice.
+    pub(crate) fn repeats(&self, text: &str) -> bool {
+        self.name == text || matches!(&self.value, Some(Value::Text(value)) if value == text)
+    }
+
+    /// True when it offers `action`.
+    pub(crate) fn offers(&self, action: Action) -> bool {
+        self.actions.contains(&action)
+    }
+
     /// Its role.
     pub fn role(&self) -> Role {
         self.role
@@ -307,7 +323,9 @@ impl Access {
             (Role::Label | Role::Status, _) => false,
             _ => true,
         };
-        let named = matches!(self.role, Role::Label) || !self.name.trim().is_empty();
+        // A label and a status are read by their text (the role table): a
+        // status is no interactive element, so rule 2 asks it for no name.
+        let named = matches!(self.role, Role::Label | Role::Status) || !self.name.trim().is_empty();
         if !named {
             Some(Problem::NoName)
         } else if !value_fits {

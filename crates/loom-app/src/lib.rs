@@ -78,6 +78,7 @@ mod settings;
 mod slots;
 mod snapshot;
 mod spectrum;
+mod stats_bar;
 mod stream;
 mod style;
 mod subscriptions;
@@ -1403,6 +1404,27 @@ impl App {
         // catches up, so it alone may arrive with the two apart.
         if !matches!(message, Message::FocusMoved(_)) {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
+        }
+        // What reads the runtime's layout (where a part is for `locate`, the
+        // nodes for the tree) waits for the draw that lays out a view a
+        // live value just rebuilt, so it never reads a layout half made.
+        if matches!(
+            message,
+            Message::Located { .. } | Message::A11y(crate::a11y::Event::Located(_))
+        ) && !cx.laid_out()
+        {
+            return loom_ui::Effects::after_draw(message);
+        }
+        // The runtime's nodes as last laid out, for the tree a rebuild
+        // sends (`a11y/tree.rs`).
+        if matches!(message, Message::A11y(crate::a11y::Event::Located(_))) {
+            self.a11y_take_ours(|ids| cx.access_nodes(ids));
+        }
+        // A target `locate` looks for may be one of the runtime's own
+        // elements, which only the context can place (section 10, rule 6).
+        let mut message = message;
+        if let Message::Located { target, found, .. } = &mut message {
+            found.find_ours(target, cx);
         }
         debug_assert!(
             !matches!(message, Message::Input { .. }),

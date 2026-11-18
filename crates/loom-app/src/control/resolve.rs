@@ -52,6 +52,20 @@ pub struct Found {
     pub text: Option<Rect>,
     /// The window's named parts, for a target given as UI ID text.
     pub(crate) places: Places,
+    /// The target in `loom-ui`'s own layout (the stats bar): by its UI ID,
+    /// or by the text it shows. Filled in the update that answers, which
+    /// can read that layout (`App::update`).
+    pub(crate) ours: Option<Rect>,
+}
+
+impl Found {
+    /// Fills [`Found::ours`] for `target` from the runtime's layout, by its
+    /// UI ID when it reads as one, else by the text the window shows.
+    pub(crate) fn find_ours<M>(&mut self, target: &str, cx: &loom_ui::Context<'_, M>) {
+        self.ours = ui_id(target)
+            .and_then(|id| cx.bounds(&id))
+            .or_else(|| cx.text_bounds(target));
+    }
 }
 
 /// Finds the canvas, and the first text widget that reads `text`.
@@ -159,13 +173,12 @@ pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
 /// The first keys a UI ID's text can start with: the window's panels and
 /// the overlays (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
 /// with another word is not taken for a UI ID.
-const PANELS: [&str; 15] = [
+const PANELS: [&str; 14] = [
     "canvas",
     "toolbar",
     "panel",
     "inspector",
     "matrix",
-    "status",
     "stats",
     "menu",
     "recent",
@@ -225,13 +238,15 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rect, String> {
         return match locate_id(app, &id, found)? {
             Some(rect) => Ok(rect),
             None => found
-                .text
+                .ours
+                .or(found.text)
                 .ok_or_else(|| format!("nothing in the window has the UI ID `{target}`")),
         };
     }
     let Some((module, name)) = split_target(target) else {
         return found
             .text
+            .or(found.ours)
             .ok_or_else(|| format!("no module, port, control, or text `{target}` in the window"));
     };
     let view = found.canvas.as_ref().ok_or("the window has no patch canvas")?;

@@ -206,6 +206,7 @@ pub struct Element {
     pub(crate) look: Look,
     pub(crate) focusable: bool,
     pub(crate) access: Option<Access>,
+    pub(crate) hover: Option<String>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -228,6 +229,7 @@ impl Element {
             look: Look::default(),
             focusable: false,
             access: None,
+            hover: None,
             children,
         }
     }
@@ -413,6 +415,15 @@ impl Element {
             Kind::Text { colour: set, .. } => *set = Some(colour),
             _ => debug_assert!(false, "only text has a colour"),
         }
+        self
+    }
+
+    /// Its hover text (ui-layer.md, section 5, rule 11): shown by the
+    /// runtime while the pointer is over it or it has the focus, and its
+    /// node's description when its access sets none (section 7, rule 23).
+    /// Only an element with a key has it.
+    pub fn hover_text(mut self, text: impl Into<String>) -> Self {
+        self.hover = Some(text.into());
         self
     }
 

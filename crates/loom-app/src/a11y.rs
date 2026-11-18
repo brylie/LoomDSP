@@ -136,6 +136,10 @@ pub(crate) enum Event {
 pub(crate) struct Access {
     /// The node ID of every element in the tree.
     ids: IdTable,
+    /// The nodes of `loom-ui`'s own elements (the stats bar), as the
+    /// runtime last laid them out, spliced into the tree (ui-layer.md,
+    /// section 7, until phase 4).
+    pub(crate) ours: loom_ui::AccessNodes,
     /// True once a screen reader asked for the tree.
     active: bool,
     /// The window's scale factor: AccessKit wants physical pixels.
@@ -212,6 +216,7 @@ impl Default for Access {
     fn default() -> Self {
         Self {
             ids: IdTable::new(),
+            ours: loom_ui::AccessNodes::default(),
             active: false,
             scale: 1.0,
             sent: tree::Sent::default(),
@@ -379,7 +384,15 @@ impl crate::App {
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
-        let whole = tree::tree(&snapshot, &frames, &ids, places, self.a11y.scale, &mut self.a11y.ids);
+        let whole = tree::tree(
+            &snapshot,
+            &frames,
+            &ids,
+            places,
+            &self.a11y.ours,
+            self.a11y.scale,
+            &mut self.a11y.ids,
+        );
         let flush = std::mem::take(&mut self.a11y.flush_live);
         if flush {
             self.a11y.live_dirty = false;
@@ -447,7 +460,9 @@ impl crate::App {
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
         let mut table = IdTable::new();
-        let whole = tree::tree(&snapshot, &frames, &ids, places, 1.0, &mut table);
+        // The runtime's own parts are found in its layout, not here.
+        let ours = loom_ui::AccessNodes::default();
+        let whole = tree::tree(&snapshot, &frames, &ids, places, &ours, 1.0, &mut table);
         let node = accesskit::NodeId(table.number(id));
         let bounds = whole.nodes.iter().find(|(found, _)| *found == node)?.1.bounds()?;
         Some(loom_ui_core::Rect::new(
@@ -547,7 +562,35 @@ impl crate::App {
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
-        tree::tree(&snapshot, &frames, &ids, places, self.a11y.scale, &mut self.a11y.ids)
+        tree::tree(
+            &snapshot,
+            &frames,
+            &ids,
+            places,
+            &self.a11y.ours,
+            self.a11y.scale,
+            &mut self.a11y.ids,
+        )
+    }
+
+    /// Lends the table of node IDs out, for the harness to read the
+    /// runtime's nodes with it while the runtime holds the app.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn a11y_lend_ids(&mut self) -> IdTable {
+        std::mem::replace(&mut self.a11y.ids, IdTable::new())
+    }
+
+    /// Takes the table back, with the runtime's nodes read with it.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn a11y_return_ids(&mut self, ids: IdTable, ours: loom_ui::AccessNodes) {
+        self.a11y.ids = ids;
+        self.a11y.ours = ours;
+    }
+
+    /// Takes the runtime's nodes from `nodes`, which reads them with the
+    /// app's own table of node IDs.
+    pub(crate) fn a11y_take_ours(&mut self, nodes: impl FnOnce(&mut IdTable) -> loom_ui::AccessNodes) {
+        self.a11y.ours = nodes(&mut self.a11y.ids);
     }
 
     /// What the tree reports of the parts around the canvas: the bar, the
@@ -560,7 +603,6 @@ impl crate::App {
         };
         let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
-            bars: self.bars_model(),
             panel,
             focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
             focused_item: self.matrix_focus(),
@@ -641,6 +683,11 @@ impl crate::App {
             return None;
         }
         let id = self.a11y.ids.id(request.target_node.0)?;
+        // The bar is `loom-ui`'s: its Click is the same click a pointer or
+        // a key gives (section 3, rule 4).
+        if id.is_under(&crate::stats_bar::stats_id()) {
+            return self.bar_click(id);
+        }
         match tree::frame_part(id)? {
             tree::FramePart::Button(name) => {
                 let model = self.toolbar_model();
@@ -648,13 +695,6 @@ impl crate::App {
                 button.enabled.then(|| crate::toolbar::message(name)).flatten()
             }
             tree::FramePart::Tab(tab) => Some(Message::Matrix(crate::matrix::Event::Tab(tab))),
-            tree::FramePart::Dismiss { kept } => {
-                let bars = self.bars_model();
-                let field = if kept { bars.kept? } else { bars.status };
-                field.dismiss.map(Message::DismissError)
-            }
-            tree::FramePart::Measure => self.dev_tools.then_some(Message::Measure(!self.measuring)),
-            tree::FramePart::MoveCamera => self.dev_tools.then_some(Message::Animate(!self.animating)),
         }
     }
 

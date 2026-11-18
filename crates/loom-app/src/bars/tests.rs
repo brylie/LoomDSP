@@ -17,14 +17,7 @@ fn every_item_has_an_id() {
         assert_eq!(id, UiId::panel("stats").with(item.name));
         assert!(!item.text.is_empty());
     }
-    for text in [
-        STATUS_ID,
-        STATUS_DISMISS_ID,
-        KEPT_ID,
-        KEPT_DISMISS_ID,
-        MEASURE_ID,
-        MOVE_CAMERA_ID,
-    ] {
+    for text in [STATUS_DISMISS_ID, KEPT_DISMISS_ID, MEASURE_ID, MOVE_CAMERA_ID] {
         let id: UiId = text.parse().unwrap();
         assert_eq!(id.to_string(), text);
     }

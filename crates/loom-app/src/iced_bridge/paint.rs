@@ -102,13 +102,22 @@ impl Side {
         }
     }
 
-    /// Takes this frame's list and prepares it, unless it is empty.
+    /// Takes this frame's list and prepares it, unless it is empty, or the
+    /// same as the last one for the same target: the renderer then holds
+    /// it already, so an unchanged panel uploads nothing (the canvas keeps
+    /// its GPU data the same way).
     fn set(&mut self, target: &Target<'_>, list: PaintList) {
         if list.is_empty() {
             self.last = None;
             return;
         }
         let to = whole(target);
+        if let Some((last, at)) = &self.last
+            && *at == to
+            && last.same_as(&list)
+        {
+            return;
+        }
         let _ = self.renderer.prepare(target.device, target.queue, &list, to);
         self.last = Some((list, to));
     }

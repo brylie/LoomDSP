@@ -86,14 +86,12 @@ pub(crate) struct Model {
     pub status: Field,
 }
 
-/// The UI ID text of the status line, the kept error, and their × buttons.
-pub(crate) const STATUS_ID: &str = "status";
-/// See [`STATUS_ID`].
-pub(crate) const STATUS_DISMISS_ID: &str = "status/dismiss";
-/// See [`STATUS_ID`].
-pub(crate) const KEPT_ID: &str = "status/kept";
-/// See [`STATUS_ID`].
-pub(crate) const KEPT_DISMISS_ID: &str = "status/kept/dismiss";
+/// The UI ID text of the status line's ×, inside the bar's panel
+/// (`stats_bar.rs`). The status itself is `stats/status`.
+pub(crate) const STATUS_DISMISS_ID: &str = "stats/status/dismiss";
+/// The UI ID text of the kept error's ×. The kept error itself is
+/// `stats/kept`.
+pub(crate) const KEPT_DISMISS_ID: &str = "stats/kept/dismiss";
 /// The UI ID text of the **Measure** switch.
 pub(crate) const MEASURE_ID: &str = "stats/measure";
 /// The UI ID text of the **Move camera** switch.

@@ -58,8 +58,8 @@ impl Pointers {
             _ => {}
         }
         let pointer = ours(&event).zip(self.cursor);
-        if let Some((_, point)) = &pointer {
-            if panels.over_target(*point) {
+        if let Some((loom, point)) = &pointer {
+            if panels.over_target(loom, *point) {
                 if !std::mem::replace(&mut self.hidden, true) {
                     self.keep(iced::Event::Mouse(mouse::Event::CursorLeft), None, events);
                 }

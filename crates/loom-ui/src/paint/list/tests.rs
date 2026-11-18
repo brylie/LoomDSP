@@ -213,3 +213,29 @@ fn a_nested_layer_is_cut_to_its_parent() {
     assert_eq!(clips[6], BOUNDS, "back to the canvas's clip");
     assert_eq!(clips.len(), 7);
 }
+
+/// Two lists painted the same way are the same, so a host can skip
+/// preparing the second; a moved box, other text, or another layer makes
+/// them differ.
+#[test]
+fn a_list_painted_the_same_way_is_the_same() {
+    let Some(text) = text() else { return };
+    let paint = |x: f32, words: &str, layer: bool| {
+        let mut list = PaintList::new(BOUNDS);
+        let mut painter = ListPainter::new(&text, &mut list);
+        if layer {
+            painter.begin_layer(BOUNDS);
+        }
+        painter.quad(quad(x));
+        painter.text(&run(words, Point::new(130.0, 80.0), Align::Left, Vertical::Center));
+        if layer {
+            painter.end_layer();
+        }
+        list
+    };
+    let first = paint(110.0, "50", false);
+    assert!(first.same_as(&paint(110.0, "50", false)));
+    assert!(!first.same_as(&paint(111.0, "50", false)), "a moved box");
+    assert!(!first.same_as(&paint(110.0, "51", false)), "other text");
+    assert!(!first.same_as(&paint(110.0, "50", true)), "another layer");
+}

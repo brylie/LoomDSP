@@ -95,6 +95,18 @@ pub struct PaintList {
 }
 
 impl PaintList {
+    /// True when `other` paints exactly what this list paints: the same
+    /// boxes, glyphs, faces, and layers, in the same order. A renderer that
+    /// prepared this list draws `other` as it is, so a host can skip
+    /// preparing a frame that did not change.
+    pub fn same_as(&self, other: &PaintList) -> bool {
+        self.boxes == other.boxes
+            && self.glyphs == other.glyphs
+            && self.layers == other.layers
+            && self.faces.len() == other.faces.len()
+            && self.faces.iter().zip(&other.faces).all(|(a, b)| a.same(b))
+    }
+
     /// An empty list whose first layer is cut to `bounds`.
     pub fn new(bounds: Rect) -> Self {
         Self {

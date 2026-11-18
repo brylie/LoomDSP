@@ -414,7 +414,8 @@ fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale
     let drawing = app.canvas_drawn.take();
     // The renderer holds text paragraphs weakly, and the widget tree owns
     // them, so the tree must live until the frame is drawn.
-    let pixels = offscreen.pixels(physical, scale, theme.palette().background, drawing);
+    let panels = crate::iced_bridge::offscreen::still_panels(app, logical);
+    let pixels = offscreen.pixels_with(physical, scale, theme.palette().background, drawing, Some(panels));
     drop(ui);
     pixels
 }

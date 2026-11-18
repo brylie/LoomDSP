@@ -36,6 +36,11 @@ pub(crate) struct Pointer {
     /// The element a left press went down on, and its layer, until the
     /// release.
     pub(crate) pressed: Option<(Layer, UiId)>,
+    /// The focused element Space went down on, which clicks when Space
+    /// comes up there (section 3, rule 4). A pointer press cancels it.
+    pub(crate) space: Option<UiId>,
+    /// What chooses the hover text, between the pointer and the focus.
+    pub(crate) hint: crate::hint::Chooser,
 }
 
 impl Pointer {
@@ -44,6 +49,7 @@ impl Pointer {
     /// across it still clicks. Returns true when the hover changed.
     pub(crate) fn clear(&mut self) -> bool {
         self.pressed = None;
+        self.space = None;
         self.hovered.take().is_some()
     }
 
@@ -98,11 +104,21 @@ impl<A: App> Panels<'_, A> {
     /// pointer at `point`: a driver whose toolkit routes before the turn
     /// asks this first, and keeps the event from the toolkit when it is
     /// true (a move reaches it as the pointer leaving).
-    pub fn over_target(&self, point: Point) -> bool {
+    pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
-        self.window
-            .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
-            .is_some()
+        self.keeps_hint(event, point)
+            || self
+                .window
+                .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
+                .is_some()
+    }
+
+    /// True for a move onto the hover text showing, or between it and its
+    /// element, which keeps it showing (section 5, rule 11). It takes no
+    /// other event: a press there goes where it would go without it.
+    fn keeps_hint(&self, event: &Event, point: Point) -> bool {
+        matches!(event, Event::Pointer(PointerEvent::Moved))
+            && self.window.hint().is_some_and(|hint| hint.keep.contains(point))
     }
 
     /// Offers a pointer event at `point` to the runtime's layers below the
@@ -129,6 +145,9 @@ impl<A: App> Panels<'_, A> {
         ) {
             self.pointer.pressed = None;
         }
+        if matches!(event, Event::Pointer(PointerEvent::Pressed(_))) {
+            self.pointer.space = None;
+        }
         Heard {
             taken: false,
             redraw: self.pointer.hovered.take().is_some(),
@@ -151,6 +170,13 @@ impl<A: App> Panels<'_, A> {
         let Event::Pointer(pointer) = event else {
             return Heard::default();
         };
+        if side == Side::Above && self.keeps_hint(event, point) {
+            // The hover stays on the hint's element, so the hint stays.
+            return Heard {
+                taken: true,
+                redraw: false,
+            };
+        }
         let hit = self
             .window
             .hit_in(point, |layer| Side::of(layer) == side && layer >= input.layer)
@@ -168,6 +194,10 @@ impl<A: App> Panels<'_, A> {
                     self.pointer.pressed = None;
                     false
                 }
+                PointerEvent::Pressed(_) => {
+                    self.pointer.space = None;
+                    false
+                }
                 _ => false,
             };
             return Heard { taken: false, redraw };
@@ -177,6 +207,7 @@ impl<A: App> Panels<'_, A> {
         match pointer {
             PointerEvent::Moved => redraw = self.hover(at),
             PointerEvent::Pressed(button) => {
+                self.pointer.space = None;
                 redraw = self.hover(at.clone());
                 let before = self.focus.id.clone();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
@@ -201,6 +232,9 @@ impl<A: App> Panels<'_, A> {
     /// Moves the hover to `at`. Returns true when it changed.
     fn hover(&mut self, at: Option<(Layer, UiId)>) -> bool {
         let changed = self.pointer.hovered != at;
+        if changed {
+            self.pointer.hint.latest = crate::hint::Latest::Pointer;
+        }
         self.pointer.hovered = at;
         changed
     }

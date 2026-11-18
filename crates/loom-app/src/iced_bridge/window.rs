@@ -335,9 +335,7 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
                 Bridged::Focus(answer) => self.answers.push_back(answer),
                 // Only the harness's bridge makes these.
                 #[cfg(any(test, feature = "test-ui"))]
-                Bridged::Woken | Bridged::Deadline => {}
-                #[cfg(test)]
-                Bridged::Presented => {}
+                Bridged::Woken | Bridged::Deadline | Bridged::Presented => {}
             }
         }
         if let Some(stuck) = &ran.stuck {

@@ -195,7 +195,7 @@ A rectangle is `{x, y, width, height}`, from its top-left corner. `locate` answe
 | `learning` | True while MIDI learn mode is on and the bar shows `Learning` |
 | `tiles[].inputs[].shown`, `tiles[].outputs[].shown`, `tiles[].widgets[].shown` | The label as the tile draws it, when it is cut with "…" (`{"label": "Resonance", "shown": "Reson…"}`). Left out when the whole label shows |
 
-`App::stats_bar` draws from the same `stats` model, and `shown` comes from the canvas's own tile text layout, so the snapshot cannot disagree with the window. The frame rate is left out, so two snapshots of an idle app are equal. Titles are not listed: they are clipped at the tile edge, not cut with "…". A mapping label shown in place of a caption in MIDI learn mode is not listed either.
+The stats bar (`stats_bar.rs`) draws from the same `stats` model, and `shown` comes from the canvas's own tile text layout, so the snapshot cannot disagree with the window. The frame rate is left out, so two snapshots of an idle app are equal. Titles are not listed: they are clipped at the tile edge, not cut with "…". A mapping label shown in place of a caption in MIDI learn mode is not listed either.
 
 ## Devices and stream health
 

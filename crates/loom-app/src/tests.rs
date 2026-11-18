@@ -1,5 +1,4 @@
 use super::*;
-use crate::view::severity_colour;
 use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::time::Duration;
@@ -209,8 +208,8 @@ fn window_text_meets_wcag_minimum_contrast() {
     let pairs = [
         ("theme text on background", theme.text),
         ("DIM text on background", DIM),
-        ("warning text on background", severity_colour(alerts::Severity::Warning)),
-        ("alarm text on background", severity_colour(alerts::Severity::Alarm)),
+        ("warning text on background", crate::style::WARNING_TEXT),
+        ("alarm text on background", crate::style::ERROR_TEXT),
     ];
     for (name, text) in pairs {
         let ratio = loom_canvas::contrast_ratio(text.to_core(), theme.background.to_core());

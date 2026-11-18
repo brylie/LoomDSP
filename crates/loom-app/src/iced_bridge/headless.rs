@@ -231,7 +231,8 @@ impl Surface {
         let drawing = app.canvas_drawn.take();
         // The tree owns the text the renderer holds weakly, so it stays
         // until the frame is drawn.
-        let pixels = offscreen.pixels(physical, 1.0, theme.palette().background, drawing);
+        let panels = super::offscreen::still_panels(app, size);
+        let pixels = offscreen.pixels_with(physical, 1.0, theme.palette().background, drawing, Some(panels));
         self.cache = Some(ui.into_cache());
         // A frame that could not be read back answers as the window's
         // capture does then: with no image (`shell/gpu.rs`, `capture`).

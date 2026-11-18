@@ -254,3 +254,39 @@ async fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
         .ok()?;
     Some((adapter, device, queue))
 }
+
+/// The app's own panels as a still picture of a window of `logical` size:
+/// painted into the list below Iced (the canvas and panels layers) and the
+/// one above it (the overlays and question layers), as the window paints
+/// them (`window.rs`, `paint_panels`), with nothing hovered or focused.
+pub(crate) fn still_panels(
+    app: &crate::App,
+    logical: iced::Size,
+) -> (loom_ui::paint::PaintList, loom_ui::paint::PaintList) {
+    use loom_canvas::iced_convert::ToCore as _;
+    use loom_ui::Layer;
+    use loom_ui::paint::{ListPainter, PaintList, PanelStyle, Typesetter};
+    let size = loom_ui_core::Size::new(logical.width, logical.height);
+    let mut view = loom_ui::View::new();
+    app.bar_panels(&mut view);
+    let text = std::cell::RefCell::new(Typesetter::new());
+    let still = loom_ui::Still::new(&view, size, &mut *text.borrow_mut());
+    let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, size);
+    // As the window paints them (`window.rs`, `paint_panels`).
+    let theme = app.theme();
+    let style = PanelStyle {
+        text: theme.palette().text.to_core(),
+        caret: theme.palette().text.to_core(),
+        selection: theme.extended_palette().primary.weak.color.to_core(),
+    };
+    let mut lists = (PaintList::new(whole), PaintList::new(whole));
+    for (layers, list) in [
+        ([Layer::Canvas, Layer::Panels], &mut lists.0),
+        ([Layer::Overlays, Layer::Question], &mut lists.1),
+    ] {
+        for layer in layers {
+            still.paint(layer, &mut ListPainter::new(&text, list), &style);
+        }
+    }
+    lists
+}

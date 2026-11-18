@@ -1072,6 +1072,7 @@ fn locate_agrees_with_the_ui_harness() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     // The two sides round differently, so allow a tiny difference.
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
@@ -1409,6 +1410,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     let ask = |ui: &mut crate::ui_test::Ui, target: &str, then: AfterSearch| {
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -1775,6 +1777,7 @@ fn locate_finds_lights_and_meters() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     let view = found.canvas.unwrap();
     let centre = |module: u32, widget: usize| {
@@ -2432,6 +2435,7 @@ fn locate_and_sample_find_a_surface_control() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
     let knob = locate(ui.app(), "2:cutoff", &found).unwrap();
@@ -2461,6 +2465,7 @@ fn locate_takes_a_ui_id_as_text() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let near = |a: Rect, b: Rect| {
         (a.x - b.x).abs() < 0.01
@@ -2493,7 +2498,17 @@ fn locate_takes_a_ui_id_as_text() {
     assert!(undo.width < 200.0, "the button, not the toolbar");
     let toolbar = locate(ui.app(), "toolbar", &found).unwrap();
     assert!(toolbar.contains(undo.center()));
-    for id in ["panel/inspector", "panel/matrix", "stats/patch", "stats/midi", "status"] {
+    for id in [
+        "panel/inspector",
+        "panel/matrix",
+        "stats/patch",
+        "stats/midi",
+        "stats/status",
+    ] {
+        // The bar is `loom-ui`'s: the answering update fills its place from
+        // the runtime's layout (`Found::ours`), as here.
+        let mut found = found.clone();
+        found.ours = ui.runtime().bounds(&id.parse().unwrap());
         let rect = locate(ui.app(), id, &found).unwrap_or_else(|error| panic!("{id}: {error}"));
         assert!(rect.width > 0.0 && rect.height > 0.0, "{id}");
     }
@@ -2529,6 +2544,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let cancel = locate(ui.app(), "question/cancel", &found).unwrap();
     let label = ui.text("Cancel").expect("the question shows Cancel");
@@ -2543,6 +2559,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let search = locate(ui.app(), "browser/search", &found).unwrap();
     let browser = locate(ui.app(), "browser", &found).unwrap();
@@ -2556,6 +2573,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: None,
         text: None,
         places: ui.places(),
+        ours: None,
     };
     let close = locate(ui.app(), "preferences/close", &found).unwrap();
     let label = ui.text("Close").expect("Preferences shows Close");
@@ -2568,6 +2586,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: None,
         text: None,
         places: ui.places(),
+        ours: None,
     };
     let cancel = locate(ui.app(), "licence/cancel", &found).unwrap();
     let label = ui.text("Cancel").expect("the chooser shows Cancel");
@@ -2833,4 +2852,45 @@ fn watch_runs_a_socket_listener() {
     watch(&Listener::Socket(path.clone()), outlet);
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `locate` on a part of the runtime's own, answered in the turn after one
+/// that rebuilt it (here learn mode adds its word to the bar) and before
+/// any draw, waits for the draw that lays the bar out, through the
+/// after-draw effect, and is answered then: once, with real bounds, and
+/// with no second wait (ui-layer.md, section 10, rule 6).
+#[test]
+fn locate_waits_once_for_the_draw_after_a_rebuild() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        ..Default::default()
+    };
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "locate", "target": "stats/learning"}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let heard = ui.deliver(Message::Located {
+        call,
+        target: "stats/learning".to_string(),
+        found,
+        then: crate::control::AfterSearch::Locate,
+    });
+    assert!(receiver.try_recv().is_err(), "not answered before the draw: {heard:?}");
+    let heard = ui.redraw();
+    let reply = receiver
+        .try_recv()
+        .expect("answered after one draw")
+        .unwrap_or_else(|why| panic!("stats/learning: {why}"));
+    assert!(reply["width"].as_f64().unwrap_or(0.0) > 0.0, "real bounds: {reply:?}");
+    let again = heard.iter().filter(|m| matches!(m, Message::Located { .. })).count();
+    assert_eq!(again, 1, "one retry, after the draw");
+    let later = ui.redraw();
+    assert!(
+        !later.iter().any(|m| matches!(m, Message::Located { .. })),
+        "and no second one"
+    );
 }
