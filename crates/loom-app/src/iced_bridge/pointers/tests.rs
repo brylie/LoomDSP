@@ -392,16 +392,25 @@ fn our_field_gives_the_keyboard_to_an_iced_field() {
     click(&mut ui, field);
     ui.redraw();
     let part = ui.focused_field();
-    assert!(part.is_some(), "the value field has the keyboard");
+    assert_eq!(
+        part,
+        ui.app().value_field_part(4, 0),
+        "the clicked value field has the keyboard"
+    );
     assert_eq!(ui.runtime().focused(), None, "ours let go");
 
     // Iced's field uses the key, so its listener reports no `Key`: the
     // field's own message is the sign it got there.
     let heard = ui.step(&[key_press(a, keyboard::Modifiers::default(), Some("a"), false)]);
     assert!(
-        heard
-            .iter()
-            .any(|m| matches!(m, Message::Inspector(crate::inspector::Message::ValueText { .. }))),
-        "Iced's field typed it: {heard:?}"
+        heard.iter().any(|m| matches!(
+            m,
+            Message::Inspector(crate::inspector::Message::ValueText {
+                module: 4,
+                index: 0,
+                ..
+            })
+        )),
+        "the clicked field typed it: {heard:?}"
     );
 }

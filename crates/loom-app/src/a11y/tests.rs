@@ -1259,20 +1259,23 @@ fn a_message_that_changes_nothing_sends_nothing() {
     assert!(changes.is_none());
 }
 
-/// Messages that arrive while a rebuild waits for the canvas ask for no
-/// second one: the one on its way holds them.
+/// One rebuild at a time: messages that arrive while one waits for the
+/// canvas start no second at once. However many there are, they ask for
+/// exactly one more once the one on its way is built, which sees what
+/// they changed.
 #[test]
 fn one_rebuild_at_a_time() {
     let (mut app, _, _) = app_with_filter();
     listen(&mut app);
     app.a11y_after(Touch::Changed);
     assert!(app.a11y.locating);
-    // Asking again while it waits changes nothing.
     app.a11y_after(Touch::Changed);
     app.a11y_after(Touch::Own);
     assert!(app.a11y.locating);
     app.a11y_event(Event::Located(Places::default()));
-    assert!(!app.a11y.locating);
+    assert!(app.a11y.locating, "one more, for what arrived meanwhile");
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(!app.a11y.locating, "and only one");
 }
 
 /// Runs the engine and hands the app the lights and meters that moved, as
@@ -4816,4 +4819,22 @@ fn a_lights_message_is_a_live_reading_of_its_own() {
     // Any other message with a focus asks where it went.
     let _ = app.send(Message::CloseHelp);
     assert!(app.focus_question_waits());
+}
+
+/// A change while a rebuild is in flight (an autosave's warning, say) is
+/// not dropped: the in-flight build is sent, then exactly one more is asked
+/// for, which sees the change; and nothing more after it.
+#[test]
+fn a_change_during_a_rebuild_asks_for_one_more() {
+    let (mut app, _, _) = app_with_filter();
+    listen(&mut app);
+    app.a11y_after(Touch::Changed);
+    assert!(app.a11y.locating, "a rebuild is in flight");
+    app.alerts.warn("Autosave failed");
+    app.a11y_after(Touch::Changed);
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(app.a11y.locating, "one more build was asked for");
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(!app.a11y.locating, "and no third");
+    assert!(!app.a11y.again);
 }

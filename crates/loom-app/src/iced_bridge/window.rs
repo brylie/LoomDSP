@@ -515,32 +515,16 @@ impl WindowLayers {
         frame: &Frame<'_>,
         theme: &iced::Theme,
     ) -> (loom_ui::paint::PaintList, loom_ui::paint::PaintList) {
-        use loom_canvas::iced_convert::ToCore as _;
-        use loom_ui::Layer;
-        use loom_ui::paint::{ListPainter, PaintList, PanelStyle};
+        use loom_ui::paint::ListPainter;
         self.text.borrow_mut().begin_frame();
         parts.panels.lay_out(&mut *self.text.borrow_mut());
         let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, frame.size);
-        // A field of the runtime's looks like one of Iced's while both
-        // draw: the caret in the text colour, the selection in the theme's
-        // weak primary.
-        let style = PanelStyle {
-            text: theme.palette().text.to_core(),
-            caret: theme.palette().text.to_core(),
-            selection: theme.extended_palette().primary.weak.color.to_core(),
-        };
-        let mut lists = (PaintList::new(whole), PaintList::new(whole));
-        for (layers, list) in [
-            ([Layer::Canvas, Layer::Panels], &mut lists.0),
-            ([Layer::Overlays, Layer::Question], &mut lists.1),
-        ] {
-            for layer in layers {
-                parts
-                    .panels
-                    .paint(layer, &mut ListPainter::new(&self.text, list), &style);
-            }
-        }
-        lists
+        let style = super::paint::panel_style(theme);
+        super::paint::paint_sides(whole, |layer, list| {
+            parts
+                .panels
+                .paint(layer, &mut ListPainter::new(&self.text, list), &style);
+        })
     }
 }
 

@@ -89,6 +89,20 @@ impl<A: App> Panels<'_, A> {
     /// focused one in the layers that take input, and lays it out
     /// (section 5, rule 11).
     fn place_hint(&mut self, text: &mut dyn TextMeasure) {
+        // A layout may have moved the hovered element out from under a
+        // pointer that did not move: it is hovered no more, unless the
+        // pointer is on its hover text.
+        if let (Some((_, id)), Some(at)) = (&self.pointer.hovered, self.pointer.at) {
+            // Its box only: the rest of the keep area is where the element
+            // was before this layout.
+            let on_hint = self
+                .window
+                .hint()
+                .is_some_and(|hint| hint.source == *id && hint.on_box(at));
+            if !on_hint && !self.window.bounds(id).is_some_and(|bounds| bounds.contains(at)) {
+                self.pointer.hovered = None;
+            }
+        }
         let input = self.app.input().layer;
         let window = &*self.window;
         let with_text = |id: &UiId| {
@@ -100,11 +114,22 @@ impl<A: App> Panels<'_, A> {
         };
         let hovered = self.pointer.hovered.as_ref().and_then(|(_, id)| with_text(id));
         let focused = self.focus.id().and_then(with_text);
-        let chosen = self.pointer.hint.choose(hovered, focused, self.focus.id());
+        let hover = self.pointer.hovered.as_ref().map(|(_, id)| id);
+        let chosen = self.pointer.hint.choose(hovered, focused, hover, self.focus.moves);
         let style = self.app.hint_style();
         let shown = chosen.and_then(|(source, hover)| {
             let anchor = self.window.bounds(&source)?;
-            Some(crate::hint::place(source, hover, anchor, self.size, &style, text))
+            // Above everything but a question, and above a question when
+            // its element is in one, so the question's panel never covers
+            // it.
+            let layer = self
+                .window
+                .layer_of(&source)
+                .filter(|layer| *layer == Layer::Question)
+                .unwrap_or(Layer::Overlays);
+            Some(crate::hint::place(
+                source, hover, anchor, self.size, &style, text, layer,
+            ))
         });
         self.window.set_hint(shown);
     }

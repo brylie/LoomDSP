@@ -520,6 +520,8 @@ impl<D: BridgeDriver> Bridge<D> {
     /// (loom-ui's `test-driver` feature).
     #[cfg(any(test, feature = "test-ui"))]
     pub(crate) fn app_mut(&mut self) -> &mut App {
+        // What a test changes here, outside a turn, shows on the next frame.
+        self.runtime.mark_view_stale();
         &mut self.runtime.app_mut().0
     }
 

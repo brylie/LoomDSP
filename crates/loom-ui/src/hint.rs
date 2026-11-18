@@ -67,65 +67,68 @@ impl Default for HintStyle {
     }
 }
 
-/// Which input moved last, for which hover text shows when the pointer and
-/// the focus are on different elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Latest {
-    /// The pointer: the hovered element's text.
-    #[default]
-    Pointer,
-    /// The focus: the focused element's text.
-    Focus,
-}
-
-/// What the runtime keeps between frames to choose the hover text.
+/// What the runtime keeps between frames to choose the hover text. Which
+/// input moved last is told by the focus's move count ([`Focus`]): the
+/// pointer records the count when it moves over an element of ours, so a
+/// focus move after that, even in the same frame, raises the count past
+/// it, and a pointer move after a focus move records the new count.
+///
+/// [`Focus`]: crate::focus::Focus
 #[derive(Debug, Default)]
 pub(crate) struct Chooser {
-    /// Which input moved last.
-    pub(crate) latest: Latest,
-    /// The focus as last seen, to tell when it moved.
-    seen_focus: Option<UiId>,
-    /// The element whose text Escape hid, until what shows changes.
-    hidden: Option<UiId>,
+    /// The focus's move count when the pointer last moved over an element.
+    /// `None` until it has: the focus then decides alone.
+    pointer_at: Option<u64>,
+    /// The element whose text Escape hid, with the focus's move count and
+    /// the hovered element then: it shows again once either changes.
+    hidden: Option<(UiId, u64, Option<UiId>)>,
 }
 
 impl Chooser {
+    /// The pointer moved over one of the runtime's elements, with the
+    /// focus moved `moves` times so far: the pointer is the latest input.
+    pub(crate) fn pointer_moved(&mut self, moves: u64) {
+        self.pointer_at = Some(moves);
+    }
+
     /// The element whose hover text shows, of the `hovered` element and
-    /// the `focused` one, each with its text if it has any. Notes a focus
-    /// move as the latest input, and forgets an Escape once what would show
-    /// is another element.
+    /// the `focused` one, each with its text if it has any: the one whose
+    /// input moved last, or the other when it has none (Brylie's decision,
+    /// 2026-11-17). `hover` is the hovered element, with text or not, and
+    /// `moves` the focus's move count. An Escape is forgotten once the
+    /// focus moved or the hover changed since it.
     pub(crate) fn choose(
         &mut self,
         hovered: Option<(UiId, String)>,
         focused: Option<(UiId, String)>,
-        focus: Option<&UiId>,
+        hover: Option<&UiId>,
+        moves: u64,
     ) -> Option<(UiId, String)> {
-        if self.seen_focus.as_ref() != focus {
-            self.seen_focus = focus.cloned();
-            if focus.is_some() {
-                self.latest = Latest::Focus;
-            }
-        }
-        let pick = match self.latest {
-            Latest::Pointer => hovered.or(focused),
-            Latest::Focus => focused.or(hovered),
+        let pointer_last = self.pointer_at.is_some_and(|at| at >= moves);
+        let pick = if pointer_last {
+            hovered.or(focused)
+        } else {
+            focused.or(hovered)
         };
-        if self.hidden.is_some() && self.hidden.as_ref() != pick.as_ref().map(|(id, _)| id) {
+        if let Some((_, at, over)) = &self.hidden
+            && (*at != moves || over.as_ref() != hover)
+        {
             self.hidden = None;
         }
-        pick.filter(|(id, _)| self.hidden.as_ref() != Some(id))
+        pick.filter(|(id, _)| self.hidden.as_ref().map(|(hid, _, _)| hid) != Some(id))
     }
 
-    /// Hides the hover text of `shown` until what shows changes. Returns
-    /// true when something was hidden.
-    pub(crate) fn hide(&mut self, shown: Option<&UiId>) -> bool {
-        match shown {
-            Some(id) if self.hidden.as_ref() != Some(id) => {
-                self.hidden = Some(id.clone());
-                true
-            }
-            _ => false,
+    /// Hides the hover text of `shown` until the focus moves past `moves`
+    /// or the hover leaves `hover`. Returns true when something was hidden.
+    pub(crate) fn hide(&mut self, shown: Option<&UiId>, hover: Option<&UiId>, moves: u64) -> bool {
+        let Some(id) = shown else {
+            return false;
+        };
+        if self.hidden.as_ref().is_some_and(|(hid, _, _)| hid == id) {
+            return false;
         }
+        self.hidden = Some((id.clone(), moves, hover.cloned()));
+        true
     }
 }
 
@@ -133,6 +136,9 @@ impl Chooser {
 pub(crate) struct Shown {
     /// The element it belongs to.
     pub(crate) source: UiId,
+    /// The layer it is painted in: the overlays, or the question when its
+    /// element is in one.
+    pub(crate) layer: crate::view::Layer,
     /// Its text.
     text: String,
     /// Its box and text, laid out alone.
@@ -166,6 +172,7 @@ pub(crate) fn place(
     window: Size,
     style: &HintStyle,
     measure: &mut dyn TextMeasure,
+    layer: crate::view::Layer,
 ) -> Shown {
     let mut layout = Layout::new(UiId::panel("loom-ui-hover-text"));
     layout.rebuild(
@@ -193,6 +200,7 @@ pub(crate) fn place(
     let rect = Rect::new(Point::new(x, y), size);
     Shown {
         source,
+        layer,
         text,
         layout,
         rect,
@@ -201,6 +209,11 @@ pub(crate) fn place(
 }
 
 impl Shown {
+    /// True when `point` is on its box.
+    pub(crate) fn on_box(&self, point: Point) -> bool {
+        self.rect.contains(point)
+    }
+
     /// True when the pointer at `point` keeps it showing.
     pub(crate) fn keeps(&self, point: Point) -> bool {
         self.keep.iter().any(|area| area.contains(point))

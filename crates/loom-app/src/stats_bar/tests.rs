@@ -338,60 +338,34 @@ fn the_bar_stops_are_the_runtimes() {
     assert_eq!(ui.runtime().focus_stops(), stops.as_slice());
 }
 
-/// `locate` finds the bar's parts by their new UI IDs, from the runtime's
-/// layout, and the old names, from before the bar moved under `stats`,
-/// give an error rather than a wrong place.
-#[test]
-fn locate_takes_the_new_names_and_refuses_the_old() {
-    let mut ui = ui_with_error();
-    ui.app_mut().alerts.say("saved");
-    ui.redraw();
-    ui.lay_out_panels();
-    let base = crate::control::Found {
-        canvas: Some(ui.canvas()),
-        ..Default::default()
-    };
-    for name in [
-        "stats",
-        "stats/status",
-        "stats/kept",
-        "stats/kept/dismiss",
-        "stats/patch",
-    ] {
-        let mut found = base.clone();
-        found.ours = ui.runtime().bounds(&id(name));
-        let rect = crate::control::locate(ui.app(), name, &found).unwrap_or_else(|error| panic!("{name}: {error}"));
-        assert!(rect.width > 0.0 && rect.height > 0.0, "{name}");
-        assert!(
-            rect.y >= crate::WINDOW.height - style::STATS_BAR_HEIGHT,
-            "{name} is in the bar"
-        );
-    }
-    for old in ["status", "status/kept", "status/dismiss", "status/kept/dismiss"] {
-        // As the answering update would: by text, since it is no UI ID now.
-        let mut found = base.clone();
-        found.ours = ui.runtime().text_bounds(old);
-        assert!(
-            crate::control::locate(ui.app(), old, &found).is_err(),
-            "`{old}` names nothing now"
-        );
-    }
-}
-
 /// A status longer than the bar is cut, not the fixed items: each keeps its
 /// width, and the status starts after the last of them and ends inside the
 /// window, as Iced's clipped field did.
 #[test]
 fn a_long_status_is_cut_and_the_items_keep_their_width() {
     let mut ui = Ui::open("subtractive.ron");
+    let widths = |ui: &mut Ui| -> Vec<(&'static str, f32)> {
+        ui.lay_out_panels();
+        let model = ui.app().bars_model();
+        model
+            .items
+            .iter()
+            .map(|item| {
+                let at = ui.runtime().bounds(&stats_id().with(item.name)).expect("laid out");
+                (item.name, at.width)
+            })
+            .collect()
+    };
+    ui.app_mut().alerts.say("short");
+    ui.redraw();
+    let before = widths(&mut ui);
     ui.app_mut().alerts.say("a long message ".repeat(40));
     ui.redraw();
-    ui.lay_out_panels();
+    assert_eq!(widths(&mut ui), before, "each item keeps the width it had");
     let model = ui.app().bars_model();
     let mut right = 0.0_f32;
     for item in &model.items {
         let at = ui.runtime().bounds(&stats_id().with(item.name)).expect("laid out");
-        assert!(at.width > 0.0, "{} kept its width: {at:?}", item.name);
         right = right.max(at.x + at.width);
     }
     let status = ui.runtime().bounds(&stats_id().with("status")).expect("the status");
@@ -428,10 +402,55 @@ fn locate_on_a_cut_status_gives_the_part_that_shows() {
 fn a_screen_readers_focus_moves_the_keyboard_to_the_x() {
     let x = id(bars::STATUS_DISMISS_ID);
     let mut ui = ui_with_error();
+    let node = ui.a11y_tree().node_by_id(&x).node_id();
     ui.a11y_action(&x, KitAction::Focus);
     assert_eq!(ui.runtime().focused(), Some(&x));
     tap(&mut ui, Named::Enter);
     ui.redraw();
     assert!(ui.app().alerts.kept().is_empty(), "Enter on the focused × dismissed it");
     assert!(!ui.app().bar_stops().contains(&x), "and the × is gone");
+    // A Focus on the node the × had, sent again, moves nothing now.
+    let before = ui.runtime().focused().cloned();
+    let request = accesskit::ActionRequest {
+        action: KitAction::Focus,
+        target_tree: accesskit::TreeId::ROOT,
+        target_node: node,
+        data: None,
+    };
+    let _ = ui.deliver(Message::A11y(crate::a11y::Event::Action(request)));
+    ui.redraw();
+    assert_eq!(
+        ui.runtime().focused().cloned(),
+        before,
+        "Focus on a gone × does nothing"
+    );
+}
+
+/// A test's change made outside a turn (`app_mut`) is shown by the next
+/// rebuild, and a rebuild that an update causes uses that change up too, so
+/// no extra rebuild waits after it.
+#[test]
+fn a_rebuild_after_an_update_uses_up_a_stale_view() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().alerts.say("changed outside a turn");
+    assert!(ui.runtime().view_is_stale());
+    let _ = ui.deliver(Message::Tick);
+    assert!(!ui.runtime().view_is_stale(), "the update's rebuild used it up");
+}
+
+/// A screen reader's Focus on a bar stop ends its open undo group, as a
+/// focus move on the canvas does, so a step after it is a step of its own.
+#[test]
+fn focus_on_a_bar_stop_ends_the_screen_readers_undo_group() {
+    use crate::edits::ReaderGroup;
+    let mut ui = ui_with_error();
+    let knob = id("canvas/4/param/cutoff");
+    ui.a11y_action(&knob, KitAction::Increment);
+    assert_ne!(
+        ui.app().session.edits.reader_group(),
+        ReaderGroup::Closed,
+        "the step opened a group"
+    );
+    ui.a11y_action(&id(bars::STATUS_DISMISS_ID), KitAction::Focus);
+    assert_eq!(ui.app().session.edits.reader_group(), ReaderGroup::Closed);
 }

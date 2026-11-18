@@ -2894,3 +2894,65 @@ fn locate_waits_once_for_the_draw_after_a_rebuild() {
         "and no second one"
     );
 }
+
+/// The bar's parts are found by their new UI IDs through the `locate`
+/// command itself, which reads the runtime's layout (`Found::find_ours`),
+/// inside the bar; the old names, from before the bar moved under `stats`,
+/// give an error rather than a wrong place.
+#[test]
+fn locate_takes_the_bars_new_names_and_refuses_the_old() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.app_mut().alerts.say("saved");
+    let _ = ui.redraw();
+    let bar_top = f64::from(crate::WINDOW.height - crate::style::STATS_BAR_HEIGHT);
+    for name in [
+        "stats",
+        "stats/status",
+        "stats/kept",
+        "stats/kept/dismiss",
+        "stats/patch",
+    ] {
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{name}"}}"#))
+            .unwrap_or_else(|why| panic!("{name}: {why}"));
+        let number = |key: &str| reply[key].as_f64().unwrap_or(0.0);
+        assert!(number("width") > 0.0 && number("height") > 0.0, "{name}: {reply:?}");
+        assert!(number("y") >= bar_top, "{name} is in the bar: {reply:?}");
+    }
+    for old in ["status", "status/kept", "status/dismiss", "status/kept/dismiss"] {
+        assert!(
+            run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{old}"}}"#)).is_err(),
+            "`{old}` names nothing now"
+        );
+    }
+}
+
+/// A `locate` that the canvas answers needs nothing of the runtime's
+/// layout, so it is answered at once, even in the turn after a rebuild of
+/// the bar and before the draw that lays it out.
+#[test]
+fn locate_on_the_canvas_does_not_wait_for_a_rebuild() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        ..Default::default()
+    };
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "locate", "target": "4"}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let _ = ui.deliver(Message::Located {
+        call,
+        target: "4".to_string(),
+        found,
+        then: crate::control::AfterSearch::Locate,
+    });
+    let reply = receiver
+        .try_recv()
+        .expect("answered before any draw")
+        .unwrap_or_else(|why| panic!("4: {why}"));
+    assert!(reply["width"].as_f64().unwrap_or(0.0) > 0.0, "{reply:?}");
+}

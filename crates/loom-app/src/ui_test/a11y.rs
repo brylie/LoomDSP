@@ -216,6 +216,11 @@ impl<'a> A11yNode<'a> {
         self.id == self.tree.focus
     }
 
+    /// Its node ID, for a test that sends a request to it after it is gone.
+    pub fn node_id(&self) -> NodeId {
+        self.id
+    }
+
     /// Its UI ID.
     pub fn ui_id(&self) -> Option<&'a UiId> {
         self.tree.ids.get(&self.id)

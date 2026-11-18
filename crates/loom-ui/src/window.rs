@@ -579,8 +579,8 @@ impl Window {
             painted.panels += 1;
             painter.end_layer();
         }
-        if layer == Layer::Overlays
-            && let Some(hint) = &self.hint
+        if let Some(hint) = &self.hint
+            && hint.layer == layer
         {
             painter.begin_layer(hint.rect);
             painted.elements += hint.layout.paint(hint.rect.position(), hint.rect, painter, style, None);
@@ -606,9 +606,10 @@ impl Window {
                     return None;
                 }
                 let element = &records[index];
+                // The text sits in the content box, inside any padding.
                 let inside = match element.clip {
-                    Some(clip) => element.bounds.intersection(clip)?,
-                    None => element.bounds,
+                    Some(clip) => element.content.intersection(clip)?,
+                    None => element.content,
                 };
                 let at = Rect::new(
                     Point::new(record.origin.x + inside.x, record.origin.y + inside.y),

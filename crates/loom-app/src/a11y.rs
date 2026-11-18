@@ -147,8 +147,14 @@ pub(crate) struct Access {
     /// What the screen reader was last sent.
     sent: tree::Sent,
     /// True while a rebuild waits for the window to say where the canvas
-    /// is. Messages that arrive meanwhile are in that rebuild.
+    /// is. Messages that arrive meanwhile start no second one, but ask for
+    /// one more once this one is built ([`Access::again`]).
     locating: bool,
+    /// A rebuild was asked for while one was in flight: once that one is
+    /// built, one more runs, so a change the in-flight build could not see
+    /// yet (the runtime's layout of a bar an autosave just changed) is
+    /// sent too.
+    again: bool,
     /// True while live values have changed and were not sent yet. The
     /// timer that sends them runs only then.
     live_dirty: bool,
@@ -221,6 +227,7 @@ impl Default for Access {
             scale: 1.0,
             sent: tree::Sent::default(),
             locating: false,
+            again: false,
             live_dirty: false,
             flush_live: false,
             focus: None,
@@ -366,7 +373,11 @@ impl crate::App {
     /// Asks the window where the canvas is, to rebuild the tree when the
     /// answer comes. One request at a time.
     fn a11y_rebuild(&mut self) {
-        if !self.a11y.active || self.a11y.locating {
+        if !self.a11y.active {
+            return;
+        }
+        if self.a11y.locating {
+            self.a11y.again = true;
             return;
         }
         self.a11y.locating = true;
@@ -755,6 +766,9 @@ impl crate::App {
             && self.bar_stops().contains(id)
         {
             let id = id.clone();
+            // A focus move ends the screen reader's undo group, as it does
+            // on the canvas, so a later step starts its own.
+            self.reader_event(crate::edits::ReaderEvent::Close);
             self.effect(loom_ui::Effects::focus(id));
             return Vec::new();
         }
@@ -859,6 +873,9 @@ impl crate::App {
                         BuildTimes::record(start.elapsed());
                     }
                     self.effect(loom_ui::Effects::accessibility(whole, changes));
+                }
+                if std::mem::take(&mut self.a11y.again) {
+                    self.a11y_rebuild();
                 }
             }
             Event::Action(request) => {

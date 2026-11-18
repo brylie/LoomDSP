@@ -14,41 +14,48 @@ use loom_ui_core::{Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent}
 use std::time::Instant;
 
 /// A Chooser shows the hovered element's text after a pointer move and the
-/// focused one's after a focus move, whichever came last; with one of them
-/// missing, the other's.
+/// focused one's after a focus move, by the focus's move count: whichever
+/// came last; with one of them missing, the other's.
 #[test]
 fn the_latest_input_chooses_the_text() {
     let one = (UiId::panel("p").with("one"), "One".to_string());
     let two = (UiId::panel("p").with("two"), "Two".to_string());
     let mut chooser = Chooser::default();
-    assert_eq!(chooser.choose(Some(one.clone()), None, None), Some(one.clone()));
-    // The focus moves to two while the pointer rests on one.
+    chooser.pointer_moved(0);
     assert_eq!(
-        chooser.choose(Some(one.clone()), Some(two.clone()), Some(&two.0)),
+        chooser.choose(Some(one.clone()), None, Some(&one.0), 0),
+        Some(one.clone())
+    );
+    // The focus moves to two (move 1) while the pointer rests on one.
+    assert_eq!(
+        chooser.choose(Some(one.clone()), Some(two.clone()), Some(&one.0), 1),
         Some(two.clone())
     );
     // Then the pointer moves.
-    chooser.latest = Latest::Pointer;
+    chooser.pointer_moved(1);
     assert_eq!(
-        chooser.choose(Some(one.clone()), Some(two.clone()), Some(&two.0)),
+        chooser.choose(Some(one.clone()), Some(two.clone()), Some(&one.0), 1),
         Some(one.clone())
     );
-    assert_eq!(chooser.choose(None, Some(two.clone()), Some(&two.0)), Some(two));
+    assert_eq!(chooser.choose(None, Some(two.clone()), None, 1), Some(two));
 }
 
-/// Escape hides what shows until another element's text would show; then
-/// the hidden one shows again when it comes back.
+/// Escape hides what shows until the focus moves or the hover changes;
+/// then it shows again, even when the same element would show.
 #[test]
-fn escape_hides_until_what_shows_changes() {
+fn escape_hides_until_the_focus_or_the_hover_moves() {
     let one = (UiId::panel("p").with("one"), "One".to_string());
-    let two = (UiId::panel("p").with("two"), "Two".to_string());
     let mut chooser = Chooser::default();
-    assert!(chooser.hide(Some(&one.0)));
-    assert!(!chooser.hide(Some(&one.0)), "already hidden");
-    assert!(!chooser.hide(None), "nothing showing");
-    assert_eq!(chooser.choose(Some(one.clone()), None, None), None);
-    assert_eq!(chooser.choose(Some(two.clone()), None, None), Some(two));
-    assert_eq!(chooser.choose(Some(one.clone()), None, None), Some(one));
+    chooser.pointer_moved(0);
+    assert!(chooser.hide(Some(&one.0), Some(&one.0), 0));
+    assert!(!chooser.hide(Some(&one.0), Some(&one.0), 0), "already hidden");
+    assert!(!chooser.hide(None, None, 0), "nothing showing");
+    assert_eq!(chooser.choose(Some(one.clone()), None, Some(&one.0), 0), None);
+    // The pointer leaves one; the focus, on one, still offers its text.
+    assert_eq!(chooser.choose(None, Some(one.clone()), None, 0), Some(one.clone()));
+    assert!(chooser.hide(Some(&one.0), None, 0));
+    // The focus moves away and back: the count moved, so it shows again.
+    assert_eq!(chooser.choose(None, Some(one.clone()), None, 2), Some(one));
 }
 
 /// The box goes above its element, left edges aligned; moved in at the
@@ -62,7 +69,15 @@ fn the_box_sits_above_its_element_or_below_it() {
     };
     let id = UiId::panel("p").with("one");
     let low = Rect::new(Point::new(10.0, 150.0), Size::new(40.0, 20.0));
-    let shown = place(id.clone(), "Hello".into(), low, window, &style, &mut Mono::default());
+    let shown = place(
+        id.clone(),
+        "Hello".into(),
+        low,
+        window,
+        &style,
+        &mut Mono::default(),
+        Layer::Overlays,
+    );
     assert_eq!(shown.rect.x, 10.0);
     assert_eq!(shown.rect.y + shown.rect.height, 150.0 - style.gap, "above, by the gap");
     assert!(
@@ -71,11 +86,27 @@ fn the_box_sits_above_its_element_or_below_it() {
     );
 
     let right = Rect::new(Point::new(290.0, 150.0), Size::new(10.0, 20.0));
-    let moved = place(id.clone(), "Hello".into(), right, window, &style, &mut Mono::default());
+    let moved = place(
+        id.clone(),
+        "Hello".into(),
+        right,
+        window,
+        &style,
+        &mut Mono::default(),
+        Layer::Overlays,
+    );
     assert_eq!(moved.rect.x + moved.rect.width, 300.0, "moved in at the right edge");
 
     let high = Rect::new(Point::new(10.0, 5.0), Size::new(40.0, 20.0));
-    let below = place(id, "Hello".into(), high, window, &style, &mut Mono::default());
+    let below = place(
+        id,
+        "Hello".into(),
+        high,
+        window,
+        &style,
+        &mut Mono::default(),
+        Layer::Overlays,
+    );
     assert_eq!(below.rect.y, 25.0 + style.gap, "below, with no room above");
 }
 
@@ -84,12 +115,24 @@ fn the_box_sits_above_its_element_or_below_it() {
 enum Message {
     /// A click on the element with this UI ID.
     Clicked(UiId),
+    /// Set the input layer.
+    Input(Layer),
+    /// Move the bar's buttons right by 100, or back.
+    Shift(bool),
+    /// Show a question with a button that has hover text, or not.
+    Question(bool),
 }
 
 /// An app with a bar of two buttons at the bottom of a 300 by 200 window,
 /// each with hover text, and a plain button with none.
 struct Hints {
     heard: Vec<Message>,
+    /// The input layer.
+    input: Layer,
+    /// The bar's buttons are 100 to the right.
+    shifted: bool,
+    /// A question shows.
+    question: bool,
 }
 
 /// A button keyed `key`, 40 wide, with `hover` text if any.
@@ -110,15 +153,23 @@ impl App for Hints {
     type Message = Message;
 
     fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
+        match &message {
+            Message::Input(layer) => self.input = *layer,
+            Message::Shift(on) => self.shifted = *on,
+            Message::Question(on) => self.question = *on,
+            Message::Clicked(_) => {}
+        }
         self.heard.push(message);
         Effects::none()
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("bar"), Layer::Panels, &(), |_| {
+        view.panel_with(UiId::panel("bar"), Layer::Panels, &self.shifted, |shifted| {
+            let gap = if *shifted { 100.0 } else { 0.0 };
             Element::column([
                 Element::space(Length::Shrink, Length::FILL),
                 Element::row([
+                    Element::space(Length::Fixed(gap), Length::Fixed(1.0)).min_width(gap),
                     button("a", Some("First")),
                     button("b", Some("Second")),
                     button("c", None),
@@ -127,6 +178,18 @@ impl App for Hints {
             .width(Length::FILL)
             .height(Length::FILL)
         });
+        if self.question {
+            view.panel_with(UiId::panel("ask"), Layer::Question, &(), |_| {
+                Element::column([
+                    Element::space(Length::Shrink, Length::Fixed(80.0)),
+                    Element::row([button("ok", Some("Answer"))]),
+                ])
+                .width(Length::FILL)
+                .height(Length::FILL)
+                .background(loom_ui_core::Color::rgb(0.2, 0.2, 0.2))
+                .opaque()
+            });
+        }
     }
 
     fn window(&self) -> WindowSpec {
@@ -134,7 +197,10 @@ impl App for Hints {
     }
 
     fn input(&self) -> InputState {
-        InputState::default()
+        InputState {
+            layer: self.input,
+            ..InputState::default()
+        }
     }
 
     fn clicked(&self, id: &UiId) -> Option<Message> {
@@ -145,7 +211,13 @@ impl App for Hints {
 /// The app in a 300 by 200 window, laid out.
 fn harness() -> Harness<Hints, NoTarget> {
     let window = WindowState::new(Size::new(300.0, 200.0));
-    let mut harness = Harness::new(Hints { heard: Vec::new() }, NoTarget, window, Instant::now());
+    let app = Hints {
+        heard: Vec::new(),
+        input: Layer::Canvas,
+        shifted: false,
+        question: false,
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
     harness.lay_out(&mut Mono::default());
     harness
 }
@@ -207,8 +279,8 @@ fn hover_text_follows_the_pointer_and_the_focus() {
     step(&mut harness, at(25.0, ROW, PointerEvent::Moved));
     assert_eq!(
         showing(&harness).as_deref(),
-        Some("bar/b"),
-        "a move on the same element moves nothing"
+        Some("bar/a"),
+        "a move on the hovered element makes the pointer the latest input again"
     );
     step(&mut harness, at(100.0, ROW, PointerEvent::Moved));
     assert_eq!(
@@ -293,4 +365,92 @@ fn a_neighbour_under_a_wide_hover_text_takes_the_hover() {
     step(&mut harness, at(42.0, ROW, PointerEvent::Moved));
     assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("bar").with("b")));
     assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
+}
+
+/// The order of inputs is kept as they happen, not when the hover text is
+/// laid out: Tab and then a pointer move before one layout show the
+/// pointer's element's text, and the other way round the focused one's.
+#[test]
+fn the_order_of_two_inputs_in_one_frame_counts() {
+    let mut pointer_last = harness();
+    pointer_last.step(key(Key::Tab, false));
+    pointer_last.step(at(60.0, ROW, PointerEvent::Moved));
+    pointer_last.lay_out(&mut Mono::default());
+    assert_eq!(
+        showing(&pointer_last).as_deref(),
+        Some("bar/b"),
+        "the pointer moved last"
+    );
+
+    let mut focus_last = harness();
+    focus_last.step(at(60.0, ROW, PointerEvent::Moved));
+    focus_last.step(key(Key::Tab, false));
+    focus_last.lay_out(&mut Mono::default());
+    assert_eq!(showing(&focus_last).as_deref(), Some("bar/a"), "the focus moved last");
+}
+
+/// A move within the element already hovered is still the latest input:
+/// hover b, Tab to a (a's text), then move inside b: b's text shows.
+#[test]
+fn a_move_within_the_hovered_element_is_the_latest_input() {
+    let mut harness = harness();
+    step(&mut harness, at(60.0, ROW, PointerEvent::Moved));
+    step(&mut harness, key(Key::Tab, false));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/a"));
+    step(&mut harness, at(65.0, ROW, PointerEvent::Moved));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
+}
+
+/// With the pointer and the focus both on a, Escape hides a's text; the
+/// pointer leaving a ends that, so the focus's text, a's, shows again.
+#[test]
+fn escape_ends_when_the_pointer_leaves() {
+    let mut harness = harness();
+    step(&mut harness, key(Key::Tab, false));
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    step(&mut harness, key(Key::Escape, false));
+    assert_eq!(showing(&harness), None);
+    step(&mut harness, at(250.0, 20.0, PointerEvent::Moved));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/a"), "the focus's text, back");
+}
+
+/// A hover text whose element is below the input layer now (a question
+/// opened before the next draw) keeps no move, so the move reaches what
+/// takes input.
+#[test]
+fn a_hint_below_the_input_layer_keeps_no_move() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    let (_, rect) = harness.runtime().hover_text().expect("a's text");
+    let on_it = Point::new(rect.x + 2.0, rect.y + rect.height / 2.0);
+    harness.send(Message::Input(Layer::Question));
+    let (_, _, panels) = harness.parts();
+    assert!(!panels.over_target(&Event::Pointer(PointerEvent::Moved), on_it));
+}
+
+/// A layout that moves the hovered element away from a pointer that did
+/// not move ends the hover, so its hover text does not follow it.
+#[test]
+fn a_layout_that_moves_the_hovered_element_away_ends_the_hover() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/a"));
+    harness.send(Message::Shift(true));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().hovered(), None);
+    assert_eq!(showing(&harness), None);
+}
+
+/// A hover text whose element is in a question is painted in the question
+/// layer, so the question's own panel never covers it.
+#[test]
+fn a_questions_hover_text_is_painted_above_the_question() {
+    let mut harness = harness();
+    harness.send(Message::Question(true));
+    harness.send(Message::Input(Layer::Question));
+    harness.lay_out(&mut Mono::default());
+    step(&mut harness, at(20.0, 88.0, PointerEvent::Moved));
+    assert_eq!(showing(&harness).as_deref(), Some("ask/ok"));
+    let (_, _, panels) = harness.parts();
+    assert_eq!(panels.window.hint().map(|hint| hint.layer), Some(Layer::Question));
 }

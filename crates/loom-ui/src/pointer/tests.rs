@@ -24,6 +24,8 @@ enum Message {
     Input(Layer),
     /// Focus each of these in turn, in one update.
     Refocus(Vec<UiId>),
+    /// The canvas takes the keyboard, or lets it go.
+    Canvas(bool),
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -32,6 +34,8 @@ enum Message {
 struct Layers {
     overlay: bool,
     input: Layer,
+    /// The canvas has the keyboard.
+    canvas: bool,
     heard: Vec<Message>,
 }
 
@@ -42,6 +46,7 @@ impl App for Layers {
         let mut effects = Effects::none();
         match &message {
             Message::Input(layer) => self.input = *layer,
+            Message::Canvas(on) => self.canvas = *on,
             Message::Refocus(ids) => {
                 for id in ids {
                     effects = effects.and(Effects::focus(id.clone()));
@@ -71,7 +76,7 @@ impl App for Layers {
     fn input(&self) -> InputState {
         InputState {
             layer: self.input,
-            canvas_focused: false,
+            canvas_focused: self.canvas,
             target_first: false,
         }
     }
@@ -134,6 +139,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
     let app = Layers {
         overlay,
         input: Layer::Canvas,
+        canvas: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -619,4 +625,82 @@ fn any_focus_move_while_space_is_held_cancels_the_click() {
     harness.step(release_key(Key::Space));
     harness.step(DriverEvent::Woken);
     assert_eq!(clicks(&harness), std::slice::from_ref(&a), "A again moved nothing");
+}
+
+/// A pointer press cancels a held Space even when it comes with no
+/// position to route by.
+#[test]
+fn a_press_with_no_position_cancels_a_held_space() {
+    use loom_ui_core::Key;
+    let mut harness = focused_on_a();
+    harness.step(press_key(Key::Space, false));
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        pointer: None,
+    });
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "{:?}", clicks(&harness));
+}
+
+/// The pointer leaving the window keeps a held Space: it is the keyboard's,
+/// and no focus moved, so the release still clicks.
+#[test]
+fn the_pointer_leaving_keeps_a_held_space() {
+    use loom_ui_core::Key;
+    let mut harness = focused_on_a();
+    harness.step(press_key(Key::Space, false));
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::LeftWindow),
+        pointer: None,
+    });
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(clicks(&harness), [UiId::panel("bar").with("a")]);
+}
+
+/// Escape with a Space that could no longer click (a layer rose above its
+/// button) drops it without taking Escape, which goes on to the target.
+#[test]
+fn escape_with_a_stale_space_goes_on() {
+    use loom_ui_core::Key;
+    let mut harness = focused_on_a();
+    harness.step(press_key(Key::Space, false));
+    harness.send(Message::Input(Layer::Overlays));
+    harness.step(press_key(Key::Escape, false));
+    assert!(target_heard_press(&harness, Key::Escape), "the target heard Escape");
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty());
+}
+
+/// While the canvas has the keyboard, Space and Enter are its own: a
+/// button of ours that still has the focus is not activated by them.
+#[test]
+fn keys_go_to_the_canvas_while_it_has_the_keyboard() {
+    use loom_ui_core::Key;
+    let mut harness = focused_on_a();
+    harness.send(Message::Canvas(true));
+    harness.step(press_key(Key::Enter, false));
+    harness.step(press_key(Key::Space, false));
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "{:?}", clicks(&harness));
+    assert!(target_heard_press(&harness, Key::Enter) && target_heard_press(&harness, Key::Space));
+}
+
+/// A repeat of Enter or Space is taken and clicks nothing, and draws no
+/// frame either.
+#[test]
+fn an_ignored_repeat_draws_no_frame() {
+    use loom_ui_core::Key;
+    let mut harness = focused_on_a();
+    harness.step(press_key(Key::Enter, false));
+    harness.step(DriverEvent::Woken);
+    let next = harness.step(press_key(Key::Enter, true));
+    assert!(!next.draw, "a repeat changed nothing that shows");
+    assert!(
+        !target_heard_press(&harness, Key::Enter),
+        "and is still kept from the target"
+    );
 }

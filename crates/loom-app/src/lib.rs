@@ -1408,11 +1408,15 @@ impl App {
         // What reads the runtime's layout (where a part is for `locate`, the
         // nodes for the tree) waits for the draw that lays out a view a
         // live value just rebuilt, so it never reads a layout half made.
-        if matches!(
-            message,
-            Message::Located { .. } | Message::A11y(crate::a11y::Event::Located(_))
-        ) && !cx.laid_out()
-        {
+        // A `locate` that Iced or the canvas answers needs nothing of ours,
+        // so it is answered at once, from a fresh search; only one whose
+        // answer would come from the runtime's layout waits.
+        let waits = match &message {
+            Message::Located { target, found, .. } => crate::control::locate(self, target, found).is_err(),
+            Message::A11y(crate::a11y::Event::Located(_)) => true,
+            _ => false,
+        };
+        if waits && !cx.laid_out() {
             return loom_ui::Effects::after_draw(message);
         }
         // The runtime's nodes as last laid out, for the tree a rebuild

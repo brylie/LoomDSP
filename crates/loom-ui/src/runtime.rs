@@ -120,8 +120,8 @@ pub struct Runtime<A: App, T> {
     pending: VecDeque<A::Message>,
     window: WindowState,
     view: Option<View>,
-    /// The app changed outside a turn ([`Runtime::app_mut`], for tests),
-    /// so the next turn builds its view again even with no update.
+    /// The app changed outside a turn ([`Runtime::mark_view_stale`], for
+    /// tests), so the next turn builds its view again even with no update.
     view_stale: bool,
     /// The layouts of the panels that have elements.
     panels: Window,
@@ -185,17 +185,25 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// The app, to change, for a test driver that sets up state between
     /// turns. The queue, the deadline, and the messages waiting for a draw
     /// stay as they are. Only with the `test-driver` feature: a real driver
-    /// changes the app only through `update` (section 2, rule 1). What the
-    /// test changes can change the view, so the next turn builds the view
-    /// again although it runs no update.
+    /// changes the app only through `update` (section 2, rule 1). A driver
+    /// that changed what the view shows calls [`Runtime::mark_view_stale`]
+    /// too.
     #[cfg(feature = "test-driver")]
     pub fn app_mut(&mut self) -> &mut A {
-        self.view_stale = true;
         &mut self.app
     }
 
-    /// True while the view waits to be built again after [`Runtime::app_mut`].
-    /// Only with the `test-driver` feature.
+    /// Tells the runtime the app changed outside a turn, through
+    /// [`Runtime::app_mut`], in a way the view shows, so the next turn
+    /// builds the view again although it runs no update. Only with the
+    /// `test-driver` feature.
+    #[cfg(feature = "test-driver")]
+    pub fn mark_view_stale(&mut self) {
+        self.view_stale = true;
+    }
+
+    /// True while the view waits to be built again after
+    /// [`Runtime::mark_view_stale`]. Only with the `test-driver` feature.
     #[cfg(feature = "test-driver")]
     pub fn view_is_stale(&self) -> bool {
         self.view_stale
@@ -602,7 +610,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// clicks nothing.
     fn activatable(&self, id: &UiId) -> Option<bool> {
         let input = self.app.input();
-        if self.panels.layer_of(id).is_none_or(|layer| layer < input.layer) {
+        // While the canvas has the keyboard, its keys are its own (section
+        // 6, rule 1): no element of ours is activated by them.
+        if input.canvas_focused || self.panels.layer_of(id).is_none_or(|layer| layer < input.layer) {
             return None;
         }
         let access = self.panels.access_of(id)?;
@@ -616,6 +626,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// The element a held Space would click now: the one it went down on,
+    /// when the focus never moved since and it can still be clicked.
+    fn live_arm(&self) -> Option<UiId> {
+        let (armed, moves) = self.pointer.space.as_ref()?;
+        let unmoved = self.focus.moves == *moves && self.focus.id() == Some(armed);
+        (unmoved && self.activatable(armed).is_some()).then(|| armed.clone())
+    }
+
     /// Keyboard activation of the focused element (section 3, rule 4):
     /// Enter clicks a button when it goes down, and Space clicks a button
     /// or a switch when it comes up on the element it went down on.
@@ -623,42 +641,52 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// cancels it, and so does the element no longer being clickable when
     /// Space comes up. Repeats click nothing. The click reaches the app
     /// through `App::clicked` on the next turn, as a pointer's does.
-    /// Returns true when the key was taken, so the target never hears it.
-    fn activate(&mut self, event: &Event) -> bool {
+    /// Returns whether the key was taken, so the target never hears it, and
+    /// whether anything that shows changed, so a repeat draws no frame.
+    fn activate(&mut self, event: &Event) -> (bool, bool) {
         let Event::Key(key) = event else {
-            return false;
+            return (false, false);
         };
         if let KeyEvent::Released { key: Key::Space } = key
-            && let Some((armed, moves)) = self.pointer.space.take()
+            && self.pointer.space.is_some()
         {
-            let still = self.focus.moves == moves && self.focus.id() == Some(&armed);
-            if still && self.activatable(&armed).is_some() {
+            if let Some(armed) = self.live_arm() {
                 self.click(&armed);
             }
-            return true;
+            self.pointer.space = None;
+            return (true, false);
         }
         if let KeyEvent::Pressed { key: Key::Escape, .. } = key {
             // Escape cancels a held Space and hides the hover text, both at
             // once, and goes no further when it did either (section 5,
-            // rule 11).
-            let cancelled = self.pointer.space.take().is_some();
-            let shown = self.panels.hint().map(|hint| hint.source.clone());
-            let hid = self.pointer.hint.hide(shown.as_ref());
+            // rule 11). A Space that could no longer click (the focus moved,
+            // or a layer rose above it) is dropped without taking Escape,
+            // which then goes where it goes, such as to a question.
+            let cancelled = self.live_arm().is_some();
+            self.pointer.space = None;
+            let input = self.app.input().layer;
+            let shown = self
+                .panels
+                .hint()
+                .map(|hint| hint.source.clone())
+                .filter(|source| self.panels.layer_of(source).is_some_and(|layer| layer >= input));
+            let hover = self.pointer.hovered.as_ref().map(|(_, id)| id.clone());
+            let hid = self.pointer.hint.hide(shown.as_ref(), hover.as_ref(), self.focus.moves);
             if cancelled || hid {
-                return true;
+                return (true, hid);
             }
         }
         let Some(id) = self.focus.id().cloned() else {
-            return false;
+            return (false, false);
         };
         let Some(button) = self.activatable(&id) else {
-            return false;
+            return (false, false);
         };
         let KeyEvent::Pressed {
             key, modifiers, repeat, ..
         } = key
         else {
-            return false;
+            return (false, false);
         };
         let plain = !(modifiers.control || modifiers.alt || modifiers.meta);
         match key {
@@ -666,15 +694,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 if !repeat {
                     self.click(&id);
                 }
-                true
+                (true, false)
             }
             Key::Space if plain => {
                 if !repeat {
                     self.pointer.space = Some((id, self.focus.moves));
                 }
-                true
+                (true, false)
             }
-            _ => false,
+            _ => (false, false),
         }
     }
 
@@ -800,9 +828,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 let (mut taken, moved) = self.tab(&event);
                 redraw |= moved;
                 if !taken {
-                    taken = self.activate(&event);
-                    // What it did shows: a hidden hover text, a click.
-                    redraw |= taken;
+                    let (activated, changed) = self.activate(&event);
+                    taken = activated;
+                    redraw |= changed;
                 }
                 if taken {
                     self.target.kept(&event);
@@ -853,7 +881,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.counts.updates += updates as u64;
 
         // 4. What changed.
-        if updates > 0 || self.view.is_none() || std::mem::take(&mut self.view_stale) {
+        // Taken first, so any rebuild uses up a stale view.
+        let stale = std::mem::take(&mut self.view_stale);
+        if updates > 0 || self.view.is_none() || stale {
             redraw |= self.rebuild(driver);
             // A layer the input layer rose above holds no hover or press.
             redraw |= self.pointer.below(self.app.input().layer);
@@ -888,6 +918,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// to the target, then to the layers below it; whatever else, to the
     /// target. Returns true when the hover moved.
     fn route(&mut self, event: &Event, pointer: Option<Point>, now: Instant, batch: &mut Vec<A::Message>) -> bool {
+        // A press of the pointer cancels a held Space, wherever it is, even
+        // with no position to route by (section 3, rule 4).
+        if let Event::Pointer(PointerEvent::Pressed(_)) = event {
+            self.pointer.space = None;
+        }
         let point = match (event, pointer) {
             (Event::Pointer(PointerEvent::LeftWindow), _) => {
                 let redraw = self.pointer.clear();

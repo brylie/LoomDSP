@@ -42,15 +42,19 @@ pub(crate) struct Pointer {
     pub(crate) space: Option<(UiId, u64)>,
     /// What chooses the hover text, between the pointer and the focus.
     pub(crate) hint: crate::hint::Chooser,
+    /// Where the pointer last moved, in the window, to check the hover
+    /// again after a layout moves what was under it.
+    pub(crate) at: Option<Point>,
 }
 
 impl Pointer {
     /// Forgets the hover and the press: the pointer left the window.
     /// Another toolkit taking a move ends only the hover, so a press held
-    /// across it still clicks. Returns true when the hover changed.
+    /// across it still clicks. A held Space stays, since it is the
+    /// keyboard's and no focus moved. Returns true when the hover changed.
     pub(crate) fn clear(&mut self) -> bool {
         self.pressed = None;
-        self.space = None;
+        self.at = None;
         self.hovered.take().is_some()
     }
 
@@ -117,8 +121,17 @@ impl<A: App> Panels<'_, A> {
     /// True for a move onto the hover text showing, or between it and its
     /// element, which keeps it showing (section 5, rule 11). It takes no
     /// other event: a press there goes where it would go without it.
+    /// It keeps only a hover the pointer has: while the pointer hovers the
+    /// hint's element. A hint shown for the focus keeps nothing, so a move
+    /// onto its element hovers it as any move does. A hint whose element is
+    /// now below the input layer (a question opened before the next draw)
+    /// keeps nothing either, since the update that raised the layer ended
+    /// that hover (`Pointer::below`).
     fn keeps_hint(&self, event: &Event, point: Point) -> bool {
-        matches!(event, Event::Pointer(PointerEvent::Moved)) && self.window.hint().is_some_and(|hint| hint.keeps(point))
+        matches!(event, Event::Pointer(PointerEvent::Moved))
+            && self.window.hint().is_some_and(|hint| {
+                hint.keeps(point) && self.pointer.hovered.as_ref().is_some_and(|(_, id)| *id == hint.source)
+            })
     }
 
     /// Offers a pointer event at `point` to the runtime's layers below the
@@ -170,6 +183,9 @@ impl<A: App> Panels<'_, A> {
         let Event::Pointer(pointer) = event else {
             return Heard::default();
         };
+        if matches!(pointer, PointerEvent::Moved) {
+            self.pointer.at = Some(point);
+        }
         if side == Side::Above && self.keeps_hint(event, point) {
             // The hover stays on the hint's element, so the hint stays.
             return Heard {
@@ -230,10 +246,12 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// Moves the hover to `at`. Returns true when it changed.
+    /// A move onto an element, even the one already hovered, makes the
+    /// pointer the latest input for hover text (section 5, rule 11).
     fn hover(&mut self, at: Option<(Layer, UiId)>) -> bool {
         let changed = self.pointer.hovered != at;
-        if changed {
-            self.pointer.hint.latest = crate::hint::Latest::Pointer;
+        if at.is_some() {
+            self.pointer.hint.pointer_moved(self.focus.moves);
         }
         self.pointer.hovered = at;
         changed
