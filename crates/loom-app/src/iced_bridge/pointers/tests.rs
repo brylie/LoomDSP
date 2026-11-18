@@ -127,6 +127,28 @@ fn a_press_iced_captures_leaves_our_focus() {
     assert_eq!(ui.runtime().focused(), Some(&go()), "Iced took that press");
 }
 
+/// One element has the keyboard across the window (section 6, rule 1):
+/// with our button focused, a click into an Iced value field moves the
+/// keyboard there, and the runtime lets go of its focus, so the app's one
+/// copy of focus is the field.
+#[test]
+fn an_iced_field_taking_the_keyboard_ends_our_focus() {
+    let mut ui = ui_with(bar);
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.redraw();
+    // Focused as one of the app's panels would ask, with no click, which
+    // the test's hook would turn into opening Help.
+    ui.send(Message::MidiGhosts);
+    assert_eq!(ui.runtime().focused(), Some(&go()));
+    let field = ui.value_field(4, 0);
+    click(&mut ui, field);
+    ui.redraw();
+    let part = ui.focused_field();
+    assert!(part.is_some(), "the value field has the keyboard");
+    assert_eq!(ui.runtime().focused(), None, "ours let go");
+    assert_eq!(ui.app().focus, part, "the app's copy is the field");
+}
+
 /// A layer above Iced takes its point before Iced hears it: a click on the
 /// pop-up over the toolbar is the pop-up's, and the toolbar under it hears
 /// nothing. A move onto it hovers it; a move off, onto the bar below Iced,
@@ -155,15 +177,23 @@ fn a_layer_above_iced_keeps_its_points_from_iced() {
 }
 
 /// Section 6, rule 2, between the toolkits: with nothing focused in
-/// either, Tab enters the runtime's first stop, and Iced never hears it,
-/// so no field of Iced's takes it too.
+/// either, Tab is the canvas's, which reads first, and Shift+Tab enters
+/// the runtime's last stop. Iced never hears a Tab the runtime took, so no
+/// field of Iced's takes it too.
 #[test]
-fn tab_from_nothing_enters_our_first_stop_and_not_iced() {
+fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
     let mut ui = ui_with(bar);
     assert_eq!(ui.focused_field(), None);
     ui.tap(
         keyboard::Key::Named(keyboard::key::Named::Tab),
         keyboard::Modifiers::default(),
+    );
+    assert_eq!(ui.runtime().focused(), None, "Tab from nothing is the canvas's");
+    ui.app_mut().session.selection.clear();
+    ui.redraw();
+    ui.tap(
+        keyboard::Key::Named(keyboard::key::Named::Tab),
+        keyboard::Modifiers::SHIFT,
     );
     assert_eq!(ui.runtime().focused(), Some(&go()));
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
@@ -213,9 +243,9 @@ fn pressed(heard: &[keyboard::Event], key: &keyboard::Key) -> bool {
         .any(|event| matches!(event, keyboard::Event::KeyPressed { key: got, .. } if got == key))
 }
 
-/// Only the key the runtime took is kept from Iced. A Tab the runtime
+/// Only the key the runtime took is kept from Iced. A Shift+Tab the runtime
 /// takes, then a modifier change and a key in the same batch: Iced hears
-/// the last two. A taken Tab between two kept keys: Iced hears both keys.
+/// the last two. A taken Shift+Tab between two kept keys: Iced hears both.
 #[test]
 fn only_the_key_the_runtime_took_is_kept_from_iced() {
     use crate::ui_test::key_press;
@@ -224,9 +254,10 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     let x = keyboard::Key::Character("x".into());
     let q = keyboard::Key::Character("q".into());
 
+    let shift = keyboard::Modifiers::SHIFT;
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
-        key_press(tab.clone(), none, None, false),
+        key_press(tab.clone(), shift, None, false),
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT)),
         key_press(x.clone(), none, Some("x"), false),
     ]));
@@ -243,7 +274,7 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
         key_press(x.clone(), none, Some("x"), false),
-        key_press(tab.clone(), none, None, false),
+        key_press(tab.clone(), shift, None, false),
         key_press(q.clone(), none, Some("q"), false),
     ]));
     assert_eq!(ui.runtime().focused(), Some(&go()));
@@ -340,4 +371,46 @@ fn a_key_our_field_takes_is_kept_from_iced() {
 
     ui.step(&[key_press(tab.clone(), none, None, false)]);
     assert_eq!(ui.runtime().focused(), None, "Tab left our field, past our last stop");
+}
+
+/// Where our text field's focus meets Iced's (section 6, rule 1): with our
+/// field focused, a click puts the keyboard in an Iced value field. The
+/// runtime lets go of its focus (`Runtime::follow_target`), so the next key
+/// is not our field's and is not kept: it reaches Iced, which types it into
+/// its field.
+#[test]
+fn our_field_gives_the_keyboard_to_an_iced_field() {
+    use crate::ui_test::key_press;
+    let a = keyboard::Key::Character("a".into());
+    let mut ui = ui_with(bar_with_field);
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.redraw();
+    ui.send(Message::MidiGhosts);
+    assert_eq!(ui.runtime().focused(), Some(&go()), "our field has the focus");
+
+    let field = ui.value_field(4, 0);
+    click(&mut ui, field);
+    ui.redraw();
+    let part = ui.focused_field();
+    assert_eq!(
+        part,
+        ui.app().value_field_part(4, 0),
+        "the clicked value field has the keyboard"
+    );
+    assert_eq!(ui.runtime().focused(), None, "ours let go");
+
+    // Iced's field uses the key, so its listener reports no `Key`: the
+    // field's own message is the sign it got there.
+    let heard = ui.step(&[key_press(a, keyboard::Modifiers::default(), Some("a"), false)]);
+    assert!(
+        heard.iter().any(|m| matches!(
+            m,
+            Message::Inspector(crate::inspector::Message::ValueText {
+                module: 4,
+                index: 0,
+                ..
+            })
+        )),
+        "the clicked field typed it: {heard:?}"
+    );
 }

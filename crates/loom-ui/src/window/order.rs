@@ -116,6 +116,19 @@ impl Window {
             .max_by_key(|key| key.keys().len())
     }
 
+    /// What the element with UI ID `id` is to a screen reader, as last
+    /// laid out.
+    pub(crate) fn access_of(&self, id: &UiId) -> Option<&crate::access::Access> {
+        let panel = self.panel_of(id)?;
+        self.records[panel]
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?
+            .access
+            .as_ref()
+    }
+
     /// The layer of the panel that holds the element with UI ID `id`.
     pub(crate) fn layer_of(&self, id: &UiId) -> Option<Layer> {
         self.panel_of(id).map(|panel| self.records[panel].layer)

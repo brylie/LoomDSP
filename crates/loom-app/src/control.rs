@@ -32,8 +32,8 @@ mod resolve;
 mod run;
 mod transport;
 
-pub(crate) use resolve::Find;
 use resolve::*;
+pub(crate) use resolve::{Find, may_be_ours, ours_for_pointer, waits_for_ours};
 pub use resolve::{Found, locate};
 pub use transport::{Listener, close, exit_status, watch};
 
@@ -57,6 +57,56 @@ impl Options {
         let socket = self.control.clone().map(Listener::Socket);
         let script = self.control_script.clone().map(Listener::Script);
         socket.into_iter().chain(script).collect()
+    }
+}
+
+impl Command {
+    /// Rewrites each pointer target that `ours` places to the centre of its
+    /// place: a part of the runtime's own (the stats bar), which the
+    /// scripted pointer, an Iced widget, cannot look up itself. A target
+    /// `ours` does not place stays a name, for Iced's search. Returns true
+    /// when it rewrote one.
+    pub(crate) fn place_targets(&mut self, ours: impl Fn(&str) -> Option<loom_ui_core::Rect>) -> bool {
+        let mut placed = false;
+        let mut place = |target: &mut Option<String>, x: &mut Option<f32>, y: &mut Option<f32>| {
+            if let Some(rect) = target.as_deref().and_then(&ours) {
+                *x = Some(rect.center_x());
+                *y = Some(rect.center_y());
+                *target = None;
+                placed = true;
+            }
+        };
+        match self {
+            Self::Press { target, x, y, .. }
+            | Self::Release { target, x, y, .. }
+            | Self::Hover { target, x, y }
+            | Self::Scroll { target, x, y, .. } => place(target, x, y),
+            Self::Drag { from, to, .. } => {
+                for end in [from, to] {
+                    if let Value::String(name) = end
+                        && let Some(rect) = ours(name)
+                    {
+                        *end = serde_json::json!([rect.center_x(), rect.center_y()]);
+                        placed = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        placed
+    }
+
+    /// The targets this pointer command names, as names: its `target`, or
+    /// a `drag`'s ends given by name. Empty for any other command.
+    pub(crate) fn pointer_targets(&self) -> Vec<&str> {
+        match self {
+            Self::Press { target, .. }
+            | Self::Release { target, .. }
+            | Self::Hover { target, .. }
+            | Self::Scroll { target, .. } => target.as_deref().into_iter().collect(),
+            Self::Drag { from, to, .. } => [from, to].into_iter().filter_map(Value::as_str).collect(),
+            _ => Vec::new(),
+        }
     }
 }
 

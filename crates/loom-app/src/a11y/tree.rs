@@ -14,7 +14,7 @@ use super::items;
 use crate::matrix::Tab;
 use crate::places::Places;
 use crate::snapshot::{Rect, UiSnapshot, Widget};
-use crate::{bars, toolbar};
+use crate::toolbar;
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use loom_canvas::{CanvasView, ControlPart, Reading, WidgetViewKind, arrow_share, option_bounds, part_bounds};
 use loom_core::{ParamMapping, ParamSpec};
@@ -380,6 +380,7 @@ pub(crate) fn tree(
     frames: &Frames,
     ids: &WidgetIds,
     places: &Places,
+    ours: &loom_ui::AccessNodes,
     scale: f32,
     table: &mut IdTable,
 ) -> TreeUpdate {
@@ -403,7 +404,7 @@ pub(crate) fn tree(
         nodes: &mut nodes,
     };
     let mut children = vec![frame.toolbar(&snapshot.toolbar), frame.tabs(snapshot.matrix.tab)];
-    let bar = frame.bar(&frames.bars);
+    let bar = frame.ours(ours);
     // The open panel, drawn beside the canvas: each of its parts, and the
     // panel itself marked as cutting off what it scrolls out of view.
     let panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
@@ -530,14 +531,14 @@ pub(crate) fn tree(
     }
 
     children.extend(panel);
-    children.push(bar);
+    children.extend(bar);
     // Last, as it is drawn on top.
     children.extend(overlay);
     // A text field that has keyboard focus has it, whatever the canvas
     // last said (section 6, rule 5). Then a panel part the keys act on,
     // such as the matrix's chosen cell, since the panel hears the keys
     // before the canvas does (section 6, rule 6).
-    let focus = field_focus.or(overlay_focus).or(item_focus).or(focus);
+    let focus = field_focus.or(overlay_focus).or(item_focus).or(ours.focus).or(focus);
     let root_node = node_id(table, &window_id());
     let mut root = Node::new(Role::Window);
     root.set_label(snapshot.title.clone());
@@ -559,8 +560,6 @@ pub(crate) fn tree(
 /// the bar at the bottom, the open panel's parts, and the text field that
 /// has keyboard focus.
 pub(crate) struct Frames {
-    /// The stats bar and the status line.
-    pub bars: bars::Model,
     /// The open panel's parts: the inspector's or the matrix's, by the tab
     /// that is open.
     pub panel: Vec<items::Item>,
@@ -590,13 +589,6 @@ pub(crate) fn toolbar_id() -> UiId {
     UiId::panel("toolbar")
 }
 
-/// The UI ID of the stats bar. Every item's ID is inside it. The status
-/// line and a kept error are drawn in the bar but keep IDs of their own,
-/// under `status`.
-pub(crate) fn stats_id() -> UiId {
-    UiId::panel("stats")
-}
-
 /// The UI ID of the right panel's tabs. Each tab's ID is inside it.
 pub(crate) fn tabs_id() -> UiId {
     UiId::panel("panel")
@@ -624,15 +616,6 @@ pub(crate) enum FramePart<'a> {
     Button(&'a str),
     /// One of the right panel's tabs.
     Tab(Tab),
-    /// The × of the status line, or of the kept error.
-    Dismiss {
-        /// True for the kept error's ×.
-        kept: bool,
-    },
-    /// The **Measure** switch.
-    Measure,
-    /// The **Move camera** switch.
-    MoveCamera,
 }
 
 /// What `id` names outside the canvas, if it names something that acts.
@@ -642,13 +625,10 @@ pub(crate) fn frame_part(id: &UiId) -> Option<FramePart<'_>> {
             ("toolbar", name) => return Some(FramePart::Button(name)),
             ("panel", "inspector") => return Some(FramePart::Tab(Tab::Inspector)),
             ("panel", "matrix") => return Some(FramePart::Tab(Tab::Matrix)),
-            ("status", "dismiss") => return Some(FramePart::Dismiss { kept: false }),
-            ("stats", "measure") => return Some(FramePart::Measure),
-            ("stats", "move_camera") => return Some(FramePart::MoveCamera),
             _ => {}
         }
     }
-    (*id == fixed_id(bars::KEPT_DISMISS_ID)).then_some(FramePart::Dismiss { kept: true })
+    None
 }
 
 /// Builds the nodes of the window around the canvas: the toolbar, the
@@ -900,59 +880,44 @@ impl Frame<'_> {
         self.add(&tabs_id(), list)
     }
 
-    /// The bar at the bottom: the developer switches, the fixed items, a
-    /// kept error, and the status line. Plain text is a label whose value
-    /// is the text shown. A warning is a status, so it is announced, and
-    /// ordinary status text is not (ui-layer.md, section 7, the role table).
-    fn bar(&mut self, model: &bars::Model) -> NodeId {
-        let mut items = Vec::new();
-        if let Some(dev) = &model.dev {
-            for (id, label, on) in [
-                (bars::MEASURE_ID, "Measure", dev.measuring),
-                (bars::MOVE_CAMERA_ID, "Move camera", dev.animating),
-            ] {
-                let mut node = Node::new(Role::Switch);
-                node.set_label(label);
-                node.set_toggled(if on { Toggled::True } else { Toggled::False });
-                node.add_action(Action::Click);
-                items.push(self.add(&fixed_id(id), node));
+    /// The runtime's own nodes, from `loom-ui`'s layout: the stats bar's
+    /// items, in a group named "Status bar" around them, as the window's
+    /// child. Below a panel that owns the input they are hidden, as the
+    /// window's other parts are.
+    fn ours(&mut self, ours: &loom_ui::AccessNodes) -> Vec<NodeId> {
+        let mut bounds: Option<accesskit::Rect> = None;
+        let tops: Vec<NodeId> = ours
+            .roots
+            .iter()
+            .flat_map(|(_, _, tops)| tops.iter().copied())
+            .collect();
+        for (id, node) in &ours.nodes {
+            let mut node = node.clone();
+            if self.covered {
+                node.set_hidden();
             }
+            if tops.contains(id)
+                && let Some(b) = node.bounds()
+            {
+                bounds = Some(bounds.map_or(b, |a| a.union(b)));
+            }
+            self.nodes.push((*id, node));
         }
-        for item in &model.items {
-            let mut node = Node::new(match item.kind {
-                bars::Kind::Alert => Role::Status,
-                bars::Kind::Text | bars::Kind::Live => Role::Label,
-            });
-            node.set_value(item.text.clone());
-            if let Some(hover) = &item.hover {
-                node.set_description(hover.clone());
-            }
-            items.push(self.add(&stats_id().with(item.name), node));
-        }
-        let fields = [
-            (model.kept.as_ref(), bars::KEPT_ID, bars::KEPT_DISMISS_ID),
-            (Some(&model.status), bars::STATUS_ID, bars::STATUS_DISMISS_ID),
-        ];
-        for (field, id, dismiss_id) in fields {
-            let Some(field) = field else { continue };
-            let plain = field.severity == crate::alerts::Severity::Normal;
-            let mut node = Node::new(if plain { Role::Label } else { Role::Status });
-            node.set_value(field.shown.clone());
-            if field.hover != field.shown {
-                node.set_description(field.hover.clone());
-            }
-            items.push(self.add(&fixed_id(id), node));
-            if field.dismiss.is_some() {
-                let mut dismiss = Node::new(Role::Button);
-                dismiss.set_label(field.dismiss_hover());
-                dismiss.add_action(Action::Click);
-                items.push(self.add(&fixed_id(dismiss_id), dismiss));
-            }
+        if tops.is_empty() {
+            return Vec::new();
         }
         let mut group = Node::new(Role::Group);
         group.set_label("Status bar");
-        group.set_children(items);
-        self.add(&stats_id(), group)
+        group.set_children(tops);
+        if let Some(bounds) = bounds {
+            group.set_bounds(bounds);
+        }
+        if self.covered {
+            group.set_hidden();
+        }
+        let id = node_id(self.table, &crate::stats_bar::stats_id());
+        self.nodes.push((id, group));
+        vec![id]
     }
 }
 

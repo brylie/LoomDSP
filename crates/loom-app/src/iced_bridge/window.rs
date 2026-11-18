@@ -335,9 +335,7 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
                 Bridged::Focus(answer) => self.answers.push_back(answer),
                 // Only the harness's bridge makes these.
                 #[cfg(any(test, feature = "test-ui"))]
-                Bridged::Woken | Bridged::Deadline => {}
-                #[cfg(test)]
-                Bridged::Presented => {}
+                Bridged::Woken | Bridged::Deadline | Bridged::Presented => {}
             }
         }
         if let Some(stuck) = &ran.stuck {
@@ -460,6 +458,11 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             let routed: Vec<Message> = messages.into_iter().flat_map(crate::input_owner::route).collect();
             parts.waker.send_all(routed);
         }
+        // The control channel's scripted pointer events go into Iced on a
+        // redraw, so what Iced left of them goes on to our layers here.
+        if super::pointers::hand_scripted(app.pointer.take_for_runtime(), &mut parts.panels) {
+            self.redraw = Redraw::NextFrame;
+        }
     }
 }
 
@@ -504,6 +507,10 @@ impl super::pointers::IcedSide for WindowIced<'_> {
         self.messages.extend(batch(messages, events, &statuses, self.listeners));
         Some(statuses)
     }
+
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)> {
+        self.app.pointer.take_for_runtime()
+    }
 }
 
 impl WindowLayers {
@@ -517,32 +524,16 @@ impl WindowLayers {
         frame: &Frame<'_>,
         theme: &iced::Theme,
     ) -> (loom_ui::paint::PaintList, loom_ui::paint::PaintList) {
-        use loom_canvas::iced_convert::ToCore as _;
-        use loom_ui::Layer;
-        use loom_ui::paint::{ListPainter, PaintList, PanelStyle};
+        use loom_ui::paint::ListPainter;
         self.text.borrow_mut().begin_frame();
         parts.panels.lay_out(&mut *self.text.borrow_mut());
         let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, frame.size);
-        // A field of the runtime's looks like one of Iced's while both
-        // draw: the caret in the text colour, the selection in the theme's
-        // weak primary.
-        let style = PanelStyle {
-            text: theme.palette().text.to_core(),
-            caret: theme.palette().text.to_core(),
-            selection: theme.extended_palette().primary.weak.color.to_core(),
-        };
-        let mut lists = (PaintList::new(whole), PaintList::new(whole));
-        for (layers, list) in [
-            ([Layer::Canvas, Layer::Panels], &mut lists.0),
-            ([Layer::Overlays, Layer::Question], &mut lists.1),
-        ] {
-            for layer in layers {
-                parts
-                    .panels
-                    .paint(layer, &mut ListPainter::new(&self.text, list), &style);
-            }
-        }
-        lists
+        let style = super::paint::panel_style(theme);
+        super::paint::paint_sides(whole, |layer, list| {
+            parts
+                .panels
+                .paint(layer, &mut ListPainter::new(&self.text, list), &style);
+        })
     }
 }
 

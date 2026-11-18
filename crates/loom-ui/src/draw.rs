@@ -81,7 +81,57 @@ impl<A: App> Panels<'_, A> {
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
         self.focus.settle(self.window);
+        self.place_hint(text);
         self.report_focus();
+    }
+
+    /// Chooses the hover text to show, from the hovered element and the
+    /// focused one in the layers that take input, and lays it out
+    /// (section 5, rule 11).
+    fn place_hint(&mut self, text: &mut dyn TextMeasure) {
+        // A layout may have moved the hovered element out from under a
+        // pointer that did not move: it is hovered no more, unless the
+        // pointer is on its hover text.
+        if let (Some((_, id)), Some(at)) = (&self.pointer.hovered, self.pointer.at) {
+            // Its box only: the rest of the keep area is where the element
+            // was before this layout.
+            let on_hint = self
+                .window
+                .hint()
+                .is_some_and(|hint| hint.source == *id && hint.on_box(at));
+            if !on_hint && !self.window.bounds(id).is_some_and(|bounds| bounds.contains(at)) {
+                self.pointer.hovered = None;
+            }
+        }
+        let input = self.app.input().layer;
+        let window = &*self.window;
+        let with_text = |id: &UiId| {
+            window
+                .layer_of(id)
+                .filter(|layer| *layer >= input)
+                .and_then(|_| window.hover_text_of(id))
+                .map(|hover| (id.clone(), hover.to_string()))
+        };
+        let hovered = self.pointer.hovered.as_ref().and_then(|(_, id)| with_text(id));
+        let focused = self.focus.id().and_then(with_text);
+        let hover = self.pointer.hovered.as_ref().map(|(_, id)| id);
+        let chosen = self.pointer.hint.choose(hovered, focused, hover, self.focus.moves);
+        let style = self.app.hint_style();
+        let shown = chosen.and_then(|(source, hover)| {
+            let anchor = self.window.bounds(&source)?;
+            // Above everything but a question, and above a question when
+            // its element is in one, so the question's panel never covers
+            // it.
+            let layer = self
+                .window
+                .layer_of(&source)
+                .filter(|layer| *layer == Layer::Question)
+                .unwrap_or(Layer::Overlays);
+            Some(crate::hint::place(
+                source, hover, anchor, self.size, &style, text, layer,
+            ))
+        });
+        self.window.set_hint(shown);
     }
 
     /// Tells the app the focused element changed since it was last told,
@@ -96,11 +146,11 @@ impl<A: App> Panels<'_, A> {
     /// The app's message for a focus move it has not been told of yet,
     /// marking it told. `None` when nothing moved, or the app does not ask.
     pub(crate) fn focus_report(&mut self) -> Option<A::Message> {
-        if self.focus.id == self.focus.reported {
+        if self.focus.id() == self.focus.reported.as_ref() {
             return None;
         }
-        self.focus.reported = self.focus.id.clone();
-        self.app.focus_moved(self.focus.id.as_ref())
+        self.focus.reported = self.focus.id().cloned();
+        self.app.focus_moved(self.focus.id())
     }
 
     /// Paints the panels of `layer`, as
@@ -115,9 +165,7 @@ impl<A: App> Panels<'_, A> {
             self.window.is_settled(self.size),
             "the window changed since it was last laid out: call Runtime::lay_out first"
         );
-        let painted = self
-            .window
-            .paint(layer, painter, style, self.focus.id.as_ref(), self.scale);
+        let painted = self.window.paint(layer, painter, style, self.focus.id(), self.scale);
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
     }

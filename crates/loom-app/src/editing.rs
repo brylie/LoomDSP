@@ -90,13 +90,44 @@ impl App {
         focused.is_some_and(|focused| self.tab_fields().contains(focused))
     }
 
+    /// True while the window's own Tab order has fields that read before
+    /// the stats bar's stops: patch info's, with no overlay open, and the
+    /// bar has a stop to hand Tab on to (ui-layer.md, section 6, rule 2).
+    pub(crate) fn fields_before_the_bar(&self) -> bool {
+        self.no_overlay() && !self.tab_fields().is_empty() && !self.bar_stops().is_empty()
+    }
+
     /// Tab or Shift+Tab between the fields of the view on top: the next one
-    /// takes focus. With no field of the view in focus it changes nothing.
+    /// takes focus. Past either end of patch info's fields, focus goes on to
+    /// the stats bar's first stop (or its last, with Shift), when it has
+    /// any. With no stop in the bar, and in an overlay, the fields loop as
+    /// before. With no field of the view in focus it changes nothing: Tab
+    /// from nothing is the canvas's (section 6, rule 2).
     pub(crate) fn tab_between_fields(&mut self, focused: Option<&UiId>, backwards: bool) {
-        let next = focused.and_then(|focused| field_after(&self.tab_fields(), focused, backwards));
-        if let Some(next) = next {
-            self.effect(loom_ui::Effects::focus(next));
-        }
+        let fields = self.tab_fields();
+        let at = focused.and_then(|focused| fields.iter().position(|field| field == focused));
+        let next = match at {
+            Some(at) if self.fields_before_the_bar() => {
+                let step = if backwards { at.checked_sub(1) } else { Some(at + 1) };
+                match step.and_then(|step| fields.get(step)) {
+                    Some(field) => field.clone(),
+                    // Past an end: on to the bar.
+                    None => {
+                        let stops = self.bar_stops();
+                        let stop = if backwards { stops.last() } else { stops.first() };
+                        stop.cloned().expect("fields_before_the_bar checked the bar has a stop")
+                    }
+                }
+            }
+            Some(_) => {
+                let Some(next) = focused.and_then(|focused| field_after(&fields, focused, backwards)) else {
+                    return;
+                };
+                next
+            }
+            None => return,
+        };
+        self.effect(loom_ui::Effects::focus(next));
     }
 
     /// Starts recording an edit: keeps the patch as it is now. Does nothing

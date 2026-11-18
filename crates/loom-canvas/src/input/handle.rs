@@ -207,19 +207,31 @@ impl CanvasModel<'_> {
                     state.focus_key.get_or_insert(focus_key);
                 } else if self.focus_policy.interactive
                     && state.focus_key.replace(focus_key).is_some_and(|key| key != focus_key)
-                    && let Some((module, widget)) = focus_control
                 {
-                    let can_focus = self
-                        .scene
-                        .module(module)
-                        .is_some_and(|tile| super::panel_input::focusable(&tile.panel).contains(&widget));
-                    if can_focus {
-                        // As a press on the control does: its tile is the
-                        // one selected, so the keys reach it and the
-                        // inspector follows.
-                        self.select_for_edit(module, out);
-                        state.focus.set(module, widget, true);
-                        out.redraw();
+                    match focus_control {
+                        Some((module, widget)) => {
+                            let can_focus = self
+                                .scene
+                                .module(module)
+                                .is_some_and(|tile| super::panel_input::focusable(&tile.panel).contains(&widget));
+                            if can_focus {
+                                // As a press on the control does: its tile is
+                                // the one selected, so the keys reach it and
+                                // the inspector follows.
+                                self.select_for_edit(module, out);
+                                state.focus.set(module, widget, true);
+                                out.redraw();
+                            }
+                        }
+                        // A request for no control lets go of the keyboard,
+                        // selecting nothing, as when the app's other part
+                        // takes it (a screen reader focusing the stats bar).
+                        None => {
+                            if state.focus.control().is_some() {
+                                state.focus.clear();
+                                out.redraw();
+                            }
+                        }
                     }
                 }
                 if self.animate {

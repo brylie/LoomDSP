@@ -53,8 +53,9 @@ pub(crate) enum Bridged {
     /// The app's deadline has come.
     #[cfg(any(test, feature = "test-ui"))]
     Deadline,
-    /// A frame, which the crate's tests send as one shown.
-    #[cfg(test)]
+    /// A frame, which the crate's tests and the `Ui` harness send as one
+    /// shown.
+    #[cfg(any(test, feature = "test-ui"))]
     Presented,
     /// Iced's answer to the focus question (`focus_query`).
     Focus(FocusAnswer),
@@ -275,13 +276,33 @@ impl loom_ui::App for Hosted {
     /// No panels yet: Iced draws every view until phase 3. A test may add
     /// some ([`Extra`]).
     fn view(&self, view: &mut loom_ui::View) {
+        self.0.bar_panels(view);
         self.2.view(view);
     }
 
     /// What a click on one of the runtime's elements means. None of the
     /// app's own views is one yet.
     fn clicked(&self, id: &UiId) -> Option<Message> {
-        self.2.clicked(id)
+        self.0.bar_click(id).or_else(|| self.2.clicked(id))
+    }
+
+    /// Hover text in the look of Iced's tooltips: the theme's weak
+    /// background, a 2 px radius, 6 px padding, at most 480 wide.
+    fn hint_style(&self) -> loom_ui::HintStyle {
+        use loom_canvas::iced_convert::ToCore as _;
+        let theme = self.0.theme();
+        let palette = theme.extended_palette();
+        loom_ui::HintStyle {
+            text: crate::style::BODY_TEXT,
+            colour: palette.background.weak.text.to_core(),
+            background: palette.background.weak.color.to_core(),
+            border: palette.background.weak.color.to_core(),
+            border_width: 0.0,
+            radius: 2.0,
+            padding: 6.0,
+            max_width: 480.0,
+            gap: 0.0,
+        }
     }
 
     /// The runtime's focus moved: the app keeps one copy of what has the
@@ -315,6 +336,10 @@ impl loom_ui::App for Hosted {
                 _ => loom_ui::Layer::Overlays,
             },
             canvas_focused: self.0.a11y.focus().is_some(),
+            // With no overlay open, Tab from nothing is the canvas's, as it
+            // was before the bar moved: the canvas is above the bar
+            // (section 6, rule 2; Brylie's decision, 2026-11-17).
+            target_first: matches!(self.0.input_owner(), InputOwner::Canvas),
         }
     }
 
@@ -406,7 +431,7 @@ impl<D: BridgeDriver> Bridge<D> {
             }
             Bridged::Woken => self.turn(DriverEvent::Woken),
             Bridged::Deadline => self.turn(DriverEvent::DeadlineReached),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-ui"))]
             Bridged::Presented => self.turn(DriverEvent::Presented),
             // Every answer reaches the app, changed or not, as the window's
             // word on focus after a press: a press elsewhere ends a draft
@@ -495,6 +520,8 @@ impl<D: BridgeDriver> Bridge<D> {
     /// (loom-ui's `test-driver` feature).
     #[cfg(any(test, feature = "test-ui"))]
     pub(crate) fn app_mut(&mut self) -> &mut App {
+        // What a test changes here, outside a turn, shows on the next frame.
+        self.runtime.mark_view_stale();
         &mut self.runtime.app_mut().0
     }
 
@@ -627,7 +654,9 @@ impl loom_ui::Target<Message> for IcedTarget {
     /// Iced's update, so Tab among the runtime's stops never also moves an
     /// Iced field.
     fn kept(&mut self, event: &loom_ui_core::Event) {
-        if matches!(event, loom_ui_core::Event::Key(_)) {
+        // Only a press: a release the runtime takes (Space on its button)
+        // follows a press Iced never heard, so Iced may hear it.
+        if matches!(event, loom_ui_core::Event::Key(loom_ui_core::KeyEvent::Pressed { .. })) {
             self.drop_keys = true;
         }
     }

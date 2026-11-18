@@ -62,6 +62,21 @@ fn a_label_needs_only_its_text() {
     assert_eq!(Access::label("").problem(false), Some(Problem::NoValue));
 }
 
+/// A status, like a label, is read by its text: the role table gives it
+/// only its text, and rule 2 asks a name of interactive elements only. So
+/// it needs non-empty text and no name.
+#[test]
+fn a_status_needs_only_its_text() {
+    let status = |text: &str| Access::new(Role::Status, "").value(Value::Text(text.into()));
+    assert_eq!(status("Warning: the input is late").problem(false), None);
+    assert_eq!(status("").problem(false), Some(Problem::NoValue));
+    assert_eq!(
+        Access::new(Role::Status, "").problem(false),
+        Some(Problem::NoValue),
+        "no text at all"
+    );
+}
+
 /// Something a user acts on must offer an action. A focus stop offers
 /// Focus, so that is enough; a group a user does not act on needs none.
 #[test]

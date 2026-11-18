@@ -58,8 +58,8 @@ impl Pointers {
             _ => {}
         }
         let pointer = ours(&event).zip(self.cursor);
-        if let Some((_, point)) = &pointer {
-            if panels.over_target(*point) {
+        if let Some((loom, point)) = &pointer {
+            if panels.over_target(loom, *point) {
                 if !std::mem::replace(&mut self.hidden, true) {
                     self.keep(iced::Event::Mouse(mouse::Event::CursorLeft), None, events);
                 }
@@ -121,13 +121,16 @@ impl Pointers {
             iced.run(release);
         }
         let statuses = if events.is_empty() { None } else { iced.update(&events) };
-        match statuses {
+        let redraw = match statuses {
             Some(statuses) => self.after(panels, &statuses),
             None => {
                 self.kept.clear();
                 false
             }
-        }
+        };
+        // A script's pointer events go into Iced during that update (the
+        // control channel's injector); what Iced left goes on to our layers.
+        redraw | hand_scripted(iced.take_scripted(), panels)
     }
 
     /// After Iced's update over the events kept, with its `statuses` in the
@@ -158,6 +161,25 @@ pub(crate) trait IcedSide {
     /// and returns each event's status, in order. `None` when Iced cannot
     /// run yet, such as before the window has a renderer.
     fn update(&mut self, events: &[iced::Event]) -> Option<Vec<Status>>;
+
+    /// The scripted pointer events Iced's widgets left unused in that
+    /// update, with where they happened.
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)>;
+}
+
+/// Hands the control channel's scripted pointer events that Iced left
+/// unused to the runtime's layers below Iced, as [`Pointers::update`] hands
+/// it a real one (ui-layer.md, section 5, rule 10), so a script presses
+/// the stats bar's × as a user does. Returns true when the window needs
+/// drawing.
+pub(crate) fn hand_scripted(scripted: Vec<(iced::Event, iced::Point)>, panels: &mut Panels<'_, Hosted>) -> bool {
+    let mut redraw = false;
+    for (event, at) in scripted {
+        if let Some(event) = ours(&event) {
+            redraw |= panels.pointer_below(&event, Point::new(at.x, at.y)).redraw;
+        }
+    }
+    redraw
 }
 
 /// An Iced mouse event as the runtime's layers hear it: a move, or a press

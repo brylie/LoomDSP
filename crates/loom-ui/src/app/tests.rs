@@ -107,3 +107,50 @@ fn a_context_made_by_hand_reads_back_what_it_was_given() {
         "the waker sends into the queue it was made with"
     );
 }
+
+/// An app whose one panel shows a count, and which notes, in each update,
+/// whether the context's layout was current.
+struct Counter {
+    count: u32,
+    laid_out: Vec<bool>,
+}
+
+impl App for Counter {
+    type Message = ();
+
+    fn update(&mut self, _message: (), cx: &Context<'_, ()>) -> Effects<()> {
+        self.laid_out.push(cx.laid_out());
+        self.count += 1;
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut crate::View) {
+        view.panel_with(UiId::panel("count"), crate::Layer::Panels, &self.count, |count| {
+            crate::Element::text(count.to_string(), crate::layout::tests::STYLE)
+        });
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+}
+
+/// `Context::laid_out` is false in a turn after one that rebuilt the view
+/// with no layout between them, and true once the driver laid it out, so an
+/// app can wait for the draw before it reads the layout.
+#[test]
+fn the_context_says_whether_the_layout_is_current() {
+    use crate::layout::tests::Mono;
+    let window = crate::event::WindowState::new(loom_ui_core::Size::new(100.0, 50.0));
+    let app = Counter {
+        count: 0,
+        laid_out: Vec::new(),
+    };
+    let mut harness = crate::headless::Harness::new(app, crate::NoTarget, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    harness.send(());
+    harness.send(());
+    harness.lay_out(&mut Mono::default());
+    harness.send(());
+    assert_eq!(harness.app().laid_out, [true, false, true]);
+}

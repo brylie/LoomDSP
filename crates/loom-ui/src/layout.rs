@@ -156,6 +156,8 @@ pub(crate) struct Record {
     pub(crate) focusable: bool,
     /// What it is to a screen reader. Only an element with a UI ID has it.
     pub(crate) access: Option<Access>,
+    /// Its hover text. Only an element with a UI ID has it.
+    pub(crate) hover: Option<String>,
     /// The panel this record's slot holds, for a slot.
     pub(crate) slot: Option<UiId>,
     /// Where it is in the panel, after [`Layout::compute`].
@@ -630,6 +632,7 @@ impl Layout {
             look,
             focusable,
             access,
+            hover,
             children,
             ..
         } = element;
@@ -705,7 +708,14 @@ impl Layout {
         if (focusable || access.is_some()) && id.is_none() {
             self.problem(None, Problem::NoKey);
         }
-        let access = access.filter(|_| kept.is_some());
+        let hover = hover.filter(|_| kept.is_some());
+        // The hover text is the node's description unless it sets its own
+        // (section 7, rule 23): one string for both. Text that only repeats
+        // the node's name or value is not read a second time.
+        let access = access.filter(|_| kept.is_some()).map(|access| match &hover {
+            Some(text) if !access.has_description() && !access.repeats(text) => access.description(text.clone()),
+            _ => access,
+        });
         let stop = kept.is_some() && is_stop(focusable, access.as_ref());
         if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
             self.problem(kept.clone(), problem);
@@ -724,6 +734,7 @@ impl Layout {
             parent,
             focusable: stop,
             access,
+            hover,
             slot,
             id: kept,
             opaque,

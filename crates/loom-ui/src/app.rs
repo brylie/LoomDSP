@@ -68,6 +68,12 @@ pub trait App {
         None
     }
 
+    /// How hover text looks (ui-layer.md, section 5, rule 11), from the
+    /// app's style tokens. The default is plain and readable.
+    fn hint_style(&self) -> crate::HintStyle {
+        crate::HintStyle::default()
+    }
+
     /// The message for a move of the runtime's keyboard focus, if the app
     /// wants to know: to rebuild its accessibility tree, which reports the
     /// focus (section 7, rule 7). `focus` is the runtime's element that has
@@ -134,6 +140,13 @@ pub struct InputState {
     /// Tab does not enter the runtime's stops (section 6, rule 1). The
     /// default is false.
     pub canvas_focused: bool,
+    /// True while the target's own Tab stops read before the runtime's
+    /// (ui-layer.md, section 6, rule 2, between the toolkits): Tab with
+    /// nothing focused is then the target's, and enters the runtime's
+    /// stops only when the target hands it over. Shift+Tab from nothing
+    /// still enters the runtime's last stop, the last in reading order.
+    /// The default is false: the runtime's stops come first.
+    pub target_first: bool,
 }
 
 impl Default for InputState {
@@ -141,6 +154,7 @@ impl Default for InputState {
         Self {
             layer: Layer::Canvas,
             canvas_focused: false,
+            target_first: false,
         }
     }
 }
@@ -188,6 +202,36 @@ impl<'a, M> Context<'a, M> {
             window,
             panels: None,
         }
+    }
+
+    /// True when the runtime's panels are laid out as the view now stands,
+    /// so [`Context::bounds`], [`Context::text_bounds`], and
+    /// [`Context::access_nodes`] are current. A view rebuilt in an earlier
+    /// turn is laid out only before the next draw: an app that needs those
+    /// answers then waits for it ([`Effects::after_draw`](crate::Effects::after_draw)).
+    /// True outside a runtime.
+    pub fn laid_out(&self) -> bool {
+        self.panels.is_none_or(|panels| panels.is_settled(self.window.size))
+    }
+
+    /// True when one of the runtime's panels is where the UI ID `id` would
+    /// be: its key, or one inside it, whether or not the element is laid
+    /// out yet. Tells a part of the runtime's own from a toolkit's.
+    pub fn holds(&self, id: &UiId) -> bool {
+        self.panels.is_some_and(|panels| panels.panel_of(id).is_some())
+    }
+
+    /// Where the runtime's element with UI ID `id` is in the window, in
+    /// logical pixels, as last laid out. `None` outside a runtime, and for
+    /// an ID no panel of the runtime's has.
+    pub fn bounds(&self, id: &UiId) -> Option<loom_ui_core::Rect> {
+        self.panels?.bounds(id)
+    }
+
+    /// Where the first of the runtime's text elements that reads `text` is
+    /// in the window, as last laid out.
+    pub fn text_bounds(&self, text: &str) -> Option<loom_ui_core::Rect> {
+        self.panels?.text_bounds(text)
     }
 
     /// The moment this turn runs, from the driver.

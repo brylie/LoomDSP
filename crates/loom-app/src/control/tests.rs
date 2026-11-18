@@ -1072,6 +1072,7 @@ fn locate_agrees_with_the_ui_harness() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     // The two sides round differently, so allow a tiny difference.
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
@@ -1409,6 +1410,7 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     let ask = |ui: &mut crate::ui_test::Ui, target: &str, then: AfterSearch| {
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -1775,6 +1777,7 @@ fn locate_finds_lights_and_meters() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     let view = found.canvas.unwrap();
     let centre = |module: u32, widget: usize| {
@@ -2432,6 +2435,7 @@ fn locate_and_sample_find_a_surface_control() {
         canvas: Some(ui.canvas()),
         text: None,
         places: crate::places::Places::default(),
+        ours: None,
     };
     let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
     let knob = locate(ui.app(), "2:cutoff", &found).unwrap();
@@ -2461,6 +2465,7 @@ fn locate_takes_a_ui_id_as_text() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let near = |a: Rect, b: Rect| {
         (a.x - b.x).abs() < 0.01
@@ -2493,7 +2498,17 @@ fn locate_takes_a_ui_id_as_text() {
     assert!(undo.width < 200.0, "the button, not the toolbar");
     let toolbar = locate(ui.app(), "toolbar", &found).unwrap();
     assert!(toolbar.contains(undo.center()));
-    for id in ["panel/inspector", "panel/matrix", "stats/patch", "stats/midi", "status"] {
+    for id in [
+        "panel/inspector",
+        "panel/matrix",
+        "stats/patch",
+        "stats/midi",
+        "stats/status",
+    ] {
+        // The bar is `loom-ui`'s: the answering update fills its place from
+        // the runtime's layout (`Found::ours`), as here.
+        let mut found = found.clone();
+        found.ours = ui.runtime().bounds(&id.parse().unwrap());
         let rect = locate(ui.app(), id, &found).unwrap_or_else(|error| panic!("{id}: {error}"));
         assert!(rect.width > 0.0 && rect.height > 0.0, "{id}");
     }
@@ -2529,6 +2544,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let cancel = locate(ui.app(), "question/cancel", &found).unwrap();
     let label = ui.text("Cancel").expect("the question shows Cancel");
@@ -2543,6 +2559,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let search = locate(ui.app(), "browser/search", &found).unwrap();
     let browser = locate(ui.app(), "browser", &found).unwrap();
@@ -2556,6 +2573,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: None,
         text: None,
         places: ui.places(),
+        ours: None,
     };
     let close = locate(ui.app(), "preferences/close", &found).unwrap();
     let label = ui.text("Close").expect("Preferences shows Close");
@@ -2568,6 +2586,7 @@ fn locate_takes_an_overlay_ui_id() {
         canvas: None,
         text: None,
         places: ui.places(),
+        ours: None,
     };
     let cancel = locate(ui.app(), "licence/cancel", &found).unwrap();
     let label = ui.text("Cancel").expect("the chooser shows Cancel");
@@ -2833,4 +2852,196 @@ fn watch_runs_a_socket_listener() {
     watch(&Listener::Socket(path.clone()), outlet);
     assert!(!path.exists());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `locate` on a part of the runtime's own, answered in the turn after one
+/// that rebuilt it (here learn mode adds its word to the bar) and before
+/// any draw, waits for the draw that lays the bar out, through the
+/// after-draw effect, and is answered then: once, with real bounds, and
+/// with no second wait (ui-layer.md, section 10, rule 6).
+#[test]
+fn locate_waits_once_for_the_draw_after_a_rebuild() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        ..Default::default()
+    };
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "locate", "target": "stats/learning"}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let heard = ui.deliver(Message::Located {
+        call,
+        target: "stats/learning".to_string(),
+        found,
+        then: crate::control::AfterSearch::Locate,
+    });
+    assert!(receiver.try_recv().is_err(), "not answered before the draw: {heard:?}");
+    let heard = ui.redraw();
+    let reply = receiver
+        .try_recv()
+        .expect("answered after one draw")
+        .unwrap_or_else(|why| panic!("stats/learning: {why}"));
+    assert!(reply["width"].as_f64().unwrap_or(0.0) > 0.0, "real bounds: {reply:?}");
+    let again = heard.iter().filter(|m| matches!(m, Message::Located { .. })).count();
+    assert_eq!(again, 1, "one retry, after the draw");
+    let later = ui.redraw();
+    assert!(
+        !later.iter().any(|m| matches!(m, Message::Located { .. })),
+        "and no second one"
+    );
+}
+
+/// The bar's parts are found by their new UI IDs through the `locate`
+/// command itself, which reads the runtime's layout (`Found::find_ours`),
+/// inside the bar; the old names, from before the bar moved under `stats`,
+/// give an error rather than a wrong place.
+#[test]
+fn locate_takes_the_bars_new_names_and_refuses_the_old() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.app_mut().alerts.say("saved");
+    let _ = ui.redraw();
+    let bar_top = f64::from(crate::WINDOW.height - crate::style::STATS_BAR_HEIGHT);
+    for name in [
+        "stats",
+        "stats/status",
+        "stats/kept",
+        "stats/kept/dismiss",
+        "stats/patch",
+    ] {
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{name}"}}"#))
+            .unwrap_or_else(|why| panic!("{name}: {why}"));
+        let number = |key: &str| reply[key].as_f64().unwrap_or(0.0);
+        assert!(number("width") > 0.0 && number("height") > 0.0, "{name}: {reply:?}");
+        assert!(number("y") >= bar_top, "{name} is in the bar: {reply:?}");
+    }
+    for old in ["status", "status/kept", "status/dismiss", "status/kept/dismiss"] {
+        assert!(
+            run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{old}"}}"#)).is_err(),
+            "`{old}` names nothing now"
+        );
+    }
+}
+
+/// A `locate` that the canvas answers needs nothing of the runtime's
+/// layout, so it is answered at once, even in the turn after a rebuild of
+/// the bar and before the draw that lays it out.
+#[test]
+fn locate_on_the_canvas_does_not_wait_for_a_rebuild() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        ..Default::default()
+    };
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "locate", "target": "4"}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let _ = ui.deliver(Message::Located {
+        call,
+        target: "4".to_string(),
+        found,
+        then: crate::control::AfterSearch::Locate,
+    });
+    let reply = receiver
+        .try_recv()
+        .expect("answered before any draw")
+        .unwrap_or_else(|why| panic!("4: {why}"));
+    assert!(reply["width"].as_f64().unwrap_or(0.0) > 0.0, "{reply:?}");
+}
+
+/// A script's pointer reaches the stats bar, which `loom-ui` draws, by its
+/// UI ID, as `locate` does: a hover over the × hovers it, and a press and a
+/// release on it dismiss the error (section 10, rule 6).
+#[test]
+fn scripted_pointer_commands_reach_the_bar() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    let _ = ui.redraw();
+    let x: loom_ui_core::UiId = "stats/status/dismiss".parse().unwrap();
+    run_ui(&mut ui, r#"{"cmd": "hover", "target": "stats/status/dismiss"}"#)
+        .unwrap_or_else(|why| panic!("hover: {why}"));
+    assert_eq!(ui.runtime().hovered(), Some(&x), "the script's hover reached the ×");
+    run_ui(&mut ui, r#"{"cmd": "press", "target": "stats/status/dismiss"}"#)
+        .unwrap_or_else(|why| panic!("press: {why}"));
+    run_ui(
+        &mut ui,
+        r#"{"cmd": "release", "button": "left", "target": "stats/status/dismiss"}"#,
+    )
+    .unwrap_or_else(|why| panic!("release: {why}"));
+    let _ = ui.redraw();
+    assert!(
+        ui.app().alerts.kept().is_empty(),
+        "the script's click dismissed the error"
+    );
+}
+
+/// A `locate` whose answer could never come from the runtime's layout, a
+/// module that does not exist, answers at once with its error, even in the
+/// turn after a rebuild and before the draw.
+#[test]
+fn locate_on_a_missing_module_answers_at_once() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        ..Default::default()
+    };
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "locate", "target": "999999"}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let _ = ui.deliver(Message::Located {
+        call,
+        target: "999999".to_string(),
+        found,
+        then: crate::control::AfterSearch::Locate,
+    });
+    let reply = receiver.try_recv().expect("answered before any draw");
+    assert!(reply.is_err(), "no such module: {reply:?}");
+}
+
+/// A pointer command aimed at text that a rebuilt view shows waits for the
+/// draw that lays it out, as `locate` does: a script that turns learn mode
+/// on and hovers "Learning" in the same turn hovers the bar's word.
+#[test]
+fn a_pointer_command_waits_for_text_a_rebuild_shows() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    run_ui(&mut ui, r#"{"cmd": "hover", "target": "Learning"}"#).unwrap_or_else(|why| panic!("hover: {why}"));
+    let learning: loom_ui_core::UiId = "stats/learning".parse().unwrap();
+    assert_eq!(
+        ui.runtime().hovered(),
+        Some(&learning),
+        "the hover found the bar's word"
+    );
+}
+
+/// A pointer command aimed at a module's control goes to the control, as
+/// `locate` resolves it, even while the stats bar shows the same text.
+#[test]
+fn a_pointer_command_aims_a_module_target_at_the_canvas() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.say("4:cutoff");
+    let _ = ui.redraw();
+    let at = run_ui(&mut ui, r#"{"cmd": "locate", "target": "4:cutoff"}"#).unwrap();
+    let pointer =
+        run_ui(&mut ui, r#"{"cmd": "hover", "target": "4:cutoff"}"#).unwrap_or_else(|why| panic!("hover: {why}"));
+    for key in ["x", "y"] {
+        let (want, got) = (at[key].as_f64().unwrap(), pointer[key].as_f64().unwrap());
+        assert!(
+            (want - got).abs() < 1.0,
+            "{key}: the hover went to the knob, {got} for {want}"
+        );
+    }
 }
