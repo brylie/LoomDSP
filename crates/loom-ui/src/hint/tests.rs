@@ -66,7 +66,7 @@ fn the_box_sits_above_its_element_or_below_it() {
     assert_eq!(shown.rect.x, 10.0);
     assert_eq!(shown.rect.y + shown.rect.height, 150.0 - style.gap, "above, by the gap");
     assert!(
-        shown.keep.contains(Point::new(20.0, 150.0 - style.gap / 2.0)),
+        shown.keeps(Point::new(20.0, 150.0 - style.gap / 2.0)),
         "the gap keeps it"
     );
 
@@ -278,4 +278,19 @@ fn escape_with_space_held_cancels_and_hides() {
         Some(&UiId::panel("bar").with("a")),
         "focus stays"
     );
+}
+
+/// Beside a narrow element, under its wider hover text, the pointer is on
+/// the next button, not on the text or its element: that button takes the
+/// hover, and its own text shows. The rectangle around the box and the
+/// element would have kept the first one.
+#[test]
+fn a_neighbour_under_a_wide_hover_text_takes_the_hover() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    let (_, rect) = harness.runtime().hover_text().expect("a's text");
+    assert!(rect.x + rect.width > 42.0, "a's text reaches over b: {rect:?}");
+    step(&mut harness, at(42.0, ROW, PointerEvent::Moved));
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("bar").with("b")));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
 }

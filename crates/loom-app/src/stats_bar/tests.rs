@@ -398,3 +398,25 @@ fn a_long_status_is_cut_and_the_items_keep_their_width() {
     assert!(status.x >= right, "the status starts after the items: {status:?}");
     assert!(status.x + status.width <= crate::WINDOW.width, "and ends in the window");
 }
+
+/// `locate` on a status line too long for the bar gives the part of it
+/// that shows, cut by its row, so the point it gives is on visible text.
+#[test]
+fn locate_on_a_cut_status_gives_the_part_that_shows() {
+    let mut ui = Ui::open("subtractive.ron");
+    let long = "a long message ".repeat(40);
+    ui.app_mut().alerts.say(long.clone());
+    ui.redraw();
+    ui.lay_out_panels();
+    let status = ui.runtime().bounds(&stats_id().with("status")).expect("the status");
+    let text = ui
+        .runtime()
+        .text_bounds(long.trim_end())
+        .or_else(|| ui.runtime().text_bounds(&long));
+    let text = text.expect("the status shows part of its text");
+    assert!(
+        text.x >= status.x && text.x + text.width <= status.x + status.width,
+        "{text:?} in {status:?}"
+    );
+    assert!(status.contains(text.center()), "the point is on what shows");
+}

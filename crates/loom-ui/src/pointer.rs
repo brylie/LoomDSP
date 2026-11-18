@@ -36,9 +36,10 @@ pub(crate) struct Pointer {
     /// The element a left press went down on, and its layer, until the
     /// release.
     pub(crate) pressed: Option<(Layer, UiId)>,
-    /// The focused element Space went down on, which clicks when Space
-    /// comes up there (section 3, rule 4). A pointer press cancels it.
-    pub(crate) space: Option<UiId>,
+    /// The focused element Space went down on, and the focus's move count
+    /// then: it clicks when Space comes up with the focus never moved
+    /// since (section 3, rule 4). A pointer press cancels it.
+    pub(crate) space: Option<(UiId, u64)>,
     /// What chooses the hover text, between the pointer and the focus.
     pub(crate) hint: crate::hint::Chooser,
 }
@@ -117,8 +118,7 @@ impl<A: App> Panels<'_, A> {
     /// element, which keeps it showing (section 5, rule 11). It takes no
     /// other event: a press there goes where it would go without it.
     fn keeps_hint(&self, event: &Event, point: Point) -> bool {
-        matches!(event, Event::Pointer(PointerEvent::Moved))
-            && self.window.hint().is_some_and(|hint| hint.keep.contains(point))
+        matches!(event, Event::Pointer(PointerEvent::Moved)) && self.window.hint().is_some_and(|hint| hint.keeps(point))
     }
 
     /// Offers a pointer event at `point` to the runtime's layers below the
@@ -209,9 +209,9 @@ impl<A: App> Panels<'_, A> {
             PointerEvent::Pressed(button) => {
                 self.pointer.space = None;
                 redraw = self.hover(at.clone());
-                let before = self.focus.id.clone();
+                let before = self.focus.id().cloned();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
-                redraw |= self.focus.id != before;
+                redraw |= self.focus.id() != before.as_ref();
                 if *button == PointerButton::Left {
                     self.pointer.pressed = at;
                 }
@@ -250,9 +250,10 @@ impl<A: App> Panels<'_, A> {
     /// so a press focuses in the same panels it hits.
     fn focus_in(&mut self, point: Point, keep: impl Fn(Layer) -> bool) {
         self.focus.wanted = None;
-        self.focus.id = self.window.focus_at_in(point, keep).flatten().cloned();
+        let to = self.window.focus_at_in(point, keep).flatten().cloned();
+        self.focus.set(to);
         self.focus.ring = false;
-        if self.focus.id.is_some() {
+        if self.focus.id().is_some() {
             self.focus.release_owed = true;
         }
     }

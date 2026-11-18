@@ -284,7 +284,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// The runtime's own element with keyboard focus, if any. Elements a
     /// toolkit still draws keep theirs in the routing target.
     pub fn focused(&self) -> Option<&UiId> {
-        self.focus.id.as_ref()
+        self.focus.id()
     }
 
     /// Every focus stop of the runtime's elements, in focus order, as last
@@ -325,7 +325,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             .iter()
             .filter(|stop| self.panels.layer_of(stop).is_some_and(|layer| layer >= input))
             .collect();
-        self.step_among(stops, self.focus.id.as_ref(), back)
+        self.step_among(stops, self.focus.id(), back)
     }
 
     /// Focuses what a press at `point` reaches, for a router to call when
@@ -344,7 +344,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         panels.focus_at(point);
         panels.report_focus();
         self.release_if_owed();
-        self.focus.id.clone()
+        self.focus.id().cloned()
     }
 
     /// Where the first of the runtime's text elements that reads `text` is
@@ -357,7 +357,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// from `ids`, as [`Context::access_nodes`](crate::Context::access_nodes)
     /// gives them inside a turn.
     pub fn access_nodes(&self, ids: &mut loom_ui_core::IdTable) -> crate::AccessNodes {
-        self.panels.access_nodes(ids, self.window.scale, self.focus.id.as_ref())
+        self.panels.access_nodes(ids, self.window.scale, self.focus.id())
     }
 
     /// The hover text showing, as last laid out: the element it belongs to
@@ -376,7 +376,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// when the keyboard put the focus there. `None` after a press, or with
     /// no focus.
     pub fn focus_ring(&self) -> Option<(UiId, Rect)> {
-        let focus = self.focus.id.as_ref().filter(|_| self.focus.ring)?;
+        let focus = self.focus.id().filter(|_| self.focus.ring)?;
         Some((focus.clone(), self.panels.bounds(focus)?))
     }
 
@@ -413,11 +413,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             return false;
         }
         self.target_seen = now;
-        if self.target_seen.is_none() || self.focus.id.is_none() {
+        if self.target_seen.is_none() || self.focus.id().is_none() {
             return false;
         }
         self.focus.wanted = None;
-        self.focus.id = None;
+        self.focus.set(None);
         self.focus.ring = false;
         true
     }
@@ -426,9 +426,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// so a ring shows. Returns true when it changed.
     fn focus_to(&mut self, to: Option<UiId>) -> bool {
         self.focus.wanted = None;
-        let changed = self.focus.id != to || (to.is_some() && !self.focus.ring);
-        self.focus.id = to;
-        self.focus.ring = self.focus.id.is_some();
+        let changed = self.focus.id() != to.as_ref() || (to.is_some() && !self.focus.ring);
+        self.focus.set(to);
+        self.focus.ring = self.focus.id().is_some();
         changed
     }
 
@@ -443,8 +443,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 self.release_target();
                 self.focus_to(Some(id.clone()))
             }
-            FocusTarget::Next | FocusTarget::Previous if self.focus.id.is_some() => {
-                match self.focus_step(self.focus.id.as_ref(), *target == FocusTarget::Previous) {
+            FocusTarget::Next | FocusTarget::Previous if self.focus.id().is_some() => {
+                match self.focus_step(self.focus.id(), *target == FocusTarget::Previous) {
                     FocusStep::To(stop) => self.focus_to(Some(stop)),
                     FocusStep::PastEnd => {
                         self.target.focus(target, select);
@@ -496,7 +496,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             return (false, false);
         }
         let input = self.app.input();
-        if self.focus.id.is_none() {
+        if self.focus.id().is_none() {
             // Forward from nothing goes to the half that reads first: the
             // target's, when it says so.
             let ours_first = !input.target_first || modifiers.shift;
@@ -511,8 +511,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // when Tab finds no stop above it: the key goes on to the target.
         let below = self
             .focus
-            .id
-            .as_ref()
+            .id()
             .and_then(|id| self.panels.layer_of(id))
             .is_some_and(|layer| layer < input.layer);
         match self.tab_step(input.layer, modifiers.shift) {
@@ -547,8 +546,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let layer = self.app.input().layer;
         let Some(id) = self
             .focus
-            .id
-            .clone()
+            .id()
+            .cloned()
             .filter(|id| self.panels.fields.has(id) && self.panels.layer_of(id).is_some_and(|its| its >= layer))
         else {
             return (false, false);
@@ -579,14 +578,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// this (section 8, rule 3).
     fn field_left(&mut self, batch: &mut Vec<A::Message>) {
         if let Some(field) = self.field_focus.take() {
-            if self.focus.id.as_ref() == Some(&field) {
+            if self.focus.id() == Some(&field) {
                 self.field_focus = Some(field);
                 return;
             }
             self.panels.fields.left(&field);
             batch.extend(self.app.field_event(&field, &FieldEvent::Left));
         }
-        self.field_focus = self.focus.id.clone().filter(|id| self.panels.fields.has(id));
+        self.field_focus = self.focus.id().cloned().filter(|id| self.panels.fields.has(id));
     }
 
     /// The text the field with UI ID `id` shows now, for tests.
@@ -595,21 +594,45 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.panels.fields.get(id).map(crate::field::FieldState::text)
     }
 
+    /// What the keyboard can activate the element with UI ID `id` as, now:
+    /// `Some(true)` for a button, `Some(false)` for a switch, `None` when it
+    /// is neither, offers no Click, is turned off, or is in a layer below
+    /// the one taking input. The press and the release of Space both ask,
+    /// so an element that stopped being clickable while Space was held
+    /// clicks nothing.
+    fn activatable(&self, id: &UiId) -> Option<bool> {
+        let input = self.app.input();
+        if self.panels.layer_of(id).is_none_or(|layer| layer < input.layer) {
+            return None;
+        }
+        let access = self.panels.access_of(id)?;
+        if !access.offers(crate::access::Action::Click) || access.is_disabled() {
+            return None;
+        }
+        match access.role() {
+            crate::access::Role::Button => Some(true),
+            crate::access::Role::Switch => Some(false),
+            _ => None,
+        }
+    }
+
     /// Keyboard activation of the focused element (section 3, rule 4):
     /// Enter clicks a button when it goes down, and Space clicks a button
     /// or a switch when it comes up on the element it went down on.
-    /// Escape, a focus move, or a pointer press while Space is held
-    /// cancels it. Repeats click nothing. The click reaches the app through
-    /// `App::clicked` on the next turn, as a pointer's does. Returns true
-    /// when the key was taken, so the target never hears it.
+    /// Escape, any move of the focus, or a pointer press while Space is held
+    /// cancels it, and so does the element no longer being clickable when
+    /// Space comes up. Repeats click nothing. The click reaches the app
+    /// through `App::clicked` on the next turn, as a pointer's does.
+    /// Returns true when the key was taken, so the target never hears it.
     fn activate(&mut self, event: &Event) -> bool {
         let Event::Key(key) = event else {
             return false;
         };
         if let KeyEvent::Released { key: Key::Space } = key
-            && let Some(armed) = self.pointer.space.take()
+            && let Some((armed, moves)) = self.pointer.space.take()
         {
-            if self.focus.id.as_ref() == Some(&armed) {
+            let still = self.focus.moves == moves && self.focus.id() == Some(&armed);
+            if still && self.activatable(&armed).is_some() {
                 self.click(&armed);
             }
             return true;
@@ -625,19 +648,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 return true;
             }
         }
-        let Some(id) = self.focus.id.clone() else {
+        let Some(id) = self.focus.id().cloned() else {
             return false;
         };
-        let input = self.app.input();
-        if self.panels.layer_of(&id).is_none_or(|layer| layer < input.layer) {
-            return false;
-        }
-        let Some(access) = self.panels.access_of(&id) else {
+        let Some(button) = self.activatable(&id) else {
             return false;
         };
-        let clicks = access.offers(crate::access::Action::Click) && !access.is_disabled();
-        let button = clicks && access.role() == crate::access::Role::Button;
-        let switch = clicks && access.role() == crate::access::Role::Switch;
         let KeyEvent::Pressed {
             key, modifiers, repeat, ..
         } = key
@@ -652,9 +668,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 true
             }
-            Key::Space if (button || switch) && plain => {
+            Key::Space if plain => {
                 if !repeat {
-                    self.pointer.space = Some(id);
+                    self.pointer.space = Some((id, self.focus.moves));
                 }
                 true
             }
@@ -783,10 +799,6 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             DriverEvent::Input { event, pointer } => {
                 let (mut taken, moved) = self.tab(&event);
                 redraw |= moved;
-                if moved {
-                    // A focus move cancels a held Space (section 3, rule 4).
-                    self.pointer.space = None;
-                }
                 if !taken {
                     taken = self.activate(&event);
                     // What it did shows: a hidden hover text, a click.
@@ -931,7 +943,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let cx = Context {
             now,
             waker: &self.waker,
-            focused: self.focus.id.clone().or_else(|| self.target.focused()),
+            focused: self.focus.id().cloned().or_else(|| self.target.focused()),
             window: self.window,
             panels: Some(&self.panels),
         };

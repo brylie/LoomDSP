@@ -22,6 +22,8 @@ enum Message {
     Key,
     /// Set the input layer.
     Input(Layer),
+    /// Focus each of these in turn, in one update.
+    Refocus(Vec<UiId>),
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -37,11 +39,18 @@ impl App for Layers {
     type Message = Message;
 
     fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
-        if let Message::Input(layer) = message {
-            self.input = layer;
+        let mut effects = Effects::none();
+        match &message {
+            Message::Input(layer) => self.input = *layer,
+            Message::Refocus(ids) => {
+                for id in ids {
+                    effects = effects.and(Effects::focus(id.clone()));
+                }
+            }
+            _ => {}
         }
         self.heard.push(message);
-        Effects::none()
+        effects
     }
 
     fn view(&self, view: &mut View) {
@@ -573,4 +582,41 @@ fn space_clicks_on_release_and_can_be_cancelled() {
     harness.step(release_key(Key::Space));
     harness.step(DriverEvent::Woken);
     assert!(clicks(&harness).is_empty(), "a pointer press cancelled it");
+}
+
+/// Space clicks only if what it went down on can still be clicked when it
+/// comes up: an update that raises the input layer above the bar while
+/// Space is held leaves the release clicking nothing.
+#[test]
+fn space_released_after_the_input_layer_rose_clicks_nothing() {
+    use loom_ui_core::Key;
+    let mut harness = focused_on_a();
+    harness.step(press_key(Key::Space, false));
+    harness.send(Message::Input(Layer::Overlays));
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "{:?}", clicks(&harness));
+}
+
+/// Any move of the focus while Space is held cancels the click, whatever
+/// moved it: one update that focuses B and then A again clicks nothing. An
+/// update that focuses A while A has it moves nothing, so that one clicks.
+#[test]
+fn any_focus_move_while_space_is_held_cancels_the_click() {
+    use loom_ui_core::Key;
+    let a = UiId::panel("bar").with("a");
+    let b = UiId::panel("bar").with("b");
+    let mut harness = focused_on_a();
+    harness.step(press_key(Key::Space, false));
+    harness.send(Message::Refocus(vec![b, a.clone()]));
+    assert_eq!(harness.runtime().focused(), Some(&a), "back on A");
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "B and back cancelled it");
+
+    harness.step(press_key(Key::Space, false));
+    harness.send(Message::Refocus(vec![a.clone()]));
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(clicks(&harness), std::slice::from_ref(&a), "A again moved nothing");
 }

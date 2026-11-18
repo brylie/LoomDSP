@@ -372,3 +372,36 @@ fn a_key_our_field_takes_is_kept_from_iced() {
     ui.step(&[key_press(tab.clone(), none, None, false)]);
     assert_eq!(ui.runtime().focused(), None, "Tab left our field, past our last stop");
 }
+
+/// Where our text field's focus meets Iced's (section 6, rule 1): with our
+/// field focused, a click puts the keyboard in an Iced value field. The
+/// runtime lets go of its focus (`Runtime::follow_target`), so the next key
+/// is not our field's and is not kept: it reaches Iced, which types it into
+/// its field.
+#[test]
+fn our_field_gives_the_keyboard_to_an_iced_field() {
+    use crate::ui_test::key_press;
+    let a = keyboard::Key::Character("a".into());
+    let mut ui = ui_with(bar_with_field);
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.redraw();
+    ui.send(Message::MidiGhosts);
+    assert_eq!(ui.runtime().focused(), Some(&go()), "our field has the focus");
+
+    let field = ui.value_field(4, 0);
+    click(&mut ui, field);
+    ui.redraw();
+    let part = ui.focused_field();
+    assert!(part.is_some(), "the value field has the keyboard");
+    assert_eq!(ui.runtime().focused(), None, "ours let go");
+
+    // Iced's field uses the key, so its listener reports no `Key`: the
+    // field's own message is the sign it got there.
+    let heard = ui.step(&[key_press(a, keyboard::Modifiers::default(), Some("a"), false)]);
+    assert!(
+        heard
+            .iter()
+            .any(|m| matches!(m, Message::Inspector(crate::inspector::Message::ValueText { .. }))),
+        "Iced's field typed it: {heard:?}"
+    );
+}

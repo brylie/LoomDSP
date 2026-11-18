@@ -61,8 +61,10 @@ pub struct AccessNodes {
 /// settles the focus as [`Runtime::lay_out`](crate::Runtime::lay_out) does.
 #[derive(Debug, Default)]
 pub(crate) struct Focus {
-    /// The element with focus.
-    pub(crate) id: Option<UiId>,
+    /// The element with focus. Private, so [`Focus::set`] is the only way
+    /// to change it and no move escapes its count; read it with
+    /// [`Focus::id`].
+    id: Option<UiId>,
     /// The keyboard, or a focus effect, put it there, so a ring shows
     /// (ui-layer.md, section 6, rule 3). A press does not.
     pub(crate) ring: bool,
@@ -78,9 +80,27 @@ pub(crate) struct Focus {
     pub(crate) release_owed: bool,
     /// The focus the app was last told of ([`App::focus_moved`](crate::App::focus_moved)).
     pub(crate) reported: Option<UiId>,
+    /// How many times the focused element changed: a held Space clicks
+    /// only if this has not moved since it went down (ui-layer.md,
+    /// section 3, rule 4), whatever moved the focus and back.
+    pub(crate) moves: u64,
 }
 
 impl Focus {
+    /// The element with focus, if any.
+    pub(crate) fn id(&self) -> Option<&UiId> {
+        self.id.as_ref()
+    }
+
+    /// Gives the focus to `id`, or to none, counting a change of element.
+    /// Every path that moves the focus goes through here.
+    pub(crate) fn set(&mut self, id: Option<UiId>) {
+        if self.id != id {
+            self.moves += 1;
+        }
+        self.id = id;
+    }
+
     /// After a layout: takes a focus that a focus effect asked for before
     /// its element was laid out, and owes the target its release, or moves
     /// a focus whose element is gone to the first stop of the panel that
@@ -91,7 +111,7 @@ impl Focus {
             && window.stops().contains(&wanted)
         {
             self.release_owed = true;
-            self.id = Some(wanted);
+            self.set(Some(wanted));
             self.ring = true;
             return;
         }
@@ -99,10 +119,11 @@ impl Focus {
             return;
         };
         if !window.stops().contains(focus) {
-            self.id = window
+            let fallback = window
                 .panel_of(focus)
                 .cloned()
                 .and_then(|panel| window.first_stop_in(&panel));
+            self.set(fallback);
         }
     }
 }

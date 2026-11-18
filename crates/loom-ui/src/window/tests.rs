@@ -548,3 +548,29 @@ fn a_panel_named_twice_by_one_parent_is_in_the_first_slot() {
         None | Some((_, Hit::Blocked))
     ));
 }
+
+/// Text is found only where it shows: a long line in a clipping row gives
+/// the part inside the row, and a line clipped away entirely is not found.
+#[test]
+fn text_is_found_only_where_it_shows() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("cut"), Layer::Panels, &(), |_| {
+        Element::column([
+            Element::row([Element::text("a long line of text", STYLE)])
+                .width(Length::Fixed(40.0))
+                .clip(),
+            Element::row([
+                Element::space(Length::Fixed(10.0), Length::Fixed(10.0)).min_width(10.0),
+                Element::text("gone", STYLE),
+            ])
+            .width(Length::Fixed(10.0))
+            .clip(),
+        ])
+    });
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    let shown = screen.window.text_bounds("a long line of text").expect("partly shown");
+    assert_eq!((shown.x, shown.width), (0.0, 40.0), "cut to its row: {shown:?}");
+    assert_eq!(screen.window.text_bounds("gone"), None, "clipped away");
+}

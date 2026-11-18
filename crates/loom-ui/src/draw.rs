@@ -99,8 +99,8 @@ impl<A: App> Panels<'_, A> {
                 .map(|hover| (id.clone(), hover.to_string()))
         };
         let hovered = self.pointer.hovered.as_ref().and_then(|(_, id)| with_text(id));
-        let focused = self.focus.id.as_ref().and_then(with_text);
-        let chosen = self.pointer.hint.choose(hovered, focused, self.focus.id.as_ref());
+        let focused = self.focus.id().and_then(with_text);
+        let chosen = self.pointer.hint.choose(hovered, focused, self.focus.id());
         let style = self.app.hint_style();
         let shown = chosen.and_then(|(source, hover)| {
             let anchor = self.window.bounds(&source)?;
@@ -121,11 +121,11 @@ impl<A: App> Panels<'_, A> {
     /// The app's message for a focus move it has not been told of yet,
     /// marking it told. `None` when nothing moved, or the app does not ask.
     pub(crate) fn focus_report(&mut self) -> Option<A::Message> {
-        if self.focus.id == self.focus.reported {
+        if self.focus.id() == self.focus.reported.as_ref() {
             return None;
         }
-        self.focus.reported = self.focus.id.clone();
-        self.app.focus_moved(self.focus.id.as_ref())
+        self.focus.reported = self.focus.id().cloned();
+        self.app.focus_moved(self.focus.id())
     }
 
     /// Paints the panels of `layer`, as
@@ -140,9 +140,7 @@ impl<A: App> Panels<'_, A> {
             self.window.is_settled(self.size),
             "the window changed since it was last laid out: call Runtime::lay_out first"
         );
-        let painted = self
-            .window
-            .paint(layer, painter, style, self.focus.id.as_ref(), self.scale);
+        let painted = self.window.paint(layer, painter, style, self.focus.id(), self.scale);
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
     }

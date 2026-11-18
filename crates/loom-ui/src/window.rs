@@ -589,22 +589,32 @@ impl Window {
         painted
     }
 
-    /// Where the first text element that reads `text` is in the window, in
-    /// draw order, as last laid out: what `locate` finds for text the
-    /// window shows (ui-layer.md, section 10, rule 6).
+    /// Where the first text element that reads `text` shows in the window,
+    /// in draw order, as last laid out: what `locate` finds for text the
+    /// window shows (ui-layer.md, section 10, rule 6). Only the part that
+    /// shows: its bounds cut by every clipping element around it and by its
+    /// panel's clip, as painting and hit-testing cut it. Text cut away
+    /// entirely is not found, so a point `locate` gives is always on text
+    /// a user can see.
     pub(crate) fn text_bounds(&self, text: &str) -> Option<Rect> {
         self.drawn.iter().find_map(|key| {
             let record = &self.records[key];
             let records = record.layout.records();
             (0..records.len()).find_map(|index| {
                 let paint = record.layout.text(index)?;
-                (paint.text == text).then(|| {
-                    let bounds = records[index].bounds;
-                    Rect::new(
-                        Point::new(record.origin.x + bounds.x, record.origin.y + bounds.y),
-                        bounds.size(),
-                    )
-                })
+                if paint.text != text {
+                    return None;
+                }
+                let element = &records[index];
+                let inside = match element.clip {
+                    Some(clip) => element.bounds.intersection(clip)?,
+                    None => element.bounds,
+                };
+                let at = Rect::new(
+                    Point::new(record.origin.x + inside.x, record.origin.y + inside.y),
+                    inside.size(),
+                );
+                at.intersection(record.clip)
             })
         })
     }

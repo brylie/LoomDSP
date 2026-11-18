@@ -139,9 +139,11 @@ pub(crate) struct Shown {
     pub(crate) layout: Layout,
     /// Where its box is in the window.
     pub(crate) rect: Rect,
-    /// Where the pointer keeps it showing: its box, its element, and the
-    /// room between them.
-    pub(crate) keep: Rect,
+    /// Where the pointer keeps it showing: its box, its element's box, and
+    /// the strip between them where the two line up. Not the rectangle
+    /// around all of it, which can cover a neighbour beside a narrow
+    /// element under a wide box: that neighbour must take the hover.
+    keep: [Rect; 3],
 }
 
 impl std::fmt::Debug for Shown {
@@ -194,16 +196,31 @@ pub(crate) fn place(
         text,
         layout,
         rect,
-        keep: union(rect, anchor),
+        keep: [rect, anchor, strip(rect, anchor)],
     }
 }
 
-/// The smallest rectangle around `a` and `b`.
-fn union(a: Rect, b: Rect) -> Rect {
-    let left = a.x.min(b.x);
-    let top = a.y.min(b.y);
-    let right = (a.x + a.width).max(b.x + b.width);
-    let bottom = (a.y + a.height).max(b.y + b.height);
+impl Shown {
+    /// True when the pointer at `point` keeps it showing.
+    pub(crate) fn keeps(&self, point: Point) -> bool {
+        self.keep.iter().any(|area| area.contains(point))
+    }
+}
+
+/// The strip between the box `hint` and its element `anchor`, one above
+/// the other, across the width they share: the way from one to the other.
+/// Empty when they share no width.
+fn strip(hint: Rect, anchor: Rect) -> Rect {
+    let left = hint.x.max(anchor.x);
+    let right = (hint.x + hint.width).min(anchor.x + anchor.width);
+    let (top, bottom) = if hint.y + hint.height <= anchor.y {
+        (hint.y + hint.height, anchor.y)
+    } else {
+        (anchor.y + anchor.height, hint.y)
+    };
+    if right <= left || bottom < top {
+        return Rect::new(Point::new(left, top), Size::ZERO);
+    }
     Rect::new(Point::new(left, top), Size::new(right - left, bottom - top))
 }
 
