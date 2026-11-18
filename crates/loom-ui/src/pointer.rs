@@ -167,6 +167,24 @@ impl<A: App> Panels<'_, A> {
         }
     }
 
+    /// The element that shows as pressed (visual-system.md, Role tokens):
+    /// the one a held left press went down on while the pointer is still
+    /// over it, or the one a held Space would click now
+    /// ([`live_arm`](crate::runtime::live_arm)), so the look says exactly
+    /// what letting go does. `None` when neither holds.
+    pub(crate) fn shown_pressed(&self) -> Option<UiId> {
+        if let Some(armed) = crate::runtime::live_arm(self.window, self.app, self.focus, self.pointer) {
+            return Some(armed);
+        }
+        let (_, pressed) = self.pointer.pressed.as_ref()?;
+        let over = self
+            .pointer
+            .hovered
+            .as_ref()
+            .is_some_and(|(_, hovered)| hovered == pressed);
+        over.then(|| pressed.clone())
+    }
+
     /// Offers a pointer event to the runtime's layers above the target.
     pub(crate) fn pointer_above(&mut self, input: InputState, event: &Event, point: Point) -> Heard {
         self.offer(input, event, point, Side::Above)

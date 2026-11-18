@@ -26,6 +26,8 @@ enum Message {
     Refocus(Vec<UiId>),
     /// The canvas takes the keyboard, or lets it go.
     Canvas(bool),
+    /// Tab left the first run of stops for the target's stops after it.
+    IntoTarget,
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -36,6 +38,9 @@ struct Layers {
     input: Layer,
     /// The canvas has the keyboard.
     canvas: bool,
+    /// The bar's two buttons are two runs, `a` and then `b`, with the
+    /// target's own stops between them, and the order wraps.
+    runs: bool,
     heard: Vec<Message>,
 }
 
@@ -83,6 +88,23 @@ impl App for Layers {
 
     fn clicked(&self, id: &UiId) -> Option<Message> {
         Some(Message::Clicked(id.clone()))
+    }
+
+    fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> crate::app::TabStep<Message> {
+        use crate::app::TabStep;
+        let (a, b) = (UiId::panel("bar").with("a"), UiId::panel("bar").with("b"));
+        if !self.runs {
+            return next.map_or(TabStep::Leave, |next| TabStep::To(next.clone()));
+        }
+        match (from == &a, back, next) {
+            // Forward from the first run: the target's stops come next.
+            (true, false, _) => TabStep::Send(Message::IntoTarget),
+            // Back from the first: the order wraps to the last.
+            (true, true, None) => TabStep::To(b),
+            // Forward from the last: it wraps to the first.
+            (false, false, None) => TabStep::To(a),
+            (_, _, next) => next.map_or(TabStep::Leave, |next| TabStep::To(next.clone())),
+        }
     }
 }
 
@@ -140,6 +162,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         overlay,
         input: Layer::Canvas,
         canvas: false,
+        runs: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -703,4 +726,184 @@ fn an_ignored_repeat_draws_no_frame() {
         !target_heard_press(&harness, Key::Enter),
         "and is still kept from the target"
     );
+}
+
+/// Steps `event` and says whether any turn of it drew a frame: a click
+/// queues the app's message for a turn of its own, so the last turn's
+/// `Next` is not the one to read.
+fn drew(harness: &mut Harness<Layers, Fake>, event: DriverEvent) -> bool {
+    let before = harness.driver().redraws();
+    harness.step(event);
+    harness.driver().redraws() > before
+}
+
+/// What shows as pressed now, and the panels laid out so far.
+fn pressed_and_layouts(harness: &mut Harness<Layers, Fake>) -> (Option<UiId>, u64) {
+    let laid_out = harness.runtime().counts().panels_laid_out;
+    let (_, _, panels) = harness.parts();
+    (panels.shown_pressed(), laid_out)
+}
+
+/// A press, a move off and back, and a release each change what shows as
+/// pressed, and each asks for a frame without laying a panel out again:
+/// the look is chosen when painting (visual-system.md, Role tokens).
+#[test]
+fn a_change_of_the_press_draws_without_a_rebuild() {
+    let mut harness = harness(false, Routed::Passed);
+    let a = UiId::panel("bar").with("a");
+    harness.step(at(5.0, 5.0, PointerEvent::Moved));
+    let (_, before) = pressed_and_layouts(&mut harness);
+    let drawn = drew(&mut harness, at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert!(drawn, "the press asks for a frame");
+    assert_eq!(
+        pressed_and_layouts(&mut harness),
+        (Some(a.clone()), before),
+        "pressed, no layout"
+    );
+    let drawn = drew(&mut harness, at(5.0, 150.0, PointerEvent::Moved));
+    assert!(drawn, "off the element: no longer shown pressed");
+    assert_eq!(pressed_and_layouts(&mut harness).0, None);
+    let drawn = drew(&mut harness, at(5.0, 5.0, PointerEvent::Moved));
+    assert!(drawn, "back on it: pressed again");
+    assert_eq!(pressed_and_layouts(&mut harness).0, Some(a));
+    let drawn = drew(&mut harness, at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert!(drawn, "the release asks for a frame");
+    assert_eq!(pressed_and_layouts(&mut harness), (None, before), "released, no layout");
+}
+
+/// A press cancelled by the pointer leaving the window asks for a frame,
+/// so the pressed look does not stay.
+#[test]
+fn a_cancelled_press_draws() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    let drawn = drew(
+        &mut harness,
+        DriverEvent::Input {
+            event: Event::Pointer(PointerEvent::LeftWindow),
+            pointer: None,
+        },
+    );
+    assert!(drawn);
+    assert_eq!(pressed_and_layouts(&mut harness).0, None);
+}
+
+/// A held Space on a focused button shows it pressed until Space comes
+/// up, and both ask for a frame; a repeat asks for none.
+#[test]
+fn a_held_space_shows_pressed() {
+    let mut harness = harness(false, Routed::Passed);
+    let a = UiId::panel("bar").with("a");
+    harness.step(press_key(loom_ui_core::Key::Tab, false));
+    assert_eq!(harness.runtime().focused(), Some(&a));
+    let drawn = drew(&mut harness, press_key(loom_ui_core::Key::Space, false));
+    assert!(drawn, "Space down asks for a frame");
+    assert_eq!(pressed_and_layouts(&mut harness).0, Some(a.clone()));
+    let drawn = drew(&mut harness, press_key(loom_ui_core::Key::Space, true));
+    assert!(!drawn, "a repeat changes nothing");
+    let drawn = drew(&mut harness, release_key(loom_ui_core::Key::Space));
+    assert!(drawn, "Space up asks for a frame");
+    assert_eq!(pressed_and_layouts(&mut harness).0, None);
+    assert_eq!(clicks(&harness), [a], "and it clicked");
+}
+
+/// A key going down with Shift held.
+fn press_shifted(key: loom_ui_core::Key) -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key,
+            modifiers: loom_ui_core::Modifiers {
+                shift: true,
+                ..loom_ui_core::Modifiers::NONE
+            },
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    }
+}
+
+/// The app decides where Tab goes at the ends of a run of the runtime's
+/// stops (ui-layer.md, section 6, rule 3). Forward out of the first run,
+/// its message runs on the next turn, the runtime's focus clears, and the
+/// key goes no further. Past the last stop the order wraps to the first,
+/// and Shift+Tab from the first wraps to the last.
+#[test]
+fn the_app_decides_tab_at_the_end_of_a_run() {
+    let app = Layers {
+        overlay: false,
+        input: Layer::Canvas,
+        canvas: false,
+        runs: true,
+        heard: Vec::new(),
+    };
+    let target = Fake {
+        answer: Routed::Passed,
+        taken_from: 350.0,
+        heard: Vec::new(),
+        focus: None,
+    };
+    let mut harness = Harness::new(app, target, WindowState::new(Size::new(400.0, 200.0)), Instant::now());
+    harness.lay_out(&mut Mono::default());
+    let (a, b) = (UiId::panel("bar").with("a"), UiId::panel("bar").with("b"));
+    let tab = || press_key(loom_ui_core::Key::Tab, false);
+    harness.step(tab());
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&a),
+        "Tab from nothing enters the first stop"
+    );
+    harness.step(tab());
+    assert_eq!(harness.runtime().focused(), None, "out of the first run");
+    assert!(
+        harness.app().heard.contains(&Message::IntoTarget),
+        "the app's message ran"
+    );
+    assert!(
+        !target_heard_press(&harness, loom_ui_core::Key::Tab),
+        "the key went no further"
+    );
+    harness.step(press_shifted(loom_ui_core::Key::Tab));
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&b),
+        "Shift+Tab from nothing enters the last stop"
+    );
+    harness.step(tab());
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&a),
+        "past the last stop, the order wraps"
+    );
+    harness.step(press_shifted(loom_ui_core::Key::Tab));
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&b),
+        "Shift+Tab from the first wraps to the last"
+    );
+}
+
+/// A held Space shows pressed only while letting go would click: when an
+/// update raises the input layer above the bar, as a dialog opening does,
+/// the button no longer looks pressed, and Space coming up clicks nothing.
+#[test]
+fn a_held_space_stops_looking_pressed_when_a_layer_rises() {
+    let mut harness = harness(false, Routed::Passed);
+    let a = UiId::panel("bar").with("a");
+    harness.step(press_key(loom_ui_core::Key::Tab, false));
+    harness.step(press_key(loom_ui_core::Key::Space, false));
+    assert_eq!(
+        pressed_and_layouts(&mut harness).0,
+        Some(a),
+        "pressed while it would click"
+    );
+    let drawn = {
+        let before = harness.driver().redraws();
+        harness.send(Message::Input(Layer::Overlays));
+        harness.driver().redraws() > before
+    };
+    assert!(drawn, "the update that raised the layer drew");
+    assert_eq!(pressed_and_layouts(&mut harness).0, None, "no longer pressed");
+    harness.step(release_key(loom_ui_core::Key::Space));
+    assert!(clicks(&harness).is_empty(), "and letting go clicks nothing");
 }
