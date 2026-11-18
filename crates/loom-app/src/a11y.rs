@@ -747,6 +747,17 @@ impl crate::App {
             self.reader_event(ReaderEvent::Close);
             return vec![crate::Message::Canvas(event)];
         }
+        // Focus on one of the bar's stops (a ×, a developer switch) moves the
+        // runtime's focus there, as Tab would, through a focus effect
+        // (ui-layer.md, section 7, rule 6). Only a stop the bar shows now.
+        if request.action == accesskit::Action::Focus
+            && let Some(id) = self.a11y.ids.id(request.target_node.0)
+            && self.bar_stops().contains(id)
+        {
+            let id = id.clone();
+            self.effect(loom_ui::Effects::focus(id));
+            return Vec::new();
+        }
         if request.action == accesskit::Action::Focus {
             // Focus on a control moves the canvas's keyboard focus there.
             // The canvas selects the control's tile as a press on it does.

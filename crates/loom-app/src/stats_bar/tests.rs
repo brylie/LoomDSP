@@ -420,3 +420,18 @@ fn locate_on_a_cut_status_gives_the_part_that_shows() {
     );
     assert!(status.contains(text.center()), "the point is on what shows");
 }
+
+/// A screen reader's Focus on the bar's × moves the keyboard there, as the
+/// node's Focus action says it does (section 7, rule 6), so Enter then
+/// dismisses the error. Focus on a × the bar no longer shows does nothing.
+#[test]
+fn a_screen_readers_focus_moves_the_keyboard_to_the_x() {
+    let x = id(bars::STATUS_DISMISS_ID);
+    let mut ui = ui_with_error();
+    ui.a11y_action(&x, KitAction::Focus);
+    assert_eq!(ui.runtime().focused(), Some(&x));
+    tap(&mut ui, Named::Enter);
+    ui.redraw();
+    assert!(ui.app().alerts.kept().is_empty(), "Enter on the focused × dismissed it");
+    assert!(!ui.app().bar_stops().contains(&x), "and the × is gone");
+}
