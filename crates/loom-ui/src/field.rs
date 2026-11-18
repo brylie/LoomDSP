@@ -340,19 +340,21 @@ fn printable(text: Option<&str>) -> Option<String> {
 }
 
 /// `text` as one line, for a field that shows one: each line break (CRLF,
-/// LF, or CR) becomes one space, a break at the end is dropped, a tab
+/// LF, CR, or the line and paragraph separators U+2028 and U+2029, which
+/// the text engine also breaks at) becomes one space, a break at the end
+/// is dropped, a tab
 /// becomes one space too, since it usually separates words, and other
 /// control characters go, as when typing. An empty text stays empty.
 /// (ui-layer.md, section 8, rule 2.)
 pub(crate) fn one_line(text: &str) -> String {
     let text = text
         .strip_suffix("\r\n")
-        .or_else(|| text.strip_suffix(['\n', '\r']))
+        .or_else(|| text.strip_suffix(['\n', '\r', '\u{2028}', '\u{2029}']))
         .unwrap_or(text);
     text.replace("\r\n", " ")
         .chars()
         .filter_map(|c| match c {
-            '\n' | '\r' | '\t' => Some(' '),
+            '\n' | '\r' | '\t' | '\u{2028}' | '\u{2029}' => Some(' '),
             c if c.is_control() => None,
             c => Some(c),
         })
@@ -485,48 +487,58 @@ impl FieldState {
         let Some(layout) = self.editor.try_layout() else {
             return Vec::new();
         };
-        // Each cluster's place along its line, from one walk in visual
-        // order. `Cluster::visual_offset` walks the line up to the
-        // cluster each time it is asked, which would make a long line's
-        // runs cost its length squared. A field has no inline boxes, so
-        // the line's runs are all it holds.
-        let mut places = std::collections::HashMap::new();
-        if geometry {
-            for line in layout.lines() {
-                let mut offset = line.metrics().offset;
-                for run in line.runs() {
-                    for cluster in run.visual_clusters() {
-                        #[cfg(test)]
-                        VISITS.with(|visits| visits.set(visits.get() + 1));
-                        places.insert(cluster.text_range().start, offset);
-                        offset += cluster.advance();
+        // One walk over each line's shaped runs, in visual order, takes
+        // every cluster with its place; sorting by byte then gives text
+        // order. Parley's own ways to step from cluster to cluster cost
+        // more on a long line: `Cluster::visual_offset` walks the line up
+        // to its cluster, and `next_logical` searches the line's runs from
+        // the start at each run boundary, so text that changes script
+        // often would cost its length squared. A field has no inline
+        // boxes, so the runs are all a line holds.
+        struct Found {
+            bytes: std::ops::Range<usize>,
+            offset: f32,
+            advance: f32,
+            boundary: bool,
+        }
+        let mut found = Vec::new();
+        for line in layout.lines() {
+            let mut offset = line.metrics().offset;
+            for run in line.runs() {
+                for cluster in run.visual_clusters() {
+                    #[cfg(test)]
+                    VISITS.with(|visits| visits.set(visits.get() + 1));
+                    let bytes = cluster.text_range();
+                    let advance = cluster.advance();
+                    if !bytes.is_empty() {
+                        found.push(Found {
+                            bytes,
+                            offset: if geometry { offset } else { 0.0 },
+                            advance: if geometry { advance } else { 0.0 },
+                            boundary: cluster.is_word_boundary() && !cluster.is_space_or_nbsp(),
+                        });
                     }
+                    offset += advance;
                 }
             }
         }
-        let mut out = Vec::new();
-        let mut at = parley::layout::Cluster::from_byte_index(layout, 0);
-        while let Some(cluster) = at {
-            #[cfg(test)]
-            VISITS.with(|visits| visits.set(visits.get() + 1));
-            let bytes = cluster.text_range();
-            if bytes.is_empty() {
-                break;
-            }
-            let offset = places.get(&bytes.start).copied().unwrap_or(0.0);
-            let advance = if geometry { cluster.advance() } else { 0.0 };
+        found.sort_by_key(|cluster| cluster.bytes.start);
+        let mut out = Vec::with_capacity(found.len());
+        for cluster in found {
+            let bytes = cluster.bytes;
             // A word starts at a boundary that is not a space, since
             // AccessKit counts the space after a word as part of it; the
             // line's first character starts one too. These are where
             // moving left by word stops.
-            let word = out.is_empty() || (cluster.is_word_boundary() && !cluster.is_space_or_nbsp());
+            let word = out.is_empty() || cluster.boundary;
             // AccessKit keeps a character's length in one byte, so a
             // cluster longer than that (a letter with hundreds of
             // combining marks) is split at char boundaries into pieces of
             // at most 255 bytes. The first piece has the cluster's place
-            // and width, and the rest sit at its start with no width, since
-            // no caret can stand inside a cluster; the lengths still add up
-            // to the text and the positions stay in order.
+            // and width; the rest sit at its trailing edge with no width,
+            // since no caret stands inside a cluster, and a caret after
+            // the last piece then reports the cluster's end. The lengths
+            // still add up to the text and the positions stay in order.
             let text = &self.text()[bytes.clone()];
             let mut start = 0;
             let mut first = true;
@@ -538,14 +550,17 @@ impl FieldState {
                 out.push(Character {
                     bytes: bytes.start + start..bytes.start + end,
                     cluster: bytes.clone(),
-                    offset,
-                    advance: if first { advance } else { 0.0 },
+                    offset: if first {
+                        cluster.offset
+                    } else {
+                        cluster.offset + cluster.advance
+                    },
+                    advance: if first { cluster.advance } else { 0.0 },
                     word: word && first,
                 });
                 first = false;
                 start = end;
             }
-            at = cluster.next_logical();
         }
         out
     }
@@ -616,11 +631,16 @@ impl FieldState {
         index: usize,
     ) -> Option<(usize, std::ops::Range<usize>)> {
         let runs = characters.len().div_ceil(RUN_CHARACTERS).max(1);
+        // The run is checked before it is multiplied, so a huge index from
+        // a stale or made-up node cannot overflow.
+        if run >= runs {
+            return None;
+        }
         let length = characters
             .len()
             .saturating_sub(run * RUN_CHARACTERS)
             .min(RUN_CHARACTERS);
-        if run >= runs || index > length {
+        if index > length {
             return None;
         }
         let at = run * RUN_CHARACTERS + index;
@@ -646,6 +666,12 @@ impl FieldState {
             (true, false) => cluster.start,
             (false, _) => at,
         };
+        // A caret, both ends at one place inside a split cluster, stays a
+        // caret: it goes to the cluster's start.
+        if anchor_at == focus_at {
+            let at = snap(anchor_at, &anchor_cluster, false);
+            return Some((at, at));
+        }
         let forward = anchor_at <= focus_at;
         Some((
             snap(anchor_at, &anchor_cluster, !forward),

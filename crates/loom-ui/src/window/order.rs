@@ -129,6 +129,14 @@ impl Window {
             .as_ref()
     }
 
+    /// Whether the panel that holds the element with UI ID `id` has it in
+    /// its current layout, with a node: false for an element a rebuild
+    /// removed before the next layout drops what the window keeps for it.
+    pub(crate) fn has_node(&self, id: &UiId) -> bool {
+        self.panel_of(id)
+            .is_some_and(|panel| self.records[panel].layout.has_node(id))
+    }
+
     /// The layer of the panel that holds the element with UI ID `id`.
     pub(crate) fn layer_of(&self, id: &UiId) -> Option<Layer> {
         self.panel_of(id).map(|panel| self.records[panel].layer)
@@ -222,7 +230,7 @@ impl Window {
                     let content = element.content;
                     let left = origin.x + content.x - field.scroll();
                     let top = origin.y + content.y;
-                    let runs: Vec<(NodeId, Node)> = field
+                    let mut runs: Vec<(NodeId, Node)> = field
                         .runs()
                         .into_iter()
                         .enumerate()
@@ -246,6 +254,18 @@ impl Window {
                             (NodeId(ids.number(&run_id(id, at))), node)
                         })
                         .collect();
+                    // A field is one line, so its runs are one line too:
+                    // each links to its neighbours, or a screen reader
+                    // would read 255 characters as a whole line.
+                    let ids: Vec<NodeId> = runs.iter().map(|(id, _)| *id).collect();
+                    for (at, (_, run)) in runs.iter_mut().enumerate() {
+                        if at > 0 {
+                            run.set_previous_on_line(ids[at - 1]);
+                        }
+                        if let Some(next) = ids.get(at + 1) {
+                            run.set_next_on_line(*next);
+                        }
+                    }
                     let ((anchor_run, anchor), (focus_run, focus)) = field.reader_selection();
                     node.set_text_selection(accesskit::TextSelection {
                         anchor: accesskit::TextPosition {

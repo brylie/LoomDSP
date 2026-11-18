@@ -468,6 +468,8 @@ enum Message {
     Cover(Layer),
     /// Turn the field off, or back on.
     TurnOff(bool),
+    /// Take the field out of the form, keeping the panel.
+    Remove,
     /// Focus the first UI ID, then the second, in one update.
     FocusTwice(UiId, UiId),
     /// What a field reports to a screen reader changed, with the text the
@@ -492,6 +494,8 @@ struct Form {
     covered: Option<Layer>,
     /// The field is turned off.
     off: bool,
+    /// The field is out of the form.
+    removed: bool,
     /// The text each notice carried, in order.
     noticed: Vec<String>,
     /// Every field message, notice, and screen reader action, in order.
@@ -519,6 +523,7 @@ impl App for Form {
                 self.noticed.push(text);
             }
             Message::TurnOff(off) => self.off = off,
+            Message::Remove => self.removed = true,
             Message::SetText(text) => self.text = text,
             Message::Reader(action) => self.log.push(format!("reader {action:?}")),
         }
@@ -529,7 +534,7 @@ impl App for Form {
         view.panel_with(
             UiId::panel("form"),
             Layer::Panels,
-            &(self.text.clone(), self.off),
+            &(self.text.clone(), self.off, self.removed),
             form_panel,
         );
     }
@@ -570,8 +575,8 @@ impl App for Form {
 }
 
 /// The form's panel: the field showing `text`, turned off if `off`, then
-/// an OK button.
-fn form_panel((text, off): &(String, bool)) -> Element {
+/// an OK button; with `removed`, the button alone.
+fn form_panel((text, off, removed): &(String, bool, bool)) -> Element {
     let states = States {
         disabled: *off,
         ..States::default()
@@ -584,6 +589,9 @@ fn form_panel((text, off): &(String, bool)) -> Element {
         .key("ok")
         .focusable()
         .access(Access::new(Role::Button, "OK").action(crate::access::Action::Click));
+    if *removed {
+        return Element::row([button]);
+    }
     Element::row([field, button])
 }
 
@@ -1392,9 +1400,10 @@ fn a_cluster_longer_than_255_bytes_splits_into_pieces() {
     assert!(lengths.len() >= 3, "{lengths:?}");
     let positions = &runs[0].positions;
     assert!(positions.windows(2).all(|pair| pair[0] <= pair[1]), "{positions:?}");
-    // The pieces after the first stand at the cluster's start, with no
-    // width: no caret stands inside a cluster.
-    assert_eq!(positions[0], positions[1], "{positions:?}");
+    // The pieces after the first stand at the cluster's trailing edge,
+    // with no width: no caret stands inside a cluster, and the one after
+    // the last piece reports the cluster's end.
+    assert_eq!(positions[1], positions[0] + runs[0].widths[0], "{positions:?}");
     assert_eq!(runs[0].widths[1], 0.0);
     let ((_, _), (run, index)) = bench.field.reader_selection();
     assert_eq!((run, index), (runs.len() - 1, runs[runs.len() - 1].lengths.len()));
@@ -1503,6 +1512,11 @@ fn a_screen_readers_text_is_one_line() {
     assert_eq!(one_line("a\rb"), "a b");
     assert_eq!(one_line("cell\tcell"), "cell cell", "a tab separates words");
     assert_eq!(one_line("a\u{7}b"), "ab", "other control characters go");
+    assert_eq!(
+        one_line("a\u{2028}b\u{2029}c\u{2029}"),
+        "a b c",
+        "line and paragraph separators"
+    );
     assert_eq!(one_line(""), "");
     let Some(mut bench) = field_in("", 300.0) else { return };
     let Bench {
@@ -1606,6 +1620,10 @@ fn a_turned_off_field_takes_no_text_actions() {
     let (field, _) = describe(&mut harness, &mut text);
     harness.send(Message::TurnOff(true));
     harness.lay_out(&mut text);
+    let (_, off_node) = describe(&mut harness, &mut text);
+    for action in [Action::SetValue, Action::SetTextSelection, Action::ReplaceSelectedText] {
+        assert!(!off_node.supports_action(action), "{action:?} offered while off");
+    }
     // Focus leaves the field as it turns off, and the app hears Left.
     harness.step(DriverEvent::Woken);
     assert_eq!(harness.app().log.last().map(String::as_str), Some("Left"));
@@ -1651,4 +1669,135 @@ fn runs_are_built_in_linear_time() {
     let visits = super::VISITS.with(std::cell::Cell::get);
     assert_eq!(runs.iter().map(|run| run.lengths.len()).sum::<usize>(), 1000);
     assert!(visits <= 2 * 1000 + 2, "{visits} visits for 1000 clusters");
+}
+
+/// A request naming a run far past the field's, as a made-up or stale
+/// node could, is stale and does nothing: the run is checked before it is
+/// multiplied, so a huge index cannot overflow.
+#[test]
+fn a_huge_run_index_is_stale() {
+    use super::FieldAction;
+    let Some(mut bench) = field_in("abc", 300.0) else {
+        return;
+    };
+    let Bench {
+        field,
+        fonts,
+        layouts,
+        now,
+    } = &mut bench;
+    let select = FieldAction::Select {
+        anchor: (usize::MAX, 0),
+        focus: (usize::MAX, usize::MAX),
+    };
+    assert!(!field.act(select, *now, fonts, layouts).changed);
+}
+
+/// A caret placed inside a split cluster stays a caret, at the cluster's
+/// start, so a replacement after it goes in before the cluster rather than
+/// replacing it.
+#[test]
+fn a_caret_inside_a_split_cluster_stays_a_caret() {
+    use super::FieldAction;
+    let text = format!("a{}b", "\u{301}".repeat(150));
+    let Some(mut bench) = field_in(&text, 3000.0) else {
+        return;
+    };
+    let Bench {
+        field,
+        fonts,
+        layouts,
+        now,
+    } = &mut bench;
+    let caret = FieldAction::Select {
+        anchor: (0, 1),
+        focus: (0, 1),
+    };
+    field.act(caret, *now, fonts, layouts);
+    assert_eq!(field.selection_bytes(), (0, 0));
+    field.act(FieldAction::ReplaceSelection("x".to_owned()), *now, fonts, layouts);
+    assert_eq!(field.text(), format!("x{text}"));
+}
+
+/// A field that ends in a split cluster reports a caret after it at the
+/// cluster's end: the last piece's place plus its width is the cluster's
+/// trailing edge, where AccessKit puts that caret.
+#[test]
+fn the_end_caret_after_a_split_cluster_is_at_its_end() {
+    let text = format!("a{}", "\u{301}".repeat(150));
+    let Some(bench) = field_in(&text, 3000.0) else {
+        return;
+    };
+    let runs = bench.field.runs();
+    let run = &runs[0];
+    let last = run.positions.len() - 1;
+    assert_eq!(run.positions[last] + run.widths[last], run.positions[0] + run.widths[0]);
+}
+
+/// Text that changes script often, so the line has many shaped runs,
+/// still gives its characters in text order with lengths that add up,
+/// from one pass: each cluster is visited once.
+#[test]
+fn many_shaped_runs_are_read_in_one_pass() {
+    let text = "a\u{3b1}".repeat(300);
+    let Some(bench) = field_in(&text, 30000.0) else {
+        return;
+    };
+    super::VISITS.with(|visits| visits.set(0));
+    let runs = bench.field.runs();
+    let visits = super::VISITS.with(std::cell::Cell::get);
+    let joined: String = runs.iter().map(|run| run.text.as_str()).collect();
+    assert_eq!(joined, text, "text order");
+    let lengths: usize = runs
+        .iter()
+        .flat_map(|run| run.lengths.iter())
+        .map(|&length| usize::from(length))
+        .sum();
+    assert_eq!(lengths, text.len());
+    assert!(visits <= 600 + 2, "{visits} visits for 600 clusters");
+}
+
+/// A field a rebuild took out of its panel takes no screen reader action
+/// in the gap before the layout that drops its state: no edit, no message.
+#[test]
+fn a_removed_field_takes_no_text_actions() {
+    use accesskit::{Action, ActionData};
+    let Some((mut harness, mut text)) = form("abc", true) else {
+        return;
+    };
+    let (field, _) = describe(&mut harness, &mut text);
+    harness.send(Message::Remove);
+    let start = harness.app().log.len();
+    harness.step(reader(Action::SetValue, field, Some(ActionData::Value("new".into()))));
+    assert_eq!(harness.app().text, "abc");
+    assert!(
+        !harness.app().log[start..].iter().any(|line| line.starts_with("Edited")),
+        "{:?}",
+        &harness.app().log[start..]
+    );
+}
+
+/// A field's runs are one line: each links to its neighbours both ways, so
+/// a screen reader reads the whole field as one line. One run links to
+/// nothing.
+#[test]
+fn a_fields_runs_link_as_one_line() {
+    let Some((mut harness, mut text)) = form(&"x".repeat(300), true) else {
+        return;
+    };
+    let (_, node) = describe(&mut harness, &mut text);
+    let runs = node.children().to_vec();
+    assert_eq!(runs.len(), 2);
+    let nodes = &harness.app().nodes.as_ref().expect("nodes").nodes;
+    let run = |id| {
+        nodes
+            .iter()
+            .find(|(at, _)| *at == id)
+            .map(|(_, node)| node.clone())
+            .expect("run")
+    };
+    assert_eq!(run(runs[0]).next_on_line(), Some(runs[1]));
+    assert_eq!(run(runs[0]).previous_on_line(), None);
+    assert_eq!(run(runs[1]).previous_on_line(), Some(runs[0]));
+    assert_eq!(run(runs[1]).next_on_line(), None);
 }

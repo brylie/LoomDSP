@@ -111,9 +111,10 @@ pub trait App {
         None
     }
 
-    /// The message for "what a field reports to a screen reader changed
-    /// with no message of its own": its caret, its selection, or its
-    /// scroll (section 7, rule 7). The runtime asks at most once per turn,
+    /// The message for "what a field reports to a screen reader changed":
+    /// its text, its caret, its selection, or its scroll (section 7, rule
+    /// 7). An edit gives both: [`FieldEvent::Edited`](crate::FieldEvent::Edited)
+    /// through [`App::field_event`], then this notice in the same turn. The runtime asks at most once per turn,
     /// after that turn's updates have run, field messages included, so the
     /// answer is built from a model that holds them, and runs it as one
     /// more update; the app can send a new tree there. An app with no screen reader listening gives `None`, which

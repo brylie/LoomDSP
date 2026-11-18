@@ -580,7 +580,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// below [`App::input`]'s layer (section 5, rule 3). A key and a screen
     /// reader's text action both ask this, so the two follow one rule.
     fn field_takes_input(&self, id: &UiId) -> bool {
+        // Its element must still be in its panel: a rebuild may have
+        // removed it before the layout that drops its state.
         self.panels.fields.has(id)
+            && self.panels.has_node(id)
             && !self
                 .panels
                 .access_of(id)
