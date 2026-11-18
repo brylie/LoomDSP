@@ -234,13 +234,32 @@ fn locate_id(app: &App, id: &UiId, found: &Found) -> Result<Option<Rect>, String
 /// `locate` waits for a current layout; any other, a missing module or a
 /// part of Iced's scrolled out of view, answers at once with its error.
 pub(crate) fn waits_for_ours<M>(app: &App, target: &str, found: &Found, cx: &loom_ui::Context<'_, M>) -> bool {
-    if locate(app, target, found).is_ok() {
-        return false;
-    }
+    locate(app, target, found).is_err() && may_be_ours(target, cx)
+}
+
+/// True when `target` may name a part only the runtime's layout places, so
+/// a layout still to come could find it: a UI ID of a runtime panel, or
+/// text, which the runtime's panels may show. A module, a control, or a
+/// port by name never is: the canvas places those. `locate` and the
+/// pointer commands both wait by this rule, so the two cannot drift.
+pub(crate) fn may_be_ours<M>(target: &str, cx: &loom_ui::Context<'_, M>) -> bool {
     match ui_id(target) {
         Some(id) => cx.holds(&id),
         None => split_target(target).is_none(),
     }
+}
+
+/// Where the runtime's layout places `target` for a pointer command, or
+/// `None` for a target it does not hold. A module, a control, or a port
+/// by name is the canvas's, even when some text in the window reads the
+/// same, as `locate` resolves it.
+pub(crate) fn ours_for_pointer<M>(target: &str, cx: &loom_ui::Context<'_, M>) -> Option<Rect> {
+    if split_target(target).is_some() {
+        return None;
+    }
+    let mut found = Found::default();
+    found.find_ours(target, cx);
+    found.ours
 }
 
 /// Where a target is in the window: a UI ID as text (`toolbar/undo`,

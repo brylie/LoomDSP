@@ -33,7 +33,7 @@ mod run;
 mod transport;
 
 use resolve::*;
-pub(crate) use resolve::{Find, waits_for_ours};
+pub(crate) use resolve::{Find, may_be_ours, ours_for_pointer, waits_for_ours};
 pub use resolve::{Found, locate};
 pub use transport::{Listener, close, exit_status, watch};
 
@@ -94,6 +94,19 @@ impl Command {
             _ => {}
         }
         placed
+    }
+
+    /// The targets this pointer command names, as names: its `target`, or
+    /// a `drag`'s ends given by name. Empty for any other command.
+    pub(crate) fn pointer_targets(&self) -> Vec<&str> {
+        match self {
+            Self::Press { target, .. }
+            | Self::Release { target, .. }
+            | Self::Hover { target, .. }
+            | Self::Scroll { target, .. } => target.as_deref().into_iter().collect(),
+            Self::Drag { from, to, .. } => [from, to].into_iter().filter_map(Value::as_str).collect(),
+            _ => Vec::new(),
+        }
     }
 }
 

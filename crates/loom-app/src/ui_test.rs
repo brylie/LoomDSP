@@ -163,6 +163,12 @@ impl Ui {
         self.bridge.app_mut()
     }
 
+    /// Takes every whole accessibility tree the app sent since the last
+    /// call, oldest first: what a screen reader was handed.
+    pub(crate) fn take_sent_trees(&mut self) -> Vec<accesskit::TreeUpdate> {
+        std::mem::take(&mut self.bridge.driver_mut().trees)
+    }
+
     /// The clipboard's text.
     pub(crate) fn clipboard(&self) -> Option<&str> {
         self.bridge.driver().headless.clipboard()

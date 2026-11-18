@@ -36,6 +36,9 @@ pub(crate) struct UiDriver {
     pub(crate) headless: Headless,
     /// Capture replies waiting for the harness to draw the view.
     captures: Vec<Reply<Result<Image, NoGpu>, Message>>,
+    /// Every whole accessibility tree the app handed the screen reader, in
+    /// order, for a test to read what was sent rather than build its own.
+    pub(crate) trees: Vec<accesskit::TreeUpdate>,
 }
 
 impl Driver<Message> for UiDriver {
@@ -83,6 +86,11 @@ impl Driver<Message> for UiDriver {
 
     fn exit(&mut self) {
         Driver::<Message>::exit(&mut self.headless);
+    }
+
+    /// Keeps the whole tree, as a screen reader would be sent it.
+    fn accessibility(&mut self, whole: accesskit::TreeUpdate, _changes: Option<accesskit::TreeUpdate>) {
+        self.trees.push(whole);
     }
 }
 

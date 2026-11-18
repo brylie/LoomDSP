@@ -482,28 +482,63 @@ fn focus_on_the_x_takes_the_keyboard_from_the_canvas() {
 }
 
 /// A change made while a tree rebuild is in flight reaches the screen
-/// reader: an autosave's warning that arrives then is in the tree built by
-/// the one more rebuild, once the bar is laid out again.
+/// reader: a rebuild asked for while one is on its way is run once that
+/// one is sent, so an autosave's warning that arrives then is in the tree
+/// the follow-up sends.
 #[test]
 fn a_warning_during_a_rebuild_reaches_the_next_tree() {
     use crate::a11y::{Event, Touch};
+    let reads_warning = |tree: &accesskit::TreeUpdate| {
+        tree.nodes
+            .iter()
+            .any(|(_, node)| node.value().is_some_and(|value| value.contains("Autosave failed")))
+    };
     let mut ui = Ui::open("subtractive.ron");
-    ui.app_mut().a11y_event(Event::Activated);
-    ui.read_runtime_nodes();
-    let places = ui.places();
-    ui.app_mut().a11y_event(Event::Located(places.clone()));
+    let _ = ui.deliver(Message::A11y(Event::Activated));
+    ui.redraw();
+    let _ = ui.take_sent_trees();
+    // A rebuild goes out, and the warning comes while it is on its way.
     ui.app_mut().a11y_after(Touch::Changed);
     ui.app_mut().alerts.warn("Autosave failed");
     ui.app_mut().a11y_after(Touch::Changed);
-    ui.app_mut().a11y_event(Event::Located(places.clone()));
-    ui.redraw();
-    ui.read_runtime_nodes();
-    let (whole, _) = ui.app_mut().a11y_changes(&places);
+    for _ in 0..4 {
+        ui.redraw();
+    }
+    let sent = ui.take_sent_trees();
+    // Exactly one more, not "at least": a rebuild that kept asking for
+    // itself would also send two or more.
+    assert_eq!(sent.len(), 2, "the rebuild and exactly one more");
     assert!(
-        whole
-            .nodes
-            .iter()
-            .any(|(_, node)| node.value().is_some_and(|value| value.contains("Autosave failed"))),
+        sent.last().is_some_and(reads_warning),
         "the follow-up tree reads the warning"
     );
+}
+
+/// A screen reader's Focus on the bar's × lets go of the canvas even when
+/// the canvas has not yet taken an earlier Focus: a knob's Focus and the
+/// ×'s Focus arrive with no frame between them, so the knob's request is
+/// still on its way. On the next frame the canvas must not take the keys
+/// back, and Enter must reach the ×.
+#[test]
+fn focus_on_the_x_cancels_a_canvas_focus_still_on_its_way() {
+    let mut ui = ui_with_error();
+    let tree = ui.a11y_tree();
+    let knob = tree.node_by_id(&id("canvas/4/param/cutoff")).node_id();
+    let x = tree.node_by_id(&id(bars::STATUS_DISMISS_ID)).node_id();
+    drop(tree);
+    for node in [knob, x] {
+        let request = accesskit::ActionRequest {
+            action: KitAction::Focus,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: node,
+            data: None,
+        };
+        let _ = ui.deliver(Message::A11y(crate::a11y::Event::Action(request)));
+    }
+    ui.redraw();
+    assert_eq!(ui.app().a11y.focus(), None, "the canvas did not take the keys back");
+    assert_eq!(ui.runtime().focused(), Some(&id(bars::STATUS_DISMISS_ID)));
+    tap(&mut ui, Named::Enter);
+    ui.redraw();
+    assert!(ui.app().alerts.kept().is_empty(), "Enter on the × dismissed the error");
 }

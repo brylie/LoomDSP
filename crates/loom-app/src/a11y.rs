@@ -777,12 +777,14 @@ impl crate::App {
             // on the canvas, so a later step starts its own.
             self.reader_event(crate::edits::ReaderEvent::Close);
             // The canvas lets go of the keyboard, selecting nothing, so the
-            // bar's keys are the bar's (section 6, rule 1). Its answer,
-            // `FocusChanged(None)`, clears the app's copy on its frame; it
-            // is cleared here too, so the next key already sees it.
-            if self.a11y.focus().is_some() {
-                self.a11y.release_canvas_focus();
-            }
+            // bar's keys are the bar's (section 6, rule 1). Always, even
+            // when the canvas has reported no focus: a request still on its
+            // way would otherwise land on the next frame and take the keys
+            // back. With no focus, a request for no control does nothing.
+            // The canvas's answer, `FocusChanged(None)`, clears the app's
+            // copy on its frame; it is cleared here too, so the next key
+            // already sees it.
+            self.a11y.release_canvas_focus();
             self.effect(loom_ui::Effects::focus(id));
             return Vec::new();
         }

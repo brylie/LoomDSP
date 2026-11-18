@@ -1428,16 +1428,21 @@ impl App {
         // A pointer command aimed at one of the runtime's own elements is
         // aimed at its place, which only the context knows; it waits for the
         // draw that lays a rebuilt view out (section 10, rule 6).
+        // It waits by the rule `locate` waits by, before asking for a place,
+        // since text a rebuilt view shows has no place yet.
         if let Message::Control(call) = &mut message {
-            let ours = |target: &str| {
-                let mut found = crate::control::Found::default();
-                found.find_ours(target, cx);
-                found.ours
-            };
-            if !cx.laid_out() && call.command.clone().place_targets(ours) {
+            let stale = !cx.laid_out();
+            if stale
+                && call
+                    .command
+                    .pointer_targets()
+                    .iter()
+                    .any(|target| crate::control::may_be_ours(target, cx))
+            {
                 return loom_ui::Effects::after_draw(message);
             }
-            call.command.place_targets(ours);
+            call.command
+                .place_targets(|target| crate::control::ours_for_pointer(target, cx));
         }
         // A target `locate` looks for may be one of the runtime's own
         // elements, which only the context can place (section 10, rule 6).

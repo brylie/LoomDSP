@@ -3009,3 +3009,39 @@ fn locate_on_a_missing_module_answers_at_once() {
     let reply = receiver.try_recv().expect("answered before any draw");
     assert!(reply.is_err(), "no such module: {reply:?}");
 }
+
+/// A pointer command aimed at text that a rebuilt view shows waits for the
+/// draw that lays it out, as `locate` does: a script that turns learn mode
+/// on and hovers "Learning" in the same turn hovers the bar's word.
+#[test]
+fn a_pointer_command_waits_for_text_a_rebuild_shows() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    run_ui(&mut ui, r#"{"cmd": "hover", "target": "Learning"}"#).unwrap_or_else(|why| panic!("hover: {why}"));
+    let learning: loom_ui_core::UiId = "stats/learning".parse().unwrap();
+    assert_eq!(
+        ui.runtime().hovered(),
+        Some(&learning),
+        "the hover found the bar's word"
+    );
+}
+
+/// A pointer command aimed at a module's control goes to the control, as
+/// `locate` resolves it, even while the stats bar shows the same text.
+#[test]
+fn a_pointer_command_aims_a_module_target_at_the_canvas() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.say("4:cutoff");
+    let _ = ui.redraw();
+    let at = run_ui(&mut ui, r#"{"cmd": "locate", "target": "4:cutoff"}"#).unwrap();
+    let pointer =
+        run_ui(&mut ui, r#"{"cmd": "hover", "target": "4:cutoff"}"#).unwrap_or_else(|why| panic!("hover: {why}"));
+    for key in ["x", "y"] {
+        let (want, got) = (at[key].as_f64().unwrap(), pointer[key].as_f64().unwrap());
+        assert!(
+            (want - got).abs() < 1.0,
+            "{key}: the hover went to the knob, {got} for {want}"
+        );
+    }
+}

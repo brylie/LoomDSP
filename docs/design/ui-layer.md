@@ -334,7 +334,7 @@ The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar
 
 ## 7. The accessibility tree
 
-**Status:** Agreed, phase 1. The node of a text field (rule 10) is built in phase 3. `loom-ui`'s elements give their nodes from plan step 3.1 (`access.rs`, `Context::access_nodes`), checked against rule 2 when they are laid out; no view uses them yet.
+**Status:** Agreed, phase 1. The node of a text field (rule 10) is built in phase 3. `loom-ui`'s elements give their nodes from plan step 3.1 (`access.rs`, `Context::access_nodes`), checked against rule 2 when they are laid out. The stats bar is the first view to give them (plan 3.2, row 1); the app still builds the whole tree and splices them in, until phase 4.
 
 ### Behaviour
 
