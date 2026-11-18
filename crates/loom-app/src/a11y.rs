@@ -26,8 +26,6 @@
 
 use crate::places::Places;
 use accesskit::{ActionRequest, TreeUpdate};
-#[cfg(test)]
-use iced::Subscription;
 use loom_core::ModuleId;
 use loom_ui_core::IdTable;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -110,8 +108,6 @@ pub(crate) struct PollKey {
 /// What the accessibility layer tells the app.
 #[derive(Debug, Clone)]
 pub(crate) enum Event {
-    /// The window's scale factor, to turn logical pixels into physical ones.
-    ScaleFactor(f32),
     /// A screen reader started listening. `App::update` takes the window's
     /// scale first, so the tree's bounds are right from the start.
     Activated,
@@ -138,8 +134,6 @@ pub(crate) struct Access {
     ids: IdTable,
     /// True once a screen reader asked for the tree.
     active: bool,
-    /// The window's scale factor: AccessKit wants physical pixels.
-    scale: f32,
     /// What the screen reader was last sent.
     sent: tree::Sent,
     /// True while a rebuild waits for the window to say where the canvas
@@ -213,7 +207,6 @@ impl Default for Access {
         Self {
             ids: IdTable::new(),
             active: false,
-            scale: 1.0,
             sent: tree::Sent::default(),
             locating: false,
             live_dirty: false,
@@ -258,12 +251,6 @@ impl Access {
         self.active
     }
 
-    /// The window's scale, for a screen reader that starts now. The tree
-    /// it is about to get is built whole, so no node is sent again for it.
-    pub(crate) fn set_scale(&mut self, scale: f32) {
-        self.scale = scale;
-    }
-
     /// The layer as `--measure-tree` runs it: building the tree as if a
     /// screen reader were listening from the start, and timing each build.
     /// For measuring only. A normal run starts with [`Access::default`].
@@ -281,28 +268,7 @@ impl Access {
     }
 }
 
-/// The window's new scale factor, from a window event.
-pub(crate) fn rescaled(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Event> {
-    match event {
-        iced::Event::Window(iced::window::Event::Rescaled(scale)) => Some(Event::ScaleFactor(scale)),
-        _ => None,
-    }
-}
-
 impl crate::App {
-    /// While a screen reader listens, the window's scale factor when it
-    /// changes, as Iced's subscription heard it. Kept for the tests that
-    /// compare the window's listeners with Iced's subscriptions
-    /// (`subscriptions/tests.rs`); the window hears it through `Listeners`.
-    #[cfg(test)]
-    pub(crate) fn a11y_subscription(&self) -> Subscription<Event> {
-        if self.a11y.is_active() {
-            iced::event::listen_with(rescaled)
-        } else {
-            Subscription::none()
-        }
-    }
-
     /// Notes a message the app just handled. Live values wait for the
     /// timer. Anything else asks for a rebuild now, unless one is on its
     /// way. With no screen reader this does nothing.
@@ -360,7 +326,7 @@ impl crate::App {
 
     /// Asks the window where the canvas is, to rebuild the tree when the
     /// answer comes. One request at a time.
-    fn a11y_rebuild(&mut self) {
+    pub(crate) fn a11y_rebuild(&mut self) {
         if !self.a11y.active || self.a11y.locating {
             return;
         }
@@ -379,7 +345,7 @@ impl crate::App {
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
-        let whole = tree::tree(&snapshot, &frames, &ids, places, self.a11y.scale, &mut self.a11y.ids);
+        let whole = tree::tree(&snapshot, &frames, &ids, places, self.window_scale, &mut self.a11y.ids);
         let flush = std::mem::take(&mut self.a11y.flush_live);
         if flush {
             self.a11y.live_dirty = false;
@@ -387,7 +353,7 @@ impl crate::App {
         let table = &self.a11y.ids;
         // The canvas in the window, in physical pixels, as node bounds are.
         let screen = view.map(|view| {
-            let s = f64::from(self.a11y.scale);
+            let s = f64::from(self.window_scale);
             let b = view.bounds;
             accesskit::Rect {
                 x0: f64::from(b.x) * s,
@@ -547,7 +513,7 @@ impl crate::App {
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
-        tree::tree(&snapshot, &frames, &ids, places, self.a11y.scale, &mut self.a11y.ids)
+        tree::tree(&snapshot, &frames, &ids, places, self.window_scale, &mut self.a11y.ids)
     }
 
     /// What the tree reports of the parts around the canvas: the bar, the
@@ -714,6 +680,7 @@ impl crate::App {
             // nothing (ui-layer.md, section 7, rules 9 and 20).
             if let Some(control) = actions::focus_target(&snapshot, &ids, &self.a11y.ids, request) {
                 self.a11y.focus_request = (self.a11y.focus_request.0 + 1, Some(control));
+                self.effect(loom_ui::Effects::redraw());
                 // The keys go with the focus, by the path a press on the
                 // canvas takes: the matrix lets go of them, and a text
                 // field that has them closes, leaving its draft as a press
@@ -776,14 +743,6 @@ impl crate::App {
     /// them as ordinary edits.
     pub(crate) fn a11y_event(&mut self, event: Event) {
         match event {
-            Event::ScaleFactor(scale) => {
-                // Every node's bounds change with it, so all are sent again.
-                let changed = self.a11y.scale != scale;
-                self.a11y.scale = scale;
-                if changed {
-                    self.a11y_rebuild();
-                }
-            }
             Event::Activated => {
                 self.a11y.active = true;
                 // The screen reader has nothing yet: send the whole tree.

@@ -497,3 +497,33 @@ fn a_scope_drawn_size_follows_the_zoom_the_scale_and_a_resize() {
         "the same monitor thread"
     );
 }
+
+/// The history, spectrum, and square XY area use the renderer's
+/// dimensions at the runtime's scale.
+#[test]
+fn trace_watch_sizes_use_the_drawn_area() {
+    use loom_canvas::{Camera, CanvasEvent};
+    let mut app = crate::tests::app_with_text(include_str!("../../../../examples/dev/steady-displays.ron"));
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![4, 5, 8])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Camera(Camera::default())));
+    let _ = app.send_scaled(Message::WindowRescaled, 2.0);
+    let watch = app.session.engine.monitor.watched();
+    let expected = |module| {
+        let tile = app.session.scene.module(module).unwrap();
+        let (index, widget) = tile
+            .panel
+            .widgets
+            .iter()
+            .enumerate()
+            .find(|(_, widget)| widget.kind.draws_a_trace())
+            .unwrap();
+        let bounds = tile.widget_bounds(index).unwrap();
+        let area = loom_canvas::trace_draw_area(bounds, &widget.kind);
+        Some(crate::monitor::DrawnSize::new(area.width * 2.0, area.height * 2.0))
+    };
+    assert_eq!(watch.histories.values().next().unwrap().drawn, expected(4));
+    assert_eq!(watch.spectra.values().next().unwrap().drawn, expected(5));
+    let xy = watch.xy.values().next().unwrap().drawn;
+    assert_eq!(xy, expected(8));
+    assert!(xy.is_some_and(|size| size.width == size.height));
+}

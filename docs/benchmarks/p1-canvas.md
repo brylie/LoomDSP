@@ -62,7 +62,7 @@ Each line is `key=value` pairs separated by spaces. The numbers come from the ca
 
 **With a screen reader.** `--measure-tree`, with any of the three flags, runs the accessibility layer as if a screen reader were listening from the start, and ends each line with `tree_builds`, `tree_avg_ms`, and `tree_worst_ms`: how many times the tree was built, and the average and longest build. Compare a run with it against the same run without it. A normal run never sets it.
 
-Each line also prints `causes=tick:N,live:N,meters:N,lights:N,control:N,input:N,redraw:N,forced:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
+Each line also prints `causes=tick:N,live:N,meters:N,lights:N,control:N,input:N,redraw:N,forced:N,audio:N,lifecycle:N,other:N` as totals since the report began. A frame can count under several causes. `cpu=N.N` is the whole process's user plus system CPU time during that line's interval, as a percentage of one core. The final line covers the full measured interval. See [frame meter](../design/frame-meter.md).
 
 A patch that plays is not always idle, even with the camera still. A scope draws only when its line moves by more than half a pixel, so a still smooth wave draws nothing ([panels spec, Drawing the scope trace](../design/panels.md#drawing-the-scope-trace)). A running transport's Beat light flashes on every beat, so it still draws a few frames a beat ([panels spec, Redraw](../design/panels.md#redraw), A running transport is not idle). Signal activity on ports changes a few times a second, and so do live values on modulated controls. Meter levels, scope traces, and activity count under `meters`, lights under `lights`, and live values under `live`. All of these frames are by design. To measure a truly idle app, run without audio or MIDI:
 
@@ -72,13 +72,21 @@ cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-id
 
 After start-up, each line prints `fps=0.0`, and `frames` stops counting up. The final line can show one or two more frames, from closing the window.
 
-To see what a playing patch costs, run the same patch with an audio device or `--fake-audio`. `subtractive.ron` has a scope on a still wave and a running transport. With `--fake-audio --measure-idle --bench-seconds 6` it draws 69 frames: `meters:5`, all in the first second, and `lights:56`, about 9 a second from the Beat light (development Mac, 2026-11-16, [#730](https://github.com/brylie/LoomDSP/issues/730)). Before #730 the same run drew 175 frames, 168 of them counted as meters, since the scope woke the UI on every read and lights counted as meters. With its transport stopped it draws 16 to 18 frames: after the first second, none for meters or lights, and about one a second for `other`. `fm-feedback.ron` has no scope, but its signal activity still draws about 10 frames a second:
+To see what a playing patch costs, run the same patch with an audio device or `--fake-audio`. `subtractive.ron` has a scope on a still wave and a running transport. With `--fake-audio --measure-idle --bench-seconds 6` it draws 69 frames: `meters:5`, all in the first second, and `lights:56`, about 9 a second from the Beat light (development Mac, 2026-11-16, [#730](https://github.com/brylie/LoomDSP/issues/730)). Before #730 the same run drew 175 frames, 168 of them counted as meters, since the scope woke the UI on every read and lights counted as meters. A six-second run with the Transport module's `run` set to 0 drew 15 frames before #811. Ten counted as `other`. A temporary trace identified one `StartWatching` request and nine audio stats requests. After naming these causes, a repeat drew 12 frames with `lifecycle:1,audio:4,other:0`. Audio stats caused the only redraws after startup. [Idle-frame attribution](https://github.com/brylie/LoomDSP/issues/811)
+
+`fm-feedback.ron` has no scope, but its signal activity still draws about 10 frames a second:
 
 ```sh
 cargo run --release -p loom-app -- examples/patches/subtractive.ron --measure-idle --bench-seconds 10
 ```
 
 For idle CPU, read Activity Monitor during the same run. Without an audio device, use `--fake-audio` in place of `--no-audio`: the engine then runs from a timer, so live values, lights, and meters move as with a device, and their redraws are counted too.
+
+**Steady displays.** On 2026-11-18, a release build on macOS 27.0.1 (Apple M1 Pro) framed an XY scope, level history, and spectrum in one patch. The spectrum and history read a 1500 Hz sine, and the XY scope read a separate steady sine. The report counted 45 `meters` frames during startup, including the fill of the one-second history. The count stayed at 45 from the second report to the end of the nine-second run. The settled reports showed `fps=0.0` and the final line showed `other:0`. [Display redraw issue](https://github.com/brylie/LoomDSP/issues/810)
+
+```sh
+cargo run --release -p loom-app -- examples/dev/steady-displays.ron --fake-audio --no-midi --measure-idle --bench-seconds 9
+```
 
 Record from the stats bar, or the final line, after about 10 seconds:
 

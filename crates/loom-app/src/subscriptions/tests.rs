@@ -8,12 +8,7 @@ use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
 /// waits on the adapter, not on window events.
 fn through_iced(app: &App, event: &iced::Event, status: Status) -> Vec<String> {
     let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
-    let scale = if app.a11y.is_active() {
-        iced::event::listen_with(crate::a11y::rescaled).map(Message::A11y)
-    } else {
-        Subscription::none()
-    };
-    let subscriptions = [close, app.input_subscription(), always_subscription(), scale];
+    let subscriptions = [close, app.input_subscription(), always_subscription()];
     let window = iced::window::Id::unique();
     let mut heard: Vec<String> = subscriptions
         .into_iter()
@@ -75,24 +70,18 @@ fn events() -> Vec<iced::Event> {
     ]
 }
 
-/// The plain calls send what Iced's subscriptions send, for every event,
-/// used by a widget or not, with and without a screen reader. Only the
-/// order may differ, and Iced sets none.
+/// The plain calls send what Iced's subscriptions send for each event,
+/// whether a widget used it or not.
 #[test]
 fn the_listeners_send_what_the_subscriptions_send() {
-    for screen_reader in [false, true] {
-        let mut app = crate::tests::app();
-        if screen_reader {
-            app.a11y_event(crate::a11y::Event::Activated);
-        }
-        for event in events() {
-            for status in [Status::Ignored, Status::Captured] {
-                assert_eq!(
-                    through_listeners(&app, &event, status),
-                    through_iced(&app, &event, status),
-                    "{event:?}, {status:?}, screen reader {screen_reader}"
-                );
-            }
+    let app = crate::tests::app();
+    for event in events() {
+        for status in [Status::Ignored, Status::Captured] {
+            assert_eq!(
+                through_listeners(&app, &event, status),
+                through_iced(&app, &event, status),
+                "{event:?}, {status:?}"
+            );
         }
     }
 }
@@ -117,32 +106,34 @@ fn the_close_request_is_the_apps_close() {
 fn the_listeners_are_a_snapshot() {
     let mut app = crate::tests::app();
     let before = app.listeners();
-    app.a11y_event(crate::a11y::Event::Activated);
-    assert_ne!(app.listeners(), before);
-    let rescaled = iced::Event::Window(iced::window::Event::Rescaled(2.0));
-    assert!(before.messages(&rescaled, Status::Ignored).is_empty());
-    assert_eq!(app.listeners().messages(&rescaled, Status::Ignored).len(), 1);
+    app.right_tab = crate::matrix::Tab::Matrix;
+    app.session.matrix.focused = true;
+    let after = app.listeners();
+    let event = press(Key::Named(Named::ArrowDown));
+    assert_ne!(before, after);
+    let route = |listeners: Listeners| {
+        listeners
+            .messages(&event, Status::Ignored)
+            .into_iter()
+            .flat_map(crate::input_owner::route)
+            .collect::<Vec<_>>()
+    };
+    assert!(!route(before).iter().any(|m| matches!(m, Message::MatrixKey(_))));
+    assert!(route(after).iter().any(|m| matches!(m, Message::MatrixKey(_))));
 }
 
-/// No listener hears the redraw event, whoever listens and with or without
-/// a screen reader: Iced's `listen_with` never gave it to them, so the
-/// window's layers pass it to none, and a frame never posts a message that
-/// would ask for the next one.
+/// Iced's listeners do not hear redraw events, so one frame never posts a
+/// message that would ask for the next one.
 #[test]
 fn no_listener_hears_a_redraw() {
     let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
     for listening in Listening::all() {
-        for screen_reader in [false, true] {
-            let listeners = Listeners {
-                listening,
-                screen_reader,
-            };
-            for status in [Status::Ignored, Status::Captured] {
-                assert!(
-                    listeners.messages(&redraw, status).is_empty(),
-                    "{listening:?}, screen reader {screen_reader}, {status:?}"
-                );
-            }
+        let listeners = Listeners { listening };
+        for status in [Status::Ignored, Status::Captured] {
+            assert!(
+                listeners.messages(&redraw, status).is_empty(),
+                "{listening:?}, {status:?}"
+            );
         }
     }
 }

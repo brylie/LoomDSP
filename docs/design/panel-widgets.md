@@ -371,7 +371,7 @@ How loud a signal has been over the last seconds ([#97](https://github.com/bryli
 - **Binds to:** an output, through the same meter probe as the [meter](panels.md#meter-widget).
 - **Drawing:** the RMS level from −60 to 0 dB over a time window, newest at the right, as a filled shape; the peak as a lighter line above it. Colour is not the only signal: peak and RMS differ in fill (rule 8).
 - **Levels:** each column holds the true RMS and peak of its frames, with none of the meter's one-second fall. A tone that stops scrolls away, so the history reaches the floor after one full window. A stereo output uses the higher side in each column.
-- **Data:** the telemetry thread keeps the history, one column per 1/100 of the window, and places each reading by its frame stamp. A column with no reading shows the floor. A reading that is not finite is skipped. The thread wakes the UI only when a column it would draw moves by at least half a dB. *Why not every change:* every message redraws the window, so comparing exact values would wake it for rounding noise on a steady tone. A silent history draws no frames (rule 7).
+- **Data:** the telemetry thread keeps the history, one column per 1/100 of the window, and places each reading by its frame stamp. A column with no reading shows the floor. A reading that is not finite is skipped. The thread wakes the UI when a column it would draw moves more than half a physical pixel. This avoids frames caused by rounding noise on a steady tone. A silent history draws no frames (rule 7). [Redraw rules](panels.md#drawing-the-scope-trace)
 - **Pointer:** a display (rule 1). **Middle zoom:** the RMS shape only. **Starting size:** 9 × 6, growable, so it matches the meter's height beside it.
 - **Used by** the Level Meter (below).
 
@@ -391,7 +391,7 @@ The frequency content of a signal ([#109](https://github.com/brylie/LoomDSP/issu
 - **Drawing:** one line, log frequency from 20 Hz to 20 kHz across, −90 to 0 dB up. Bins are reduced to one value per drawn column (the highest), so low and high frequencies read alike. After a peak, the line falls at 20 dB per second. *Why:* a raw spectrum flickers too fast to read.
 - **Tilt:** Flat, or +4.5 dB per octave around 1 kHz, so a full mix reads closer to level across the range. It changes only the drawing.
 - **Hold:** an optional peak line that stays for 2 s, then falls at 20 dB per second.
-- **Data and redraw:** the thread sends the UI new columns only when a column moves by at least half a dB, so a steady tone stops waking the UI once its line settles. A silent spectrum draws no frames (rule 7).
+- **Data and redraw:** the thread wakes the UI when a column it would draw moves more than half a physical pixel, so a steady tone stops waking the UI once its line settles. A silent spectrum draws no frames (rule 7). [Redraw rules](panels.md#drawing-the-scope-trace)
 - **Pointer:** a display. **Close zoom:** a faint grid at 100 Hz, 1 kHz, and 10 kHz. **Middle zoom:** the line only, no grid. **Starting size:** 9 × 5, growable.
 
 ## Shapes and data

@@ -6,6 +6,8 @@
 //! Every message to the app redraws the window, so draining telemetry on a
 //! UI timer would draw frames even when every meter is silent.
 
+mod xy_distance;
+
 use crate::clip::{MeterWidget, PeakNews, Peaks};
 use crate::history::LevelHistory;
 use crate::live::{Level, Levels, ScopeTrace, Slope, Trigger};
@@ -29,15 +31,6 @@ pub const SCOPE_INTERVAL: Duration = Duration::from_millis(16);
 /// (`docs/design/panels.md`, Signal activity on ports).
 pub const ACTIVITY_THRESHOLD: f32 = 0.0001;
 
-/// How far a level history's column must move before the UI hears of it:
-/// half a dB of the 60 dB the frame shows, which spans 2 in a trace. Every
-/// message redraws the window, so an exact comparison would wake it for
-/// rounding noise on a steady tone (panel-widgets.md, Level history).
-const HISTORY_TOLERANCE: f32 = 2.0 * 0.5 / 60.0;
-
-/// The same for a spectrum: half a dB of the 90 dB its frame shows.
-const SPECTRUM_TOLERANCE: f32 = 2.0 * 0.5 / 90.0;
-
 /// How often activity is read: 5 times a second.
 pub const ACTIVITY_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -54,11 +47,11 @@ pub struct WatchList {
     /// Scope probes on screen, with the trace each asks for.
     pub scopes: HashMap<ProbeId, ScopeWant>,
     /// Meter probes whose level history is drawn, with the seconds it shows.
-    pub histories: HashMap<ProbeId, f32>,
+    pub histories: HashMap<ProbeId, TraceWant<f32>>,
     /// Scope probes whose spectrum is drawn, with how each draws.
-    pub spectra: HashMap<ProbeId, SpectrumWant>,
+    pub spectra: HashMap<ProbeId, TraceWant<SpectrumWant>>,
     /// Paired probes whose XY scope is drawn, with how each draws.
-    pub xy: HashMap<ProbeId, XyWant>,
+    pub xy: HashMap<ProbeId, TraceWant<XyWant>>,
     /// Each meter on screen, by module and widget, with the probe on its
     /// output and its own count of the UI's resets of its clip light and
     /// peak hold, so the thread reports that meter's peaks again from there.
@@ -115,6 +108,15 @@ impl DrawnSize {
             height: self.height.max(other.height),
         }
     }
+}
+
+/// A display's settings and the physical size inside its frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TraceWant<T> {
+    /// The settings that shape the data sent to the canvas.
+    pub settings: T,
+    /// Physical pixels in the trace area, when a camera is known.
+    pub drawn: Option<DrawnSize>,
 }
 
 /// What one spectrum on screen draws.
@@ -250,8 +252,9 @@ impl Watcher {
             .spectra
             .iter()
             .filter_map(|(probe, want)| {
-                let trace = self.spectra.get(probe)?.trace(want.tilt, want.hold);
-                moved(self.shown_spectra.get(probe), &trace, SPECTRUM_TOLERANCE).then_some((*probe, trace))
+                let trace = self.spectra.get(probe)?.trace(want.settings.tilt, want.settings.hold);
+                columns_moved(self.shown_spectra.get(probe), &trace, want.drawn, watch.full_traces)
+                    .then_some((*probe, trace))
             })
             .collect();
         let mut traces = Vec::new();
@@ -297,16 +300,21 @@ impl Watcher {
                     .push(&chunk);
             }
         }
-        let empty = loom_canvas::Trace::default();
         watch
             .xy
             .iter()
             .filter_map(|(probe, want)| {
-                let trace = self
-                    .xy
-                    .get(probe)?
-                    .trace(want.frames, want.range, want.rotate, watch.full_traces);
-                (self.shown_xy.get(probe).unwrap_or(&empty) != &trace).then_some((*probe, trace))
+                let trace = self.xy.get(probe)?.trace(
+                    want.settings.frames,
+                    want.settings.range,
+                    want.settings.rotate,
+                    watch.full_traces,
+                );
+                let shown = self
+                    .shown_xy
+                    .get(probe)
+                    .map_or(&[][..], |trace| trace.points.as_slice());
+                xy_distance::moved(shown, &trace.points, want.drawn).then_some((*probe, trace))
             })
             .collect()
     }
@@ -322,7 +330,8 @@ impl Watcher {
         self.histories.retain(|probe, _| watch.histories.contains_key(probe));
         self.shown_histories
             .retain(|probe, _| watch.histories.contains_key(probe));
-        for (probe, &window) in &watch.histories {
+        for (probe, want) in &watch.histories {
+            let window = want.settings;
             let fresh = self.histories.get(probe).is_none_or(|h| h.window() != window);
             if fresh {
                 self.histories.insert(*probe, LevelHistory::new(window, sample_rate));
@@ -338,7 +347,7 @@ impl Watcher {
             .filter_map(|(probe, history)| {
                 let trace = history.trace();
                 let shown = self.shown_histories.get(probe);
-                moved(shown, &trace, HISTORY_TOLERANCE).then_some((*probe, trace))
+                columns_moved(shown, &trace, watch.histories[probe].drawn, watch.full_traces).then_some((*probe, trace))
             })
             .collect()
     }
@@ -501,16 +510,26 @@ impl Hash for Monitor {
     }
 }
 
-/// True when `trace` differs from what the UI has by more than `tolerance`
-/// in some point, in a trace's vertical units. Nothing shown yet counts as an
-/// empty trace, so a display that stays empty sends nothing.
-pub fn moved(shown: Option<&loom_canvas::Trace>, trace: &loom_canvas::Trace, tolerance: f32) -> bool {
+/// True when one of the drawn lines appears or its fixed columns move by
+/// more than half a pixel. Until the size is known, compare the visible points.
+fn columns_moved(
+    shown: Option<&loom_canvas::Trace>,
+    trace: &loom_canvas::Trace,
+    drawn: Option<DrawnSize>,
+    full: bool,
+) -> bool {
     let empty = loom_canvas::Trace::default();
     let shown = shown.unwrap_or(&empty);
-    let apart = |a: &[[f32; 2]], b: &[[f32; 2]]| {
-        a.len() != b.len() || a.iter().zip(b).any(|(a, b)| (a[1] - b[1]).abs() > tolerance)
+    let apart = |a: &[[f32; 2]], b: &[[f32; 2]]| match drawn {
+        None => a != b,
+        Some(size) => {
+            a.len() != b.len()
+                || a.iter()
+                    .zip(b)
+                    .any(|(a, b)| (a[1] - b[1]).abs() * size.height as f32 * 0.5 > SCOPE_TOLERANCE)
+        }
     };
-    apart(&shown.points, &trace.points) || apart(&shown.second, &trace.second)
+    apart(&shown.points, &trace.points) || (full && apart(&shown.second, &trace.second))
 }
 
 /// How far a scope's line must move before the UI hears of it: half a
@@ -526,6 +545,7 @@ pub const SCOPE_SEGMENT_CAP: usize = 64;
 
 /// True when a scope's `trace` differs on screen from what the UI has
 /// (`docs/design/panels.md`, Drawing the scope trace, What counts as moved).
+/// Sampling and the trigger offset are explained in `docs/learn/triggered-scope.md`.
 ///
 /// Nothing shown yet counts as moved. With no drawn size known, any change
 /// counts. When both traces have no points (the middle zoom, where only the

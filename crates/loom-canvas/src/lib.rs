@@ -71,5 +71,5 @@ pub use scene::{
 pub use slot::{CanvasDrawing, CanvasSlot};
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{TextItem, TextKind, for_each as for_each_tile_text};
-pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace};
+pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace, trace_draw_area};
 pub use widget::{DragLine, PatchCanvas};

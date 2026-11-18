@@ -634,7 +634,7 @@ fn bounds_are_in_physical_pixels() {
     let top_left = view.to_window(Point::new(world.x, world.y));
     let bottom_right = view.to_window(Point::new(world.x + world.width, world.y + world.height));
 
-    app.a11y.scale = 1.0;
+    app.window_scale = 1.0;
     let once = app.a11y_tree(&Places::of_canvas(Some(view)));
     let cutoff = widget_node(&mut app, module, knob);
     let logical = node(&once, cutoff).bounds().unwrap();
@@ -644,7 +644,7 @@ fn bounds_are_in_physical_pixels() {
     assert!((logical.y1 - f64::from(bottom_right.y)).abs() < 1e-3);
     assert!(logical.x1 > logical.x0 && logical.y1 > logical.y0);
 
-    app.a11y_event(Event::ScaleFactor(2.0));
+    let _ = app.send_scaled(Message::WindowRescaled, 2.0);
     let twice = app.a11y_tree(&Places::of_canvas(Some(view)));
     let physical = node(&twice, cutoff).bounds().unwrap();
     assert!((physical.x0 - logical.x0 * 2.0).abs() < 1e-3);
@@ -1174,8 +1174,8 @@ fn actions_wait_while_a_panel_owns_input() {
 fn a_screen_reader_turns_the_layer_on() {
     let (mut app, _, _) = app_with_filter();
     assert!(!app.a11y.active);
-    let _ = app.a11y_subscription();
-    assert!(!app.a11y.active, "listening for the scale is not listening");
+    let _ = app.send_scaled(Message::WindowRescaled, 2.0);
+    assert!(!app.a11y.active, "a window rescale does not activate the tree");
     app.a11y_event(Event::Located(Places::default()));
     assert!(app.a11y.ids.is_empty(), "no tree without a screen reader");
     app.a11y_after(Touch::Changed);
@@ -1184,7 +1184,6 @@ fn a_screen_reader_turns_the_layer_on() {
     app.a11y_event(Event::Activated);
     assert!(app.a11y.active);
     assert!(app.a11y.locating, "the first tree is on its way");
-    let _ = app.a11y_subscription();
     app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating);
     assert!(!app.a11y.ids.is_empty(), "locating the canvas built the tree");
@@ -1339,14 +1338,33 @@ fn a_new_scale_factor_resends_bounds() {
         bounds: Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0)),
         camera: Camera::default(),
     };
+    let scope = app.session.controller.add_module("loom.display.scope").unwrap().0;
+    app.commit();
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![scope])));
+    let _ = app.send(Message::Canvas(CanvasEvent::Camera(view.camera)));
+    let size = |app: &crate::App| {
+        app.session
+            .engine
+            .monitor
+            .watched()
+            .scopes
+            .values()
+            .next()
+            .unwrap()
+            .drawn
+            .unwrap()
+    };
+    let before = size(&app);
     app.a11y_event(Event::Activated);
     let _ = app.a11y_changes(&Places::of_canvas(Some(view)));
     app.a11y.locating = false;
 
-    app.a11y_event(Event::ScaleFactor(1.0));
+    let _ = app.send_scaled(Message::WindowRescaled, 1.0);
     assert!(!app.a11y.locating, "the same scale factor asks for nothing");
-    app.a11y_event(Event::ScaleFactor(2.0));
+    let _ = app.send_scaled(Message::WindowRescaled, 2.0);
     assert!(app.a11y.locating, "a new one asks for a rebuild");
+    let after = size(&app);
+    assert_eq!((after.width, after.height), (before.width * 2, before.height * 2));
     let (_, changes) = app.a11y_changes(&Places::of_canvas(Some(view)));
     let changed = sent_ids(&changes.expect("bounds changed"));
     assert!(changed.contains(&node_of(&mut app, &tile_id(module))));
@@ -1374,12 +1392,13 @@ fn a_screen_reader_that_leaves_stops_the_tree() {
 /// event, and other window events do not.
 #[test]
 fn a_rescaled_window_reports_its_scale_factor() {
-    let window = iced::window::Id::unique();
-    let status = iced::event::Status::Ignored;
-    let rescaled = iced::Event::Window(iced::window::Event::Rescaled(2.0));
-    assert!(matches!(super::rescaled(rescaled, status, window), Some(Event::ScaleFactor(s)) if s == 2.0));
-    let focused = iced::Event::Window(iced::window::Event::Focused);
-    assert!(super::rescaled(focused, status, window).is_none());
+    use loom_ui::App as _;
+    let hosted = crate::iced_bridge::Hosted(app_with_filter().0, None, Default::default());
+    assert!(matches!(
+        hosted.window_event(&loom_ui::WindowEvent::ScaleChanged(2.0)),
+        Some(Message::WindowRescaled)
+    ));
+    assert!(hosted.window_event(&loom_ui::WindowEvent::Focused(true)).is_none());
 }
 
 /// The tree reports focus on the control the canvas says has it, and on
@@ -1609,8 +1628,8 @@ fn a_meter_reports_the_number_its_text_shows() {
 }
 
 /// A Focus action that arrives while nothing else happens still moves the
-/// focus: the runtime draws the window after every message, and the canvas
-/// applies the request on that redraw. The control's tile is selected, as
+/// focus: the action asks for a frame, and the canvas applies the request
+/// on that frame. The control's tile is selected, as
 /// a press on the control selects it, so an arrow key then changes that
 /// control and the focus stays (ui-layer.md, section 7, rule 20).
 #[test]
@@ -1627,8 +1646,16 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
     let cutoff = widget_node(ui.app_mut(), module, knob);
     let steps = ui.app().session.edits.history.len();
 
-    // The action and the one redraw that follows any message.
-    ui.send(Message::A11y(Event::Action(request(Action::Focus, cutoff, None))));
+    // Check the action on its own, without the Iced bridge's redraw policy.
+    let effects = ui
+        .app_mut()
+        .send(Message::A11y(Event::Action(request(Action::Focus, cutoff, None))));
+    assert!(
+        effects
+            .into_iter()
+            .any(|effect| matches!(effect, loom_ui::Effect::Redraw))
+    );
+    // Apply the requested frame through the actual canvas.
     let drawn = ui.redraw();
     assert!(drawn.iter().any(
         |message| matches!(message, Message::Canvas(CanvasEvent::FocusChanged(Some(at))) if *at == (module, knob))
@@ -2123,7 +2150,7 @@ fn frame_nodes_have_the_bounds_the_window_drew() {
     let _ = ui.redraw();
     let places = ui.places();
     assert!(places.canvas.is_some());
-    ui.app_mut().a11y.scale = 2.0;
+    ui.app_mut().window_scale = 2.0;
     let update = ui.app_mut().a11y_tree(&places);
 
     let mut ids: Vec<UiId> = ui
@@ -2872,7 +2899,7 @@ fn a_scrolling_panel_is_as_tall_as_what_it_shows() {
     let clip = place.clip.unwrap();
     let update = ui.app_mut().a11y_tree(&places);
     let bounds = node(&update, node_of(ui.app_mut(), &panel)).bounds().unwrap();
-    let scale = f64::from(ui.app().a11y.scale);
+    let scale = f64::from(ui.app().window_scale);
     assert!(
         (bounds.height() - f64::from(clip.height) * scale).abs() < 1.0,
         "{bounds:?} {clip:?}"
@@ -4858,7 +4885,7 @@ fn a_screen_reader_takes_the_windows_scale() {
     let cx = loom_ui::Context::new(std::time::Instant::now(), &waker, None, window);
     let _ = app.update(Message::A11y(Event::Activated), &cx);
     assert!(app.a11y.is_active());
-    assert_eq!(app.a11y.scale, 2.0);
+    assert_eq!(app.window_scale, 2.0);
 }
 
 /// A lights message counts as its own frame cause, apart from the meters,

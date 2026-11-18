@@ -56,6 +56,10 @@ pub enum FrameCause {
     Input,
     Redraw,
     Forced,
+    /// Audio load, warnings, input drift, or device health.
+    Audio,
+    /// The window starts its watchers or ends a measurement.
+    Lifecycle,
     Other,
 }
 
@@ -73,7 +77,7 @@ impl FrameCause {
 }
 
 /// How many kinds of [`FrameCause`] there are.
-pub const CAUSE_COUNT: usize = 9;
+pub const CAUSE_COUNT: usize = FrameCause::Other as usize + 1;
 
 /// Frame totals by cause, in the order printed by the measure report.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

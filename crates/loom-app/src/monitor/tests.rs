@@ -496,15 +496,23 @@ fn reading(probe: ProbeId, frame: u64, rms: f32) -> MeterReading {
 
 /// Runs a watcher over `seconds` of readings, in steps like the thread's, and
 /// counts the updates that carry a history.
-fn history_updates(watcher: &mut Watcher, watch: &WatchList, seconds: f32, level: impl Fn(u64) -> f32) -> usize {
+fn history_updates(
+    watcher: &mut Watcher,
+    watch: &WatchList,
+    start: &mut u64,
+    seconds: f32,
+    level: impl Fn(u64) -> f32,
+) -> usize {
     let probe = *watch.histories.keys().next().unwrap();
     let mut sends = 0;
     let now = Instant::now();
     let steps = (seconds * 48_000.0 / 1280.0) as u64;
+    let first = *start;
+    *start += steps * 1280;
     for step in 0..steps {
         let readings: Vec<MeterReading> = (0..10)
             .map(|i| {
-                let frame = (step * 10 + i) * 128;
+                let frame = first + (step * 10 + i) * 128;
                 reading(probe, frame, level(frame))
             })
             .collect();
@@ -520,7 +528,13 @@ fn history_updates(watcher: &mut Watcher, watch: &WatchList, seconds: f32, level
 /// A list watching one level history of one second.
 fn history_watch() -> WatchList {
     WatchList {
-        histories: HashMap::from([(ProbeId(1), 1.0)]),
+        histories: HashMap::from([(
+            ProbeId(1),
+            TraceWant {
+                settings: 1.0,
+                drawn: Some(DrawnSize::new(200.0, 60.0)),
+            },
+        )]),
         ..WatchList::default()
     }
 }
@@ -529,7 +543,7 @@ fn history_watch() -> WatchList {
 #[test]
 fn a_silent_history_sends_nothing() {
     let mut watcher = Watcher::default();
-    assert_eq!(history_updates(&mut watcher, &history_watch(), 2.0, |_| 0.0), 0);
+    assert_eq!(history_updates(&mut watcher, &history_watch(), &mut 0, 2.0, |_| 0.0), 0);
 }
 
 /// A steady tone stops sending once its columns have filled the window, even
@@ -538,9 +552,17 @@ fn a_silent_history_sends_nothing() {
 fn a_steady_history_stops_sending_once_settled() {
     let mut watcher = Watcher::default();
     let watch = history_watch();
+    let mut frame = 0;
     let noisy = |frame: u64| 0.5 + 1e-4 * (frame as f32).sin();
-    assert!(history_updates(&mut watcher, &watch, 2.0, noisy) > 0, "filling");
-    assert_eq!(history_updates(&mut watcher, &watch, 2.0, noisy), 0, "settled");
+    assert!(
+        history_updates(&mut watcher, &watch, &mut frame, 2.0, noisy) > 0,
+        "filling"
+    );
+    assert_eq!(
+        history_updates(&mut watcher, &watch, &mut frame, 2.0, noisy),
+        0,
+        "settled"
+    );
 }
 
 /// Changing the window starts the history again, on that window.
@@ -548,24 +570,31 @@ fn a_steady_history_stops_sending_once_settled() {
 fn a_new_window_starts_the_history_again() {
     let mut watcher = Watcher::default();
     let mut watch = history_watch();
-    history_updates(&mut watcher, &watch, 1.0, |_| 0.5);
-    watch.histories.insert(ProbeId(1), 5.0);
+    history_updates(&mut watcher, &watch, &mut 0, 1.0, |_| 0.5);
+    watch.histories.get_mut(&ProbeId(1)).unwrap().settings = 5.0;
     watcher.take(&watch, &[], Vec::new(), 48_000.0, Instant::now());
     assert_eq!(watcher.histories[&ProbeId(1)].window(), 5.0);
 }
 
-/// [`moved`] ignores what is inside the tolerance, and counts a change of
-/// length, or a trace where nothing was shown.
+/// The same column movement only wakes the UI at a size where it is visible.
 #[test]
-fn moved_reads_a_tolerance() {
-    let trace = |y: f32| loom_canvas::Trace {
+fn columns_use_half_a_pixel_and_only_drawn_lines() {
+    let trace = |y: f32, peak: f32| loom_canvas::Trace {
         points: vec![[0.0, y]],
+        second: vec![[0.0, peak]],
         ..loom_canvas::Trace::default()
     };
-    assert!(!moved(None, &loom_canvas::Trace::default(), 0.1));
-    assert!(moved(None, &trace(0.0), 0.1));
-    assert!(!moved(Some(&trace(0.0)), &trace(0.05), 0.1));
-    assert!(moved(Some(&trace(0.0)), &trace(0.2), 0.1));
+    let a = trace(0.0, 0.5);
+    let small = Some(DrawnSize::new(100.0, 50.0));
+    let large = Some(DrawnSize::new(100.0, 100.0));
+    assert!(!columns_moved(None, &loom_canvas::Trace::default(), small, true));
+    assert!(columns_moved(None, &a, small, true));
+    assert!(!columns_moved(Some(&a), &trace(0.01, 0.5), large, true));
+    assert!(!columns_moved(Some(&a), &trace(0.011, 0.5), small, true));
+    assert!(columns_moved(Some(&a), &trace(0.011, 0.5), large, true));
+    assert!(!columns_moved(Some(&a), &trace(0.0, 0.52), large, false));
+    assert!(columns_moved(Some(&a), &trace(0.0, 0.52), large, true));
+    assert!(columns_moved(Some(&a), &trace(0.0001, 0.5), None, true));
 }
 
 /// One chunk of a sine at engine frame `frame`.
@@ -605,7 +634,14 @@ fn spectrum_updates(watcher: &mut Watcher, watch: &WatchList, start: &mut u64, s
 /// A list watching one spectrum.
 fn spectrum_watch(hold: bool) -> WatchList {
     WatchList {
-        spectra: HashMap::from([(ProbeId(1), SpectrumWant { tilt: false, hold })]),
+        spectra: HashMap::from([(
+            ProbeId(1),
+            TraceWant {
+                settings: SpectrumWant { tilt: false, hold },
+                drawn: Some(DrawnSize::new(200.0, 90.0)),
+            },
+        )]),
+        full_traces: true,
         ..WatchList::default()
     }
 }
@@ -685,10 +721,13 @@ fn xy_watch() -> WatchList {
     WatchList {
         xy: HashMap::from([(
             ProbeId(1),
-            XyWant {
-                frames: 480,
-                range: 1.0,
-                rotate: false,
+            TraceWant {
+                settings: XyWant {
+                    frames: 480,
+                    range: 1.0,
+                    rotate: false,
+                },
+                drawn: Some(DrawnSize::new(120.0, 120.0)),
             },
         )]),
         full_traces: true,
@@ -741,7 +780,7 @@ fn only_a_moving_xy_scope_sends() {
     );
     let mut moving = Watcher::default();
     let mut frame = 0;
-    let wave = |f: u64| [(f as f32 * 0.03).sin() * 0.5, (f as f32 * 0.02).cos() * 0.5];
+    let wave = |f: u64| [(f / loom_core::PAIR_CHUNK as u64) as f32 * 0.025, 0.25];
     assert_eq!(xy_sends(&mut moving, &watch, &mut frame, 20, wave), 20, "moving");
 }
 
@@ -753,4 +792,79 @@ fn an_xy_scope_off_screen_keeps_nothing() {
     xy_sends(&mut watcher, &xy_watch(), &mut frame, 5, |_| [0.25, 0.5]);
     assert!(watcher.take_pairs(&WatchList::default(), [], 48_000.0).is_empty());
     assert!(watcher.xy.is_empty() && watcher.shown_xy.is_empty());
+}
+
+/// A whole cycle of paired sines keeps its outline as the points slide along it.
+#[test]
+fn a_steady_xy_circle_sends_once_after_the_window_fills() {
+    let watch = xy_watch();
+    let mut watcher = Watcher::default();
+    let tone = |n: u64| {
+        let phase = n as f64 * std::f64::consts::TAU * 997.3 / 48_000.0;
+        [0.5 * phase.cos() as f32, 0.5 * phase.sin() as f32]
+    };
+    // Feed more than a window at once so the first drawing is settled.
+    let chunks = (0..10).map(|i| pair_chunk(ProbeId(1), i * loom_core::PAIR_CHUNK as u64, tone));
+    let xy = watcher.take_pairs(&watch, chunks, 48_000.0);
+    assert_eq!(xy.len(), 1);
+    watcher.sent(&Update {
+        xy,
+        ..Update::default()
+    });
+    let mut frame = 10 * loom_core::PAIR_CHUNK as u64;
+    assert_eq!(xy_sends(&mut watcher, &watch, &mut frame, 200, tone), 0);
+}
+
+/// XY compares segments, dots and empty frames in drawn pixels.
+#[test]
+fn xy_wakes_on_a_visible_shift_in_either_axis() {
+    let size = Some(DrawnSize::new(128.0, 128.0));
+    let line = [[0.0, 0.0], [0.5, 0.0], [1.0, 0.0]];
+    let shifted = |pixels: f32| line.map(|[x, _]| [x, pixels / 64.0]);
+    assert!(!xy_distance::moved(&line, &shifted(0.5), size));
+    assert!(xy_distance::moved(&line, &shifted(0.625), size));
+    assert!(!xy_distance::moved(&line, &[[0.0, 0.0], [1.0, 0.0]], size));
+    assert!(!xy_distance::moved(&[[0.5, 0.0]], &[[0.502, 0.0]], size));
+    assert!(xy_distance::moved(&[[0.5, 0.0]], &[[0.505, 0.0]], size));
+    assert!(xy_distance::moved(&line, &[], size));
+    assert!(xy_distance::moved(&line, &shifted(0.1), None));
+}
+
+/// A tall spectrum and history send a small change that a short frame hides.
+#[test]
+fn steady_column_displays_send_visible_level_changes() {
+    let mut tiny = history_watch();
+    let mut tall = history_watch();
+    tiny.histories.get_mut(&ProbeId(1)).unwrap().drawn = Some(DrawnSize::new(128.0, 64.0));
+    tall.histories.get_mut(&ProbeId(1)).unwrap().drawn = Some(DrawnSize::new(128.0, 256.0));
+    for (watch, visible) in [(tiny, false), (tall, true)] {
+        let mut watcher = Watcher::default();
+        // Each 128-sample read holds four cycles of a 1500 Hz sine.
+        let rms = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+        let mut frame = 0;
+        assert!(history_updates(&mut watcher, &watch, &mut frame, 2.0, |_| rms) > 0);
+        assert_eq!(history_updates(&mut watcher, &watch, &mut frame, 2.0, |_| rms), 0);
+        assert_eq!(
+            history_updates(&mut watcher, &watch, &mut frame, 2.0, |_| rms * 1.02) > 0,
+            visible
+        );
+    }
+    let mut watch = spectrum_watch(false);
+    for (height, visible) in [(64.0, false), (512.0, true)] {
+        watch.spectra.get_mut(&ProbeId(1)).unwrap().drawn = Some(DrawnSize::new(128.0, height));
+        let mut watcher = Watcher::default();
+        let mut frame = 0;
+        assert!(spectrum_updates(&mut watcher, &watch, &mut frame, 100, 0.5) > 0);
+        assert_eq!(spectrum_updates(&mut watcher, &watch, &mut frame, 100, 0.5), 0);
+        // Compare settled tones. An abrupt amplitude jump inside an FFT
+        // window has its own visible spectrum.
+        let mut next_tone = SpectrumAnalyser::new(48_000.0);
+        let probe = ProbeId(1);
+        for chunk in 0..100 {
+            next_tone.push(&sine_chunk(probe, chunk * loom_core::SCOPE_CHUNK as u64, 0.5 * 1.02));
+        }
+        watcher.spectra.insert(probe, next_tone);
+        let update = watcher.take(&watch, &[], [], 48_000.0, Instant::now());
+        assert_eq!(!update.spectra.is_empty(), visible);
+    }
 }

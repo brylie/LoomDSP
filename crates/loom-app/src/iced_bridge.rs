@@ -298,6 +298,11 @@ impl loom_ui::App for Hosted {
         }
     }
 
+    /// Wakes the app after the runtime updates its window scale.
+    fn window_event(&self, event: &loom_ui::WindowEvent) -> Option<Message> {
+        matches!(event, loom_ui::WindowEvent::ScaleChanged(_)).then_some(Message::WindowRescaled)
+    }
+
     fn next_deadline(&self) -> Option<Deadline<Message>> {
         self.0.next_deadline()
     }

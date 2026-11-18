@@ -309,6 +309,8 @@ enum Message {
     /// The player pressed × on a kept error.
     DismissError(alerts::Cause),
     Canvas(CanvasEvent),
+    /// The runtime has updated the window's scale.
+    WindowRescaled,
     /// A window event for the app's one input listener, and whether a widget
     /// used it. `update` turns it into the messages it routes to
     /// (`Listening::route`).
@@ -586,6 +588,7 @@ impl Message {
                 | Self::AskRecovery
                 | Self::ControlReply
                 | Self::StartWatching
+                | Self::WindowRescaled
         )
     }
 
@@ -612,6 +615,7 @@ impl Message {
             | Self::Control(_)
             | Self::ControlReply
             | Self::StartWatching
+            | Self::WindowRescaled
             | Self::ControlFrame(_)
             | Self::Located { .. }
             | Self::Captured { .. }
@@ -815,7 +819,7 @@ struct App {
     /// waiting command asks for one at a time.
     control_frame_asked: bool,
     /// The window's scale factor as last read from an update's context, for
-    /// a scope's drawn size in physical pixels (`App::publish_watch`).
+    /// drawn display sizes and accessibility bounds in physical pixels.
     window_scale: f32,
     /// The watcher threads that outlive a patch (`watching.rs`).
     watchers: watching::AppWatchers,
@@ -1144,31 +1148,48 @@ impl App {
                     drawn,
                 });
         }
-        let histories = scene::history_outputs(&self.session.controller, &self.session.visible_displays)
-            .into_iter()
-            .filter_map(|history| Some((self.session.engine.live.probe(history.output)?, history.window)))
-            .collect();
-        let spectra = scene::spectrum_outputs(&self.session.controller, &self.session.visible_displays)
-            .into_iter()
-            .filter_map(|spectrum| {
-                let want = monitor::SpectrumWant {
-                    tilt: spectrum.tilt,
-                    hold: spectrum.hold,
-                };
-                Some((self.session.engine.live.scope_probe(spectrum.output)?, want))
-            })
-            .collect();
-        let xy = scene::xy_outputs(&self.session.controller, &self.session.visible_displays)
-            .into_iter()
-            .filter_map(|scope| {
-                let want = monitor::XyWant {
-                    frames: (scope.time * rate).round().max(1.0) as usize,
-                    range: scope.range,
-                    rotate: scope.rotate,
-                };
-                Some((self.session.engine.live.pair_probe(scope.x, scope.y)?, want))
-            })
-            .collect();
+        let histories = self.trace_wants(
+            scene::history_outputs(&self.session.controller, &self.session.visible_displays)
+                .into_iter()
+                .filter_map(|history| {
+                    Some((
+                        self.session.engine.live.probe(history.output)?,
+                        history.widget,
+                        history.window,
+                    ))
+                }),
+        );
+        let spectra = self.trace_wants(
+            scene::spectrum_outputs(&self.session.controller, &self.session.visible_displays)
+                .into_iter()
+                .filter_map(|spectrum| {
+                    let settings = monitor::SpectrumWant {
+                        tilt: spectrum.tilt,
+                        hold: spectrum.hold,
+                    };
+                    Some((
+                        self.session.engine.live.scope_probe(spectrum.output)?,
+                        spectrum.widget,
+                        settings,
+                    ))
+                }),
+        );
+        let xy = self.trace_wants(
+            scene::xy_outputs(&self.session.controller, &self.session.visible_displays)
+                .into_iter()
+                .filter_map(|scope| {
+                    let settings = monitor::XyWant {
+                        frames: (scope.time * rate).round().max(1.0) as usize,
+                        range: scope.range,
+                        rotate: scope.rotate,
+                    };
+                    Some((
+                        self.session.engine.live.pair_probe(scope.x, scope.y)?,
+                        scope.widget,
+                        settings,
+                    ))
+                }),
+        );
         let activity = self.session.engine.live.activity_probes().collect();
         self.session
             .carrying
@@ -1225,6 +1246,30 @@ impl App {
         let bounds = self.session.scene.module(module)?.widget_bounds(widget)?;
         let scale = zoom * self.window_scale;
         Some(monitor::DrawnSize::new(bounds.width * scale, bounds.height * scale))
+    }
+
+    /// Builds wants for displays whose wake rule uses the data area inside
+    /// the frame. A shared probe uses the largest size on each axis.
+    fn trace_wants<T>(
+        &self,
+        displays: impl Iterator<Item = (ProbeId, (u32, usize), T)>,
+    ) -> std::collections::HashMap<ProbeId, monitor::TraceWant<T>> {
+        let mut wants = std::collections::HashMap::<_, monitor::TraceWant<T>>::new();
+        let zoom = self.session.cameras.get(&self.session.level).map(|camera| camera.zoom);
+        for (probe, (module, index), settings) in displays {
+            let drawn = zoom.and_then(|zoom| {
+                let tile = self.session.scene.module(module)?;
+                let bounds = tile.widget_bounds(index)?;
+                let area = loom_canvas::trace_draw_area(bounds, &tile.panel.widgets.get(index)?.kind);
+                let scale = zoom * self.window_scale;
+                Some(monitor::DrawnSize::new(area.width * scale, area.height * scale))
+            });
+            let drawn = wants.get(&probe).map_or(drawn, |previous| {
+                previous.drawn.zip(drawn).map(|(previous, drawn)| previous.max(drawn))
+            });
+            wants.insert(probe, monitor::TraceWant { settings, drawn });
+        }
+        wants
     }
 
     /// Gives each new trace from the telemetry thread to the widgets that show
@@ -1410,16 +1455,11 @@ impl App {
         );
         let now = cx.now();
         self.timers.set_frame(cx.window().frame);
-        // A scope's drawn size follows the window's scale, so a new scale
-        // tells the telemetry thread the new sizes.
+        // Display sizes and accessibility bounds share the runtime's scale.
         if cx.window().scale != self.window_scale {
             self.window_scale = cx.window().scale;
             self.publish_watch();
-        }
-        // A screen reader that starts gets bounds at the window's scale
-        // from its first tree; later changes come with `Rescaled`.
-        if matches!(message, Message::A11y(a11y::Event::Activated)) {
-            self.a11y.set_scale(cx.window().scale);
+            self.a11y_rebuild();
         }
         if let Some(timer) = timers::Timer::of(&message) {
             self.timers.taken(timer, now);
@@ -1470,7 +1510,11 @@ impl App {
             | Message::Located { .. }
             | Message::Captured { .. }
             | Message::TypeFocus { .. } => FrameCause::Control,
-            Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) => FrameCause::Input,
+            Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) | Message::WindowRescaled => {
+                FrameCause::Input
+            }
+            Message::Audio(_) | Message::InputAudio(_) | Message::AudioPoll => FrameCause::Audio,
+            Message::StartWatching | Message::BenchDone => FrameCause::Lifecycle,
             Message::Frame(_) => FrameCause::Forced,
             _ => FrameCause::Other,
         };
@@ -1480,7 +1524,7 @@ impl App {
         }
         // What this message means for a screen reader's tree.
         let touch = match (&message, cause) {
-            (Message::A11y(_), _) => a11y::Touch::Own,
+            (Message::A11y(_) | Message::WindowRescaled, _) => a11y::Touch::Own,
             // The audio watchers' readings: the load, the dropouts, and
             // the bar's warnings. The load and the dropouts are live
             // values, so these wait for the live timer, which then sends a
@@ -1968,6 +2012,7 @@ impl App {
             Message::Redo => self.redo(),
             Message::OpenBrowser => self.browser_key += 1,
             Message::Panic => self.panic(),
+            Message::WindowRescaled => {}
             Message::DismissError(cause) => self.alerts.dismiss(cause),
             Message::MidiPoll => self.poll_midi(),
             Message::HoldNote => {

@@ -19,7 +19,7 @@ fn a_line_is_key_value_pairs() {
             glyph_skips: 0,
         },
         worst: Duration::from_millis(9),
-        causes: FrameCauses([2, 70, 1, 5, 0, 3, 0, 44, 0]),
+        causes: FrameCauses([2, 70, 1, 5, 0, 3, 0, 44, 8, 1, 0]),
         cpu: 4.1,
     };
     assert_eq!(
@@ -27,7 +27,7 @@ fn a_line_is_key_value_pairs() {
         "fps=120.0 avg_ms=8.33 worst_ms=9.00 frames=600 scene_builds=1 control_builds=2 \
              scene_uploads=1 control_uploads=2 overlay_uploads=0 trace_uploads=3 \
              text_uploads=4 glyph_rasters=50 glyph_skips=0 \
-             causes=tick:2,live:70,meters:1,lights:5,control:0,input:3,redraw:0,forced:44,other:0 cpu=4.1"
+             causes=tick:2,live:70,meters:1,lights:5,control:0,input:3,redraw:0,forced:44,audio:8,lifecycle:1,other:0 cpu=4.1"
     );
 }
 
@@ -110,4 +110,26 @@ fn the_tree_counts_come_only_with_their_flag() {
         ..Options::default()
     };
     assert!(options.reporter().is_some_and(|reporter| reporter.tree));
+}
+
+/// Startup and audio status each have a named cause in an idle window.
+#[test]
+fn audio_and_startup_have_their_own_frame_causes() {
+    use loom_canvas::stats::{FrameCause, requests_this_thread};
+    let mut app = crate::tests::app();
+    let audio = requests_this_thread(FrameCause::Audio);
+    let lifecycle = requests_this_thread(FrameCause::Lifecycle);
+    let other = requests_this_thread(FrameCause::Other);
+    app.apply(crate::Message::StartWatching);
+    app.apply(crate::Message::Audio(crate::audio_watch::Event::Stats {
+        dropouts: 0,
+        at: Instant::now(),
+        peak: 0.1,
+        max: 0.1,
+        silenced: false,
+        clipped: false,
+    }));
+    assert_eq!(requests_this_thread(FrameCause::Audio), audio + 1);
+    assert_eq!(requests_this_thread(FrameCause::Lifecycle), lifecycle + 1);
+    assert_eq!(requests_this_thread(FrameCause::Other), other);
 }

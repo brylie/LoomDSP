@@ -452,7 +452,7 @@ impl App {
         let mut histories: std::collections::HashMap<loom_core::ProbeId, crate::history::LevelHistory> = watch
             .histories
             .iter()
-            .map(|(&probe, &seconds)| (probe, crate::history::LevelHistory::new(seconds, rate)))
+            .map(|(&probe, want)| (probe, crate::history::LevelHistory::new(want.settings, rate)))
             .collect();
         let mut spectra: std::collections::HashMap<loom_core::ProbeId, crate::spectrum::SpectrumAnalyser> = watch
             .spectra
@@ -529,7 +529,7 @@ impl App {
                 .into_iter()
                 .map(|(probe, spectrum)| {
                     let want = watch.spectra[&probe];
-                    (probe, spectrum.trace(want.tilt, want.hold))
+                    (probe, spectrum.trace(want.settings.tilt, want.settings.hold))
                 })
                 .collect(),
             xy: xy
@@ -538,7 +538,12 @@ impl App {
                     let want = watch.xy[&probe];
                     (
                         probe,
-                        trace.trace(want.frames, want.range, want.rotate, watch.full_traces),
+                        trace.trace(
+                            want.settings.frames,
+                            want.settings.range,
+                            want.settings.rotate,
+                            watch.full_traces,
+                        ),
                     )
                 })
                 .collect(),

@@ -42,6 +42,8 @@ fn lights_are_a_live_cause_of_their_own() {
         FrameCause::Control,
         FrameCause::Input,
         FrameCause::Redraw,
+        FrameCause::Audio,
+        FrameCause::Lifecycle,
         FrameCause::Other,
     ] {
         assert!(!cause.is_live(), "{cause:?} is not live");

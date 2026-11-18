@@ -22,12 +22,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn subscription(&self) -> Subscription<Message> {
         let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
-        Subscription::batch([
-            close,
-            self.input_subscription(),
-            always_subscription(),
-            self.a11y_subscription().map(Message::A11y),
-        ])
+        Subscription::batch([close, self.input_subscription(), always_subscription()])
     }
 
     /// Who hears the window's events now, for [`Listeners::messages`].
@@ -36,7 +31,6 @@ impl App {
     pub(crate) fn listeners(&self) -> Listeners {
         Listeners {
             listening: self.listening(),
-            screen_reader: self.a11y.is_active(),
         }
     }
 
@@ -190,24 +184,18 @@ pub(crate) fn browser_key(
 pub(crate) struct Listeners {
     /// Who has the input (input_owner.rs).
     listening: Listening,
-    /// A screen reader listens, so a change of scale is heard.
-    screen_reader: bool,
 }
 
 impl Listeners {
     /// The messages the listeners send for `event`, which a widget used or
     /// not as `status` says: the close request, then the input listeners
-    /// (input_owner.rs), then the scale for a screen reader.
+    /// (input_owner.rs).
     pub(crate) fn messages(self, event: &iced::Event, status: Status) -> Vec<Message> {
         let mut messages = Vec::new();
         if matches!(event, iced::Event::Window(iced::window::Event::CloseRequested)) {
             messages.push(Message::File(FileAction::Close));
         }
         messages.extend(crate::input_owner::heard_messages(event, status, self.listening));
-        if self.screen_reader {
-            let window = iced::window::Id::unique();
-            messages.extend(crate::a11y::rescaled(event.clone(), status, window).map(Message::A11y));
-        }
         messages
     }
 }

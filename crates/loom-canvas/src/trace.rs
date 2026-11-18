@@ -169,6 +169,16 @@ pub(crate) fn xy_scope_area(rect: Rect) -> Rect {
     )
 }
 
+/// The part of a trace widget that draws its data, as used by the renderer.
+/// XY scopes use a centred square so both axes have the same scale.
+pub fn trace_draw_area(rect: Rect, kind: &WidgetViewKind) -> Rect {
+    if *kind == WidgetViewKind::XyScope {
+        xy_scope_area(rect)
+    } else {
+        trace_area(rect)
+    }
+}
+
 /// GPU instances for every scope trace in a scene.
 #[derive(Debug, Default)]
 pub(crate) struct TraceGeometry {
@@ -198,11 +208,7 @@ impl TraceGeometry {
                 let (Some(rect), Some(trace)) = (module.widget_bounds(index), traces.get(module.id, index)) else {
                     continue;
                 };
-                let area = if widget.kind == WidgetViewKind::XyScope {
-                    xy_scope_area(rect)
-                } else {
-                    trace_area(rect)
-                };
+                let area = trace_draw_area(rect, &widget.kind);
                 let at = |[x, y]: [f32; 2]| {
                     Point::new(
                         area.x + x * area.width,

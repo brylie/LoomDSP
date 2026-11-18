@@ -135,7 +135,6 @@ fn tab_sequence(ui: &mut Ui, module: u32) -> Vec<String> {
 #[test]
 fn a_control_moved_right_keeps_its_node_and_its_place_in_tab_order() {
     let (mut ui, module) = with_wide_scope();
-    ui.app_mut().a11y.set_scale(1.0);
     let before = tab_sequence(&mut ui, module);
     assert_eq!(before, ["Beside", "Lower", "Below"]);
     let x_before = ui.control_bounds(module, "beside").x;
