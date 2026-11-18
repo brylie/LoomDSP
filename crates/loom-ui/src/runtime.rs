@@ -680,21 +680,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.field_left(&mut batch);
 
         // 3. One update per message, each followed by its own effects. A
-        // focus effect may move focus off a field: each update's is looked
-        // at, so focus that leaves and comes back in one turn still ends
-        // the field's undo, and the app hears of it on the next turn.
+        // focus effect that moves focus off a field is looked at as it
+        // runs (`update`), so focus that leaves and comes back in one turn
+        // still ends the field's undo.
         let mut updates = 0;
-        let mut later = Vec::new();
         for message in batch {
             if self.exited {
                 break;
             }
             updates += 1;
             redraw |= self.update(message, now, driver);
-            self.field_left(&mut later);
         }
         self.counts.updates += updates as u64;
-        self.pending.extend(later);
 
         // 4. What changed.
         if updates > 0 || self.view.is_none() {
@@ -795,7 +792,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let mut redraw = false;
         for effect in effects {
             match effect {
-                Effect::Focus { target, select } => redraw |= self.focus_effect(&target, select),
+                Effect::Focus { target, select } => {
+                    redraw |= self.focus_effect(&target, select);
+                    // Each focus effect may move focus off a field, even
+                    // one that a later effect of the same update moves
+                    // back: the field leaves at each, and the app hears of
+                    // it on the next turn.
+                    let mut later = Vec::new();
+                    self.field_left(&mut later);
+                    self.pending.extend(later);
+                }
                 Effect::ScrollIntoView(id) => self.target.scroll_into_view(&id),
                 Effect::ClipboardWrite(text) => driver.clipboard_write(text),
                 Effect::ClipboardRead(reply) => driver.clipboard_read(reply, &self.waker),

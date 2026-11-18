@@ -466,6 +466,8 @@ enum Message {
     Describe,
     /// Take input only from this layer up, as an open question does.
     Cover(Layer),
+    /// Focus the first UI ID, then the second, in one update.
+    FocusTwice(UiId, UiId),
 }
 
 /// An app with one field, keyed `form/name`, and a button after it. It
@@ -495,6 +497,7 @@ impl App for Form {
             }
             Message::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
             Message::Cover(layer) => self.covered = Some(layer),
+            Message::FocusTwice(first, second) => return Effects::focus(first).and(Effects::focus(second)),
         }
         Effects::none()
     }
@@ -1005,6 +1008,25 @@ fn focus_away_and_back_in_one_turn_leaves_the_field() {
         .waker()
         .send_all([Message::Focus(ok), Message::Focus(name())]);
     harness.step(DriverEvent::Woken);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    assert_eq!(harness.app().heard.last(), Some(&FieldEvent::Left));
+    harness.step(key_in(Key::Character('z'), shortcut(Platform::current(), false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab", "no undo step was left");
+}
+
+/// Two focus effects of one update, away from the field and back, still
+/// leave it: the runtime looks after each effect, not once after the
+/// update.
+#[test]
+fn focus_away_and_back_in_one_update_leaves_the_field() {
+    let Some((mut harness, mut text)) = form("", true) else {
+        return;
+    };
+    type_in(&mut harness, "ab");
+    harness.lay_out(&mut text);
+    harness.send(Message::FocusTwice(UiId::panel("form").with("ok"), name()));
     harness.step(DriverEvent::Woken);
     assert_eq!(harness.runtime().focused(), Some(&name()));
     assert_eq!(harness.app().heard.last(), Some(&FieldEvent::Left));
