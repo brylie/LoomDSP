@@ -480,7 +480,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Event::Key(key) = event else {
             return (false, false);
         };
-        let Some(id) = self.focus.id.clone().filter(|id| self.panels.fields.has(id)) else {
+        // A field in a layer below the one taking input, such as a panel
+        // under a question, edits nothing: the key goes on.
+        let layer = self.app.input().layer;
+        let Some(id) = self
+            .focus
+            .id
+            .clone()
+            .filter(|id| self.panels.fields.has(id) && self.panels.layer_of(id).is_some_and(|its| its >= layer))
+        else {
             return (false, false);
         };
         let used = self.panels.fields.key(&id, key, now, Platform::current());
@@ -671,20 +679,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // a field: the app hears of it in this turn.
         self.field_left(&mut batch);
 
-        // 3. One update per message, each followed by its own effects.
+        // 3. One update per message, each followed by its own effects. A
+        // focus effect may move focus off a field: each update's is looked
+        // at, so focus that leaves and comes back in one turn still ends
+        // the field's undo, and the app hears of it on the next turn.
         let mut updates = 0;
+        let mut later = Vec::new();
         for message in batch {
             if self.exited {
                 break;
             }
             updates += 1;
             redraw |= self.update(message, now, driver);
+            self.field_left(&mut later);
         }
         self.counts.updates += updates as u64;
-        // A focus effect may have moved focus off a field: the app hears
-        // of it on the next turn.
-        let mut later = Vec::new();
-        self.field_left(&mut later);
         self.pending.extend(later);
 
         // 4. What changed.

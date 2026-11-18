@@ -464,6 +464,8 @@ enum Message {
     Field(FieldEvent),
     /// Make the nodes from the last layout and keep them.
     Describe,
+    /// Take input only from this layer up, as an open question does.
+    Cover(Layer),
 }
 
 /// An app with one field, keyed `form/name`, and a button after it. It
@@ -475,6 +477,8 @@ struct Form {
     heard: Vec<FieldEvent>,
     ids: IdTable,
     nodes: Option<AccessNodes>,
+    /// The lowest layer that takes input, when not every layer does.
+    covered: Option<Layer>,
 }
 
 impl App for Form {
@@ -490,6 +494,7 @@ impl App for Form {
                 self.heard.push(event);
             }
             Message::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
+            Message::Cover(layer) => self.covered = Some(layer),
         }
         Effects::none()
     }
@@ -502,6 +507,13 @@ impl App for Form {
         WindowSpec {
             title: "Form".to_owned(),
             min_size: None,
+        }
+    }
+
+    fn input(&self) -> crate::app::InputState {
+        crate::app::InputState {
+            layer: self.covered.unwrap_or(Layer::Canvas),
+            ..crate::app::InputState::default()
         }
     }
 
@@ -851,17 +863,67 @@ fn backspace_and_delete_with_any_modifier_stay_in_the_field() {
     for (platform, modifiers) in [
         (Platform::Other, held(false, false, true, false)),
         (Platform::Other, held(false, false, false, true)),
-        (Platform::Other, held(true, true, true, false)),
-        (Platform::Mac, held(false, false, true, true)),
-        (Platform::Mac, held(false, true, false, true)),
+        (Platform::Other, held(true, false, true, false)),
+        (Platform::Mac, held(false, true, false, false)),
+        (Platform::Mac, held(true, true, false, false)),
     ] {
         let Some(mut bench) = field_in("abc", 300.0) else {
             return;
         };
+        bench.hit(platform, Key::Left, Modifiers::NONE);
         for key in [Key::Backspace, Key::Delete] {
             let used = bench.hit(platform, key, modifiers);
             assert!(used.taken, "{platform:?} {key:?} {modifiers:?}");
+            assert!(!used.edited, "{platform:?} {key:?} {modifiers:?}");
+            assert_eq!(bench.text(), "abc", "{platform:?} {key:?} {modifiers:?}");
         }
+    }
+}
+
+/// Backspace and Delete with Shift alone delete one character, as plain,
+/// on both platforms, so a slip while typing capitals still deletes.
+#[test]
+fn shift_backspace_and_delete_delete_one_character() {
+    for platform in PLATFORMS {
+        let Some(mut bench) = field_in("loom", 300.0) else {
+            return;
+        };
+        bench.hit(platform, Key::Left, Modifiers::NONE);
+        bench.hit(platform, Key::Backspace, SHIFT);
+        assert_eq!(bench.text(), "lom", "{platform:?}");
+        bench.hit(platform, Key::Delete, SHIFT);
+        assert_eq!(bench.text(), "lo", "{platform:?}");
+    }
+}
+
+/// Space types the text the platform gives with it, such as the no-break
+/// space of Option+Space on a Mac, and a plain space when it gives none.
+#[test]
+fn space_types_the_text_it_comes_with() {
+    let Some(mut bench) = field_in("", 300.0) else {
+        return;
+    };
+    let option = held(false, false, true, false);
+    bench.key(Platform::Mac, &press(Key::Space, option, Some("\u{a0}")));
+    bench.key(Platform::Mac, &press(Key::Space, Modifiers::NONE, None));
+    assert_eq!(bench.text(), "\u{a0} ");
+}
+
+/// Typing over a selection is an undo step of its own: the letters typed
+/// right after it are the next step, so undo takes them away first.
+#[test]
+fn typing_over_a_selection_is_its_own_step() {
+    for platform in PLATFORMS {
+        let Some(mut bench) = field_in("abc", 300.0) else {
+            return;
+        };
+        bench.hit(platform, Key::Character('a'), shortcut(platform, false));
+        bench.type_text(platform, "xy");
+        assert_eq!(bench.text(), "xy");
+        bench.hit(platform, Key::Character('z'), shortcut(platform, false));
+        assert_eq!(bench.text(), "x", "{platform:?}");
+        bench.hit(platform, Key::Character('z'), shortcut(platform, false));
+        assert_eq!(bench.text(), "abc", "{platform:?}");
     }
 }
 
@@ -908,4 +970,45 @@ fn a_delete_that_deletes_nothing_opens_no_run() {
     bench.hit(platform, Key::Character('z'), shortcut(platform, false));
     assert_eq!(bench.text(), "ab");
     assert_eq!(bench.field.steps(), (0, 1));
+}
+
+/// A field in a layer below the one taking input, such as a panel under
+/// an open question, edits nothing: its keys go on to the target.
+#[test]
+fn a_covered_field_takes_no_keys() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    harness.send(Message::Cover(Layer::Question));
+    harness.lay_out(&mut text);
+    harness.step(key_in(Key::Character('x'), Modifiers::NONE, Some("x")));
+    harness.step(key_in(Key::Backspace, Modifiers::NONE, None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab");
+    assert_eq!(harness.runtime().target().heard, [Key::Character('x'), Key::Backspace]);
+    assert!(harness.runtime().target().kept.is_empty());
+}
+
+/// Focus that leaves a field and comes back within one turn still leaves
+/// it: the app hears `Left` on the next turn, and the field's undo steps
+/// are gone (section 8, rule 3).
+#[test]
+fn focus_away_and_back_in_one_turn_leaves_the_field() {
+    let Some((mut harness, mut text)) = form("", true) else {
+        return;
+    };
+    type_in(&mut harness, "ab");
+    harness.lay_out(&mut text);
+    let ok = UiId::panel("form").with("ok");
+    harness
+        .runtime()
+        .waker()
+        .send_all([Message::Focus(ok), Message::Focus(name())]);
+    harness.step(DriverEvent::Woken);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    assert_eq!(harness.app().heard.last(), Some(&FieldEvent::Left));
+    harness.step(key_in(Key::Character('z'), shortcut(Platform::current(), false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab", "no undo step was left");
 }

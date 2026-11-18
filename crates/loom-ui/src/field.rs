@@ -447,7 +447,9 @@ impl FieldState {
                     driver.delete_word();
                 }
             }
-            Key::Backspace | Key::Delete if !shortcut => {
+            // Plain, or with Shift as the platforms allow while typing
+            // capitals: one character.
+            Key::Backspace | Key::Delete if !(modifiers.control || modifiers.alt || modifiers.meta) => {
                 self.step(Some(RunKind::Deleting), now, false);
                 let mut driver = self.editor.driver(fonts, layouts);
                 if *key == Key::Backspace {
@@ -475,7 +477,12 @@ impl FieldState {
                 'y' if !mac => self.redo(fonts, layouts),
                 _ => return KeyUse::default(),
             },
-            Key::Space if types => self.type_text(" ", now, fonts, layouts),
+            // Space types what the platform says it types, such as the
+            // no-break space of Option+Space on a Mac, or a plain space.
+            Key::Space if types => {
+                let typed = printable(text.as_deref()).unwrap_or_else(|| " ".to_owned());
+                self.type_text(&typed, now, fonts, layouts);
+            }
             _ => match printable(text.as_deref()).filter(|_| types) {
                 Some(typed) => self.type_text(&typed, now, fonts, layouts),
                 None => return KeyUse::default(),
@@ -515,11 +522,17 @@ impl FieldState {
         act(&mut self.editor.driver(fonts, layouts));
     }
 
-    /// Types `text` at the selection, at `now`.
+    /// Types `text` at the selection, at `now`. Typing over a selection is
+    /// an undo step of its own (ui-layer.md, section 8, rule 3), so the
+    /// typing after it starts a new run.
     fn type_text(&mut self, text: &str, now: Instant, fonts: &mut FontContext, layouts: &mut LayoutContext<()>) {
         let space = text.chars().all(char::is_whitespace);
+        let over = !self.editor.raw_selection().is_collapsed();
         self.step(Some(RunKind::Typing), now, space);
         self.editor.driver(fonts, layouts).insert_or_replace_selection(text);
+        if over {
+            self.run = None;
+        }
     }
 
     /// Before an edit at `now`: opens a new undo step, which
