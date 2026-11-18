@@ -53,6 +53,75 @@ impl Hierarchy {
         wiring
     }
 
+    /// Ends behind a pulled link, at the actual input in every stack copy.
+    /// A mode that sums or selects at a port ends the walk at its mixer.
+    pub(in crate::hierarchy) fn pulled_fade_inputs(&self, graph: &Graph) -> BTreeSet<End> {
+        let mut inputs = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut pending: Vec<_> = self
+            .pulled
+            .iter()
+            .map(|link| (link.level.clone(), link.to.clone()))
+            .collect();
+        while let Some((level, to)) = pending.pop() {
+            if !seen.insert((level.clone(), to.clone())) {
+                continue;
+            }
+            if let Some(port) = self.ports.get(&level.child(to.0))
+                && port.direction == Direction::Output
+                && let Some(mixer) = self.added_output(&level, &port.name)
+            {
+                for (id, node) in graph.nodes() {
+                    let same_output = id == mixer
+                        || match (self.added.get(&id), self.added.get(&mixer)) {
+                            (
+                                Some(Added::Output { instance, port }),
+                                Some(Added::Output {
+                                    instance: base,
+                                    port: name,
+                                }),
+                            ) => {
+                                port == name
+                                    && instance
+                                        .without_copies()
+                                        .zip(base.without_copies())
+                                        .is_some_and(|(left, right)| left.0 == right.0)
+                            }
+                            _ => false,
+                        };
+                    if same_output {
+                        for index in 0..node.descriptor.inputs.len() {
+                            if let Some(name) = node.input_name(index) {
+                                inputs.insert((id.0, name.to_string()));
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            match self.input_step(graph, &level, &to) {
+                InputStep::Found((id, name)) => {
+                    inputs.insert((id.0, name.clone()));
+                    inputs.extend(self.copies_of(id).iter().map(|(copy, _)| (copy.0, name.clone())));
+                }
+                InputStep::Next(next) => pending.extend(next),
+                InputStep::Nothing => {}
+            }
+        }
+        inputs
+    }
+
+    /// Retires the unfed destinations whose links were pulled. Once gone,
+    /// a later sync must not put their fades back.
+    pub(in crate::hierarchy) fn forget_fade_inputs(&mut self, inputs: &BTreeSet<End>) {
+        for fading in self.slots.values_mut().filter_map(|slot| slot.fading.as_mut()) {
+            fading.thru_dests.retain(|input| !inputs.contains(input));
+            for copy in &mut fading.copies {
+                copy.thru_dests.retain(|input| !inputs.contains(input));
+            }
+        }
+    }
+
     /// The fade wiring of one slot in copy 0.
     fn slot_fade_wiring(
         &self,
@@ -272,7 +341,7 @@ impl Hierarchy {
         slot_path: &ModulePath,
         leaving: Option<u32>,
         fades: &[(String, ModuleId)],
-    ) -> Result<Vec<CopyFade>, String> {
+    ) -> Result<Vec<CopyFade>, PatchError> {
         let level = slot_path.parent().unwrap_or_else(ModulePath::root);
         let mut made = Vec::new();
         for level_k in self.copy_levels(&level) {
@@ -289,19 +358,17 @@ impl Hierarchy {
                     .ids
                     .path_of(*fade)
                     .map(ModulePath::last)
-                    .ok_or("a fade has no path")?;
+                    .ok_or_else(|| PatchError::SlotEdit("a fade has no path".to_string()))?;
                 let law = controller
                     .graph()
                     .node(*fade)
                     // Copy 0's law, by name, so another parameter cannot change it.
                     .and_then(|n| Some(n.params[n.descriptor.param_index("law")?]))
                     .unwrap_or(0.0);
-                let id = self.ids.id_of(&slot_k.child(step)).map_err(|e| e.to_string())?;
-                controller
-                    .add_module_with_id(id, FADE_KIND)
-                    .map_err(|e| e.to_string())?;
+                let id = self.ids.id_of(&slot_k.child(step))?;
+                controller.add_module_with_id(id, FADE_KIND)?;
                 copy_fades.push((role_out.clone(), id));
-                controller.set_param_named(id, "law", law).map_err(|e| e.to_string())?;
+                controller.set_param_named(id, "law", law)?;
             }
             made.push(CopyFade {
                 level: level_k,
@@ -352,19 +419,15 @@ impl Hierarchy {
         controller: &mut Controller,
         slot_path: &ModulePath,
         outputs: Vec<(String, Law)>,
-    ) -> Result<Vec<(String, ModuleId)>, String> {
+    ) -> Result<Vec<(String, ModuleId)>, PatchError> {
         let mut made = Vec::new();
         for (role_out, law) in outputs {
             let k = self.next_level_id(slot_path);
             let fade_path = slot_path.child(k);
-            let fade_id = self.ids.id_of(&fade_path).map_err(|e| e.to_string())?;
-            controller
-                .add_module_with_id(fade_id, FADE_KIND)
-                .map_err(|e| e.to_string())?;
+            let fade_id = self.ids.id_of(&fade_path)?;
+            controller.add_module_with_id(fade_id, FADE_KIND)?;
             made.push((role_out, fade_id));
-            controller
-                .set_param_named(fade_id, "law", fade_law_value(law))
-                .map_err(|e| e.to_string())?;
+            controller.set_param_named(fade_id, "law", fade_law_value(law))?;
         }
         Ok(made)
     }

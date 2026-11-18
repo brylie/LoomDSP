@@ -10,17 +10,23 @@ impl Hierarchy {
     /// parameter in the order the file loads them (flattening rule 11),
     /// giving a new id only to one that must move, so the sum plays the
     /// same after save and reload (sub-patches.md, Editor model), and gives
-    /// each exposed parameter the range MIDI sweeps on it (Exposing). A
-    /// refusal changes nothing. The caller commits. Returns the assignments
-    /// that got a new id, as (old, new), so what keeps an id can follow.
+    /// each exposed parameter the range MIDI sweeps on it (Exposing).
+    /// Returns the assignments that got a new id, as (old, new), so what
+    /// keeps an id can follow. The caller commits.
+    ///
+    /// # Errors
+    ///
+    /// Invalid patches and shortages for the batch of new DSP modules
+    /// are refused before changing the graph. If the controller refuses
+    /// a later operation, the caller must take back the uncommitted edit.
     pub fn sync(&mut self, controller: &mut Controller) -> Result<Vec<(AssignmentId, AssignmentId)>, PatchError> {
         self.sync_without(controller, &[])
     }
 
     /// [`Hierarchy::sync`] with `skip` left out of the file, as if those
     /// modules were gone: a delete checks and settles the cables first,
-    /// while the modules are still in the graph, so a refusal changes
-    /// nothing. The cables into and out of them are disconnected.
+    /// while the modules are still in the graph. Cables into and out of
+    /// them are disconnected. Errors follow the rules of [`Hierarchy::sync`].
     pub fn sync_without(
         &mut self,
         controller: &mut Controller,
@@ -39,17 +45,18 @@ impl Hierarchy {
                 let _ = self.ids.reserve(ModulePath::top(id.0), id);
             }
         }
-        // What the links imply, from the links alone: a cable the graph
-        // holds for a link that is gone must be written as direct now.
-        let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), false, &skip);
+        // Do not write an old implied cable as direct when its link was
+        // just pulled. Dissolve explicitly promotes the joins it keeps.
+        let links_only = self.unflatten_with(controller.graph(), |_| Layout::default(), None, &skip);
         let mut links_scratch = self.ids.clone();
         let links_flat = links_only.flatten(controller.registry(), &mut links_scratch)?;
-        self.implied = links_flat
+        let mut implied: BTreeSet<(End, End)> = links_flat
             .cables
             .iter()
             .map(|cable| (cable.from.clone(), cable.to.clone()))
             .collect();
-        let patch = self.unflatten_with(controller.graph(), |_| Layout::default(), true, &skip);
+        let suppressed = self.implied.union(&implied).cloned().collect();
+        let patch = self.unflatten_with(controller.graph(), |_| Layout::default(), Some(&suppressed), &skip);
         // On the links' table, so implied modules have the same ids.
         let mut scratch = links_scratch.clone();
         let flat = patch.flatten(controller.registry(), &mut scratch)?;
@@ -61,13 +68,14 @@ impl Hierarchy {
             .filter(|m| m.path.is_implied())
             .map(|m| m.id.0)
             .collect();
-        self.implied.extend(
+        implied.extend(
             flat.cables
                 .iter()
                 .filter(|c| implied_ids.contains(&c.from.0) || implied_ids.contains(&c.to.0))
                 .map(|cable| (cable.from.clone(), cable.to.clone())),
         );
         self.sync_implied_modules(controller, &flat, &scratch)?;
+        self.implied = implied;
         let mut desired: BTreeSet<(End, End)> = flat
             .cables
             .iter()
@@ -81,6 +89,7 @@ impl Hierarchy {
         // While a slot fades, both parts run and the fades sit between the
         // new part and what the slot's output fed (sub-patches.md, How a
         // swap crossfades).
+        let pulled = self.pulled_fade_inputs(controller.graph());
         let wiring = self.fade_wiring(controller.graph());
         for (part_out, fade_out) in &wiring.reroute {
             let moved: Vec<(End, End)> = desired
@@ -100,10 +109,15 @@ impl Hierarchy {
         // A stack copy's fade takes over an input only while its thru cable
         // is still wanted, so an edit during the fade wins (ADR-0046).
         for (thru, input, fade_out) in &wiring.replace {
+            if pulled.contains(input) {
+                continue;
+            }
             let take = match thru {
                 Some(thru) => desired.remove(&(thru.clone(), input.clone())),
                 None => {
-                    controller.graph().node(ModuleId(input.0)).is_some()
+                    input_ref(controller.graph(), input)
+                        .and_then(|input| controller.graph().source_of(input))
+                        .is_some()
                         && !going.contains(&ModuleId(input.0))
                         && !desired.iter().any(|(_, to)| to == input)
                 }
@@ -127,12 +141,14 @@ impl Hierarchy {
         // new part comes from that copy's fade (ADR-0044).
         let through_fade: BTreeMap<End, End> = wiring.reroute.iter().cloned().collect();
         self.sync_implied_links(controller, &flat, &through_fade)?;
-        let renamed = order_assignments(controller, &flat.modulation).map_err(PatchError::Engine)?;
+        let renamed = order_assignments(controller, &flat.modulation, &through_fade).map_err(PatchError::Engine)?;
         // The range MIDI sweeps follows the surfaces: a range that changed
         // or went away reaches the engine with the caller's commit.
         controller
             .set_limits(flat.limits_in(controller.graph()))
             .map_err(PatchError::Engine)?;
+        self.forget_fade_inputs(&pulled);
+        self.pulled.clear();
         self.note_flat(&flat);
         self.synced_revision = SyncMark(Some(controller.revision()));
         Ok(renamed)
@@ -154,6 +170,7 @@ impl Hierarchy {
 fn order_assignments(
     controller: &mut Controller,
     canonical: &[PatchModulation],
+    through_fade: &BTreeMap<End, End>,
 ) -> Result<Vec<(AssignmentId, AssignmentId)>, loom_core::LoomError> {
     let graph = controller.graph();
     let mut live: BTreeMap<(End, End), Vec<AssignmentId>> = BTreeMap::new();
@@ -164,7 +181,8 @@ fn order_assignments(
     }
     let mut groups: BTreeMap<End, Vec<AssignmentId>> = BTreeMap::new();
     for entry in canonical {
-        let ids = live.get_mut(&(entry.source.clone(), entry.target.clone()));
+        let source = through_fade.get(&entry.source).unwrap_or(&entry.source);
+        let ids = live.get_mut(&(source.clone(), entry.target.clone()));
         if let Some(id) = ids.and_then(|ids| (!ids.is_empty()).then(|| ids.remove(0))) {
             groups.entry(entry.target.clone()).or_default().push(id);
         }

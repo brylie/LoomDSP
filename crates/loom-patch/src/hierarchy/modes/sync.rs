@@ -25,6 +25,26 @@ impl Hierarchy {
             .filter(|m| m.path.is_implied())
             .map(|m| (m.id, m))
             .collect();
+        // A running module that is removed still owns its slot until a
+        // schedule swaps. Check the whole batch before changing anything.
+        let added: Vec<_> = desired
+            .iter()
+            .filter(|(id, _)| controller.graph().node(**id).is_none())
+            .collect();
+        let needed = added
+            .iter()
+            .filter(|(_, module)| matches!(module.module.descriptor.role, loom_core::ModuleRole::Dsp(_)))
+            .count();
+        if needed > controller.free_module_slots() {
+            return Err(loom_core::LoomError::TooManyModules(controller.config().max_modules).into());
+        }
+        let mut ids = self.ids.clone();
+        for (id, _) in &added {
+            if let Some(path) = scratch.path_of(**id) {
+                ids.reserve(path.clone(), **id)?;
+            }
+        }
+
         // A leaving part or a fade of a stack copy sits at an implied path,
         // but the swap made it, not the flattener (ADR-0044).
         let fading = self.fading_ids();
@@ -34,25 +54,27 @@ impl Hierarchy {
             .map(|(id, _)| id)
             .filter(|id| self.is_implied_module(*id) && !fading.contains(id))
             .collect();
-        for id in current.iter().filter(|id| !desired.contains_key(id)) {
-            controller.remove_module(*id)?;
-            if let Some(path) = self.ids.path_of(*id).cloned() {
-                self.ids.forget(&path);
+        for (index, (id, module)) in added.iter().enumerate() {
+            if let Err(error) = module.module.add_to(controller, **id) {
+                for (id, _) in &added[..=index] {
+                    let _ = controller.remove_module(**id);
+                }
+                return Err(error);
             }
         }
-        for (id, module) in &desired {
-            if controller.graph().node(*id).is_none() {
-                if let Some(path) = scratch.path_of(*id) {
-                    self.ids.reserve(path.clone(), *id)?;
-                }
-                module.module.add_to(controller, *id)?;
-                continue;
+        for id in current.iter().filter(|id| !desired.contains_key(id)) {
+            controller.remove_module(*id)?;
+            if let Some(path) = ids.path_of(*id).cloned() {
+                ids.forget(&path);
             }
+        }
+        for id in current {
+            let Some(module) = desired.get(&id) else { continue };
             // Ranges first, as a load sets them, so a range never clamps a
             // value; spread works in the control's range, so copies must share
             // copy 0's.
             let ranges: Vec<(usize, loom_core::ParamRange)> = {
-                let node = controller.graph().node(*id).expect("checked above");
+                let node = controller.graph().node(id).expect("checked above");
                 module
                     .module
                     .ranges
@@ -62,10 +84,10 @@ impl Hierarchy {
                     .collect()
             };
             for (index, range) in ranges {
-                controller.set_range(*id, index, range)?;
+                controller.set_range(id, index, range)?;
             }
             let changes: Vec<(usize, f32)> = {
-                let node = controller.graph().node(*id).expect("checked above");
+                let node = controller.graph().node(id).expect("checked above");
                 module
                     .module
                     .params
@@ -79,9 +101,10 @@ impl Hierarchy {
                     .collect()
             };
             for (index, value) in changes {
-                controller.set_param(*id, index, value)?;
+                controller.set_param(id, index, value)?;
             }
         }
+        self.ids = ids;
         Ok(())
     }
 

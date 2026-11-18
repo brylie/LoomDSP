@@ -49,6 +49,10 @@ impl Hierarchy {
                 .map(|(p, _)| p.clone())
                 .collect();
             for path in under {
+                if let Some(state) = self.slots.get(&path).cloned() {
+                    removed.extend(self.end_fade(&path));
+                    self.remove_slot_record(&path, &state);
+                }
                 if let Some(instance) = self.instances.remove(&path) {
                     // The held definition stays, stored whole; nested ones
                     // live inside it.
@@ -212,13 +216,19 @@ impl Hierarchy {
     /// removed and their labels returned. A fade already in progress is
     /// finished first. `layout` gives tile layouts for a sub-patch part
     /// that is stored. The caller syncs and commits.
+    ///
+    /// # Errors
+    ///
+    /// Returns a slot, patch, or engine error. The slot and graph may have
+    /// changed before the error. Use a candidate hierarchy and undo graph
+    /// changes if the edit is refused, before committing.
     pub fn swap_to_module(
         &mut self,
         controller: &mut Controller,
         layout: &dyn Fn(u32) -> Layout,
         slot: ModuleId,
         kind: &str,
-    ) -> Result<Swapped, String> {
+    ) -> Result<Swapped, PatchError> {
         self.swap_to_module_at(controller, layout, slot, kind, None)
     }
 
@@ -226,6 +236,12 @@ impl Hierarchy {
     /// `at` when given: undo and redo put a part back at the id it had, so
     /// the step's assignments and mappings find it (sub-patches.md, Slots:
     /// undo of a swap fades too).
+    ///
+    /// # Errors
+    ///
+    /// Returns a slot, patch, or engine error. The slot and graph may have
+    /// changed before the error. Use a candidate hierarchy and undo graph
+    /// changes if the edit is refused, before committing.
     pub fn swap_to_module_at(
         &mut self,
         controller: &mut Controller,
@@ -233,20 +249,23 @@ impl Hierarchy {
         slot: ModuleId,
         kind: &str,
         at: Option<u32>,
-    ) -> Result<Swapped, String> {
+    ) -> Result<Swapped, PatchError> {
         let slot_path = self
             .ids
             .path_of(slot)
             .cloned()
-            .ok_or_else(|| "select a slot".to_string())?;
+            .ok_or_else(|| PatchError::SlotEdit("select a slot".to_string()))?;
         let state = self
             .slots
             .get(&slot_path)
             .cloned()
-            .ok_or_else(|| "select a slot".to_string())?;
-        let descriptor = controller.registry().resolve(kind).map_err(|e| e.to_string())?;
+            .ok_or_else(|| PatchError::SlotEdit("select a slot".to_string()))?;
+        let descriptor = controller.registry().resolve(kind)?;
         let Some(fills) = descriptor.fills(state.role.id) else {
-            return Err(format!("{} does not fill {}", descriptor.name, state.role.name));
+            return Err(PatchError::SlotEdit(format!(
+                "{} does not fill {}",
+                descriptor.name, state.role.name
+            )));
         };
         self.finish_fade(controller, slot);
         let level = slot_path.parent().unwrap_or_else(ModulePath::root);
@@ -261,12 +280,12 @@ impl Hierarchy {
         let (new_path, new_id) = match at {
             Some(lid) => {
                 let path = level.child(lid);
-                let id = self.ids.id_of(&path).map_err(|e| e.to_string())?;
+                let id = self.ids.id_of(&path)?;
                 (path, id)
             }
-            None => self.new_module(&level).map_err(|e| e.to_string())?,
+            None => self.new_module(&level)?,
         };
-        controller.add_module_with_id(new_id, kind).map_err(|e| e.to_string())?;
+        controller.add_module_with_id(new_id, kind)?;
         let mut added = vec![new_id];
         if let Some(held) = &restore {
             for (name, &value) in &held.params {
@@ -337,6 +356,12 @@ impl Hierarchy {
     /// Swaps the slot tile `slot` to a sub-patch: the file `file` inserted
     /// as a copy (or linked to `library`), which must declare the role and
     /// fit it. See [`Hierarchy::swap_to_module`] for what carries across.
+    ///
+    /// # Errors
+    ///
+    /// Returns a slot, patch, or engine error. The slot and graph may have
+    /// changed before the error. Use a candidate hierarchy and undo graph
+    /// changes if the edit is refused, before committing.
     pub fn swap_to_subpatch(
         &mut self,
         controller: &mut Controller,
@@ -344,13 +369,19 @@ impl Hierarchy {
         slot: ModuleId,
         file: &Patch,
         library: Option<&str>,
-    ) -> Result<Swapped, String> {
+    ) -> Result<Swapped, PatchError> {
         self.swap_to_subpatch_at(controller, layout, slot, file, library, None, None)
     }
 
     /// [`Hierarchy::swap_to_subpatch`], with the new instance at the level
     /// id `at` and its definition under `key` when given, as
     /// [`Hierarchy::swap_to_module_at`] does for undo.
+    ///
+    /// # Errors
+    ///
+    /// Returns a slot, patch, or engine error. The slot and graph may have
+    /// changed before the error. Use a candidate hierarchy and undo graph
+    /// changes if the edit is refused, before committing.
     #[allow(clippy::too_many_arguments)]
     pub fn swap_to_subpatch_at(
         &mut self,
@@ -361,17 +392,17 @@ impl Hierarchy {
         library: Option<&str>,
         at: Option<u32>,
         key: Option<&str>,
-    ) -> Result<Swapped, String> {
+    ) -> Result<Swapped, PatchError> {
         let slot_path = self
             .ids
             .path_of(slot)
             .cloned()
-            .ok_or_else(|| "select a slot".to_string())?;
+            .ok_or_else(|| PatchError::SlotEdit("select a slot".to_string()))?;
         let state = self
             .slots
             .get(&slot_path)
             .cloned()
-            .ok_or_else(|| "select a slot".to_string())?;
+            .ok_or_else(|| PatchError::SlotEdit("select a slot".to_string()))?;
         let (definition, _) = SubPatch::from_patch(file, controller.registry(), library);
         if !definition.fills(state.role, controller.registry(), &file.subpatches) {
             let why: Vec<String> = definition
@@ -384,10 +415,10 @@ impl Hierarchy {
             } else {
                 why.join(", ")
             };
-            return Err(format!(
+            return Err(PatchError::SlotEdit(format!(
                 "{} does not fill {}: {why}",
                 file.metadata.name, state.role.name
-            ));
+            )));
         }
         self.finish_fade(controller, slot);
         let level = slot_path.parent().unwrap_or_else(ModulePath::root);
@@ -396,9 +427,7 @@ impl Hierarchy {
         let old_id = old_part.and_then(|lid| self.ids.get(&level.child(lid)));
         self.hold_part(controller.graph(), controller.registry(), layout, &slot_path);
 
-        let inserted = self
-            .insert_with(controller, &level, file, library, at, key)
-            .map_err(|e| e.to_string())?;
+        let inserted = self.insert_with(controller, &level, file, library, at, key)?;
         let new_id = inserted.instance;
         let new_path = self.ids.path_of(new_id).cloned().expect("just inserted");
         let mut added = inserted.modules.clone();
@@ -461,18 +490,30 @@ impl Hierarchy {
 
     /// Swaps the slot tile `slot` back to a held sub-patch part, whose
     /// definition was stored whole when it left.
+    ///
+    /// # Errors
+    ///
+    /// Returns a slot, patch, or engine error. The slot and graph may have
+    /// changed before the error. Use a candidate hierarchy and undo graph
+    /// changes if the edit is refused, before committing.
     pub fn swap_to_held_subpatch(
         &mut self,
         controller: &mut Controller,
         layout: &dyn Fn(u32) -> Layout,
         slot: ModuleId,
         key: &str,
-    ) -> Result<Swapped, String> {
+    ) -> Result<Swapped, PatchError> {
         self.swap_to_held_subpatch_at(controller, layout, slot, key, None)
     }
 
     /// [`Hierarchy::swap_to_held_subpatch`], with the instance back at the
     /// level id `at` when given, under the key it had.
+    ///
+    /// # Errors
+    ///
+    /// Returns a slot, patch, or engine error. The slot and graph may have
+    /// changed before the error. Use a candidate hierarchy and undo graph
+    /// changes if the edit is refused, before committing.
     pub fn swap_to_held_subpatch_at(
         &mut self,
         controller: &mut Controller,
@@ -480,12 +521,12 @@ impl Hierarchy {
         slot: ModuleId,
         key: &str,
         at: Option<u32>,
-    ) -> Result<Swapped, String> {
+    ) -> Result<Swapped, PatchError> {
         let stored = self
             .definitions
             .get(key)
             .and_then(|d| d.stored.clone())
-            .ok_or_else(|| format!("the slot no longer holds `{key}`"))?;
+            .ok_or_else(|| PatchError::SlotEdit(format!("the slot no longer holds `{key}`")))?;
         let held = self
             .slot(slot)
             .and_then(|s| s.held.get(&PartKey::SubPatch(key.to_string())).cloned())

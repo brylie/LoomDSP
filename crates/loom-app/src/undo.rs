@@ -642,7 +642,7 @@ pub fn apply_full(
     sizes: &mut BTreeMap<u32, (u8, u8)>,
     layout: &dyn Fn(u32) -> loom_patch::Layout,
 ) -> Result<(), String> {
-    apply_fills(step, forward, controller, hierarchy, layout)?;
+    apply_fills(step, forward, controller, hierarchy, layout).map_err(|error| error.to_string())?;
     let removals = apply_removals(step, forward, controller, hierarchy, layout)?;
     for id in removals.gone {
         let _ = controller.remove_module(id);
@@ -671,7 +671,7 @@ pub(crate) fn apply_fills(
     controller: &mut Controller,
     hierarchy: &mut Hierarchy,
     layout: &dyn Fn(u32) -> loom_patch::Layout,
-) -> Result<(), String> {
+) -> Result<(), loom_patch::PatchError> {
     let Some((before, after)) = &step.hierarchy else {
         return Ok(());
     };
@@ -693,11 +693,11 @@ pub(crate) fn apply_fills(
                 controller.set_label(id, state.label.clone());
                 for (index, range) in state.ranges.iter().enumerate() {
                     if let Some(range) = *range {
-                        controller.set_range(id, index, range).map_err(|e| e.to_string())?;
+                        controller.set_range(id, index, range)?;
                     }
                 }
                 let changes: Vec<(usize, f32)> = state.params.iter().copied().enumerate().collect();
-                controller.set_params(id, &changes).map_err(|e| e.to_string())?;
+                controller.set_params(id, &changes)?;
             }
             None => {
                 // A sub-patch part: held whole in the live hierarchy, put
@@ -705,7 +705,11 @@ pub(crate) fn apply_fills(
                 // their old flat ids.
                 let key = to
                     .key_at(&level.child(lid))
-                    .ok_or_else(|| "the step's part is neither a module nor a sub-patch".to_string())?
+                    .ok_or_else(|| {
+                        loom_patch::PatchError::SlotEdit(
+                            "the step's part is neither a module nor a sub-patch".to_string(),
+                        )
+                    })?
                     .to_string();
                 hierarchy.swap_to_held_subpatch_at(controller, layout, slot, &key, Some(lid))?;
             }

@@ -656,3 +656,44 @@ fn two_cables_into_one_slot_input_keep_the_later() {
         Some(into[0])
     );
 }
+
+/// Copy assignments keep file order when their slot source becomes a fade.
+#[test]
+fn a_stack_fade_keeps_its_assignment_first() {
+    let mut patch = Patch::from_ron(STACKED_MODULATOR).unwrap();
+    let voice = patch.subpatches.get_mut("voice").unwrap();
+    for id in [7, 8] {
+        voice.modules.push(PatchModule {
+            id,
+            kind: "loom.math.constant@1".into(),
+            ..voice.modules[0].clone()
+        });
+        voice.modulation.push(PatchModulation {
+            source: (id, "out".into()),
+            depth: if id == 7 { 0.25 } else { 0.75 },
+            ..voice.modulation[0].clone()
+        });
+    }
+    let (mut controller, mut hierarchy) = load(&patch);
+    let slot = inside(&hierarchy, 9);
+    let amp = inside(&hierarchy, 5);
+    let copy = hierarchy.copies_of(amp)[0].0;
+    hierarchy
+        .swap_to_module(&mut controller, &|_| Layout::default(), slot, "loom.mod.lfo@1")
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    let graph = controller.graph();
+    let ordered: Vec<_> = graph
+        .assignments()
+        .filter(|(_, a)| a.target == copy)
+        .map(|(_, a)| (graph.node(a.source.module).unwrap().descriptor.id, a.depth))
+        .collect();
+    assert_eq!(
+        ordered,
+        [
+            ("loom.struct.fade", 0.5),
+            ("loom.math.constant", 0.25),
+            ("loom.math.constant", 0.75)
+        ]
+    );
+}

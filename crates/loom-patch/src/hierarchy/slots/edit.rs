@@ -9,6 +9,10 @@ impl Hierarchy {
     /// select member level. Nothing is added to the graph: a slot is routed
     /// through, and an empty one has nothing behind it. The caller syncs
     /// and commits.
+    ///
+    /// # Errors
+    ///
+    /// The destination accepts only mode members, or a tile id cannot be allocated.
     pub fn add_empty_slot(&mut self, level: &ModulePath, role: &'static RoleDescriptor) -> Result<ModuleId, String> {
         if let Some(why) = self.level_refusal(level) {
             return Err(why);
@@ -42,6 +46,11 @@ impl Hierarchy {
     /// removed, and its label returned, as are exposures of parameters
     /// outside the role. Refused for a tile that does not declare the
     /// role, or is already a slot or a part. The caller syncs and commits.
+    ///
+    /// # Errors
+    ///
+    /// The tile is missing, already in a slot, or does not fill the role.
+    /// A tile id may also fail to allocate.
     pub fn make_slot(
         &mut self,
         graph: &Graph,
@@ -169,6 +178,10 @@ impl Hierarchy {
     /// (sub-patches.md, Slots: Dissolve slot). A fade in progress is
     /// finished first; the modules to remove are returned. The caller
     /// removes them, syncs, and commits.
+    ///
+    /// # Errors
+    ///
+    /// The selected id does not name a slot, or its part cannot be moved.
     pub fn dissolve_slot(&mut self, graph: &Graph, slot: ModuleId) -> Result<Vec<ModuleId>, String> {
         let Some(slot_path) = self.ids.path_of(slot).cloned() else {
             return Err("select a slot".to_string());
@@ -203,7 +216,7 @@ impl Hierarchy {
             };
             // Between two modules the graph holds the cable already; it
             // becomes direct. A link stays a link.
-            if !(self.is_module_end(graph, &level, &from) && self.is_module_end(graph, &level, &to)) {
+            if !self.keep_direct_ends(graph, &level, &from, &to) {
                 self.links.insert(Link {
                     level: level.clone(),
                     to,

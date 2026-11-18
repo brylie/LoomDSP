@@ -541,7 +541,7 @@ impl App {
             &swapped,
             Some(&mut gone),
         )
-        .map_err(|e| e.to_string())
+        .map_err(loom_patch::PatchError::from)
         .and_then(|()| self.sync_step(&gone, &mut renamed));
         if rest.is_ok() && !self.fits(0) && !emptied_slots.is_empty() {
             // A recorded width was stale, so `room` was short: a removal
@@ -572,24 +572,23 @@ impl App {
         &mut self,
         gone: &[ModuleId],
         renamed: &mut Vec<(loom_core::AssignmentId, loom_core::AssignmentId)>,
-    ) -> Result<(), String> {
+    ) -> Result<(), loom_patch::PatchError> {
         let synced = self
             .session
             .hierarchy
-            .sync_without(&mut self.session.controller, gone)
-            .map_err(|e| crate::slots::sync_why(&e))?;
+            .sync_without(&mut self.session.controller, gone)?;
         renamed.extend(synced);
         Ok(())
     }
 
     /// Whether a part of a step went wrong: a failure, a lack of room on
     /// the way, or a measure with `room` kept free that does not fit.
-    fn refusal(&self, part: Result<(), String>, room: usize) -> Option<StepRefusal> {
+    fn refusal(&self, part: Result<(), loom_patch::PatchError>, room: usize) -> Option<StepRefusal> {
         match part {
             Ok(()) if self.fits(room) => None,
             Ok(()) => Some(StepRefusal::NoRoom),
-            Err(why) if crate::slots::is_room_error(&self.session.controller, &why) => Some(StepRefusal::NoRoom),
-            Err(why) => Some(StepRefusal::Failed(why)),
+            Err(why) if crate::slots::is_room_error(&why) => Some(StepRefusal::NoRoom),
+            Err(why) => Some(StepRefusal::Failed(crate::slots::sync_why(&why))),
         }
     }
 

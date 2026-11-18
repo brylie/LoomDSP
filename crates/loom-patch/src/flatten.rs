@@ -395,7 +395,8 @@ struct Inner {
     outputs: BTreeMap<String, Option<Source>>,
     /// Exposed name to the flat module and parameter it stands for.
     exposed: BTreeMap<String, (ModuleId, String)>,
-    /// Exposed name to every finite range on the way in, outer first.
+    /// Every declared exposed name and its ranges, outer first, even when
+    /// it currently reaches no live parameter.
     chains: BTreeMap<String, Vec<(f32, f32)>>,
     /// Flat parameter to the range MIDI sweeps on it. See [`Flat::limits`].
     limits: BTreeMap<(ModuleId, String), (f32, f32)>,
@@ -892,10 +893,11 @@ fn flatten_level(
                             reason: format!("module {} has no parameter `{}`", exposed.module, exposed.param),
                         });
                     }
-                    (*id, exposed.param.clone())
+                    Some((*id, exposed.param.clone()))
                 }
                 Some(Member::Instance(child)) => match child.exposed.get(&exposed.param) {
-                    Some(target) => target.clone(),
+                    Some(target) => Some(target.clone()),
+                    None if child.chains.contains_key(&exposed.param) => None,
                     None => {
                         return Err(PatchError::BadExposed {
                             name: exposed.name.clone(),
@@ -913,10 +915,7 @@ fn flatten_level(
                             reason: format!("slot {} has no role parameter `{}`", exposed.module, exposed.param),
                         });
                     }
-                    match slot_param(&members, slot, &exposed.param) {
-                        Some(target) => target,
-                        None => continue,
-                    }
+                    slot_param(&members, slot, &exposed.param)
                 }
                 Some(Member::Input(_) | Member::Output(_)) => {
                     return Err(PatchError::BadExposed {
@@ -938,11 +937,13 @@ fn flatten_level(
             {
                 chain.extend(further);
             }
-            if let Some(limit) = fold_ranges(chain.iter().copied()) {
-                surface_limits.push((target.clone(), limit));
+            if let Some(target) = target {
+                if let Some(limit) = fold_ranges(chain.iter().copied()) {
+                    surface_limits.push((target.clone(), limit));
+                }
+                inner.exposed.insert(exposed.name.clone(), target);
             }
-            inner.chains.insert(exposed.name.clone(), chain);
-            if inner.exposed.insert(exposed.name.clone(), target).is_some() {
+            if inner.chains.insert(exposed.name.clone(), chain).is_some() {
                 return Err(PatchError::BadExposed {
                     name: exposed.name.clone(),
                     reason: "it is exposed twice".to_string(),
@@ -1875,7 +1876,11 @@ impl Lookup<'_> {
                 {
                     return Err(through_slot(*slot));
                 }
-                child.exposed.get(param).cloned().map(Some).ok_or_else(no_such_param)
+                if child.exposed.contains_key(param) || child.chains.contains_key(param) {
+                    Ok(child.exposed.get(param).cloned())
+                } else {
+                    Err(no_such_param())
+                }
             }
             Some(Member::Input(_) | Member::Output(_)) => Err(no_such_param()),
             None => Err(LoomError::UnknownModule(ModuleId(*id)).into()),

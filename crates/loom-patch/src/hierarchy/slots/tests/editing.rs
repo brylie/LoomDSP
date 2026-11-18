@@ -322,10 +322,10 @@ fn a_swap_during_a_fade_finishes_the_first_and_a_bad_part_is_refused() {
         .slot;
     hierarchy.sync(&mut controller).unwrap();
     let layout = |_: u32| Layout::default();
-    assert_eq!(
+    assert!(matches!(
         hierarchy.swap_to_module(&mut controller, &layout, slot, "loom.osc.sine@1"),
-        Err("Sine does not fill Filter".to_string())
-    );
+        Err(PatchError::SlotEdit(reason)) if reason == "Sine does not fill Filter"
+    ));
     let first = hierarchy
         .swap_to_module(&mut controller, &layout, slot, "loom.filter.ladder@1")
         .unwrap();

@@ -548,8 +548,10 @@ impl Hierarchy {
     }
 
     /// The live module and parameter reached through a slot's role name.
-    pub fn slot_parameter(&self, slot: ModuleId, param: &str) -> Option<(ModuleId, String)> {
-        self.slot_param_target(self.ids.path_of(slot)?, param)
+    pub fn slot_parameter(&self, graph: &Graph, slot: ModuleId, param: &str) -> Option<(ModuleId, String)> {
+        let (module, name) = self.slot_param_target(self.ids.path_of(slot)?, param)?;
+        graph.node(module)?.parameter_index(&name)?;
+        Some((module, name))
     }
 
     /// The flat output behind the role output `name` of the part `lid` at

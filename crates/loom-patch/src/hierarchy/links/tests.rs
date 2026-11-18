@@ -24,7 +24,7 @@ fn both_orders_stay_in_step_and_find_by_range() {
     .collect();
     let top = ModulePath(Vec::new());
     let inside = ModulePath(vec![2]);
-    assert_eq!(set.len(), 4);
+    assert_eq!(set.iter().count(), 4);
     assert_eq!(set.at_level(&top).count(), 2);
     assert_eq!(set.at_level(&inside).count(), 2);
     assert_eq!(

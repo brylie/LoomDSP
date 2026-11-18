@@ -442,3 +442,42 @@ fn remove_part_with_no_room_for_its_fades_lets_every_copy_go() {
     }
     controller.commit().unwrap();
 }
+
+/// Pulling a link to an unfed empty slot's fade disconnects every copy,
+/// while a second sync keeps them disconnected.
+#[test]
+fn pulling_an_unfed_stack_fade_disconnects_every_copy() {
+    let patch = Patch::from_ron(&stacked_thru(2, true, false)).unwrap();
+    let (mut controller, mut hierarchy) = load(&patch);
+    let slot = inside(&hierarchy, 9);
+    let amps = amps(&hierarchy);
+    hierarchy
+        .swap_to_empty(&mut controller, &|_| Layout::default(), slot)
+        .unwrap();
+    hierarchy.sync(&mut controller).unwrap();
+    assert!(amps.iter().all(|amp| fed_by(&controller, *amp, "in").is_some()));
+    assert!(hierarchy.disconnect(&ModulePath::top(2), &(5, "in".into())));
+    for _ in 0..2 {
+        hierarchy.sync(&mut controller).unwrap();
+        assert!(amps.iter().all(|amp| fed_by(&controller, *amp, "in").is_none()));
+    }
+}
+
+/// Pulling an empty slot's structural link must not save or play a direct
+/// cable through the now disconnected input.
+#[test]
+fn pulling_an_empty_slot_link_drops_the_implied_cable() {
+    let patch = Patch::from_ron(&stacked_thru(1, false, true)).unwrap();
+    let (mut controller, mut hierarchy) = load(&patch);
+    let amp = inside(&hierarchy, 5);
+    assert!(fed_by(&controller, amp, "in").is_some());
+    assert!(hierarchy.disconnect(&ModulePath::top(2), &(5, "in".into())));
+    hierarchy.sync(&mut controller).unwrap();
+    assert!(fed_by(&controller, amp, "in").is_none());
+    assert!(
+        !written(&hierarchy, &controller).subpatches["voice"]
+            .cables
+            .iter()
+            .any(|cable| cable.to == (5, "in".into()))
+    );
+}

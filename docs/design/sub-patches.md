@@ -622,7 +622,7 @@ Points settled while building slice 5 (2026-11-08), beyond what the proposal put
 - **An undo snapshot leaves the fading modules out**, and undo or redo first finishes any fade in progress. A step that changes a slot's part is applied as a swap at the id the part had, so the step's assignments and mappings on it still apply, and the leaving part keeps its id and path across the restored snapshot.
 - **A sub-patch part is stored whole when it leaves**, with the definitions nested in it, under its key in the `subpatches` table. If a new definition takes a nested key meanwhile, the stored nested definitions are rekeyed when the file is written.
 - **A library item swapped in is inserted as a copy**, and its own linked items are refreshed first, as Insert does.
-- **Not built here:** a slot tile on the clipboard, a menu on a control, moving a slot through collapse or dissolve, and data on held parts (module data is not built). An empty slot from the browser came with [#700](https://github.com/brylie/LoomDSP/issues/700).
+- **Not built here:** a menu on a control and data on held parts (module data is not built). An empty slot from the browser came with [#700](https://github.com/brylie/LoomDSP/issues/700).
 
 ### Notes from building: modes
 

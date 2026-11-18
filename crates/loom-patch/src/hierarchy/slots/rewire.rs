@@ -74,7 +74,7 @@ impl Hierarchy {
         old_state: &SlotState,
         old: ModuleId,
         new: ModuleId,
-    ) -> Result<(Vec<ModuleId>, Vec<String>, Vec<(String, ModuleId)>), String> {
+    ) -> Result<(Vec<ModuleId>, Vec<String>, Vec<(String, ModuleId)>), PatchError> {
         let level = slot_path.parent().unwrap_or_else(ModulePath::root);
         let new_state = self.slots.get(slot_path).cloned().expect("the slot");
         let graph = controller.graph();
@@ -224,9 +224,7 @@ impl Hierarchy {
                     port: FADE_OUT,
                 };
             }
-            controller
-                .retarget_assignment(aid, source, target, param)
-                .map_err(|e| e.to_string())?;
+            controller.retarget_assignment(aid, source, target, param)?;
         }
         for aid in drops {
             let _ = controller.remove_assignment(aid);
@@ -236,9 +234,7 @@ impl Hierarchy {
         }
         for (old_target, old_param, control, target, param, options) in remaps {
             let _ = controller.unmap_midi(old_target, old_param);
-            controller
-                .map_midi_with(control, target, param, options)
-                .map_err(|e| e.to_string())?;
+            controller.map_midi_with(control, target, param, options)?;
         }
         Ok((added, removed, fades_made))
     }

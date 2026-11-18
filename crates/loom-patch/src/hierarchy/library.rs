@@ -6,6 +6,12 @@ impl Hierarchy {
     /// Inserts a clipboard slot with its own part and held definitions. A
     /// temporary definition lets the normal sub-patch loader validate and
     /// remap the whole slot before its tiles are moved to the destination.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a member-only destination, invalid slot or
+    /// part, or an engine refusal. The caller discards the candidate
+    /// hierarchy if insertion fails.
     pub fn insert_slot_copy(
         &mut self,
         controller: &mut Controller,

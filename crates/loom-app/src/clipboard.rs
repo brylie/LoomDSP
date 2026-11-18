@@ -789,30 +789,32 @@ impl Group {
         let mut added = Vec::with_capacity(self.members.len());
         let mut modules = Vec::new();
         let mut tiles = Vec::new();
-        let result = self.add_into(
-            controller,
-            hierarchy,
-            level,
-            positions,
-            sizes,
-            origin,
-            &mut added,
-            &mut modules,
-            &mut tiles,
-        );
-        match result {
-            Ok(renamed) => Ok(Added { ids: added, renamed }),
-            Err(why) => {
-                for id in &modules {
-                    let _ = controller.remove_module(*id);
+        controller.with_midi_mapping_rollback(|controller| {
+            let result = self.add_into(
+                controller,
+                hierarchy,
+                level,
+                positions,
+                sizes,
+                origin,
+                &mut added,
+                &mut modules,
+                &mut tiles,
+            );
+            match result {
+                Ok(renamed) => Ok(Added { ids: added, renamed }),
+                Err(why) => {
+                    for id in &modules {
+                        let _ = controller.remove_module(*id);
+                    }
+                    for id in &tiles {
+                        positions.remove(&id.0);
+                        sizes.remove(&id.0);
+                    }
+                    Err(why)
                 }
-                for id in &tiles {
-                    positions.remove(&id.0);
-                    sizes.remove(&id.0);
-                }
-                Err(why)
             }
-        }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1000,7 +1002,7 @@ impl Group {
                 let (module, param) = match controller.graph().node(target) {
                     Some(_) => (target, assignment.target.1.clone()),
                     None if hierarchy.slot(target).is_some() => {
-                        hierarchy.slot_parameter(target, &assignment.target.1)?
+                        hierarchy.slot_parameter(controller.graph(), target, &assignment.target.1)?
                     }
                     None => {
                         let index = hierarchy

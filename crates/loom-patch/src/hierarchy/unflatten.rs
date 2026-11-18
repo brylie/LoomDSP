@@ -8,7 +8,7 @@ impl Hierarchy {
     /// with `layout` giving each tile's position and size by flat id.
     /// The patch's own metadata is left for the caller.
     pub fn unflatten(&self, graph: &Graph, layout: impl Fn(u32) -> Layout) -> Patch {
-        self.unflatten_with(graph, layout, true, &BTreeSet::new())
+        self.unflatten_with(graph, layout, Some(&self.implied), &BTreeSet::new())
     }
 
     /// [`Hierarchy::unflatten`], with or without the graph's own cables. Without
@@ -18,7 +18,7 @@ impl Hierarchy {
         &self,
         graph: &Graph,
         layout: impl Fn(u32) -> Layout,
-        direct: bool,
+        implied: Option<&BTreeSet<(End, End)>>,
         skip: &BTreeSet<ModuleId>,
     ) -> Patch {
         let leaving = self.leaving_paths();
@@ -131,12 +131,12 @@ impl Hierarchy {
         }
         // Cables: the graph's between two modules of one level, unless a
         // link implies them, then the links.
-        for (from, to) in graph.cables().filter(|_| direct) {
+        for (from, to) in graph.cables().filter(|_| implied.is_some()) {
             if skip.contains(&from.module) || skip.contains(&to.module) {
                 continue;
             }
             let (from_end, to_end) = cable_ends(graph, from, to);
-            if self.implied.contains(&(from_end.clone(), to_end.clone())) {
+            if implied.is_some_and(|implied| implied.contains(&(from_end.clone(), to_end.clone()))) {
                 continue;
             }
             let (from_path, to_path) = (self.path_of(from.module), self.path_of(to.module));

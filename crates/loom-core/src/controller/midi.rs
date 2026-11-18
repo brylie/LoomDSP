@@ -7,6 +7,24 @@ use super::*;
 /// MIDI mappings and learn (`docs/design/midi-learn.md`), and the MIDI
 /// inputs the engine listens to.
 impl Controller {
+    /// Runs an uncommitted edit, preserving existing MIDI mappings and
+    /// their feedback state if the edit fails. The caller owns rollback of
+    /// other graph changes. The edit must return before committing.
+    pub fn with_midi_mapping_rollback<T, E>(&mut self, edit: impl FnOnce(&mut Self) -> Result<T, E>) -> Result<T, E> {
+        let mappings = self.graph.midi_mappings.clone();
+        let followers = self.graph.midi_followers.clone();
+        let seen = self.midi.seen.clone();
+        let edits = self.midi.edits.clone();
+        let result = edit(self);
+        if result.is_err() {
+            self.graph.midi_mappings = mappings;
+            self.graph.midi_followers = followers;
+            self.midi.seen = seen;
+            self.midi.edits = edits;
+        }
+        result
+    }
+
     /// Maps a hardware control to a parameter, with the default options. See
     /// [`Controller::map_midi_with`].
     pub fn map_midi(

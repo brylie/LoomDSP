@@ -653,3 +653,108 @@ fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
         "the LFO onto the inner multiply, and the inner one, once"
     );
 }
+
+/// The first inserted slot has a mapping that takes a live control. A
+/// refused second slot leaves the original mapping ID and options intact.
+#[test]
+fn a_refused_slot_paste_keeps_existing_midi_mappings() {
+    let mut engine = parts();
+    let controller = &mut engine.controller;
+    let amp = controller.add_module("loom.level.amp@1").unwrap();
+    let control = MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    controller.map_midi_named(control, amp, "gain").unwrap();
+    let before: Vec<_> = controller
+        .graph()
+        .midi_mappings()
+        .map(|(id, mapping)| (id, *mapping))
+        .collect();
+    let patch = r#"Patch(version: 1,
+        subpatches: {"effect": SubPatch(metadata: Metadata(name: "Effect"), roles: ["loom.role.effect@1"],
+            modules: [
+                PatchModule(id: 1, kind: "loom.struct.input@1", label: Some("in")),
+                PatchModule(id: 2, kind: "loom.level.amp@1"),
+                PatchModule(id: 3, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [PatchCable(from: (1, "out"), to: (2, "in")), PatchCable(from: (2, "out"), to: (3, "in"))],
+            midi: [PatchMidiMapping(target: (2, "gain"), channel: 0, controller: 74)],
+        )},
+        modules: [
+            PatchModule(id: 1, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.effect@1", part: Some(2)))),
+            PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("effect")),
+            PatchModule(id: 3, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(4)))),
+            PatchModule(id: 4, kind: "loom.osc.sine@1"),
+        ],
+    )"#;
+    let mut hierarchy = flat(controller.graph());
+    let mut positions = BTreeMap::new();
+    let mut sizes = BTreeMap::new();
+    let group = Group::from_text(patch, controller.registry()).unwrap();
+    let failure = group.add(
+        controller,
+        &mut hierarchy.clone(),
+        &root(),
+        &mut positions,
+        &mut sizes,
+        (0.0, 0.0),
+    );
+    assert!(failure.is_err());
+    assert_eq!(
+        controller
+            .graph()
+            .midi_mappings()
+            .map(|(id, mapping)| (id, *mapping))
+            .collect::<Vec<_>>(),
+        before
+    );
+
+    let mut patch = Patch::from_ron(patch).unwrap();
+    patch.modules.truncate(2);
+    let valid = Group::from_text(&patch.to_ron().unwrap(), controller.registry()).unwrap();
+    valid
+        .add(
+            controller,
+            &mut hierarchy,
+            &root(),
+            &mut positions,
+            &mut sizes,
+            (0.0, 0.0),
+        )
+        .unwrap();
+    assert_ne!(controller.graph().midi_mapping_on(control).unwrap().1.target, amp);
+}
+
+/// Optional role targets are skipped when the slot's part does not have
+/// them. Available targets still receive their modulation.
+#[test]
+fn pasting_a_slot_skips_an_optional_parameter_its_part_lacks() {
+    let mut engine = parts();
+    let controller = &mut engine.controller;
+    let patch = r#"Patch(version: 1,
+        modules: [
+            PatchModule(id: 1, kind: "loom.struct.slot@1", slot: Some(Slot(role: "loom.role.filter@1", part: Some(2)))),
+            PatchModule(id: 2, kind: "loom.filter.onepole@1"),
+            PatchModule(id: 3, kind: "loom.math.constant@1"),
+        ],
+        modulation: [
+            PatchModulation(source: (3, "out"), target: (1, "resonance"), depth: 0.25),
+            PatchModulation(source: (3, "out"), target: (1, "cutoff"), depth: 0.5),
+        ],
+    )"#;
+    let mut hierarchy = flat(controller.graph());
+    let group = Group::from_text(patch, controller.registry()).unwrap();
+    group
+        .add(
+            controller,
+            &mut hierarchy,
+            &root(),
+            &mut BTreeMap::new(),
+            &mut BTreeMap::new(),
+            (0.0, 0.0),
+        )
+        .unwrap();
+    let depths: Vec<_> = controller.graph().assignments().map(|(_, a)| a.depth).collect();
+    assert_eq!(depths, [0.5]);
+}

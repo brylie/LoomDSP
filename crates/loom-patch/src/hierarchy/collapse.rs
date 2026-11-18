@@ -34,6 +34,10 @@ impl Hierarchy {
             return Err(NOTHING_TO_COLLAPSE.to_string());
         }
 
+        let paths: Vec<_> = members.iter().map(|lid| level.child(*lid)).collect();
+        self.check_moving_fades(&paths)?;
+        let copies = self.copy_levels(level);
+
         // The definition and its instance.
         let name = unique_name(DEFAULT_NAME, |name| {
             self.definitions.values().any(|d| d.metadata.name == name)
@@ -68,14 +72,12 @@ impl Hierarchy {
         let shown = self.level_cables(graph, level);
         let member_ids: Vec<ModuleId> = members.iter().filter_map(|lid| self.id_at(level, *lid)).collect();
 
-        // Members move inside, keeping their level ids.
+        // Each member keeps its flat id in every running stack copy.
         for lid in &members {
             if let Some(part) = self.slots.get(&level.child(*lid)).and_then(|slot| slot.part) {
-                self.rename_prefix(&level.child(part), &instance_path.child(part))
-                    .map_err(|e| e.to_string())?;
+                self.move_into(level, &copies, ilid, part)?;
             }
-            self.rename_prefix(&level.child(*lid), &instance_path.child(*lid))
-                .map_err(|e| e.to_string())?;
+            self.move_into(level, &copies, ilid, *lid)?;
         }
 
         // Cables: inside stays inside, a crossing cable gets a port.
@@ -259,6 +261,27 @@ impl Hierarchy {
         })
     }
 
+    /// Refuses to move a slot while its leaving part still runs.
+    fn check_moving_fades(&self, paths: &[ModulePath]) -> Result<(), String> {
+        if self
+            .slots
+            .iter()
+            .any(|(slot, state)| state.fading.is_some() && paths.iter().any(|path| slot.starts_with(path)))
+        {
+            return Err("Finish the slot swap before moving it".to_string());
+        }
+        Ok(())
+    }
+
+    /// Moves one member and its running stack copies into the new instance.
+    fn move_into(&mut self, level: &ModulePath, copies: &[ModulePath], instance: u32, lid: u32) -> Result<(), String> {
+        for at in std::iter::once(level).chain(copies) {
+            self.rename_prefix(&at.child(lid), &at.child(instance).child(lid))
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     /// The output port of the new definition at `instance` that `from`
     /// (an end inside it) feeds, made when `from` has none yet. Returns the
     /// port's level id and name.
@@ -360,6 +383,8 @@ impl Hierarchy {
             .unwrap_or_default();
         let level = instance_path.parent().unwrap_or_else(ModulePath::root);
         let ilid = instance_path.last();
+        self.check_moving_fades(std::slice::from_ref(&instance_path))?;
+        let copies = self.copy_levels(&level);
 
         // The members and the ports of the inside.
         let mut members: Vec<ModulePath> = Vec::new();
@@ -385,7 +410,9 @@ impl Hierarchy {
                 .map(|l| l.to.clone())
                 .collect()
         };
-        let mut joins: Vec<(End, End)> = Vec::new();
+        // Select which endpoints are local to the instance when joining
+        // across a boundary. The outer level can use the same numbers.
+        let mut joins = Vec::new();
         for (path, port) in &ports {
             match port.direction {
                 Direction::Input => {
@@ -397,10 +424,10 @@ impl Hierarchy {
                             .find(|(p, q)| p.last() == link.to.0 && q.direction == Direction::Output)
                         {
                             for dest in outside_dests(&out.1) {
-                                joins.push((source.clone(), dest));
+                                joins.push((source.clone(), dest, None));
                             }
                         } else {
-                            joins.push((source.clone(), link.to.clone()));
+                            joins.push((source.clone(), link.to.clone(), Some(Direction::Input)));
                         }
                     }
                 }
@@ -415,7 +442,7 @@ impl Hierarchy {
                         continue; // Handled from the input side.
                     }
                     for dest in outside_dests(port) {
-                        joins.push((link.from.clone(), dest));
+                        joins.push((link.from.clone(), dest, Some(Direction::Output)));
                     }
                 }
             }
@@ -468,8 +495,11 @@ impl Hierarchy {
             .filter(|id| !self.is_hidden(*id))
             .collect();
         for path in &members {
-            let new = level.child(renamed[&path.last()]);
-            self.rename_prefix(path, &new).map_err(|e| e.to_string())?;
+            let lid = path.last();
+            for at in std::iter::once(&level).chain(&copies) {
+                self.rename_prefix(&at.child(ilid).child(lid), &at.child(renamed[&lid]))
+                    .map_err(|error| error.to_string())?;
+            }
         }
         // Every slot and part now has its destination path. The slot's
         // part reference uses the destination level's local id too.
@@ -495,7 +525,7 @@ impl Hierarchy {
                 };
                 entry.module = renamed.get(&through.module).copied().unwrap_or(through.module);
                 entry.param = through.param.clone();
-                entry.range = entry.range.or(through.range);
+                entry.range = fold_ranges(entry.range.into_iter().chain(through.range));
             }
             self.top_exposed.retain(|e| e.module != ilid);
         }
@@ -513,17 +543,20 @@ impl Hierarchy {
                     .unwrap_or_default();
                 entry.module = renamed.get(&through.module).copied().unwrap_or(through.module);
                 entry.param = through.param.clone();
-                entry.range = entry.range.or(through.range);
+                entry.range = fold_ranges(entry.range.into_iter().chain(through.range));
                 moved.push(((entry.module, entry.param.clone()), stored));
             }
             outer.exposed.retain(|e| e.module != ilid);
             outer.defaults.retain(|(member, _), _| *member != ilid);
             outer.defaults.extend(moved);
         }
-        for (from, to) in joins {
-            let (from, to) = (rename(&from), rename(&to));
-            if self.is_module_end(graph, &level, &from) && self.is_module_end(graph, &level, &to) {
-                // The graph holds it already; it becomes a direct cable.
+        for (mut from, mut to, inner) in joins {
+            match inner {
+                Some(Direction::Input) => to = rename(&to),
+                Some(Direction::Output) => from = rename(&from),
+                None => {}
+            }
+            if self.keep_direct_ends(graph, &level, &from, &to) {
                 continue;
             }
             self.links.insert(Link {

@@ -283,6 +283,8 @@ pub struct Hierarchy {
     /// The slot tiles, by path (sub-patches.md, Slots).
     slots: BTreeMap<ModulePath, SlotState>,
     links: links::LinkSet,
+    /// Links pulled since the last sync while a slot was fading.
+    pulled: Vec<Link>,
     /// The flat cables the links imply, as (output, input) in flat ids and
     /// port names, from the last sync or load.
     implied: BTreeSet<(End, End)>,
@@ -331,6 +333,7 @@ impl Hierarchy {
             ports: BTreeMap::new(),
             slots: BTreeMap::new(),
             links: links::LinkSet::default(),
+            pulled: Vec::new(),
             implied: BTreeSet::new(),
             copies: BTreeMap::new(),
             added: BTreeMap::new(),
@@ -431,9 +434,32 @@ impl Hierarchy {
 
     /// Removes the link into `to` on `level`. True when there was one.
     pub fn disconnect(&mut self, level: &ModulePath, to: &End) -> bool {
-        let before = self.links.len();
-        self.links.retain(|link| !(link.level == *level && link.to == *to));
-        self.links.len() != before
+        let Some(link) = self.link_into(level, to).cloned() else {
+            return false;
+        };
+        self.links.remove(&link);
+        if self.is_fading() {
+            self.pulled.push(link);
+        }
+        true
+    }
+
+    /// The editor deliberately made this flat cable direct after replacing
+    /// a boundary link, even when it chose the same input and output.
+    pub fn keep_direct_cable(&mut self, graph: &Graph, from: OutputRef, to: InputRef) {
+        self.implied.remove(&cable_ends(graph, from, to));
+    }
+
+    /// Keeps a boundary edit's joined cable when both ends are plain modules.
+    fn keep_direct_ends(&mut self, graph: &Graph, level: &ModulePath, from: &End, to: &End) -> bool {
+        if !self.is_module_end(graph, level, from) || !self.is_module_end(graph, level, to) {
+            return false;
+        }
+        if let (Some(source), Some(target)) = (self.id_at(level, from.0), self.id_at(level, to.0)) {
+            self.implied
+                .remove(&((source.0, from.1.clone()), (target.0, to.1.clone())));
+        }
+        true
     }
 
     /// Takes a tile out: a module loses its links; a port goes with its

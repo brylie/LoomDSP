@@ -50,11 +50,6 @@ impl LinkSet {
         self.by_to.iter()
     }
 
-    /// How many links there are.
-    pub(super) fn len(&self) -> usize {
-        self.by_to.len()
-    }
-
     /// The links of `level`, by range.
     pub(super) fn at_level<'a>(&'a self, level: &ModulePath) -> impl Iterator<Item = &'a Link> + 'a {
         let start = Link {
