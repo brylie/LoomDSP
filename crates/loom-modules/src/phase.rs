@@ -123,8 +123,8 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
         name: "phase",
         label: "Phase",
         signal: SignalType::Phase,
-        description: "The phase to watch. Each wrap fires a trigger.",
-        default: PortDefault::Value(0.0),
+        description: "The phase to watch. Each wrap fires a trigger. With no cable, it follows the bar.",
+        default: PortDefault::BarPhase,
         range: loom_core::PortRange::Signal,
         channels: Channels::Downmix,
     }],
@@ -155,6 +155,8 @@ pub static PHASE_TRIGGER: ModuleDescriptor = ModuleDescriptor {
     roles: &[],
 };
 
+const TRIGGER_PHASE_IN: usize = PHASE_TRIGGER.input_index("phase").unwrap();
+
 #[derive(Clone)]
 struct PhaseTrigger {
     wrap: WrapDetector,
@@ -168,10 +170,16 @@ impl Module for PhaseTrigger {
         loom_core::copy_state(self, other)
     }
 
-    fn process(&mut self, _ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+    fn process(&mut self, ctx: &ProcessContext<'_>, io: &mut PortIo<'_>) {
+        let follows_bar = io.uses_default(TRIGGER_PHASE_IN);
+        let transport = ctx.transport();
+        let active = !follows_bar || transport.playing();
+        if follows_bar && (!active || transport.jumped()) {
+            self.wrap.reset();
+        }
         let ([phase], [out]) = io.split::<1, 1>();
         for (out, &p) in out.iter_mut().zip(phase) {
-            let fired = self.wrap.wrapped(p);
+            let fired = active && self.wrap.wrapped(p);
             self.fired.record(fired);
             *out = trigger(fired);
         }

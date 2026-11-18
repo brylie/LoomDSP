@@ -15,7 +15,7 @@ Fires a trigger each time the phase wraps, forward or backward.
 
 | Port | Signal | Unconnected | Description |
 |---|---|---|---|
-| **Phase** (`phase`) | phase | 0 | The phase to watch. Each wrap fires a trigger. |
+| **Phase** (`phase`) | phase | bar phase | The phase to watch. Each wrap fires a trigger. With no cable, it follows the bar. |
 
 ## Outputs
 
