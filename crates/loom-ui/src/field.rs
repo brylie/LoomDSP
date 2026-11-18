@@ -105,9 +105,12 @@ impl Fields {
         for field in seen {
             match self.states.get_mut(&field.id) {
                 Some(state) => {
-                    let before = state.reported();
+                    // The text is compared before it is taken, so nothing
+                    // is copied while nothing changes.
+                    let text = state.text() != field.text;
+                    let before = (*state.editor.raw_selection(), state.scroll.to_bits());
                     state.take(&field.text, field.style, field.width, fonts, layouts);
-                    self.changed |= state.reported() != before;
+                    self.changed |= text || (*state.editor.raw_selection(), state.scroll.to_bits()) != before;
                 }
                 None => {
                     let mut state = FieldState::new(&field.text, field.style, fonts, layouts);
@@ -243,6 +246,9 @@ pub(crate) struct ReaderRun {
 /// and whether a word starts there.
 struct Character {
     bytes: std::ops::Range<usize>,
+    /// The bytes of the whole cluster it is part of: the same as `bytes`
+    /// unless the cluster was split into pieces.
+    cluster: std::ops::Range<usize>,
     offset: f32,
     advance: f32,
     word: bool,
@@ -319,11 +325,38 @@ impl std::fmt::Debug for FieldState {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many clusters this thread's calls to `FieldState::characters`
+    /// have visited, so a test can show a run is built in linear time.
+    pub(crate) static VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `text` with no control characters, or `None` when nothing is left to
 /// type.
 fn printable(text: Option<&str>) -> Option<String> {
     let text: String = text?.chars().filter(|c| !c.is_control()).collect();
     (!text.is_empty()).then_some(text)
+}
+
+/// `text` as one line, for a field that shows one: each line break (CRLF,
+/// LF, or CR) becomes one space, a break at the end is dropped, a tab
+/// becomes one space too, since it usually separates words, and other
+/// control characters go, as when typing. An empty text stays empty.
+/// (ui-layer.md, section 8, rule 2.)
+pub(crate) fn one_line(text: &str) -> String {
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix(['\n', '\r']))
+        .unwrap_or(text);
+    text.replace("\r\n", " ")
+        .chars()
+        .filter_map(|c| match c {
+            '\n' | '\r' | '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
 }
 
 impl FieldState {
@@ -445,20 +478,43 @@ impl FieldState {
         )
     }
 
-    /// Its clusters, in text order.
-    fn characters(&self) -> Vec<Character> {
+    /// Its clusters, in text order, with their places and widths when
+    /// `geometry` is set; without it, both are 0, for a caller that needs
+    /// only bytes.
+    fn characters(&self, geometry: bool) -> Vec<Character> {
         let Some(layout) = self.editor.try_layout() else {
             return Vec::new();
         };
+        // Each cluster's place along its line, from one walk in visual
+        // order. `Cluster::visual_offset` walks the line up to the
+        // cluster each time it is asked, which would make a long line's
+        // runs cost its length squared. A field has no inline boxes, so
+        // the line's runs are all it holds.
+        let mut places = std::collections::HashMap::new();
+        if geometry {
+            for line in layout.lines() {
+                let mut offset = line.metrics().offset;
+                for run in line.runs() {
+                    for cluster in run.visual_clusters() {
+                        #[cfg(test)]
+                        VISITS.with(|visits| visits.set(visits.get() + 1));
+                        places.insert(cluster.text_range().start, offset);
+                        offset += cluster.advance();
+                    }
+                }
+            }
+        }
         let mut out = Vec::new();
         let mut at = parley::layout::Cluster::from_byte_index(layout, 0);
         while let Some(cluster) = at {
+            #[cfg(test)]
+            VISITS.with(|visits| visits.set(visits.get() + 1));
             let bytes = cluster.text_range();
             if bytes.is_empty() {
                 break;
             }
-            let offset = cluster.visual_offset().unwrap_or(0.0);
-            let advance = cluster.advance();
+            let offset = places.get(&bytes.start).copied().unwrap_or(0.0);
+            let advance = if geometry { cluster.advance() } else { 0.0 };
             // A word starts at a boundary that is not a space, since
             // AccessKit counts the space after a word as part of it; the
             // line's first character starts one too. These are where
@@ -468,9 +524,9 @@ impl FieldState {
             // cluster longer than that (a letter with hundreds of
             // combining marks) is split at char boundaries into pieces of
             // at most 255 bytes. The first piece has the cluster's place
-            // and width, and the rest sit at its end with no width, so the
-            // lengths still add up to the text and the positions stay in
-            // order.
+            // and width, and the rest sit at its start with no width, since
+            // no caret can stand inside a cluster; the lengths still add up
+            // to the text and the positions stay in order.
             let text = &self.text()[bytes.clone()];
             let mut start = 0;
             let mut first = true;
@@ -481,7 +537,8 @@ impl FieldState {
                 }
                 out.push(Character {
                     bytes: bytes.start + start..bytes.start + end,
-                    offset: if first { offset } else { offset + advance },
+                    cluster: bytes.clone(),
+                    offset,
                     advance: if first { advance } else { 0.0 },
                     word: word && first,
                 });
@@ -496,7 +553,7 @@ impl FieldState {
     /// Its text as runs for a screen reader, of at most [`RUN_CHARACTERS`]
     /// characters each. An empty field has one empty run.
     pub(crate) fn runs(&self) -> Vec<ReaderRun> {
-        let characters = self.characters();
+        let characters = self.characters(true);
         if characters.is_empty() {
             return vec![ReaderRun::default()];
         }
@@ -533,7 +590,7 @@ impl FieldState {
     /// started, then where the caret is. An end past the last character
     /// is the last run's length.
     pub(crate) fn reader_selection(&self) -> ((usize, usize), (usize, usize)) {
-        let characters = self.characters();
+        let characters = self.characters(false);
         let place = |byte: usize| {
             let index = characters
                 .iter()
@@ -547,16 +604,53 @@ impl FieldState {
         (place(selection.anchor().index()), place(selection.focus().index()))
     }
 
-    /// The byte where character `index` of run `run` starts, or the end of
-    /// the text past the last character. `None` past that.
-    fn byte_at(&self, run: usize, index: usize) -> Option<usize> {
-        let characters = self.characters();
-        let at = run.checked_mul(RUN_CHARACTERS)?.checked_add(index)?;
-        match at.cmp(&characters.len()) {
-            std::cmp::Ordering::Less => Some(characters[at].bytes.start),
-            std::cmp::Ordering::Equal => Some(self.text().len()),
-            std::cmp::Ordering::Greater => None,
+    /// The byte where character `index` of run `run` starts, with the
+    /// cluster it is in: at the end of a run, the next run's first
+    /// character, and past the last character, the end of the text.
+    /// `None` for a run the field does not have, or an index past that
+    /// run's length, so a stale request does nothing.
+    fn byte_at(
+        characters: &[Character],
+        text_len: usize,
+        run: usize,
+        index: usize,
+    ) -> Option<(usize, std::ops::Range<usize>)> {
+        let runs = characters.len().div_ceil(RUN_CHARACTERS).max(1);
+        let length = characters
+            .len()
+            .saturating_sub(run * RUN_CHARACTERS)
+            .min(RUN_CHARACTERS);
+        if run >= runs || index > length {
+            return None;
         }
+        let at = run * RUN_CHARACTERS + index;
+        Some(match characters.get(at) {
+            Some(character) => (character.bytes.start, character.cluster.clone()),
+            None => (text_len, text_len..text_len),
+        })
+    }
+
+    /// The byte range a screen reader's selection from `anchor` to `focus`
+    /// (each a run and a character in it) names, or `None` if either end
+    /// is stale. An end inside a cluster split into pieces moves out to the
+    /// cluster's edge, the near end back to its start and the far end on to
+    /// its end, since the editor selects whole clusters only.
+    fn reader_range(&self, anchor: (usize, usize), focus: (usize, usize)) -> Option<(usize, usize)> {
+        let characters = self.characters(false);
+        let len = self.text().len();
+        let (anchor_at, anchor_cluster) = Self::byte_at(&characters, len, anchor.0, anchor.1)?;
+        let (focus_at, focus_cluster) = Self::byte_at(&characters, len, focus.0, focus.1)?;
+        let inside = |at: usize, cluster: &std::ops::Range<usize>| at > cluster.start && at < cluster.end;
+        let snap = |at: usize, cluster: &std::ops::Range<usize>, far: bool| match (inside(at, cluster), far) {
+            (true, true) => cluster.end,
+            (true, false) => cluster.start,
+            (false, _) => at,
+        };
+        let forward = anchor_at <= focus_at;
+        Some((
+            snap(anchor_at, &anchor_cluster, !forward),
+            snap(focus_at, &focus_cluster, forward),
+        ))
     }
 
     /// Carries out a screen reader's `action`, at `now`. Each edit ends the
@@ -568,21 +662,33 @@ impl FieldState {
         fonts: &mut FontContext,
         layouts: &mut LayoutContext<()>,
     ) -> ActUse {
+        // A stale selection changes nothing, not even the typing run, so
+        // typing after it still joins the run it was in.
+        let range = match &action {
+            FieldAction::Select { anchor, focus } => match self.reader_range(*anchor, *focus) {
+                Some(range) => Some(range),
+                None => return ActUse::default(),
+            },
+            _ => None,
+        };
         let before = self.reported();
         self.run = None;
         match action {
+            // A field shows one line, so a screen reader's text is made one
+            // as a pasted text is (section 8, rule 2).
             FieldAction::SetValue(text) => {
                 self.step(None, now, false);
-                self.editor.set_text(&text);
+                self.editor.set_text(&one_line(&text));
                 self.editor.driver(fonts, layouts).move_to_text_end();
             }
             FieldAction::ReplaceSelection(text) => {
                 self.step(None, now, false);
-                self.editor.driver(fonts, layouts).insert_or_replace_selection(&text);
+                self.editor
+                    .driver(fonts, layouts)
+                    .insert_or_replace_selection(&one_line(&text));
             }
-            FieldAction::Select { anchor, focus } => {
-                if let (Some(anchor), Some(focus)) = (self.byte_at(anchor.0, anchor.1), self.byte_at(focus.0, focus.1))
-                {
+            FieldAction::Select { .. } => {
+                if let Some((anchor, focus)) = range {
                     self.editor.driver(fonts, layouts).select_byte_range(anchor, focus);
                 }
             }

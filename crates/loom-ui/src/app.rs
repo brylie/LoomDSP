@@ -114,8 +114,9 @@ pub trait App {
     /// The message for "what a field reports to a screen reader changed
     /// with no message of its own": its caret, its selection, or its
     /// scroll (section 7, rule 7). The runtime asks at most once per turn,
-    /// after that turn's own field messages, so the app can send a new
-    /// tree. An app with no screen reader listening gives `None`, which
+    /// after that turn's updates have run, field messages included, so the
+    /// answer is built from a model that holds them, and runs it as one
+    /// more update; the app can send a new tree there. An app with no screen reader listening gives `None`, which
     /// costs nothing.
     fn access_changed(&self) -> Option<Self::Message> {
         None
@@ -268,7 +269,11 @@ impl<'a, M> Context<'a, M> {
     /// any other does, through [`App::accessibility_event`]. The app turns
     /// it into a message by the UI ID its table gives (section 7, rule 6),
     /// and a Focus action into [`Effects::focus`](crate::Effects::focus).
-    /// Empty outside a runtime.
+    /// The one exception is a text field's: when [`App::access_target`]
+    /// names a field or its run, the runtime carries out SetValue,
+    /// ReplaceSelectedText, and SetTextSelection itself, and an edit reaches
+    /// the app through [`App::field_event`] (rule 10). Focus on a field
+    /// still comes through `accessibility_event`. Empty outside a runtime.
     pub fn access_nodes(&self, ids: &mut IdTable) -> AccessNodes {
         self.panels.map_or_else(AccessNodes::default, |panels| {
             panels.access_nodes(ids, self.window.scale, self.focused.as_ref())

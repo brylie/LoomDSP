@@ -552,12 +552,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         };
         // A field in a layer below the one taking input, such as a panel
         // under a question, edits nothing: the key goes on.
-        let Some(id) = self
-            .focus
-            .id()
-            .cloned()
-            .filter(|id| self.panels.fields.has(id) && self.takes_input(id))
-        else {
+        let Some(id) = self.focus.id().cloned().filter(|id| self.field_takes_input(id)) else {
             return (false, false);
         };
         let used = self.panels.fields.key(&id, key, now, Platform::current());
@@ -580,10 +575,24 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         (used.taken, used.redraw)
     }
 
+    /// Whether the field with UI ID `id` takes input now: it is one of the
+    /// runtime's fields, not turned off (section 7, rule 22), and not
+    /// below [`App::input`]'s layer (section 5, rule 3). A key and a screen
+    /// reader's text action both ask this, so the two follow one rule.
+    fn field_takes_input(&self, id: &UiId) -> bool {
+        self.panels.fields.has(id)
+            && !self
+                .panels
+                .access_of(id)
+                .is_some_and(crate::access::Access::is_disabled)
+            && self.in_input_layer(id)
+    }
+
     /// Whether the element with UI ID `id` is in a layer that takes input
-    /// now: not below [`App::input`]'s layer (section 5, rule 3). A key
-    /// and a screen reader's text action on a field both ask this.
-    fn takes_input(&self, id: &UiId) -> bool {
+    /// now: at or above [`App::input`]'s layer (section 5, rule 3). A
+    /// field's keys and actions and a keyboard click all ask this, so they
+    /// follow one rule.
+    fn in_input_layer(&self, id: &UiId) -> bool {
         let layer = self.app.input().layer;
         self.panels.layer_of(id).is_some_and(|its| its >= layer)
     }
@@ -609,10 +618,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         let target = self.app.access_target(request.target_node)?;
         let field = self.panels.fields.owner_of(&target)?.clone();
-        // A field below the layer taking input takes no screen reader
-        // action (section 5, rule 3): the action is used up and changes
-        // nothing, so nothing is reported.
-        if !self.takes_input(&field) {
+        // A field below the layer taking input, or turned off, takes no
+        // screen reader action (section 5, rule 3; rule 22): the action is
+        // used up and changes nothing, so nothing is reported.
+        if !self.field_takes_input(&field) {
             return Some(false);
         }
         let place = |node: accesskit::NodeId, index: usize| {
@@ -679,7 +688,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let input = self.app.input();
         // While the canvas has the keyboard, its keys are its own (section
         // 6, rule 1): no element of ours is activated by them.
-        if input.canvas_focused || self.panels.layer_of(id).is_none_or(|layer| layer < input.layer) {
+        if input.canvas_focused || !self.in_input_layer(id) {
             return None;
         }
         let access = self.panels.access_of(id)?;
@@ -940,11 +949,6 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // Tab, or a press the target handed back, may have moved focus off
         // a field: the app hears of it in this turn.
         self.field_left(&mut batch);
-        // What a field reports changed: one notice, after the field's own
-        // messages, so the app's update for it sees the new text.
-        if reported {
-            batch.extend(self.app.access_changed());
-        }
 
         // 3. One update per message, each followed by its own effects. A
         // focus effect that moves focus off a field is looked at as it
@@ -957,6 +961,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             updates += 1;
             redraw |= self.update(message, now, driver);
+        }
+        // What a field reports changed: one notice, asked for after the
+        // turn's updates, so the app's answer is built from its model with
+        // the field's messages in it.
+        if reported
+            && !self.exited
+            && let Some(notice) = self.app.access_changed()
+        {
+            updates += 1;
+            redraw |= self.update(notice, now, driver);
         }
         self.counts.updates += updates as u64;
 
