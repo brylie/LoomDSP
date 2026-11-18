@@ -14,12 +14,15 @@ use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
-/// Command-line options for measuring the frame rate.
+/// Command-line options for measuring the frame rate or building an autosave copy.
 ///
 /// No implicit group: `screenshot::Options` already uses the name.
 #[derive(clap::Args, Debug, Clone, Default)]
 #[group(skip)]
 pub struct Options {
+    /// Measure how long it takes to build an autosave copy, without opening a window.
+    #[arg(long, conflicts_with_all = ["measuring", "inspect", "image"])]
+    pub bench_autosave_copy: bool,
     /// Measure the frame rate with the camera moving (performance gate),
     /// and print the numbers to stdout once a second.
     #[arg(long, group = "measuring")]
@@ -41,6 +44,22 @@ pub struct Options {
     /// built and how long a build took to each line.
     #[arg(long, requires = "measuring")]
     pub measure_tree: bool,
+}
+
+/// Measures the in-memory patch snapshot autosave builds on the UI thread.
+/// Report the mean in microseconds, with no time limit.
+pub(crate) fn autosave_copy(app: &crate::App) {
+    const RUNS: u32 = 200;
+    let patch = app.current_patch();
+    let start = Instant::now();
+    for _ in 0..RUNS {
+        std::hint::black_box(app.current_patch());
+    }
+    let microseconds = start.elapsed().as_secs_f64() * 1e6 / f64::from(RUNS);
+    println!(
+        "Autosave copy for {} top-level modules: {microseconds:.1} us mean over {RUNS} copies",
+        patch.modules.len()
+    );
 }
 
 /// The longest run `--bench-seconds` takes: a day. Longer is surely a typo,

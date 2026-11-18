@@ -143,7 +143,7 @@ struct Args {
     /// the recording.
     #[arg(long, value_name = "WAV", conflicts_with = "no_audio")]
     record: Option<PathBuf>,
-    /// Measuring the frame rate: --bench, --measure, --bench-seconds.
+    /// Benchmark options.
     #[command(flatten)]
     bench: bench::Options,
     /// The control channel: --control, --control-script.
@@ -230,7 +230,20 @@ impl Args {
 
 /// Runs the program with the command line it was started with.
 pub fn run() -> Result<(), loom_ui::shell::Error> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    if args.bench.bench_autosave_copy {
+        if args.patch.is_none() && args.generate.is_none() {
+            args.generate = Some(300);
+        }
+        match snapshot::headless(&args) {
+            Ok(app) => bench::autosave_copy(&app),
+            Err(e) => {
+                eprintln!("loom-app: {e}");
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
     if let Some(path) = &args.view.screenshot {
         if let Err(e) = screenshot::run(&args, path) {
             eprintln!("loom-app: {e}");

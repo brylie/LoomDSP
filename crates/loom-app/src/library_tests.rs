@@ -117,6 +117,50 @@ fn library() -> TempDir {
     dir
 }
 
+/// A library voice whose exposed gain sweeps a smaller range than its Multiply.
+fn library_with_midi_range() -> TempDir {
+    let dir = TempDir::new("library-midi-range");
+    let mut voice = Patch::from_ron(VOICE_FILE).unwrap();
+    voice.exposed[0].range = Some((0.25, 0.75));
+    write(&dir.0, "Voices/Voice.ron", &voice.to_ron().unwrap());
+    dir
+}
+
+/// Reads the engine's MIDI limit on the flattened parameter of this instance.
+fn midi_gain_range(app: &App, instance: u32) -> Option<(f32, f32)> {
+    let inside = app.session.hierarchy.path_of(ModuleId(instance));
+    let multiply = app.session.hierarchy.id_at(&inside, 4).expect("the multiply");
+    let node = app.session.controller.graph().node(multiply).unwrap();
+    let index = node.parameter_index("gain").unwrap();
+    node.limit(index).map(|limit| (limit.min, limit.max))
+}
+
+/// Insert from the library applies the exposed range to the live MIDI target.
+#[test]
+fn inserting_a_sub_patch_sets_its_midi_range() {
+    let dir = library_with_midi_range();
+    let mut ui = Ui::with_app(app_with(HOST, &dir.0));
+    let voice = insert(&mut ui, "Voice", false);
+    assert_eq!(midi_gain_range(ui.app(), voice), Some((0.25, 0.75)));
+}
+
+/// Paste applies the exposed range to the new instance's own MIDI target.
+#[test]
+fn pasting_a_sub_patch_sets_its_midi_range() {
+    let dir = library_with_midi_range();
+    let mut ui = Ui::with_app(app_with(HOST, &dir.0));
+    let original = insert(&mut ui, "Voice", false);
+    let app = ui.app_mut();
+    let text = app.copy().expect("the inserted tile is selected");
+    app.paste(loom_ui_core::Point::new(300.0, 300.0), Some(text));
+    let mut selected = app.session.selection.iter().copied();
+    let (Some(pasted), None) = (selected.next(), selected.next()) else {
+        panic!("the pasted tile is selected");
+    };
+    assert_ne!(pasted, original);
+    assert_eq!(midi_gain_range(app, pasted), Some((0.25, 0.75)));
+}
+
 /// Opens the module browser, which reads the library folder.
 fn open_browser(ui: &mut Ui) {
     ui.send(Message::OpenBrowser);

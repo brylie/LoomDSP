@@ -84,6 +84,8 @@ Tests live in their own files, never inline in a code module. Why: a code file t
 
 `mise run test-placement` checks this (`scripts/check-test-placement.sh`, tested by `scripts/test-check-test-placement.sh`). It fails on an inline `#[cfg(test)] mod name { ... }`, and on a `#[test]` in a file that is not a test file. The commit hook and CI run it.
 
+Count work in regression tests and use benchmarks to measure speed. Advance a simulated clock by fixed steps at known events. A real timeout can guard against a hang while waiting for an event.
+
 Run the desktop app and the command-line tool:
 
 ```sh

@@ -207,17 +207,17 @@ fn a_non_finite_voice_never_wins_lowest_or_highest() {
 /// through unchanged, at every block size.
 #[test]
 fn all_non_finite_voices_keep_the_lowest_index() {
+    let bits = [0x7fc0_0001, 0x7fc0_0002, 0x7fc0_0003, 0x7fc0_0004];
     for mode in [3.0, 4.0] {
-        let h = Harness::new(&MERGE)
-            .frames(1024)
-            .param("mode", mode)
-            .bundle_input("in", (0..4).map(|_| Signal::constant(f32::NAN)).collect());
-        let renders: Vec<_> = loom_test::BLOCK_SIZES.iter().map(|&b| h.render_with_block(b)).collect();
-        for render in &renders {
-            assert!(render.output("out").iter().all(|v| v.is_nan()));
-            assert_eq!(
-                render.output("out").iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-                renders[0].output("out").iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        let h = Harness::new(&MERGE).frames(1024).param("mode", mode).bundle_input(
+            "in",
+            bits.into_iter().map(|b| Signal::constant(f32::from_bits(b))).collect(),
+        );
+        for block in loom_test::BLOCK_SIZES {
+            let render = h.render_with_block(block);
+            assert!(
+                render.output("out").iter().all(|v| v.to_bits() == bits[0]),
+                "mode {mode}, block {block}: every frame must carry voice 1's NaN payload"
             );
         }
     }

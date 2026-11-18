@@ -2,6 +2,7 @@
 //! chains, fan-outs, and loops, and a long chain of empty thru slots is
 //! answered for every end in a time proportional to its length.
 
+use super::test_support::with_follow_budget;
 use super::*;
 use crate::Patch;
 use crate::hierarchy::tests::load;
@@ -79,9 +80,8 @@ fn a_loop_of_empty_slots_has_nothing_behind_it() {
     }
 }
 
-/// Every end of a chain of 10,000 empty Effect slots is answered within a
-/// second, both ways: the plain follows would walk the chain once per end,
-/// some 50 million steps (sub-patches.md, Empty slots).
+/// Every end of a 10,000-slot chain takes just one follow in each
+/// direction (sub-patches.md, Empty slots).
 #[test]
 fn a_long_chain_is_answered_for_every_end_in_linear_time() {
     let (text, last) = chain(10_000);
@@ -101,21 +101,22 @@ fn a_long_chain_is_answered_for_every_end_in_linear_time() {
         .unwrap()
         .0;
     let behind = Behind::new(&hierarchy, graph);
-    let started = std::time::Instant::now();
-    for id in (10..=last).rev() {
-        assert_eq!(
-            behind.source(&root, &(id, "out".into())),
-            Some((sine, "out".to_string()))
-        );
-    }
-    for id in 10..=last {
-        assert_eq!(
-            behind.first_input(&root, &(id, "in".into())),
-            Some((out, "in".to_string()))
-        );
-    }
-    let took = started.elapsed();
-    assert!(took < std::time::Duration::from_secs(1), "took {took:?}");
+    let budget = 2 * (last as usize - 9) + 2;
+    let ((), follows) = with_follow_budget(budget, || {
+        for id in (10..=last).rev() {
+            assert_eq!(
+                behind.source(&root, &(id, "out".into())),
+                Some((sine, "out".to_string()))
+            );
+        }
+        for id in 10..=last {
+            assert_eq!(
+                behind.first_input(&root, &(id, "in".into())),
+                Some((out, "in".to_string()))
+            );
+        }
+    });
+    assert_eq!(follows, budget);
 }
 
 /// `levels` diamonds of empty Effect slots in a row: slot `S_k` feeds two
@@ -249,36 +250,29 @@ fn the_memo_agrees_on_diamonds_and_rings() {
     }
 }
 
-/// A crafted loop of 20 diamonds (60 empty slots, each reached by two
-/// routes) and a ring of 10,000 empty slots are answered for every end
-/// within a second: each walk visits an end once, and a walk that finds
-/// nothing keeps that for every end it reached. Without both, the
-/// diamonds take time that doubles with each one and the ring its square.
+/// In a loop of diamonds or a ring, each walk visits every end once
+/// and keeps the result for every end it reached.
 #[test]
-fn loops_of_empty_slots_are_answered_quickly() {
+fn loops_of_empty_slots_follow_each_end_once() {
     for (text, ids) in [diamonds(20, true), ring(10_000)] {
         let (controller, hierarchy) = load(&Patch::from_ron(&text).unwrap());
         let root = ModulePath::root();
         let behind = Behind::new(&hierarchy, controller.graph());
-        let started = std::time::Instant::now();
-        for id in &ids {
-            assert_eq!(behind.first_input(&root, &(*id, "in".to_string())), None);
-            assert_eq!(behind.source(&root, &(*id, "out".to_string())), None);
-        }
-        let took = started.elapsed();
-        assert!(
-            took < std::time::Duration::from_secs(1),
-            "{} slots took {took:?}",
-            ids.len()
-        );
+        let budget = 2 * ids.len();
+        let ((), follows) = with_follow_budget(budget, || {
+            for id in &ids {
+                assert_eq!(behind.first_input(&root, &(*id, "in".to_string())), None);
+                assert_eq!(behind.source(&root, &(*id, "out".to_string())), None);
+            }
+        });
+        assert_eq!(follows, budget);
     }
 }
 
-/// A ring of 10,000 empty slots, one of which also feeds the output, is
-/// answered for every end within a second: each walk keeps the output for
-/// every end on its path.
+/// Each walk in a ring with one exit keeps the output for every end
+/// on its path.
 #[test]
-fn a_ring_with_one_way_out_is_answered_quickly() {
+fn a_ring_with_one_way_out_follows_each_input_once() {
     let (text, ids) = ring(10_000);
     let exit = ids[ids.len() / 2];
     let text = text.replacen(
@@ -300,13 +294,14 @@ fn a_ring_with_one_way_out_is_answered_quickly() {
         .0;
     let root = ModulePath::root();
     let behind = Behind::new(&hierarchy, graph);
-    let started = std::time::Instant::now();
-    for id in &ids {
-        assert_eq!(
-            behind.first_input(&root, &(*id, "in".to_string())),
-            Some((output, "in".to_string()))
-        );
-    }
-    let took = started.elapsed();
-    assert!(took < std::time::Duration::from_secs(1), "took {took:?}");
+    let budget = ids.len() + 1;
+    let ((), follows) = with_follow_budget(budget, || {
+        for id in &ids {
+            assert_eq!(
+                behind.first_input(&root, &(*id, "in".to_string())),
+                Some((output, "in".to_string()))
+            );
+        }
+    });
+    assert_eq!(follows, budget);
 }

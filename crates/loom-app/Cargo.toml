@@ -79,6 +79,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 hound.workspace = true
 loom-analysis.workspace = true
+loom-patch = { workspace = true, features = ["test-follows"] }
 # `test-ui`: lets the tests in `tests/` import `Ui`.
 loom-app = { path = ".", features = ["test-ui"] }
 

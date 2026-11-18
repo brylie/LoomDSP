@@ -148,7 +148,7 @@ If the window is closed or the dialog cannot be shown, the result is **Not Now**
 
 **A patch path on the command line:** the offer still comes first. Restore replaces the command-line patch, and the status bar says so: `Restored unsaved changes from 20 October, 14:31. drone.ron was not opened.` The other two choices load the command-line patch as usual. *Why:* the player who restarts after a crash usually starts the app the same way as before, and the copy has more recent work.
 
-**Non-interactive runs** never ask and never touch other sessions' folders: `--screenshot`, `--screenshot-window`, `--dump-ui`, `--bench`, `--measure`, `--measure-idle`, `--control`, `--control-script`, and `--no-recovery`. They also write no recovery copy. *Why:* scripts and tests must not stop at a dialog, and must not use up or delete a real user's recovery copy.
+**Non-interactive runs** never ask and never touch other sessions' folders: `--screenshot`, `--screenshot-window`, `--dump-ui`, `--bench`, `--bench-autosave-copy`, `--measure`, `--measure-idle`, `--control`, `--control-script`, and `--no-recovery`. They also write no recovery copy. *Why:* scripts and tests must not stop at a dialog, and must not use up or delete a real user's recovery copy.
 
 ### When the saved file has changed since the copy
 
@@ -264,7 +264,7 @@ Tests point `--recovery-dir` (or the function behind it) at a temporary folder. 
 - [ ] Given a write that does not finish (a writer blocked by the test), when the window closes, then the app exits within 2.5 s and the session folder is left for the next start.
 - [ ] Given an orphan whose current file has the same modification time but a different size, then the offer carries the "has changed" line. Given a file that changes while the question is open, then after Restore there is no current file.
 - [ ] Given the default paths, then on each OS the folder matches the table in Where the recovery copy lives. (Unit test of the path function against the environment variables the app reads. The test reads them and does not set them: setting environment variables while other tests run is unsound.)
-- [ ] With a 300-module patch (`--generate 300`), building the copy on the UI thread takes under 1 ms (benchmark, in [p1-canvas.md](../benchmarks/p1-canvas.md) or its own note).
+- [x] With a patch of about 300 modules (`--generate 300`), building the copy on the UI thread takes under 1 ms ([benchmark](../benchmarks/2026-11-18-autosave-copy.md)).
 - [ ] **Manual check.** On macOS, Windows, and Linux: make changes, wait 3 s, kill the app with the OS (Activity Monitor, Task Manager, `kill -9`). Start it again: the offer appears, Restore brings back the changes, and the title shows the unsaved mark.
 - [ ] **Manual check.** On a slow disk (a network share or USB stick as `--recovery-dir`), turning a knob continuously for 30 s keeps the canvas responsive.
 

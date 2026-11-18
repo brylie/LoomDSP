@@ -821,15 +821,11 @@ fn a_meters_number_is_the_one_its_text_says() {
     assert_eq!(meter_reading(divide, &divide.panel.widgets[2], 0.4, None), None);
 }
 
-/// A chain of 10,000 empty Effect slots loads and its scene builds in a
-/// few seconds: the follows through the chain are kept for the build, and
-/// which modules are hidden or leaving is worked out once per pass, so no
-/// step scans every slot for each module or cable (sub-patches.md, Empty
-/// slots). Without that, a crafted file this long froze the editor for a
-/// minute on load and on every rebuild.
+/// Each slot in a long chain gets a tile and the scene follows its ends
+/// within a linear budget (sub-patches.md, Empty slots).
 #[test]
-fn a_long_chain_of_empty_slots_builds_its_scene_quickly() {
-    const SLOTS: u32 = 10_000;
+fn a_long_chain_of_empty_slots_builds_its_scene_with_one_walk() {
+    const SLOTS: usize = 10_000;
     let mut modules = String::from(
         "PatchModule(id: 1, kind: \"loom.osc.sine@1\"), PatchModule(id: 2, kind: \"loom.io.audio-out@1\"),",
     );
@@ -846,31 +842,42 @@ fn a_long_chain_of_empty_slots_builds_its_scene_quickly() {
     cables.push_str(&format!("PatchCable(from: ({from}, \"out\"), to: (2, \"in\")),"));
     let text =
         format!("Patch(version: 1, metadata: Metadata(name: \"Chain\"), modules: [{modules}], cables: [{cables}])");
-    let loading = std::time::Instant::now();
-    let app = crate::tests::app_with_text(&text);
-    let loaded = loading.elapsed();
-    assert!(loaded < std::time::Duration::from_secs(5), "the load took {loaded:?}");
-    let session = &app.session;
-    let started = std::time::Instant::now();
-    let scene = build(
-        &session.controller,
-        &session.hierarchy,
-        &loom_patch::ModulePath::root(),
-        &session.positions,
-        &session.sizes,
-    );
-    let took = started.elapsed();
-    assert!(scene.modules().len() as u32 >= SLOTS + 2, "every slot has a tile");
-    assert!(took < std::time::Duration::from_secs(5), "the scene took {took:?}");
+    check_slot_scene(&text, SLOTS, SLOTS + 1, 2);
 }
 
-/// Crafted loops of empty Effect slots load and build their scene in a
-/// few seconds: a ring of 10,000, and a loop of 20 diamonds, where every
-/// slot is reached by two routes. Each follow visits an end once and keeps
-/// "nothing behind" for every end it reached, so neither costs a walk per
-/// cable (sub-patches.md, Empty slots).
+/// Builds the actual scene and gives each slot one visit per end, with
+/// room for the two ordinary ends at the head and tail of a chain.
+fn check_slot_scene(text: &str, slots: usize, cables: usize, other_modules: usize) {
+    let patch = loom_patch::Patch::from_ron(text).unwrap();
+    let loaded = crate::Loaded::read(
+        loom_core::EngineConfig::default(),
+        false,
+        crate::Source::Recovered(Box::new(patch)),
+        &loom_patch::NoLibrary,
+    )
+    .unwrap();
+    let (scene, follows) = loom_patch::hierarchy::behind::test_support::with_follow_budget(2 * slots + 2, || {
+        build(
+            &loaded.controller,
+            &loaded.hierarchy,
+            &loom_patch::ModulePath::root(),
+            &loaded.positions,
+            &loaded.sizes,
+        )
+    });
+    assert_eq!(
+        scene.modules().len(),
+        slots + other_modules + 1,
+        "every tile and the Transport are drawn"
+    );
+    assert_eq!(scene.cables().len(), cables, "every cable is drawn");
+    assert!(follows >= slots, "the scene follows the slots");
+}
+
+/// A 10,000-slot ring and a loop of 20 diamonds keep the answer that
+/// nothing lies behind their ends. The scene reuses it for every cable.
 #[test]
-fn loops_of_empty_slots_build_their_scene_quickly() {
+fn loops_of_empty_slots_build_their_scene_with_one_walk() {
     let slot = |id: u32| {
         format!("PatchModule(id: {id}, kind: \"loom.struct.slot@1\", slot: Some(Slot(role: \"loom.role.effect@1\"))),")
     };
@@ -893,25 +900,15 @@ fn loops_of_empty_slots_build_their_scene_quickly() {
             diamonds.1.push_str(&cable(from, to));
         }
     }
-    for (modules, cables) in [ring_text, diamonds] {
+    for ((modules, links), slots, cables) in [
+        (ring_text, ring.len(), ring.len()),
+        // A scene input has one source, so only one return from each
+        // diamond is drawn.
+        (diamonds, 3 * levels as usize, 3 * levels as usize),
+    ] {
         let text =
-            format!("Patch(version: 1, metadata: Metadata(name: \"Loop\"), modules: [{modules}], cables: [{cables}])");
-        let started = std::time::Instant::now();
-        let app = crate::tests::app_with_text(&text);
-        let session = &app.session;
-        let scene = build(
-            &session.controller,
-            &session.hierarchy,
-            &loom_patch::ModulePath::root(),
-            &session.positions,
-            &session.sizes,
-        );
-        let took = started.elapsed();
-        assert!(!scene.modules().is_empty());
-        assert!(
-            took < std::time::Duration::from_secs(5),
-            "the load and scene took {took:?}"
-        );
+            format!("Patch(version: 1, metadata: Metadata(name: \"Loop\"), modules: [{modules}], cables: [{links}])");
+        check_slot_scene(&text, slots, cables, 0);
     }
 }
 

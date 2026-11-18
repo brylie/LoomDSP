@@ -479,28 +479,39 @@ fn unattended_runs_leave_recovery_alone() {
     assert_eq!(sessions(&setup.root()), [crashed]);
 }
 
-/// Building the copy on the UI thread stays well under 1 ms for a
-/// 300-module patch (autosave.md, acceptance criteria). Debug builds are
-/// slower, so the bound here is loose; the release figure is in the PR.
+/// Autosave writes a complete copy of a large generated patch.
 #[test]
-fn building_a_copy_is_cheap() {
+fn autosave_copies_a_large_patch() {
+    let root = TempDir::new("large-autosave");
     let mut app = App::boot(
         Args {
             generate: Some(300),
+            recovery_dir: Some(root.0.clone()),
             ..tests::app_args()
         },
         &mut Answer::new(Choice::NotNow),
     );
-    let _ = app.current_patch();
-    let runs = 20;
-    let t = Instant::now();
-    for _ in 0..runs {
-        std::hint::black_box(app.current_patch());
-    }
-    let each = t.elapsed() / runs;
-    eprintln!("building a 300-module copy: {each:?}");
-    assert!(each < Duration::from_millis(20), "{each:?}");
-    app.autosave(Instant::now());
+    let dir = folder(&app);
+    let (filter, _) = app
+        .session
+        .controller
+        .graph()
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == loom_modules::filter::SVF.id)
+        .expect("the generated patch has a filter");
+    let index = loom_modules::filter::SVF.param_index("cutoff").unwrap();
+    let _ = app.send(Message::Inspector(crate::inspector::Message::ParamValue {
+        module: filter.0,
+        index,
+        value: 2_500.0,
+    }));
+    let _ = app.send(Message::SliderReleased);
+    let now = Instant::now();
+    app.autosave(now);
+    settle(&mut app, now + recovery::QUIET, |_| dir.join("info.ron").is_file());
+    let copy = crate::patch_file::load(dir.join("patch.ron")).unwrap();
+    assert_eq!(copy.modules.len(), 299);
+    assert_eq!(copy, app.current_patch());
 }
 
 /// A failed autosave stays on screen as a warning beside later messages, also

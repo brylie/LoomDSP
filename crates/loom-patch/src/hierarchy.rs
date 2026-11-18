@@ -781,6 +781,8 @@ impl Hierarchy {
     /// it. Each end has at most one step back, which is what lets
     /// [`behind::Behind`] give every end on a chain the chain's answer.
     pub(crate) fn source_step(&self, graph: &Graph, level: &ModulePath, end: &End) -> Option<Step> {
+        #[cfg(any(test, feature = "test-follows"))]
+        behind::test_support::follow();
         let path = level.child(end.0);
         if let Some(port) = self.ports.get(&path) {
             if port.direction != Direction::Input || end.1 != "out" {
@@ -856,6 +858,8 @@ impl Hierarchy {
     /// One step of [`Hierarchy::inputs_behind`]: the flat input the end is,
     /// the ends one link further on, in order, or nothing.
     pub(crate) fn input_step(&self, graph: &Graph, level: &ModulePath, end: &End) -> InputStep {
+        #[cfg(any(test, feature = "test-follows"))]
+        behind::test_support::follow();
         let path = level.child(end.0);
         let next = |at: &ModulePath, from: &End| -> InputStep {
             InputStep::Next(self.links_from(at, from).map(|l| (at.clone(), l.to.clone())).collect())

@@ -182,3 +182,6 @@ impl<'h> Behind<'h> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(any(test, feature = "test-follows"))]
+pub mod test_support;

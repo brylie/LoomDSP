@@ -1,5 +1,5 @@
 use super::*;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A fresh folder under the system temp folder, deleted when dropped.
 pub(crate) struct TempDir(pub PathBuf);
@@ -516,103 +516,105 @@ fn session_with(root: &Path, perform: Perform) -> Session {
     start_with(root, perform).unwrap().session
 }
 
-/// A failed write is reported once, and its recovery once.
+/// Waits for the writer to publish a result. The timeout only detects a
+/// hung worker. The simulated schedule clock stays where the test put it.
+fn wait_for_write(session: &Session) {
+    let writer = &session.writer.shared;
+    let (state, _) = writer
+        .changed
+        .wait_timeout_while(writer.lock(), Duration::from_secs(30), |state| state.done.is_empty())
+        .unwrap();
+    assert!(!state.done.is_empty(), "the writer did not finish");
+}
+
+/// A failed write is reported once across repeated failures. The first
+/// successful retry is reported once too, with no edit to trigger it.
 #[test]
 fn failures_are_reported_once() {
     let root = TempDir::new("fail");
-    let failing = Arc::new(AtomicBool::new(true));
-    let fail = failing.clone();
+    let mut attempts = 0;
     let mut session = session_with(
         &root.0,
         Box::new(move |dir, job| {
-            if fail.load(Ordering::SeqCst) {
+            attempts += 1;
+            if attempts <= 2 {
                 Err("disk full".to_string())
             } else {
                 perform(dir, job)
             }
         }),
     );
-    let info = || Info::new(None, None, SystemTime::now());
+    let info = || Info::new(None, None, SystemTime::UNIX_EPOCH);
+    let target = Some(patch("a"));
     let t0 = Instant::now();
-    let mut lines = Vec::new();
-    let mut now = t0;
-    // 25 s of the same unsaved patch: one attempt, then retries every 10 s.
-    while now < t0 + Duration::from_secs(25) {
-        lines.extend(session.tick(now, Some(patch("a")), info));
-        std::thread::sleep(Duration::from_millis(2));
-        now += TICK;
-    }
-    let until = Instant::now() + Duration::from_secs(5);
-    while lines.is_empty() && Instant::now() < until {
-        lines.extend(session.tick(now, Some(patch("a")), info));
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let first = t0 + QUIET;
+    assert!(session.tick(t0, target.clone(), info).is_empty());
+    assert!(session.tick(first, target.clone(), info).is_empty());
+    wait_for_write(&session);
     assert_eq!(
-        lines,
+        session.tick(first, target.clone(), info),
         [Report::Failed(
             "Autosave failed: disk full. Your changes are not protected against a crash. Save to keep them."
                 .to_string()
         )]
     );
-    // The disk has room again: the next retry writes, with no new change.
-    failing.store(false, Ordering::SeqCst);
-    let mut later = Vec::new();
-    let mut t = now;
-    let until = Instant::now() + Duration::from_secs(5);
-    while later.is_empty() && Instant::now() < until {
-        t += TICK;
-        later.extend(session.tick(t, Some(patch("a")), info));
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(later, [Report::Works]);
-    assert!(t - now <= RETRY + TICK * 2, "written within 10 s: {:?}", t - now);
+
+    let retry = first + RETRY;
+    assert!(session.tick(retry - TICK, target.clone(), info).is_empty());
+    assert_eq!(session.writer.next, 1, "no retry before its deadline");
+    assert!(session.tick(retry, target.clone(), info).is_empty());
+    wait_for_write(&session);
+    assert!(
+        session.tick(retry, target.clone(), info).is_empty(),
+        "failure already reported"
+    );
+
+    let recovered = retry + RETRY;
+    assert!(session.tick(recovered, target.clone(), info).is_empty());
+    wait_for_write(&session);
+    assert_eq!(session.tick(recovered, target.clone(), info), [Report::Works]);
+    assert!(session.tick(recovered + TICK, target, info).is_empty());
     assert!(session.dir.join(PATCH).is_file());
-    assert!(session.finish());
+    assert!(session.finish_within(Duration::from_secs(30)));
 }
 
-/// A folder that cannot be deleted at exit ends the wait at once, not
-/// after the full 2 s.
+/// The writer reports a failed cleanup as a result the caller can use.
 #[test]
-fn a_failed_cleanup_does_not_wait() {
+fn a_failed_cleanup_reports_its_result() {
     let root = TempDir::new("cleanup");
     let Startup { session, .. } = start(&root.0).unwrap();
+    let shared = session.writer.shared.clone();
     let dir = session.dir.clone();
-    // A file in place of the folder: remove_dir_all fails on it.
+    // A file in place of the folder makes remove_dir_all fail.
     fs::remove_dir_all(&dir).unwrap();
     fs::write(&dir, "not a folder").unwrap();
-    let t = Instant::now();
-    assert!(!session.finish());
-    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    assert!(!session.finish_within(Duration::from_secs(30)));
+    assert_eq!(shared.lock().finished, Some(false));
 }
 
-/// A write that never finishes does not hold up the exit, and the folder
-/// is left for the next start.
+/// Exit can give up on a write that is still blocked and leave its folder.
 #[test]
 fn exit_does_not_wait_for_a_stuck_write() {
     let root = TempDir::new("stuck");
-    let started = Arc::new(AtomicBool::new(false));
-    let flag = started.clone();
+    let (started, waiting) = std::sync::mpsc::channel();
+    let (release, blocked) = std::sync::mpsc::channel();
     let mut session = session_with(
         &root.0,
         Box::new(move |_, _| {
-            flag.store(true, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_secs(30));
+            started.send(()).unwrap();
+            let _ = blocked.recv_timeout(Duration::from_secs(30));
             Ok(())
         }),
     );
     session.schedule.write_now();
     session.tick(Instant::now(), Some(patch("a")), || {
-        Info::new(None, None, SystemTime::now())
+        Info::new(None, None, SystemTime::UNIX_EPOCH)
     });
-    wait_for(|| {}, || started.load(Ordering::SeqCst));
+    waiting.recv_timeout(Duration::from_secs(30)).unwrap();
     let dir = session.dir.clone();
-    let t = Instant::now();
-    assert!(
-        !session.finish_within(Duration::from_millis(200)),
-        "the write was still running"
-    );
-    assert!(t.elapsed() < Duration::from_secs(2));
+    assert!(!session.finish_within(Duration::ZERO), "the write was still running");
     assert!(dir.is_dir(), "left for the next start");
+    release.send(()).unwrap();
 }
 
 /// The folder is the one in the spec's table, for this OS, read from the

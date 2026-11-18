@@ -11,6 +11,10 @@ readme.workspace = true
 keywords = ["audio", "patch", "ron", "modular", "synthesizer"]
 categories = ["multimedia::audio", "encoding"]
 
+[features]
+# Lets the desktop tests bound the work in their actual scene build.
+test-follows = []
+
 [dependencies]
 loom-core.workspace = true
 loom-dsp.workspace = true

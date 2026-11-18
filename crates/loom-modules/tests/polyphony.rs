@@ -323,6 +323,93 @@ fn stereo_sides_multiply_with_voices_without_downmixing_them() {
     assert_eq!(right, [sum(4); 512]);
 }
 
+/// A sine per pitch, with adjacent voices one semitone apart.
+fn tuned_sines(c: &mut loom_core::Controller, voices: f32, first_pitch: f32) -> ModuleId {
+    let pitch = c.add_module("test.voices").unwrap();
+    c.set_param_named(pitch, "voices", voices).unwrap();
+    c.set_param_named(pitch, "value", first_pitch).unwrap();
+    let phase = c.add_module("loom.phase.generator").unwrap();
+    let sine = c.add_module("loom.osc.sine").unwrap();
+    c.connect_named(pitch, "out", phase, "pitch").unwrap();
+    c.connect_named(phase, "phase", sine, "phase").unwrap();
+    sine
+}
+
+/// Plays one voice of the stereo chain, or its isolated mono reference
+/// for the given side's starting pitch.
+fn play_filtered_voice(voice: usize, block: usize, first_pitch: Option<f32>) -> [Vec<u32>; 2] {
+    const PITCHES: [f32; 2] = [0.01, 0.13];
+    const FRAMES: usize = 1024;
+    let mut parts = engine();
+    let c = &mut parts.controller;
+    let source = if let Some(pitch) = first_pitch {
+        tuned_sines(c, 1.0, pitch + voice as f32 * 0.01)
+    } else {
+        let left = tuned_sines(c, 8.0, PITCHES[0]);
+        let right = tuned_sines(c, 8.0, PITCHES[1]);
+        let join = c.add_module("loom.mix.join").unwrap();
+        c.connect_named(left, "out", join, "left").unwrap();
+        c.connect_named(right, "out", join, "right").unwrap();
+        join
+    };
+    let filter = c.add_module("loom.filter.svf").unwrap();
+    let amplifier = c.add_module("loom.level.amp").unwrap();
+    c.set_param_named(amplifier, "gain", 0.25).unwrap();
+    c.connect_named(source, "out", filter, "in").unwrap();
+    c.connect_named(filter, "lowpass", amplifier, "in").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    if first_pitch.is_none() {
+        let split = c.add_module("loom.voice.split").unwrap();
+        c.set_param_named(split, "first", (voice + 1) as f32).unwrap();
+        c.connect_named(amplifier, "out", split, "in").unwrap();
+        c.connect_named(split, "out1", out, "in").unwrap();
+    } else {
+        c.connect_named(amplifier, "out", out, "in").unwrap();
+    }
+    c.commit().unwrap();
+    if first_pitch.is_none() {
+        let report = c.last_report();
+        for (module, port) in [(filter, "lowpass"), (amplifier, "out")] {
+            assert!(
+                report.runs_per_channel(module),
+                "{module:?} runs separately on each side"
+            );
+            let width = report.width(c.output_ref(module, port).unwrap());
+            assert_eq!(width, Width { voices: 8, sides: 2 }, "{module:?}: 16 copies");
+        }
+    }
+    let mut left = [0.0_f32; FRAMES];
+    let mut right = [0.0_f32; FRAMES];
+    for (left, right) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
+        parts.engine.process(left, right);
+    }
+    [left.map(f32::to_bits).to_vec(), right.map(f32::to_bits).to_vec()]
+}
+
+/// Each of the 16 filter and amplifier copies sounds bit-identical to
+/// processing its side alone, at every required block size.
+#[test]
+fn stereo_inside_eight_voices_matches_sixteen_mono_chains() {
+    for voice in 0..8 {
+        let [left, _] = play_filtered_voice(voice, 1, Some(0.01));
+        let [right, _] = play_filtered_voice(voice, 1, Some(0.13));
+        assert!(left.iter().any(|&sample| f32::from_bits(sample).abs() > 0.01));
+        assert!(right.iter().any(|&sample| f32::from_bits(sample).abs() > 0.01));
+        assert_ne!(left, right, "the two sides carry different signals");
+        let expected = [left, right];
+        for block in loom_test::BLOCK_SIZES {
+            let actual = play_filtered_voice(voice, block, None);
+            for (side, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                let mismatch = actual.iter().zip(expected).position(|(a, b)| a != b);
+                assert_eq!(
+                    mismatch, None,
+                    "voice {voice}, side {side}, block {block}: first differing frame"
+                );
+            }
+        }
+    }
+}
+
 /// Eight seeded copies differ and stay repeatable when the engine supplies voice identity.
 #[test]
 fn eight_seeded_voices_differ_and_repeat() {

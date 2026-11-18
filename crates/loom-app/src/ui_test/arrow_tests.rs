@@ -219,6 +219,99 @@ fn undo_and_redo_see_an_open_slider_gesture() {
     assert!(ui.app().redo_hint().is_ok(), "and the slider edit can come back");
 }
 
+/// The gestures that can affect whether history is available.
+#[derive(Clone, Copy, Debug)]
+enum HistoryGesture {
+    None,
+    ArrowHeld,
+    ArrowReleased,
+    InspectorSlider,
+    CanvasDrag,
+}
+
+impl HistoryGesture {
+    /// Starts the gesture after the recorded steps have been set up.
+    fn start(self, ui: &mut Ui) {
+        match self {
+            Self::None => {}
+            Self::ArrowHeld | Self::ArrowReleased => {
+                let at = ui.control(FILTER, "cutoff");
+                ui.move_to(at);
+                ui.press();
+                ui.release();
+                ui.key_down(right(), false);
+                if matches!(self, Self::ArrowReleased) {
+                    ui.key_up(right());
+                }
+            }
+            Self::InspectorSlider => slide_cutoff(ui, 2_500.0),
+            Self::CanvasDrag => {
+                let at = ui.control(FILTER, "cutoff");
+                ui.move_to(at);
+                ui.press();
+                ui.move_to(Point::new(at.x, at.y - 12.0));
+            }
+        }
+    }
+}
+
+/// The toolbar hints match live history actions before, during, and just
+/// after an edit. Redo can close and record a pending edit even if there
+/// is no old step to replay (undo.md, Gestures).
+#[test]
+fn history_hints_match_the_actions_during_gestures() {
+    for gesture in [
+        HistoryGesture::None,
+        HistoryGesture::ArrowHeld,
+        HistoryGesture::ArrowReleased,
+        HistoryGesture::InspectorSlider,
+        HistoryGesture::CanvasDrag,
+    ] {
+        for (undo, redo) in [(0, 0), (2, 0), (0, 2), (1, 1)] {
+            for forward in [false, true] {
+                let mut ui = Ui::open(PATCH);
+                for value in [800.0, 1_500.0].into_iter().take(undo + redo) {
+                    slide_cutoff(&mut ui, value);
+                    ui.send(Message::SliderReleased);
+                }
+                for _ in 0..redo {
+                    ui.app_mut().undo();
+                }
+
+                let original = cutoff(&ui);
+                gesture.start(&mut ui);
+                let pending = !matches!(gesture, HistoryGesture::None);
+                let closes = matches!(gesture, HistoryGesture::ArrowReleased | HistoryGesture::InspectorSlider);
+                assert_eq!(ui.app().session.edits.gesture_open(), pending, "{gesture:?}");
+                assert_eq!(cutoff(&ui) != original, pending, "{gesture:?}");
+
+                let before = ui.app().current_patch();
+                let app = ui.app_mut();
+                let enabled = if forward {
+                    let enabled = app.redo_hint().is_ok();
+                    app.redo();
+                    enabled
+                } else {
+                    let enabled = app.undo_hint().is_ok();
+                    app.undo();
+                    enabled
+                };
+                let history = &app.session.edits.history;
+                // Closing a new edit records it and drops prior redo steps.
+                // Check that side effect separately from traversing history.
+                let expected_len = if closes { undo + 1 } else { undo + redo };
+                let changed = app.current_patch() != before;
+                assert_eq!(
+                    enabled, changed,
+                    "{gesture:?}, undo {undo}, redo {redo}, forward {forward}"
+                );
+                assert_eq!(history.len(), expected_len, "{gesture:?}, forward {forward}");
+                assert_eq!(app.session.edits.gesture_open(), pending && !closes, "{gesture:?}");
+            }
+        }
+    }
+}
+
 /// An arrow press and the window losing focus in one frame: no key release
 /// will come, so the group ends there, and Undo works at once.
 #[test]
