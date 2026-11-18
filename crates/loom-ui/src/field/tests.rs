@@ -1417,3 +1417,57 @@ fn a_runs_units_match_the_field_nodes_at_scale_two() {
 fn bench_width(text: &str) -> f32 {
     field_in(text, 3000.0).map_or(0.0, |bench| bench.field.text_width())
 }
+
+/// While a layer above the field takes input, such as an open question,
+/// the field takes no screen reader text action (section 5, rule 3):
+/// SetTextSelection, SetValue, and ReplaceSelectedText leave its text and
+/// selection as they were, with no message and no notice, and nothing goes
+/// on to the app. Once the cover is gone, the same three work.
+#[test]
+fn a_covered_field_takes_no_text_actions() {
+    use accesskit::{Action, ActionData, TextPosition, TextSelection};
+    let Some((mut harness, mut text)) = form("abc", true) else {
+        return;
+    };
+    let (field, node) = describe(&mut harness, &mut text);
+    let run = node.children()[0];
+    let selection = TextSelection {
+        anchor: TextPosition {
+            node: run,
+            character_index: 0,
+        },
+        focus: TextPosition {
+            node: run,
+            character_index: 2,
+        },
+    };
+    let actions = [
+        (Action::SetTextSelection, ActionData::SetTextSelection(selection)),
+        (Action::SetValue, ActionData::Value("new".into())),
+        (Action::ReplaceSelectedText, ActionData::Value("x".into())),
+    ];
+
+    harness.send(Message::Cover(Layer::Question));
+    harness.lay_out(&mut text);
+    let start = harness.app().log.len();
+    for (action, data) in actions.clone() {
+        harness.step(reader(action, field, Some(data)));
+        harness.lay_out(&mut text);
+    }
+    let (_, after) = describe(&mut harness, &mut text);
+    assert_eq!(after.text_selection(), node.text_selection(), "the selection stayed");
+    assert_eq!(harness.app().text, "abc");
+    assert_eq!(harness.app().log.len(), start, "{:?}", &harness.app().log[start..]);
+
+    harness.send(Message::Cover(Layer::Canvas));
+    harness.lay_out(&mut text);
+    for (action, data) in actions {
+        harness.step(reader(action, field, Some(data)));
+        harness.lay_out(&mut text);
+    }
+    assert_eq!(harness.app().text, "newx", "SetValue, then the replacement at its end");
+    assert_eq!(
+        harness.app().log[start..],
+        ["changed", "Edited(\"new\")", "changed", "Edited(\"newx\")", "changed"]
+    );
+}

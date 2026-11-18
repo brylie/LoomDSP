@@ -483,12 +483,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         };
         // A field in a layer below the one taking input, such as a panel
         // under a question, edits nothing: the key goes on.
-        let layer = self.app.input().layer;
         let Some(id) = self
             .focus
             .id
             .clone()
-            .filter(|id| self.panels.fields.has(id) && self.panels.layer_of(id).is_some_and(|its| its >= layer))
+            .filter(|id| self.panels.fields.has(id) && self.takes_input(id))
         else {
             return (false, false);
         };
@@ -512,6 +511,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         (used.taken, used.redraw)
     }
 
+    /// Whether the element with UI ID `id` is in a layer that takes input
+    /// now: not below [`App::input`]'s layer (section 5, rule 3). A key
+    /// and a screen reader's text action on a field both ask this.
+    fn takes_input(&self, id: &UiId) -> bool {
+        let layer = self.app.input().layer;
+        self.panels.layer_of(id).is_some_and(|its| its >= layer)
+    }
+
     /// A screen reader's text action on one of the runtime's fields
     /// (section 7, rule 10): SetValue, ReplaceSelectedText, or
     /// SetTextSelection, on a field's node or one of its runs. The runtime
@@ -533,6 +540,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         let target = self.app.access_target(request.target_node)?;
         let field = self.panels.fields.owner_of(&target)?.clone();
+        // A field below the layer taking input takes no screen reader
+        // action (section 5, rule 3): the action is used up and changes
+        // nothing, so nothing is reported.
+        if !self.takes_input(&field) {
+            return Some(false);
+        }
         let place = |node: accesskit::NodeId, index: usize| {
             let id = self.app.access_target(node)?;
             Some((crate::field::run_index(&field, &id)?, index))
