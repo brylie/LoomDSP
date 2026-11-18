@@ -4505,3 +4505,31 @@ fn an_arrow_for_a_control_that_went_inert_does_not_move_the_tile() {
     let second = host_event(&canvas, &mut state, &key_event(Key::Up, true));
     assert!(moves(&second), "{second:?}");
 }
+
+/// A focus request for no control, with a new key, lets go of the keyboard:
+/// the focus clears, the change is reported, and nothing is selected, as
+/// when another part of the window takes the keys. With no focus, it does
+/// nothing.
+#[test]
+fn a_focus_request_for_no_control_lets_go() {
+    let mut tile = module(2, 0.0);
+    tile.panel = panel();
+    let scene = Scene::new(vec![tile], Vec::new());
+    let chosen = BTreeSet::from([2]);
+    let mut state = CanvasInput::default();
+    let at = |key, control| CanvasModel::new(&scene, &chosen).focus_request(key, control);
+    let _ = host_event(&at(5, Some((2, 0))), &mut state, &Event::Redraw);
+    let _ = host_event(&at(6, Some((2, 0))), &mut state, &Event::Redraw);
+    assert_eq!(state.focused_control(), Some((2, 0)));
+
+    let released = host_event(&at(7, None), &mut state, &Event::Redraw);
+    assert_eq!(state.focused_control(), None);
+    assert!(released.contains(&CanvasEvent::FocusChanged(None)));
+    assert!(
+        !released.iter().any(|event| matches!(event, CanvasEvent::Select(_))),
+        "nothing selected"
+    );
+
+    let again = host_event(&at(8, None), &mut state, &Event::Redraw);
+    assert!(!again.iter().any(|event| matches!(event, CanvasEvent::FocusChanged(_))));
+}

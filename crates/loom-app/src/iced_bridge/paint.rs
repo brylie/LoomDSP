@@ -102,13 +102,22 @@ impl Side {
         }
     }
 
-    /// Takes this frame's list and prepares it, unless it is empty.
+    /// Takes this frame's list and prepares it, unless it is empty, or the
+    /// same as the last one for the same target: the renderer then holds
+    /// it already, so an unchanged panel uploads nothing (the canvas keeps
+    /// its GPU data the same way).
     fn set(&mut self, target: &Target<'_>, list: PaintList) {
         if list.is_empty() {
             self.last = None;
             return;
         }
         let to = whole(target);
+        if let Some((last, at)) = &self.last
+            && *at == to
+            && last.same_as(&list)
+        {
+            return;
+        }
         let _ = self.renderer.prepare(target.device, target.queue, &list, to);
         self.last = Some((list, to));
     }
@@ -164,6 +173,38 @@ impl PanelPass {
         self.below.set(target, below);
         self.above.set(target, above);
     }
+}
+
+/// How the runtime's panels look from `theme`, for the window and its
+/// still captures alike: text in the theme's text colour, and a field
+/// looking like one of Iced's while both draw, its caret in the text
+/// colour and its selection in the theme's weak primary.
+pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
+    use loom_canvas::iced_convert::ToCore as _;
+    loom_ui::paint::PanelStyle {
+        text: theme.palette().text.to_core(),
+        caret: theme.palette().text.to_core(),
+        selection: theme.extended_palette().primary.weak.color.to_core(),
+    }
+}
+
+/// The runtime's layers painted into two lists over `whole` by `paint`: the
+/// canvas and panels layers, drawn below Iced, then the overlays and
+/// question layers, drawn above it (ui-layer.md, section 5, rule 10). The
+/// window and its still captures both split the layers here.
+pub(crate) fn paint_sides(
+    whole: Rect,
+    mut paint: impl FnMut(loom_ui::Layer, &mut PaintList),
+) -> (PaintList, PaintList) {
+    use loom_ui::Layer;
+    let mut lists = (PaintList::new(whole), PaintList::new(whole));
+    for layer in [Layer::Canvas, Layer::Panels] {
+        paint(layer, &mut lists.0);
+    }
+    for layer in [Layer::Overlays, Layer::Question] {
+        paint(layer, &mut lists.1);
+    }
+    lists
 }
 
 /// The whole of `target` for the panels' renderers: they draw in window

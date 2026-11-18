@@ -78,6 +78,7 @@ mod settings;
 mod slots;
 mod snapshot;
 mod spectrum;
+mod stats_bar;
 mod stream;
 mod style;
 mod subscriptions;
@@ -1448,6 +1449,50 @@ impl App {
         // catches up, so it alone may arrive with the two apart.
         if !matches!(message, Message::FocusMoved(_)) {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
+        }
+        // What reads the runtime's layout (where a part is for `locate`, the
+        // nodes for the tree) waits for the draw that lays out a view a
+        // live value just rebuilt, so it never reads a layout half made.
+        // A `locate` that Iced or the canvas answers needs nothing of ours,
+        // so it is answered at once, from a fresh search; only one whose
+        // answer would come from the runtime's layout waits.
+        let waits = match &message {
+            Message::Located { target, found, .. } => crate::control::waits_for_ours(self, target, found, cx),
+            Message::A11y(crate::a11y::Event::Located(_)) => true,
+            _ => false,
+        };
+        if waits && !cx.laid_out() {
+            return loom_ui::Effects::after_draw(message);
+        }
+        // The runtime's nodes as last laid out, for the tree a rebuild
+        // sends (`a11y/tree.rs`).
+        if matches!(message, Message::A11y(crate::a11y::Event::Located(_))) {
+            self.a11y_take_ours(|ids| cx.access_nodes(ids));
+        }
+        let mut message = message;
+        // A pointer command aimed at one of the runtime's own elements is
+        // aimed at its place, which only the context knows; it waits for the
+        // draw that lays a rebuilt view out (section 10, rule 6).
+        // It waits by the rule `locate` waits by, before asking for a place,
+        // since text a rebuilt view shows has no place yet.
+        if let Message::Control(call) = &mut message {
+            let stale = !cx.laid_out();
+            if stale
+                && call
+                    .command
+                    .pointer_targets()
+                    .iter()
+                    .any(|target| crate::control::may_be_ours(target, cx))
+            {
+                return loom_ui::Effects::after_draw(message);
+            }
+            call.command
+                .place_targets(|target| crate::control::ours_for_pointer(target, cx));
+        }
+        // A target `locate` looks for may be one of the runtime's own
+        // elements, which only the context can place (section 10, rule 6).
+        if let Message::Located { target, found, .. } = &mut message {
+            found.find_ours(target, cx);
         }
         debug_assert!(
             !matches!(message, Message::Input { .. }),

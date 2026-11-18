@@ -2,7 +2,7 @@
 //! out again, bounds and hits across panels, and slot mistakes.
 
 use super::Window;
-use crate::element::{Element, Length};
+use crate::element::{Element, Length, Padding};
 use crate::hit::Hit;
 use crate::layout::tests::{Mono, STYLE};
 use crate::view::{Layer, View};
@@ -547,4 +547,48 @@ fn a_panel_named_twice_by_one_parent_is_in_the_first_slot() {
         screen.window.hit(Point::new(25.0, 5.0)),
         None | Some((_, Hit::Blocked))
     ));
+}
+
+/// Text is found only where it shows: a long line in a clipping row gives
+/// the part inside the row, and a line clipped away entirely is not found.
+#[test]
+fn text_is_found_only_where_it_shows() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("cut"), Layer::Panels, &(), |_| {
+        Element::column([
+            Element::row([Element::text("a long line of text", STYLE)])
+                .width(Length::Fixed(40.0))
+                .clip(),
+            Element::row([
+                Element::space(Length::Fixed(10.0), Length::Fixed(10.0)).min_width(10.0),
+                Element::text("gone", STYLE),
+            ])
+            .width(Length::Fixed(10.0))
+            .clip(),
+        ])
+    });
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    let shown = screen.window.text_bounds("a long line of text").expect("partly shown");
+    assert_eq!((shown.x, shown.width), (0.0, 40.0), "cut to its row: {shown:?}");
+    assert_eq!(screen.window.text_bounds("gone"), None, "clipped away");
+}
+
+/// Text is looked for in its content box, inside its padding: a clip that
+/// keeps only the padding shows none of the text, so none is found.
+#[test]
+fn text_cut_to_its_padding_is_not_found() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("pad"), Layer::Panels, &(), |_| {
+        Element::column([
+            Element::row([Element::text("inside", STYLE).padding(Padding::symmetric(0.0, 8.0))])
+                .width(Length::Fixed(6.0))
+                .clip(),
+        ])
+    });
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(screen.window.text_bounds("inside"), None, "only padding shows");
 }

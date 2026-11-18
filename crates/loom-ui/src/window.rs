@@ -51,6 +51,8 @@ pub(crate) struct Window {
     order: Vec<UiId>,
     /// Their keys in draw order, after the last [`Window::lay_out`].
     drawn: Vec<UiId>,
+    /// The hover text showing, laid out after the panels.
+    hint: Option<crate::hint::Shown>,
     /// The window's size at the last [`Window::lay_out`].
     laid_out_at: Option<Size>,
     /// Panic on a slot mistake. On in a debug build; a test turns it off to
@@ -177,6 +179,7 @@ impl Default for Window {
             records: HashMap::new(),
             order: Vec::new(),
             drawn: Vec::new(),
+            hint: None,
             laid_out_at: None,
             panic_on_mistake: cfg!(debug_assertions),
             stops: Vec::new(),
@@ -576,7 +579,67 @@ impl Window {
             painted.panels += 1;
             painter.end_layer();
         }
+        if let Some(hint) = &self.hint
+            && hint.layer == layer
+        {
+            painter.begin_layer(hint.rect);
+            painted.elements += hint.layout.paint(hint.rect.position(), hint.rect, painter, style, None);
+            painter.end_layer();
+        }
         painted
+    }
+
+    /// Where the first text element that reads `text` shows in the window,
+    /// in draw order, as last laid out: what `locate` finds for text the
+    /// window shows (ui-layer.md, section 10, rule 6). Only the part that
+    /// shows: its bounds cut by every clipping element around it and by its
+    /// panel's clip, as painting and hit-testing cut it. Text cut away
+    /// entirely is not found, so a point `locate` gives is always on text
+    /// a user can see.
+    pub(crate) fn text_bounds(&self, text: &str) -> Option<Rect> {
+        self.drawn.iter().find_map(|key| {
+            let record = &self.records[key];
+            let records = record.layout.records();
+            (0..records.len()).find_map(|index| {
+                let paint = record.layout.text(index)?;
+                if paint.text != text {
+                    return None;
+                }
+                let element = &records[index];
+                // The text sits in the content box, inside any padding.
+                let inside = match element.clip {
+                    Some(clip) => element.content.intersection(clip)?,
+                    None => element.content,
+                };
+                let at = Rect::new(
+                    Point::new(record.origin.x + inside.x, record.origin.y + inside.y),
+                    inside.size(),
+                );
+                at.intersection(record.clip)
+            })
+        })
+    }
+
+    /// The hover text of the element with UI ID `id`, as last laid out.
+    pub(crate) fn hover_text_of(&self, id: &UiId) -> Option<&str> {
+        let panel = self.panel_of(id)?;
+        self.records[panel]
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?
+            .hover
+            .as_deref()
+    }
+
+    /// Shows `hint`, or none.
+    pub(crate) fn set_hint(&mut self, hint: Option<crate::hint::Shown>) {
+        self.hint = hint;
+    }
+
+    /// The hover text showing, if any.
+    pub(crate) fn hint(&self) -> Option<&crate::hint::Shown> {
+        self.hint.as_ref()
     }
 
     /// How many times the panel keyed `key` was laid out.

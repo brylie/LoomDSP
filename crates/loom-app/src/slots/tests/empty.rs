@@ -706,7 +706,7 @@ fn remove_part_at_the_limit_ramps_and_its_undo_is_refused() {
         assert_eq!(app.undo_hint(), Ok("Undo: remove part from Filter".to_string()));
         assert_eq!(app.session.hierarchy.part_of_slot(loom_core::ModuleId(slot)), None);
         ui.redraw();
-        let status_id = crate::a11y::tree::fixed_id(crate::bars::STATUS_ID);
+        let status_id = crate::stats_bar::stats_id().with("status");
         let role = ui.a11y_tree().node_by_id(&status_id).role();
         assert_eq!(role, accesskit::Role::Status, "the refusal is a status");
         // `fill` adds modules behind the hierarchy, and one can take the

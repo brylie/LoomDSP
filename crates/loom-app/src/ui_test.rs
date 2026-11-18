@@ -163,6 +163,12 @@ impl Ui {
         self.bridge.app_mut()
     }
 
+    /// Takes every whole accessibility tree the app sent since the last
+    /// call, oldest first: what a screen reader was handed.
+    pub(crate) fn take_sent_trees(&mut self) -> Vec<accesskit::TreeUpdate> {
+        std::mem::take(&mut self.bridge.driver_mut().trees)
+    }
+
     /// The clipboard's text.
     pub(crate) fn clipboard(&self) -> Option<&str> {
         self.bridge.driver().headless.clipboard()
@@ -308,12 +314,24 @@ impl Ui {
         self.lay_out_panels();
         let Self { bridge, surface, .. } = self;
         surface.draw(bridge.app());
+        // The frame is shown: what waited for it runs now, as in the window
+        // (`Effects::after_draw`).
+        if self.bridge.runtime().waits_for_draw() {
+            let task = self.bridge.update(Bridged::Presented);
+            self.settle(vec![task]);
+        }
         self.bridge.take_log()
     }
 
     /// Lays out the runtime's own panels, as the window does before each
     /// frame, so hits and focus read what was drawn.
-    fn lay_out_panels(&mut self) {
+    pub(crate) fn lay_out_panels(&mut self) {
+        // A test that set the app's state directly gets the view it set,
+        // through one turn with nothing to run.
+        if self.bridge.runtime().view_is_stale() {
+            let task = self.bridge.update(crate::iced_bridge::Bridged::Woken);
+            self.settle(vec![task]);
+        }
         let (_, _, mut panels) = self.bridge.runtime_mut().parts();
         panels.lay_out(&mut self.text);
     }
@@ -720,7 +738,11 @@ impl Ui {
         }
         let mut find = Find(content, None);
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.1.map(|bounds| bounds.to_core())
+        // Then the runtime's own text (the stats bar), as last laid out.
+        find.1.map(|bounds| bounds.to_core()).or_else(|| {
+            self.lay_out_panels();
+            self.runtime().text_bounds(content)
+        })
     }
 }
 

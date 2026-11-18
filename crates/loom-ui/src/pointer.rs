@@ -36,14 +36,25 @@ pub(crate) struct Pointer {
     /// The element a left press went down on, and its layer, until the
     /// release.
     pub(crate) pressed: Option<(Layer, UiId)>,
+    /// The focused element Space went down on, and the focus's move count
+    /// then: it clicks when Space comes up with the focus never moved
+    /// since (section 3, rule 4). A pointer press cancels it.
+    pub(crate) space: Option<(UiId, u64)>,
+    /// What chooses the hover text, between the pointer and the focus.
+    pub(crate) hint: crate::hint::Chooser,
+    /// Where the pointer last moved, in the window, to check the hover
+    /// again after a layout moves what was under it.
+    pub(crate) at: Option<Point>,
 }
 
 impl Pointer {
     /// Forgets the hover and the press: the pointer left the window.
     /// Another toolkit taking a move ends only the hover, so a press held
-    /// across it still clicks. Returns true when the hover changed.
+    /// across it still clicks. A held Space stays, since it is the
+    /// keyboard's and no focus moved. Returns true when the hover changed.
     pub(crate) fn clear(&mut self) -> bool {
         self.pressed = None;
+        self.at = None;
         self.hovered.take().is_some()
     }
 
@@ -98,11 +109,29 @@ impl<A: App> Panels<'_, A> {
     /// pointer at `point`: a driver whose toolkit routes before the turn
     /// asks this first, and keeps the event from the toolkit when it is
     /// true (a move reaches it as the pointer leaving).
-    pub fn over_target(&self, point: Point) -> bool {
+    pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
-        self.window
-            .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
-            .is_some()
+        self.keeps_hint(event, point)
+            || self
+                .window
+                .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
+                .is_some()
+    }
+
+    /// True for a move onto the hover text showing, or between it and its
+    /// element, which keeps it showing (section 5, rule 11). It takes no
+    /// other event: a press there goes where it would go without it.
+    /// It keeps only a hover the pointer has: while the pointer hovers the
+    /// hint's element. A hint shown for the focus keeps nothing, so a move
+    /// onto its element hovers it as any move does. A hint whose element is
+    /// now below the input layer (a question opened before the next draw)
+    /// keeps nothing either, since the update that raised the layer ended
+    /// that hover (`Pointer::below`).
+    fn keeps_hint(&self, event: &Event, point: Point) -> bool {
+        matches!(event, Event::Pointer(PointerEvent::Moved))
+            && self.window.hint().is_some_and(|hint| {
+                hint.keeps(point) && self.pointer.hovered.as_ref().is_some_and(|(_, id)| *id == hint.source)
+            })
     }
 
     /// Offers a pointer event at `point` to the runtime's layers below the
@@ -129,6 +158,9 @@ impl<A: App> Panels<'_, A> {
         ) {
             self.pointer.pressed = None;
         }
+        if matches!(event, Event::Pointer(PointerEvent::Pressed(_))) {
+            self.pointer.space = None;
+        }
         Heard {
             taken: false,
             redraw: self.pointer.hovered.take().is_some(),
@@ -151,6 +183,16 @@ impl<A: App> Panels<'_, A> {
         let Event::Pointer(pointer) = event else {
             return Heard::default();
         };
+        if matches!(pointer, PointerEvent::Moved) {
+            self.pointer.at = Some(point);
+        }
+        if side == Side::Above && self.keeps_hint(event, point) {
+            // The hover stays on the hint's element, so the hint stays.
+            return Heard {
+                taken: true,
+                redraw: false,
+            };
+        }
         let hit = self
             .window
             .hit_in(point, |layer| Side::of(layer) == side && layer >= input.layer)
@@ -168,6 +210,10 @@ impl<A: App> Panels<'_, A> {
                     self.pointer.pressed = None;
                     false
                 }
+                PointerEvent::Pressed(_) => {
+                    self.pointer.space = None;
+                    false
+                }
                 _ => false,
             };
             return Heard { taken: false, redraw };
@@ -177,10 +223,11 @@ impl<A: App> Panels<'_, A> {
         match pointer {
             PointerEvent::Moved => redraw = self.hover(at),
             PointerEvent::Pressed(button) => {
+                self.pointer.space = None;
                 redraw = self.hover(at.clone());
-                let before = self.focus.id.clone();
+                let before = self.focus.id().cloned();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
-                redraw |= self.focus.id != before;
+                redraw |= self.focus.id() != before.as_ref();
                 if *button == PointerButton::Left {
                     self.pointer.pressed = at;
                 }
@@ -199,8 +246,13 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// Moves the hover to `at`. Returns true when it changed.
+    /// A move onto an element, even the one already hovered, makes the
+    /// pointer the latest input for hover text (section 5, rule 11).
     fn hover(&mut self, at: Option<(Layer, UiId)>) -> bool {
         let changed = self.pointer.hovered != at;
+        if at.is_some() {
+            self.pointer.hint.pointer_moved(self.focus.moves);
+        }
         self.pointer.hovered = at;
         changed
     }
@@ -216,9 +268,10 @@ impl<A: App> Panels<'_, A> {
     /// so a press focuses in the same panels it hits.
     fn focus_in(&mut self, point: Point, keep: impl Fn(Layer) -> bool) {
         self.focus.wanted = None;
-        self.focus.id = self.window.focus_at_in(point, keep).flatten().cloned();
+        let to = self.window.focus_at_in(point, keep).flatten().cloned();
+        self.focus.set(to);
         self.focus.ring = false;
-        if self.focus.id.is_some() {
+        if self.focus.id().is_some() {
             self.focus.release_owed = true;
         }
     }

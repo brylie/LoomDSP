@@ -6,9 +6,9 @@ use crate::Element;
 use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
-use crate::{App, DIM, Message, alerts, browser, inspector, matrix, pointer, probe_menu, recent, style};
-use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, toggler, tooltip};
-use iced::{Color, Length};
+use crate::{App, Message, browser, inspector, matrix, pointer, probe_menu, recent, style};
+use iced::Length;
+use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, tooltip};
 use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 
@@ -69,7 +69,9 @@ impl App {
             self.breadcrumb(),
             body,
             rule::horizontal(1),
-            self.stats_bar()
+            // The stats bar is `loom-ui`'s (`stats_bar.rs`): Iced keeps its
+            // place, empty, at the same height.
+            space().height(style::STATS_BAR_HEIGHT)
         ];
         // Always a stack, so opening the browser keeps the canvas's state
         // (its camera) in the same place in the widget tree. Tested by
@@ -306,96 +308,6 @@ impl App {
         };
         column![tabs, panel].width(280).height(Length::Fill).into()
     }
-
-    pub(crate) fn stats_bar(&self) -> Element<'_, Message> {
-        // Drawn from the model the accessibility tree reads too. Each item
-        // sits in a container named by its UI ID (`places.rs`).
-        let model = self.bars_model();
-        let mut bar = row![].spacing(16).align_y(iced::Alignment::Center);
-        if let Some(dev) = &model.dev {
-            bar = bar
-                .push(
-                    container(
-                        toggler(dev.measuring)
-                            .label("Measure")
-                            .on_toggle(Message::Measure)
-                            .size(style::SWITCH)
-                            .text_size(style::BODY),
-                    )
-                    .id(crate::bars::MEASURE_ID),
-                )
-                .push(
-                    container(
-                        toggler(dev.animating)
-                            .label("Move camera")
-                            .on_toggle(Message::Animate)
-                            .size(style::SWITCH)
-                            .text_size(style::BODY),
-                    )
-                    .id(crate::bars::MOVE_CAMERA_ID),
-                )
-                .push(bar_text(dev.frames.clone()));
-        }
-        // The audio items sit closer together than the rest of the bar.
-        let shown = |item: &crate::bars::Item| -> Element<'static, Message> {
-            let words = bar_text(item.text.clone());
-            let words = match item.tone {
-                Some(severity) => words.color(severity_colour(severity)),
-                None => words,
-            };
-            let named = container(words).id(item.id);
-            match &item.hover {
-                Some(hover) => tooltip(
-                    named,
-                    container(text(hover.clone()).size(style::BODY))
-                        .padding(6)
-                        .style(container::rounded_box),
-                    tooltip::Position::Top,
-                )
-                .into(),
-                None => named.into(),
-            }
-        };
-        let audio_names = ["audio", "load", "dropouts", "input", "silenced", "clipped", "telemetry"];
-        let audio = iced::widget::Row::with_children(
-            model
-                .items
-                .iter()
-                .filter(|item| audio_names.contains(&item.name))
-                .map(shown),
-        )
-        .spacing(10);
-        for item in model.items.iter().filter(|item| item.name == "patch") {
-            bar = bar.push(shown(item));
-        }
-        bar = bar.push(audio);
-        for item in model
-            .items
-            .iter()
-            .filter(|item| item.name == "midi" || item.name == "learning")
-        {
-            bar = bar.push(shown(item));
-        }
-        // The fixed items come first. The kept error and the status share
-        // the remaining width, and are cut off rather than wrapped, so the
-        // bar stays one line high. Hover shows all of it.
-        container(
-            bar.extend(
-                model
-                    .kept
-                    .as_ref()
-                    .map(|kept| status_field(kept, crate::bars::KEPT_ID, crate::bars::KEPT_DISMISS_ID)),
-            )
-            .push(status_field(
-                &model.status,
-                crate::bars::STATUS_ID,
-                crate::bars::STATUS_DISMISS_ID,
-            ))
-            .padding([4, 10]),
-        )
-        .id("stats")
-        .into()
-    }
 }
 
 /// Hold note's hover text while it is disabled. The control channel refuses
@@ -404,33 +316,6 @@ pub(crate) const HOLD_DISABLED: &str = "Hold note is disabled: no audio is playi
 
 /// Recent's hover text while it is disabled.
 const RECENT_DISABLED: &str = "Recent is disabled: no patches opened or saved yet";
-
-/// One message in the status bar: cut to its share of the width, all of it in
-/// hover text, with a × if the player may dismiss it. `id` and `dismiss_id`
-/// name the text and the × for the window (`places.rs`).
-fn status_field<'a>(field: &crate::bars::Field, id: &'static str, dismiss_id: &'static str) -> Element<'a, Message> {
-    row![tooltip(
-        container(bar_text(field.shown.clone()).color(severity_colour(field.severity)))
-            .id(id)
-            .width(Length::Fill)
-            .align_x(iced::Alignment::End)
-            .clip(true),
-        container(text(field.hover.clone()).size(style::BODY))
-            .padding(6)
-            .max_width(480)
-            .style(container::rounded_box),
-        tooltip::Position::Top,
-    )]
-    .extend(field.dismiss.map(|cause| {
-        container(remove_button(field.dismiss_hover(), Message::DismissError(cause)))
-            .id(dismiss_id)
-            .into()
-    }))
-    .width(Length::Fill)
-    .spacing(4)
-    .align_y(iced::Alignment::Center)
-    .into()
-}
 
 /// The inspector's remove button for an item in a list, such as a MIDI
 /// mapping or a modulation assignment: a small × at the end of its row,
@@ -447,20 +332,4 @@ pub(crate) fn remove_button<'a>(what: impl Into<String>, on_press: Message) -> E
         tooltip::Position::Top,
     )
     .into()
-}
-
-/// Stats bar text: one line, never wrapped.
-pub(crate) fn bar_text<'a>(
-    content: impl text::IntoFragment<'a>,
-) -> iced::widget::Text<'a, iced::Theme, crate::Renderer> {
-    text(content).size(style::BODY).wrapping(text::Wrapping::None)
-}
-
-/// Stats bar colour for a warning level.
-pub(crate) fn severity_colour(severity: alerts::Severity) -> Color {
-    match severity {
-        alerts::Severity::Normal => DIM,
-        alerts::Severity::Warning => style::WARNING_TEXT,
-        alerts::Severity::Alarm => style::ERROR_TEXT,
-    }
 }

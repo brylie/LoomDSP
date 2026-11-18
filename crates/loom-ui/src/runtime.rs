@@ -120,6 +120,9 @@ pub struct Runtime<A: App, T> {
     pending: VecDeque<A::Message>,
     window: WindowState,
     view: Option<View>,
+    /// The app changed outside a turn ([`Runtime::mark_view_stale`], for
+    /// tests), so the next turn builds its view again even with no update.
+    view_stale: bool,
     /// The layouts of the panels that have elements.
     panels: Window,
     spec: Option<WindowSpec>,
@@ -135,6 +138,9 @@ pub struct Runtime<A: App, T> {
     /// The text field that had focus when the runtime last looked, so it
     /// can tell the app when focus leaves it ([`FieldEvent::Left`]).
     field_focus: Option<UiId>,
+    /// The target's focus as last seen, to tell when one of its own
+    /// elements takes the keyboard ([`Runtime::follow_target`]).
+    target_seen: Option<UiId>,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -151,6 +157,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             pending: VecDeque::new(),
             window,
             view: None,
+            view_stale: false,
             panels: Window::default(),
             spec: None,
             deadline: None,
@@ -161,6 +168,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             focus: Focus::default(),
             pointer: Pointer::default(),
             field_focus: None,
+            target_seen: None,
         }
     }
 
@@ -177,10 +185,28 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// The app, to change, for a test driver that sets up state between
     /// turns. The queue, the deadline, and the messages waiting for a draw
     /// stay as they are. Only with the `test-driver` feature: a real driver
-    /// changes the app only through `update` (section 2, rule 1).
+    /// changes the app only through `update` (section 2, rule 1). A driver
+    /// that changed what the view shows calls [`Runtime::mark_view_stale`]
+    /// too.
     #[cfg(feature = "test-driver")]
     pub fn app_mut(&mut self) -> &mut A {
         &mut self.app
+    }
+
+    /// Tells the runtime the app changed outside a turn, through
+    /// [`Runtime::app_mut`], in a way the view shows, so the next turn
+    /// builds the view again although it runs no update. Only with the
+    /// `test-driver` feature.
+    #[cfg(feature = "test-driver")]
+    pub fn mark_view_stale(&mut self) {
+        self.view_stale = true;
+    }
+
+    /// True while the view waits to be built again after
+    /// [`Runtime::mark_view_stale`]. Only with the `test-driver` feature.
+    #[cfg(feature = "test-driver")]
+    pub fn view_is_stale(&self) -> bool {
+        self.view_stale
     }
 
     /// The routing target, to read.
@@ -266,7 +292,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// The runtime's own element with keyboard focus, if any. Elements a
     /// toolkit still draws keep theirs in the routing target.
     pub fn focused(&self) -> Option<&UiId> {
-        self.focus.id.as_ref()
+        self.focus.id()
     }
 
     /// Every focus stop of the runtime's elements, in focus order, as last
@@ -307,7 +333,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             .iter()
             .filter(|stop| self.panels.layer_of(stop).is_some_and(|layer| layer >= input))
             .collect();
-        self.step_among(stops, self.focus.id.as_ref(), back)
+        self.step_among(stops, self.focus.id(), back)
     }
 
     /// Focuses what a press at `point` reaches, for a router to call when
@@ -326,7 +352,26 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         panels.focus_at(point);
         panels.report_focus();
         self.release_if_owed();
-        self.focus.id.clone()
+        self.focus.id().cloned()
+    }
+
+    /// Where the first of the runtime's text elements that reads `text` is
+    /// in the window, as last laid out.
+    pub fn text_bounds(&self, text: &str) -> Option<Rect> {
+        self.panels.text_bounds(text)
+    }
+
+    /// The nodes of the runtime's own elements, as last laid out, with IDs
+    /// from `ids`, as [`Context::access_nodes`](crate::Context::access_nodes)
+    /// gives them inside a turn.
+    pub fn access_nodes(&self, ids: &mut loom_ui_core::IdTable) -> crate::AccessNodes {
+        self.panels.access_nodes(ids, self.window.scale, self.focus.id())
+    }
+
+    /// The hover text showing, as last laid out: the element it belongs to
+    /// and where its box is, in logical pixels (section 5, rule 11).
+    pub fn hover_text(&self) -> Option<(&UiId, Rect)> {
+        self.panels.hint().map(|hint| (&hint.source, hint.rect))
     }
 
     /// The runtime's element under the pointer, if one of its layers holds
@@ -339,7 +384,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// when the keyboard put the focus there. `None` after a press, or with
     /// no focus.
     pub fn focus_ring(&self) -> Option<(UiId, Rect)> {
-        let focus = self.focus.id.as_ref().filter(|_| self.focus.ring)?;
+        let focus = self.focus.id().filter(|_| self.focus.ring)?;
         Some((focus.clone(), self.panels.bounds(focus)?))
     }
 
@@ -364,13 +409,34 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// Lets go of the runtime's focus when one of the target's own elements
+    /// took the keyboard since the last turn, as a click on a toolkit's
+    /// field or the toolkit's own Tab does: one element has focus across
+    /// the window (section 6, rule 1). The target's focus only changing to
+    /// nothing leaves the runtime's as it is. Returns true when the focus
+    /// changed.
+    fn follow_target(&mut self) -> bool {
+        let now = self.target.focused();
+        if now == self.target_seen {
+            return false;
+        }
+        self.target_seen = now;
+        if self.target_seen.is_none() || self.focus.id().is_none() {
+            return false;
+        }
+        self.focus.wanted = None;
+        self.focus.set(None);
+        self.focus.ring = false;
+        true
+    }
+
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
     /// so a ring shows. Returns true when it changed.
     fn focus_to(&mut self, to: Option<UiId>) -> bool {
         self.focus.wanted = None;
-        let changed = self.focus.id != to || (to.is_some() && !self.focus.ring);
-        self.focus.id = to;
-        self.focus.ring = self.focus.id.is_some();
+        let changed = self.focus.id() != to.as_ref() || (to.is_some() && !self.focus.ring);
+        self.focus.set(to);
+        self.focus.ring = self.focus.id().is_some();
         changed
     }
 
@@ -385,8 +451,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 self.release_target();
                 self.focus_to(Some(id.clone()))
             }
-            FocusTarget::Next | FocusTarget::Previous if self.focus.id.is_some() => {
-                match self.focus_step(self.focus.id.as_ref(), *target == FocusTarget::Previous) {
+            FocusTarget::Next | FocusTarget::Previous if self.focus.id().is_some() => {
+                match self.focus_step(self.focus.id(), *target == FocusTarget::Previous) {
                     FocusStep::To(stop) => self.focus_to(Some(stop)),
                     FocusStep::PastEnd => {
                         self.target.focus(target, select);
@@ -438,8 +504,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             return (false, false);
         }
         let input = self.app.input();
-        if self.focus.id.is_none() {
-            let enters = input.layer <= Layer::Panels && !input.canvas_focused && self.target.focused().is_none();
+        if self.focus.id().is_none() {
+            // Forward from nothing goes to the half that reads first: the
+            // target's, when it says so.
+            let ours_first = !input.target_first || modifiers.shift;
+            let enters =
+                input.layer <= Layer::Panels && !input.canvas_focused && self.target.focused().is_none() && ours_first;
             return match self.tab_step(input.layer, modifiers.shift) {
                 FocusStep::To(stop) if enters => (true, self.focus_to(Some(stop))),
                 _ => (false, false),
@@ -449,8 +519,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // when Tab finds no stop above it: the key goes on to the target.
         let below = self
             .focus
-            .id
-            .as_ref()
+            .id()
             .and_then(|id| self.panels.layer_of(id))
             .is_some_and(|layer| layer < input.layer);
         match self.tab_step(input.layer, modifiers.shift) {
@@ -485,8 +554,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let layer = self.app.input().layer;
         let Some(id) = self
             .focus
-            .id
-            .clone()
+            .id()
+            .cloned()
             .filter(|id| self.panels.fields.has(id) && self.panels.layer_of(id).is_some_and(|its| its >= layer))
         else {
             return (false, false);
@@ -517,20 +586,131 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// this (section 8, rule 3).
     fn field_left(&mut self, batch: &mut Vec<A::Message>) {
         if let Some(field) = self.field_focus.take() {
-            if self.focus.id.as_ref() == Some(&field) {
+            if self.focus.id() == Some(&field) {
                 self.field_focus = Some(field);
                 return;
             }
             self.panels.fields.left(&field);
             batch.extend(self.app.field_event(&field, &FieldEvent::Left));
         }
-        self.field_focus = self.focus.id.clone().filter(|id| self.panels.fields.has(id));
+        self.field_focus = self.focus.id().cloned().filter(|id| self.panels.fields.has(id));
     }
 
     /// The text the field with UI ID `id` shows now, for tests.
     #[cfg(test)]
     pub(crate) fn field_text(&self, id: &UiId) -> Option<&str> {
         self.panels.fields.get(id).map(crate::field::FieldState::text)
+    }
+
+    /// What the keyboard can activate the element with UI ID `id` as, now:
+    /// `Some(true)` for a button, `Some(false)` for a switch, `None` when it
+    /// is neither, offers no Click, is turned off, or is in a layer below
+    /// the one taking input. The press and the release of Space both ask,
+    /// so an element that stopped being clickable while Space was held
+    /// clicks nothing.
+    fn activatable(&self, id: &UiId) -> Option<bool> {
+        let input = self.app.input();
+        // While the canvas has the keyboard, its keys are its own (section
+        // 6, rule 1): no element of ours is activated by them.
+        if input.canvas_focused || self.panels.layer_of(id).is_none_or(|layer| layer < input.layer) {
+            return None;
+        }
+        let access = self.panels.access_of(id)?;
+        if !access.offers(crate::access::Action::Click) || access.is_disabled() {
+            return None;
+        }
+        match access.role() {
+            crate::access::Role::Button => Some(true),
+            crate::access::Role::Switch => Some(false),
+            _ => None,
+        }
+    }
+
+    /// The element a held Space would click now: the one it went down on,
+    /// when the focus never moved since and it can still be clicked.
+    fn live_arm(&self) -> Option<UiId> {
+        let (armed, moves) = self.pointer.space.as_ref()?;
+        let unmoved = self.focus.moves == *moves && self.focus.id() == Some(armed);
+        (unmoved && self.activatable(armed).is_some()).then(|| armed.clone())
+    }
+
+    /// Keyboard activation of the focused element (section 3, rule 4):
+    /// Enter clicks a button when it goes down, and Space clicks a button
+    /// or a switch when it comes up on the element it went down on.
+    /// Escape, any move of the focus, or a pointer press while Space is held
+    /// cancels it, and so does the element no longer being clickable when
+    /// Space comes up. Repeats click nothing. The click reaches the app
+    /// through `App::clicked` on the next turn, as a pointer's does.
+    /// Returns whether the key was taken, so the target never hears it, and
+    /// whether anything that shows changed, so a repeat draws no frame.
+    fn activate(&mut self, event: &Event) -> (bool, bool) {
+        let Event::Key(key) = event else {
+            return (false, false);
+        };
+        if let KeyEvent::Released { key: Key::Space } = key
+            && self.pointer.space.is_some()
+        {
+            if let Some(armed) = self.live_arm() {
+                self.click(&armed);
+            }
+            self.pointer.space = None;
+            return (true, false);
+        }
+        if let KeyEvent::Pressed { key: Key::Escape, .. } = key {
+            // Escape cancels a held Space and hides the hover text, both at
+            // once, and goes no further when it did either (section 5,
+            // rule 11). A Space that could no longer click (the focus moved,
+            // or a layer rose above it) is dropped without taking Escape,
+            // which then goes where it goes, such as to a question.
+            let cancelled = self.live_arm().is_some();
+            self.pointer.space = None;
+            let input = self.app.input().layer;
+            let shown = self
+                .panels
+                .hint()
+                .map(|hint| hint.source.clone())
+                .filter(|source| self.panels.layer_of(source).is_some_and(|layer| layer >= input));
+            let hover = self.pointer.hovered.as_ref().map(|(_, id)| id.clone());
+            let hid = self.pointer.hint.hide(shown.as_ref(), hover.as_ref(), self.focus.moves);
+            if cancelled || hid {
+                return (true, hid);
+            }
+        }
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some(button) = self.activatable(&id) else {
+            return (false, false);
+        };
+        let KeyEvent::Pressed {
+            key, modifiers, repeat, ..
+        } = key
+        else {
+            return (false, false);
+        };
+        let plain = !(modifiers.control || modifiers.alt || modifiers.meta);
+        match key {
+            Key::Enter if button && plain => {
+                if !repeat {
+                    self.click(&id);
+                }
+                (true, false)
+            }
+            Key::Space if plain => {
+                if !repeat {
+                    self.pointer.space = Some((id, self.focus.moves));
+                }
+                (true, false)
+            }
+            _ => (false, false),
+        }
+    }
+
+    /// Sends the app's message for a click on `id`, for the next turn.
+    fn click(&self, id: &UiId) {
+        if let Some(message) = self.app.clicked(id) {
+            self.waker().send(message);
+        }
     }
 
     /// Where the element with UI ID `id` is in the window, in logical
@@ -636,15 +816,22 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     ) -> Next {
         self.counts.turns += 1;
         self.release_if_owed();
-        // A layout between turns may have moved focus off a field.
+        // The target's own element may have taken the keyboard since the
+        // last turn; then a layout between turns, or that, may have moved
+        // focus off a field.
+        let mut redraw = self.follow_target();
         self.field_left(&mut batch);
-        let mut redraw = false;
 
         // 2. Route the event.
         match event {
             DriverEvent::Input { event, pointer } => {
-                let (taken, moved) = self.tab(&event);
+                let (mut taken, moved) = self.tab(&event);
                 redraw |= moved;
+                if !taken {
+                    let (activated, changed) = self.activate(&event);
+                    taken = activated;
+                    redraw |= changed;
+                }
                 if taken {
                     self.target.kept(&event);
                 } else {
@@ -694,7 +881,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.counts.updates += updates as u64;
 
         // 4. What changed.
-        if updates > 0 || self.view.is_none() {
+        // Taken first, so any rebuild uses up a stale view.
+        let stale = std::mem::take(&mut self.view_stale);
+        if updates > 0 || self.view.is_none() || stale {
             redraw |= self.rebuild(driver);
             // A layer the input layer rose above holds no hover or press.
             redraw |= self.pointer.below(self.app.input().layer);
@@ -729,6 +918,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// to the target, then to the layers below it; whatever else, to the
     /// target. Returns true when the hover moved.
     fn route(&mut self, event: &Event, pointer: Option<Point>, now: Instant, batch: &mut Vec<A::Message>) -> bool {
+        // A press of the pointer cancels a held Space, wherever it is, even
+        // with no position to route by (section 3, rule 4).
+        if let Event::Pointer(PointerEvent::Pressed(_)) = event {
+            self.pointer.space = None;
+        }
         let point = match (event, pointer) {
             (Event::Pointer(PointerEvent::LeftWindow), _) => {
                 let redraw = self.pointer.clear();
@@ -784,7 +978,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let cx = Context {
             now,
             waker: &self.waker,
-            focused: self.focus.id.clone().or_else(|| self.target.focused()),
+            focused: self.focus.id().cloned().or_else(|| self.target.focused()),
             window: self.window,
             panels: Some(&self.panels),
         };

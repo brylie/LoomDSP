@@ -24,6 +24,29 @@ pub const TITLE: f32 = 18.0;
 /// The marker of a toggle, checkbox, or radio button.
 pub const SWITCH: f32 = 14.0;
 
+/// How high the stats bar is, in logical pixels: the bar `loom-ui` draws
+/// and the space Iced keeps for it, so the two cannot disagree. Whole
+/// pixels, since the runtime's layout rounds to them (2026-11-17).
+pub const STATS_BAR_HEIGHT: f32 = 24.0;
+
+/// The line height of the app's text, as a multiple of its size: Iced's
+/// default, kept for text `loom-ui` draws.
+const LINE_HEIGHT: f32 = 1.3;
+
+/// [`BODY`] text, for `loom-ui` elements.
+pub const BODY_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: BODY,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
+/// [`CONTROL`] text, for `loom-ui` elements.
+pub const CONTROL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: CONTROL,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
 /// Quiet text: details, IDs, and the title of a closed tab. Iced's own
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
 /// WCAG asks for, so the app uses this instead (a test checks it).

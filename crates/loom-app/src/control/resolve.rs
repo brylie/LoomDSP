@@ -52,6 +52,20 @@ pub struct Found {
     pub text: Option<Rect>,
     /// The window's named parts, for a target given as UI ID text.
     pub(crate) places: Places,
+    /// The target in `loom-ui`'s own layout (the stats bar): by its UI ID,
+    /// or by the text it shows. Filled in the update that answers, which
+    /// can read that layout (`App::update`).
+    pub(crate) ours: Option<Rect>,
+}
+
+impl Found {
+    /// Fills [`Found::ours`] for `target` from the runtime's layout, by its
+    /// UI ID when it reads as one, else by the text the window shows.
+    pub(crate) fn find_ours<M>(&mut self, target: &str, cx: &loom_ui::Context<'_, M>) {
+        self.ours = ui_id(target)
+            .and_then(|id| cx.bounds(&id))
+            .or_else(|| cx.text_bounds(target));
+    }
 }
 
 /// Finds the canvas, and the first text widget that reads `text`.
@@ -159,13 +173,12 @@ pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
 /// The first keys a UI ID's text can start with: the window's panels and
 /// the overlays (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
 /// with another word is not taken for a UI ID.
-const PANELS: [&str; 15] = [
+const PANELS: [&str; 14] = [
     "canvas",
     "toolbar",
     "panel",
     "inspector",
     "matrix",
-    "status",
     "stats",
     "menu",
     "recent",
@@ -215,6 +228,40 @@ fn locate_id(app: &App, id: &UiId, found: &Found) -> Result<Option<Rect>, String
     }
 }
 
+/// True when `locate` cannot answer `target` from Iced's search and the
+/// canvas alone, and the answer could come from the runtime's own layout:
+/// a UI ID inside one of its panels, or plain text it may show. Such a
+/// `locate` waits for a current layout; any other, a missing module or a
+/// part of Iced's scrolled out of view, answers at once with its error.
+pub(crate) fn waits_for_ours<M>(app: &App, target: &str, found: &Found, cx: &loom_ui::Context<'_, M>) -> bool {
+    locate(app, target, found).is_err() && may_be_ours(target, cx)
+}
+
+/// True when `target` may name a part only the runtime's layout places, so
+/// a layout still to come could find it: a UI ID of a runtime panel, or
+/// text, which the runtime's panels may show. A module, a control, or a
+/// port by name never is: the canvas places those. `locate` and the
+/// pointer commands both wait by this rule, so the two cannot drift.
+pub(crate) fn may_be_ours<M>(target: &str, cx: &loom_ui::Context<'_, M>) -> bool {
+    match ui_id(target) {
+        Some(id) => cx.holds(&id),
+        None => split_target(target).is_none(),
+    }
+}
+
+/// Where the runtime's layout places `target` for a pointer command, or
+/// `None` for a target it does not hold. A module, a control, or a port
+/// by name is the canvas's, even when some text in the window reads the
+/// same, as `locate` resolves it.
+pub(crate) fn ours_for_pointer<M>(target: &str, cx: &loom_ui::Context<'_, M>) -> Option<Rect> {
+    if split_target(target).is_some() {
+        return None;
+    }
+    let mut found = Found::default();
+    found.find_ours(target, cx);
+    found.ours
+}
+
 /// Where a target is in the window: a UI ID as text (`toolbar/undo`,
 /// `canvas/4/param/cutoff`), a module, a control, port, light, or meter by
 /// name (rule 10), or any text the window shows.
@@ -225,13 +272,15 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rect, String> {
         return match locate_id(app, &id, found)? {
             Some(rect) => Ok(rect),
             None => found
-                .text
+                .ours
+                .or(found.text)
                 .ok_or_else(|| format!("nothing in the window has the UI ID `{target}`")),
         };
     }
     let Some((module, name)) = split_target(target) else {
         return found
             .text
+            .or(found.ours)
             .ok_or_else(|| format!("no module, port, control, or text `{target}` in the window"));
     };
     let view = found.canvas.as_ref().ok_or("the window has no patch canvas")?;

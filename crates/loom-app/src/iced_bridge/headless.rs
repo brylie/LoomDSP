@@ -36,6 +36,9 @@ pub(crate) struct UiDriver {
     pub(crate) headless: Headless,
     /// Capture replies waiting for the harness to draw the view.
     captures: Vec<Reply<Result<Image, NoGpu>, Message>>,
+    /// Every whole accessibility tree the app handed the screen reader, in
+    /// order, for a test to read what was sent rather than build its own.
+    pub(crate) trees: Vec<accesskit::TreeUpdate>,
 }
 
 impl Driver<Message> for UiDriver {
@@ -83,6 +86,11 @@ impl Driver<Message> for UiDriver {
 
     fn exit(&mut self) {
         Driver::<Message>::exit(&mut self.headless);
+    }
+
+    /// Keeps the whole tree, as a screen reader would be sent it.
+    fn accessibility(&mut self, whole: accesskit::TreeUpdate, _changes: Option<accesskit::TreeUpdate>) {
+        self.trees.push(whole);
     }
 }
 
@@ -231,7 +239,8 @@ impl Surface {
         let drawing = app.canvas_drawn.take();
         // The tree owns the text the renderer holds weakly, so it stays
         // until the frame is drawn.
-        let pixels = offscreen.pixels(physical, 1.0, theme.palette().background, drawing);
+        let panels = super::offscreen::still_panels(app, size);
+        let pixels = offscreen.pixels_with(physical, 1.0, theme.palette().background, drawing, Some(panels));
         self.cache = Some(ui.into_cache());
         // A frame that could not be read back answers as the window's
         // capture does then: with no image (`shell/gpu.rs`, `capture`).
@@ -361,6 +370,10 @@ impl super::pointers::IcedSide for HarnessIced<'_> {
             statuses = heard;
         });
         Some(statuses)
+    }
+
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)> {
+        self.app.pointer.take_for_runtime()
     }
 }
 

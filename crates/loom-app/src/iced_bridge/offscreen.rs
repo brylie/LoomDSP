@@ -254,3 +254,25 @@ async fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
         .ok()?;
     Some((adapter, device, queue))
 }
+
+/// The app's own panels as a still picture of a window of `logical` size:
+/// painted into the list below Iced (the canvas and panels layers) and the
+/// one above it (the overlays and question layers), as the window paints
+/// them (`window.rs`, `paint_panels`), with nothing hovered or focused.
+pub(crate) fn still_panels(
+    app: &crate::App,
+    logical: iced::Size,
+) -> (loom_ui::paint::PaintList, loom_ui::paint::PaintList) {
+    use loom_ui::paint::{ListPainter, Typesetter};
+    let size = loom_ui_core::Size::new(logical.width, logical.height);
+    let mut view = loom_ui::View::new();
+    app.bar_panels(&mut view);
+    let text = std::cell::RefCell::new(Typesetter::new());
+    let still = loom_ui::Still::new(&view, size, &mut *text.borrow_mut());
+    let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, size);
+    // As the window paints them (`window.rs`, `paint_panels`).
+    let style = paint::panel_style(&app.theme());
+    paint::paint_sides(whole, |layer, list| {
+        still.paint(layer, &mut ListPainter::new(&text, list), &style);
+    })
+}

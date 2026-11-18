@@ -216,6 +216,11 @@ impl<'a> A11yNode<'a> {
         self.id == self.tree.focus
     }
 
+    /// Its node ID, for a test that sends a request to it after it is gone.
+    pub fn node_id(&self) -> NodeId {
+        self.id
+    }
+
     /// Its UI ID.
     pub fn ui_id(&self) -> Option<&'a UiId> {
         self.tree.ids.get(&self.id)
@@ -311,10 +316,23 @@ impl Ui {
     /// The accessibility tree as a screen reader is sent it now, with the
     /// canvas and the window's parts where this view placed them.
     pub fn a11y_tree(&mut self) -> A11yTree {
+        // The runtime's nodes first: reading them may run a turn and lay
+        // out, which can move Iced's parts, so their places are read after.
+        self.read_runtime_nodes();
         let places = self.places();
         let update = self.app_mut().a11y_tree(&places);
         let app = self.app();
         A11yTree::new(update, |node| app.a11y_ui_id(node))
+    }
+
+    /// Reads the runtime's own nodes (the stats bar) into the app, with the
+    /// app's table of node IDs, as the window's rebuild reads them through
+    /// its context: for a test that builds the tree itself.
+    pub fn read_runtime_nodes(&mut self) {
+        self.lay_out_panels();
+        let mut ids = self.app_mut().a11y_lend_ids();
+        let ours = self.runtime().access_nodes(&mut ids);
+        self.app_mut().a11y_return_ids(ids, ours);
     }
 
     /// Performs `action` on the node `target` names, as a screen reader's

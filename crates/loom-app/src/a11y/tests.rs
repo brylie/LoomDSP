@@ -235,16 +235,10 @@ fn tree_shows_tiles_and_controls() {
 
     let root = node_of(&mut app, &window_id());
     let tile_node = node_of(&mut app, &tile_id(module));
-    let status = node_of(&mut app, &tree::fixed_id(crate::bars::STATUS_ID));
     assert_eq!(update.tree.as_ref().unwrap().root, root);
     assert_eq!(update.focus, root);
     assert_eq!(node(&update, root).role(), Role::Window);
     assert!(node(&update, root).children().contains(&tile_node));
-    // The status line is the last item of the bar at the bottom.
-    let bar = node_of(&mut app, &tree::stats_id());
-    assert!(node(&update, root).children().contains(&bar));
-    assert_eq!(node(&update, bar).children().last(), Some(&status));
-    assert_eq!(node(&update, status).value(), Some(snapshot.status.as_str()));
     assert_eq!(node(&update, tile_node).label(), Some(tile.title.as_str()));
 
     let cutoff_node = widget_node(&mut app, module, knob);
@@ -449,6 +443,7 @@ fn a_widget_without_a_detail_or_a_parameter() {
         &app.a11y_frames(),
         &bare,
         &Places::of_canvas(None),
+        &loom_ui::AccessNodes::default(),
         1.0,
         &mut app.a11y.ids,
     );
@@ -479,6 +474,7 @@ fn a_widget_without_a_detail_or_a_parameter() {
         &app.a11y_frames(),
         &travel,
         &Places::of_canvas(None),
+        &loom_ui::AccessNodes::default(),
         1.0,
         &mut app.a11y.ids,
     );
@@ -518,6 +514,7 @@ fn a_scope_says_its_trace_in_words() {
         &app.a11y_frames(),
         &ids,
         &Places::of_canvas(None),
+        &loom_ui::AccessNodes::default(),
         1.0,
         &mut app.a11y.ids,
     );
@@ -568,6 +565,7 @@ fn hidden_widgets_are_left_out() {
         &app.a11y_frames(),
         &ids,
         &Places::of_canvas(None),
+        &loom_ui::AccessNodes::default(),
         1.0,
         &mut app.a11y.ids,
     );
@@ -599,6 +597,7 @@ fn a_widget_with_no_name_is_left_out() {
         &app.a11y_frames(),
         &named,
         &Places::of_canvas(None),
+        &loom_ui::AccessNodes::default(),
         1.0,
         &mut app.a11y.ids,
     );
@@ -607,6 +606,7 @@ fn a_widget_with_no_name_is_left_out() {
         &app.a11y_frames(),
         &ids,
         &Places::of_canvas(None),
+        &loom_ui::AccessNodes::default(),
         1.0,
         &mut app.a11y.ids,
     );
@@ -1258,20 +1258,23 @@ fn a_message_that_changes_nothing_sends_nothing() {
     assert!(changes.is_none());
 }
 
-/// Messages that arrive while a rebuild waits for the canvas ask for no
-/// second one: the one on its way holds them.
+/// One rebuild at a time: messages that arrive while one waits for the
+/// canvas start no second at once. However many there are, they ask for
+/// exactly one more once the one on its way is built, which sees what
+/// they changed.
 #[test]
 fn one_rebuild_at_a_time() {
     let (mut app, _, _) = app_with_filter();
     listen(&mut app);
     app.a11y_after(Touch::Changed);
     assert!(app.a11y.locating);
-    // Asking again while it waits changes nothing.
     app.a11y_after(Touch::Changed);
     app.a11y_after(Touch::Own);
     assert!(app.a11y.locating);
     app.a11y_event(Event::Located(Places::default()));
-    assert!(!app.a11y.locating);
+    assert!(app.a11y.locating, "one more, for what arrived meanwhile");
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(!app.a11y.locating, "and only one");
 }
 
 /// Runs the engine and hands the app the lights and meters that moved, as
@@ -2021,74 +2024,8 @@ fn the_right_panel_has_tabs() {
     assert_eq!(node(&update, inspector).is_selected(), Some(false));
 }
 
-/// The bar at the bottom is a named group. Its plain items are labels with
-/// the text shown, hover text is the description, and ordinary status text
-/// is a label. A warning in the status line is a status, so it is
-/// announced (ui-layer.md, section 7, the role table).
-#[test]
-fn the_bar_reports_its_items_and_the_status() {
-    let (mut app, _, _) = app_with_filter();
-    app.alerts.say("Saved");
-    let update = app.a11y_tree(&Places::default());
-    let bar = node_of(&mut app, &tree::stats_id());
-    assert_eq!(node(&update, bar).role(), Role::Group);
-    assert_eq!(node(&update, bar).label(), Some("Status bar"));
-    let model = app.bars_model();
-    for item in &model.items {
-        let found = node(&update, node_of(&mut app, &tree::stats_id().with(item.name)));
-        assert_eq!(found.value(), Some(item.text.as_str()), "{}", item.name);
-        assert_eq!(found.description(), item.hover.as_deref(), "{}", item.name);
-        let alert = item.kind == crate::bars::Kind::Alert;
-        assert_eq!(
-            found.role(),
-            if alert { Role::Status } else { Role::Label },
-            "{}",
-            item.name
-        );
-    }
-    let status = node_of(&mut app, &tree::fixed_id(crate::bars::STATUS_ID));
-    assert_eq!(node(&update, status).role(), Role::Label);
-    assert_eq!(node(&update, status).value(), Some(model.status.shown.as_str()));
-
-    app.alerts.warn("The audio device is gone");
-    let update = app.a11y_tree(&Places::default());
-    assert_eq!(node(&update, status).role(), Role::Status);
-    assert!(node(&update, status).value().is_some_and(|text| text.contains("gone")));
-
-    assert!(tree::is_live_bar_item(&tree::stats_id().with("load")));
-    assert!(tree::is_live_bar_item(&tree::stats_id().with("dropouts")));
-    assert!(!tree::is_live_bar_item(&tree::stats_id().with("midi")));
-}
-
-/// The developer switches are switches, and a Click turns one.
-#[test]
-fn the_developer_switches_are_switches() {
-    let (mut app, _, _) = app_with_filter();
-    app.dev_tools = true;
-    let was = app.measuring;
-    let update = app.a11y_tree(&Places::default());
-    let measure = node_of(&mut app, &tree::fixed_id(crate::bars::MEASURE_ID));
-    let camera = node_of(&mut app, &tree::fixed_id(crate::bars::MOVE_CAMERA_ID));
-    assert_eq!(node(&update, measure).role(), Role::Switch);
-    assert_eq!(node(&update, measure).label(), Some("Measure"));
-    assert_eq!(node(&update, camera).label(), Some("Move camera"));
-    act(
-        &mut app,
-        &request(Action::Click, measure, None),
-        std::time::Instant::now(),
-    );
-    assert_eq!(app.measuring, !was);
-    assert!(matches!(
-        app.a11y_frame_message(&request(Action::Click, camera, None)),
-        Some(Message::Animate(on)) if on != app.animating
-    ));
-    // Without the tools the switches are not drawn, and do nothing.
-    app.dev_tools = false;
-    assert!(app.a11y_frame_message(&request(Action::Click, measure, None)).is_none());
-}
-
-/// What a UI ID names outside the canvas: a button, a tab, a ×, a switch,
-/// or nothing that acts.
+/// What a UI ID names outside the canvas: a button, a tab, or nothing that
+/// acts. The stats bar's parts are `loom-ui`'s (`stats_bar/tests.rs`).
 #[test]
 fn frame_parts_are_told_by_their_ids() {
     use tree::{FramePart, frame_part};
@@ -2102,20 +2039,10 @@ fn frame_parts_are_told_by_their_ids() {
         frame_part(&id("panel/inspector")),
         Some(FramePart::Tab(crate::matrix::Tab::Inspector))
     );
-    assert_eq!(
-        frame_part(&id("status/dismiss")),
-        Some(FramePart::Dismiss { kept: false })
-    );
-    assert_eq!(
-        frame_part(&id("status/kept/dismiss")),
-        Some(FramePart::Dismiss { kept: true })
-    );
-    assert_eq!(frame_part(&id("stats/measure")), Some(FramePart::Measure));
-    assert_eq!(frame_part(&id("stats/move_camera")), Some(FramePart::MoveCamera));
     for nothing in [
         "stats/load",
-        "status",
-        "status/kept",
+        "stats/status/dismiss",
+        "stats/measure",
         "toolbar",
         "panel",
         "canvas/4",
@@ -2146,19 +2073,13 @@ fn frame_nodes_have_the_bounds_the_window_drew() {
         .iter()
         .map(|button| tree::toolbar_id().with(button.name))
         .collect();
-    ids.extend(
-        ui.app()
-            .bars_model()
-            .items
-            .iter()
-            .map(|item| tree::stats_id().with(item.name)),
-    );
-    ids.push(tree::fixed_id(crate::bars::STATUS_ID));
+    // The stats bar's parts are `loom-ui`'s, placed by its layout
+    // (`stats_bar/tests.rs`).
     ids.push(tree::tab_id(crate::matrix::Tab::Inspector));
     ids.push(tree::tab_id(crate::matrix::Tab::Matrix));
     // The groups hold their parts, so only the parts are compared for
     // overlap below.
-    for group in [tree::toolbar_id(), tree::tabs_id(), tree::stats_id()] {
+    for group in [tree::toolbar_id(), tree::tabs_id()] {
         let place = places
             .of(&group)
             .unwrap_or_else(|| panic!("the window drew no `{group}`"));
@@ -2199,12 +2120,7 @@ fn frame_nodes_are_hidden_below_a_panel() {
     app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
     assert!(!app.no_overlay());
     let update = app.a11y_tree(&Places::default());
-    for id in [
-        tree::toolbar_id(),
-        tree::tabs_id(),
-        tree::stats_id(),
-        tree::toolbar_id().with("undo"),
-    ] {
+    for id in [tree::toolbar_id(), tree::tabs_id(), tree::toolbar_id().with("undo")] {
         assert!(node(&update, node_of(&mut app, &id)).is_hidden(), "{id}");
     }
     assert!(!act(
@@ -2357,7 +2273,7 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             "{owner:?}: a Click on Panic"
         );
         assert_eq!(node(&update, panic_node).is_hidden(), !open, "{owner:?}: Panic's node");
-        for group in [tree::toolbar_id(), tree::tabs_id(), tree::stats_id(), tile_id(module)] {
+        for group in [tree::toolbar_id(), tree::tabs_id(), tile_id(module)] {
             let group_node = node_of(ui.app_mut(), &group);
             assert_eq!(node(&update, group_node).is_hidden(), !open, "{owner:?}: {group}");
         }
@@ -2762,6 +2678,7 @@ fn an_exposed_row_and_the_inner_row_differ_and_are_both_found() {
         canvas: places.canvas,
         text: None,
         places: places.clone(),
+        ours: None,
     };
     let at = crate::control::locate(ui.app(), &exposed.to_string(), &found).expect("found");
     assert!(at.width > 0.0);
@@ -2784,6 +2701,7 @@ fn an_exposed_row_and_the_inner_row_differ_and_are_both_found() {
         canvas: places.canvas,
         text: None,
         places,
+        ours: None,
     };
     let at = crate::control::locate(ui.app(), &own.to_string(), &found).expect("found");
     assert!(at.width > 0.0);
@@ -4697,6 +4615,7 @@ fn one_change_in_preferences_sends_only_what_changed() {
     let _ = ui.redraw();
     ui.app_mut().a11y_event(Event::Activated);
     let places = ui.places();
+    ui.read_runtime_nodes();
     let _ = ui.app_mut().a11y_changes(&places);
     let on = ui.app().rig.store.saved().show_activity;
     let _ = ui
@@ -4704,13 +4623,14 @@ fn one_change_in_preferences_sends_only_what_changed() {
         .send(Message::Preferences(crate::settings::Message::Activity(!on)));
     let _ = ui.redraw();
     let places = ui.places();
+    ui.read_runtime_nodes();
     let (_, changes) = ui.app_mut().a11y_changes(&places);
     let changes = changes.expect("the check box changed");
     let activity = node_of(
         ui.app_mut(),
         &crate::settings::access::preferences_id().with("activity"),
     );
-    let status = node_of(ui.app_mut(), &UiId::panel("status"));
+    let status = node_of(ui.app_mut(), &crate::stats_bar::stats_id().with("status"));
     let mut sent = sent_ids(&changes);
     sent.sort_by_key(|id| id.0);
     let mut expected = vec![activity, status];
@@ -4912,4 +4832,22 @@ fn a_lights_message_is_a_live_reading_of_its_own() {
     // Any other message with a focus asks where it went.
     let _ = app.send(Message::CloseHelp);
     assert!(app.focus_question_waits());
+}
+
+/// A change while a rebuild is in flight (an autosave's warning, say) is
+/// not dropped: the in-flight build is sent, then exactly one more is asked
+/// for, which sees the change; and nothing more after it.
+#[test]
+fn a_change_during_a_rebuild_asks_for_one_more() {
+    let (mut app, _, _) = app_with_filter();
+    listen(&mut app);
+    app.a11y_after(Touch::Changed);
+    assert!(app.a11y.locating, "a rebuild is in flight");
+    app.alerts.warn("Autosave failed");
+    app.a11y_after(Touch::Changed);
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(app.a11y.locating, "one more build was asked for");
+    app.a11y_event(Event::Located(Places::default()));
+    assert!(!app.a11y.locating, "and no third");
+    assert!(!app.a11y.again);
 }

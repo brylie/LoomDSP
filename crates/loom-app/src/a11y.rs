@@ -132,13 +132,23 @@ pub(crate) enum Event {
 pub(crate) struct Access {
     /// The node ID of every element in the tree.
     ids: IdTable,
+    /// The nodes of `loom-ui`'s own elements (the stats bar), as the
+    /// runtime last laid them out, spliced into the tree (ui-layer.md,
+    /// section 7, until phase 4).
+    pub(crate) ours: loom_ui::AccessNodes,
     /// True once a screen reader asked for the tree.
     active: bool,
     /// What the screen reader was last sent.
     sent: tree::Sent,
     /// True while a rebuild waits for the window to say where the canvas
-    /// is. Messages that arrive meanwhile are in that rebuild.
+    /// is. Messages that arrive meanwhile start no second one, but ask for
+    /// one more once this one is built ([`Access::again`]).
     locating: bool,
+    /// A rebuild was asked for while one was in flight: once that one is
+    /// built, one more runs, so a change the in-flight build could not see
+    /// yet (the runtime's layout of a bar an autosave just changed) is
+    /// sent too.
+    again: bool,
     /// True while live values have changed and were not sent yet. The
     /// timer that sends them runs only then.
     live_dirty: bool,
@@ -206,9 +216,11 @@ impl Default for Access {
     fn default() -> Self {
         Self {
             ids: IdTable::new(),
+            ours: loom_ui::AccessNodes::default(),
             active: false,
             sent: tree::Sent::default(),
             locating: false,
+            again: false,
             live_dirty: false,
             flush_live: false,
             focus: None,
@@ -234,6 +246,13 @@ impl Access {
     /// Notes which control has keyboard focus on the canvas.
     pub(crate) fn set_focus(&mut self, control: Option<(u32, usize)>) {
         self.focus = control;
+    }
+
+    /// Asks the canvas to let go of the keyboard, with a focus request for
+    /// no control, and notes it as let go.
+    pub(crate) fn release_canvas_focus(&mut self) {
+        self.focus_request = (self.focus_request.0 + 1, None);
+        self.focus = None;
     }
 
     /// The canvas control with keyboard focus, as the canvas last said.
@@ -327,7 +346,11 @@ impl crate::App {
     /// Asks the window where the canvas is, to rebuild the tree when the
     /// answer comes. One request at a time.
     pub(crate) fn a11y_rebuild(&mut self) {
-        if !self.a11y.active || self.a11y.locating {
+        if !self.a11y.active {
+            return;
+        }
+        if self.a11y.locating {
+            self.a11y.again = true;
             return;
         }
         self.a11y.locating = true;
@@ -345,7 +368,15 @@ impl crate::App {
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
-        let whole = tree::tree(&snapshot, &frames, &ids, places, self.window_scale, &mut self.a11y.ids);
+        let whole = tree::tree(
+            &snapshot,
+            &frames,
+            &ids,
+            places,
+            &self.a11y.ours,
+            self.window_scale,
+            &mut self.a11y.ids,
+        );
         let flush = std::mem::take(&mut self.a11y.flush_live);
         if flush {
             self.a11y.live_dirty = false;
@@ -413,7 +444,9 @@ impl crate::App {
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
         let mut table = IdTable::new();
-        let whole = tree::tree(&snapshot, &frames, &ids, places, 1.0, &mut table);
+        // The runtime's own parts are found in its layout, not here.
+        let ours = loom_ui::AccessNodes::default();
+        let whole = tree::tree(&snapshot, &frames, &ids, places, &ours, 1.0, &mut table);
         let node = accesskit::NodeId(table.number(id));
         let bounds = whole.nodes.iter().find(|(found, _)| *found == node)?.1.bounds()?;
         Some(loom_ui_core::Rect::new(
@@ -513,7 +546,35 @@ impl crate::App {
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
         let ids = self.a11y_widget_ids(&snapshot);
-        tree::tree(&snapshot, &frames, &ids, places, self.window_scale, &mut self.a11y.ids)
+        tree::tree(
+            &snapshot,
+            &frames,
+            &ids,
+            places,
+            &self.a11y.ours,
+            self.window_scale,
+            &mut self.a11y.ids,
+        )
+    }
+
+    /// Lends the table of node IDs out, for the harness to read the
+    /// runtime's nodes with it while the runtime holds the app.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn a11y_lend_ids(&mut self) -> IdTable {
+        std::mem::replace(&mut self.a11y.ids, IdTable::new())
+    }
+
+    /// Takes the table back, with the runtime's nodes read with it.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) fn a11y_return_ids(&mut self, ids: IdTable, ours: loom_ui::AccessNodes) {
+        self.a11y.ids = ids;
+        self.a11y.ours = ours;
+    }
+
+    /// Takes the runtime's nodes from `nodes`, which reads them with the
+    /// app's own table of node IDs.
+    pub(crate) fn a11y_take_ours(&mut self, nodes: impl FnOnce(&mut IdTable) -> loom_ui::AccessNodes) {
+        self.a11y.ours = nodes(&mut self.a11y.ids);
     }
 
     /// What the tree reports of the parts around the canvas: the bar, the
@@ -526,7 +587,6 @@ impl crate::App {
         };
         let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
-            bars: self.bars_model(),
             panel,
             focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
             focused_item: self.matrix_focus(),
@@ -607,6 +667,11 @@ impl crate::App {
             return None;
         }
         let id = self.a11y.ids.id(request.target_node.0)?;
+        // The bar is `loom-ui`'s: its Click is the same click a pointer or
+        // a key gives (section 3, rule 4).
+        if id.is_under(&crate::stats_bar::stats_id()) {
+            return self.bar_click(id);
+        }
         match tree::frame_part(id)? {
             tree::FramePart::Button(name) => {
                 let model = self.toolbar_model();
@@ -614,13 +679,6 @@ impl crate::App {
                 button.enabled.then(|| crate::toolbar::message(name)).flatten()
             }
             tree::FramePart::Tab(tab) => Some(Message::Matrix(crate::matrix::Event::Tab(tab))),
-            tree::FramePart::Dismiss { kept } => {
-                let bars = self.bars_model();
-                let field = if kept { bars.kept? } else { bars.status };
-                field.dismiss.map(Message::DismissError)
-            }
-            tree::FramePart::Measure => self.dev_tools.then_some(Message::Measure(!self.measuring)),
-            tree::FramePart::MoveCamera => self.dev_tools.then_some(Message::Animate(!self.animating)),
         }
     }
 
@@ -672,6 +730,29 @@ impl crate::App {
             };
             self.reader_event(ReaderEvent::Close);
             return vec![crate::Message::Canvas(event)];
+        }
+        // Focus on one of the bar's stops (a ×, a developer switch) moves the
+        // runtime's focus there, as Tab would, through a focus effect
+        // (ui-layer.md, section 7, rule 6). Only a stop the bar shows now.
+        if request.action == accesskit::Action::Focus
+            && let Some(id) = self.a11y.ids.id(request.target_node.0)
+            && self.bar_stops().contains(id)
+        {
+            let id = id.clone();
+            // A focus move ends the screen reader's undo group, as it does
+            // on the canvas, so a later step starts its own.
+            self.reader_event(crate::edits::ReaderEvent::Close);
+            // The canvas lets go of the keyboard, selecting nothing, so the
+            // bar's keys are the bar's (section 6, rule 1). Always, even
+            // when the canvas has reported no focus: a request still on its
+            // way would otherwise land on the next frame and take the keys
+            // back. With no focus, a request for no control does nothing.
+            // The canvas's answer, `FocusChanged(None)`, clears the app's
+            // copy on its frame; it is cleared here too, so the next key
+            // already sees it.
+            self.a11y.release_canvas_focus();
+            self.effect(loom_ui::Effects::focus(id));
+            return Vec::new();
         }
         if request.action == accesskit::Action::Focus {
             // Focus on a control moves the canvas's keyboard focus there.
@@ -767,6 +848,9 @@ impl crate::App {
                         BuildTimes::record(start.elapsed());
                     }
                     self.effect(loom_ui::Effects::accessibility(whole, changes));
+                }
+                if std::mem::take(&mut self.a11y.again) {
+                    self.a11y_rebuild();
                 }
             }
             Event::Action(request) => {
