@@ -10,6 +10,7 @@ A resonant filter with low-pass, band-pass, high-pass, and notch outputs. The cu
 | Version | 1 |
 | Family | Filters and effects |
 | Category | Filter |
+| Fills roles | [Filter](loom.role.filter.md) |
 
 ## Inputs
 

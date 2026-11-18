@@ -4,7 +4,7 @@ use crate::Element;
 use crate::style::{self, button};
 use iced::widget::{column, container, markdown, row, scrollable, space, text};
 use iced::{Length, Theme};
-use loom_core::ModuleDescriptor;
+use loom_core::{ModuleDescriptor, Registry, RoleDescriptor, RolePort};
 use serde::Serialize;
 
 use crate::Message;
@@ -38,6 +38,17 @@ pub struct Model {
     pub example: Option<String>,
 }
 
+impl Model {
+    /// The heading details, shared by the overlay and its accessibility tree.
+    pub(crate) fn summary(&self) -> String {
+        [self.family, self.category, self.id]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
 /// The open overlay and its parsed Markdown: the notes before the
 /// example, and the example section with what follows it.
 pub struct Help {
@@ -54,10 +65,15 @@ pub(crate) const EXAMPLE_HEADING: &str = "\n## Example";
 impl Help {
     /// Builds the view from the actual registry descriptor.
     pub fn new(d: &'static ModuleDescriptor) -> Self {
-        let notes = bundled_page(d.id)
-            .and_then(|page| page.split_once(MARKER).map(|(_, notes)| notes.trim()))
-            .unwrap_or("")
-            .replace("\r\n", "\n");
+        let mut notes = bundled_notes(d.id);
+        if !d.roles.is_empty() {
+            let roles: Vec<_> = d
+                .roles
+                .iter()
+                .map(|fills| format!("[{}]({}.md)", fills.role.name, fills.role.id))
+                .collect();
+            notes = format!("Fills roles: {}.\n\n{notes}", roles.join(", "));
+        }
         let example = notes
             .split_once("```ron\n")
             .and_then(|(_, rest)| rest.split_once("```"))
@@ -108,6 +124,58 @@ impl Help {
         Self::from_model(model)
     }
 
+    /// Builds offline help for the contract a slot's parts fill.
+    pub fn role(role: &'static RoleDescriptor, registry: &Registry) -> Self {
+        let requirement = |required| if required { "required" } else { "optional" };
+        let port = |p: &RolePort| Entry {
+            name: p.name,
+            label: p.label,
+            description: p.description,
+            details: format!("{}, {}", p.signal.name(), requirement(p.required)),
+        };
+        let mut parts: Vec<_> = registry
+            .browsable()
+            .filter(|d| d.roles.iter().any(|fills| fills.role == role))
+            .collect();
+        parts.sort_by_key(|d| (d.name, d.id));
+        let links: Vec<_> = parts.iter().map(|d| format!("[{}]({}.md)", d.name, d.id)).collect();
+        let parts = if links.is_empty() {
+            "No registered modules fill this role yet.".to_string()
+        } else {
+            format!("Modules that fill this role: {}.", links.join(", "))
+        };
+        let notes = format!("{parts}\n\n{}", bundled_notes(role.id));
+        Self::from_model(Model {
+            id: role.id,
+            name: role.name,
+            category: "Slot role",
+            family: "",
+            description: role.description,
+            inputs: role.inputs.iter().map(port).collect(),
+            outputs: role.outputs.iter().map(port).collect(),
+            params: role
+                .params
+                .iter()
+                .map(|p| {
+                    let values = if p.whole { "whole numbers" } else { "continuous" };
+                    let details = [p.unit, values, requirement(p.required)]
+                        .into_iter()
+                        .filter(|part| !part.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Entry {
+                        name: p.name,
+                        label: p.label,
+                        description: p.description,
+                        details,
+                    }
+                })
+                .collect(),
+            notes,
+            example: None,
+        })
+    }
+
     /// The keyboard shortcuts page: every canvas gesture and shortcut,
     /// opened from the inspector or with F1 when nothing is selected.
     pub fn shortcuts() -> Self {
@@ -156,11 +224,7 @@ impl Help {
         .align_y(iced::Alignment::Center);
         let mut content = column![].spacing(12).width(Length::Fill);
         if !m.id.is_empty() {
-            content = content.push(
-                text(format!("{} · {} · {}", m.family, m.category, m.id))
-                    .size(style::SMALL)
-                    .color(style::QUIET),
-            );
+            content = content.push(text(m.summary()).size(style::SMALL).color(style::QUIET));
             content = content.push(text(m.description).size(style::BODY));
         }
         content = content.push(markdown::view(&self.lead, style::markdown(&theme)).map(Message::HelpLink));
@@ -223,6 +287,26 @@ impl Help {
                 ..container::Style::default()
             });
         iced::widget::mouse_area(backdrop).on_press(Message::CloseHelp).into()
+    }
+}
+
+/// The hand-written part of a bundled help page.
+fn bundled_notes(id: &str) -> String {
+    bundled_page(id)
+        .and_then(|page| page.split_once(MARKER).map(|(_, notes)| notes.trim()))
+        .unwrap_or("")
+        .replace("\r\n", "\n")
+}
+
+impl crate::App {
+    /// The help page for a canvas tile, including a slot's role contract.
+    pub(crate) fn tile_help(&self, id: u32) -> Option<Help> {
+        let id = loom_core::ModuleId(id);
+        let controller = &self.session.controller;
+        if let Some(slot) = self.session.hierarchy.slot(id) {
+            return Some(Help::role(slot.role, controller.registry()));
+        }
+        controller.graph().node(id).map(|node| Help::new(node.descriptor))
     }
 }
 

@@ -1,6 +1,6 @@
 use super::*;
-use loom_core::ParamRange;
 use loom_core::{EngineConfig, EngineParts, LoomError, MidiControl, create_engine};
+use loom_core::{OutputRef, ParamRange};
 
 fn parts() -> EngineParts {
     create_engine(loom_modules::registry(), EngineConfig::with_sample_rate(48_000.0))

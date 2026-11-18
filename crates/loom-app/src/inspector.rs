@@ -105,6 +105,8 @@ pub struct SubPatchRows {
     pub id: u32,
     /// The definition's name, or the name being typed for it.
     pub name: String,
+    /// The authors credited on this definition, in order.
+    pub authors: Vec<String>,
     /// The input ports, in order.
     pub inputs: Vec<String>,
     /// The output ports, in order.
@@ -964,6 +966,9 @@ impl App {
                         .gestures
                         .label_draft(id)
                         .map_or_else(|| hierarchy.tile_name(ModuleId(id)).unwrap_or_default(), str::to_string),
+                    authors: hierarchy
+                        .definition_of(ModuleId(id))
+                        .map_or_else(Vec::new, |d| d.metadata.authors.clone()),
                     inputs: inputs.into_iter().map(|(_, name)| name).collect(),
                     outputs: outputs.into_iter().map(|(_, name)| name).collect(),
                     params,
@@ -1169,7 +1174,7 @@ impl App {
 /// The inspector's widgets.
 pub fn view<'a>(
     model: Inspector,
-    authors: &'a iced::widget::text_editor::Content<crate::Renderer>,
+    patch_info: &'a crate::patch_info::State,
     drop_row: Option<(u32, usize)>,
     dragging: bool,
     listening: bool,
@@ -1189,7 +1194,7 @@ pub fn view<'a>(
     let content: Element<'a, AppMessage> = match model {
         // Short, with the full list one click away (visual-system.md).
         Inspector::Patch(rows) => column![
-            crate::patch_info::view(rows, authors),
+            crate::patch_info::view(rows, &patch_info.authors),
             iced::widget::rule::horizontal(1),
             text("Select a module to edit it.").size(style::BODY).color(DIM),
             text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
@@ -1294,6 +1299,9 @@ pub fn view<'a>(
                     drop_row,
                     dragging,
                 ));
+            }
+            if let Some(authors) = patch_info.part_authors(id) {
+                rows = rows.push(crate::patch_info::part_authors_view(id, authors));
             }
             rows.into()
         }

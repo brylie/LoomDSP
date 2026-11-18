@@ -435,3 +435,57 @@ fn a_credit_question_that_cannot_be_asked_yet_waits() {
         "a later Save asks"
     );
 }
+
+/// Part credit follows nested definitions and editing a sub-patch's
+/// authors changes the saved definition and the top-level credit.
+#[test]
+fn part_credits_follow_nested_definitions_and_author_edits() {
+    let dir = folder("part-authors");
+    let file = dir.join("voices.ron");
+    std::fs::write(
+        &file,
+        r#"Patch(version: 1, metadata: Metadata(name: "Voices", authors: ["Lena"]),
+        modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"))],
+        subpatches: {
+            "voice": SubPatch(metadata: Metadata(name: "Voice", authors: ["lena", "Ada"]),
+                modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("inner"))]),
+            "inner": SubPatch(metadata: Metadata(name: "Inner", authors: ["ADA", "Sam"])),
+        },
+    )"#,
+    )
+    .unwrap();
+    let mut app = App::new(Args {
+        patch: Some(file.clone()),
+        ..crate::tests::app_args()
+    });
+    assert_eq!(rows(&app).parts_by, ["Ada", "Sam"]);
+    app.session.selection.insert(2);
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(AppMessage::Tick);
+    let authors = part_authors_id(2);
+    ui.focus(&authors);
+    assert_eq!(ui.focused_field(), Some(authors.clone()));
+    ui.send(AppMessage::PatchInfo(Message::PartAuthors(
+        2,
+        text_editor::Action::Move(text_editor::Motion::DocumentEnd),
+    )));
+    ui.tap(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+        iced::keyboard::Modifiers::empty(),
+    );
+    ui.typewrite("Yara");
+    assert!(ui.app().unsaved());
+    let Inspector::SubPatch(subpatch) = ui.app().inspector_model() else {
+        panic!("selected sub-patch")
+    };
+    assert_eq!(subpatch.authors, ["lena", "Ada", "Yara"]);
+    assert_eq!(ui.a11y_tree().node_by_id(&authors).value(), Some("lena\nAda\nYara"));
+    let app = ui.app_mut();
+    app.session.selection.clear();
+    assert_eq!(rows(app).parts_by, ["Ada", "Yara", "Sam"]);
+    assert!(app.write_to(file.clone()));
+    let saved = crate::patch_file::load(file).unwrap();
+    assert_eq!(saved.metadata.authors, ["Lena"]);
+    assert_eq!(saved.subpatches["voice"].metadata.authors, ["lena", "Ada", "Yara"]);
+    std::fs::remove_dir_all(dir).unwrap();
+}

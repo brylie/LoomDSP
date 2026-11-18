@@ -268,7 +268,7 @@ impl App {
     pub(crate) fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
-            &self.session.patch_info.authors,
+            &self.session.patch_info,
             self.session.gestures.drop_row(),
             self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on(),
             self.a11y.is_active(),

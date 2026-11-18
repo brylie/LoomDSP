@@ -9,10 +9,6 @@ use loom_core::{ModuleId, RoleDescriptor};
 use loom_patch::{PartKey, Patch, hierarchy};
 use serde::Serialize;
 
-/// The status bar text when a selection with a slot tile is copied or cut
-/// (sub-patches.md, Slots). A follow-up carries the slot.
-pub const CANNOT_COPY_SLOT: &str = "Cannot copy a slot yet";
-
 /// The inspector's Part choice that empties the slot, and names an empty
 /// slot's part (sub-patches.md, Empty slots).
 pub const NO_PART_CHOICE: &str = "No part";

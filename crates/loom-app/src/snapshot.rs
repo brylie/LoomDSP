@@ -767,6 +767,7 @@ pub fn headless(args: &Args) -> Result<App, String> {
         }
         app.session.selection.insert(id);
     }
+    app.sync_part_authors();
     if args.show_help {
         if app.session.selection.len() != 1 {
             return Err("--show-help needs exactly one selected module".to_string());

@@ -13,6 +13,7 @@ mod midi_port;
 use clap::{Parser, Subcommand};
 use loom_core::ModuleNames;
 use loom_core::{Controller, EngineConfig, EngineParts, MidiEvent, ModuleId, OutputSafety, Registry, create_engine};
+use loom_host_desktop::patch_file::{FolderLibrary, load};
 use loom_host_desktop::{AudioOptions, AudioOutput, StatsSnapshot};
 use loom_patch::Patch;
 use std::collections::BTreeMap;
@@ -37,7 +38,7 @@ enum Command {
         /// Show ports and parameters.
         #[arg(short, long)]
         verbose: bool,
-        /// Write one Markdown help page per module into this folder, plus an
+        /// Write one Markdown help page per module and role, plus an
         /// index (README.md), instead of listing. Text below a page's marker
         /// line is kept. The repository's pages are in docs/modules
         /// (`mise run help-pages`).
@@ -53,13 +54,13 @@ enum Command {
     /// Load a patch and report what the compiler found (feedback loops,
     /// inserted delays).
     Check {
-        /// Patch file (.ron).
-        patch: PathBuf,
+        #[command(flatten)]
+        source: PatchArgs,
     },
     /// Render a patch to a 32-bit float stereo WAV file.
     Render {
-        /// Patch file (.ron).
-        patch: PathBuf,
+        #[command(flatten)]
+        source: PatchArgs,
         /// Output WAV file.
         #[arg(short, long)]
         output: PathBuf,
@@ -96,8 +97,8 @@ enum Command {
     Capture(capture::Options),
     /// Play a patch live with a MIDI controller.
     Play {
-        /// Patch file (.ron).
-        patch: PathBuf,
+        #[command(flatten)]
+        source: PatchArgs,
         #[command(flatten)]
         audio: AudioArgs,
         /// Hold this MIDI note, for testing without a controller.
@@ -125,6 +126,16 @@ enum Command {
         #[arg(long)]
         offline: bool,
     },
+}
+
+/// The patch and optional library used by check, render, and play.
+#[derive(clap::Args)]
+struct PatchArgs {
+    /// Patch file (.ron).
+    patch: PathBuf,
+    /// Refresh linked sub-patches from this folder. By default, use the copies in the patch.
+    #[arg(long, value_name = "DIR")]
+    library: Option<PathBuf>,
 }
 
 #[derive(clap::Args)]
@@ -166,12 +177,12 @@ fn main() -> ExitCode {
             ..
         } => modules(verbose),
         Command::Devices => devices(),
-        Command::Check { patch } => check(&patch),
+        Command::Check { source } => check(&source),
         Command::Analyze(options) => return analyze::run(&options),
         Command::MidiPort(options) => return midi_port::run(&options),
         Command::Capture(options) => return capture::run(&options),
         Command::Render {
-            patch,
+            source,
             output,
             seconds,
             sample_rate,
@@ -184,9 +195,9 @@ fn main() -> ExitCode {
                 output_safety,
                 ..EngineConfig::with_sample_rate(sample_rate as f32)
             };
-            render(&patch, &output, seconds, config, block, &notes, note_length)
+            render(&source, &output, seconds, config, block, &notes, note_length)
         }
-        Command::Play { patch, audio, note } => play(&patch, &audio, note),
+        Command::Play { source, audio, note } => play(&source, &audio, note),
         Command::Stress {
             patch,
             audio,
@@ -211,15 +222,16 @@ fn main() -> ExitCode {
     }
 }
 
-fn load_engine(path: &Path, config: EngineConfig) -> Result<(Patch, EngineParts)> {
-    // The CLI only reads patches; saving lives in the app (`loom-app`'s
-    // `patch_file`). The error names the path, then the system's reason.
-    let text = std::fs::read_to_string(path).map_err(|source| format!("{}: {source}", path.display()))?;
-    let patch = Patch::from_ron(&text)?;
+fn load_engine(path: &Path, config: EngineConfig, library: Option<&Path>) -> Result<(Patch, EngineParts)> {
+    let mut patch = load(path)?;
     let mut parts = create_engine(loom_modules::registry(), config);
+    let mut notes = library.map_or_else(Vec::new, |root| {
+        patch.refresh_linked(&FolderLibrary { root: root.to_owned() }, parts.controller.registry())
+    });
     // What loaded differently from the file, such as a saved control range
     // that was not kept (control-ranges.md, rule 7). The patch still plays.
-    for note in patch.load_into(&mut parts.controller)? {
+    notes.extend(patch.load_into(&mut parts.controller)?);
+    for note in notes {
         let level = match note.level() {
             loom_patch::LoadLevel::Warning => "warning",
             loom_patch::LoadLevel::Note => "note",
@@ -429,8 +441,9 @@ fn describe(controller: &Controller, inside: &BTreeMap<ModuleId, String>, id: Mo
         .unwrap_or_else(|| place)
 }
 
-fn check(path: &Path) -> Result<ExitCode> {
-    let (patch, parts) = load_engine(path, EngineConfig::default())?;
+fn check(source: &PatchArgs) -> Result<ExitCode> {
+    let path = &source.patch;
+    let (patch, parts) = load_engine(path, EngineConfig::default(), source.library.as_deref())?;
     let c = &parts.controller;
     let inside = inside(&patch, c.registry());
     let unknown: Vec<_> = c
@@ -512,7 +525,7 @@ fn check(path: &Path) -> Result<ExitCode> {
 }
 
 fn render(
-    path: &Path,
+    source: &PatchArgs,
     output: &Path,
     seconds: f32,
     config: EngineConfig,
@@ -520,7 +533,7 @@ fn render(
     notes: &[u8],
     note_length: f32,
 ) -> Result<ExitCode> {
-    let (_, mut parts) = load_engine(path, config)?;
+    let (_, mut parts) = load_engine(&source.patch, config, source.library.as_deref())?;
     let sample_rate = config.sample_rate;
     let frames = (seconds * sample_rate) as usize;
     let note_frames = ((note_length * sample_rate) as usize).max(2);
@@ -589,7 +602,7 @@ struct Live {
     controller: Controller,
 }
 
-fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Live> {
+fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>, library: Option<&Path>) -> Result<Live> {
     let output = AudioOutput::open(&AudioOptions {
         device: args.device.clone(),
         sample_rate: args.sample_rate,
@@ -600,7 +613,7 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>) -> Result<Li
         output_safety: args.output_safety,
         ..EngineConfig::with_sample_rate(output.sample_rate() as f32)
     };
-    let (patch, parts) = load_engine(path, config)?;
+    let (patch, parts) = load_engine(path, config, library)?;
     let EngineParts {
         controller,
         engine,
@@ -739,8 +752,8 @@ fn format_stress_line(elapsed_secs: f32, edits: u64, s: &StatsSnapshot) -> Strin
     )
 }
 
-fn play(path: &Path, args: &AudioArgs, note: Option<u8>) -> Result<ExitCode> {
-    let mut live = start_live(path, args, note)?;
+fn play(source: &PatchArgs, args: &AudioArgs, note: Option<u8>) -> Result<ExitCode> {
+    let mut live = start_live(&source.patch, args, note, source.library.as_deref())?;
     println!("playing. press Enter to stop.");
     let stop = Arc::new(AtomicBool::new(false));
     let stop_reader = stop.clone();
@@ -812,7 +825,7 @@ impl Stressor {
 }
 
 fn stress_live(path: &Path, args: &AudioArgs, seconds: f32, rate: f32, note: u8) -> Result<ExitCode> {
-    let mut live = start_live(path, args, Some(note))?;
+    let mut live = start_live(path, args, Some(note), None)?;
     println!("stress: {rate} structural edits per second for {seconds} s");
     let mut stressor = Stressor::new();
     let interval = Duration::from_secs_f32(1.0 / rate.max(0.1));
@@ -852,7 +865,7 @@ fn stress_offline(path: &Path, seconds: f32, rate: f32, note: u8, output_safety:
         output_safety,
         ..EngineConfig::with_sample_rate(SAMPLE_RATE)
     };
-    let (_, mut parts) = load_engine(path, config)?;
+    let (_, mut parts) = load_engine(path, config, None)?;
     parts.midi.send(MidiEvent::note_on(0, 0, note, 100));
     let mut stressor = Stressor::new();
     let blocks = (seconds * SAMPLE_RATE / BLOCK as f32) as usize;

@@ -53,9 +53,7 @@ pub trait Library {
     fn read(&self, path: &str) -> Result<Patch, LibraryError>;
 }
 
-/// A library with nothing in it: every linked instance keeps its stored
-/// copy. For the command line and the web runtime, which have no library
-/// folder.
+/// A library with nothing in it: every linked instance keeps its stored copy.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoLibrary;
 
@@ -695,23 +693,41 @@ fn drop_stale_references(patch: &mut Patch, key: &str, surface: &Surface, name: 
     }
 }
 
-/// The keys of the definitions `root` uses, through any depth, in the
-/// order they are first met: the instances in id order, depth first.
+/// The definitions the patch carries at any depth, including held parts.
 pub fn reachable_keys(root: &SubPatch, table: &BTreeMap<String, SubPatch>) -> Vec<String> {
+    definition_keys(root, table, true)
+}
+
+/// The definitions instantiated at any depth, excluding held parts.
+pub fn live_definition_keys(root: &SubPatch, table: &BTreeMap<String, SubPatch>) -> Vec<String> {
+    definition_keys(root, table, false)
+}
+
+/// Walks the definition table, visiting a key at most once.
+fn definition_keys(root: &SubPatch, table: &BTreeMap<String, SubPatch>, include_held: bool) -> Vec<String> {
     let mut found = Vec::new();
     let mut pending: Vec<&SubPatch> = vec![root];
     while let Some(definition) = pending.pop() {
-        let mut instances: Vec<&PatchModule> = definition.modules.iter().filter(|m| m.subpatch.is_some()).collect();
+        let mut instances: Vec<&PatchModule> = definition.modules.iter().collect();
         instances.sort_by_key(|m| m.id);
         // Depth first: the last pushed is visited next.
         for module in instances.iter().rev() {
-            let key = module.subpatch.clone().unwrap_or_default();
-            if found.contains(&key) {
-                continue;
-            }
-            if let Some(nested) = table.get(&key) {
-                found.push(key);
-                pending.push(nested);
+            let held = module
+                .slot
+                .iter()
+                .filter(|_| include_held)
+                .flat_map(|slot| slot.held.keys())
+                .filter_map(|key| match key {
+                    crate::PartKey::SubPatch(key) => Some(key),
+                    crate::PartKey::Module(_) => None,
+                });
+            for key in module.subpatch.iter().chain(held) {
+                if !found.contains(key)
+                    && let Some(nested) = table.get(key)
+                {
+                    found.push(key.clone());
+                    pending.push(nested);
+                }
             }
         }
     }
@@ -731,23 +747,11 @@ pub(crate) fn fingerprint(root: &SubPatch, table: &BTreeMap<String, SubPatch>) -
         .collect();
     let table = std::mem::take(&mut file.subpatches);
     for (key, mut definition) in table {
-        for module in &mut definition.modules {
-            if let Some(key) = &mut module.subpatch
-                && let Some(new) = renamed.get(key)
-            {
-                *key = new.clone();
-            }
-        }
+        rename_module_keys(&mut definition.modules, &renamed);
         file.subpatches
             .insert(renamed.get(&key).cloned().unwrap_or(key), definition);
     }
-    for module in &mut file.modules {
-        if let Some(key) = &mut module.subpatch
-            && let Some(new) = renamed.get(key)
-        {
-            *key = new.clone();
-        }
-    }
+    rename_module_keys(&mut file.modules, &renamed);
     file.to_ron().unwrap_or_default()
 }
 
@@ -767,20 +771,36 @@ pub(crate) fn rekey(root: &mut SubPatch, nested: &mut BTreeMap<String, SubPatch>
     if renamed.is_empty() {
         return;
     }
-    let fix = |modules: &mut [PatchModule]| {
-        for module in modules {
-            if let Some(key) = &mut module.subpatch
-                && let Some(new) = renamed.get(key)
-            {
-                *key = new.clone();
-            }
-        }
-    };
-    fix(&mut root.modules);
+    rename_module_keys(&mut root.modules, &renamed);
     let table = std::mem::take(nested);
     for (key, mut definition) in table {
-        fix(&mut definition.modules);
+        rename_module_keys(&mut definition.modules, &renamed);
         nested.insert(renamed.get(&key).cloned().unwrap_or(key), definition);
+    }
+}
+
+/// Remaps live and held sub-patch references into the destination table.
+fn rename_module_keys(modules: &mut [PatchModule], renamed: &BTreeMap<String, String>) {
+    for module in modules {
+        if let Some(key) = &mut module.subpatch
+            && let Some(new) = renamed.get(key)
+        {
+            *key = new.clone();
+        }
+        if let Some(slot) = &mut module.slot {
+            slot.held = std::mem::take(&mut slot.held)
+                .into_iter()
+                .map(|(part, held)| {
+                    let part = match part {
+                        crate::PartKey::SubPatch(key) => {
+                            crate::PartKey::SubPatch(renamed.get(&key).cloned().unwrap_or(key))
+                        }
+                        module => module,
+                    };
+                    (part, held)
+                })
+                .collect();
+        }
     }
 }
 

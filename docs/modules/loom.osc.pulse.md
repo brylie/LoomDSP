@@ -10,6 +10,7 @@ A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sh
 | Version | 1 |
 | Family | Sources |
 | Category | Oscillator |
+| Fills roles | [Sound source](loom.role.source.md) |
 
 ## Inputs
 

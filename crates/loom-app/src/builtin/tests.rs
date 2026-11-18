@@ -70,7 +70,7 @@ fn the_synth_voice_exposes_its_surface_in_order() {
 /// The browser lists the built-ins first, marked `Built in`, with their own
 /// description and no menu; Enter on the first inserts the Synth voice as
 /// a copy, selected, whose tile menu offers `Swap Filter to Ladder` and
-/// leaves out Dissolve sub-patch while it holds slots (sub-patches.md,
+/// offers Dissolve sub-patch for the built-in with slots (sub-patches.md,
 /// Built-in abstractions).
 #[test]
 fn the_browser_inserts_a_builtin_as_a_copy() {
@@ -120,7 +120,7 @@ fn the_browser_inserts_a_builtin_as_a_copy() {
     );
     let items: Vec<String> = ui.app().tile_menu_items(tile).into_iter().map(|(l, _)| l).collect();
     assert!(items.contains(&"Swap Filter to Ladder".to_string()), "{items:?}");
-    assert!(!items.contains(&"Dissolve sub-patch".to_string()), "{items:?}");
+    assert!(items.contains(&"Dissolve sub-patch".to_string()), "{items:?}");
     assert!(!items.iter().any(|l| l.contains("Remove part")), "{items:?}");
     // A search by the mark finds both.
     ui.send(Message::OpenBrowser);

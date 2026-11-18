@@ -172,12 +172,7 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         Item::text(ids::part(&panel, "name"), rows.name.clone()),
         // Read only until the multi-line editor comes (phase 3): its name
         // and its text, and focus, but no SetValue.
-        Item {
-            label: Some("Authors, one per line".to_string()),
-            value: Some(rows.authors.join("\n")),
-            focus: Some(crate::places::field_widget_id(&crate::patch_info::authors_part())),
-            ..Item::new(ids::part(&panel, "authors"), Kind::Field)
-        },
+        authors(crate::patch_info::authors_part(), &rows.authors),
     ];
     for (index, tag) in rows.tags.iter().enumerate() {
         let key = ids::part(&panel, "tag").with(tag.as_str());
@@ -230,6 +225,17 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         Some(AppMessage::ShowShortcuts),
     ));
     Item::group(panel, "Patch", parts)
+}
+
+/// An Iced multi-line authors field exposes text and focus until the
+/// runtime's multi-line editor can provide editing actions.
+fn authors(id: UiId, names: &[String]) -> Item {
+    Item {
+        label: Some("Authors, one per line".to_string()),
+        value: Some(names.join("\n")),
+        focus: Some(crate::places::field_widget_id(&id)),
+        ..Item::new(id, Kind::Field)
+    }
 }
 
 /// One module's inspector.
@@ -437,6 +443,7 @@ fn sub_patch(s: &SubPatchRows) -> Item {
         let own = (!exposed.member).then_some(&exposed.own);
         parts.push(param_row(exposed.module, &exposed.label, &exposed.row, own));
     }
+    parts.push(authors(crate::patch_info::part_authors_id(s.id), &s.authors));
     Item::group(panel, s.name.clone(), parts)
 }
 

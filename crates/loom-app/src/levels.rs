@@ -266,6 +266,7 @@ impl App {
             self.alerts.warn(why);
             return;
         }
+        self.finish_all_fades();
         let mut candidate = self.session.hierarchy.clone();
         let made = match candidate.collapse(self.session.controller.graph(), &level, &selection) {
             Ok(made) => made,
@@ -368,6 +369,7 @@ impl App {
         }
         let level = self.session.level.clone();
         let inside = self.session.hierarchy.path_of(instance);
+        self.finish_all_fades();
         let mut candidate = self.session.hierarchy.clone();
         let undone = match candidate.dissolve(self.session.controller.graph(), instance) {
             Ok(undone) => undone,
@@ -807,11 +809,7 @@ impl App {
         match tile {
             Some(Tile::Instance(_)) => {
                 let mut items = vec![own("Open", Message::OpenTile(module))];
-                // Dissolve is left off while it would be refused: a slot
-                // cannot move out with its part yet (#702).
-                if !session.hierarchy.holds_slot(ModuleId(module)) {
-                    items.push(own("Dissolve sub-patch", Message::DissolveSubPatch(module)));
-                }
+                items.push(own("Dissolve sub-patch", Message::DissolveSubPatch(module)));
                 items.push(own("Save to library", Message::SaveToLibrary(module)));
                 if session.hierarchy.library_of(ModuleId(module)).is_some() {
                     items.push(own("Unlink", Message::Unlink(module)));
@@ -822,20 +820,24 @@ impl App {
             }
             Some(Tile::Port(..)) => vec![own("Help", Message::ShowModuleHelp(module))],
             Some(Tile::Slot(_)) => {
-                let mut items: Vec<(String, Message)> = self
-                    .swap_choices(module)
-                    .into_iter()
-                    .filter(|choice| !choice.current)
-                    .map(|choice| {
-                        (
-                            format!("Swap to {}", choice.label),
-                            Message::SwapSlot {
-                                slot: module,
-                                to: choice.to,
-                            },
-                        )
-                    })
-                    .collect();
+                let mut items = vec![
+                    own("Help", Message::ShowModuleHelp(module)),
+                    own("Make sub-patch", Message::MakeSubPatch(module)),
+                ];
+                items.extend(
+                    self.swap_choices(module)
+                        .into_iter()
+                        .filter(|choice| !choice.current)
+                        .map(|choice| {
+                            (
+                                format!("Swap to {}", choice.label),
+                                Message::SwapSlot {
+                                    slot: module,
+                                    to: choice.to,
+                                },
+                            )
+                        }),
+                );
                 // An empty slot has no part to remove or put in its place
                 // (sub-patches.md, Empty slots).
                 if session.hierarchy.part_of_slot(ModuleId(module)).is_some() {

@@ -376,14 +376,11 @@ fn a_bound_surface_control_offers_the_swap_through_its_tile() {
     assert_eq!(surface.module, target.module);
 }
 
-/// Dissolve slot puts the SVF tile back where the slot stood; copying a
-/// slot tile is refused with the spec's text.
+/// Dissolve slot puts the SVF tile back where the slot stood.
 #[test]
-fn dissolve_slot_and_the_clipboard_refusal() {
+fn dissolve_slot_puts_the_part_back() {
     let (mut app, slot, svf) = with_slot();
     app.session.selection = std::collections::BTreeSet::from([slot]);
-    assert!(app.copy().is_none());
-    assert_eq!(app.alerts.status(), CANNOT_COPY_SLOT);
     let _ = app.send(Message::DissolveSlot(slot));
     assert_eq!(app.alerts.status(), "Filter slot dissolved");
     assert!(titles(&app).contains(&"SVF".to_string()));
@@ -392,6 +389,92 @@ fn dissolve_slot_and_the_clipboard_refusal() {
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("dissolve Filter slot"));
     let saved = app.current_patch();
     assert!(saved.subpatches["voice"].modules.iter().all(|m| !m.is_slot()));
+}
+
+/// Paste selects only the new slot. Its part is independent, and undo
+/// removes the copied slot and part in one step.
+#[test]
+fn a_pasted_slot_swaps_independently_and_undoes_as_one_step() {
+    let (app, slot, svf) = with_slot();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let text = ui.app_mut().copy().unwrap();
+    ui.app_mut().paste(loom_ui_core::Point::new(600.0, 240.0), Some(text));
+    let snapshot = ui.app().ui_snapshot();
+    assert_eq!(snapshot.undo.as_deref(), Some("paste Filter"), "{:?}", snapshot.status);
+    let [copy] = snapshot.selection.as_slice() else {
+        panic!("one copied slot")
+    };
+    let (original, copy) = (ModuleId(slot), ModuleId(*copy));
+    let hierarchy = &ui.app().session.hierarchy;
+    let copy_part = hierarchy.part_of_slot(copy).unwrap();
+    assert_ne!(copy_part, ModuleId(svf));
+    ui.send(Message::SwapSlot {
+        slot: copy.0,
+        to: SwapTarget::Module("loom.filter.ladder@1".into()),
+    });
+    assert_eq!(ui.app().session.hierarchy.part_of_slot(original), Some(ModuleId(svf)));
+    assert_ne!(ui.app().session.hierarchy.part_of_slot(copy), Some(copy_part));
+    ui.app_mut().undo();
+    ui.app_mut().undo();
+    assert!(ui.app().session.hierarchy.slot(copy).is_none());
+    assert_eq!(ui.app().session.hierarchy.part_of_slot(original), Some(ModuleId(svf)));
+}
+
+/// The tile menu can collapse a slot and dissolve the result. Each undo
+/// keeps the same slot and part and restores the previous level.
+#[test]
+fn a_slot_moves_across_subpatch_boundaries_in_one_undo_step() {
+    let (app, slot, part) = with_slot();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let (slot, part) = (ModuleId(slot), ModuleId(part));
+    let outer = ModulePath::top(2);
+    ui.send(Message::MakeSubPatch(slot.0));
+    let instance = ModuleId(*ui.app().session.selection.first().unwrap());
+    assert_ne!(instance, slot);
+    let inner = ui.app().session.hierarchy.path_of(instance);
+    assert_eq!(ui.app().session.hierarchy.level_of(slot), inner);
+    ui.send(Message::DissolveSubPatch(instance.0));
+    assert_eq!(ui.app().session.hierarchy.level_of(slot), outer);
+    assert_eq!(ui.app().session.hierarchy.part_of_slot(slot), Some(part));
+    ui.app_mut().undo();
+    assert_eq!(ui.app().session.hierarchy.level_of(slot), inner);
+    ui.app_mut().undo();
+    assert_eq!(ui.app().session.hierarchy.level_of(slot), outer);
+    assert_eq!(ui.app().session.hierarchy.part_of_slot(slot), Some(part));
+}
+
+/// The slot uses the role's port text and the same role's offline Help.
+#[test]
+fn a_slot_port_and_menu_show_help_for_its_role() {
+    let (app, slot, _) = with_slot();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let input = ui.input(slot, "cutoff");
+    ui.move_to(input);
+    let role = &loom_core::roles::FILTER;
+    let cutoff = role.input("cutoff").unwrap();
+    let tile = ui.app().session.scene.module(slot).unwrap();
+    assert!(
+        tile.inputs
+            .iter()
+            .any(|input| input.label == cutoff.label && input.hover.description == cutoff.description)
+    );
+    let (_, help) = ui
+        .app()
+        .tile_menu_items(slot)
+        .into_iter()
+        .find(|(label, _)| label == "Help")
+        .unwrap();
+    ui.send(help);
+    let help = &ui.app().overlays.help.as_ref().unwrap().model;
+    assert_eq!(help.id, role.id);
+    assert_eq!(
+        help.inputs
+            .iter()
+            .find(|entry| entry.name == "cutoff")
+            .unwrap()
+            .description,
+        cutoff.description
+    );
 }
 
 /// Noise into a Voice whose Ladder is already a Filter slot's part, with an

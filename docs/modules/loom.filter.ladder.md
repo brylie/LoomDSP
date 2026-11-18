@@ -10,6 +10,7 @@ A resonant low-pass with a 12, 18, or 24 dB slope; high resonance thins the bass
 | Version | 1 |
 | Family | Filters and effects |
 | Category | Filter |
+| Fills roles | [Filter](loom.role.filter.md) |
 
 ## Inputs
 

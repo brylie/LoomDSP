@@ -1513,6 +1513,7 @@ impl App {
             self.control_frame_asked = false;
         }
         self.apply(message);
+        self.sync_part_authors();
         // The timers, the watchers, and the frames a command waits for
         // follow what this update changed.
         self.sync_timers(now);
@@ -1925,24 +1926,15 @@ impl App {
             Message::A11y(_) => {}
             Message::ShowHelp => {
                 if self.overlays.help.is_none() {
-                    let descriptor = self
-                        .overlays
-                        .browser()
-                        .and_then(browser::Browser::highlighted)
-                        .or_else(|| {
-                            (self.overlays.browser().is_none() && self.session.selection.len() == 1)
-                                .then(|| {
-                                    self.session
-                                        .selection
-                                        .iter()
-                                        .next()
-                                        .and_then(|id| self.session.controller.graph().node(ModuleId(*id)))
-                                        .map(|node| node.descriptor)
-                                })
-                                .flatten()
-                        });
+                    let page = if let Some(browser) = self.overlays.browser() {
+                        browser.highlighted().map(help::Help::new)
+                    } else if self.session.selection.len() == 1 {
+                        self.session.selection.first().and_then(|&id| self.tile_help(id))
+                    } else {
+                        None
+                    };
                     // With nothing to describe, F1 shows the shortcuts.
-                    self.overlays.help = Some(descriptor.map_or_else(help::Help::shortcuts, help::Help::new));
+                    self.overlays.help = Some(page.unwrap_or_else(help::Help::shortcuts));
                 }
             }
             Message::ShowShortcuts => {
@@ -1994,12 +1986,7 @@ impl App {
             Message::Mode(message) => self.mode_message(message),
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
-                self.overlays.help = self
-                    .session
-                    .controller
-                    .graph()
-                    .node(ModuleId(id))
-                    .map(|node| help::Help::new(node.descriptor));
+                self.overlays.help = self.tile_help(id);
             }
             Message::CloseHelp => self.overlays.help = None,
             Message::HelpExample => {
@@ -2018,6 +2005,11 @@ impl App {
                     .copied();
                 if let Some(descriptor) = descriptor {
                     self.overlays.help = Some(help::Help::new(descriptor));
+                } else if let Some(role) = link
+                    .strip_suffix(".md")
+                    .and_then(|id| self.session.controller.registry().role(id))
+                {
+                    self.overlays.help = Some(help::Help::role(role, self.session.controller.registry()));
                 } else {
                     self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }

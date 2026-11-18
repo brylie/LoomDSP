@@ -19,6 +19,8 @@ The descriptor already holds this: each port and parameter has a label, a one-se
 
 `loom modules --markdown DIR` writes one page per registered module into `DIR`, named after the module's ID (`loom.filter.svf.md`), and an index, `README.md`. The repository's pages live in `docs/modules/`. `mise run help-pages` regenerates them. With `--check`, the command writes nothing and exits with an error if any page is out of date, for scripts.
 
+The same command writes one page per registered slot role from its role descriptor. It lists the required and optional ports and parameters, and links to the registered modules that fill the role. Each module page links to any roles its descriptor declares. The index lists the roles after the module families.
+
 A page has two parts:
 
 | Part | Holds | Who writes it |
@@ -58,6 +60,8 @@ The index lists every module by family, in the module browser's order ([ADR-0029
 **Status:** Agreed and implemented.
 
 The app shows a module's help in an overlay over a dimmed backdrop. F1 opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile; with neither, F1 opens the **Keyboard shortcuts** page, which the inspector's button also opens. The inspector has a help action, and the tile menu has a help item. It opens on top of Your patches, the licence chooser, and Preferences, which wait underneath, and only a question is drawn over it. Escape, the **Close** button, or a click on the backdrop closes the overlay and nothing else; a click inside it does nothing else. The same help view is used for all entry points.
+
+A slot tile's **Help** menu item opens the role's page in the same view. Its port hover text uses the role port's label and description. Links between modules and roles open the corresponding help in the app.
 
 The overlay has a fixed title row with **Close**, and one scrolling body in reading order ([#457](https://github.com/brylie/LoomDSP/issues/457)): the family, category, and ID; the summary; the hand-written notes up to their example; **Parameters**, **Inputs**, and **Outputs**; then **Open example** and the example section. Each entry shows its label, its details in words with units ("20 to 20000 Hz, logarithmic. Default 1000 Hz.", "audio; reads 0 with no cable", "audio, bipolar"), and its description. Text wraps inside the overlay, and the scrollbar takes its own space. Sizes come from the [visual system](visual-system.md); the details use the same text as the generated pages (`ParamSpec::range_text`, `PortDefault::text`).
 
