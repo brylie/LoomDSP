@@ -359,6 +359,9 @@ fn a_long_status_is_cut_and_the_items_keep_their_width() {
     ui.app_mut().alerts.say("short");
     ui.redraw();
     let before = widths(&mut ui);
+    for (name, width) in &before {
+        assert!(*width > 0.0, "{name} has a width to keep");
+    }
     ui.app_mut().alerts.say("a long message ".repeat(40));
     ui.redraw();
     assert_eq!(widths(&mut ui), before, "each item keeps the width it had");
@@ -453,4 +456,54 @@ fn focus_on_a_bar_stop_ends_the_screen_readers_undo_group() {
     );
     ui.a11y_action(&id(bars::STATUS_DISMISS_ID), KitAction::Focus);
     assert_eq!(ui.app().session.edits.reader_group(), ReaderGroup::Closed);
+}
+
+/// A screen reader's Focus on the bar's ×, while a canvas control has the
+/// keyboard, takes the keyboard from the canvas without selecting
+/// anything: the selected tile stays selected, and Enter on the × then
+/// dismisses the error rather than going to the canvas.
+#[test]
+fn focus_on_the_x_takes_the_keyboard_from_the_canvas() {
+    let mut ui = ui_with_error();
+    let knob = id("canvas/4/param/cutoff");
+    ui.a11y_action(&knob, KitAction::Focus);
+    assert!(ui.app().a11y.focus().is_some(), "the canvas control has the keyboard");
+    assert!(
+        ui.app().session.selection.contains(&4),
+        "Focus on the knob selected its tile"
+    );
+    let selected = ui.app().session.selection.clone();
+    ui.a11y_action(&id(bars::STATUS_DISMISS_ID), KitAction::Focus);
+    assert_eq!(ui.app().a11y.focus(), None, "the canvas let go");
+    assert_eq!(ui.app().session.selection, selected, "nothing else selected");
+    tap(&mut ui, Named::Enter);
+    ui.redraw();
+    assert!(ui.app().alerts.kept().is_empty(), "Enter on the × dismissed the error");
+}
+
+/// A change made while a tree rebuild is in flight reaches the screen
+/// reader: an autosave's warning that arrives then is in the tree built by
+/// the one more rebuild, once the bar is laid out again.
+#[test]
+fn a_warning_during_a_rebuild_reaches_the_next_tree() {
+    use crate::a11y::{Event, Touch};
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().a11y_event(Event::Activated);
+    ui.read_runtime_nodes();
+    let places = ui.places();
+    ui.app_mut().a11y_event(Event::Located(places.clone()));
+    ui.app_mut().a11y_after(Touch::Changed);
+    ui.app_mut().alerts.warn("Autosave failed");
+    ui.app_mut().a11y_after(Touch::Changed);
+    ui.app_mut().a11y_event(Event::Located(places.clone()));
+    ui.redraw();
+    ui.read_runtime_nodes();
+    let (whole, _) = ui.app_mut().a11y_changes(&places);
+    assert!(
+        whole
+            .nodes
+            .iter()
+            .any(|(_, node)| node.value().is_some_and(|value| value.contains("Autosave failed"))),
+        "the follow-up tree reads the warning"
+    );
 }

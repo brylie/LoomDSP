@@ -194,6 +194,13 @@ impl<'a, M> Context<'a, M> {
         self.panels.is_none_or(|panels| panels.is_settled(self.window.size))
     }
 
+    /// True when one of the runtime's panels is where the UI ID `id` would
+    /// be: its key, or one inside it, whether or not the element is laid
+    /// out yet. Tells a part of the runtime's own from a toolkit's.
+    pub fn holds(&self, id: &UiId) -> bool {
+        self.panels.is_some_and(|panels| panels.panel_of(id).is_some())
+    }
+
     /// Where the runtime's element with UI ID `id` is in the window, in
     /// logical pixels, as last laid out. `None` outside a runtime, and for
     /// an ID no panel of the runtime's has.

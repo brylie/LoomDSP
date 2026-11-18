@@ -316,8 +316,10 @@ impl Ui {
     /// The accessibility tree as a screen reader is sent it now, with the
     /// canvas and the window's parts where this view placed them.
     pub fn a11y_tree(&mut self) -> A11yTree {
-        let places = self.places();
+        // The runtime's nodes first: reading them may run a turn and lay
+        // out, which can move Iced's parts, so their places are read after.
         self.read_runtime_nodes();
+        let places = self.places();
         let update = self.app_mut().a11y_tree(&places);
         let app = self.app();
         A11yTree::new(update, |node| app.a11y_ui_id(node))

@@ -346,6 +346,10 @@ impl super::pointers::IcedSide for HarnessIced<'_> {
         });
         Some(statuses)
     }
+
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)> {
+        self.app.pointer.take_for_runtime()
+    }
 }
 
 /// Where a release task acts in the harness: the surface alone.

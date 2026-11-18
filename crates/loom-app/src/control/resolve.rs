@@ -228,6 +228,21 @@ fn locate_id(app: &App, id: &UiId, found: &Found) -> Result<Option<Rect>, String
     }
 }
 
+/// True when `locate` cannot answer `target` from Iced's search and the
+/// canvas alone, and the answer could come from the runtime's own layout:
+/// a UI ID inside one of its panels, or plain text it may show. Such a
+/// `locate` waits for a current layout; any other, a missing module or a
+/// part of Iced's scrolled out of view, answers at once with its error.
+pub(crate) fn waits_for_ours<M>(app: &App, target: &str, found: &Found, cx: &loom_ui::Context<'_, M>) -> bool {
+    if locate(app, target, found).is_ok() {
+        return false;
+    }
+    match ui_id(target) {
+        Some(id) => cx.holds(&id),
+        None => split_target(target).is_none(),
+    }
+}
+
 /// Where a target is in the window: a UI ID as text (`toolbar/undo`,
 /// `canvas/4/param/cutoff`), a module, a control, port, light, or meter by
 /// name (rule 10), or any text the window shows.

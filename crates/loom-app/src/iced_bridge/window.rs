@@ -458,6 +458,11 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             let routed: Vec<Message> = messages.into_iter().flat_map(crate::input_owner::route).collect();
             parts.waker.send_all(routed);
         }
+        // The control channel's scripted pointer events go into Iced on a
+        // redraw, so what Iced left of them goes on to our layers here.
+        if super::pointers::hand_scripted(app.pointer.take_for_runtime(), &mut parts.panels) {
+            self.redraw = Redraw::NextFrame;
+        }
     }
 }
 
@@ -501,6 +506,10 @@ impl super::pointers::IcedSide for WindowIced<'_> {
         self.layers.take_state(&state);
         self.messages.extend(batch(messages, events, &statuses, self.listeners));
         Some(statuses)
+    }
+
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)> {
+        self.app.pointer.take_for_runtime()
     }
 }
 

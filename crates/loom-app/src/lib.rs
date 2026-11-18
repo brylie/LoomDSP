@@ -1412,7 +1412,7 @@ impl App {
         // so it is answered at once, from a fresh search; only one whose
         // answer would come from the runtime's layout waits.
         let waits = match &message {
-            Message::Located { target, found, .. } => crate::control::locate(self, target, found).is_err(),
+            Message::Located { target, found, .. } => crate::control::waits_for_ours(self, target, found, cx),
             Message::A11y(crate::a11y::Event::Located(_)) => true,
             _ => false,
         };
@@ -1424,9 +1424,23 @@ impl App {
         if matches!(message, Message::A11y(crate::a11y::Event::Located(_))) {
             self.a11y_take_ours(|ids| cx.access_nodes(ids));
         }
+        let mut message = message;
+        // A pointer command aimed at one of the runtime's own elements is
+        // aimed at its place, which only the context knows; it waits for the
+        // draw that lays a rebuilt view out (section 10, rule 6).
+        if let Message::Control(call) = &mut message {
+            let ours = |target: &str| {
+                let mut found = crate::control::Found::default();
+                found.find_ours(target, cx);
+                found.ours
+            };
+            if !cx.laid_out() && call.command.clone().place_targets(ours) {
+                return loom_ui::Effects::after_draw(message);
+            }
+            call.command.place_targets(ours);
+        }
         // A target `locate` looks for may be one of the runtime's own
         // elements, which only the context can place (section 10, rule 6).
-        let mut message = message;
         if let Message::Located { target, found, .. } = &mut message {
             found.find_ours(target, cx);
         }

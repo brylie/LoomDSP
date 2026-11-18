@@ -2956,3 +2956,56 @@ fn locate_on_the_canvas_does_not_wait_for_a_rebuild() {
         .unwrap_or_else(|why| panic!("4: {why}"));
     assert!(reply["width"].as_f64().unwrap_or(0.0) > 0.0, "{reply:?}");
 }
+
+/// A script's pointer reaches the stats bar, which `loom-ui` draws, by its
+/// UI ID, as `locate` does: a hover over the × hovers it, and a press and a
+/// release on it dismiss the error (section 10, rule 6).
+#[test]
+fn scripted_pointer_commands_reach_the_bar() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    let _ = ui.redraw();
+    let x: loom_ui_core::UiId = "stats/status/dismiss".parse().unwrap();
+    run_ui(&mut ui, r#"{"cmd": "hover", "target": "stats/status/dismiss"}"#)
+        .unwrap_or_else(|why| panic!("hover: {why}"));
+    assert_eq!(ui.runtime().hovered(), Some(&x), "the script's hover reached the ×");
+    run_ui(&mut ui, r#"{"cmd": "press", "target": "stats/status/dismiss"}"#)
+        .unwrap_or_else(|why| panic!("press: {why}"));
+    run_ui(
+        &mut ui,
+        r#"{"cmd": "release", "button": "left", "target": "stats/status/dismiss"}"#,
+    )
+    .unwrap_or_else(|why| panic!("release: {why}"));
+    let _ = ui.redraw();
+    assert!(
+        ui.app().alerts.kept().is_empty(),
+        "the script's click dismissed the error"
+    );
+}
+
+/// A `locate` whose answer could never come from the runtime's layout, a
+/// module that does not exist, answers at once with its error, even in the
+/// turn after a rebuild and before the draw.
+#[test]
+fn locate_on_a_missing_module_answers_at_once() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let found = Found {
+        canvas: Some(ui.canvas()),
+        ..Default::default()
+    };
+    let _ = ui.deliver(Message::Learn(crate::learn::Message::Toggle));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let call = Call {
+        command: serde_json::from_str(r#"{"cmd": "locate", "target": "999999"}"#).unwrap(),
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    };
+    let _ = ui.deliver(Message::Located {
+        call,
+        target: "999999".to_string(),
+        found,
+        then: crate::control::AfterSearch::Locate,
+    });
+    let reply = receiver.try_recv().expect("answered before any draw");
+    assert!(reply.is_err(), "no such module: {reply:?}");
+}

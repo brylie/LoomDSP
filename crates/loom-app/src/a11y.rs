@@ -255,6 +255,13 @@ impl Access {
         self.focus = control;
     }
 
+    /// Asks the canvas to let go of the keyboard, with a focus request for
+    /// no control, and notes it as let go.
+    pub(crate) fn release_canvas_focus(&mut self) {
+        self.focus_request = (self.focus_request.0 + 1, None);
+        self.focus = None;
+    }
+
     /// The canvas control with keyboard focus, as the canvas last said.
     pub(crate) fn focus(&self) -> Option<(u32, usize)> {
         self.focus
@@ -769,6 +776,13 @@ impl crate::App {
             // A focus move ends the screen reader's undo group, as it does
             // on the canvas, so a later step starts its own.
             self.reader_event(crate::edits::ReaderEvent::Close);
+            // The canvas lets go of the keyboard, selecting nothing, so the
+            // bar's keys are the bar's (section 6, rule 1). Its answer,
+            // `FocusChanged(None)`, clears the app's copy on its frame; it
+            // is cleared here too, so the next key already sees it.
+            if self.a11y.focus().is_some() {
+                self.a11y.release_canvas_focus();
+            }
             self.effect(loom_ui::Effects::focus(id));
             return Vec::new();
         }

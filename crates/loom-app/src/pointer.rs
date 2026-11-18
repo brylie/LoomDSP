@@ -109,6 +109,10 @@ struct Inner {
     last_redraw: Option<Instant>,
     /// The first error of each command, by serial.
     errors: Vec<(u64, String)>,
+    /// Scripted pointer events Iced's widgets left unused, with where they
+    /// happened, for the runtime's own layers below Iced, as the bridge
+    /// hands it a real event Iced left (`iced_bridge/pointers.rs`).
+    for_runtime: Vec<(Event, Point)>,
     next_serial: u64,
     seen: Option<Seen>,
 }
@@ -155,6 +159,12 @@ impl Pointer {
     pub fn position(&self) -> Option<Point> {
         let inner = self.0.borrow();
         inner.at.or_else(|| inner.seen.as_ref().and_then(|s| s.cursor))
+    }
+
+    /// Takes the scripted pointer events that Iced's widgets left unused,
+    /// in order, for the runtime's layers below Iced.
+    pub(crate) fn take_for_runtime(&self) -> Vec<(Event, Point)> {
+        std::mem::take(&mut self.0.borrow_mut().for_runtime)
     }
 
     /// True when a command is waiting for its events to go in.
@@ -549,6 +559,15 @@ impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Mes
                 );
                 let status = own.event_status();
                 shell.merge(own, |m| m);
+                // A pointer event no widget of Iced's took goes on to the
+                // runtime's layers below it, so a script reaches the stats
+                // bar as a real pointer does.
+                if status == iced::event::Status::Ignored
+                    && matches!(injected, Event::Mouse(_))
+                    && let Some(at) = at
+                {
+                    self.pointer.0.borrow_mut().for_runtime.push((injected.clone(), at));
+                }
                 // Modifier changes reach the view only (control-channel.md,
                 // Pointer commands).
                 if !matches!(injected, Event::Keyboard(keyboard::Event::ModifiersChanged(_))) {
