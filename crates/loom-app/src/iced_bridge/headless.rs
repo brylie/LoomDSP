@@ -279,6 +279,23 @@ pub(crate) fn settle(bridge: &mut Bridge<UiDriver>, surface: &mut Surface, tasks
     }
 }
 
+#[cfg(test)]
+impl Bridge<UiDriver> {
+    /// Delivers one accessibility event and reports whether the runtime
+    /// asked the shell for a frame with Iced's automatic redraw disabled.
+    pub(crate) fn accessibility_turn(&mut self, event: loom_ui::AccessEvent) -> (Pending, bool) {
+        self.runtime.target_mut().suppress_update_redraw = true;
+        let mut draw = false;
+        let tasks = self.step(|runtime, now, driver| {
+            let next = runtime.handle(loom_ui::DriverEvent::Accessibility(event), now, driver);
+            draw = next.draw;
+            next
+        });
+        self.runtime.target_mut().suppress_update_redraw = false;
+        (tasks, draw)
+    }
+}
+
 /// The harness's place for a task's actions: operations on its surface,
 /// and the clipboard on its driver.
 struct HarnessSink<'a> {

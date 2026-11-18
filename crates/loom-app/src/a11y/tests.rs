@@ -1628,10 +1628,8 @@ fn a_meter_reports_the_number_its_text_shows() {
 }
 
 /// A Focus action that arrives while nothing else happens still moves the
-/// focus: the action asks for a frame, and the canvas applies the request
-/// on that frame. The control's tile is selected, as
-/// a press on the control selects it, so an arrow key then changes that
-/// control and the focus stays (ui-layer.md, section 7, rule 20).
+/// focus on the frame requested by the action. An arrow key then changes
+/// that control and keeps its focus (ui-layer.md, section 7, rule 20).
 #[test]
 fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
     use iced::keyboard::{Key, key::Named};
@@ -1640,23 +1638,11 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
     app.commit();
     let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![other])));
     let mut ui = crate::ui_test::Ui::with_app(app);
-    // The first frame only notes the request's key.
-    let _ = ui.redraw();
     let _ = ui.app_mut().a11y_tree(&Places::default());
     let cutoff = widget_node(ui.app_mut(), module, knob);
     let steps = ui.app().session.edits.history.len();
 
-    // Check the action on its own, without the Iced bridge's redraw policy.
-    let effects = ui
-        .app_mut()
-        .send(Message::A11y(Event::Action(request(Action::Focus, cutoff, None))));
-    assert!(
-        effects
-            .into_iter()
-            .any(|effect| matches!(effect, loom_ui::Effect::Redraw))
-    );
-    // Apply the requested frame through the actual canvas.
-    let drawn = ui.redraw();
+    let drawn = ui.accessibility_turn(loom_ui::AccessEvent::Action(request(Action::Focus, cutoff, None)));
     assert!(drawn.iter().any(
         |message| matches!(message, Message::Canvas(CanvasEvent::FocusChanged(Some(at))) if *at == (module, knob))
     ));

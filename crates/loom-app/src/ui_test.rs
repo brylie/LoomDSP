@@ -346,6 +346,15 @@ impl Ui {
         self.bridge.take_log()
     }
 
+    /// Handles an accessibility event and serves a frame only if its
+    /// runtime turn requests one without Iced's automatic redraw.
+    #[cfg(test)]
+    pub(crate) fn accessibility_turn(&mut self, event: loom_ui::AccessEvent) -> Vec<Message> {
+        let (tasks, draw) = self.bridge.accessibility_turn(event);
+        self.settle(vec![tasks]);
+        if draw { self.redraw() } else { self.bridge.take_log() }
+    }
+
     /// Takes focus from every field, as the bridge does for a focus effect
     /// to no element, with no message.
     pub(crate) fn unfocus_all(&mut self) -> Vec<Message> {
