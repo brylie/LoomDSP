@@ -1,0 +1,46 @@
+// This patch plays on its own. If the transport is stopped, turn on Run.
+// Euclidean Rhythm spreads seven hits across sixteen steps. The unpatched
+// Phase input follows the bar. Chance sends some hits to the AD envelope,
+// which opens the Amplifier briefly even when the trigger is one sample long.
+//
+// Random takes a new value on every hit, including those Chance skips. Its
+// assignment moves SVF Cutoff, so successive plucks can have different
+// brightness. Click the pink badge on Random to trace the assignment.
+// Try Hits, Rotation, and the first Chance knob. Transport Reset sends
+// Jump to both random modules so the pattern starts from their seeds.
+Patch(
+    version: 1,
+    metadata: Metadata(
+        name: "Broken Pulse",
+        description: "A bar-synced bass rhythm with seeded hit probability and filter movement.",
+        tags: ["rhythm", "chance", "generative"],
+        license: "CC0-1.0",
+    ),
+    modules: [
+        PatchModule(id: 1, kind: "loom.clock.transport@1", params: {"tempo": 108.0}, position: Some((-420.0, 228.0))),
+        PatchModule(id: 2, kind: "loom.gate.euclid@1", params: {"hits": 7.0, "rotation": 1.0}, position: Some((-420.0, -288.0))),
+        PatchModule(id: 3, kind: "loom.rand.chance@1", params: {"chance1": 0.72, "seed": 37.0}, position: Some((-72.0, -288.0))),
+        PatchModule(id: 4, kind: "loom.env.envelope@1", params: {"attack": 0.0025, "curve": 0.52, "decay": 0.135, "mode": 1.0}, position: Some((288.0, -300.0))),
+        PatchModule(id: 5, kind: "loom.rand.random@1", params: {"high": 0.92, "low": 0.04, "seed": 113.0}, position: Some((-408.0, -24.0))),
+        PatchModule(id: 6, kind: "loom.osc.pulse@1", params: {"octave": -2.0, "width": 0.37}, position: Some((-132.0, 48.0))),
+        PatchModule(id: 7, kind: "loom.filter.svf@1", params: {"cutoff": 245.0, "resonance": 0.48}, position: Some((132.0, 24.0))),
+        PatchModule(id: 8, kind: "loom.level.amp@1", params: {"gain": 0.4}, position: Some((396.0, -24.0))),
+        PatchModule(id: 9, kind: "loom.io.audio-out@1", position: Some((432.0, 276.0))),
+        PatchModule(id: 10, kind: "loom.display.meter@1", params: {"view": 1.0}, position: Some((96.0, 264.0))),
+    ],
+    cables: [
+        PatchCable(from: (1, "jump"), to: (3, "reset")),
+        PatchCable(from: (2, "trigger"), to: (3, "trigger1")),
+        PatchCable(from: (3, "a1"), to: (4, "gate")),
+        PatchCable(from: (1, "jump"), to: (5, "reset")),
+        PatchCable(from: (2, "trigger"), to: (5, "trigger")),
+        PatchCable(from: (6, "out"), to: (7, "in")),
+        PatchCable(from: (7, "lowpass"), to: (8, "in")),
+        PatchCable(from: (4, "out"), to: (8, "level")),
+        PatchCable(from: (8, "out"), to: (9, "in")),
+        PatchCable(from: (8, "out"), to: (10, "in")),
+    ],
+    modulation: [
+        PatchModulation(source: (5, "out"), target: (7, "cutoff"), depth: 0.25),
+    ],
+)

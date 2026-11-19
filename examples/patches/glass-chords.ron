@@ -1,0 +1,41 @@
+// Play four notes on a MIDI keyboard, or click Hold note to hear one voice.
+// Try C3, G3, E-flat4, and B-flat4 together. Use Cutoff to soften the saw.
+// MIDI CC 74 on channel 1 moves Cutoff. Map another control with MIDI learn.
+//
+// Follow the thicker pitch and gate cables out of MIDI Note. One cable
+// carries four voices through the oscillator, filter, envelope, and amp.
+// Voice Merge sums them before the Scope, so the trace shows the chord.
+// Amplifier Gain leaves room for all four voices to sound together.
+Patch(
+    version: 1,
+    metadata: Metadata(
+        name: "Glass Chords",
+        description: "A four-voice subtractive synth with a scope and MIDI control of Cutoff.",
+        tags: ["polyphony", "midi", "synth"],
+        license: "CC0-1.0",
+    ),
+    modules: [
+        PatchModule(id: 1, kind: "loom.clock.transport@1", position: Some((-420.0, 240.0))),
+        PatchModule(id: 2, kind: "loom.midi.note@1", params: {"mode": 0.0, "voices": 4.0}, position: Some((-408.0, -228.0))),
+        PatchModule(id: 3, kind: "loom.osc.saw@1", position: Some((-132.0, -288.0))),
+        PatchModule(id: 4, kind: "loom.env.envelope@1", params: {"attack": 0.06, "decay": 0.24, "release": 0.52, "sustain": 0.67}, position: Some((-156.0, -72.0))),
+        PatchModule(id: 5, kind: "loom.filter.svf@1", params: {"cutoff": 1400.0, "resonance": 0.28}, position: Some((96.0, -288.0))),
+        PatchModule(id: 6, kind: "loom.level.amp@1", params: {"gain": 0.16}, position: Some((384.0, -180.0))),
+        PatchModule(id: 7, kind: "loom.voice.merge@1", position: Some((228.0, 0.0))),
+        PatchModule(id: 8, kind: "loom.io.audio-out@1", position: Some((444.0, 264.0))),
+        PatchModule(id: 9, kind: "loom.display.scope@1", position: Some((144.0, 240.0))),
+    ],
+    cables: [
+        PatchCable(from: (2, "pitch"), to: (3, "pitch")),
+        PatchCable(from: (2, "gate"), to: (4, "gate")),
+        PatchCable(from: (3, "out"), to: (5, "in")),
+        PatchCable(from: (5, "lowpass"), to: (6, "in")),
+        PatchCable(from: (4, "out"), to: (6, "level")),
+        PatchCable(from: (6, "out"), to: (7, "in")),
+        PatchCable(from: (7, "out"), to: (9, "in")),
+        PatchCable(from: (9, "out"), to: (8, "in")),
+    ],
+    midi: [
+        PatchMidiMapping(target: (5, "cutoff"), channel: 0, controller: 74),
+    ],
+)
