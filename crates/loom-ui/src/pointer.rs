@@ -138,9 +138,15 @@ impl<A: App> Panels<'_, A> {
     /// target, for a driver to call when its target answered
     /// [`Routed::Later`](crate::Routed::Later) and then left this event
     /// unused. A click's message is sent for the next turn.
+    ///
+    /// It runs outside a turn, so it reports a change of what shows as
+    /// pressed itself, in [`Heard::redraw`]: the turn's own comparison
+    /// never sees it.
     pub fn pointer_below(&mut self, event: &Event, point: Point) -> Heard {
         let input = self.app.input();
-        let heard = self.offer(input, event, point, Side::Below);
+        let pressed = self.shown_pressed();
+        let mut heard = self.offer(input, event, point, Side::Below);
+        heard.redraw |= self.shown_pressed() != pressed;
         self.report_focus();
         heard
     }
@@ -152,6 +158,7 @@ impl<A: App> Panels<'_, A> {
     /// so does a new left press, which can only follow a release the
     /// runtime missed (section 3, rule 4).
     pub fn pointer_taken(&mut self, event: &Event) -> Heard {
+        let pressed = self.shown_pressed();
         if matches!(
             event,
             Event::Pointer(PointerEvent::Pressed(PointerButton::Left) | PointerEvent::Released(PointerButton::Left))
@@ -161,9 +168,10 @@ impl<A: App> Panels<'_, A> {
         if matches!(event, Event::Pointer(PointerEvent::Pressed(_))) {
             self.pointer.space = None;
         }
+        let hover = self.pointer.hovered.take().is_some();
         Heard {
             taken: false,
-            redraw: self.pointer.hovered.take().is_some(),
+            redraw: hover || self.shown_pressed() != pressed,
         }
     }
 

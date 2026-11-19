@@ -933,3 +933,38 @@ fn a_press_on_a_button_leaves_the_focus_where_it_was() {
     assert_eq!(clicks(&harness), [b], "the click landed on b");
     assert_eq!(harness.runtime().focused(), Some(&a), "and a still has it");
 }
+
+/// A late answer goes through `pointer_below`, outside a turn, so it
+/// reports a change of what shows as pressed itself: a left press on a
+/// button already hovered, which moves neither the hover nor the focus,
+/// still asks for a frame, and so does its release. A move that changes
+/// nothing asks for none.
+#[test]
+fn pointer_below_reports_a_change_of_the_press() {
+    let mut harness = harness(false, Routed::Later);
+    let at = Point::new(45.0, 5.0);
+    let mut below = |event: PointerEvent| {
+        let (_, _, mut panels) = harness.parts();
+        panels.pointer_below(&Event::Pointer(event), at)
+    };
+    assert!(below(PointerEvent::Moved).redraw, "the hover moved");
+    assert!(!below(PointerEvent::Moved).redraw, "nothing changed");
+    assert!(below(PointerEvent::Pressed(PointerButton::Left)).redraw, "pressed");
+    assert!(below(PointerEvent::Released(PointerButton::Left)).redraw, "released");
+}
+
+/// When the other toolkit takes a pointer press, it cancels a held Space,
+/// so the button no longer looks pressed, and that asks for a frame, though
+/// the hover, over the other toolkit, did not change.
+#[test]
+fn a_press_the_other_toolkit_takes_reports_the_lost_press() {
+    let mut harness = harness(false, Routed::Later);
+    harness.step(press_key(loom_ui_core::Key::Tab, false));
+    harness.step(press_key(loom_ui_core::Key::Space, false));
+    let (_, _, mut panels) = harness.parts();
+    assert!(panels.shown_pressed().is_some(), "Space shows the button pressed");
+    assert!(panels.pointer.hovered.is_none(), "the pointer is not over it");
+    let heard = panels.pointer_taken(&Event::Pointer(PointerEvent::Pressed(PointerButton::Left)));
+    assert!(panels.shown_pressed().is_none(), "the press cancelled the Space");
+    assert!(heard.redraw, "the pressed look went");
+}
