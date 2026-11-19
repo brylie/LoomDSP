@@ -112,6 +112,10 @@ fn the_x_dismisses_by_pointer_key_and_screen_reader() {
                 ui.release();
             }
             "enter" | "space" => {
+                // From nothing: no tile selected either, or the canvas
+                // holds the keys and walks its tiles (section 6, rule 1).
+                ui.app_mut().session.selection.clear();
+                ui.redraw();
                 ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
                 assert_eq!(
                     ui.runtime().focused(),
@@ -145,6 +149,9 @@ fn the_developer_switches_turn_with_space_and_a_screen_reader() {
     let back = |ui: &mut Ui| {
         ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
     };
+    // From nothing: no tile selected either (section 6, rule 1).
+    ui.app_mut().session.selection.clear();
+    ui.redraw();
     back(&mut ui);
     back(&mut ui);
     assert_eq!(ui.runtime().focused(), Some(&measure));
@@ -541,4 +548,32 @@ fn focus_on_the_x_cancels_a_canvas_focus_still_on_its_way() {
     tap(&mut ui, Named::Enter);
     ui.redraw();
     assert!(ui.app().alerts.kept().is_empty(), "Enter on the × dismissed the error");
+}
+
+/// With a tile selected and nothing else focused, the canvas holds the
+/// keys (section 6, rule 1; Brylie's decision, 2026-11-19): Shift+Tab
+/// walks the canvas's tiles, and does not enter the bar, though the bar
+/// has a stop.
+#[test]
+fn shift_tab_with_a_tile_selected_walks_the_canvas() {
+    let mut ui = ui_with_error();
+    assert!(ui.app().canvas_has_keys(), "tile 4 is selected");
+    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    assert_eq!(ui.runtime().focused(), None, "the bar's × was not entered");
+    assert_eq!(ui.app().session.selection.len(), 1, "the canvas selected a tile");
+    assert_ne!(ui.app().session.selection, [4].into_iter().collect(), "another one");
+}
+
+/// A keyboard user reaches the bar's × with a tile selected: Escape lets
+/// the selection go, and Shift+Tab from nothing then enters the bar's last
+/// stop, the ×.
+#[test]
+fn the_x_is_reached_from_a_selected_tile_by_escape_then_shift_tab() {
+    let mut ui = ui_with_error();
+    let x = id(bars::STATUS_DISMISS_ID);
+    tap(&mut ui, Named::Escape);
+    ui.redraw();
+    assert!(ui.app().session.selection.is_empty(), "Escape let the selection go");
+    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    assert_eq!(ui.runtime().focused(), Some(&x));
 }

@@ -30,6 +30,22 @@ impl App {
         self.bar_panel(view);
     }
 
+    /// True when the canvas holds the keys (ui-layer.md, section 6, rule 1;
+    /// Brylie's decision, 2026-11-19): one of its controls has focus, or,
+    /// with nothing open over the canvas and no field or element of either
+    /// toolkit focused, a tile is selected. The canvas then takes Tab and
+    /// Shift+Tab, and walks its tiles, as the arrow keys move a selected
+    /// tile; the runtime's stops are not entered from it, and Enter and
+    /// Space activate none of them. The one answer every rule reads.
+    pub(crate) fn canvas_has_keys(&self) -> bool {
+        use crate::input_owner::InputOwner;
+        let control = self.a11y.focus().is_some();
+        let tile = matches!(self.input_owner(), InputOwner::Canvas)
+            && self.focus.is_none()
+            && !self.session.selection.is_empty();
+        control || tile
+    }
+
     /// Every focus stop of the runtime's, in the order Tab meets them: the
     /// top run (the toolbar's, then the breadcrumb's), then the bar's.
     pub(crate) fn our_stops(&self) -> Vec<UiId> {

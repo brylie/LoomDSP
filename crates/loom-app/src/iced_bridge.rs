@@ -341,8 +341,8 @@ impl loom_ui::App for Hosted {
 
     /// The input owner as a layer: an open question holds the window, and
     /// every other panel or menu Iced draws over the canvas is an overlay
-    /// (ui-layer.md, section 5, rule 2). The canvas has the keyboard while
-    /// one of its controls has focus.
+    /// (ui-layer.md, section 5, rule 2). Whether the canvas has the keys is
+    /// [`App::canvas_has_keys`].
     fn input(&self) -> loom_ui::InputState {
         use crate::input_owner::InputOwner;
         loom_ui::InputState {
@@ -351,7 +351,7 @@ impl loom_ui::App for Hosted {
                 InputOwner::Canvas => loom_ui::Layer::Canvas,
                 _ => loom_ui::Layer::Overlays,
             },
-            canvas_focused: self.0.a11y.focus().is_some(),
+            canvas_focused: self.0.canvas_has_keys(),
             // With no overlay open, Tab from nothing is the canvas's, as it
             // was before the bar moved: the canvas is above the bar
             // (section 6, rule 2; Brylie's decision, 2026-11-17).
