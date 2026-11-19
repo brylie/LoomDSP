@@ -95,15 +95,22 @@ fn a_click_on_the_open_level_changes_nothing() {
     assert_eq!((ui.app().undo_hint(), ui.app().redo_hint()), history, "no undo step");
 }
 
-/// Tab meets the toolbar's buttons, then the breadcrumb's entries; past
+/// Tab meets the toolbar as one stop, then the breadcrumb's entries, one
+/// stop each: Tab from any toolbar button goes to the first entry. Past
 /// the last entry it goes into the canvas, which takes it as Tab from
-/// nothing (ui-layer.md, section 6, rule 3, from row 2).
+/// nothing (ui-layer.md, section 6, rule 3, from row 2; the WAI-ARIA
+/// toolbar pattern, Brylie's decision, 2026-11-19).
 #[test]
 fn tab_reaches_the_breadcrumb_after_the_toolbar_then_the_canvas() {
     let mut ui = inside_voice();
     let top = ui.app().top_stops();
-    let toolbar = ui.app().toolbar_stops();
-    assert_eq!(&top[toolbar.len()..], ui.app().breadcrumb_stops().as_slice());
+    let crumbs = ui.app().breadcrumb_stops();
+    assert_eq!(top[0], ui.app().toolbar_stops()[0], "the toolbar's one stop");
+    assert_eq!(&top[1..], crumbs.as_slice());
+    let button = ui.app().toolbar_stops().last().cloned().expect("a toolbar button");
+    ui.a11y_action(&button, accesskit::Action::Focus);
+    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+    assert_eq!(ui.runtime().focused(), Some(&crumbs[0]), "from any toolbar button");
     let last = top.last().cloned().expect("a top run");
     ui.a11y_action(&last, accesskit::Action::Focus);
     assert_eq!(ui.runtime().focused(), Some(&last));

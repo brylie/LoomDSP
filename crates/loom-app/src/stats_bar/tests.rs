@@ -261,13 +261,14 @@ fn at(ui: &mut Ui) -> (Option<UiId>, Option<UiId>) {
 /// 2): Tab from nothing is the canvas's, as before; past patch info's last
 /// field, the bar's ×; past the ×, the order wraps to the toolbar's first
 /// button, New. Shift+Tab before patch info's first field reaches the top
-/// run's last stop, Preferences (Brylie's decisions, 2026-11-18).
+/// run's last stop, which at the top level is the toolbar's one stop, on
+/// its first button the first time (Brylie's decisions, 2026-11-18 and
+/// 2026-11-19).
 #[test]
 fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     let [authors, tags] = crate::patch_info::text_fields();
     let x = id(bars::STATUS_DISMISS_ID);
     let new = crate::toolbar::toolbar_id().with("new");
-    let preferences = crate::toolbar::toolbar_id().with("preferences");
     let mut from_nothing = ui_with_patch_info(true);
     tap(&mut from_nothing, Named::Tab);
     assert_eq!(at(&mut from_nothing), (None, None), "from nothing, nothing of ours");
@@ -285,14 +286,18 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     assert_eq!(at(&mut ui), (None, Some(x.clone())), "past patch info, the bar");
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
     tap(&mut ui, Named::Tab);
-    assert_eq!(at(&mut ui), (None, Some(new)), "past the bar, the toolbar's first");
+    assert_eq!(
+        at(&mut ui),
+        (None, Some(new.clone())),
+        "past the bar, the toolbar's first"
+    );
 
     // Back the other way: before patch info's first field, the top run's
     // last stop.
     let mut ui = ui_with_patch_info(true);
     click_authors(&mut ui);
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
-    assert_eq!(at(&mut ui), (None, Some(preferences)), "before patch info, the toolbar");
+    assert_eq!(at(&mut ui), (None, Some(new)), "before patch info, the toolbar");
 }
 
 /// Shift+Tab from nothing enters the bar's last stop, the last in reading
@@ -504,6 +509,7 @@ fn a_warning_during_a_rebuild_reaches_the_next_tree() {
     let _ = ui.deliver(Message::A11y(Event::Activated));
     ui.redraw();
     let _ = ui.take_sent_trees();
+    let _ = ui.take_sent_changes();
     // A rebuild goes out, and the warning comes while it is on its way.
     ui.app_mut().a11y_after(Touch::Changed);
     ui.app_mut().alerts.warn("Autosave failed");
@@ -518,6 +524,10 @@ fn a_warning_during_a_rebuild_reaches_the_next_tree() {
     assert!(
         sent.last().is_some_and(reads_warning),
         "the follow-up tree reads the warning"
+    );
+    assert!(
+        ui.take_sent_changes().iter().any(reads_warning),
+        "the warning reached the adapter"
     );
 }
 

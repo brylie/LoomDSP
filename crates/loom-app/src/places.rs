@@ -15,8 +15,8 @@
 use iced::Rectangle;
 use iced::advanced::widget::operation::{Outcome, Scrollable};
 use iced::advanced::widget::{Id, Operation};
-use loom_canvas::CanvasView;
 use loom_canvas::iced_convert::ToCore;
+use loom_canvas::{CanvasTyped, CanvasView};
 use loom_ui_core::{Rect, UiId, Vector};
 use std::any::Any;
 use std::collections::HashMap;
@@ -120,6 +120,8 @@ impl Place {
 pub(crate) struct Places {
     /// The patch canvas and its camera.
     pub canvas: Option<CanvasView>,
+    /// The value editor drawn over a tile, if open.
+    pub typed: Option<CanvasTyped>,
     /// Each named container, by its widget ID.
     parts: HashMap<Id, Place>,
 }
@@ -130,7 +132,7 @@ impl Places {
     pub(crate) fn of_canvas(canvas: Option<CanvasView>) -> Self {
         Self {
             canvas,
-            parts: HashMap::new(),
+            ..Self::default()
         }
     }
 
@@ -272,6 +274,8 @@ impl Operation<Places> for Collect {
     fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Any) {
         if let Some(view) = state.downcast_ref::<CanvasView>() {
             self.found.canvas = Some(*view);
+        } else if let Some(typed) = state.downcast_ref::<CanvasTyped>() {
+            self.found.typed = Some(typed.clone());
         }
     }
 

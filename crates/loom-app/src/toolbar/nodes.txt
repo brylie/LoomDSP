@@ -1,5 +1,5 @@
 top level
-Group Some("Toolbar")
+Toolbar Some("Toolbar") orientation=Some(Horizontal)
   Button Some("New") description=None toggled=None disabled=false click=true
   Button Some("Open") description=None toggled=None disabled=false click=true
   Button Some("Save") description=None toggled=None disabled=false click=true
@@ -12,10 +12,11 @@ Group Some("Toolbar")
   Button Some("Undo") description=Some("Nothing to undo") toggled=None disabled=true click=false
   Button Some("Redo") description=Some("Nothing to redo") toggled=None disabled=true click=false
   Button Some("MIDI learn") description=None toggled=Some(False) disabled=false click=true
+  Button Some("Map") description=Some("Patch map: Auto. Press M to cycle.") toggled=None disabled=false click=true
   Button Some("Preferences") description=Some("Cmd+,") toggled=None disabled=false click=true
 
 inside a sub-patch
-Group Some("Toolbar")
+Toolbar Some("Toolbar") orientation=Some(Horizontal)
   Button Some("New") description=None toggled=None disabled=false click=true
   Button Some("Open") description=None toggled=None disabled=false click=true
   Button Some("Save") description=None toggled=None disabled=false click=true
@@ -29,4 +30,5 @@ Group Some("Toolbar")
   Button Some("Undo") description=Some("Nothing to undo") toggled=None disabled=true click=false
   Button Some("Redo") description=Some("Nothing to redo") toggled=None disabled=true click=false
   Button Some("MIDI learn") description=None toggled=Some(False) disabled=false click=true
+  Button Some("Map") description=Some("Patch map: Auto. Press M to cycle.") toggled=None disabled=false click=true
   Button Some("Preferences") description=Some("Cmd+,") toggled=None disabled=false click=true

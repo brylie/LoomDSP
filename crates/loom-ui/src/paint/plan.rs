@@ -5,9 +5,9 @@
 //! The plan is built on the CPU, so its order is tested without a GPU.
 //! [`PaintRenderer`](super::PaintRenderer) uploads and draws it.
 
-use super::PaintList;
 use super::atlas::{Atlas, Full, GlyphQuad};
-use super::list::Batch;
+use super::list::{Batch, PaintBox};
+use super::{PaintList, Segment};
 use bytemuck::{Pod, Zeroable};
 use loom_ui_core::{Color, Point, Rect, Size};
 use std::ops::Range;
@@ -41,6 +41,23 @@ impl Shape {
             border: packed(border),
             params: [radius, border_width, 1.0, 0.0],
         }
+    }
+
+    /// A filled rectangle rotated about the centre of the mark.
+    fn segment(segment: Segment, origin: Point) -> Self {
+        let delta = segment.to - segment.from;
+        let length = delta.x.hypot(delta.y);
+        let centre = segment.from + delta * 0.5;
+        let rect = Rect::new(
+            Point::new(
+                centre.x - origin.x - length * 0.5,
+                centre.y - origin.y - segment.width * 0.5,
+            ),
+            Size::new(length, segment.width),
+        );
+        let mut shape = Self::new(rect, 0.0, segment.colour, Color::TRANSPARENT, 0.0);
+        shape.params[3] = delta.y.atan2(delta.x);
+        shape
     }
 
     /// The rectangle: x, y, width, height.
@@ -146,13 +163,19 @@ impl PaintPlan {
                         Batch::Boxes(range) => {
                             let start = plan.boxes.len() as u32;
                             plan.boxes
-                                .extend(list.boxes[range.start as usize..range.end as usize].iter().map(|quad| {
-                                    let rect = Rect::new(
-                                        Point::new(quad.rect.x - origin.x, quad.rect.y - origin.y),
-                                        quad.rect.size(),
-                                    );
-                                    Shape::new(rect, quad.radius, quad.fill, quad.border, quad.border_width)
-                                }));
+                                .extend(
+                                    list.boxes[range.start as usize..range.end as usize].iter().map(
+                                        |shape| match *shape {
+                                            PaintBox::Quad(quad) => {
+                                                let mut rect = quad.rect;
+                                                rect.x -= target.origin.x;
+                                                rect.y -= target.origin.y;
+                                                Shape::new(rect, quad.radius, quad.fill, quad.border, quad.border_width)
+                                            }
+                                            PaintBox::Segment(segment) => Shape::segment(segment, target.origin),
+                                        },
+                                    ),
+                                );
                             Draw::Boxes(start..plan.boxes.len() as u32)
                         }
                         Batch::Glyphs(range) => {

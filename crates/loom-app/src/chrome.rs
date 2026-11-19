@@ -46,35 +46,48 @@ impl App {
         control || tile
     }
 
-    /// Every focus stop of the runtime's, in the order Tab meets them: the
-    /// top run (the toolbar's, then the breadcrumb's), then the bar's.
+    /// Every focus stop of the runtime's: each toolbar button, the
+    /// breadcrumb's entries, then the bar's. A screen reader's Focus can
+    /// reach any of them; Tab meets the toolbar as one stop
+    /// ([`Self::top_stops`]).
     pub(crate) fn our_stops(&self) -> Vec<UiId> {
-        let mut stops = self.top_stops();
+        let mut stops = self.toolbar_stops();
+        stops.extend(self.breadcrumb_stops());
         stops.extend(self.bar_stops());
         stops
     }
 
     /// Where Tab goes from the runtime's stop `from` (ui-layer.md, section
-    /// 6, rule 3, from row 2; Brylie's decisions of 2026-11-18). Forward
-    /// out of the top run, the key goes on to the canvas, which takes it as
-    /// Tab from nothing. Back from the top run's first stop, to the bar's
-    /// last, and forward from the bar's last, to the top run's first: the
-    /// order wraps. Back from the bar's first stop, to patch info's last
-    /// field. `next` is the stop after `from` in the runtime's reading
-    /// order, which inside each run is where Tab goes.
+    /// 6, rule 3, from row 2; Brylie's decisions of 2026-11-18 and
+    /// 2026-11-19). The toolbar is one stop (the WAI-ARIA toolbar
+    /// pattern): Tab into it lands on [`Self::toolbar_entry`], and Tab from
+    /// any of its buttons leaves it. Forward out of the top run, the key
+    /// goes on to the canvas, which takes it as Tab from nothing. Back from
+    /// the top run's first stop, to the bar's last, and forward from the
+    /// bar's last, to the top run's first: the order wraps. Back from the
+    /// bar's first stop, to patch info's last field. `next` is the stop
+    /// after `from` in the runtime's reading order, which inside the bar is
+    /// where Tab goes.
     pub(crate) fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> loom_ui::TabStep<Message> {
         use loom_ui::TabStep;
         let (top, bar) = (self.top_stops(), self.bar_stops());
         let to = |stop: Option<&UiId>| stop.map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()));
-        let in_top = top.contains(from);
-        let in_bar = bar.contains(from);
-        if in_top && !back && top.last() == Some(from) {
-            TabStep::Leave
-        } else if in_top && back && top.first() == Some(from) {
-            to(bar.last())
-        } else if in_bar && !back && bar.last() == Some(from) {
+        // Any toolbar button stands for the toolbar's one stop.
+        let toolbar = self.toolbar_stops();
+        let entry = self.toolbar_entry();
+        let from = match &entry {
+            Some(entry) if toolbar.contains(from) => entry,
+            _ => from,
+        };
+        if let Some(at) = top.iter().position(|stop| stop == from) {
+            if back {
+                at.checked_sub(1).map_or_else(|| to(bar.last()), |at| to(top.get(at)))
+            } else {
+                top.get(at + 1).map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()))
+            }
+        } else if bar.contains(from) && !back && bar.last() == Some(from) {
             to(top.first())
-        } else if in_bar && back && bar.first() == Some(from) {
+        } else if bar.contains(from) && back && bar.first() == Some(from) {
             if self.fields_among_ours() {
                 TabStep::Send(Message::EnterFields { backwards: true })
             } else {
@@ -85,12 +98,27 @@ impl App {
         }
     }
 
-    /// The top run's stops: the toolbar's turned-on buttons, then, inside
-    /// a sub-patch, the breadcrumb's entries.
+    /// The top run's stops as Tab meets them: the toolbar as one stop, its
+    /// [`Self::toolbar_entry`], then, inside a sub-patch, the breadcrumb's
+    /// entries, one stop each, since a breadcrumb is a list of links, not
+    /// a toolbar.
     pub(crate) fn top_stops(&self) -> Vec<UiId> {
-        let mut stops = self.toolbar_stops();
+        let mut stops: Vec<UiId> = self.toolbar_entry().into_iter().collect();
         stops.extend(self.breadcrumb_stops());
         stops
+    }
+
+    /// The toolbar button Tab and Ctrl+Tab enter the toolbar on: the one
+    /// last focused in this level while it is still turned on, otherwise
+    /// the first turned-on button. `None` when every button is off.
+    pub(crate) fn toolbar_entry(&self) -> Option<UiId> {
+        let stops = self.toolbar_stops();
+        self.session
+            .outline
+            .last_toolbar
+            .clone()
+            .filter(|id| stops.contains(id))
+            .or_else(|| stops.into_iter().next())
     }
 }
 

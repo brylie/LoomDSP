@@ -3,13 +3,13 @@
 How a screen reader user gets an overview of a patch, follows a signal from module to module, and reaches a module's controls only when they want them; and how the same model draws a small patch map that a sighted user pans with.
 
 - **Kind:** living specification.
-- **Status:** Agreed (2026-11-09), M2. The answers to its open questions are in [Decisions made for this spec](#decisions-made-for-this-spec).
+- **Status:** Implemented for M2 in [#849](https://github.com/brylie/LoomDSP/pull/849). Native screen-reader playtests are pending. The answers to its open questions are in [Decisions made for this spec](#decisions-made-for-this-spec).
 - **Decision behind it:** none of its own. Builds on [ADR-0041](../adr/0041-own-ui-layer.md) (our own UI layer, with its accessibility tree), [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md) (plain-data view models), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0002](../adr/0002-graph-execution-and-feedback.md) (feedback loops), and [ADR-0039](../adr/0039-editor-keeps-the-hierarchy-as-an-overlay.md) (the editor's sub-patch levels).
 - **Use case and requirements:** UC11, NFR-UX-06, NFR-UX-07, FR-CANVAS-06, FR-CANVAS-13.
 - **Background:** [Reading a patch by ear](../learn/reading-a-patch-by-ear.md) (explainer), [overviews of node-link diagrams for screen reader users](../research/2026-11-screen-reader-graph-overviews.md) (research), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [the large patch review](../research/2026-11-large-patch-ux-review.md) (finding 3, the overview has no words), [Feedback loops](../learn/feedback-loops.md).
 - **Prior art:** the WAI-ARIA tree view pattern for the outline's keys, and "overview first, then details on demand" from information visualisation research. Named only to explain ideas; the research snapshot cites them.
 - **Issues:** [#683](https://github.com/brylie/LoomDSP/issues/683) (the UI layer), [#527](https://github.com/brylie/LoomDSP/issues/527) (find a module and a readable overview), [#524](https://github.com/brylie/LoomDSP/issues/524) (cables by key).
-- **Code:** `FeedbackLoop::run_order` in `crates/loom-core/src/compile.rs` reports each loop's module order (rule 7). The patch map model and shared module naming will sit beside the other view models in `crates/loom-app`.
+- **Code:** `FeedbackLoop::run_order` in `crates/loom-core/src/compile.rs` reports each loop's module order (rule 7). `crates/loom-app/src/patch_map.rs` builds the model, `outline.rs` builds its rows, and `modulation.rs` provides shared module names.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -22,11 +22,11 @@ The [UI layer specification](ui-layer.md) gives every tile, control, and port an
 
 Example, with `subtractive.ron` open and VoiceOver on. The user presses O on the canvas. The outline opens and reads its first row:
 
-> Subtractive. 11 modules, 11 cables, no feedback loops. 2 modules not heard.
+> Subtractive. 10 modules, 10 cables, no feedback loops. 2 modules not heard.
 
 They press Down and hear the modules in the order the signal flows, from the source to the output:
 
-> MIDI Note. Source. To Phase, Envelope 5, and Envelope 7.
+> MIDI Note. Source. To Saw, Envelope 5, and Envelope 7.
 > ...
 > Multiply 8. From SVF and Envelope 7. To Audio Out.
 > Audio Out. From Multiply 8. The output.
@@ -52,7 +52,7 @@ A sighted user beside them sees the same patch drawn small in the map in the can
 
 ## 1. The patch map model
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 ### Behaviour
 
@@ -85,7 +85,7 @@ Geometry:
 
 ## 2. Levels of detail
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 The outline gives four levels, from the coarsest. The user moves down a level only when they want to.
 
@@ -102,7 +102,7 @@ The outline gives four levels, from the coarsest. The user moves down a level on
 
 ## 3. Signal-flow order and sections
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 ### Rules
 
@@ -115,16 +115,16 @@ The outline gives four levels, from the coarsest. The user moves down a level on
 
 ## 4. What a row says
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 A row has a short **name**, read at once, and a **description**, read after it or after a pause, as the screen reader is set. Values with units follow the [port and parameter text](port-and-parameter-text.md) rules.
 
 | Row | Name | Description |
 |---|---|---|
-| Summary | "Subtractive. 11 modules, 11 cables, no feedback loops. 2 modules not heard." | None |
+| Summary | "Subtractive. 10 modules, 10 cables, no feedback loops. 2 modules not heard." | None |
 | Not heard section | "Not heard, 2 modules" | None |
 | Module | "SVF. From Saw and Multiply 6. To Multiply 8 and Scope." | "Filter. Cutoff modulated by LFO. In feedback loop 1." |
-| Source module | "MIDI Note. Source. To Phase, Envelope 5, and Envelope 7." | Its kind |
+| Source module | "MIDI Note. Source. To Saw, Envelope 5, and Envelope 7." | Its kind |
 | Output module | "Audio Out. From Multiply 8. The output." | Its kind |
 | Loop | "Feedback loop 1: SVF, Delay, Mix" | "Delay inserted from Mix to SVF." |
 | Connection, input | "In, from Saw out" | Signal type, stereo or mono |
@@ -145,7 +145,7 @@ A row has a short **name**, read at once, and a **description**, read after it o
 
 ## 5. Keys in the outline
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 The outline is an **Outline** tab in the right column, beside Inspector and Matrix. O on the canvas, with no text field focused, opens the tab and moves focus to the outline's focused row, or to its first row the first time. Ctrl+Tab moves focus to the next region (canvas, right column, toolbar) and Ctrl+Shift+Tab to the previous one, on every platform, and lands on the outline when its tab is open (ui-layer.md, section 6, rule 7). A click on the tab opens it too, so sighted users can read the outline as well.
 
@@ -174,7 +174,7 @@ The outline is one focus stop. While it has focus, it takes these keys before th
 
 ## 6. The canvas: tiles and ports
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 The canvas gives a node per tile, control, and port (ui-layer.md, section 9, rule 3). This section adds what those nodes say about the graph.
 
@@ -187,7 +187,7 @@ The canvas gives a node per tile, control, and port (ui-layer.md, section 9, rul
 
 ## 7. Following a cable
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 Following a cable works in the outline and on the canvas, with the same keys: `[` follows upstream, `]` follows downstream, and Cmd+`[` (Ctrl+`[` on Windows and Linux) goes back. On the canvas they act on the focused port, else the focused control's module, else the selected module, and do nothing with no module selected or with more than one. *Why:* the arrow keys already move tiles and Alt-arrow resizes them ([panels.md](panels.md#keyboard-without-a-mouse)). The brackets are free, sit together, and point left and right like the signal on the canvas, and Cmd+`[` is back in browsers.
 
@@ -198,7 +198,7 @@ The keys bind by **physical position**: the two keys to the right of P on a US l
 23. **Follow upstream** jumps to the module that feeds the current one. **Follow downstream** jumps to the module it feeds.
     - On a connection row or a focused port, it follows that port's cable or cables.
     - On a module row or a selected tile with exactly one neighbour on that side, it jumps there.
-    - With more than one, a short list opens, one row per neighbour with its ports ("Saw out to In", "Multiply 6 out to Cutoff"), in signal-flow order. Up, Down, and Enter pick one; Escape closes it. Modulation sources and targets are in the list too, marked "modulation".
+    - With more than one, a short list opens, one row per neighbour with its ports ("Saw Out to In", "Lowpass to Multiply 8 A"), in signal-flow order. Up, Down, and Enter pick one. Escape, a click outside the list, a tab change, or removal of the source closes it. Other keys keep their usual actions. Modulation sources and targets are in the list too, marked "modulation".
     - With none, nothing moves, and the screen reader hears "Nothing upstream" or "Nothing downstream".
 
     *Why:* a jump that guessed among several cables would take the user somewhere they did not choose, and they could not tell from the sound alone. The list says how many there are and lets them pick, as the planned cable-by-key list does (#524).
@@ -208,7 +208,7 @@ The keys bind by **physical position**: the two keys to the right of P on a US l
 
 ## 8. The map
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 ### Behaviour
 
@@ -236,11 +236,11 @@ M on the canvas, with no text field focused, moves through the three settings, a
 29. **The map is one image node in the accessibility tree,** named "Patch map", whose description points to the outline. It has no nodes of its own. *Why:* WCAG 1.1.1 asks for a text alternative for a complex image. The outline is that alternative, and a second set of nodes for the same modules would be read twice.
 30. **Auto shows the map only while it helps.** When the whole level fits in the view, the canvas already is the map. *Why:* a map of what is already on screen takes room and adds nothing; a large patch is where finding your way is hard.
 31. **The map takes the pointer over its own area,** and the canvas gets no pointer events there (ui-layer.md, section 5, rule 1). A tile under the map is reached by panning, or the map is hidden with M. *Why:* the user sees the map on top, so it must take the click.
-32. **The map is redrawn only when the patch map changes or the camera moves.** The camera moves only its view rectangle. *Why:* NFR-PERF-04, and ADR-0010's rule that pan and zoom never rebuild drawing data.
+32. **The map caches its artwork until the patch map, geometry, or appearance changes.** The camera moves only its view rectangle. A solid line takes one segment and a dashed or dotted line takes one segment per mark. *Why:* NFR-PERF-04, and ADR-0010's rule that pan and zoom never rebuild drawing data.
 
 ## 9. Updates while the user listens
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 ### Rules
 
@@ -250,42 +250,42 @@ M on the canvas, with no text field focused, moves through the three settings, a
 
 ## 10. Tests and the control channel
 
-**Status:** Agreed, M2.
+**Status:** Implemented for M2.
 
 ### Rules
 
-36. **`App::ui_snapshot` and `--dump-ui` include the patch map,** as rows with their names and descriptions. *Why:* agents and tests then check what a screen reader user hears with no screen reader, as they do for the rest of the window.
+36. **The UI snapshot includes the patch map as rows when the Outline is open or a screen reader is active.** The rows include names and descriptions. `--dump-ui` always includes them. *Why:* agents and tests then check what a screen reader user hears with no screen reader, as they do for the rest of the window.
 37. **The outline's rows have UI IDs** from section 4 of the UI layer spec: a module row keyed by its module, a connection row by the module and port, a modulation row by its `AssignmentId` (one output can modulate several parameters, so the port alone does not tell its rows apart), a section and a loop by a fixed name and the loop's lowest module ID. The control channel's `locate` accepts them. *Why:* one identity scheme (ui-layer.md, section 4, rule 1).
 
 ## Acceptance criteria
 
-- [ ] A test builds the patch map of `subtractive.ron` and checks the goal's example: the summary row; MIDI Note first and Multiply 8 then Audio Out last among the heard rows; every module after all its feeders; and the Not heard section with Scope and Transport.
-- [ ] A test of rule 6's tie-break: sources A and C, B fed by A, with A reading first and B reading before C. The order is A, B, C (not A, C, B, which sorting by depth would give).
-- [ ] A test checks the first state: the Not heard section and loop rows are expanded, module rows are collapsed, and Down from the summary reaches every module.
-- [ ] A test checks that the tile header, the inspector, the matrix, and the outline name a module the same way: "Envelope 5" with two envelopes, "MIDI Note" with one.
-- [ ] A test with a feedback loop checks that the loop is one row named with its number, its modules are its children in run order (not ID order), and its description names the inserted delay. A loop broken by the user's unit delay names that delay, and a loop broken on an assignment names the assignment.
-- [ ] A test checks that a module modulated by another, with no cable, lists the modulation in its description and in its connection rows, and comes after its source in signal-flow order.
-- [ ] A test checks the sections: a module that feeds only a scope is in Not heard, and a patch where every module is heard has no section row. The sections are the same with port activity on and off, and after a pan.
-- [ ] A test with a twelve-input mixer checks that its row names three neighbours and "and 9 more", and its connection rows list all twelve.
-- [ ] `Ui` harness: Down, Up, Right, Left, Home, End, and letters move as section 5 says, with no screen reader.
-- [ ] `Ui` harness: Enter on a module row focuses that tile's first control on the canvas; Escape on the canvas does not return to the outline, and O does, to the same row.
-- [ ] `Ui` harness: follow downstream from Saw reaches SVF, and Back returns to Saw, in the outline and on the canvas. On SVF, which feeds Multiply 8 and Scope, the list opens and Enter picks one.
-- [ ] `Ui` harness: a jump to a module inside a collapsed section or loop expands it and focuses the module's row. Enter on an output connection row with two targets opens the list.
-- [ ] A test: inside a sub-patch, a port tile whose cables reach the audio output is heard, and one whose cables do not is in Not heard.
-- [ ] A test: one LFO output modulating two parameters gives two source-side rows with different UI IDs.
-- [ ] A test: an assignment that is off is listed with "off" at the end of its row, keeps its module's place in signal-flow order, and is drawn dotted on the map. Turning it on changes only that word and the line style.
-- [ ] A test: moving an independent tile above another reorders their rows when the move ends, and focus stays on the same row.
-- [ ] `Ui` harness: Delete in the outline removes nothing.
-- [ ] A test checks that moving a tile or the camera does not rebuild the patch map's structure, and that adding a cable does.
-- [ ] A test checks that a tile's description and its module row name the same neighbours.
-- [ ] A test checks that an output port's node has a `controls` relation to every input its cables feed.
-- [ ] `Ui` harness: a click on the map centres the canvas there, and dragging the view rectangle pans it.
-- [ ] `Ui` harness: with the Auto setting, the map shows while the level overflows the view and hides when it fits; M moves through Auto, Always, and Hidden, and the setting is saved in preferences.
-- [ ] `Ui` harness: O on the canvas opens the Outline tab and focuses its first row; Ctrl+Tab reaches it; at the top level, Escape returns to the canvas with the tab still open.
-- [ ] `Ui` harness: with an outline row focused, Ctrl+Tab and Ctrl+Shift+Tab move to the next and previous region, and the outline takes neither key (ui-layer.md, section 6, rule 7).
-- [ ] `Ui` harness: on the canvas, `]` on a selected Saw selects SVF and centres it, and Cmd+`[` (Ctrl+`[`) returns to Saw. With a German layout, the same physical keys do the same.
-- [ ] Inside a sub-patch, the outline shows the inside, with the port tiles as source and output rows, and the summary names the sub-patch and its path.
-- [ ] `Ui` harness: Enter on a sub-patch row focuses its tile, Cmd/Ctrl+Enter opens it, and Escape inside goes up to the instance's row.
+- [x] A test builds the patch map of `subtractive.ron` and checks the goal's example: the summary row; MIDI Note first and Multiply 8 then Audio Out last among the heard rows; every module after all its feeders; and the Not heard section with Scope and Transport.
+- [x] A test of rule 6's tie-break: sources A and C, B fed by A, with A reading first and B reading before C. The order is A, B, C (not A, C, B, which sorting by depth would give).
+- [x] A test checks the first state: the Not heard section and loop rows are expanded, module rows are collapsed, and Down from the summary reaches every module.
+- [x] A test checks that the tile header, the inspector, the matrix, and the outline name a module the same way: "Envelope 5" with two envelopes, "MIDI Note" with one.
+- [x] A test with a feedback loop checks that the loop is one row named with its number, its modules are its children in run order (not ID order), and its description names the inserted delay. A loop broken by the user's unit delay names that delay, and a loop broken on an assignment names the assignment.
+- [x] A test checks that a module modulated by another, with no cable, lists the modulation in its description and in its connection rows, and comes after its source in signal-flow order.
+- [x] A test checks the sections: a module that feeds only a scope is in Not heard, and a patch where every module is heard has no section row. The sections are the same with port activity on and off, and after a pan.
+- [x] A test with a twelve-input mixer checks that its row names three neighbours and "and 9 more", and its connection rows list all twelve.
+- [x] `Ui` harness: Down, Up, Right, Left, Home, End, and letters move as section 5 says, with no screen reader.
+- [x] `Ui` harness: Enter on a module row focuses that tile's first control on the canvas; Escape on the canvas does not return to the outline, and O does, to the same row.
+- [x] `Ui` harness: follow downstream from Saw reaches SVF, and Back returns to Saw, in the outline and on the canvas. On SVF, which feeds Multiply 8 and Scope, the list opens and Enter picks one.
+- [x] `Ui` harness: a jump to a module inside a collapsed section or loop expands it and focuses the module's row. Enter on an output connection row with two targets opens the list.
+- [x] A test: inside a sub-patch, a port tile whose cables reach the audio output is heard, and one whose cables do not is in Not heard.
+- [x] A test: one LFO output modulating two parameters gives two source-side rows with different UI IDs.
+- [x] A test: an assignment that is off is listed with "off" at the end of its row, keeps its module's place in signal-flow order, and is drawn dotted on the map. Turning it on changes only that word and the line style.
+- [x] A test: moving an independent tile above another reorders their rows when the move ends, and focus stays on the same row.
+- [x] `Ui` harness: Delete in the outline removes nothing.
+- [x] A test checks that moving a tile or the camera does not rebuild the patch map's structure, and that adding a cable does.
+- [x] A test checks that a tile's description and its module row name the same neighbours.
+- [x] A test checks that an output port's node has a `controls` relation to every input its cables feed.
+- [x] `Ui` harness: a click on the map centres the canvas there, and dragging the view rectangle pans it.
+- [x] `Ui` harness: with the Auto setting, the map shows while the level overflows the view and hides when it fits; M moves through Auto, Always, and Hidden, and the setting is saved in preferences.
+- [x] `Ui` harness: O on the canvas opens the Outline tab and focuses its first row; Ctrl+Tab reaches it; at the top level, Escape returns to the canvas with the tab still open.
+- [x] `Ui` harness: with an outline row focused, Ctrl+Tab and Ctrl+Shift+Tab move to the next and previous region, and the outline takes neither key (ui-layer.md, section 6, rule 7).
+- [x] `Ui` harness: on the canvas, `]` on a selected Saw selects SVF and centres it, and Cmd+`[` (Ctrl+`[`) returns to Saw. With a German layout, the same physical keys do the same.
+- [x] Inside a sub-patch, the outline shows the inside, with the port tiles as source and output rows, and the summary names the sub-patch and its path.
+- [x] `Ui` harness: Enter on a sub-patch row focuses its tile, Cmd/Ctrl+Enter opens it, and Escape inside goes up to the instance's row.
 - [ ] A VoiceOver check, recorded in the pull request: the summary, a scan of `subtractive.ron`, a jump and Back, Enter to a tile, and what VoiceOver says about a row's level and position (rule 15). Narrator and Orca checks are recorded, or listed as not checked.
 
 ## Out of scope

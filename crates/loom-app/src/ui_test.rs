@@ -157,12 +157,19 @@ fn sweep_old_copies() {
 /// folder, it stays itself), or a name that is no file, which opens the
 /// app with no patch.
 pub(crate) fn example_copy(patch: &str) -> PathBuf {
+    example_copy_owned(patch).0
+}
+
+/// [`example_copy`], with the folder it made for the copy. The folder is
+/// `None` when the patch was opened as it was, so a caller owns only a
+/// folder made for it, never one a path it was given happens to sit in.
+fn example_copy_owned(patch: &str) -> (PathBuf, Option<PathBuf>) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     static SWEPT: std::sync::Once = std::sync::Once::new();
     let source = example_path(patch);
     if std::path::Path::new(patch).is_absolute() || !source.is_file() {
-        return source;
+        return (source, None);
     }
     SWEPT.call_once(sweep_old_copies);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -170,7 +177,7 @@ pub(crate) fn example_copy(patch: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).expect("a folder for the copy");
     let copy = dir.join(patch);
     std::fs::copy(&source, &copy).unwrap_or_else(|why| panic!("copy {patch}: {why}"));
-    copy
+    (copy, Some(dir))
 }
 
 /// The app [`Ui::open`] runs, for a test that applies messages to it
@@ -262,6 +269,11 @@ impl Ui {
         std::mem::take(&mut self.bridge.driver_mut().trees)
     }
 
+    /// Takes the incremental accessibility updates the screen reader received.
+    pub(crate) fn take_sent_changes(&mut self) -> Vec<accesskit::TreeUpdate> {
+        std::mem::take(&mut self.bridge.driver_mut().changes)
+    }
+
     /// The clipboard's text.
     pub(crate) fn clipboard(&self) -> Option<&str> {
         self.bridge.driver().headless.clipboard()
@@ -317,8 +329,7 @@ impl Ui {
     /// Opens a patch from `examples/patches` with no audio, as the app does
     /// in a window of [`WINDOW`] size, and draws the first frame.
     pub(crate) fn open(patch: &str) -> Self {
-        let path = example_copy(patch);
-        let copy = path.parent().filter(|dir| is_copy_folder(dir)).map(PathBuf::from);
+        let (path, copy) = example_copy_owned(patch);
         let mut ui = Self::with_app(app_at(path));
         ui.copy = copy;
         ui
@@ -386,6 +397,9 @@ impl Ui {
                 ..
             } = self;
             let (app, target, mut panels) = bridge.runtime_mut().parts();
+            if app.0.pointer.waiting() {
+                app.0.pointer.place_runtime_targets(&panels);
+            }
             let mut iced = crate::iced_bridge::headless::HarnessIced {
                 app: &app.0,
                 surface,
@@ -516,9 +530,18 @@ impl Ui {
         self.redraw_at(Instant::now())
     }
 
+    /// Resizes the harness's window, leaving the new layout for the next frame.
+    #[cfg(test)]
+    pub(crate) fn resize(&mut self, width: f32, height: f32) {
+        self.surface.size = iced::Size::new(width, height);
+        let task = self.bridge.resize(loom_ui_core::Size::new(width, height));
+        self.settle(vec![task]);
+    }
+
     /// A redraw at a chosen time, so a test can pass a timer's deadline
     /// without sleeping.
     pub(crate) fn redraw_at(&mut self, at: Instant) -> Vec<Message> {
+        self.lay_out_panels();
         self.step(&[Event::Window(window::Event::RedrawRequested(at))])
     }
 

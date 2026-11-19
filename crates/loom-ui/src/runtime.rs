@@ -813,8 +813,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .hint()
                 .map(|hint| hint.source.clone())
                 .filter(|source| self.panels.layer_of(source).is_some_and(|layer| layer >= input));
-            let hover = self.pointer.hovered.as_ref().map(|(_, id)| id.clone());
-            let hid = self.pointer.hint.hide(shown.as_ref(), hover.as_ref(), self.focus.moves);
+            let hid = self
+                .pointer
+                .hint
+                .hide(shown.as_ref(), self.pointer.hover_moves, self.focus.moves);
             if cancelled || hid {
                 return (true, hid);
             }

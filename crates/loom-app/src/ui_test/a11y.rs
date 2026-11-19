@@ -222,6 +222,11 @@ impl<'a> A11yNode<'a> {
         self.raw().toggled()
     }
 
+    /// Which way it lies, for a toolbar, a list, or a slider.
+    pub fn orientation(&self) -> Option<accesskit::Orientation> {
+        self.raw().orientation()
+    }
+
     /// True when it offers `action`.
     pub fn offers(&self, action: Action) -> bool {
         self.raw().supports_action(action)

@@ -1326,7 +1326,7 @@ fn a_select_only_parameter_is_a_modulation_target() {
     };
     assert!(rows.params[long].accepts_drop, "its row accepts a drop");
     assert!(
-        crate::matrix::targets(ui.app().session.controller.graph())
+        crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
             .iter()
             .any(|t| t.module == id && t.param == long),
         "the matrix offers it as a target"
@@ -2543,7 +2543,7 @@ fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
     ui.send(Message::Learn(crate::learn::Message::Arm((source.0, index))));
     assert!(!ui.app().session.learn.is_armed((source.0, index)));
     assert!(
-        !crate::matrix::targets(ui.app().session.controller.graph())
+        !crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
             .iter()
             .any(|target| target.module == source && target.param == index)
     );
@@ -3087,4 +3087,25 @@ fn a_ui_removes_its_own_copy_folder_when_the_file_changed() {
         .saved(PathBuf::from("elsewhere.ron"), loom_patch::Patch::new("Elsewhere"));
     drop(ui);
     assert!(!folder.exists(), "the copy folder is gone");
+}
+
+/// A `Ui` owns only a copy folder it made: a second `Ui` opened on the
+/// first one's copy, by its absolute path, leaves that folder in place
+/// when it drops (CodeRabbit, #850).
+#[test]
+fn a_ui_on_another_ui_s_copy_leaves_that_folder() {
+    let first = Ui::open("subtractive.ron");
+    let file = first
+        .app()
+        .session
+        .document
+        .file()
+        .expect("a file is open")
+        .to_path_buf();
+    let folder = file.parent().expect("the copy has a folder").to_path_buf();
+    let second = Ui::open(file.to_str().expect("a path in UTF-8"));
+    drop(second);
+    assert!(folder.is_dir(), "the first Ui's folder stays");
+    drop(first);
+    assert!(!folder.exists(), "and goes with its own Ui");
 }

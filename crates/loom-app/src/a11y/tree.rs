@@ -15,7 +15,7 @@ use crate::matrix::Tab;
 use crate::places::Places;
 use crate::snapshot::{Rect, UiSnapshot, Widget};
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
-use loom_canvas::{CanvasView, ControlPart, Reading, WidgetViewKind, arrow_share, option_bounds, part_bounds};
+use loom_canvas::{CanvasView, ControlPart, PortRef, Reading, WidgetViewKind, arrow_share, option_bounds, part_bounds};
 use loom_core::ParamSpec;
 use loom_ui_core::{IdKey, IdTable, UiId};
 use std::collections::BTreeMap;
@@ -100,6 +100,14 @@ pub(crate) struct WidgetIds {
     ids: BTreeMap<u32, Vec<Option<UiId>>>,
     /// What each widget is, by tile and panel index.
     details: BTreeMap<(u32, usize), Detail>,
+    /// The ports, by their stable identity.
+    pub(crate) ports: BTreeMap<(u32, bool, usize), PortNode>,
+    /// The neighbours of each tile in the level.
+    pub(crate) neighbours: BTreeMap<u32, String>,
+    /// Bounds of the map image, when it is visible.
+    pub(crate) map: Option<loom_ui_core::Rect>,
+    /// The canvas port receiving follow commands.
+    pub(crate) focused_port: Option<PortRef>,
     /// The widgets that only show a value, which can move on its own.
     live: std::collections::BTreeSet<UiId>,
     /// The control with keyboard focus on the canvas, if one has it.
@@ -107,6 +115,16 @@ pub(crate) struct WidgetIds {
     /// True while a panel or a menu lies over the window, so a pointer
     /// press reaches nothing below it.
     covered: bool,
+}
+
+/// The graph description and bounds of an input or output port.
+#[derive(Debug, Clone)]
+pub(crate) struct PortNode {
+    pub(crate) id: UiId,
+    pub(crate) label: String,
+    pub(crate) description: String,
+    pub(crate) centre: loom_ui_core::Point,
+    pub(crate) controls: Vec<PortRef>,
 }
 
 /// What a panel widget is, beyond what the snapshot says of it: enough to
@@ -411,7 +429,14 @@ pub(crate) fn tree(
     let bar = groups.bar;
     // The open panel, drawn beside the canvas: each of its parts, and the
     // panel itself marked as cutting off what it scrolls out of view.
-    let panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
+    let outline = snapshot.matrix.tab == Tab::Outline && frames.jump.is_empty();
+    let mut panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
+    if outline {
+        panel.push(frame.outline(&snapshot.outline, frames.focused_item.as_ref()));
+    }
+    if !frames.jump.is_empty() {
+        panel.push(frame.panel(&frames.jump[0]));
+    }
     // The overlay that owns the input is not below anything: it is reported
     // and acts, while what it covers is hidden.
     let covered = std::mem::replace(&mut frame.covered, false);
@@ -427,7 +452,12 @@ pub(crate) fn tree(
     let item_focus = frames
         .focused_item
         .as_ref()
-        .filter(|id| items::find(&frames.panel, id).is_some())
+        .filter(|id| {
+            items::find(&frames.panel, id).is_some()
+                || items::find(&frames.jump, id).is_some()
+                || (outline && snapshot.outline.iter().any(|row| &row.id == *id))
+                || **id == tab_id(Tab::Inspector)
+        })
         .map(|id| node_id(table, id));
     // Focus is on the window unless a control on the canvas has it.
     let mut focus = None;
@@ -435,7 +465,8 @@ pub(crate) fn tree(
         let id = node_id(table, &tile_id(tile.id));
         let mut node = Node::new(Role::Group);
         node.set_label(tile.title.clone());
-        if let Some(description) = &tile.description {
+        let description = ids.neighbours.get(&tile.id).filter(|text| !text.is_empty());
+        if let Some(description) = description.or(tile.description.as_ref()) {
             node.set_description(description.clone());
         }
         place(&mut node, tile.bounds);
@@ -460,6 +491,19 @@ pub(crate) fn tree(
                 continue;
             };
             let child = node_id(table, widget_id);
+            if let Some(typed) = places
+                .typed
+                .as_ref()
+                .filter(|typed| !ids.covered && (typed.module, typed.widget) == (tile.id, index))
+            {
+                let field_id = widget_id.clone().with("field");
+                let name = ids
+                    .detail(tile.id, index)
+                    .map_or(widget.label.as_str(), |detail| &detail.name);
+                focus = Some(typed_field(typed, &field_id, name, scale, table, &mut nodes));
+                kids.extend(focus);
+                continue;
+            }
             // A control with nothing behind it is shown disabled, says why,
             // and offers no actions (sub-patches.md, Empty slots).
             if let Some(reason) = &widget.inert {
@@ -529,11 +573,64 @@ pub(crate) fn tree(
             kids.push(child);
             nodes.push((child, w));
         }
+        for (&(_, output, index), port) in ids.ports.range((tile.id, false, 0)..=(tile.id, true, usize::MAX)) {
+            let port_id = node_id(table, &port.id);
+            let mut part = Node::new(Role::Button);
+            part.set_label(port.label.clone());
+            part.set_description(port.description.clone());
+            part.add_action(Action::Focus);
+            let radius = loom_canvas::PORT_HIT_RADIUS;
+            place(
+                &mut part,
+                Rect {
+                    x: port.centre.x - radius,
+                    y: port.centre.y - radius,
+                    width: 2.0 * radius,
+                    height: 2.0 * radius,
+                },
+            );
+            if output {
+                part.set_controls(
+                    port.controls
+                        .iter()
+                        .filter_map(|to| {
+                            ids.ports
+                                .get(&(to.module, to.output, to.index))
+                                .map(|peer| node_id(table, &peer.id))
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            if !ids.covered
+                && ids.focused_port
+                    == Some(PortRef {
+                        module: tile.id,
+                        output,
+                        index,
+                    })
+            {
+                focus = Some(port_id);
+            }
+            kids.push(port_id);
+            nodes.push((port_id, part));
+        }
         node.set_children(kids);
         children.push(id);
         nodes.push((id, node));
     }
 
+    if let Some(map) = ids.map {
+        let mut image = Node::new(Role::Image);
+        image.set_label("Patch map");
+        image.set_description("Overview of this level. Open Outline for a text description.");
+        image.set_bounds(logical(map, scale));
+        if ids.covered {
+            image.set_hidden();
+        }
+        let id = node_id(table, &canvas_id().with("patch-map"));
+        nodes.push((id, image));
+        children.push(id);
+    }
     children.extend(panel);
     children.extend(bar);
     // Last, as it is drawn on top.
@@ -560,6 +657,55 @@ pub(crate) fn tree(
     }
 }
 
+/// Reports the open value editor and its single-line text selection.
+fn typed_field(
+    typed: &loom_canvas::CanvasTyped,
+    id: &UiId,
+    name: &str,
+    scale: f32,
+    table: &mut IdTable,
+    nodes: &mut Vec<(NodeId, Node)>,
+) -> NodeId {
+    let field_id = node_id(table, id);
+    let run_id = node_id(table, &id.clone().with("text"));
+    let mut field = Node::new(Role::TextInput);
+    field.set_label(format!("{name} value"));
+    field.set_value(typed.text.clone());
+    field.add_action(Action::SetTextSelection);
+    field.add_action(Action::ReplaceSelectedText);
+    field.set_children([run_id]);
+    let rect = typed.bounds;
+    let bounds = logical(rect, scale);
+    field.set_bounds(bounds);
+    let caret = typed.text[..typed.caret].chars().count();
+    let position = |character_index| accesskit::TextPosition {
+        node: run_id,
+        character_index,
+    };
+    field.set_text_selection(accesskit::TextSelection {
+        anchor: position(typed.text[..typed.anchor].chars().count()),
+        focus: position(caret),
+    });
+    let mut run = Node::new(Role::TextRun);
+    run.set_bounds(bounds);
+    run.set_value(typed.text.clone());
+    run.set_character_lengths(typed.text.chars().map(|c| c.len_utf8() as u8).collect::<Vec<_>>());
+    run.set_text_direction(accesskit::TextDirection::LeftToRight);
+    nodes.extend([(field_id, field), (run_id, run)]);
+    field_id
+}
+
+/// Scales a window rectangle to physical pixels.
+fn logical(rect: loom_ui_core::Rect, scale: f32) -> accesskit::Rect {
+    let scale = f64::from(scale);
+    accesskit::Rect {
+        x0: f64::from(rect.x) * scale,
+        y0: f64::from(rect.y) * scale,
+        x1: f64::from(rect.x + rect.width) * scale,
+        y1: f64::from(rect.y + rect.height) * scale,
+    }
+}
+
 /// What the tree reports of the parts the toolkit draws around the canvas:
 /// the bar at the bottom, the open panel's parts, and the text field that
 /// has keyboard focus.
@@ -567,6 +713,8 @@ pub(crate) struct Frames {
     /// The open panel's parts: the inspector's or the matrix's, by the tab
     /// that is open.
     pub panel: Vec<items::Item>,
+    /// The temporary cable branch list.
+    pub jump: Vec<items::Item>,
     /// The text field with keyboard focus, as the window last said.
     pub focused_field: Option<iced::advanced::widget::Id>,
     /// The panel part the keys act on while no text field has them: the
@@ -601,6 +749,7 @@ pub(crate) fn tab_id(tab: Tab) -> UiId {
     tabs_id().with(match tab {
         Tab::Inspector => "inspector",
         Tab::Matrix => "matrix",
+        Tab::Outline => "outline",
     })
 }
 
@@ -625,6 +774,7 @@ pub(crate) fn frame_part(id: &UiId) -> Option<FramePart> {
         match (&**panel, &**name) {
             ("panel", "inspector") => return Some(FramePart::Tab(Tab::Inspector)),
             ("panel", "matrix") => return Some(FramePart::Tab(Tab::Matrix)),
+            ("panel", "outline") => return Some(FramePart::Tab(Tab::Outline)),
             _ => {}
         }
     }
@@ -822,9 +972,8 @@ impl Frame<'_> {
             node.set_children(children);
         }
         let id = self.add(&item.id, node);
-        // A list box scrolls, so it cuts off what it scrolls out of view and
-        // is as tall as what shows, as a panel is.
-        if item.kind == Kind::ListBox {
+        // Preferences and list boxes scroll, so their bounds clip descendants.
+        if item.kind == Kind::ListBox || item.id == crate::settings::access::preferences_id() {
             self.clip_to_shown(id, &item.id);
         }
         // A covered field is hidden, so it cannot be focused, even while
@@ -835,10 +984,40 @@ impl Frame<'_> {
         id
     }
 
+    /// The visible outline rows, flat under one tree.
+    fn outline(&mut self, rows: &[crate::outline::Row], focus: Option<&UiId>) -> NodeId {
+        let mut children = Vec::new();
+        for row in rows {
+            let mut node = Node::new(Role::TreeItem);
+            node.set_label(row.name.clone());
+            if !row.description.is_empty() {
+                node.set_description(row.description.clone());
+            }
+            node.set_level(row.level - 1);
+            node.set_position_in_set(row.position - 1);
+            node.set_size_of_set(row.size);
+            if let Some(expanded) = row.expanded {
+                node.set_expanded(expanded);
+            }
+            node.set_selected(focus == Some(&row.id));
+            node.add_action(Action::Focus);
+            node.add_action(Action::Click);
+            children.push(self.add(&row.id, node));
+        }
+        let mut tree = Node::new(Role::Tree);
+        tree.set_label("Outline");
+        tree.set_children(children);
+        self.add(&crate::outline::tree_id(), tree)
+    }
+
     /// The right panel's tabs: a tab list with the open tab selected.
     fn tabs(&mut self, open: Tab) -> NodeId {
         let mut tabs = Vec::new();
-        for (tab, label) in [(Tab::Inspector, "Inspector"), (Tab::Matrix, "Matrix")] {
+        for (tab, label) in [
+            (Tab::Inspector, "Inspector"),
+            (Tab::Matrix, "Matrix"),
+            (Tab::Outline, "Outline"),
+        ] {
             let mut node = Node::new(Role::Tab);
             node.set_label(label);
             node.set_selected(tab == open);
@@ -879,16 +1058,26 @@ impl Frame<'_> {
         let breadcrumb = under(&crate::breadcrumb::breadcrumb_id());
         let bar = under(&crate::stats_bar::stats_id());
         Ours {
-            toolbar: self.group(toolbar, "Toolbar", &toolbar_id()),
-            breadcrumb: self.group(breadcrumb, "Patch levels", &crate::breadcrumb::breadcrumb_id()),
-            bar: self.group(bar, "Status bar", &crate::stats_bar::stats_id()),
+            // The toolbar is one stop with arrows inside, the WAI-ARIA
+            // toolbar pattern (Brylie's decision, 2026-11-19), so its node
+            // says so; the breadcrumb is a list of links, a group.
+            toolbar: self.group(toolbar, Role::Toolbar, "Toolbar", &toolbar_id()),
+            breadcrumb: self.group(
+                breadcrumb,
+                Role::Group,
+                "Patch levels",
+                &crate::breadcrumb::breadcrumb_id(),
+            ),
+            bar: self.group(bar, Role::Group, "Status bar", &crate::stats_bar::stats_id()),
         }
     }
 
-    /// A group named `label`, with UI ID `id`, around `children`, which
-    /// were pushed already, and their bounds; none when there are no
-    /// children.
-    fn group(&mut self, children: Vec<NodeId>, label: &str, id: &UiId) -> Vec<NodeId> {
+    /// A group of `role` named `label`, with UI ID `id`, around
+    /// `children`, which were pushed already, and their bounds; none when
+    /// there are no children. A toolbar lies across the window, so it says
+    /// it is horizontal, and a screen reader names Left and Right as its
+    /// keys.
+    fn group(&mut self, children: Vec<NodeId>, role: Role, label: &str, id: &UiId) -> Vec<NodeId> {
         if children.is_empty() {
             return Vec::new();
         }
@@ -898,9 +1087,12 @@ impl Frame<'_> {
             .filter(|(node, _)| children.contains(node))
             .filter_map(|(_, node)| node.bounds())
             .reduce(|a, b| a.union(b));
-        let mut group = Node::new(Role::Group);
+        let mut group = Node::new(role);
         group.set_label(label);
         group.set_children(children);
+        if role == Role::Toolbar {
+            group.set_orientation(accesskit::Orientation::Horizontal);
+        }
         if let Some(bounds) = bounds {
             group.set_bounds(bounds);
         }

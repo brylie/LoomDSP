@@ -48,6 +48,10 @@ impl App {
             })
             .matrix_line(self.matrix_line())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
+            .report_typed(self.a11y.is_active())
+            .typed_request(self.a11y.typed_request().0, self.a11y.typed_request().1)
+            .overview(self.map_view())
+            .centre_request(self.session.outline.centre.0, self.session.outline.centre.1)
             .animate(self.animating)
             .learn(self.session.learn.shown());
         if let Some(still) = self.still {
@@ -197,20 +201,25 @@ impl App {
             row![
                 container(tab("Inspector", RightTab::Inspector)).id("panel/inspector"),
                 container(tab("Matrix", RightTab::Matrix)).id("panel/matrix"),
+                container(tab("Outline", RightTab::Outline)).id("panel/outline"),
             ]
             .spacing(4)
             .padding([6, 8]),
         )
         .id("panel");
-        let panel = match self.right_tab {
+        let panel = self.jump_view().unwrap_or_else(|| match self.right_tab {
+            RightTab::Outline => self.outline_view(),
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
-                self.session
-                    .matrix
-                    .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
+                self.session.matrix.model(
+                    self.session.controller.graph(),
+                    &self.session.hierarchy,
+                    &self.session.selection,
+                    self.right_tab,
+                ),
                 self.a11y.is_active(),
             ),
-        };
+        });
         column![tabs, panel].width(280).height(Length::Fill).into()
     }
 }

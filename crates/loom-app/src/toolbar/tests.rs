@@ -87,15 +87,21 @@ fn the_snapshot_has_the_toolbar() {
     assert!(buttons[0].get("hover").is_none(), "left out when there is none");
 }
 
-/// The toolbar's nodes as text: one line per node under `toolbar`, with
-/// its role, name, description, whether it says it is on, whether it is
+/// The toolbar's nodes as text: the toolbar's role, name, and
+/// orientation, then one line per node under `toolbar`, with its role,
+/// name, description, whether it says it is on, whether it is
 /// turned off, and whether it offers Click. Bounds and the Focus action
 /// are left out: bounds move when the toolbar changes toolkit, and Focus
 /// is new in row 2 (ui-layer.md, section 7, rule 22).
 fn toolbar_nodes(ui: &mut crate::ui_test::Ui) -> String {
     let tree = ui.a11y_tree();
     let toolbar = tree.node_by_id(&UiId::panel("toolbar"));
-    let mut lines = vec![format!("{:?} {:?}", toolbar.role(), toolbar.name())];
+    let mut lines = vec![format!(
+        "{:?} {:?} orientation={:?}",
+        toolbar.role(),
+        toolbar.name(),
+        toolbar.orientation()
+    )];
     for node in toolbar.children() {
         lines.push(format!(
             "  {:?} {:?} description={:?} toggled={:?} disabled={} click={}",
@@ -115,7 +121,10 @@ fn toolbar_nodes(ui: &mut crate::ui_test::Ui) -> String {
 /// The toolbar's nodes at the top level and inside a sub-patch match the
 /// snapshot taken from the toolbar as Iced drew it, before row 2 of plan
 /// 3.2 moved it: the move keeps every name, description, state, and
-/// action. `LOOM_UPDATE_REFERENCES=1` writes the snapshot.
+/// action. One change is deliberate: the toolbar's role is Toolbar, not
+/// Group, and it is horizontal (the WAI-ARIA toolbar pattern; Brylie's
+/// decision, 2026-11-19). Main's Map toggle (#849) is in the snapshot too.
+/// `LOOM_UPDATE_REFERENCES=1` writes the snapshot.
 #[test]
 fn the_toolbar_nodes_match_the_snapshot() {
     let mut top = crate::ui_test::Ui::open("subtractive.ron");
@@ -138,7 +147,8 @@ fn the_toolbar_nodes_match_the_snapshot() {
     assert_eq!(got, want);
 }
 
-/// The toolbar is a named group of buttons, the window's first child. Each
+/// The toolbar is a named, horizontal toolbar of buttons, the window's
+/// first child. Each
 /// button has its label, its hover text as the description, Click while
 /// it works, and Focus too, since the toolbar is `loom-ui`'s (ui-layer.md,
 /// section 7, rule 22, from row 2). A mode button says whether its mode is
@@ -148,7 +158,8 @@ fn the_toolbar_is_a_group_of_focusable_buttons() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let tree = ui.a11y_tree();
     let toolbar = tree.node_by_id(&toolbar_id());
-    assert_eq!(toolbar.role(), accesskit::Role::Group);
+    assert_eq!(toolbar.role(), accesskit::Role::Toolbar);
+    assert_eq!(toolbar.orientation(), Some(accesskit::Orientation::Horizontal));
     assert_eq!(toolbar.name(), Some("Toolbar"));
     assert_eq!(
         tree.root().children().first().and_then(|first| first.ui_id()),
@@ -454,4 +465,26 @@ fn a_focused_undo_that_turns_off_hands_the_focus_to_new() {
         Some(&toolbar_id().with("new")),
         "the focus fell back"
     );
+}
+
+/// The toolbar is one Tab stop (the WAI-ARIA toolbar pattern; Brylie's
+/// decision, 2026-11-19): at the top level, Tab from any of its buttons
+/// goes into the canvas and Shift+Tab to the bar's last stop, and Tab
+/// back in lands on the button last focused, as Ctrl+Tab does.
+#[test]
+fn the_toolbar_is_one_tab_stop() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.redraw();
+    let stops = ui.app().toolbar_stops();
+    let bar_last = ui.app().bar_stops().last().cloned().expect("the bar's ×");
+    ui.a11y_action(&stops[2], accesskit::Action::Focus);
+    assert_eq!(ui.app().top_stops()[0], stops[2], "the toolbar remembers its button");
+    ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    assert_eq!(ui.runtime().focused(), Some(&bar_last), "back out of the toolbar");
+    ui.tap(Key::Named(Named::Tab), Modifiers::default());
+    assert_eq!(ui.runtime().focused(), Some(&stops[2]), "in on the button last focused");
+    ui.tap(Key::Named(Named::Tab), Modifiers::default());
+    assert_eq!(ui.runtime().focused(), None, "out of the toolbar, into the canvas");
 }

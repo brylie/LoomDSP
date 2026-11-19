@@ -227,6 +227,7 @@ impl App {
 
     /// Closes the open gesture and records it.
     pub(crate) fn end_gesture(&mut self) {
+        self.session.patch_map.reorder(&self.session.scene);
         let step_name = if self.session.patch_info.end_part_authors_edit() {
             Some(crate::patch_info::EDIT_PART_AUTHORS.to_string())
         } else {

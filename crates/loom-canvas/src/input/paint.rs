@@ -48,6 +48,7 @@ impl CanvasInput {
         let empty = PanelValues::default();
         let values = model.values.unwrap_or(&empty);
         model.paint_tile_text(self, values, bounds, painter);
+        model.paint_map(self, bounds, painter);
         model.paint_select_popup(self, bounds, painter);
         model.paint_typed_field(self, bounds, painter);
         model.paint_hover_text(self, bounds, painter);
@@ -314,8 +315,10 @@ impl CanvasModel<'_> {
         let inner = FIELD_WIDTH_PX - 2.0 * FIELD_PADDING_PX;
         // Measured before painting starts, since one object does both.
         let mut width_of = |content: &str| painter.measure(content, style, None).width;
-        let text_width = width_of(&field.draft.text);
         let caret_width = width_of(&field.draft.text[..field.caret]);
+        let selection = field.selection();
+        let selection_start = width_of(&field.draft.text[..selection.start]).min(inner);
+        let selection_end = width_of(&field.draft.text[..selection.end]).min(inner);
         let reason_width = error.map(&mut width_of);
         let text_at = Point::new(area.x + FIELD_PADDING_PX, area.center_y());
         painter.begin_layer(bounds);
@@ -332,18 +335,18 @@ impl CanvasModel<'_> {
                 border_width: outline.1,
                 radius: 4.0,
             });
-            if field.selected && !field.draft.text.is_empty() {
+            if !selection.is_empty() {
                 painter.quad(Quad::filled(
                     Rect::new(
-                        Point::new(text_at.x - 1.0, area.y + 3.0),
-                        Size::new(text_width.min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
+                        Point::new(text_at.x + selection_start - 1.0, area.y + 3.0),
+                        Size::new(selection_end - selection_start + 2.0, FIELD_HEIGHT_PX - 6.0),
                     ),
                     self.palette.control_track,
                     0.0,
                 ));
             }
             painter.text(&line(&field.draft.text, inner, text_at, area));
-            if !field.selected {
+            if selection.is_empty() {
                 let x = text_at.x + caret_width.min(inner);
                 painter.quad(Quad::filled(
                     Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),

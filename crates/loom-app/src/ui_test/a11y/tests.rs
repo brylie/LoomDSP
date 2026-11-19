@@ -11,23 +11,28 @@ fn param(ui: &Ui, module: u32, name: &str) -> f32 {
     node.params[node.descriptor.param_index(name).unwrap()]
 }
 
+/// The ID of the cutoff control, which shares its label with an input port.
+fn cutoff_id() -> UiId {
+    crate::a11y::tree::tile_id(4).with("param").with("cutoff")
+}
+
 /// A knob reads by its name, inside the tile named above it, with its role
 /// and number; the same knob is found by its UI ID.
 #[test]
 fn a_knob_reads_by_name_role_and_number() {
     let mut ui = Ui::open("subtractive.ron");
     let tree = ui.a11y_tree();
-    let cutoff = tree.path(&["SVF", "Cutoff"]);
+    let cutoff = tree.node_by_id(&cutoff_id());
     assert_eq!(cutoff.role(), Role::Slider);
     assert_eq!(cutoff.number(), Some(300.0));
     assert!(cutoff.offers(Action::Increment));
-    assert_eq!(tree.node("Cutoff").ui_id(), cutoff.ui_id(), "one Cutoff in the patch");
+    assert_eq!(cutoff.name(), Some("Cutoff"));
     let id = cutoff.ui_id().expect("every node has a UI ID").clone();
     assert_eq!(tree.node_by_id(&id).name(), Some("Cutoff"));
 
     // Two Envelope tiles: one found by its UI ID scopes the name inside it.
     let second = tree.node_by_id(&crate::a11y::tree::tile_id(7));
-    assert_eq!(second.name(), Some("Envelope"));
+    assert_eq!(second.name(), Some("Envelope 7"));
     let attack = second.node("Attack").number().expect("a knob has a number");
     assert!((attack - 0.005).abs() < 1e-6, "the second envelope's Attack: {attack}");
     assert!(tree.names().iter().filter(|name| *name == "Attack").count() == 2);
@@ -56,11 +61,11 @@ fn a_missing_name_panics() {
 fn increment_moves_a_knob_and_the_tree_follows() {
     let mut ui = Ui::open("subtractive.ron");
     let before = param(&ui, 4, "cutoff");
-    ui.a11y_action(["SVF", "Cutoff"], Action::Increment);
+    ui.a11y_action(&cutoff_id(), Action::Increment);
     let after = param(&ui, 4, "cutoff");
     assert!(after > before, "{before} -> {after}");
     let tree = ui.a11y_tree();
-    let cutoff = tree.path(&["SVF", "Cutoff"]);
+    let cutoff = tree.node_by_id(&cutoff_id());
     let shown = cutoff.description().unwrap().strip_suffix(" Hz").unwrap();
     assert_eq!(cutoff.number(), Some(shown.parse().unwrap()));
 }
@@ -70,7 +75,7 @@ fn increment_moves_a_knob_and_the_tree_follows() {
 #[test]
 fn set_value_sets_a_knob_and_a_field() {
     let mut ui = Ui::open("subtractive.ron");
-    ui.a11y_set_value(["SVF", "Cutoff"], 1000.0);
+    ui.a11y_set_value(&cutoff_id(), 1000.0);
     assert_eq!(param(&ui, 4, "cutoff"), 1000.0);
     ui.a11y_action("SVF", Action::Click);
     ui.a11y_set_value("Cutoff value", "2000");

@@ -112,6 +112,12 @@ impl<A: App> Panels<'_, A> {
         self.report_focus();
     }
 
+    /// Finds a named element or visible text in the current layout.
+    pub fn locate(&self, id: Option<&UiId>, text: &str) -> Option<Rect> {
+        id.and_then(|id| self.window.bounds(id))
+            .or_else(|| self.window.text_bounds(text))
+    }
+
     /// Chooses the hover text to show, from the hovered element and the
     /// focused one in the layers that take input, and lays it out
     /// (section 5, rule 11).
@@ -120,14 +126,15 @@ impl<A: App> Panels<'_, A> {
         // pointer that did not move: it is hovered no more, unless the
         // pointer is on its hover text.
         if let (Some((_, id)), Some(at)) = (&self.pointer.hovered, self.pointer.at) {
-            // Its box only: the rest of the keep area is where the element
-            // was before this layout.
-            let on_hint = self
-                .window
-                .hint()
-                .is_some_and(|hint| hint.source == *id && hint.on_box(at));
-            if !on_hint && !self.window.bounds(id).is_some_and(|bounds| bounds.contains(at)) {
-                self.pointer.hovered = None;
+            let keeps_hover = self.window.bounds(id).is_some_and(|anchor| {
+                anchor.contains(at)
+                    || self
+                        .window
+                        .hint()
+                        .is_some_and(|hint| hint.source == *id && hint.keeps(at, anchor))
+            });
+            if !keeps_hover {
+                self.pointer.set_hover(None);
             }
         }
         let input = self.app.input().layer;
@@ -141,8 +148,10 @@ impl<A: App> Panels<'_, A> {
         };
         let hovered = self.pointer.hovered.as_ref().and_then(|(_, id)| with_text(id));
         let focused = self.focus.id().and_then(with_text);
-        let hover = self.pointer.hovered.as_ref().map(|(_, id)| id);
-        let chosen = self.pointer.hint.choose(hovered, focused, hover, self.focus.moves);
+        let chosen = self
+            .pointer
+            .hint
+            .choose(hovered, focused, self.pointer.hover_moves, self.focus.moves);
         let style = self.app.hint_style();
         let shown = chosen.and_then(|(source, hover)| {
             let anchor = self.window.bounds(&source)?;

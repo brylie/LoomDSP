@@ -72,7 +72,10 @@ impl CanvasModel<'_> {
 
         let keys_elsewhere = match event {
             Some(Event::Key(KeyEvent::Pressed { key, modifiers, .. })) => {
-                (self.focus_policy.matrix_keyboard && !modifiers.shortcut())
+                (self.focus_policy.jump_keyboard
+                    && *modifiers == Modifiers::NONE
+                    && matches!(key, Key::Up | Key::Down | Key::Enter | Key::Escape))
+                    || (self.focus_policy.matrix_keyboard && !modifiers.shortcut())
                     || (self.focus_policy.text_field_keys
                         && (self.focus_policy.text_field_keeps_tab || !matches!(key, Key::Tab)))
             }
@@ -98,6 +101,7 @@ impl CanvasModel<'_> {
             self.end_gestures(state, out);
             self.end_edit_group(out, false);
             state.interaction = Interaction::Idle;
+            state.map_press = None;
             state.focus.close_typing();
             // Only what the window itself reports goes on from here. `None`
             // is most often a window event with no meaning to the canvas,
@@ -114,11 +118,20 @@ impl CanvasModel<'_> {
         let Some(event) = event else {
             return;
         };
+        if matches!(event, Event::Key(KeyEvent::Pressed { key: Key::Tab, modifiers, .. }) if modifiers.control) {
+            return;
+        }
         // An open list comes before every other use of the pointer.
         if self.select_popup_event(state, event, pointer, bounds, now, out) {
             return;
         }
+        if matches!(event, Event::Redraw) && self.focus_policy.interactive {
+            self.edit_typed_request(state, out);
+        }
         if self.typed_field_event(state, event, bounds, screen, out) {
+            return;
+        }
+        if self.focus_policy.interactive && self.map_event(state, event, pointer, bounds, out) {
             return;
         }
 
@@ -204,6 +217,16 @@ impl CanvasModel<'_> {
                 // the focus, and waits while that framing waits for the
                 // canvas to have a width.
                 let reset_waits = (new_frame || new_level) && bounds.width <= 0.0;
+                let (centre_key, centre) = self.centre_request;
+                if !reset_waits
+                    && state.centre_key.replace(centre_key) != Some(centre_key)
+                    && let Some(world) = centre
+                {
+                    state.animation = None;
+                    state.camera.centre(world, bounds.size());
+                    self.emit(out, CanvasEvent::Camera(state.camera));
+                    out.redraw();
+                }
                 let (focus_key, focus_control) = self.focus_request;
                 if reset_waits {
                     // The first key is noted even so, as the one a later
@@ -405,7 +428,7 @@ impl CanvasModel<'_> {
             }
             Event::Pointer(PointerEvent::Pressed(button)) if over => {
                 let Some(screen) = screen else { return };
-                if self.focus_policy.matrix_keyboard {
+                if self.focus_policy.matrix_keyboard || self.focus_policy.jump_keyboard {
                     self.emit(out, CanvasEvent::PointerDown);
                 }
                 // A second button must end a hold. Replacing the interaction
