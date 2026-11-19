@@ -49,7 +49,7 @@ The audio thread has a hard deadline. At 48 kHz with a 128-sample buffer, each b
 | NFR-PORT-01 | The engine core compiles to `wasm32-unknown-unknown`. CI checks this on every change. | Should | Cheap to keep from the start, expensive to retrofit. Keeps the web target, which is first class, possible. |
 | NFR-PORT-02 | The engine core does not depend on threads, the file system, or a specific audio API. Those live in host adapters. | Must | Same core for the desktop app, plugins, and any future target. |
 | NFR-PORT-03 | Desktop targets: macOS (Apple Silicon), Windows 10+, Linux (x86_64, with ALSA/PipeWire/JACK). | Must | Covers the main music production platforms. |
-| NFR-PORT-04 | Browser targets: current Chrome, Firefox, and Safari with WebGPU. | Could | The web is a first-class target (Brylie's decision, 2026-11-19; [UI design goal 3](../design/ui-layer.md#design-goals)). When a web build ships is the roadmap's. |
+| NFR-PORT-04 | Browser targets: current Chrome, Firefox, and Safari with WebGPU. | Must | Must since Brylie's decision of 2026-11-19, beside FR-WAM-01. The web is a first-class target (Brylie's decision, 2026-11-19; [UI design goal 3](../design/ui-layer.md#design-goals)). When a web build ships is the roadmap's. |
 | NFR-PORT-05 | ARM Linux (for example Raspberry Pi) for standalone performance rigs. | Could | Interesting for hardware builders. |
 
 ## Web runtime (`WEB`)
