@@ -737,6 +737,7 @@ impl App {
             matrix: self.session.matrix.model(
                 self.session.controller.graph(),
                 &self.session.hierarchy,
+                &self.session.level,
                 &self.session.selection,
                 self.right_tab,
             ),

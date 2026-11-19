@@ -641,6 +641,15 @@ impl App {
         if self.focus.is_some() || self.session.value_draft.is_some() || self.matrix_has_keys() {
             return false;
         }
+        if !outline
+            && !self.session.outline.has_jump()
+            && !self.toolbar_has_focus()
+            && self.input_owner() == crate::input_owner::InputOwner::Canvas
+            && modifiers.is_empty()
+            && matches!(&key, Key::Character(c) if loom_canvas::shortcuts::CABLE.matches_letter(c))
+        {
+            return self.open_cable_picker();
+        }
         if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("o")) && modifiers.is_empty() {
             self.right_tab = crate::matrix::Tab::Outline;
             self.session.outline.active = true;

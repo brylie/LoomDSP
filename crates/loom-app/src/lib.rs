@@ -18,6 +18,7 @@ mod boot;
 mod breadcrumb;
 mod browser;
 mod builtin;
+mod cable_picker;
 mod canvas_events;
 mod chrome;
 mod clip;
@@ -327,6 +328,11 @@ enum Message {
     },
     /// The toolbar asks for the module browser at the centre of the canvas.
     OpenBrowser,
+    /// Picks a port in the cable menu, or disconnects its chosen input.
+    CablePort {
+        start: Option<loom_canvas::PortRef>,
+        port: Option<loom_canvas::PortRef>,
+    },
     /// Open help for the browser highlight or selected tile.
     ShowHelp,
     /// Open the keyboard shortcuts page in the help overlay.
@@ -679,6 +685,7 @@ impl Message {
             Self::Key(_)
             | Self::MidiGhosts
             | Self::OpenBrowser
+            | Self::CablePort { .. }
             | Self::ShowHelp
             | Self::ShowShortcuts
             | Self::ShowModuleHelp(_)
@@ -2085,6 +2092,7 @@ impl App {
                 }
             }
             Message::CloseTileMenu => self.overlays.close_tile_menu(),
+            Message::CablePort { start, port } => self.pick_cable_port(start, port),
             Message::Key(event) if self.input_owner() != input_owner::InputOwner::Canvas => self.overlay_key(&event),
             Message::Preferences(message) => self.preferences(message),
             Message::OutlineRow(id) => self.outline_select(&id),
@@ -2384,7 +2392,7 @@ const DIM: Color = style::QUIET;
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
 /// and the key handling in `loom-canvas/src/widget/input.rs` and `panel_input.rs`.
-pub(crate) const HELP: &str = "A or a double-click on empty canvas opens the module browser at the pointer; type, then Enter adds.\n\
+pub(crate) const HELP: &str = "Double-click empty canvas to open the module browser there.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\
@@ -2392,7 +2400,6 @@ Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 Tab and Shift-Tab select modules in reading order. Enter focuses the selected module's first control.\n\
 With a control focused, Tab moves between controls and arrow keys change values. Enter or a digit starts typing a value on a knob, fader, or number. Space or Enter acts on a toggle, radio, or button.\n\
 Escape clears control focus, then the selection. With a module selected and no control focused, arrow keys move it.\n\
-Space toggles Run when no control uses it, including a focused knob.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\
 F or Home frames the patch.\n\
 M cycles the patch map. O opens the Outline. The bracket keys follow a cable, and Cmd/Ctrl+[ goes back.\n\

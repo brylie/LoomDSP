@@ -25,8 +25,10 @@ pub struct Palette {
     pub hover: Color,
     /// Selection box fill.
     pub marquee: Color,
-    /// Knob ring and toggle track when off.
+    /// Fill behind control text and in the inactive toggle track.
     pub control_track: Color,
+    /// Knob and fader tracks and control outlines, with no text on them.
+    pub control_edge: Color,
     /// Knob value arc, toggle when on, chosen radio button.
     pub control_value: Color,
     /// Knob body.
@@ -53,7 +55,7 @@ impl Default for Palette {
         Self {
             background: Color::rgb8(0x1C, 0x1E, 0x23),
             tile: Color::rgb8(0x2B, 0x2E, 0x35),
-            tile_border: Color::rgb8(0x3C, 0x40, 0x4A),
+            tile_border: Color::rgb8(0x77, 0x7D, 0x88),
             text: Color::rgb8(0xEC, 0xEE, 0xF2),
             text_dim: Color::rgb8(0x9A, 0xA0, 0xAD),
             title_bar: Color::rgba8(0xEC, 0xEE, 0xF2, 0.4),
@@ -62,9 +64,10 @@ impl Default for Palette {
             hover: Color::WHITE,
             marquee: Color::rgba8(0xF5, 0xA6, 0x23, 0.12),
             control_track: Color::rgb8(0x45, 0x49, 0x54),
+            control_edge: Color::rgb8(0x88, 0x8E, 0x9A),
             control_value: Color::rgb8(0xF5, 0xA6, 0x23),
             control_body: Color::rgb8(0x3A, 0x3E, 0x47),
-            light_off: Color::rgb8(0x35, 0x38, 0x40),
+            light_off: Color::rgb8(0x77, 0x7D, 0x88),
             light_on: Color::rgb8(0x7C, 0xE0, 0x8A),
             focus: Color::rgb8(0x6C, 0xB4, 0xF0),
             warning: Color::rgb8(0xE0, 0x4F, 0x4F),

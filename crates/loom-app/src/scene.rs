@@ -2,8 +2,8 @@
 
 use crate::clip::ClipHolds;
 use loom_canvas::{
-    CableView, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue, PortShape, PortView,
-    Reading, Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
+    CableView, CableWidth, HoverText, ModulationView, ModuleView, PanelValues, PanelView, PartText, PartValue,
+    PortShape, PortView, Reading, Scene, TransportSignal, WidgetValue, WidgetView, WidgetViewKind,
 };
 use loom_core::ModuleNames;
 use loom_core::{
@@ -62,14 +62,20 @@ fn port_view(spec: &PortSpec, width: loom_core::Width) -> PortView {
 
 /// Adds the same width hint to direct and sub-patch output ports.
 fn append_width(hover: &mut HoverText, width: loom_core::Width) {
-    if width.voices > 1 {
-        hover.description.push_str(&format!(
-            " {} voices{}.",
-            width.voices,
-            if width.sides == 2 { ", stereo" } else { "" }
-        ));
-    } else if width.sides == 2 {
-        hover.description.push_str(" Stereo.");
+    if let Some(label) = width_label(width) {
+        hover.description.push(' ');
+        hover.description.push_str(&label);
+        hover.description.push('.');
+    }
+}
+
+/// A non-mono width as the port hover and inspector name it.
+pub(crate) fn width_label(width: loom_core::Width) -> Option<String> {
+    match (width.voices > 1, width.sides == 2) {
+        (true, true) => Some(format!("{} voices, stereo", width.voices)),
+        (true, false) => Some(format!("{} voices", width.voices)),
+        (false, true) => Some("Stereo".to_string()),
+        (false, false) => None,
     }
 }
 
@@ -1191,18 +1197,18 @@ pub fn build_with_clock(
         badge: 0,
         follows_transport: None,
     };
+    let flat_source = |end: &End| {
+        let (module, name) = behind.source(level, end)?;
+        Some(OutputRef {
+            module,
+            port: graph.node(module)?.output_index(&name)?,
+        })
+    };
+    let width_from =
+        |end: &End| flat_source(end).map_or(loom_core::Width::MONO, |source| controller.last_report().width(source));
     let output_port = |name: &str, end: &End, description: &str| {
         let mut port = tile_port(name, signal_from(end), description);
-        let width = behind
-            .source(level, end)
-            .and_then(|(id, name)| {
-                Some(controller.last_report().width(OutputRef {
-                    module: id,
-                    port: graph.node(id)?.output_index(&name)?,
-                }))
-            })
-            .unwrap_or_default();
-        append_width(&mut port.hover, width);
+        append_width(&mut port.hover, width_from(end));
         port
     };
     let place = |id: ModuleId| positions.get(&id.0).map_or(Point::ORIGIN, |&(x, y)| Point::new(x, y));
@@ -1455,34 +1461,35 @@ pub fn build_with_clock(
                 to: (to_id, to_index),
                 colour_from: signal_colour(from_signal),
                 colour_to: signal_colour(to_signal),
+                width: {
+                    let width = width_from(&cable.from);
+                    match (width.voices > 1, width.sides == 2) {
+                        (false, false) => CableWidth::Mono,
+                        (false, true) => CableWidth::Stereo,
+                        (true, false) => CableWidth::Bundle,
+                        (true, true) => CableWidth::StereoBundle,
+                    }
+                },
                 delayed: delayed_at.is_some_and(|input| delayed.contains(&input)),
             })
         })
         .collect();
 
-    // One line per assignment from a module of the level: to the control
-    // bound to its parameter on a module of the level, or to the surface
-    // control of the sub-patch tile that exposes an inner parameter
-    // (sub-patches.md, Editor model).
-    let modulations = graph
-        .assignments()
-        .filter(|(_, a)| on_level(a.source.module))
-        .filter_map(|(id, a)| {
-            let d = graph.node(a.target)?.descriptor;
-            let name = d.params.get(a.param)?.name;
-            let (to, widget) = if on_level(a.target) {
-                (
-                    a.target.0,
-                    d.panel.widgets.iter().position(|w| w.is_control() && w.binds(name)),
-                )
-            } else {
-                let (tile, index) = hierarchy.surface_for(level, &(a.target, name.to_string()))?;
-                (tile.0, Some(index))
-            };
+    // Lines use the level's own endpoints, as the Matrix and file do.
+    let modulations = hierarchy
+        .level_assignments(graph, level)
+        .filter_map(|(id, a, shown)| {
+            graph.node(a.target)?.descriptor.params.get(a.param)?;
+            let (module, port, _) = port_of(&shown.source, false)?;
+            let to = hierarchy.id_at(level, shown.target.0)?;
+            let name = hierarchy
+                .slot(to)
+                .map_or(shown.target.1.clone(), |slot| slot.own_param(&shown.target.1));
+            let widget = crate::surface::find_control(graph, hierarchy, to.0, &name);
             Some(ModulationView {
                 id: id.0,
-                from: (a.source.module.0, a.source.port),
-                to,
+                from: (module, port),
+                to: to.0,
                 widget,
                 enabled: a.enabled,
             })

@@ -79,6 +79,7 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
         midi = match part {
             Part::Midi { name, on, id } => midi.push(named(
                 checkbox(on)
+                    .style(style::check_box)
                     .label(name.clone())
                     .on_toggle(move |on| msg(Message::Midi(name.clone(), on)))
                     .size(style::SWITCH)
@@ -91,6 +92,7 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
                 let id = part_id("midi-output").with(name.as_str());
                 midi.push(named(
                     checkbox(on)
+                        .style(style::check_box)
                         .label(format!("Send clock to {name}"))
                         .on_toggle(move |on| msg(Message::SendClock(name.clone(), on)))
                         .size(style::SWITCH)
@@ -168,6 +170,7 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
                 row![
                     named(
                         checkbox(model.activity)
+                            .style(style::check_box)
                             .label("Show signal activity on ports")
                             .on_toggle(move |on| msg(Message::Activity(on))),
                         part_id("activity"),

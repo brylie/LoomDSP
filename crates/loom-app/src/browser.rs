@@ -635,7 +635,7 @@ impl Browser {
             // (ADR-0029). A sub-patch shows the colour of a sub-patch tile.
             let line = row![
                 text(r.name.as_str()).size(style::CONTROL),
-                swatch(crate::scene::family_colour(r.family).to_iced()),
+                swatch(family_swatch(r.family).to_iced()),
                 text(r.mark).size(style::SMALL).color(style::QUIET),
             ]
             .spacing(8)
@@ -1046,6 +1046,12 @@ pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
         },
         ..container::Style::default()
     }
+}
+
+/// A family tint that stays distinct on the browser's normal and highlighted rows.
+pub(crate) fn family_swatch(family: Family) -> loom_ui_core::Color {
+    let palette = loom_canvas::Palette::default();
+    palette.swatches()[palette.families.len() + family.index()]
 }
 
 pub(crate) mod access;

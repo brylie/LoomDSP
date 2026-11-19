@@ -148,7 +148,7 @@ impl App {
                 .blocked(self.rig.recent.files().is_empty().then(|| self.recent_hover()))
         });
         buttons.push(Button {
-            hover: Some("Or press A over the canvas, or double-click empty canvas".to_string()),
+            hover: Some("Press A or double-click empty canvas".to_string()),
             ..plain("add_module", "toolbar/add_module", "Add module", Group::Add)
         });
         // Disabled controls say why (visual-system.md, Status messages).

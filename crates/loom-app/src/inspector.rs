@@ -1102,15 +1102,30 @@ impl App {
             ports: d
                 .inputs
                 .iter()
-                .map(|p| ("Input", p))
-                .chain(d.outputs.iter().map(|p| ("Output", p)))
-                .map(|(direction, p)| {
+                .enumerate()
+                .map(|(port, p)| (false, port, p))
+                .chain(d.outputs.iter().enumerate().map(|(port, p)| (true, port, p)))
+                .map(|(output, port, p)| {
                     let (min, max) = p.nominal_range();
+                    let module = ModuleId(id);
+                    let source = if output {
+                        Some(loom_core::OutputRef { module, port })
+                    } else {
+                        graph.source_of(loom_core::InputRef { module, port })
+                    };
+                    let width = source.and_then(|source| {
+                        crate::scene::width_label(self.session.controller.last_report().width(source))
+                    });
+                    let mut details = format!("{}, {min} to {max}", p.signal.name());
+                    if let Some(width) = width {
+                        details.push_str(" · ");
+                        details.push_str(&width);
+                    }
                     PortRow {
-                        direction,
+                        direction: if output { "Output" } else { "Input" },
                         label: p.label,
                         description: format!("{} Usually {min} to {max}.", p.description),
-                        details: format!("{}, {min} to {max}", p.signal.name()),
+                        details,
                     }
                 })
                 .collect(),
@@ -1768,6 +1783,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
         rows = rows.push(ids::named(
             &ids::part(ui, "midi/invert"),
             checkbox(options.invert)
+                .style(style::check_box)
                 .label("Invert")
                 .size(style::SWITCH)
                 .text_size(style::SMALL)
@@ -2048,6 +2064,7 @@ fn modulation_view<'a>(
                 ids::named(
                     &ids::part(&ui, "on"),
                     checkbox(a.enabled)
+                        .style(style::check_box)
                         .on_toggle(
                             move |enabled| AppMessage::Modulation(crate::modulation::Message::Enabled { id, enabled })
                         )
@@ -2302,6 +2319,7 @@ fn mode_rows<'a>(
         rows = rows.push(ids::named(
             &ids::part(&panel, "stereo_spread"),
             checkbox(s.stereo_spread)
+                .style(style::check_box)
                 .label("Stereo spread")
                 .on_toggle(move |on| AppMessage::Mode(ModeMessage::SetStereoSpread { tile: id, on }))
                 .text_size(style::BODY),

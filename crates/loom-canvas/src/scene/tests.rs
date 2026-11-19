@@ -341,6 +341,7 @@ fn hits_cables_where_they_are_drawn() {
         to: (2, 0),
         colour_from: Color::WHITE,
         colour_to: Color::WHITE,
+        width: crate::CableWidth::Mono,
         delayed: false,
     };
     let scene = Scene::new(vec![module(1, 0.0, 0.0), module(2, 400.0, 200.0)], vec![cable]);

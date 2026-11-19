@@ -3,6 +3,87 @@ use crate::ui_test::Ui;
 use iced::keyboard::key::Named;
 use loom_ui_core::Point;
 
+/// Collapsing a modulation source keeps the row and line on the outside level.
+#[test]
+fn matrix_keeps_a_modulation_from_a_subpatch_output() {
+    let mut ui = Ui::open("modulation.ron");
+    let graph = ui.app().session.controller.graph();
+    let (lfo, _) = graph
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == "loom.mod.lfo")
+        .unwrap();
+    ui.send(Message::MakeSubPatch(lfo.0));
+    let tile = ModuleId(*ui.app().session.selection.first().unwrap());
+    assert_ne!(tile, lfo);
+    let title = ui.app().session.hierarchy.tile_name(tile).unwrap();
+    ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
+    ui.send(Message::Matrix(Event::SelectedOnly(true)));
+    let rows = ui.app().ui_snapshot().matrix.rows;
+    assert_eq!(rows.len(), 1);
+    let output = &ui.app().session.scene.module(tile.0).unwrap().outputs[0];
+    assert_eq!(rows[0].source, format!("{title}: {}", output.label));
+    ui.send(Message::Matrix(Event::Select(AssignmentId(rows[0].id), Column::Target)));
+    assert_eq!(ui.app().matrix_line().unwrap().from, (tile.0, 0));
+}
+
+/// The outside Matrix names, filters and selects the same surface the cable reaches.
+#[test]
+fn matrix_surface_target_and_range_survive_rename_and_reopen() {
+    let mut ui = Ui::with_app(crate::tests::app_with_text(
+        r#"Patch(
+        version: 1,
+        subpatches: {"filter": SubPatch(
+            metadata: Metadata(name: "Sweep"),
+            modules: [PatchModule(id: 1, kind: "loom.filter.svf@1", params: {"cutoff": 1000.0})],
+            exposed: [Exposed(name: "Brightness", module: 1, param: "cutoff")],
+        ), "filter-copy": SubPatch(
+            metadata: Metadata(name: "Sweep"),
+            modules: [PatchModule(id: 1, kind: "loom.filter.svf@1", params: {"cutoff": 1000.0})],
+            exposed: [Exposed(name: "Brightness", module: 1, param: "cutoff")],
+        )},
+        modules: [
+            PatchModule(id: 1, kind: "loom.mod.lfo@1"),
+            PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("filter")),
+            PatchModule(id: 3, kind: "loom.struct.subpatch@1", subpatch: Some("filter-copy")),
+        ],
+        modulation: [
+            PatchModulation(source: (1, "out"), target: (2, "Brightness"), depth: 0.25),
+            PatchModulation(source: (1, "out"), target: (3, "Brightness"), depth: 1.0),
+        ],
+    )"#,
+    ));
+    ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
+    let rows = ui.app().ui_snapshot().matrix.rows;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].target, "Sweep 2: Brightness");
+    assert_eq!(rows[1].target, "Sweep 3: Brightness");
+    assert_eq!(rows[0].target_detail.as_deref(), Some("SVF: Cutoff"));
+    assert_eq!(rows[0].range.as_deref(), Some("177.8 Hz to 5623 Hz"));
+    assert_eq!(rows[1].range.as_deref(), Some("20.00 Hz to 20000 Hz"));
+    assert_eq!(
+        ui.a11y_tree()
+            .node_by_id(&access::cell(AssignmentId(rows[0].id), Column::Depth))
+            .description(),
+        rows[0].range.as_deref()
+    );
+    ui.send(Message::Matrix(Event::Select(AssignmentId(rows[0].id), Column::Target)));
+    assert_eq!(ui.app().session.selection, [2].into());
+    assert_eq!(ui.app().matrix_line().unwrap().to, 2);
+    ui.send(Message::Matrix(Event::Filter("sweep 2".into())));
+    ui.send(Message::Matrix(Event::SelectedOnly(true)));
+    assert_eq!(ui.app().ui_snapshot().matrix.rows.len(), 1);
+    ui.app_mut().rename_subpatch(2, "Air");
+    ui.send(Message::Matrix(Event::Filter("air".into())));
+    assert_eq!(ui.app().ui_snapshot().matrix.rows[0].target, "Air: Brightness");
+
+    let dir = crate::recovery::tests::TempDir::new("matrix-surface");
+    let path = dir.0.join("surface.ron");
+    crate::files::fake::answer_save(Some(path.clone()));
+    ui.send(Message::File(crate::FileAction::Save));
+    let reopened = crate::tests::app_with_text(&std::fs::read_to_string(path).unwrap());
+    assert_eq!(reopened.ui_snapshot().matrix.rows[0].target, "Air: Brightness");
+}
+
 /// The matrix snapshot carries the picks and the cell editor used by the view.
 #[test]
 fn the_snapshot_describes_open_matrix_editors() {
@@ -154,6 +235,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
                 .model(
                     ui.app().session.controller.graph(),
                     &ui.app().session.hierarchy,
+                    &ui.app().session.level,
                     &ui.app().session.selection,
                     ui.app().right_tab
                 )
@@ -194,6 +276,7 @@ fn rows_sort_and_filter_without_editing_assignments() {
         ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
             &ui.app().session.hierarchy,
+            &ui.app().session.level,
             &ui.app().session.selection,
             ui.app().right_tab,
         )
@@ -244,10 +327,14 @@ fn retarget_keeps_id_order_and_one_undo_step() {
         .graph()
         .assignment(id)
         .expect("first assignment");
-    let target = targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-        .into_iter()
-        .find(|t| t.module == ModuleId(4) && t.param != original.param)
-        .expect("another filter parameter");
+    let target = targets(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    )
+    .into_iter()
+    .find(|t| t.module == ModuleId(4) && t.param != original.param)
+    .expect("another filter parameter");
     ui.app_mut().matrix_event(Event::Target(id, target));
     let changed = *ui
         .app()
@@ -274,14 +361,22 @@ fn retarget_keeps_id_order_and_one_undo_step() {
     assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&original));
     ui.app_mut().redo();
     assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&changed));
-    let duplicate = sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-        .into_iter()
-        .find(|s| s.output.module == ModuleId(6))
-        .expect("envelope output");
-    let cutoff = targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-        .into_iter()
-        .find(|t| t.module == ModuleId(4) && t.param == original.param)
-        .expect("cutoff");
+    let duplicate = sources(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    )
+    .into_iter()
+    .find(|s| s.output.module == ModuleId(6))
+    .expect("envelope output");
+    let cutoff = targets(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    )
+    .into_iter()
+    .find(|t| t.module == ModuleId(4) && t.param == original.param)
+    .expect("cutoff");
     ui.app_mut().matrix_event(Event::Target(id, cutoff));
     ui.app_mut().matrix_event(Event::Source(id, duplicate));
     assert!(ui.app().alerts.status().contains("already modulates"));
@@ -724,14 +819,22 @@ fn add_duplicate_and_drag_follow_inspector_edits() {
         .graph()
         .assignment(AssignmentId(1))
         .expect("assignment");
-    let source = sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-        .into_iter()
-        .find(|s| s.output == existing.source)
-        .expect("source");
-    let target = targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-        .into_iter()
-        .find(|t| (t.module, t.param) == (existing.target, existing.param))
-        .expect("target");
+    let source = sources(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    )
+    .into_iter()
+    .find(|s| s.output == existing.source)
+    .expect("source");
+    let target = targets(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    )
+    .into_iter()
+    .find(|t| (t.module, t.param) == (existing.target, existing.param))
+    .expect("target");
     ui.app_mut().matrix_event(Event::AddOpen);
     ui.app_mut().matrix_event(Event::AddSource(source));
     ui.app_mut().matrix_event(Event::AddTarget(target));
@@ -796,6 +899,7 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
             .model(
                 ui.app().session.controller.graph(),
                 &ui.app().session.hierarchy,
+                &ui.app().session.level,
                 &ui.app().session.selection,
                 ui.app().right_tab
             )
@@ -839,6 +943,7 @@ fn cards_fit_the_column() {
     let column = ui.app().session.matrix.model(
         ui.app().session.controller.graph(),
         &ui.app().session.hierarchy,
+        &ui.app().session.level,
         &ui.app().session.selection,
         ui.app().right_tab,
     );
@@ -1135,6 +1240,7 @@ fn a_card_moved_out_of_view_comes_back_just_inside() {
         let model = ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
             &ui.app().session.hierarchy,
+            &ui.app().session.level,
             &ui.app().session.selection,
             ui.app().right_tab,
         );

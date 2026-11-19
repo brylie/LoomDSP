@@ -736,9 +736,6 @@ impl CanvasModel<'_> {
                     let one_number = self
                         .widget_kind(module, widget)
                         .is_some_and(WidgetViewKind::is_one_number);
-                    let two_numbers = self
-                        .widget_kind(module, widget)
-                        .is_some_and(WidgetViewKind::is_two_numbers);
                     match self.widget_kind(module, widget) {
                         Some(WidgetViewKind::Toggle) => {
                             self.set_control(out, module, widget, if position > 0.5 { 0.0 } else { 1.0 })
@@ -754,13 +751,11 @@ impl CanvasModel<'_> {
                             self.set_control(out, module, widget, next as f32);
                         }
                         Some(WidgetViewKind::Select { .. }) if !repeat => self.open_select(state, module, widget),
-                        _ if (one_number || two_numbers) && matches!(named, Key::Space) && !repeat => {
-                            self.emit(out, CanvasEvent::ToggleRun);
-                        }
+                        // Keep an accidental Space on a focused control away from Run.
                         _ => {}
                     }
                     !(one_number && matches!(named, Key::Enter))
-                } else if matches!(named, Key::Space) {
+                } else if named == crate::shortcuts::RUN.key {
                     // Space with nothing focused is the Run shortcut. A
                     // repeat is swallowed so holding the key does not toggle
                     // again. Enter is not that shortcut.

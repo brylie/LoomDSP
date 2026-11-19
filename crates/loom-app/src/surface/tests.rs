@@ -420,9 +420,13 @@ fn an_exposed_voice_count_cannot_take_modulation() {
             .is_err()
     );
     assert!(
-        !crate::matrix::targets(app.session.controller.graph(), &app.session.hierarchy)
-            .iter()
-            .any(|item| item.module == target.module && item.param == target.index)
+        !crate::matrix::targets(
+            app.session.controller.graph(),
+            &app.session.hierarchy,
+            &app.session.level
+        )
+        .iter()
+        .any(|item| item.module == target.module && item.param == target.index)
     );
     assert!(!app.session.scene.is_live_control(1, 0));
 }

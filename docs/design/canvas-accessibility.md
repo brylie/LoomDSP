@@ -288,9 +288,24 @@ M on the canvas, with no text field focused, moves through the three settings, a
 - [x] `Ui` harness: Enter on a sub-patch row focuses its tile, Cmd/Ctrl+Enter opens it, and Escape inside goes up to the instance's row.
 - [ ] A VoiceOver check, recorded in the pull request: the summary, a scan of `subtractive.ron`, a jump and Back, Enter to a tile, and what VoiceOver says about a row's level and position (rule 15). Narrator and Orca checks are recorded, or listed as not checked.
 
+## Patching by keyboard (Agreed, #524)
+
+With one tile selected and the canvas taking keys, **C** opens a list of
+its inputs and outputs. Up and Down move the highlight, Enter picks a port,
+and Escape closes the list. The second list offers the opposite ports on the
+shown level, using the same module and port names as the cable jump list.
+Picking a row connects the two ports, replacing an existing input cable as a
+pointer connection would. A connected input also offers **Disconnect cable**.
+Escape cancels without an edit. Both lists expose their rows and highlight
+to a screen reader. Connect, replace, and disconnect each use one undo step.
+
+- [x] The headless editor adds two modules, connects them, edits a knob,
+  and saves using keys. The picker reports the highlighted port as focus.
+- [x] Escape leaves the cable in place. Disconnect removes it and Undo brings it back.
+
 ## Out of scope
 
-- **Editing from the outline.** Connecting, disconnecting, and adding modules by key belong to [#524](https://github.com/brylie/LoomDSP/issues/524). Its cable list should share the jump list's rows (rule 23).
+- **Editing from the outline.** The cable picker works from the canvas selection. It uses the same module and port labels as the jump list (rule 23).
 - **Listening to a point in the path,** such as soloing a module's output to hear what the signal sounds like there. Useful for everyone, and it needs its own spec.
 - **Sonified overviews,** such as a tone per module. The research snapshot notes this work; it is not proposed here.
 - **Comments and frames** in the outline. When annotations arrive ([#512](https://github.com/brylie/LoomDSP/issues/512)), a frame may become a section; that is decided in their spec.

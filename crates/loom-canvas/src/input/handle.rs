@@ -323,6 +323,23 @@ impl CanvasModel<'_> {
                 );
                 out.take();
             }
+            Event::Key(KeyEvent::Pressed {
+                key,
+                modifiers,
+                repeat: false,
+                ..
+            }) if *key == crate::shortcuts::ADD.key && modifiers.none() => {
+                let (placement, anchor) = if let Some(at) = screen.filter(|_| over) {
+                    (BrowserPlacement::Pointer(state.camera.to_world(at)), at)
+                } else {
+                    (
+                        BrowserPlacement::Toolbar(state.camera.visible(bounds.size())),
+                        Point::new(bounds.width / 2.0, bounds.height / 2.0),
+                    )
+                };
+                self.open_browser(placement, anchor, bounds, out);
+                out.take();
+            }
             // The menu key, or Shift+F10, opens the tile menu, as a
             // right-click on the tile does (ui-layer.md, section 6, rule 8).
             // It acts on the focused control's tile or the selected tile,
@@ -377,17 +394,6 @@ impl CanvasModel<'_> {
                     Key::Character('a') if modifiers.shortcut() => {
                         let all = self.scene.modules().iter().map(|m| m.id).collect();
                         self.emit(out, CanvasEvent::Select(all));
-                        out.take();
-                    }
-                    Key::Character('a') if modifiers.none() => {
-                        if let Some(screen) = screen {
-                            self.open_browser(
-                                BrowserPlacement::Pointer(state.camera.to_world(screen)),
-                                screen,
-                                bounds,
-                                out,
-                            );
-                        }
                         out.take();
                     }
                     _ => {}

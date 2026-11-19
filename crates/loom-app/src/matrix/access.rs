@@ -94,12 +94,18 @@ impl App {
     pub(crate) fn matrix_items(&self) -> Vec<Item> {
         let graph = self.session.controller.graph();
         let state = &self.session.matrix;
-        let model = state.model(graph, &self.session.hierarchy, &self.session.selection, self.right_tab);
+        let model = state.model(
+            graph,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.selection,
+            self.right_tab,
+        );
         // Each pick list once per build, not once per row and direction:
         // each pick carries a name made for it.
         let picks = Picks {
-            sources: sources(graph, &self.session.hierarchy),
-            targets: targets(graph, &self.session.hierarchy),
+            sources: sources(graph, &self.session.hierarchy, &self.session.level),
+            targets: targets(graph, &self.session.hierarchy, &self.session.level),
         };
         let mut parts = vec![
             Item {
@@ -201,6 +207,7 @@ impl App {
         cells.push(Item {
             label: Some("Target".to_string()),
             value: Some(r.target.clone()),
+            description: r.target_detail.clone(),
             step: (
                 self.matrix_target_step(id, true, &picks.targets),
                 self.matrix_target_step(id, false, &picks.targets),
@@ -231,6 +238,7 @@ impl App {
         let down = ((percent - 1.0) / 100.0).max(-1.0);
         cells.push(Item {
             label: Some("Depth".to_string()),
+            description: r.range.clone(),
             number: Some(Number {
                 value: f64::from(percent),
                 min: -100.0,

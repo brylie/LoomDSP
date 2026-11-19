@@ -149,9 +149,7 @@ impl CanvasModel<'_> {
                     index: cable.to.1,
                 };
                 if let (Some(a), Some(b)) = (self.scene.port_position(from), self.scene.port_position(to)) {
-                    overlay
-                        .cables
-                        .push(Cable::new(a, b, cable.colour_from, cable.colour_to, cable.delayed).focused());
+                    overlay.cables.push(Cable::installed(a, b, cable).focused());
                 }
             }
         }
