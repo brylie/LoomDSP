@@ -31,6 +31,20 @@ pub(crate) enum Message {
 }
 
 impl App {
+    /// Sets depth for a drag from any view and updates the outline's spoken value.
+    pub(crate) fn change_assignment_depth(
+        &mut self,
+        id: AssignmentId,
+        depth: f32,
+    ) -> Result<f32, loom_core::LoomError> {
+        let depth = self.session.controller.set_assignment_depth(id, depth)?;
+        self.fan_out_assignment(id, |controller, copy| {
+            controller.set_assignment_depth(copy, depth).map(|_| ())
+        });
+        self.session.patch_map.update_depth(id.0, depth);
+        Ok(depth)
+    }
+
     /// Handles a change to a modulation assignment.
     pub(crate) fn modulation_message(&mut self, message: Message) {
         match message {
@@ -46,11 +60,9 @@ impl App {
                 // Like a parameter slider: the first change opens the
                 // gesture, and letting go closes it, so one drag is one step.
                 self.start_slider_edit();
-                if let Err(e) = self.session.controller.set_assignment_depth(id, depth) {
-                    self.alerts.warn(e.to_string());
+                if let Err(error) = self.change_assignment_depth(id, depth) {
+                    self.alerts.warn(error.to_string());
                 }
-                self.fan_out_assignment(id, |c, copy| c.set_assignment_depth(copy, depth).map(|_| ()));
-                self.refresh_patch_map();
                 self.refresh_values();
             }
             Message::Polarity { id, choice } => {
@@ -81,11 +93,11 @@ impl App {
                 self.edit(|app| match app.session.controller.remove_assignment(id) {
                     Ok(removed) => {
                         app.commit();
-                        let graph = app.session.controller.graph();
+                        let names = Names::new(app.session.controller.graph(), &app.session.hierarchy);
                         app.alerts.say(format!(
                             "Removed modulation from {} to {}",
-                            source_name(graph, &app.session.hierarchy, removed.source),
-                            target_name(graph, &app.session.hierarchy, removed.target, removed.param)
+                            names.source(removed.source),
+                            names.target(removed.target, removed.param)
                         ));
                     }
                     Err(e) => app.alerts.warn(e.to_string()),
@@ -119,53 +131,73 @@ pub fn exists(graph: &Graph, source: OutputRef, target: ModuleId, param: usize) 
         .any(|(_, a)| a.source == source && a.target == target && a.param == param)
 }
 
-/// The module name used in the editor.
-pub fn module_name(graph: &Graph, hierarchy: &loom_patch::Hierarchy, module: ModuleId) -> String {
-    let Some(node) = graph.node(module) else {
-        return module.0.to_string();
-    };
-    let level = hierarchy.level_of(module);
-    let duplicate = graph.nodes().any(|(id, other)| {
-        id != module
-            && module_kind(node) == module_kind(other)
-            && hierarchy.level_of(id) == level
-            && !hierarchy.is_hidden(id)
-    });
-    display_name(node, hierarchy.path_of(module).last(), duplicate)
+/// Duplicate counts shared by the scene and every name in a panel model.
+pub(crate) struct Names<'a> {
+    graph: &'a Graph,
+    hierarchy: &'a loom_patch::Hierarchy,
+    hidden: loom_patch::hierarchy::Hidden<'a>,
+    counts: BTreeMap<(loom_patch::ModulePath, &'a str), usize>,
 }
 
-/// The type key used to distinguish duplicates, including unknown modules.
-pub(crate) fn module_kind(node: &loom_core::Node) -> &str {
-    node.unknown
-        .as_ref()
-        .map_or(node.descriptor.id, |unknown| unknown.kind.as_str())
-}
+impl<'a> Names<'a> {
+    /// Counts visible modules of each kind at each level.
+    pub(crate) fn new(graph: &'a Graph, hierarchy: &'a loom_patch::Hierarchy) -> Self {
+        let hidden = hierarchy.hidden();
+        let mut counts = BTreeMap::new();
+        for (id, node) in graph.nodes().filter(|(id, _)| !hidden.contains(*id)) {
+            *counts.entry((hierarchy.level_of(id), module_kind(node))).or_default() += 1;
+        }
+        Self {
+            graph,
+            hierarchy,
+            hidden,
+            counts,
+        }
+    }
 
-/// A type name disambiguated by the tile's local ID when necessary.
-pub(crate) fn display_name(node: &loom_core::Node, local: u32, duplicate: bool) -> String {
-    let name = node.unknown.as_ref().map_or(node.descriptor.name, |unknown| {
-        node.label.as_deref().unwrap_or(&unknown.kind)
-    });
-    if duplicate {
-        format!("{name} {local}")
-    } else {
-        name.to_string()
+    /// A module's visible name, including its local ID when disambiguation is needed.
+    pub(crate) fn module(&self, module: ModuleId) -> String {
+        let Some(node) = self.graph.node(module) else {
+            return module.0.to_string();
+        };
+        let name = node.unknown.as_ref().map_or(node.descriptor.name, |unknown| {
+            node.label.as_deref().unwrap_or(&unknown.kind)
+        });
+        let key = (self.hierarchy.level_of(module), module_kind(node));
+        let visible = self.counts.get(&key).copied().unwrap_or_default();
+        if visible > usize::from(!self.hidden.contains(module)) {
+            format!("{name} {}", self.hierarchy.path_of(module).last())
+        } else {
+            name.to_string()
+        }
+    }
+
+    /// Names an output on a module.
+    pub(crate) fn source(&self, source: OutputRef) -> String {
+        let label = self
+            .graph
+            .node(source.module)
+            .and_then(|n| n.output_label(source.port))
+            .unwrap_or("?");
+        format!("{}: {label}", self.module(source.module))
+    }
+
+    /// Names a parameter on a module.
+    pub(crate) fn target(&self, target: ModuleId, param: usize) -> String {
+        let label = self
+            .graph
+            .node(target)
+            .and_then(|n| n.parameter_label(param))
+            .unwrap_or("?");
+        format!("{}: {label}", self.module(target))
     }
 }
 
-/// Names an output on a module.
-pub fn source_name(graph: &Graph, hierarchy: &loom_patch::Hierarchy, source: OutputRef) -> String {
-    let label = graph
-        .node(source.module)
-        .and_then(|n| n.output_label(source.port))
-        .unwrap_or("?");
-    format!("{}: {label}", module_name(graph, hierarchy, source.module))
-}
-
-/// Names a parameter on a module.
-pub fn target_name(graph: &Graph, hierarchy: &loom_patch::Hierarchy, target: ModuleId, param: usize) -> String {
-    let label = graph.node(target).and_then(|n| n.parameter_label(param)).unwrap_or("?");
-    format!("{}: {label}", module_name(graph, hierarchy, target))
+/// The type key used to distinguish duplicates, including unknown modules.
+fn module_kind(node: &loom_core::Node) -> &str {
+    node.unknown
+        .as_ref()
+        .map_or(node.descriptor.id, |unknown| unknown.kind.as_str())
 }
 
 /// A depth as a signed percentage: "+25%", "-10%", "0%".

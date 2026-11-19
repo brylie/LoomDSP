@@ -4533,3 +4533,41 @@ fn a_focus_request_for_no_control_lets_go() {
     let again = host_event(&at(8, None), &mut state, &Event::Redraw);
     assert!(!again.iter().any(|event| matches!(event, CanvasEvent::FocusChanged(_))));
 }
+
+/// A map-only revision invalidates the artwork even when the canvas scene is unchanged.
+#[test]
+fn the_map_rebuilds_its_marks_when_only_its_graph_changes() {
+    use loom_ui::paint::testing::{Painted, Recorder};
+    let scene = Scene::new(vec![module(1, 0.0), module(2, 300.0)], Vec::new());
+    let selection = BTreeSet::new();
+    let state = CanvasInput::default();
+    let bounds = Rect::new(Point::ORIGIN, Size::new(800.0, 600.0));
+    let graph = MapGraph {
+        lines: vec![MapLine {
+            from: 1,
+            to: 2,
+            width: 1.0,
+            colour: Color::WHITE,
+            dash: 0.0,
+        }],
+        ..MapGraph::default()
+    };
+    let paint = |graph: &MapGraph, generation| {
+        let mut recorder = Recorder::default();
+        let mut model = CanvasModel::new(&scene, &selection);
+        model.map = Some(MapView {
+            graph,
+            generation,
+            auto: false,
+            text_size: 12.0,
+        });
+        model.paint_map(&state, bounds, &mut recorder);
+        recorder
+            .painted
+            .into_iter()
+            .filter(|piece| matches!(piece, Painted::Segment(_)))
+            .count()
+    };
+    assert_eq!(paint(&graph, 1), 1);
+    assert_eq!(paint(&MapGraph::default(), 2), 0);
+}

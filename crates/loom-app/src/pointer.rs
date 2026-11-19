@@ -15,9 +15,8 @@
 //! canvas says the pointer is on, once per drawn frame, for the snapshot's
 //! `pointer` field.
 
-use crate::App;
-use crate::Element;
 use crate::control::Found;
+use crate::{App, Element, Message};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::{Id, Operation, Tree, tree};
@@ -397,7 +396,7 @@ impl Operation for FindNow<'_> {
 }
 
 /// Wraps the window view and sends it the script's pointer events.
-pub struct Injector<'a, Message> {
+pub struct Injector<'a> {
     content: Element<'a, Message>,
     pointer: Pointer,
     app: &'a App,
@@ -405,7 +404,7 @@ pub struct Injector<'a, Message> {
     on_input: Box<dyn Fn(Event, iced::event::Status) -> Vec<Message> + 'a>,
 }
 
-impl<'a, Message> Injector<'a, Message> {
+impl<'a> Injector<'a> {
     /// Wraps `content`, the whole window view of `app`.
     pub(crate) fn new(
         content: impl Into<Element<'a, Message>>,
@@ -438,6 +437,31 @@ impl<'a, Message> Injector<'a, Message> {
         self.content.as_widget_mut().operate(tree, layout, renderer, &mut op);
         op.found.places = op.parts.places();
         (op.found, op.pointer, op.typed)
+    }
+
+    /// Dismisses the list on the same pointer path for users and scripts.
+    fn observe_jump_press(
+        &mut self,
+        child: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &crate::Renderer,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if self.app.session.outline.has_jump()
+            && matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)))
+            && let Some(point) = cursor.position()
+        {
+            let (found, _, _) = self.find(child, layout, renderer, None);
+            if found
+                .places
+                .of(&crate::outline::jump_id())
+                .is_none_or(|part| !part.rect.contains(point.to_core()))
+            {
+                shell.publish(Message::DismissJump);
+            }
+        }
     }
 
     /// A real pointer event takes over from the script, which first lets go
@@ -493,7 +517,7 @@ impl<'a, Message> Injector<'a, Message> {
     }
 }
 
-impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Message> {
+impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
     fn size(&self) -> Size<Length> {
         self.content.as_widget().size()
     }
@@ -581,6 +605,7 @@ impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Mes
                 }
             }
             self.take_over(child, layout, renderer, clipboard, shell, viewport);
+            self.observe_jump_press(child, event, layout, cursor, renderer, shell);
             self.content
                 .as_widget_mut()
                 .update(child, event, layout, cursor, renderer, clipboard, shell, viewport);
@@ -601,11 +626,13 @@ impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Mes
                 // A shell of its own, to tell whether a widget took it.
                 let mut messages = Vec::new();
                 let mut own = Shell::new(&mut messages);
+                let cursor = at.map_or(cursor, mouse::Cursor::Available);
+                self.observe_jump_press(&mut tree.children[0], &injected, layout, cursor, renderer, &mut own);
                 self.content.as_widget_mut().update(
                     &mut tree.children[0],
                     &injected,
                     layout,
-                    at.map_or(cursor, mouse::Cursor::Available),
+                    cursor,
                     renderer,
                     clipboard,
                     &mut own,
@@ -715,8 +742,8 @@ impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Mes
     }
 }
 
-impl<'a, Message: 'a> From<Injector<'a, Message>> for Element<'a, Message> {
-    fn from(injector: Injector<'a, Message>) -> Self {
+impl<'a> From<Injector<'a>> for Element<'a, Message> {
+    fn from(injector: Injector<'a>) -> Self {
         Element::new(injector)
     }
 }

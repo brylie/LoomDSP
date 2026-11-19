@@ -274,7 +274,7 @@ fn module(m: &ModuleRows) -> Item {
             )
         });
     }
-    Item::group(panel, m.name, parts)
+    Item::group(panel, m.name.clone(), parts)
 }
 
 /// The **Drives** list: each line selects the module it drives.

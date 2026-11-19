@@ -11,7 +11,7 @@
 //! before it. [`Painter::end_layer`] starts a new layer with the clip of
 //! the one before, so what follows is still over what came before.
 
-use super::{Align, Painter, Quad, TextMeasure, TextRun, TextStyle, Typesetter, Vertical};
+use super::{Align, Painter, Quad, Segment, TextMeasure, TextRun, TextStyle, Typesetter, Vertical};
 use loom_ui_core::{Color, Point, Rect, Size};
 use parley::{FontData, PositionedLayoutItem};
 use std::cell::RefCell;
@@ -78,11 +78,20 @@ pub(crate) struct Layer {
     pub batches: Vec<Batch>,
 }
 
+/// Shapes in the same box batch, in paint order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PaintBox {
+    /// An axis-aligned box.
+    Quad(Quad),
+    /// A rotated box.
+    Segment(Segment),
+}
+
 /// Everything painted in one frame, ready for the renderer.
 #[derive(Debug, Clone, Default)]
 pub struct PaintList {
     /// Every box, in the order painted.
-    pub(crate) boxes: Vec<Quad>,
+    pub(crate) boxes: Vec<PaintBox>,
     /// Every glyph, in the order painted.
     pub(crate) glyphs: Vec<PlacedGlyph>,
     /// The faces the glyphs name.
@@ -143,9 +152,9 @@ impl PaintList {
     }
 
     /// Adds one box to the current layer.
-    fn push_box(&mut self, quad: Quad) {
+    fn push_box(&mut self, shape: PaintBox) {
         let index = self.boxes.len() as u32;
-        self.boxes.push(quad);
+        self.boxes.push(shape);
         match self.layer().batches.last_mut() {
             Some(Batch::Boxes(range)) => range.end = index + 1,
             _ => self.layer().batches.push(Batch::Boxes(index..index + 1)),
@@ -236,7 +245,11 @@ impl Painter for ListPainter<'_> {
     }
 
     fn quad(&mut self, quad: Quad) {
-        self.list.push_box(quad);
+        self.list.push_box(PaintBox::Quad(quad));
+    }
+
+    fn segment(&mut self, segment: Segment) {
+        self.list.push_box(PaintBox::Segment(segment));
     }
 
     fn begin_layer(&mut self, clip: Rect) {

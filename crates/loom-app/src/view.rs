@@ -216,18 +216,19 @@ impl App {
             let items = model.buttons.iter().filter(|b| b.group == which).map(|b| {
                 let press = b.press();
                 let face = button(text(b.label).size(style::CONTROL)).on_press_maybe(press);
-                let face = match (b.name, b.on) {
-                    ("panic", _) => face.style(style::danger),
-                    // Primary only while learning: a mode that is on.
-                    (_, Some(true)) => face.style(style::primary),
-                    (_, Some(false)) => face.style(style::secondary),
-                    _ => face,
+                let role = match (b.name, b.on) {
+                    ("panic", _) => style::danger,
+                    (_, Some(true)) => style::primary,
+                    _ => style::secondary,
                 };
-                let face = if keyboard == Some(b.name) {
-                    face.style(style::tab(true))
-                } else {
-                    face
-                };
+                let focused = keyboard == Some(b.name);
+                let face = face.style(move |theme, status| {
+                    if focused {
+                        style::focused_button(theme, status, role)
+                    } else {
+                        role(theme, status)
+                    }
+                });
                 let named: Element<'static, Message> = container(face).id(b.id).into();
                 match &b.hover {
                     Some(hint) => tip(named, hint.clone()),

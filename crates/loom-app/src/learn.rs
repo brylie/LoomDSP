@@ -354,7 +354,7 @@ pub fn view(controller: &Controller, hierarchy: &Hierarchy, level: &ModulePath, 
 pub fn param_name(controller: &Controller, hierarchy: &loom_patch::Hierarchy, (module, param): Param) -> String {
     let graph = controller.graph();
     let id = ModuleId(module);
-    let name = crate::modulation::module_name(graph, hierarchy, id);
+    let name = crate::modulation::Names::new(graph, hierarchy).module(id);
     let label = graph.node(id).and_then(|node| {
         if let Some(unknown) = &node.unknown {
             unknown.parameters.get(param).map(String::as_str)

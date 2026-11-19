@@ -635,6 +635,8 @@ pub struct CanvasFocusPolicy {
     /// The focused matrix has the keys: unmodified keys are left to it, and
     /// the pointer still works.
     pub matrix_keyboard: bool,
+    /// A cable jump list takes only its navigation keys.
+    pub jump_keyboard: bool,
     /// The matrix has the keys and no cell editor is open, so Escape can
     /// still hide a pinned badge's lines.
     pub matrix_escape: bool,
@@ -653,6 +655,7 @@ impl Default for CanvasFocusPolicy {
         Self {
             interactive: true,
             matrix_keyboard: false,
+            jump_keyboard: false,
             matrix_escape: false,
             text_field_keys: false,
             text_field_keeps_tab: false,

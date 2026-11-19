@@ -230,9 +230,9 @@ impl App {
             interactive: self.input_owner() == InputOwner::Canvas,
             matrix_keyboard: matrix
                 || self.session.outline.active
-                || self.session.outline.has_jump()
                 || self.session.outline.toolbar
-                || self.session.outline.inspector_keys,
+                || self.session.outline.inspector_action.is_some(),
+            jump_keyboard: self.session.outline.has_jump(),
             matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
             text_field_keys: self.focus.is_some(),
             text_field_keeps_tab: self.tab_moves_between_fields(self.focus.as_ref()),

@@ -4,7 +4,7 @@ use loom_canvas::{PortRef, Scene};
 use loom_core::{AssignmentId, Controller, Graph, ModuleId, ModuleNames, ModuleRole, OutputRef, SignalType};
 use loom_patch::{Direction, Hierarchy, ModulePath, Tile};
 use loom_ui_core::Color;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A tile's identity and the words used to describe it.
 #[derive(Debug, PartialEq)]
@@ -72,6 +72,10 @@ pub(crate) enum Unit {
 /// The current level's structure and its signal-flow order.
 #[derive(Debug, Default)]
 pub(crate) struct PatchMap {
+    /// A new value for every structural refresh, shared with the canvas.
+    pub(crate) generation: u64,
+    /// Changes to order or speech that leave the map drawing intact.
+    pub(crate) row_revision: u64,
     pub(crate) structure: Structure,
     pub(crate) order: Vec<Unit>,
     pub(crate) drawing: loom_canvas::MapGraph,
@@ -343,13 +347,26 @@ impl PatchMap {
                 .flat_map(|group| group.members.iter().copied())
                 .collect(),
         };
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
         let mut map = Self {
+            generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             structure,
             drawing,
             ..Self::default()
         };
         map.reorder(scene);
         map
+    }
+
+    /// Updates only the depth announced in the outline.
+    pub(crate) fn update_depth(&mut self, id: u32, depth: f32) {
+        if let Some(assignment) = self.structure.modulations.iter_mut().find(|a| a.id == id)
+            && assignment.depth != depth
+        {
+            assignment.depth = depth;
+            self.row_revision += 1;
+        }
     }
 
     /// Recomputes the tie order after a tile move ends.
@@ -362,6 +379,7 @@ impl PatchMap {
         if reading == self.reading {
             return;
         }
+        self.row_revision += 1;
         let units: Vec<_> = reading
             .iter()
             .map(|id| {
@@ -442,18 +460,15 @@ impl Structure {
 
 /// Lists names in a short phrase for the outline and canvas descriptions.
 pub(crate) fn names(words: impl IntoIterator<Item = String>, limit: usize) -> String {
-    let mut words: VecDeque<_> = words.into_iter().collect();
-    let remaining = words.len().saturating_sub(limit);
-    if remaining > 0 {
-        words.truncate(limit);
-        return format!("{} and {remaining} more", Vec::from(words).join(", "));
+    let words: Vec<_> = words.into_iter().collect();
+    if words.len() > limit {
+        return format!("{} and {} more", words[..limit].join(", "), words.len() - limit);
     }
-    let last = words.pop_back().unwrap_or_default();
-    if words.is_empty() {
-        last
-    } else {
-        let separator = if words.len() == 1 { " and " } else { ", and " };
-        format!("{}{separator}{last}", Vec::from(words).join(", "))
+    match words.as_slice() {
+        [] => String::new(),
+        [name] => name.clone(),
+        [first, last] => format!("{first} and {last}"),
+        [first @ .., last] => format!("{}, and {last}", first.join(", ")),
     }
 }
 
@@ -462,6 +477,7 @@ impl crate::App {
     pub(crate) fn refresh_patch_map(&mut self) {
         let session = &mut self.session;
         session.patch_map = PatchMap::new(&session.controller, &session.hierarchy, &session.level, &session.scene);
+        session.outline.reconcile_jump(&session.patch_map.structure);
     }
 
     /// The map overlay's options and the graph it draws.
@@ -470,6 +486,7 @@ impl crate::App {
         let mode = self.rig.store.saved().patch_map;
         (mode != MapMode::Hidden).then_some(loom_canvas::MapView {
             graph: &self.session.patch_map.drawing,
+            generation: self.session.patch_map.generation,
             auto: mode == MapMode::Auto,
             text_size: crate::style::SMALL,
         })

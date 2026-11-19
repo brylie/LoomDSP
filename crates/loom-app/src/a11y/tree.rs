@@ -453,6 +453,7 @@ pub(crate) fn tree(
                 || items::find(&frames.jump, id).is_some()
                 || (outline && snapshot.outline.iter().any(|row| &row.id == *id))
                 || id.is_under(&toolbar_id())
+                || **id == tab_id(Tab::Inspector)
         })
         .map(|id| node_id(table, id));
     // Focus is on the window unless a control on the canvas has it.

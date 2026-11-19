@@ -518,7 +518,7 @@ impl crate::App {
                         let id = tree::tile_id(tile.id)
                             .with(if output { "output" } else { "input" })
                             .with(name);
-                        let mut description = crate::outline::port_neighbours(structure, reference);
+                        let mut description = crate::outline::port_neighbours(structure, reference, true);
                         if !output
                             && description == "Not connected"
                             && let Some(spec) = graph
@@ -678,12 +678,17 @@ impl crate::App {
             focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
             focused_item: self
                 .jump_focus()
-                .or_else(|| self.outline_focus(&self.outline_rows()))
+                .or_else(|| {
+                    (self.right_tab == crate::matrix::Tab::Outline && self.session.outline.active)
+                        .then(|| self.outline_focus(&self.outline_rows()))
+                        .flatten()
+                })
                 .or_else(|| {
                     self.toolbar_keyboard_name()
                         .map(|button| tree::toolbar_id().with(button))
                 })
-                .or_else(|| self.matrix_focus()),
+                .or_else(|| self.matrix_focus())
+                .or_else(|| self.session.outline.inspector_action.clone()),
             jump: self.jump_items(),
             overlay,
             overlay_focus,

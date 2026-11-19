@@ -148,6 +148,19 @@ impl Quad {
     }
 }
 
+/// A straight mark between two points in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Segment {
+    /// The start of the mark.
+    pub from: Point,
+    /// The end of the mark.
+    pub to: Point,
+    /// The thickness across the mark.
+    pub width: f32,
+    /// The fill colour.
+    pub colour: Color,
+}
+
 /// Takes what an element paints, in the order it is to appear: a later
 /// piece is over an earlier one in the same layer, whether it is text or a
 /// box. So a selection highlight goes before its text, and a caret after.
@@ -156,6 +169,8 @@ pub trait Painter {
     fn text(&mut self, run: &TextRun<'_>);
     /// Paints one box.
     fn quad(&mut self, quad: Quad);
+    /// Paints one straight mark.
+    fn segment(&mut self, segment: Segment);
     /// Starts a layer: everything until [`end_layer`](Self::end_layer) is
     /// over everything painted before, text included, and is cut to
     /// `clip`. A floating part uses it, so its box covers the text under

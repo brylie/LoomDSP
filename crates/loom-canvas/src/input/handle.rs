@@ -72,7 +72,10 @@ impl CanvasModel<'_> {
 
         let keys_elsewhere = match event {
             Some(Event::Key(KeyEvent::Pressed { key, modifiers, .. })) => {
-                (self.focus_policy.matrix_keyboard && !modifiers.shortcut())
+                (self.focus_policy.jump_keyboard
+                    && *modifiers == Modifiers::NONE
+                    && matches!(key, Key::Up | Key::Down | Key::Enter | Key::Escape))
+                    || (self.focus_policy.matrix_keyboard && !modifiers.shortcut())
                     || (self.focus_policy.text_field_keys
                         && (self.focus_policy.text_field_keeps_tab || !matches!(key, Key::Tab)))
             }
@@ -425,7 +428,7 @@ impl CanvasModel<'_> {
             }
             Event::Pointer(PointerEvent::Pressed(button)) if over => {
                 let Some(screen) = screen else { return };
-                if self.focus_policy.matrix_keyboard {
+                if self.focus_policy.matrix_keyboard || self.focus_policy.jump_keyboard {
                     self.emit(out, CanvasEvent::PointerDown);
                 }
                 // A second button must end a hold. Replacing the interaction

@@ -410,6 +410,13 @@ impl App {
         let gained = focus
             .clone()
             .filter(|part| self.focus.as_ref() != Some(part) && self.is_value_field(part));
+        if self.right_tab == crate::matrix::Tab::Inspector
+            && let Some(part) = focus.as_ref()
+            && part.is_under(&UiId::panel("inspector"))
+        {
+            self.session.outline.last_inspector = Some(part.clone());
+            self.session.outline.inspector_action = None;
+        }
         self.focus = focus;
         if let Some(part) = gained {
             self.effect(loom_ui::Effects::focus_and_select_all(part));
@@ -635,10 +642,8 @@ impl App {
         let Some(spec) = graph.node(target).and_then(|n| n.spec(index)) else {
             return;
         };
-        let (from, to) = (
-            modulation::source_name(graph, &self.session.hierarchy, source),
-            modulation::target_name(graph, &self.session.hierarchy, target, index),
-        );
+        let names = modulation::Names::new(graph, &self.session.hierarchy);
+        let (from, to) = (names.source(source), names.target(target, index));
         if modulation::exists(graph, source, target, index) {
             self.alerts.warn(format!("{from} already modulates {to}"));
             return;
@@ -696,14 +701,20 @@ impl App {
         let Some(a) = self.session.controller.graph().assignment(id).copied() else {
             return;
         };
-        match self.session.controller.set_assignment_depth(id, a.depth + delta) {
+        match self.change_assignment_depth(id, a.depth + delta) {
             Ok(depth) => {
-                self.fan_out_assignment(id, |c, copy| c.set_assignment_depth(copy, depth).map(|_| ()));
-                self.alerts.say(format!(
-                    "{}: depth {}",
-                    modulation::source_name(self.session.controller.graph(), &self.session.hierarchy, a.source),
-                    modulation::depth_text(depth)
-                ));
+                let graph = self.session.controller.graph();
+                let name = self.session.scene.module(a.source.module.0).map_or_else(
+                    || modulation::Names::new(graph, &self.session.hierarchy).source(a.source),
+                    |tile| {
+                        let label = graph
+                            .node(a.source.module)
+                            .and_then(|node| node.output_label(a.source.port));
+                        format!("{}: {}", tile.title, label.unwrap_or("?"))
+                    },
+                );
+                self.alerts
+                    .say(format!("{name}: depth {}", modulation::depth_text(depth)));
             }
             Err(e) => self.alerts.warn(e.to_string()),
         }

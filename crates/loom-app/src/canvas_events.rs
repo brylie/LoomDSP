@@ -14,7 +14,8 @@ impl App {
         if event == CanvasEvent::PointerDown {
             self.session.outline.active = false;
             self.session.outline.toolbar = false;
-            self.session.outline.inspector_keys = false;
+            self.session.outline.inspector_action = None;
+            self.session.outline.close_jump();
             self.session.outline.focus_port = None;
             self.session.matrix.focused = false;
             self.session.matrix.edit = None;

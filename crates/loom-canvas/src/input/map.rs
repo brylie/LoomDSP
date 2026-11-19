@@ -1,7 +1,7 @@
 //! The overview's projection and pointer handling.
 
 use super::*;
-use loom_ui::paint::{Align, Quad, TextPainter, TextRun, TextStyle, Vertical, Weight};
+use loom_ui::paint::{Align, Quad, Segment, TextPainter, TextRun, TextStyle, Vertical, Weight};
 
 /// A connection to draw between two miniature tiles.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,6 +32,8 @@ pub struct MapGraph {
 pub struct MapView<'a> {
     /// The graph drawn over the tile rectangles.
     pub graph: &'a MapGraph,
+    /// Revision of the connection and loop data.
+    pub generation: u64,
     /// True to hide the map when the whole level is in view.
     pub auto: bool,
     /// Readable label size from the app's text tokens.
@@ -49,10 +51,11 @@ struct Projection {
 /// Static map drawings, rebuilt for geometry, line styles, or a new map size.
 #[derive(Debug)]
 pub(super) struct Artwork {
-    generation: (u64, u64),
+    generation: (u64, u64, u64),
     area: Rect,
     palette: Palette,
     style: TextStyle,
+    segments: Vec<Segment>,
     boxes: Vec<Quad>,
     labels: Vec<(Rect, String)>,
 }
@@ -230,7 +233,7 @@ impl CanvasModel<'_> {
             radius: 4.0,
         });
         let mut cache = state.map_artwork.borrow_mut();
-        let generation = (self.scene.generation(), self.scene.overlay_generation());
+        let generation = (map.generation, self.scene.generation(), self.scene.overlay_generation());
         let style = TextStyle {
             size: map.text_size,
             weight: Weight::Regular,
@@ -245,6 +248,9 @@ impl CanvasModel<'_> {
             *cache = Some(self.map_artwork(map, project, generation, style));
         }
         let art = cache.as_ref().expect("the map artwork was built");
+        for &segment in &art.segments {
+            painter.segment(segment);
+        }
         for &shape in &art.boxes {
             painter.quad(shape);
         }
@@ -272,7 +278,14 @@ impl CanvasModel<'_> {
         painter.end_layer();
     }
     /// Builds the static marks of the map apart from the moving view rectangle.
-    fn map_artwork(&self, map: MapView<'_>, project: Projection, generation: (u64, u64), style: TextStyle) -> Artwork {
+    fn map_artwork(
+        &self,
+        map: MapView<'_>,
+        project: Projection,
+        generation: (u64, u64, u64),
+        style: TextStyle,
+    ) -> Artwork {
+        let mut segments = Vec::new();
         let mut boxes = Vec::new();
         let mut labels = Vec::new();
         for line in &map.graph.lines {
@@ -280,7 +293,7 @@ impl CanvasModel<'_> {
                 continue;
             };
             line_marks(
-                &mut boxes,
+                &mut segments,
                 project.point(a.bounds().center()),
                 project.point(b.bounds().center()),
                 *line,
@@ -308,26 +321,39 @@ impl CanvasModel<'_> {
             area: project.area,
             palette: self.palette,
             style,
+            segments,
             boxes,
             labels,
         }
     }
 }
 
-/// Builds a line in the map's pixel grid using small overlapping marks.
-fn line_marks(boxes: &mut Vec<Quad>, a: Point, b: Point, line: MapLine) {
+/// Builds one mark per solid line or dash.
+fn line_marks(segments: &mut Vec<Segment>, a: Point, b: Point, line: MapLine) {
     let delta = b - a;
-    let steps = delta.x.abs().max(delta.y.abs()).ceil() as usize;
-    if steps == 0 {
+    let length = delta.x.hypot(delta.y);
+    if length == 0.0 {
         return;
     }
-    let size = Size::new(line.width, line.width);
-    for step in 0..=steps {
-        if line.dash > 0.0 && (step as f32 % (2.0 * line.dash)) >= line.dash {
-            continue;
-        }
-        let centre = a + delta * (step as f32 / steps as f32);
-        let origin = centre - Vector::new(line.width * 0.5, line.width * 0.5);
-        boxes.push(Quad::filled(Rect::new(origin, size), line.colour, 0.0));
+    let mut push = |from, to| {
+        segments.push(Segment {
+            from,
+            to,
+            width: line.width,
+            colour: line.colour,
+        })
+    };
+    if line.dash <= 0.0 {
+        push(a, b);
+        return;
+    }
+    let mut start = 0.0;
+    while start < length {
+        let end = (start + line.dash).min(length);
+        push(a + delta * (start / length), a + delta * (end / length));
+        start += 2.0 * line.dash;
     }
 }
+
+#[cfg(test)]
+mod tests;

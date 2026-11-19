@@ -11,7 +11,9 @@ use iced::widget::{column, container, scrollable, text};
 use loom_canvas::PortRef;
 use loom_ui_core::{Point, UiId};
 use serde::{Serialize, Serializer};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// The outline's scrollable tree.
@@ -83,6 +85,14 @@ struct Jump {
     selected: usize,
 }
 
+/// Rows shared by the view, keyboard and accessibility updates.
+#[derive(Debug)]
+struct CachedRows {
+    revision: (u64, u64),
+    patch: String,
+    rows: Rc<[Row]>,
+}
+
 /// What the outline and cable navigation remember in the current level.
 #[derive(Debug, Default)]
 pub(crate) struct State {
@@ -93,20 +103,48 @@ pub(crate) struct State {
     pub(crate) toolbar: bool,
     /// Position of the last toolbar button reached with the keyboard.
     toolbar_index: usize,
-    /// True when Ctrl+Tab took the focus into the inspector.
-    pub(crate) inspector_keys: bool,
+    /// A focused inspector action when the panel has no editable field.
+    pub(crate) inspector_action: Option<UiId>,
+    /// The last real Inspector field or action focused in this level.
+    pub(crate) last_inspector: Option<UiId>,
+    /// The canvas control most recently left by Ctrl+Tab.
+    last_canvas: Option<(u32, usize)>,
     focus: Option<UiId>,
     index: usize,
     expanded: BTreeMap<UiId, bool>,
+    rows: RefCell<Option<CachedRows>>,
     search: Option<(Instant, String)>,
     jump: Option<Jump>,
     back: VecDeque<Target>,
 }
 
 impl State {
+    /// Invalidates the visible rows when an expanded branch changes.
+    fn set_expanded(&mut self, id: UiId, expanded: bool) {
+        if self.expanded.insert(id, expanded) != Some(expanded) {
+            *self.rows.get_mut() = None;
+        }
+    }
+
     /// True while a cable branch has focus.
     pub(crate) fn has_jump(&self) -> bool {
         self.jump.is_some()
+    }
+
+    /// Closes the jump list without changing its starting place.
+    pub(crate) fn close_jump(&mut self) {
+        self.jump = None;
+    }
+
+    /// Closes a jump whose starting point disappeared in a graph edit.
+    pub(crate) fn reconcile_jump(&mut self, structure: &Structure) {
+        if self.jump.as_ref().is_some_and(|jump| {
+            jump.from
+                .module(structure)
+                .is_none_or(|module| !structure.tiles.contains_key(&module))
+        }) {
+            self.close_jump();
+        }
     }
 
     /// Drops navigation state referring to the previous level.
@@ -114,11 +152,15 @@ impl State {
         self.focus = None;
         self.index = 0;
         self.expanded.clear();
+        *self.rows.get_mut() = None;
         self.search = None;
         self.jump = None;
         self.back.clear();
         self.focus_port = None;
         self.centre.1 = None;
+        self.inspector_action = None;
+        self.last_inspector = None;
+        self.last_canvas = None;
     }
 
     /// Remembers the row that now receives the tree's keys.
@@ -140,13 +182,27 @@ impl State {
     /// Reveals a module row and the section or loop containing it.
     fn reveal(&mut self, map: &PatchMap, module: u32) {
         if !map.structure.heard.contains(&module) {
-            self.expanded.insert(tree_id().with("not-heard"), true);
+            self.set_expanded(tree_id().with("not-heard"), true);
         }
         if let Some(group) = map.structure.loops.iter().find(|group| group.members.contains(&module)) {
-            self.expanded.insert(loop_id(group), true);
+            self.set_expanded(loop_id(group), true);
         }
         self.focus = Some(module_id(module));
     }
+}
+
+/// Enabled Inspector fields and controls in the model's reading order.
+fn inspector_stops(items: &[crate::a11y::items::Item]) -> Vec<&crate::a11y::items::Item> {
+    let mut stops = Vec::new();
+    for item in items {
+        if item.enabled
+            && (item.focus.is_some() || item.click.is_some() || item.step.0.is_some() || item.step.1.is_some())
+        {
+            stops.push(item);
+        }
+        stops.extend(inspector_stops(&item.children));
+    }
+    stops
 }
 
 /// A feedback group keeps its ID when its displayed number changes.
@@ -188,7 +244,7 @@ pub(crate) fn neighbours(structure: &Structure, module: u32) -> String {
 }
 
 /// The other ends of a connected port.
-pub(crate) fn port_neighbours(structure: &Structure, port: PortRef) -> String {
+pub(crate) fn port_neighbours(structure: &Structure, port: PortRef, sentence: bool) -> String {
     let peers = names(
         structure
             .cables
@@ -204,12 +260,15 @@ pub(crate) fn port_neighbours(structure: &Structure, port: PortRef) -> String {
         usize::MAX,
     );
     if peers.is_empty() {
-        "Not connected".into()
-    } else if port.output {
-        format!("To {peers}")
-    } else {
-        format!("From {peers}")
+        return if sentence { "Not connected" } else { "not connected" }.into();
     }
+    let direction = match (sentence, port.output) {
+        (true, true) => "To",
+        (true, false) => "From",
+        (false, true) => "to",
+        (false, false) => "from",
+    };
+    format!("{direction} {peers}")
 }
 
 impl Row {
@@ -264,8 +323,7 @@ fn module_rows(rows: &mut Vec<Row>, map: &PatchMap, state: &State, module: u32, 
                 continue;
             }
             let key = if output { "output" } else { "input" };
-            let mut about = port_neighbours(structure, port);
-            about[..1].make_ascii_lowercase();
+            let about = port_neighbours(structure, port, false);
             let width = if edges.iter().any(|wire| wire.stereo) {
                 "Stereo"
             } else {
@@ -376,7 +434,29 @@ fn unit_rows(rows: &mut Vec<Row>, map: &PatchMap, state: &State, unit: Unit, lev
 
 impl App {
     /// Builds the visible rows used by the view, snapshot, and accessibility tree.
-    pub(crate) fn outline_rows(&self) -> Vec<Row> {
+    pub(crate) fn outline_rows(&self) -> Rc<[Row]> {
+        let session = &self.session;
+        let map = &session.patch_map;
+        let revision = (map.generation, map.row_revision);
+        let patch = session.document.name();
+        let mut cache = session.outline.rows.borrow_mut();
+        let rows = cache
+            .as_mut()
+            .filter(|cached| cached.revision == revision && cached.patch == patch);
+        if let Some(cached) = rows {
+            return Rc::clone(&cached.rows);
+        }
+        let rows = Rc::from(self.build_outline_rows());
+        *cache = Some(CachedRows {
+            revision,
+            patch: patch.to_string(),
+            rows: Rc::clone(&rows),
+        });
+        rows
+    }
+
+    /// Computes rows after a change to the structure, order or expanded branches.
+    fn build_outline_rows(&self) -> Vec<Row> {
         let session = &self.session;
         let map = &session.patch_map;
         let state = &session.outline;
@@ -456,7 +536,7 @@ impl App {
         let rows = self.outline_rows();
         let index = self.session.outline.focused_index(&rows);
         let active = self.session.outline.active;
-        let content = column(rows.into_iter().enumerate().map(|(i, row)| {
+        let content = column(rows.iter().enumerate().map(|(i, row)| {
             let mark = match row.expanded {
                 Some(true) => "▾ ",
                 Some(false) => "▸ ",
@@ -469,7 +549,7 @@ impl App {
                     .width(iced::Length::Fill)
                     .padding([5, 8 + ((row.level - 1) * 12) as u16])
                     .style(style::tab(active && i == index))
-                    .on_press(Message::OutlineRow(row.id)),
+                    .on_press(Message::OutlineRow(row.id.clone())),
             )
             .id(id)
             .into()
@@ -552,9 +632,11 @@ impl App {
             return true;
         }
         let outline = self.session.outline.active && self.right_tab == crate::matrix::Tab::Outline;
-        if self.session.outline.jump.is_some() {
-            self.jump_key(key);
+        if self.session.outline.has_jump() && modifiers.is_empty() && self.jump_key(&key) {
             return true;
+        }
+        if self.session.outline.inspector_action.is_some() && modifiers.is_empty() {
+            return self.inspector_action_key(&key);
         }
         if self.focus.is_some() || self.session.value_draft.is_some() || self.matrix_has_keys() {
             return false;
@@ -587,22 +669,99 @@ impl App {
 
     /// Moves focus to the adjacent region, remembering the outline's row.
     fn cycle_region(&mut self, back: bool) {
+        use crate::matrix::Tab;
         let state = &mut self.session.outline;
         let current = if state.toolbar {
             2
-        } else if state.active || state.inspector_keys || self.session.matrix.focused || self.focus.is_some() {
+        } else if state.active
+            || state.inspector_action.is_some()
+            || self.session.matrix.focused
+            || self.focus.is_some()
+        {
             1
         } else {
             0
         };
+        if current == 0 {
+            state.last_canvas = self.a11y.focus();
+        }
+        state.close_jump();
         let next = (current + if back { 2 } else { 1 }) % 3;
         state.toolbar = next == 2;
-        state.active = next == 1 && self.right_tab == crate::matrix::Tab::Outline;
-        state.inspector_keys = next == 1 && self.right_tab == crate::matrix::Tab::Inspector;
-        self.session.matrix.focused = next == 1 && self.right_tab == crate::matrix::Tab::Matrix;
+        state.active = next == 1 && self.right_tab == Tab::Outline;
+        state.inspector_action = None;
+        self.session.matrix.focused = next == 1 && self.right_tab == Tab::Matrix;
+        if next == 1 && self.right_tab == Tab::Inspector {
+            self.a11y.request_control(None);
+            self.focus_inspector_region();
+            return;
+        }
+        let last_canvas = state
+            .last_canvas
+            .filter(|(module, _)| self.session.selection.contains(module));
         if self.focus.is_some() {
             self.effect(loom_ui::Effects::unfocus());
         }
+        if next == 0 {
+            self.a11y.request_control(last_canvas);
+            self.effect(loom_ui::Effects::redraw());
+        }
+    }
+
+    /// Focuses the last live Inspector stop or the first editable field.
+    fn focus_inspector_region(&mut self) {
+        let panel = crate::inspector::access::items(&self.inspector_model());
+        let stops = inspector_stops(&panel);
+        let saved = self.session.outline.last_inspector.as_ref();
+        let stop = saved
+            .and_then(|id| stops.iter().copied().find(|item| &item.id == id))
+            .or_else(|| stops.iter().copied().find(|item| item.focus.is_some()))
+            .or_else(|| stops.first().copied());
+        if let Some(stop) = stop {
+            self.focus_inspector_stop(stop);
+        } else if let Some(item) = panel.first() {
+            self.session.outline.inspector_action = Some(item.id.clone());
+        } else {
+            self.session.outline.inspector_action = Some(crate::a11y::tree::tab_id(crate::matrix::Tab::Inspector));
+        }
+    }
+
+    /// Takes a real text field through the focus bridge, or a keyboard-operable action.
+    fn focus_inspector_stop(&mut self, item: &crate::a11y::items::Item) {
+        self.session.outline.last_inspector = Some(item.id.clone());
+        self.effect(loom_ui::Effects::scroll_into_view(item.id.clone()));
+        if let Some(part) = item.focus.as_ref().and_then(crate::places::field_of) {
+            self.session.outline.inspector_action = None;
+            self.effect(loom_ui::Effects::focus(part));
+        } else {
+            self.session.outline.inspector_action = Some(item.id.clone());
+        }
+    }
+
+    /// Activates an inspector stop that has no toolkit text field.
+    fn inspector_action_key(&mut self, key: &Key<&str>) -> bool {
+        use crate::a11y::items;
+        use accesskit::Action;
+        let panel = crate::inspector::access::items(&self.inspector_model());
+        let id = self.session.outline.inspector_action.as_ref();
+        let action = match key {
+            Key::Named(Named::Escape) => {
+                self.session.outline.inspector_action = None;
+                self.a11y.request_control(self.session.outline.last_canvas);
+                self.effect(loom_ui::Effects::redraw());
+                return true;
+            }
+            Key::Named(Named::Enter | Named::Space) => Action::Click,
+            Key::Named(Named::ArrowRight | Named::ArrowUp) => Action::Increment,
+            Key::Named(Named::ArrowLeft | Named::ArrowDown) => Action::Decrement,
+            _ => return false,
+        };
+        if let Some(item) = id.and_then(|id| items::find(&panel, id)) {
+            for message in items::messages(item, action, None) {
+                self.post(message);
+            }
+        }
+        true
     }
 
     /// Gives the outline's newly focused row room in its scrolling view.
@@ -647,6 +806,7 @@ impl App {
                     self.post(message);
                 }
             }
+            // Plain keys stay in this region so they cannot edit the canvas.
             _ => {}
         }
         true
@@ -665,14 +825,14 @@ impl App {
             Key::Named(Named::End) => state.select(&rows, rows.len() - 1),
             Key::Named(Named::ArrowRight) => match row.expanded {
                 Some(false) => {
-                    state.expanded.insert(row.id.clone(), true);
+                    state.set_expanded(row.id.clone(), true);
                 }
                 Some(true) => state.select(&rows, index + 1),
                 None => {}
             },
             Key::Named(Named::ArrowLeft) => {
                 if row.expanded == Some(true) {
-                    state.expanded.insert(row.id.clone(), false);
+                    state.set_expanded(row.id.clone(), false);
                 } else if let Some(parent) = &row.parent
                     && let Some(index) = rows.iter().position(|row| &row.id == parent)
                 {
@@ -789,9 +949,9 @@ impl App {
     }
 
     /// Moves through jump choices without changing the underlying focus.
-    fn jump_key(&mut self, key: Key<&str>) {
+    fn jump_key(&mut self, key: &Key<&str>) -> bool {
         let Some(jump) = self.session.outline.jump.as_mut() else {
-            return;
+            return false;
         };
         match key {
             Key::Named(Named::ArrowDown) => jump.selected = (jump.selected + 1).min(jump.choices.len() - 1),
@@ -800,9 +960,10 @@ impl App {
                 let selected = jump.selected;
                 self.choose_jump(selected);
             }
-            Key::Named(Named::Escape) => self.session.outline.jump = None,
-            _ => {}
+            Key::Named(Named::Escape) => self.session.outline.close_jump(),
+            _ => return false,
         }
+        true
     }
 
     /// Jumps to the chosen destination of the open list.
@@ -887,13 +1048,14 @@ fn jump_choices(map: &PatchMap, from: Target, downstream: Option<bool>) -> Vec<C
         } else {
             Target::Tile(peer.module)
         };
-        let name = format!(
-            "{} {} to {} {}",
-            structure.name(wire.from.module),
-            structure.port_label(wire.from),
-            structure.name(wire.to.module),
-            structure.port_label(wire.to)
-        );
+        let from_label = structure.port_label(wire.from);
+        let to_label = structure.port_label(wire.to);
+        let far = structure.name(peer.module);
+        let name = if peer.output {
+            format!("{far} {from_label} to {to_label}")
+        } else {
+            format!("{from_label} to {far} {to_label}")
+        };
         choices.entry(peer.module).or_insert(Choice { target, name });
     }
     for assignment in &structure.modulations {
@@ -914,13 +1076,14 @@ fn jump_choices(map: &PatchMap, from: Target, downstream: Option<bool>) -> Vec<C
         } else {
             continue;
         };
-        let name = format!(
-            "{} {} to {} {} (modulation)",
-            structure.name(assignment.from.module),
-            structure.port_label(assignment.from),
-            structure.name(assignment.to),
-            assignment.parameter
-        );
+        let from_label = structure.port_label(assignment.from);
+        let to_label = &assignment.parameter;
+        let far = structure.name(peer);
+        let name = if assignment.from.module == module {
+            format!("{from_label} to {far} {to_label} (modulation)")
+        } else {
+            format!("{far} {from_label} to {to_label} (modulation)")
+        };
         choices.entry(peer).or_insert(Choice {
             target: Target::Tile(peer),
             name,
@@ -937,7 +1100,7 @@ fn jump_choices(map: &PatchMap, from: Target, downstream: Option<bool>) -> Vec<C
 }
 
 /// The cable choices as one panel.
-fn jump_id() -> UiId {
+pub(crate) fn jump_id() -> UiId {
     UiId::panel("cable-jump")
 }
 

@@ -511,6 +511,8 @@ enum Message {
     OutlineRow(loom_ui_core::UiId),
     /// Takes one of the offered cable jumps.
     JumpChoice(usize),
+    /// A pointer press outside the cable jump list.
+    DismissJump,
     /// An edit in patch info (`docs/design/patch-metadata.md`).
     PatchInfo(patch_info::Message),
     /// A message for the open licence chooser.
@@ -700,6 +702,7 @@ impl Message {
             | Self::Preferences(_)
             | Self::OutlineRow(_)
             | Self::JumpChoice(_)
+            | Self::DismissJump
             | Self::PatchInfo(_)
             | Self::Licence(_)
             | Self::OpenRecent
@@ -2056,6 +2059,7 @@ impl App {
             Message::Preferences(message) => self.preferences(message),
             Message::OutlineRow(id) => self.outline_select(&id),
             Message::JumpChoice(index) => self.choose_jump(index),
+            Message::DismissJump => self.session.outline.close_jump(),
             Message::PatchInfo(message) => self.patch_info_message(message),
             Message::HistoryKey { redo, typing } => {
                 if !typing {

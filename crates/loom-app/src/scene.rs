@@ -1060,10 +1060,7 @@ pub fn build_with_clock(
     // Inputs with a cable: they no longer follow their default, so they
     // show no clock mark (panels.md, Clock mark on transport inputs).
     let cabled: BTreeSet<InputRef> = graph.cables().map(|(_, to)| to).collect();
-    let mut kind_count = BTreeMap::new();
-    for (_, node) in graph.nodes().filter(|(id, _)| on_level(*id)) {
-        *kind_count.entry(crate::modulation::module_kind(node)).or_insert(0usize) += 1;
-    }
+    let names = crate::modulation::Names::new(graph, hierarchy);
     let mut modules: Vec<ModuleView> = graph
         .nodes()
         .filter(|(id, _)| on_level(*id))
@@ -1120,11 +1117,7 @@ pub fn build_with_clock(
                 title: if let Some(source) = clock_source.filter(|_| d.role.is_transport()) {
                     format!("Following {source} clock")
                 } else {
-                    crate::modulation::display_name(
-                        node,
-                        hierarchy.path_of(id).last(),
-                        kind_count[crate::modulation::module_kind(node)] > 1,
-                    )
+                    names.module(id)
                 },
                 accent: family_colour(d.family),
                 // The header's hover text: family first, so colour is

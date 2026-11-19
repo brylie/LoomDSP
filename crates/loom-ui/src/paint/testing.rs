@@ -18,6 +18,8 @@ pub enum Painted {
     },
     /// A box.
     Quad(Quad),
+    /// A straight mark.
+    Segment(Segment),
     /// A layer began, cut to this rectangle.
     Begin(Rect),
     /// The layer ended.
@@ -59,6 +61,10 @@ impl Painter for Recorder {
 
     fn quad(&mut self, quad: Quad) {
         self.painted.push(Painted::Quad(quad));
+    }
+
+    fn segment(&mut self, segment: Segment) {
+        self.painted.push(Painted::Segment(segment));
     }
 
     fn begin_layer(&mut self, clip: Rect) {

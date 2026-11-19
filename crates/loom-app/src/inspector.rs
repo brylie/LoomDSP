@@ -256,7 +256,7 @@ pub enum UnknownLink {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ModuleRows {
     pub id: u32,
-    pub name: &'static str,
+    pub name: String,
     /// The module's kind and ID, under its name.
     pub kind: String,
     pub description: &'static str,
@@ -591,6 +591,7 @@ impl App {
     /// is gone.
     fn param_row(
         &self,
+        names: &modulation::Names<'_>,
         id: u32,
         index: usize,
         spec: &ParamSpec,
@@ -674,9 +675,9 @@ impl App {
                 position: spec.normalize(value),
                 step: param::slider_step(spec),
                 control: ParamControl::of(spec, value),
-                assignments: self.assignment_rows(id, index),
+                assignments: self.assignment_rows(names, id, index),
                 adding: (!spec.options.shapes_graph && self.session.gestures.adding() == Some((id, index)))
-                    .then(|| self.sources(id, index)),
+                    .then(|| self.sources(names, id, index)),
             }
         };
         let unused = (!d.is_shown(index, &node.params)).then(|| {
@@ -824,6 +825,7 @@ impl App {
         let Some(state) = hierarchy.slot(ModuleId(id)) else {
             return Inspector::Empty;
         };
+        let names = modulation::Names::new(graph, hierarchy);
         let part = hierarchy.part_of_slot(ModuleId(id));
         // A slot's rows are its part's, keyed under the part as its tile
         // controls are, so a swap makes new elements (ui-layer.md,
@@ -856,7 +858,7 @@ impl App {
                     let Some(spec) = node.spec(index) else { continue };
                     let exposure = self.exposure_row(part.0, index, spec.name);
                     let exposed = exposure.as_ref().is_some_and(|e| e.name.is_some());
-                    let Some(row) = self.param_row(part.0, index, &spec, exposure, !exposed) else {
+                    let Some(row) = self.param_row(&names, part.0, index, &spec, exposure, !exposed) else {
                         continue;
                     };
                     let row = keyed(row, ids::Kind::Param, spec.name);
@@ -875,7 +877,9 @@ impl App {
                         continue;
                     };
                     let exposure = self.exposure_row(part.0, index, &exposed.name);
-                    let Some(row) = self.param_row(target.module.0, target.index, &target.spec, exposure, false) else {
+                    let Some(row) =
+                        self.param_row(&names, target.module.0, target.index, &target.spec, exposure, false)
+                    else {
                         continue;
                     };
                     let row = keyed(row, ids::Kind::Exposed, &exposed.name);
@@ -918,6 +922,7 @@ impl App {
             (Some(_), Some(_)) => return Inspector::Several(self.session.selection.len()),
         };
         let hierarchy = &self.session.hierarchy;
+        let names = modulation::Names::new(graph, hierarchy);
         match hierarchy.tile(graph, ModuleId(id)) {
             Some(loom_patch::Tile::Instance(_)) => {
                 let (inputs, outputs) = hierarchy.instance_ports(ModuleId(id));
@@ -950,8 +955,14 @@ impl App {
                                     surface.push_str(" (this tile)");
                                     outer.surface.push_str(" (outer)");
                                 }
-                                let mut row =
-                                    self.param_row(target.module.0, target.index, &target.spec, exposure, false)?;
+                                let mut row = self.param_row(
+                                    &names,
+                                    target.module.0,
+                                    target.index,
+                                    &target.spec,
+                                    exposure,
+                                    false,
+                                )?;
                                 // On this tile the row is the exposed item,
                                 // not the inner module's parameter.
                                 row.ui = ids::row(id, ids::Kind::Exposed, &exposed.name);
@@ -1029,13 +1040,8 @@ impl App {
                         id: assignment_id.0,
                         text: format!(
                             "{} → {}",
-                            modulation::source_name(graph, &self.session.hierarchy, assignment.source),
-                            modulation::target_name(
-                                graph,
-                                &self.session.hierarchy,
-                                assignment.target,
-                                assignment.param
-                            )
+                            names.source(assignment.source),
+                            names.target(assignment.target, assignment.param)
                         ),
                     });
                 }
@@ -1044,11 +1050,7 @@ impl App {
                 if mapping.target.0 == id {
                     links.push(UnknownLink::Midi {
                         index: mapping.param,
-                        text: format!(
-                            "{} → {}",
-                            mapping.control,
-                            modulation::target_name(graph, &self.session.hierarchy, mapping.target, mapping.param)
-                        ),
+                        text: format!("{} → {}", mapping.control, names.target(mapping.target, mapping.param)),
                     });
                 }
             }
@@ -1084,12 +1086,12 @@ impl App {
                 // its Range selector hides (flattening rule 12).
                 let exposure = self.exposure_row(id, index, spec.name);
                 let exposed = exposure.as_ref().is_some_and(|e| e.name.is_some());
-                self.param_row(id, index, &spec, exposure, !exposed)
+                self.param_row(&names, id, index, &spec, exposure, !exposed)
             })
             .collect();
         Inspector::Module(ModuleRows {
             id,
-            name: d.name,
+            name: names.module(ModuleId(id)),
             kind: format!("{} #{id}", d.kind()),
             description: d.description,
             resets_clip: d
@@ -1113,13 +1115,13 @@ impl App {
                 })
                 .collect(),
             params,
-            drives: self.drives(id),
+            drives: self.drives(&names, id),
         })
     }
 
     /// The assignments on a parameter, in engine order
     /// (`docs/design/modulation.md`, Seeing assignments).
-    fn assignment_rows(&self, module: u32, index: usize) -> Vec<AssignmentRow> {
+    fn assignment_rows(&self, names: &modulation::Names<'_>, module: u32, index: usize) -> Vec<AssignmentRow> {
         let graph = self.session.controller.graph();
         modulation::on_param(graph, ModuleId(module), index)
             .into_iter()
@@ -1127,7 +1129,7 @@ impl App {
                 let own = modulation::source_polarity(graph, a.source);
                 AssignmentRow {
                     id,
-                    source: modulation::source_name(graph, &self.session.hierarchy, a.source),
+                    source: names.source(a.source),
                     depth: a.depth,
                     depth_text: modulation::depth_text(a.depth),
                     polarity: PolarityChoice::of(a.polarity, own),
@@ -1140,7 +1142,7 @@ impl App {
 
     /// Every output at this patch level, for **Add modulation**. One that
     /// already drives the parameter cannot be picked.
-    fn sources(&self, module: u32, index: usize) -> Vec<SourceRow> {
+    fn sources(&self, names: &modulation::Names<'_>, module: u32, index: usize) -> Vec<SourceRow> {
         let graph = self.session.controller.graph();
         let hierarchy = &self.session.hierarchy;
         // Only this level's modules: nothing crosses a level (rule 4).
@@ -1150,7 +1152,7 @@ impl App {
             .filter(|source| hierarchy.level_of(source.module) == level)
             .map(|source| SourceRow {
                 source,
-                name: modulation::source_name(graph, &self.session.hierarchy, source),
+                name: names.source(source),
                 enabled: !modulation::exists(graph, source, ModuleId(module), index),
             })
             .collect()
@@ -1159,7 +1161,7 @@ impl App {
     /// **Drives**: what each output of `module` drives. Lines for
     /// assignments that are off say "off", so the state does not rest on
     /// colour alone.
-    fn drives(&self, module: u32) -> Vec<DrivesGroup> {
+    fn drives(&self, names: &modulation::Names<'_>, module: u32) -> Vec<DrivesGroup> {
         let graph = self.session.controller.graph();
         let Some(node) = graph.node(ModuleId(module)) else {
             return Vec::new();
@@ -1173,7 +1175,7 @@ impl App {
                     .map(|(id, a)| {
                         let mut line = format!(
                             "{}, {}",
-                            modulation::target_name(graph, &self.session.hierarchy, a.target, a.param),
+                            names.target(a.target, a.param),
                             modulation::depth_text(a.depth)
                         );
                         if !a.enabled {

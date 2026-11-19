@@ -833,11 +833,8 @@ fn cards_fit_the_column() {
         .matrix_event(Event::Select(AssignmentId(1), Column::Polarity));
     assert_eq!(ui.app().ui_snapshot().matrix.tab, Tab::Matrix);
 
-    let source = modulation::source_name(
-        ui.app().session.controller.graph(),
-        &ui.app().session.hierarchy,
-        OutputRef { module: hold, port: 0 },
-    );
+    let source = modulation::Names::new(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
+        .source(OutputRef { module: hold, port: 0 });
     assert!(source.len() >= 23, "{source}");
     let column = ui.app().session.matrix.model(
         ui.app().session.controller.graph(),

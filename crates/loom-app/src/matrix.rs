@@ -170,6 +170,7 @@ impl State {
         selected_modules: &std::collections::BTreeSet<u32>,
         tab: Tab,
     ) -> MatrixModel {
+        let names = modulation::Names::new(graph, hierarchy);
         let filter = self.filter.to_lowercase();
         let mut rows: Vec<_> = graph
             .assignments()
@@ -178,20 +179,16 @@ impl State {
                     || selected_modules.contains(&a.source.module.0)
                     || selected_modules.contains(&a.target.0))
                     && (filter.is_empty()
-                        || modulation::source_name(graph, hierarchy, a.source)
-                            .to_lowercase()
-                            .contains(&filter)
-                        || modulation::target_name(graph, hierarchy, a.target, a.param)
-                            .to_lowercase()
-                            .contains(&filter))
+                        || names.source(a.source).to_lowercase().contains(&filter)
+                        || names.target(a.target, a.param).to_lowercase().contains(&filter))
             })
             .map(|(id, a)| {
                 let source_polarity = modulation::source_polarity(graph, a.source);
                 MatrixRow {
                     id: id.0,
                     on: a.enabled,
-                    source: modulation::source_name(graph, hierarchy, a.source),
-                    target: modulation::target_name(graph, hierarchy, a.target, a.param),
+                    source: names.source(a.source),
+                    target: names.target(a.target, a.param),
                     depth: a.depth,
                     polarity: PolarityChoice::of(a.polarity, source_polarity).to_string(),
                     source_polarity,
@@ -224,12 +221,12 @@ impl State {
             edit: self.edit.clone(),
             add: self.add.clone(),
             sources: if picking(Column::Source) {
-                sources(graph, hierarchy)
+                source_picks(graph, &names)
             } else {
                 Vec::new()
             },
             targets: if picking(Column::Target) {
-                targets(graph, hierarchy)
+                target_picks(graph, &names)
             } else {
                 Vec::new()
             },
@@ -245,19 +242,29 @@ impl State {
     }
 }
 
+/// Sources offered by the matrix at this patch level.
+pub(crate) fn sources(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<SourcePick> {
+    source_picks(graph, &modulation::Names::new(graph, hierarchy))
+}
+
+/// Targets offered by the matrix at this patch level.
+pub(crate) fn targets(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<TargetPick> {
+    target_picks(graph, &modulation::Names::new(graph, hierarchy))
+}
+
 /// Sources offered by the matrix, in module and port order.
-pub fn sources(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<SourcePick> {
+fn source_picks(graph: &Graph, names: &modulation::Names<'_>) -> Vec<SourcePick> {
     modulation::sources(graph)
         .into_iter()
         .map(|output| SourcePick {
             output,
-            label: modulation::source_name(graph, hierarchy, output),
+            label: names.source(output),
         })
         .collect()
 }
 
 /// Parameters with a knob, toggle, or radio control, in module order.
-pub fn targets(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<TargetPick> {
+fn target_picks(graph: &Graph, names: &modulation::Names<'_>) -> Vec<TargetPick> {
     graph
         .nodes()
         .flat_map(|(module, node)| {
@@ -277,7 +284,7 @@ pub fn targets(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<TargetPi
                     eligible.then(|| TargetPick {
                         module,
                         param,
-                        label: modulation::target_name(graph, hierarchy, module, param),
+                        label: names.target(module, param),
                     })
                 })
         })
@@ -654,6 +661,8 @@ impl App {
     pub(crate) fn matrix_event(&mut self, event: Event) {
         match event {
             Event::Tab(tab) => {
+                self.session.outline.close_jump();
+                self.session.outline.inspector_action = None;
                 self.right_tab = tab;
                 self.session.outline.active = tab == Tab::Outline;
                 self.session.outline.toolbar = false;
@@ -795,10 +804,11 @@ impl App {
             .assignments()
             .any(|(other, a)| other != id && a.source == source && a.target == module && a.param == param)
         {
+            let names = modulation::Names::new(self.session.controller.graph(), &self.session.hierarchy);
             self.alerts.warn(format!(
                 "{} already modulates {}",
-                modulation::source_name(self.session.controller.graph(), &self.session.hierarchy, source),
-                modulation::target_name(self.session.controller.graph(), &self.session.hierarchy, module, param)
+                names.source(source),
+                names.target(module, param)
             ));
             return;
         }
