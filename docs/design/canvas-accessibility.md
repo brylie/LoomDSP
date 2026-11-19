@@ -22,11 +22,11 @@ The [UI layer specification](ui-layer.md) gives every tile, control, and port an
 
 Example, with `subtractive.ron` open and VoiceOver on. The user presses O on the canvas. The outline opens and reads its first row:
 
-> Subtractive. 11 modules, 11 cables, no feedback loops. 2 modules not heard.
+> Subtractive. 10 modules, 10 cables, no feedback loops. 2 modules not heard.
 
 They press Down and hear the modules in the order the signal flows, from the source to the output:
 
-> MIDI Note. Source. To Phase, Envelope 5, and Envelope 7.
+> MIDI Note. Source. To Saw, Envelope 5, and Envelope 7.
 > ...
 > Multiply 8. From SVF and Envelope 7. To Audio Out.
 > Audio Out. From Multiply 8. The output.
@@ -121,10 +121,10 @@ A row has a short **name**, read at once, and a **description**, read after it o
 
 | Row | Name | Description |
 |---|---|---|
-| Summary | "Subtractive. 11 modules, 11 cables, no feedback loops. 2 modules not heard." | None |
+| Summary | "Subtractive. 10 modules, 10 cables, no feedback loops. 2 modules not heard." | None |
 | Not heard section | "Not heard, 2 modules" | None |
 | Module | "SVF. From Saw and Multiply 6. To Multiply 8 and Scope." | "Filter. Cutoff modulated by LFO. In feedback loop 1." |
-| Source module | "MIDI Note. Source. To Phase, Envelope 5, and Envelope 7." | Its kind |
+| Source module | "MIDI Note. Source. To Saw, Envelope 5, and Envelope 7." | Its kind |
 | Output module | "Audio Out. From Multiply 8. The output." | Its kind |
 | Loop | "Feedback loop 1: SVF, Delay, Mix" | "Delay inserted from Mix to SVF." |
 | Connection, input | "In, from Saw out" | Signal type, stereo or mono |

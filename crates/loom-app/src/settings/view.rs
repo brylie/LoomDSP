@@ -172,6 +172,20 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
                     part_id("activity"),
                 ),
                 rule::horizontal(1),
+                row![
+                    text("Patch map").size(style::BODY),
+                    named(
+                        pick_list(
+                            crate::preferences::MapMode::ALL,
+                            Some(model.patch_map),
+                            move |mode| msg(Message::Map(Some(mode)))
+                        ),
+                        part_id("patch_map"),
+                    ),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+                rule::horizontal(1),
                 heading("Audio output"),
                 audio,
                 rule::horizontal(1),

@@ -112,7 +112,13 @@ struct Inner {
     /// Scripted pointer events Iced's widgets left unused, with where they
     /// happened, for the runtime's own layers below Iced, as the bridge
     /// hands it a real event Iced left (`iced_bridge/pointers.rs`).
-    for_runtime: Vec<(Event, Point)>,
+    for_runtime: Vec<(Event, Point, Delivery)>,
+    /// Physical pointer events that the injector suppressed during a script.
+    suppressed: Vec<loom_ui_core::Event>,
+    /// Scripted holds to cancel before routing a physical event.
+    cancelled: Vec<mouse::Button>,
+    /// Where named targets of the pending script are in the runtime layout.
+    runtime_targets: std::collections::BTreeMap<String, loom_ui_core::Rect>,
     next_serial: u64,
     seen: Option<Seen>,
 }
@@ -121,6 +127,15 @@ struct Inner {
 /// view it builds.
 #[derive(Debug, Clone, Default)]
 pub struct Pointer(Rc<RefCell<Inner>>);
+
+/// How a scripted pointer event reached the runtime.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Delivery {
+    /// Iced left the event for the runtime.
+    Unused,
+    /// Iced handled the event. The runtime still cancels conflicting holds.
+    Captured,
+}
 
 impl Pointer {
     /// A pointer that reads the canvas's pointer state for the snapshot
@@ -163,8 +178,41 @@ impl Pointer {
 
     /// Takes the scripted pointer events that Iced's widgets left unused,
     /// in order, for the runtime's layers below Iced.
-    pub(crate) fn take_for_runtime(&self) -> Vec<(Event, Point)> {
+    pub(crate) fn take_for_runtime(&self) -> Vec<(Event, Point, Delivery)> {
         std::mem::take(&mut self.0.borrow_mut().for_runtime)
+    }
+
+    /// Reads current runtime targets before the next injected movement.
+    pub(crate) fn place_runtime_targets<A: loom_ui::App>(&self, panels: &loom_ui::Panels<'_, A>) {
+        let mut inner = self.0.borrow_mut();
+        inner.runtime_targets = inner
+            .queue
+            .iter()
+            .filter_map(|queued| {
+                let (Step::MoveTo(Aim::Target(name))
+                | Step::Toward {
+                    to: Aim::Target(name), ..
+                }) = &queued.step
+                else {
+                    return None;
+                };
+                if !crate::control::may_be_ours(name) {
+                    return None;
+                }
+                panels
+                    .locate(crate::control::ui_id(name).as_ref(), name)
+                    .map(|rect| (name.clone(), rect))
+            })
+            .collect();
+    }
+
+    /// Separates physical input that Iced never received from ordinary statuses.
+    pub(crate) fn take_physical_changes(&self) -> (Vec<loom_ui_core::Event>, Vec<mouse::Button>) {
+        let mut inner = self.0.borrow_mut();
+        (
+            std::mem::take(&mut inner.suppressed),
+            std::mem::take(&mut inner.cancelled),
+        )
     }
 
     /// True when a command is waiting for its events to go in.
@@ -409,6 +457,7 @@ impl<'a, Message> Injector<'a, Message> {
         };
         let Some((at, buttons)) = held else { return };
         for button in buttons {
+            self.pointer.0.borrow_mut().cancelled.push(button);
             let release = Event::Mouse(mouse::Event::ButtonReleased(button));
             self.content.as_widget_mut().update(
                 tree,
@@ -432,7 +481,9 @@ impl<'a, Message> Injector<'a, Message> {
         renderer: &crate::Renderer,
         target: &str,
     ) -> Result<Point, String> {
-        let (found, _, _) = self.find(tree, layout, renderer, Some(target));
+        let runtime = self.pointer.0.borrow().runtime_targets.get(target).copied();
+        let (mut found, _, _) = self.find(tree, layout, renderer, Some(target));
+        found.ours = runtime;
         let rect = crate::control::locate(self.app, target, &found)?;
         let window = layout.bounds();
         if !window.contains(rect.center().to_iced()) {
@@ -520,6 +571,9 @@ impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Mes
                 // The script leads while its command runs. A real release
                 // waits for the command to end.
                 if !inner.queue.is_empty() {
+                    if let Some(event) = crate::iced_bridge::pointers::ours(event) {
+                        inner.suppressed.push(event);
+                    }
                     if let mouse::Event::ButtonReleased(b) = mouse_event {
                         inner.deferred.push(*b);
                     }
@@ -562,11 +616,19 @@ impl<Message> Widget<Message, iced::Theme, crate::Renderer> for Injector<'_, Mes
                 // A pointer event no widget of Iced's took goes on to the
                 // runtime's layers below it, so a script reaches the stats
                 // bar as a real pointer does.
-                if status == iced::event::Status::Ignored
-                    && matches!(injected, Event::Mouse(_))
+                if matches!(injected, Event::Mouse(_))
                     && let Some(at) = at
                 {
-                    self.pointer.0.borrow_mut().for_runtime.push((injected.clone(), at));
+                    let delivery = if status == iced::event::Status::Captured {
+                        Delivery::Captured
+                    } else {
+                        Delivery::Unused
+                    };
+                    self.pointer
+                        .0
+                        .borrow_mut()
+                        .for_runtime
+                        .push((injected.clone(), at, delivery));
                 }
                 // Modifier changes reach the view only (control-channel.md,
                 // Pointer commands).

@@ -56,6 +56,23 @@ pub(crate) fn items(model: &Model) -> Item {
         ..Item::new(id.clone().with("activity"), Kind::Check)
     });
 
+    let modes = crate::preferences::MapMode::ALL;
+    let current = modes
+        .iter()
+        .position(|mode| *mode == model.patch_map)
+        .expect("a map mode");
+    let choose = |index: Option<usize>| {
+        index
+            .and_then(|index| modes.get(index))
+            .map(|&mode| send(Message::Map(Some(mode))))
+    };
+    parts.push(Item {
+        label: Some("Patch map".to_string()),
+        value: Some(model.patch_map.to_string()),
+        step: (choose(Some(current + 1)), choose(current.checked_sub(1))),
+        ..Item::new(id.clone().with("patch_map"), Kind::Choice)
+    });
+
     for part in &model.audio {
         match part {
             Part::Picks(picks) => {

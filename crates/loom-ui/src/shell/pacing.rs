@@ -159,13 +159,13 @@ impl Pacing {
     /// ask for the next one at once: after a shown frame while the
     /// runtime animates, and once after a lost surface. A frame that was
     /// not shown otherwise asks for none, animation or not.
-    pub fn frame_ended(&mut self, drawn: Drawn) -> bool {
+    pub fn frame_ended(&mut self, drawn: Drawn, waits_for_draw: bool) -> bool {
         match drawn {
             Drawn::Shown => {
                 self.retried = false;
                 self.ask(self.frames)
             }
-            Drawn::Retry if !self.retried => {
+            Drawn::Retry | Drawn::Skipped if !self.retried && (drawn == Drawn::Retry || waits_for_draw) => {
                 self.retried = true;
                 self.ask(true)
             }

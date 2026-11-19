@@ -57,6 +57,11 @@ impl Camera {
         self.origin -= screen_delta * (1.0 / self.zoom);
     }
 
+    /// Centres the view on a world point without changing the zoom.
+    pub(crate) fn centre(&mut self, world: Point, size: Size) {
+        self.origin = world - Vector::new(size.width, size.height) * (0.5 / self.zoom);
+    }
+
     /// Zooms by `factor`, keeping the world point under `screen` in place.
     pub fn zoom_at(&mut self, screen: Point, factor: f32) {
         let anchor = self.to_world(screen);

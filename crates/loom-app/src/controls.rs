@@ -39,7 +39,7 @@ impl App {
                         app.alerts.say(format!(
                             "Removed {} from {}",
                             mapping.control,
-                            learn::param_name(&app.session.controller, (module, index))
+                            learn::param_name(&app.session.controller, &app.session.hierarchy, (module, index))
                         ));
                     }
                     Ok(None) => {}
@@ -77,7 +77,7 @@ impl App {
             // A live gesture cannot be mapped (transient-params.md).
             self.alerts.warn(format!(
                 "MIDI learn: {} cannot take MIDI mappings",
-                learn::param_name(&self.session.controller, param)
+                learn::param_name(&self.session.controller, &self.session.hierarchy, param)
             ));
             return;
         }
@@ -89,7 +89,7 @@ impl App {
             self.session.learn.arm(param, serial);
             self.alerts.say(format!(
                 "Move a MIDI control to map it to {}",
-                learn::param_name(&self.session.controller, param)
+                learn::param_name(&self.session.controller, &self.session.hierarchy, param)
             ));
         }
         self.refresh_learn();
@@ -181,8 +181,12 @@ impl App {
                 self.session.learn.disarm();
                 self.commit();
                 if let Some(mapping) = mapping {
-                    self.alerts
-                        .say(learn::mapped_status(&self.session.controller, mapping, &removed));
+                    self.alerts.say(learn::mapped_status(
+                        &self.session.controller,
+                        &self.session.hierarchy,
+                        mapping,
+                        &removed,
+                    ));
                 }
             }
             Err(e) => {
@@ -632,8 +636,8 @@ impl App {
             return;
         };
         let (from, to) = (
-            modulation::source_name(graph, source),
-            modulation::target_name(graph, target, index),
+            modulation::source_name(graph, &self.session.hierarchy, source),
+            modulation::target_name(graph, &self.session.hierarchy, target, index),
         );
         if modulation::exists(graph, source, target, index) {
             self.alerts.warn(format!("{from} already modulates {to}"));
@@ -697,7 +701,7 @@ impl App {
                 self.fan_out_assignment(id, |c, copy| c.set_assignment_depth(copy, depth).map(|_| ()));
                 self.alerts.say(format!(
                     "{}: depth {}",
-                    modulation::source_name(self.session.controller.graph(), a.source),
+                    modulation::source_name(self.session.controller.graph(), &self.session.hierarchy, a.source),
                     modulation::depth_text(depth)
                 ));
             }

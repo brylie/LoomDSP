@@ -825,7 +825,7 @@ pub(crate) mod headless;
 mod measure;
 pub(crate) mod offscreen;
 pub(crate) mod paint;
-mod pointers;
+pub(crate) mod pointers;
 pub(crate) use measure::Measure;
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) use pointers::Pointers;

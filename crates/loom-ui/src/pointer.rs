@@ -33,6 +33,8 @@ pub(crate) struct Pointer {
     /// The element under the pointer, and its layer: the one hover text
     /// reads. At most one layer in one toolkit holds the hover.
     pub(crate) hovered: Option<(Layer, UiId)>,
+    /// Counts hover changes, including ones between frames.
+    pub(crate) hover_moves: u64,
     /// The element a left press went down on, and its layer, until the
     /// release.
     pub(crate) pressed: Option<(Layer, UiId)>,
@@ -48,6 +50,16 @@ pub(crate) struct Pointer {
 }
 
 impl Pointer {
+    /// Updates the hover and records transitions even if it returns before layout.
+    pub(crate) fn set_hover(&mut self, hovered: Option<(Layer, UiId)>) -> bool {
+        if self.hovered == hovered {
+            return false;
+        }
+        self.hovered = hovered;
+        self.hover_moves += 1;
+        true
+    }
+
     /// Forgets the hover and the press: the pointer left the window.
     /// Another toolkit taking a move ends only the hover, so a press held
     /// across it still clicks. A held Space stays, since it is the
@@ -55,7 +67,7 @@ impl Pointer {
     pub(crate) fn clear(&mut self) -> bool {
         self.pressed = None;
         self.at = None;
-        self.hovered.take().is_some()
+        self.set_hover(None)
     }
 
     /// Forgets the hover and the press in layers below `input`, which take
@@ -65,8 +77,7 @@ impl Pointer {
             self.pressed = None;
         }
         if self.hovered.as_ref().is_some_and(|(layer, _)| *layer < input) {
-            self.hovered = None;
-            return true;
+            return self.set_hover(None);
         }
         false
     }
@@ -130,7 +141,11 @@ impl<A: App> Panels<'_, A> {
     fn keeps_hint(&self, event: &Event, point: Point) -> bool {
         matches!(event, Event::Pointer(PointerEvent::Moved))
             && self.window.hint().is_some_and(|hint| {
-                hint.keeps(point) && self.pointer.hovered.as_ref().is_some_and(|(_, id)| *id == hint.source)
+                self.pointer.hovered.as_ref().is_some_and(|(_, id)| *id == hint.source)
+                    && self
+                        .window
+                        .bounds(&hint.source)
+                        .is_some_and(|anchor| hint.keeps(point, anchor))
             })
     }
 
@@ -163,7 +178,7 @@ impl<A: App> Panels<'_, A> {
         }
         Heard {
             taken: false,
-            redraw: self.pointer.hovered.take().is_some(),
+            redraw: self.pointer.set_hover(None),
         }
     }
 
@@ -183,14 +198,20 @@ impl<A: App> Panels<'_, A> {
         let Event::Pointer(pointer) = event else {
             return Heard::default();
         };
-        if matches!(pointer, PointerEvent::Moved) {
+        if matches!(pointer, PointerEvent::Moved | PointerEvent::Pressed(_)) {
             self.pointer.at = Some(point);
         }
         if side == Side::Above && self.keeps_hint(event, point) {
-            // The hover stays on the hint's element, so the hint stays.
+            // Movement on the hint's source itself still counts as pointer input.
+            let on_source = self
+                .pointer
+                .hovered
+                .as_ref()
+                .and_then(|(_, id)| self.window.bounds(id))
+                .is_some_and(|bounds| bounds.contains(point));
             return Heard {
                 taken: true,
-                redraw: false,
+                redraw: on_source && self.note_hover_motion(),
             };
         }
         let hit = self
@@ -205,7 +226,7 @@ impl<A: App> Panels<'_, A> {
                 return Heard::default();
             }
             let redraw = match pointer {
-                PointerEvent::Moved => self.pointer.hovered.take().is_some(),
+                PointerEvent::Moved => self.pointer.set_hover(None),
                 PointerEvent::Released(PointerButton::Left) => {
                     self.pointer.pressed = None;
                     false
@@ -249,12 +270,20 @@ impl<A: App> Panels<'_, A> {
     /// A move onto an element, even the one already hovered, makes the
     /// pointer the latest input for hover text (section 5, rule 11).
     fn hover(&mut self, at: Option<(Layer, UiId)>) -> bool {
-        let changed = self.pointer.hovered != at;
-        if at.is_some() {
-            self.pointer.hint.pointer_moved(self.focus.moves);
-        }
-        self.pointer.hovered = at;
-        changed
+        let changed = self.pointer.set_hover(at);
+        let new_winner = self.pointer.hovered.is_some() && self.note_hover_motion();
+        changed || new_winner
+    }
+
+    /// Records pointer recency and requests a frame when it changes the visible hint.
+    fn note_hover_motion(&mut self) -> bool {
+        let moves = self.focus.moves;
+        let was_last = self.pointer.hint.pointer_last(moves);
+        self.pointer.hint.pointer_moved(moves);
+        !was_last
+            && self.pointer.hovered.as_ref().is_some_and(|(_, id)| {
+                self.window.hover_text_of(id).is_some() && self.window.hint().is_some_and(|shown| &shown.source != id)
+            })
     }
 
     /// Focuses the stop a press at `point` reaches, with no ring, and owes

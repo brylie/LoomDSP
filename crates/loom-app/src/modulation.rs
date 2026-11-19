@@ -50,6 +50,7 @@ impl App {
                     self.alerts.warn(e.to_string());
                 }
                 self.fan_out_assignment(id, |c, copy| c.set_assignment_depth(copy, depth).map(|_| ()));
+                self.refresh_patch_map();
                 self.refresh_values();
             }
             Message::Polarity { id, choice } => {
@@ -70,6 +71,7 @@ impl App {
                     } else {
                         app.fan_out_assignment(id, |c, copy| c.set_assignment_enabled(copy, enabled));
                         app.session.scene.set_modulation_enabled(id.0, enabled);
+                        app.refresh_patch_map();
                     }
                     app.refresh_values();
                 });
@@ -82,8 +84,8 @@ impl App {
                         let graph = app.session.controller.graph();
                         app.alerts.say(format!(
                             "Removed modulation from {} to {}",
-                            source_name(graph, removed.source),
-                            target_name(graph, removed.target, removed.param)
+                            source_name(graph, &app.session.hierarchy, removed.source),
+                            target_name(graph, &app.session.hierarchy, removed.target, removed.param)
                         ));
                     }
                     Err(e) => app.alerts.warn(e.to_string()),
@@ -117,35 +119,53 @@ pub fn exists(graph: &Graph, source: OutputRef, target: ModuleId, param: usize) 
         .any(|(_, a)| a.source == source && a.target == target && a.param == param)
 }
 
-/// "module name #id", as the inspector names a module.
-pub fn module_name(graph: &Graph, module: ModuleId) -> String {
-    match graph.node(module) {
-        Some(node) => format!(
-            "{} #{}",
-            // Only a placeholder is named by its label for now (#526).
-            node.unknown.as_ref().map_or(node.descriptor.name, |unknown| node
-                .label
-                .as_deref()
-                .unwrap_or(&unknown.kind)),
-            module.0
-        ),
-        None => format!("#{}", module.0),
+/// The module name used in the editor.
+pub fn module_name(graph: &Graph, hierarchy: &loom_patch::Hierarchy, module: ModuleId) -> String {
+    let Some(node) = graph.node(module) else {
+        return module.0.to_string();
+    };
+    let level = hierarchy.level_of(module);
+    let duplicate = graph.nodes().any(|(id, other)| {
+        id != module
+            && module_kind(node) == module_kind(other)
+            && hierarchy.level_of(id) == level
+            && !hierarchy.is_hidden(id)
+    });
+    display_name(node, hierarchy.path_of(module).last(), duplicate)
+}
+
+/// The type key used to distinguish duplicates, including unknown modules.
+pub(crate) fn module_kind(node: &loom_core::Node) -> &str {
+    node.unknown
+        .as_ref()
+        .map_or(node.descriptor.id, |unknown| unknown.kind.as_str())
+}
+
+/// A type name disambiguated by the tile's local ID when necessary.
+pub(crate) fn display_name(node: &loom_core::Node, local: u32, duplicate: bool) -> String {
+    let name = node.unknown.as_ref().map_or(node.descriptor.name, |unknown| {
+        node.label.as_deref().unwrap_or(&unknown.kind)
+    });
+    if duplicate {
+        format!("{name} {local}")
+    } else {
+        name.to_string()
     }
 }
 
-/// "module name #id: output label".
-pub fn source_name(graph: &Graph, source: OutputRef) -> String {
+/// Names an output on a module.
+pub fn source_name(graph: &Graph, hierarchy: &loom_patch::Hierarchy, source: OutputRef) -> String {
     let label = graph
         .node(source.module)
         .and_then(|n| n.output_label(source.port))
         .unwrap_or("?");
-    format!("{}: {label}", module_name(graph, source.module))
+    format!("{}: {label}", module_name(graph, hierarchy, source.module))
 }
 
-/// "module name #id: parameter label".
-pub fn target_name(graph: &Graph, target: ModuleId, param: usize) -> String {
+/// Names a parameter on a module.
+pub fn target_name(graph: &Graph, hierarchy: &loom_patch::Hierarchy, target: ModuleId, param: usize) -> String {
     let label = graph.node(target).and_then(|n| n.parameter_label(param)).unwrap_or("?");
-    format!("{}: {label}", module_name(graph, target))
+    format!("{}: {label}", module_name(graph, hierarchy, target))
 }
 
 /// A depth as a signed percentage: "+25%", "-10%", "0%".

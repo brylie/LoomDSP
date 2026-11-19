@@ -269,6 +269,8 @@ pub enum CanvasEvent {
     /// key, a click, a request, or the control going away. It is not an
     /// edit.
     FocusChanged(Option<(u32, usize)>),
+    /// The typed value field opened, closed, or changed without changing controls.
+    TypedFieldChanged,
     /// The gesture ended. It is always sent after a start, also when the
     /// pointer is released outside the window or the window loses focus.
     GestureEnd,

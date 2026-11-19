@@ -149,6 +149,7 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
                 .matrix
                 .model(
                     ui.app().session.controller.graph(),
+                    &ui.app().session.hierarchy,
                     &ui.app().session.selection,
                     ui.app().right_tab
                 )
@@ -188,6 +189,7 @@ fn rows_sort_and_filter_without_editing_assignments() {
     let model = |ui: &Ui| {
         ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
             &ui.app().session.selection,
             ui.app().right_tab,
         )
@@ -238,7 +240,7 @@ fn retarget_keeps_id_order_and_one_undo_step() {
         .graph()
         .assignment(id)
         .expect("first assignment");
-    let target = targets(ui.app().session.controller.graph())
+    let target = targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
         .into_iter()
         .find(|t| t.module == ModuleId(4) && t.param != original.param)
         .expect("another filter parameter");
@@ -268,11 +270,11 @@ fn retarget_keeps_id_order_and_one_undo_step() {
     assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&original));
     ui.app_mut().redo();
     assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&changed));
-    let duplicate = sources(ui.app().session.controller.graph())
+    let duplicate = sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
         .into_iter()
         .find(|s| s.output.module == ModuleId(6))
         .expect("envelope output");
-    let cutoff = targets(ui.app().session.controller.graph())
+    let cutoff = targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
         .into_iter()
         .find(|t| t.module == ModuleId(4) && t.param == original.param)
         .expect("cutoff");
@@ -718,11 +720,11 @@ fn add_duplicate_and_drag_follow_inspector_edits() {
         .graph()
         .assignment(AssignmentId(1))
         .expect("assignment");
-    let source = sources(ui.app().session.controller.graph())
+    let source = sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
         .into_iter()
         .find(|s| s.output == existing.source)
         .expect("source");
-    let target = targets(ui.app().session.controller.graph())
+    let target = targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
         .into_iter()
         .find(|t| (t.module, t.param) == (existing.target, existing.param))
         .expect("target");
@@ -789,6 +791,7 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
             .matrix
             .model(
                 ui.app().session.controller.graph(),
+                &ui.app().session.hierarchy,
                 &ui.app().session.selection,
                 ui.app().right_tab
             )
@@ -821,10 +824,15 @@ fn cards_fit_the_column() {
         .matrix_event(Event::Select(AssignmentId(1), Column::Polarity));
     assert_eq!(ui.app().ui_snapshot().matrix.tab, Tab::Matrix);
 
-    let source = format!("Sample and Hold #{}: Out", hold.0);
+    let source = modulation::source_name(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        OutputRef { module: hold, port: 0 },
+    );
     assert_eq!(source.len(), 24);
     let column = ui.app().session.matrix.model(
         ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
         &ui.app().session.selection,
         ui.app().right_tab,
     );
@@ -1120,6 +1128,7 @@ fn a_card_moved_out_of_view_comes_back_just_inside() {
     let order = |ui: &Ui| {
         let model = ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
             &ui.app().session.selection,
             ui.app().right_tab,
         );

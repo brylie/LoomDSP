@@ -74,6 +74,8 @@ pub struct UiSnapshot {
     pub licence: Option<crate::licence_chooser::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
     pub matrix: MatrixModel,
+    /// The visible signal-flow rows for the shown level.
+    pub(crate) outline: Vec<crate::outline::Row>,
     /// The stats bar's audio numbers.
     pub stats: Stats,
     /// The pointer and what it is on, as the canvas last drew it. `None`
@@ -727,10 +729,13 @@ impl App {
                 .chooser
                 .as_ref()
                 .map(crate::licence_chooser::Chooser::model),
-            matrix: self
-                .session
-                .matrix
-                .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
+            matrix: self.session.matrix.model(
+                self.session.controller.graph(),
+                &self.session.hierarchy,
+                &self.session.selection,
+                self.right_tab,
+            ),
+            outline: self.outline_rows(),
             stats: self.stats_model(),
             pointer: self.pointer_state(),
             typed_field: self.typed_field_state(),

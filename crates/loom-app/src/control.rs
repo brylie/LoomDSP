@@ -33,7 +33,7 @@ mod run;
 mod transport;
 
 use resolve::*;
-pub(crate) use resolve::{Find, may_be_ours, ours_for_pointer, waits_for_ours};
+pub(crate) use resolve::{Find, may_be_ours, ours_for_pointer, ui_id, waits_for_ours};
 pub use resolve::{Found, locate};
 pub use transport::{Listener, close, exit_status, watch};
 
@@ -81,14 +81,12 @@ impl Command {
             | Self::Release { target, x, y, .. }
             | Self::Hover { target, x, y }
             | Self::Scroll { target, x, y, .. } => place(target, x, y),
-            Self::Drag { from, to, .. } => {
-                for end in [from, to] {
-                    if let Value::String(name) = end
-                        && let Some(rect) = ours(name)
-                    {
-                        *end = serde_json::json!([rect.center_x(), rect.center_y()]);
-                        placed = true;
-                    }
+            Self::Drag { from, .. } => {
+                if let Value::String(name) = from
+                    && let Some(rect) = ours(name)
+                {
+                    *from = serde_json::json!([rect.center_x(), rect.center_y()]);
+                    placed = true;
                 }
             }
             _ => {}

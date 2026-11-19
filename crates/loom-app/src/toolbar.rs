@@ -85,6 +85,7 @@ pub(crate) fn message(name: &str) -> Option<Message> {
         "undo" => Message::Undo,
         "redo" => Message::Redo,
         "midi_learn" => Message::Learn(learn::Message::Toggle),
+        "map" => Message::Preferences(settings::Message::Map(None)),
         "preferences" => Message::Preferences(settings::Message::Open),
         _ => return None,
     })
@@ -171,6 +172,13 @@ impl App {
         buttons.push(Button {
             on: Some(self.session.learn.is_on()),
             ..plain("midi_learn", "toolbar/midi_learn", "MIDI learn", Group::Setup)
+        });
+        buttons.push(Button {
+            hover: Some(format!(
+                "Patch map: {}. Press M to cycle.",
+                self.rig.store.saved().patch_map
+            )),
+            ..plain("map", "toolbar/map", "Map", Group::Setup)
         });
         buttons.push(Button {
             hover: shortcut("Cmd+,", "Ctrl+,"),

@@ -24,6 +24,8 @@ pub struct Preferences {
     pub output_safety: OutputSafety,
     /// Show signal activity on connected ports (panels.md, Signal activity).
     pub show_activity: bool,
+    /// When to show the miniature overview of the patch.
+    pub patch_map: MapMode,
     pub audio: AudioPrefs,
     pub midi: MidiPrefs,
     /// The MIDI message that runs panic (panic.md, MIDI trigger). It
@@ -45,6 +47,7 @@ impl Default for Preferences {
         Self {
             output_safety: OutputSafety::default(),
             show_activity: true,
+            patch_map: MapMode::Auto,
             audio: AudioPrefs::default(),
             midi: MidiPrefs::default(),
             panic: None,
@@ -52,6 +55,39 @@ impl Default for Preferences {
             licence: None,
             library: None,
         }
+    }
+}
+
+/// The visibility of the patch overview.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MapMode {
+    /// Show the map when tiles extend beyond the window.
+    #[default]
+    Auto,
+    /// Show the map at every zoom.
+    Always,
+    /// Hide the map.
+    Hidden,
+}
+
+impl MapMode {
+    /// All choices in cycle order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Always, Self::Hidden];
+
+    /// The next choice in the toolbar's cycle.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Auto => Self::Always,
+            Self::Always => Self::Hidden,
+            Self::Hidden => Self::Auto,
+        }
+    }
+}
+
+impl std::fmt::Display for MapMode {
+    /// The choice as shown in Preferences and the status line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
@@ -234,6 +270,9 @@ fn parse(text: &str) -> Result<(Preferences, Vec<String>), String> {
                 );
                 preferences.output_safety = name.parse().unwrap_or_default();
             }
+            "patch_map" => {
+                preferences.patch_map = field(&mut notes, "patch_map", &raw, &MapMode::Auto, |_| true);
+            }
             "show_activity" => {
                 preferences.show_activity = field(&mut notes, "show_activity", &raw, &true, |_| true);
             }
@@ -405,6 +444,7 @@ struct FileOut<'a> {
     version: u32,
     output_safety: &'static str,
     show_activity: bool,
+    patch_map: MapMode,
     audio: AudioOut<'a>,
     midi: &'a MidiPrefs,
     panic: Option<PanicPref>,
@@ -428,6 +468,7 @@ pub fn to_text(preferences: &Preferences) -> String {
         version: VERSION,
         output_safety: preferences.output_safety.name(),
         show_activity: preferences.show_activity,
+        patch_map: preferences.patch_map,
         audio: AudioOut {
             device: &preferences.audio.device,
             input: &preferences.audio.input,

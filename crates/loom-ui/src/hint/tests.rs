@@ -22,22 +22,19 @@ fn the_latest_input_chooses_the_text() {
     let two = (UiId::panel("p").with("two"), "Two".to_string());
     let mut chooser = Chooser::default();
     chooser.pointer_moved(0);
-    assert_eq!(
-        chooser.choose(Some(one.clone()), None, Some(&one.0), 0),
-        Some(one.clone())
-    );
+    assert_eq!(chooser.choose(Some(one.clone()), None, 1, 0), Some(one.clone()));
     // The focus moves to two (move 1) while the pointer rests on one.
     assert_eq!(
-        chooser.choose(Some(one.clone()), Some(two.clone()), Some(&one.0), 1),
+        chooser.choose(Some(one.clone()), Some(two.clone()), 1, 1),
         Some(two.clone())
     );
     // Then the pointer moves.
     chooser.pointer_moved(1);
     assert_eq!(
-        chooser.choose(Some(one.clone()), Some(two.clone()), Some(&one.0), 1),
+        chooser.choose(Some(one.clone()), Some(two.clone()), 1, 1),
         Some(one.clone())
     );
-    assert_eq!(chooser.choose(None, Some(two.clone()), None, 1), Some(two));
+    assert_eq!(chooser.choose(None, Some(two.clone()), 2, 1), Some(two));
 }
 
 /// Escape hides what shows until the focus moves or the hover changes;
@@ -47,15 +44,15 @@ fn escape_hides_until_the_focus_or_the_hover_moves() {
     let one = (UiId::panel("p").with("one"), "One".to_string());
     let mut chooser = Chooser::default();
     chooser.pointer_moved(0);
-    assert!(chooser.hide(Some(&one.0), Some(&one.0), 0));
-    assert!(!chooser.hide(Some(&one.0), Some(&one.0), 0), "already hidden");
-    assert!(!chooser.hide(None, None, 0), "nothing showing");
-    assert_eq!(chooser.choose(Some(one.clone()), None, Some(&one.0), 0), None);
+    assert!(chooser.hide(Some(&one.0), 1, 0));
+    assert!(!chooser.hide(Some(&one.0), 1, 0), "already hidden");
+    assert!(!chooser.hide(None, 0, 0), "nothing showing");
+    assert_eq!(chooser.choose(Some(one.clone()), None, 1, 0), None);
     // The pointer leaves one; the focus, on one, still offers its text.
-    assert_eq!(chooser.choose(None, Some(one.clone()), None, 0), Some(one.clone()));
-    assert!(chooser.hide(Some(&one.0), None, 0));
+    assert_eq!(chooser.choose(None, Some(one.clone()), 2, 0), Some(one.clone()));
+    assert!(chooser.hide(Some(&one.0), 2, 0));
     // The focus moves away and back: the count moved, so it shows again.
-    assert_eq!(chooser.choose(None, Some(one.clone()), None, 2), Some(one));
+    assert_eq!(chooser.choose(None, Some(one.clone()), 2, 2), Some(one));
 }
 
 /// The box goes above its element, left edges aligned; moved in at the
@@ -81,7 +78,7 @@ fn the_box_sits_above_its_element_or_below_it() {
     assert_eq!(shown.rect.x, 10.0);
     assert_eq!(shown.rect.y + shown.rect.height, 150.0 - style.gap, "above, by the gap");
     assert!(
-        shown.keeps(Point::new(20.0, 150.0 - style.gap / 2.0)),
+        shown.keeps(Point::new(20.0, 150.0 - style.gap / 2.0), low),
         "the gap keeps it"
     );
 
@@ -119,6 +116,8 @@ enum Message {
     Input(Layer),
     /// Move the bar's buttons right by 100, or back.
     Shift(bool),
+    /// Removes the hovered source.
+    Remove,
     /// Show a question with a button that has hover text, or not.
     Question(bool),
 }
@@ -131,6 +130,8 @@ struct Hints {
     input: Layer,
     /// The bar's buttons are 100 to the right.
     shifted: bool,
+    /// Whether button a is present.
+    removed: bool,
     /// A question shows.
     question: bool,
 }
@@ -156,6 +157,7 @@ impl App for Hints {
         match &message {
             Message::Input(layer) => self.input = *layer,
             Message::Shift(on) => self.shifted = *on,
+            Message::Remove => self.removed = true,
             Message::Question(on) => self.question = *on,
             Message::Clicked(_) => {}
         }
@@ -164,20 +166,29 @@ impl App for Hints {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("bar"), Layer::Panels, &self.shifted, |shifted| {
-            let gap = if *shifted { 100.0 } else { 0.0 };
-            Element::column([
-                Element::space(Length::Shrink, Length::FILL),
-                Element::row([
-                    Element::space(Length::Fixed(gap), Length::Fixed(1.0)).min_width(gap),
-                    button("a", Some("First")),
-                    button("b", Some("Second")),
-                    button("c", None),
-                ]),
-            ])
-            .width(Length::FILL)
-            .height(Length::FILL)
-        });
+        view.panel_with(
+            UiId::panel("bar"),
+            Layer::Panels,
+            &(self.shifted, self.removed),
+            |(shifted, removed)| {
+                let gap = if *shifted { 100.0 } else { 0.0 };
+                Element::column([
+                    Element::space(Length::Shrink, Length::FILL),
+                    Element::row([
+                        Element::space(Length::Fixed(gap), Length::Fixed(1.0)).min_width(gap),
+                        if *removed {
+                            Element::space(Length::Fixed(40.0), Length::Shrink)
+                        } else {
+                            button("a", Some("First"))
+                        },
+                        button("b", Some("Second")),
+                        button("c", None),
+                    ]),
+                ])
+                .width(Length::FILL)
+                .height(Length::FILL)
+            },
+        );
         if self.question {
             view.panel_with(UiId::panel("ask"), Layer::Question, &(), |_| {
                 Element::column([
@@ -215,6 +226,7 @@ fn harness() -> Harness<Hints, NoTarget> {
         heard: Vec::new(),
         input: Layer::Canvas,
         shifted: false,
+        removed: false,
         question: false,
     };
     let mut harness = Harness::new(app, NoTarget, window, Instant::now());
@@ -311,6 +323,18 @@ fn escape_hides_hover_text() {
     assert_eq!(showing(&harness).as_deref(), Some("bar/a"), "a shows again");
 }
 
+/// A hover round trip between layouts ends Escape suppression.
+#[test]
+fn leaving_and_returning_before_layout_restores_the_hint() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    step(&mut harness, key(Key::Escape, false));
+    harness.step(at(250.0, 20.0, PointerEvent::Moved));
+    harness.step(at(20.0, ROW, PointerEvent::Moved));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(showing(&harness).as_deref(), Some("bar/a"));
+}
+
 /// The pointer moving from the element onto its hover text keeps it
 /// showing; a press there goes through, as if the text were not there.
 #[test]
@@ -397,7 +421,8 @@ fn a_move_within_the_hovered_element_is_the_latest_input() {
     step(&mut harness, at(60.0, ROW, PointerEvent::Moved));
     step(&mut harness, key(Key::Tab, false));
     assert_eq!(showing(&harness).as_deref(), Some("bar/a"));
-    step(&mut harness, at(65.0, ROW, PointerEvent::Moved));
+    assert!(harness.step(at(65.0, ROW, PointerEvent::Moved)).draw);
+    harness.lay_out(&mut Mono::default());
     assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
 }
 
@@ -453,4 +478,54 @@ fn a_questions_hover_text_is_painted_above_the_question() {
     assert_eq!(showing(&harness).as_deref(), Some("ask/ok"));
     let (_, _, panels) = harness.parts();
     assert_eq!(panels.window.hint().map(|hint| hint.layer), Some(Layer::Question));
+}
+
+/// A press supplies the current pointer point even without a preceding move.
+#[test]
+fn a_press_replaces_an_older_pointer_position() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    step(&mut harness, at(60.0, ROW, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("bar").with("b")));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
+}
+
+/// The old strip cannot preserve hover when its anchor moves sideways.
+#[test]
+fn a_relayout_moves_the_hint_keep_strip() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    let (_, hint) = harness.runtime().hover_text().expect("hover text");
+    let y = hint.y + hint.height + 1.0;
+    step(&mut harness, at(20.0, y, PointerEvent::Moved));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/a"));
+    harness.send(Message::Shift(true));
+    harness.lay_out(&mut Mono::default());
+    assert!(harness.runtime().hovered().is_none());
+    assert_eq!(showing(&harness), None);
+}
+
+/// A removed source cannot stay hovered even while the pointer is on its old box.
+#[test]
+fn removing_a_hint_source_ends_its_hover() {
+    let mut harness = harness();
+    step(&mut harness, at(20.0, ROW, PointerEvent::Moved));
+    let (_, hint) = harness.runtime().hover_text().expect("hover text");
+    step(&mut harness, at(hint.center_x(), hint.center_y(), PointerEvent::Moved));
+    harness.send(Message::Remove);
+    harness.lay_out(&mut Mono::default());
+    assert!(harness.runtime().hovered().is_none());
+    assert_eq!(showing(&harness), None);
+}
+
+/// Movement on the currently showing hint's source outranks focus before a layout.
+#[test]
+fn a_move_on_the_kept_source_is_the_latest_input() {
+    let mut harness = harness();
+    step(&mut harness, at(60.0, ROW, PointerEvent::Moved));
+    assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
+    harness.step(key(Key::Tab, false));
+    harness.step(at(65.0, ROW, PointerEvent::Moved));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(showing(&harness).as_deref(), Some("bar/b"));
 }

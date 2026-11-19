@@ -94,12 +94,12 @@ impl App {
     pub(crate) fn matrix_items(&self) -> Vec<Item> {
         let graph = self.session.controller.graph();
         let state = &self.session.matrix;
-        let model = state.model(graph, &self.session.selection, self.right_tab);
+        let model = state.model(graph, &self.session.hierarchy, &self.session.selection, self.right_tab);
         // Each pick list once per build, not once per row and direction:
         // each pick carries a name made for it.
         let picks = Picks {
-            sources: sources(graph),
-            targets: targets(graph),
+            sources: sources(graph, &self.session.hierarchy),
+            targets: targets(graph, &self.session.hierarchy),
         };
         let mut parts = vec![
             Item {

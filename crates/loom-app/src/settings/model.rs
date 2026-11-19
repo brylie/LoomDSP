@@ -22,6 +22,8 @@ pub(crate) struct Model {
     pub safety_notes: Vec<Note>,
     /// Show signal activity on ports.
     pub activity: bool,
+    /// Whether the miniature map is shown.
+    pub patch_map: crate::preferences::MapMode,
     /// The audio section's parts, in screen order: its lists and notes.
     pub audio: Vec<Part>,
     /// The MIDI section's parts, in screen order: a switch per input and
@@ -222,6 +224,7 @@ impl App {
             safety,
             safety_notes,
             activity: saved.show_activity,
+            patch_map: saved.patch_map,
             audio: self.audio_parts(window),
             midi: self.midi_parts(window),
             panic: Panic {

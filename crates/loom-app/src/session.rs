@@ -84,6 +84,9 @@ pub(crate) struct PatchSession {
     /// left (clock.md, Starting and stopping).
     pub(crate) run_driven: bool,
     pub(crate) scene: Scene,
+    pub(crate) patch_map: crate::patch_map::PatchMap,
+    /// The outline and cable-follow state for the open patch.
+    pub(crate) outline: crate::outline::State,
     /// The mode values the scene was built with (ADR-0030). A change
     /// rebuilds the scene, so hidden controls follow the mode.
     pub(crate) mode_key: Vec<(u32, usize, i64)>,
@@ -204,6 +207,7 @@ impl PatchSession {
         };
 
         let scene = scene::build(&controller, &hierarchy, &ModulePath::root(), &positions, &sizes);
+        let patch_map = crate::patch_map::PatchMap::new(&controller, &hierarchy, &ModulePath::root(), &scene);
         let mode_key = scene::mode_key(&controller);
         let mut values = PanelValues::new();
         scene::update_panel_values(&mut values, &controller, &hierarchy, &BTreeMap::new());
@@ -233,6 +237,8 @@ impl PatchSession {
             matrix: matrix::State::default(),
             run_driven,
             scene,
+            patch_map,
+            outline: crate::outline::State::default(),
             mode_key,
             values,
             lights: BTreeMap::new(),

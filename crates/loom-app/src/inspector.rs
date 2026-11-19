@@ -1029,8 +1029,13 @@ impl App {
                         id: assignment_id.0,
                         text: format!(
                             "{} → {}",
-                            modulation::source_name(graph, assignment.source),
-                            modulation::target_name(graph, assignment.target, assignment.param)
+                            modulation::source_name(graph, &self.session.hierarchy, assignment.source),
+                            modulation::target_name(
+                                graph,
+                                &self.session.hierarchy,
+                                assignment.target,
+                                assignment.param
+                            )
                         ),
                     });
                 }
@@ -1042,7 +1047,7 @@ impl App {
                         text: format!(
                             "{} → {}",
                             mapping.control,
-                            modulation::target_name(graph, mapping.target, mapping.param)
+                            modulation::target_name(graph, &self.session.hierarchy, mapping.target, mapping.param)
                         ),
                     });
                 }
@@ -1122,7 +1127,7 @@ impl App {
                 let own = modulation::source_polarity(graph, a.source);
                 AssignmentRow {
                     id,
-                    source: modulation::source_name(graph, a.source),
+                    source: modulation::source_name(graph, &self.session.hierarchy, a.source),
                     depth: a.depth,
                     depth_text: modulation::depth_text(a.depth),
                     polarity: PolarityChoice::of(a.polarity, own),
@@ -1145,7 +1150,7 @@ impl App {
             .filter(|source| hierarchy.level_of(source.module) == level)
             .map(|source| SourceRow {
                 source,
-                name: modulation::source_name(graph, source),
+                name: modulation::source_name(graph, &self.session.hierarchy, source),
                 enabled: !modulation::exists(graph, source, ModuleId(module), index),
             })
             .collect()
@@ -1168,7 +1173,7 @@ impl App {
                     .map(|(id, a)| {
                         let mut line = format!(
                             "{}, {}",
-                            modulation::target_name(graph, a.target, a.param),
+                            modulation::target_name(graph, &self.session.hierarchy, a.target, a.param),
                             modulation::depth_text(a.depth)
                         );
                         if !a.enabled {

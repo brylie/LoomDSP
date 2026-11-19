@@ -4028,7 +4028,7 @@ fn a_new_canvas_reports_nothing_under_the_pointer_and_no_field() {
     let pointer = input.pointer(&model);
     assert_eq!((pointer.hover, pointer.pinned), (None, None));
     assert!(pointer.drag.is_none());
-    assert!(input.typed().is_none());
+    assert!(input.focus.typed().is_none());
 }
 
 /// The next deadline is the earlier of the arrow group closing and hover

@@ -21,8 +21,8 @@ pub(crate) struct TypedField {
     pub(crate) draft: TypedDraft,
     /// Where the caret is, as a byte index on a character boundary.
     pub(crate) caret: usize,
-    /// True while the whole text is selected, so a character replaces it.
-    pub(crate) selected: bool,
+    /// Where the selection began, as a byte index.
+    pub(crate) anchor: usize,
     /// The value text it opened with. Enter with this text changes nothing,
     /// because the text shown is rounded (panel-widgets.md, Typing a value).
     unchanged: Option<String>,
@@ -35,7 +35,7 @@ impl TypedField {
         Self {
             draft: TypedDraft::new(text.to_string(), check),
             caret: text.len(),
-            selected: false,
+            anchor: text.len(),
             unchanged: None,
         }
     }
@@ -47,7 +47,7 @@ impl TypedField {
     pub(super) fn opened(shown: String, check: impl FnOnce(&str) -> Result<(), String>) -> Self {
         Self {
             caret: shown.len(),
-            selected: true,
+            anchor: 0,
             unchanged: Some(shown.clone()),
             draft: TypedDraft::new(shown, check),
         }
@@ -55,12 +55,10 @@ impl TypedField {
 
     /// Inserts typed text at the caret, or in place of the selected text.
     fn insert(&mut self, typed: &str) {
-        if std::mem::take(&mut self.selected) {
-            self.draft.text.clear();
-            self.caret = 0;
-        }
+        self.clear_selected();
         self.draft.text.insert_str(self.caret, typed);
         self.caret += typed.len();
+        self.anchor = self.caret;
     }
 
     /// The caret position one character before the caret.
@@ -79,14 +77,27 @@ impl TypedField {
             .map_or(self.caret, |c| self.caret + c.len_utf8())
     }
 
+    /// The byte range covered by the selection.
+    pub(crate) fn selection(&self) -> std::ops::Range<usize> {
+        self.anchor.min(self.caret)..self.anchor.max(self.caret)
+    }
+
     /// Clears the selected text, if any. Returns true if it did.
     fn clear_selected(&mut self) -> bool {
-        let selected = std::mem::take(&mut self.selected);
-        if selected {
-            self.draft.text.clear();
-            self.caret = 0;
+        let range = self.selection();
+        if range.is_empty() {
+            return false;
         }
-        selected
+        self.caret = range.start;
+        self.anchor = range.start;
+        self.draft.text.replace_range(range, "");
+        true
+    }
+
+    /// Moves the caret and ends the selection.
+    fn move_to(&mut self, position: usize) {
+        self.caret = position;
+        self.anchor = position;
     }
 }
 
@@ -114,6 +125,39 @@ pub(crate) fn typed_reason_bounds(field: Rect, width: f32, bounds: Rect) -> Rect
 }
 
 impl CanvasModel<'_> {
+    /// Applies a text request to the same editor the canvas keys edit.
+    pub(super) fn edit_typed_request(&self, state: &mut CanvasInput, out: &mut Reaction) {
+        let (key, request) = self.typed_request;
+        if key == std::mem::replace(&mut state.typed_key, key) {
+            return;
+        }
+        let Some(request) = request else { return };
+        let (module, widget) = request.control;
+        if state.focus.control() != Some(request.control) {
+            return;
+        }
+        let Some(mut field) = state.focus.take_typing() else {
+            return;
+        };
+        if request.text == field.draft.text {
+            match &request.edit {
+                super::TypedEdit::Select { anchor, caret }
+                    if field.draft.text.is_char_boundary(*anchor) && field.draft.text.is_char_boundary(*caret) =>
+                {
+                    field.anchor = *anchor;
+                    field.caret = *caret;
+                }
+                super::TypedEdit::Replace(text) if !text.chars().any(char::is_control) => {
+                    field.insert(text);
+                    field.draft.recheck(self.draft_check(module, widget));
+                }
+                _ => {}
+            }
+            out.redraw();
+        }
+        state.focus.open_typing(field);
+    }
+
     /// The check for text typed on `widget` of `module`: why it is not a
     /// value, if it is not. Only the app knows the parameter, so it is the
     /// app's check (see [`CanvasModel::typed_check`]).
@@ -236,7 +280,7 @@ impl CanvasModel<'_> {
                         if !field.clear_selected() && field.caret > 0 {
                             let at = field.before();
                             field.draft.text.remove(at);
-                            field.caret = at;
+                            field.move_to(at);
                         }
                     }
                     Key::Delete => {
@@ -245,27 +289,15 @@ impl CanvasModel<'_> {
                         }
                     }
                     Key::Left => {
-                        field.caret = if std::mem::take(&mut field.selected) {
-                            0
-                        } else {
-                            field.before()
-                        };
+                        let range = field.selection();
+                        field.move_to(if range.is_empty() { field.before() } else { range.start });
                     }
                     Key::Right => {
-                        field.caret = if std::mem::take(&mut field.selected) {
-                            field.draft.text.len()
-                        } else {
-                            field.after()
-                        };
+                        let range = field.selection();
+                        field.move_to(if range.is_empty() { field.after() } else { range.end });
                     }
-                    Key::Home => {
-                        field.selected = false;
-                        field.caret = 0;
-                    }
-                    Key::End => {
-                        field.selected = false;
-                        field.caret = field.draft.text.len();
-                    }
+                    Key::Home => field.move_to(0),
+                    Key::End => field.move_to(field.draft.text.len()),
                     _ if modifiers.shortcut() || modifiers.control || modifiers.alt => {}
                     _ => {
                         if let Some(typed) = text.filter(|typed| !typed.chars().any(char::is_control)) {

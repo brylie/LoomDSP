@@ -1060,6 +1060,10 @@ pub fn build_with_clock(
     // Inputs with a cable: they no longer follow their default, so they
     // show no clock mark (panels.md, Clock mark on transport inputs).
     let cabled: BTreeSet<InputRef> = graph.cables().map(|(_, to)| to).collect();
+    let mut kind_count = BTreeMap::new();
+    for (_, node) in graph.nodes().filter(|(id, _)| on_level(*id)) {
+        *kind_count.entry(crate::modulation::module_kind(node)).or_insert(0usize) += 1;
+    }
     let mut modules: Vec<ModuleView> = graph
         .nodes()
         .filter(|(id, _)| on_level(*id))
@@ -1113,18 +1117,15 @@ pub fn build_with_clock(
                 size: sizes.get(&id.0).copied(),
                 unknown: node.unknown.is_some(),
                 id: id.0,
-                // Only a placeholder shows its label for now; known modules
-                // keep theirs without showing it (clipboard.md, rule 9, #526).
-                title: node.unknown.as_ref().map_or_else(
-                    || {
-                        if let Some(source) = clock_source.filter(|_| d.role.is_transport()) {
-                            format!("Following {source} clock")
-                        } else {
-                            d.name.to_string()
-                        }
-                    },
-                    |unknown| node.label.clone().unwrap_or_else(|| unknown.kind.clone()),
-                ),
+                title: if let Some(source) = clock_source.filter(|_| d.role.is_transport()) {
+                    format!("Following {source} clock")
+                } else {
+                    crate::modulation::display_name(
+                        node,
+                        hierarchy.path_of(id).last(),
+                        kind_count[crate::modulation::module_kind(node)] > 1,
+                    )
+                },
                 accent: family_colour(d.family),
                 // The header's hover text: family first, so colour is
                 // never the only cue (ADR-0029), and the type ID as the name.

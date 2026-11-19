@@ -412,6 +412,9 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             let (below, above) = self.paint_panels(&mut parts, frame, &theme);
             panels.set(&target, below, above);
         }
+        if app.pointer.waiting() {
+            app.pointer.place_runtime_targets(&parts.panels);
+        }
         let mut messages = Vec::new();
         let window = size(&parts);
         let drawn = self.with_ui(app, window, |ui, renderer, cursor, clipboard| {
@@ -460,7 +463,10 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         }
         // The control channel's scripted pointer events go into Iced on a
         // redraw, so what Iced left of them goes on to our layers here.
-        if super::pointers::hand_scripted(app.pointer.take_for_runtime(), &mut parts.panels) {
+        let (_, cancelled) = app.pointer.take_physical_changes();
+        if super::pointers::hand_scripted(app.pointer.take_for_runtime(), &mut parts.panels)
+            | super::pointers::cancel_holds(cancelled, &mut parts.panels)
+        {
             self.redraw = Redraw::NextFrame;
         }
     }
@@ -508,8 +514,12 @@ impl super::pointers::IcedSide for WindowIced<'_> {
         Some(statuses)
     }
 
-    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)> {
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point, crate::pointer::Delivery)> {
         self.app.pointer.take_for_runtime()
+    }
+
+    fn physical_changes(&mut self) -> (Vec<loom_ui_core::Event>, Vec<iced::mouse::Button>) {
+        self.app.pointer.take_physical_changes()
     }
 }
 
