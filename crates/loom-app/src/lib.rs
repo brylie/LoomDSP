@@ -694,8 +694,12 @@ impl Message {
             | Self::Licence(_)
             | Self::OpenRecent
             | Self::Recent(_)
-            | Self::DismissError(_)
-            | Self::Pasted { .. } => false,
+            | Self::DismissError(_) => false,
+            // A refused read says so even under a question, since a read
+            // that began before the question opened can end during it, and
+            // a refusal must never pass silently; it changes no patch. A read
+            // with text waits out the question, as other edits do.
+            Self::Pasted { text, .. } => *text == loom_ui::ClipboardText::Refused,
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Tests for the clipboard thread, over a fake backend, so they run in CI
 //! with no display.
 
-use super::{Backend, Clipboard, READ_NOW_LIMIT, answer};
+use super::{BACKEND_READ_LIMIT, Backend, Clipboard, READ_NOW_LIMIT, answer};
 use crate::effect::ClipboardText;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -43,7 +43,7 @@ fn read(clipboard: &Clipboard) -> ClipboardText {
 /// what was written. An empty clipboard reads `Empty`.
 #[test]
 fn a_write_then_a_read_run_in_order() {
-    let clipboard = Clipboard::new(Fake::default());
+    let clipboard = Clipboard::new(Fake::default);
     assert_eq!(read(&clipboard), ClipboardText::Empty);
     clipboard.write("osc".to_owned());
     assert_eq!(read(&clipboard), ClipboardText::Text("osc".to_owned()));
@@ -54,7 +54,7 @@ fn a_write_then_a_read_run_in_order() {
 fn a_refused_read_is_not_empty() {
     let fake = Fake::default();
     *fake.refuse.lock().unwrap() = true;
-    let clipboard = Clipboard::new(fake);
+    let clipboard = Clipboard::new(move || fake.clone());
     clipboard.write("osc".to_owned());
     assert_eq!(read(&clipboard), ClipboardText::Refused);
 }
@@ -63,7 +63,7 @@ fn a_refused_read_is_not_empty() {
 /// a toolkit bridge, waits for the same thread.
 #[test]
 fn clones_share_the_clipboard() {
-    let clipboard = Clipboard::new(Fake::default());
+    let clipboard = Clipboard::new(Fake::default);
     let other = clipboard.clone();
     other.write("filter".to_owned());
     assert_eq!(clipboard.read_now(), ClipboardText::Text("filter".to_owned()));
@@ -116,9 +116,15 @@ impl Backend for Stuck {
 #[test]
 fn a_stuck_clipboard_does_not_freeze_a_synchronous_read() {
     let (release, released) = mpsc::channel();
-    let clipboard = Clipboard::new(Stuck {
+    let mut stuck = Some(Stuck {
         release: released,
         first: true,
+    });
+    let clipboard = Clipboard::new(move || {
+        stuck.take().unwrap_or_else(|| Stuck {
+            release: mpsc::channel().1,
+            first: false,
+        })
     });
     let started = std::time::Instant::now();
     assert_eq!(clipboard.read_now(), ClipboardText::Refused);
@@ -144,28 +150,54 @@ fn arboards_answers_map_to_clipboard_text() {
     );
 }
 
-/// A backend that fails hard, ending its thread on the first read.
-struct Broken;
+/// A backend that fails hard on its first read, as a panic in the system's
+/// clipboard code would, then works.
+struct Broken {
+    first: bool,
+}
 
 impl Backend for Broken {
     fn get(&mut self) -> ClipboardText {
-        panic!("the clipboard's thread ends here, on purpose");
+        assert!(!std::mem::take(&mut self.first), "the read fails hard, on purpose");
+        ClipboardText::Text("again".to_owned())
     }
 
     fn set(&mut self, _text: String) {}
 }
 
-/// With its thread gone, a read answers `Refused` at once, never waits,
-/// and a write is lost quietly: the app goes on.
+/// A read whose backend fails hard answers `Refused` at once, and the
+/// clipboard's thread goes on with a backend opened again.
 #[test]
-fn a_dead_clipboard_thread_answers_refused() {
-    let clipboard = Clipboard::new(Broken);
-    // The first read ends the thread; its answer is never given.
-    let (sender, answer) = mpsc::channel();
-    clipboard.read(move |text| {
-        let _ = sender.send(text);
+fn a_backend_that_fails_hard_answers_refused_and_the_thread_goes_on() {
+    let mut first = true;
+    let clipboard = Clipboard::new(move || Broken {
+        first: std::mem::take(&mut first),
     });
-    assert!(answer.recv_timeout(WAIT).is_err(), "the thread ended before answering");
-    clipboard.write("lost".to_owned());
     assert_eq!(read(&clipboard), ClipboardText::Refused);
+    assert_eq!(read(&clipboard), ClipboardText::Text("again".to_owned()));
+}
+
+/// A read that never finishes, as a Wayland transfer whose owner stops
+/// sending, holds no later job: after the backend's limit it answers
+/// `Refused`, and the next read and write go through a backend opened
+/// again, while the stuck one is still stuck.
+#[test]
+fn a_stuck_read_does_not_hold_the_clipboards_thread() {
+    let (_never, never) = mpsc::channel::<()>();
+    let mut stuck = Some(Stuck {
+        release: never,
+        first: true,
+    });
+    let clipboard = Clipboard::new(move || {
+        stuck.take().unwrap_or_else(|| Stuck {
+            release: mpsc::channel().1,
+            first: false,
+        })
+    });
+    assert_eq!(
+        read(&clipboard),
+        ClipboardText::Refused,
+        "within the limit, {BACKEND_READ_LIMIT:?}"
+    );
+    assert_eq!(read(&clipboard), ClipboardText::Text("late".to_owned()));
 }

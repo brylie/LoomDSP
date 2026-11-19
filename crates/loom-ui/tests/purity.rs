@@ -208,11 +208,14 @@ fn the_required_dependencies_are_loom_ui_core_and_taffy() {
     );
 }
 
-/// Only the clipboard's own file names `arboard`, so every other part of
-/// the crate reaches the system clipboard through `loom_ui::clipboard`.
+/// Only the clipboard's own files name `arboard` (`clipboard.rs` and its
+/// tests), so every other part of the crate reaches the system clipboard
+/// through `loom_ui::clipboard`.
 #[test]
 fn only_the_clipboard_names_arboard() {
-    let (scanned, found) = scan(&["arboard"], |path| path != Path::new("clipboard.rs"));
+    let (scanned, found) = scan(&["arboard"], |path| {
+        path != Path::new("clipboard.rs") && !path.starts_with("clipboard")
+    });
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
 }

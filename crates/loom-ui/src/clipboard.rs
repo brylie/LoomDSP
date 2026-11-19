@@ -31,6 +31,16 @@ use std::time::Duration;
 /// that did not work, which the status message then explains.
 pub const READ_NOW_LIMIT: Duration = Duration::from_millis(250);
 
+/// How long the clipboard's thread waits for one read from its backend
+/// before it answers [`ClipboardText::Refused`] and goes on to the next job
+/// with a backend opened again. *Why:* an owner that never answers must not
+/// hold every later read and write. On Wayland, `arboard` reads a transfer
+/// with no limit of its own; on X11 it waits 4 seconds, then answers as if
+/// the clipboard were empty. A second is shorter than that, so a clipboard
+/// that does not answer reads as refused, never empty, and is long enough
+/// for one that answers at all.
+pub const BACKEND_READ_LIMIT: Duration = Duration::from_secs(1);
+
 /// What the clipboard thread reads and writes through: the system's
 /// clipboard, or a fake in a test.
 pub trait Backend: Send + 'static {
@@ -61,20 +71,34 @@ impl std::fmt::Debug for Clipboard {
 }
 
 impl Clipboard {
-    /// A clipboard thread over `backend`. The thread ends when the last
-    /// handle goes.
-    pub fn new(backend: impl Backend) -> Self {
+    /// A clipboard thread over the backend `open` makes, opening another
+    /// after a read that did not finish in time. The thread ends when the
+    /// last handle goes.
+    pub fn new<B: Backend>(open: impl FnMut() -> B + Send + 'static) -> Self {
         let (jobs, queue) = mpsc::channel::<Job>();
-        let mut backend = backend;
+        let mut open = open;
         // A failed spawn leaves the queue dropped, so every read answers
         // `Refused` and every write is lost: the app still never waits.
         let _ = std::thread::Builder::new()
             .name("loom-ui clipboard".to_owned())
             .spawn(move || {
+                let mut backend: Option<B> = None;
                 for job in queue {
                     match job {
-                        Job::Write(text) => backend.set(text),
-                        Job::Read(answer) => answer(backend.get()),
+                        Job::Write(text) => backend.get_or_insert_with(&mut open).set(text),
+                        Job::Read(answer) => {
+                            let current = backend.take().unwrap_or_else(&mut open);
+                            match read_backend(current, BACKEND_READ_LIMIT) {
+                                Some((text, kept)) => {
+                                    backend = Some(kept);
+                                    answer(text);
+                                }
+                                // The read is stuck or failed: its backend
+                                // stays with it, and the next job opens
+                                // another.
+                                None => answer(ClipboardText::Refused),
+                            }
+                        }
                     }
                 }
             });
@@ -84,7 +108,7 @@ impl Clipboard {
     /// The system clipboard, one for the process, made on first use.
     pub fn system() -> Self {
         static SYSTEM: OnceLock<Clipboard> = OnceLock::new();
-        SYSTEM.get_or_init(|| Self::new(System::default())).clone()
+        SYSTEM.get_or_init(|| Self::new(System::default)).clone()
     }
 
     /// Puts `text` on the clipboard, and does not wait.
@@ -107,16 +131,11 @@ impl Clipboard {
     /// draws (a bridge, gone in phase 4); a driver uses [`read`](Self::read).
     /// An answer that comes later goes to a channel no one holds.
     pub fn read_now(&self) -> ClipboardText {
-        self.read_within(READ_NOW_LIMIT)
-    }
-
-    /// [`read_now`](Self::read_now), waiting at most `limit`.
-    fn read_within(&self, limit: Duration) -> ClipboardText {
         let (sender, answer) = mpsc::channel();
         self.read(move |text| {
             let _ = sender.send(text);
         });
-        answer.recv_timeout(limit).unwrap_or(ClipboardText::Refused)
+        answer.recv_timeout(READ_NOW_LIMIT).unwrap_or(ClipboardText::Refused)
     }
 }
 
@@ -155,6 +174,22 @@ impl Backend for System {
             self.clipboard = None;
         }
     }
+}
+
+/// One read from `backend` on a thread of its own, waiting at most
+/// `limit`: the answer and the backend back, or `None` when the read did
+/// not finish in time or its backend failed hard. A read that is late holds
+/// only its own thread and backend.
+fn read_backend<B: Backend>(mut backend: B, limit: Duration) -> Option<(ClipboardText, B)> {
+    let (sender, answer) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("loom-ui clipboard read".to_owned())
+        .spawn(move || {
+            let text = backend.get();
+            let _ = sender.send((text, backend));
+        })
+        .ok()?;
+    answer.recv_timeout(limit).ok()
 }
 
 /// What `arboard`'s read gave, as a [`ClipboardText`]: no text on the

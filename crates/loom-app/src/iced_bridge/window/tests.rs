@@ -209,7 +209,7 @@ impl loom_ui::clipboard::Backend for Memory {
 fn iceds_widgets_use_the_shells_clipboard() {
     use iced::advanced::Clipboard as _;
     use iced::advanced::clipboard::Kind;
-    let mut clipboard = super::IcedClipboard(loom_ui::clipboard::Clipboard::new(Memory::default()));
+    let mut clipboard = super::IcedClipboard(loom_ui::clipboard::Clipboard::new(Memory::default));
     clipboard.write(Kind::Standard, "osc".to_owned());
     assert_eq!(clipboard.read(Kind::Standard), Some("osc".to_owned()));
     clipboard.write(Kind::Primary, "ignored".to_owned());

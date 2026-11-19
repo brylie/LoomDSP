@@ -807,23 +807,25 @@ impl App {
 
     /// Pastes clipboard text with its top-left corner at a world point.
     pub(crate) fn paste(&mut self, world: Point, text: loom_ui::ClipboardText) {
+        // A read that could not complete is said so, never shown as an
+        // empty clipboard (ui-layer.md, section 8, rule 2), even during a
+        // drag: it changes nothing. The status line is what a screen reader
+        // announces.
+        if text == loom_ui::ClipboardText::Refused {
+            self.alerts.warn(clipboard::COULD_NOT_READ.to_string());
+            return;
+        }
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
         }
-        // A read that could not complete is said so, never shown as an
-        // empty clipboard (ui-layer.md, section 8, rule 2). The status line
-        // is what a screen reader announces.
         let text = match text {
             loom_ui::ClipboardText::Text(text) => text,
             loom_ui::ClipboardText::Empty => {
                 self.alerts.warn(clipboard::NOTHING_TO_PASTE.to_string());
                 return;
             }
-            loom_ui::ClipboardText::Refused => {
-                self.alerts.warn(clipboard::COULD_NOT_READ.to_string());
-                return;
-            }
+            loom_ui::ClipboardText::Refused => return,
         };
         match clipboard::Group::from_text(&text, self.session.controller.registry()) {
             Ok(group) => {

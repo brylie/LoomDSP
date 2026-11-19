@@ -1103,6 +1103,35 @@ fn a_refused_clipboard_read_says_so() {
     assert!(app.session.edits.history.undo_step().is_none());
 }
 
+/// A refusal is said even while a drag is open, since it changes nothing,
+/// and even under a question, since a read begun before the question opened
+/// can end during it. A read with text still waits out both.
+#[test]
+fn a_refusal_is_said_during_a_drag_and_under_a_question() {
+    let mut app = app();
+    app.session.edits.start_gesture();
+    app.paste(Point::ORIGIN, loom_ui::ClipboardText::Refused);
+    assert_eq!(app.alerts.status(), clipboard::COULD_NOT_READ);
+
+    let mut app = self::app();
+    app.overlays.question = Some(crate::question::Question::error("Waiting".to_string()));
+    let generation = app.generation;
+    let refused = Message::Pasted {
+        world: Point::ORIGIN,
+        text: loom_ui::ClipboardText::Refused,
+        generation,
+    };
+    let text = Message::Pasted {
+        world: Point::ORIGIN,
+        text: loom_ui::ClipboardText::Text("osc".into()),
+        generation,
+    };
+    assert!(refused.allowed_during_question(), "a refusal is heard under a question");
+    assert!(!text.allowed_during_question(), "text waits out the question");
+    let _ = app.send(refused);
+    assert_eq!(app.alerts.status(), clipboard::COULD_NOT_READ);
+}
+
 #[test]
 fn clipboard_keys_go_to_the_browser_while_it_is_open() {
     let mut app = app();

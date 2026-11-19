@@ -37,7 +37,7 @@ impl crate::clipboard::Backend for Memory {
 fn driver() -> ShellDriver<u32, NoServices> {
     ShellDriver {
         services: NoServices,
-        clipboard: crate::clipboard::Clipboard::new(Memory::default()),
+        clipboard: crate::clipboard::Clipboard::new(Memory::default),
         access: None,
         window: None,
         captures: Vec::new(),
