@@ -8,7 +8,7 @@ use crate::{
     settings, stream,
 };
 use iced::{Color, Theme};
-use loom_core::{Controller, EngineConfig, EngineParts, TRANSPORT_MODULE, create_engine};
+use loom_core::{Controller, EngineConfig, EngineParts, create_engine};
 use loom_host_desktop::AudioOutput;
 use loom_patch::{FlatIds, Hierarchy, Library, Metadata, ModulePath, Patch};
 use std::collections::BTreeMap;
@@ -69,7 +69,7 @@ impl App {
         notes.extend(audio_notes);
         if let (Some(path), Ok(output)) = (&args.record, &output) {
             match loom_host_desktop::Recorder::start(path, output.sample_rate()) {
-                Ok(recorder) => rig.recorder = Some(recorder),
+                Ok(recorder) => rig.output.recorder = Some(recorder),
                 Err(e) => {
                     let note = format!("Not recording: {e}.");
                     eprintln!("loom-app: {note}");
@@ -381,10 +381,12 @@ impl Loaded {
         // Every patch has one Transport (clock.md). A loaded file gets one
         // in `load_into`; a new or generated patch gets it here.
         hierarchy.adopt(controller.graph());
-        if controller.transport_module().is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
+        if controller.transport_module().is_none()
+            && let Some(descriptor) = controller.registry().transport()
+        {
             let (_, id) = hierarchy.new_module(&ModulePath::root()).map_err(|e| e.to_string())?;
             controller
-                .add_module_with_id(id, TRANSPORT_MODULE)
+                .add_module_with_id(id, descriptor.id)
                 .map_err(|e| e.to_string())?;
             controller.commit().map_err(|e| e.to_string())?;
         }

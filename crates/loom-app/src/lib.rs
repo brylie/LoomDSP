@@ -991,7 +991,7 @@ impl App {
             &self.session.level,
             &self.session.positions,
             &self.session.sizes,
-            self.rig.following_clock.as_deref(),
+            self.rig.midi.following_clock.as_deref(),
         );
         self.session.mode_key = scene::mode_key(&self.session.controller);
         self.refresh_values();
@@ -1012,7 +1012,7 @@ impl App {
                 &self.session.level,
                 &self.session.positions,
                 &self.session.sizes,
-                self.rig.following_clock.as_deref(),
+                self.rig.midi.following_clock.as_deref(),
             );
             self.session.mode_key = mode_key;
         }
@@ -1061,7 +1061,12 @@ impl App {
             self.alerts.note_dropouts(s.overruns + s.stream_errors, now);
         }
         // A recording that stopped early (a full disk) is reported once.
-        if let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
+        if let Some(error) = self
+            .rig
+            .output
+            .recorder
+            .as_ref()
+            .and_then(loom_host_desktop::Recorder::error)
             && self.alerts.recording_stopped()
         {
             self.alerts
@@ -2274,7 +2279,7 @@ impl App {
     /// drives `run`, the input decides, so Space changes nothing. Without a
     /// Transport, it starts or stops the engine's transport directly.
     fn toggle_run(&mut self) {
-        if self.rig.following_clock.is_some() {
+        if self.rig.midi.following_clock.is_some() {
             return;
         }
         let Some((transport, index)) = transport_run(&self.session.controller) else {
@@ -2303,7 +2308,7 @@ impl App {
     /// takes that state, so it shows the truth and works again.
     fn keep_run_state(&mut self) {
         let driven = run_is_driven(&self.session.controller);
-        if self.rig.following_clock.is_none()
+        if self.rig.midi.following_clock.is_none()
             && self.session.run_driven
             && !driven
             && let Some((transport, index)) = transport_run(&self.session.controller)

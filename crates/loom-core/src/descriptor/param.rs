@@ -1,7 +1,8 @@
 //! Parameter descriptions: range, mapping, options, and text.
 
-use super::format::{db_to_gain, decibel_text, gain_to_db, list_text, number_text, parse_decibels};
+use super::format::{decibel_text, list_text, number_text, parse_decibels};
 use super::lint::is_blank;
+use loom_dsp::decibels::{db_to_gain, gain_to_db};
 
 /// One parameter.
 ///

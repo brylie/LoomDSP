@@ -15,9 +15,7 @@
 //! definition's and a module's are its descriptor's.
 
 use loom_canvas::GRID;
-use loom_core::{
-    AssignmentId, Controller, Graph, ModuleId, ModuleNames, ModuleRole, Polarity, Registry, RoleDescriptor,
-};
+use loom_core::{AssignmentId, Controller, Graph, ModuleId, ModuleNames, Polarity, Registry, RoleDescriptor};
 use loom_patch::{
     End, Hierarchy, INPUT_KIND, Layout, ModulePath, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchModulation,
     PatchModule, PatchPolarity, ResolveError, ResolveOptions, ResolvedModule, SUBPATCH_KIND, SubPatch, Tile,
@@ -201,6 +199,7 @@ impl Group {
     /// left out too: the clipboard holds no ports.
     pub fn from_selection(
         graph: &Graph,
+        registry: &Registry,
         hierarchy: &Hierarchy,
         level: &ModulePath,
         positions: &BTreeMap<u32, (f32, f32)>,
@@ -220,7 +219,7 @@ impl Group {
                         .unknown
                         .as_ref()
                         .map_or_else(|| node.descriptor.kind(), |unknown| unknown.kind.clone());
-                    !loom_patch::library::is_patch_wide(&kind)
+                    !loom_patch::library::is_patch_wide(registry, &kind)
                 }),
                 Some(Tile::Instance(_) | Tile::Slot(_)) => true,
                 Some(Tile::Port(..)) | None => false,
@@ -364,7 +363,7 @@ impl Group {
         let (dropped, kept): (Vec<&PatchModule>, Vec<&PatchModule>) = patch
             .modules
             .iter()
-            .partition(|m| loom_patch::library::is_patch_wide(&m.kind));
+            .partition(|m| loom_patch::library::is_patch_wide(registry, &m.kind));
         let dropped_ids: BTreeSet<u32> = dropped.iter().map(|m| m.id).collect();
         let left_out: Vec<String> = dropped
             .iter()
@@ -723,11 +722,7 @@ impl Group {
     /// such module inside it, at every depth.
     pub fn check(&self, controller: &Controller) -> Result<(), String> {
         let registry = controller.registry();
-        let takes_slot = |kind: &str| {
-            registry
-                .resolve(kind)
-                .map_or(true, |d| matches!(d.role, ModuleRole::Dsp(_)))
-        };
+        let takes_slot = |kind: &str| registry.resolve(kind).map_or(true, |d| d.role.factory().is_some());
         let count_definition = |key: &str| -> usize {
             let Some(definition) = self.definitions.get(key) else {
                 return 0;
@@ -752,7 +747,7 @@ impl Group {
             .members
             .iter()
             .map(|member| match member {
-                Member::Module(module) => usize::from(matches!(module.descriptor.role, ModuleRole::Dsp(_))),
+                Member::Module(module) => usize::from(module.descriptor.role.factory().is_some()),
                 Member::Instance(instance) => count_definition(&instance.key),
                 Member::Slot(slot) => slot.part.as_ref().map_or(0, |part| match &part.subpatch {
                     Some(key) => count_definition(key),

@@ -131,9 +131,9 @@ impl App {
         })
     }
 
-    /// Follows control changes: mapped parameters on screen, and the armed
-    /// parameter in learn mode.
-    pub(crate) fn midi_arrived(&mut self) {
+    /// Imports the values played by mapped controls. Returns whether any
+    /// parameter changed so callers can refresh the controls.
+    pub(crate) fn sync_midi_values(&mut self) -> bool {
         // A control moving a value inside a linked sub-patch that is not
         // exposed changes its stored copy: an edit inside, which unlinks
         // it like any other, so what plays is what saves. The check costs
@@ -143,6 +143,13 @@ impl App {
         if moved && let Some(before) = linked {
             self.unlink_changed(&before);
         }
+        moved
+    }
+
+    /// Follows control changes: mapped parameters on screen, and the armed
+    /// parameter in learn mode.
+    pub(crate) fn midi_arrived(&mut self) {
+        let moved = self.sync_midi_values();
         if self.refresh_ghosts() || moved {
             self.refresh_values();
         }
@@ -570,7 +577,7 @@ impl App {
                 .graph()
                 .node(ModuleId(module))
                 .is_some_and(|node| {
-                    node.descriptor.id == loom_core::TRANSPORT_MODULE
+                    node.descriptor.role.is_transport()
                         && node
                             .descriptor
                             .params

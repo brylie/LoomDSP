@@ -237,7 +237,7 @@ impl Node {
 
     /// True for modules the engine runs itself (unit delay, audio output).
     pub fn is_intrinsic(&self) -> bool {
-        !matches!(self.descriptor.role, ModuleRole::Dsp(_))
+        self.descriptor.role.factory().is_none()
     }
 }
 

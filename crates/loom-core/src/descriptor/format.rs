@@ -1,5 +1,7 @@
 //! Text for numbers, notes, and gains, shared by parameters and displays.
 
+use loom_dsp::decibels::{db_to_gain, gain_to_db};
+
 /// Names joined as a sentence lists them: "A or B", "A, B, or C".
 pub(super) fn list_text(names: &[&str]) -> String {
     match names {
@@ -18,16 +20,6 @@ pub fn number_text(value: f32) -> String {
     } else {
         value.to_string()
     }
-}
-
-/// A gain in decibels. A gain of 0 gives negative infinity.
-pub(super) fn gain_to_db(gain: f32) -> f32 {
-    20.0 * gain.log10()
-}
-
-/// The gain of a value in decibels.
-pub(super) fn db_to_gain(db: f32) -> f32 {
-    10.0_f32.powf(db / 20.0)
 }
 
 /// A gain as a player reads it: "−6.0 dB", "0.0 dB", "+6.0 dB", or "−∞ dB".

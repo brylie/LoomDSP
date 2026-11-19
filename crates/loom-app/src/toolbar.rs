@@ -42,6 +42,23 @@ pub struct Button {
     /// The buttons it sits with.
     #[serde(skip)]
     pub(crate) group: Group,
+    /// The command error, when this button is disabled.
+    #[serde(skip)]
+    pub(crate) disabled: Option<&'static str>,
+}
+
+impl Button {
+    /// The message for an enabled button.
+    pub(crate) fn press(&self) -> Option<Message> {
+        self.enabled.then(|| message(self.name)).flatten()
+    }
+
+    /// Applies the same availability rule to the view and commands.
+    fn blocked(mut self, reason: Option<&'static str>) -> Self {
+        self.enabled = reason.is_none();
+        self.disabled = reason;
+        self
+    }
 }
 
 /// The toolbar's buttons, in the order they are drawn.
@@ -83,6 +100,7 @@ fn plain(name: &'static str, id: &'static str, label: &'static str, group: Group
         on: None,
         id,
         group,
+        disabled: None,
     }
 }
 
@@ -113,9 +131,9 @@ impl App {
             ..plain("browse", "toolbar/browse", "Browse", Group::File)
         });
         buttons.push(Button {
-            enabled: !self.rig.recent.files().is_empty(),
             hover: Some(self.recent_hover().to_string()),
             ..plain("recent", "toolbar/recent", "Recent", Group::File)
+                .blocked(self.rig.recent.files().is_empty().then(|| self.recent_hover()))
         });
         buttons.push(Button {
             hover: Some("Or press A over the canvas, or double-click empty canvas".to_string()),
@@ -123,7 +141,6 @@ impl App {
         });
         // Disabled controls say why (visual-system.md, Status messages).
         buttons.push(Button {
-            enabled: self.session.engine.midi.is_some(),
             hover: self.hold_hover().map(str::to_string),
             ..plain(
                 "hold",
@@ -135,6 +152,7 @@ impl App {
                 },
                 Group::Play,
             )
+            .blocked(self.hold_hover())
         });
         buttons.push(Button {
             hover: shortcut("Silence everything: Cmd+.", "Silence everything: Ctrl+."),
@@ -144,10 +162,10 @@ impl App {
             ("undo", "toolbar/undo", "Undo", self.undo_hint(), false),
             ("redo", "toolbar/redo", "Redo", self.redo_hint(), true),
         ] {
+            let disabled = hint.as_ref().err().map(|block| block.press_error(redo));
             buttons.push(Button {
-                enabled: hint.is_ok(),
                 hover: Some(hint.unwrap_or_else(|block| block.hover(redo).to_string())),
-                ..plain(name, id, label, Group::Edit)
+                ..plain(name, id, label, Group::Edit).blocked(disabled)
             });
         }
         buttons.push(Button {

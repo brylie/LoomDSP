@@ -3,7 +3,7 @@
 
 use crate::{App, Message, browser};
 use loom_canvas::{BrowserPlacement, GRID, PortRef, TILE_WIDTH};
-use loom_core::{ModuleId, OutputRef, TRANSPORT_MODULE};
+use loom_core::{ModuleId, OutputRef};
 use loom_patch::{Direction, End, Hierarchy, INPUT_KIND, ModulePath, OUTPUT_KIND, Tile};
 use loom_ui_core::{Point, Rect, Size};
 use std::collections::BTreeSet;
@@ -443,7 +443,8 @@ impl App {
         if let Some(why) = self.session.hierarchy.level_refusal(&self.session.level) {
             return Some(why);
         }
-        (!self.session.level.is_root() && kind == TRANSPORT_MODULE).then(|| NO_TRANSPORT_INSIDE.to_string())
+        (!self.session.level.is_root() && self.session.controller.registry().is_transport_kind(kind))
+            .then(|| NO_TRANSPORT_INSIDE.to_string())
     }
 
     /// Inside a sub-patch, a Patch input or output from the browser is a

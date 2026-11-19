@@ -595,10 +595,7 @@ pub fn update_panel_values_dragging(
                         });
                         // While a cable drives the Transport's run input, the
                         // Run toggle shows the state it sets (clock.md).
-                        let value = if controller.follows_midi_clock()
-                            && d.id == loom_core::TRANSPORT_MODULE
-                            && w.binds("tempo")
-                        {
+                        let value = if controller.follows_midi_clock() && d.role.is_transport() && w.binds("tempo") {
                             ((controller.rendered_tempo().unwrap_or(f64::from(value)) * 10.0).round() / 10.0) as f32
                         } else {
                             driven_run(controller, id, w).unwrap_or(value)
@@ -1120,7 +1117,7 @@ pub fn build_with_clock(
                 // keep theirs without showing it (clipboard.md, rule 9, #526).
                 title: node.unknown.as_ref().map_or_else(
                     || {
-                        if let Some(source) = clock_source.filter(|_| d.id == loom_core::TRANSPORT_MODULE) {
+                        if let Some(source) = clock_source.filter(|_| d.role.is_transport()) {
                             format!("Following {source} clock")
                         } else {
                             d.name.to_string()
@@ -1152,7 +1149,7 @@ pub fn build_with_clock(
                     // Exposing).
                     for (w, view) in d.panel.widgets.iter().zip(panel.widgets.iter_mut()) {
                         if clock_source.is_some()
-                            && d.id == loom_core::TRANSPORT_MODULE
+                            && d.role.is_transport()
                             && ["tempo", "run", "reset"].iter().any(|param| w.binds(param))
                         {
                             view.inert = true;

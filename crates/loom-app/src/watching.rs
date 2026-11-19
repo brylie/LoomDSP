@@ -293,7 +293,7 @@ impl App {
     /// parameters to follow, or learn mode waiting for MIDI.
     fn learn_watch(&self) -> Option<learn::Watch> {
         let mapped = self.session.controller.graph().midi_mappings().next().is_some();
-        (mapped || self.session.learn.is_on() || self.rig.panic_learn.is_some()).then(|| learn::Watch {
+        (mapped || self.session.learn.is_on() || self.rig.midi.panic_learn.is_some()).then(|| learn::Watch {
             reader: self.session.controller.midi_reader(),
             generation: self.generation,
         })
@@ -303,12 +303,12 @@ impl App {
     /// thread, which wakes the UI only when it changes; a test host is
     /// polled from the UI by a timer instead (`subscriptions.rs`).
     fn midi_port_watch(&self) -> Option<devices::MidiWatch> {
-        if self.rig.midi_in.is_none() || self.rig.flags.no_midi {
+        if self.rig.midi.input.is_none() || self.rig.flags.no_midi {
             return None;
         }
         self.rig.host.midi_lister().map(|list| devices::MidiWatch {
             list,
-            seen: self.rig.seen_midi.clone(),
+            seen: self.rig.midi.seen_midi.clone(),
             generation: self.generation,
         })
     }

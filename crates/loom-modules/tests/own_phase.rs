@@ -8,7 +8,7 @@
 //! new module is checked without anyone adding it here.
 
 use loom_core::testing::run;
-use loom_core::{ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault};
+use loom_core::{ModuleConfig, ModuleDescriptor, PortDefault};
 
 const RATE: f32 = 48_000.0;
 const FRAMES: usize = 4_800;
@@ -18,7 +18,7 @@ const FRAMES: usize = 4_800;
 fn own_phase_modules() -> Vec<(&'static ModuleDescriptor, usize)> {
     loom_modules::registry()
         .iter()
-        .filter(|d| matches!(d.role, ModuleRole::Dsp(_)))
+        .filter(|d| d.role.factory().is_some())
         .filter_map(|d| {
             d.inputs
                 .iter()
@@ -33,7 +33,7 @@ fn own_phase_modules() -> Vec<(&'static ModuleDescriptor, usize)> {
 /// any other input reads zeros: what an own phase feeds, and what bar phase,
 /// beat phase, and the play gate read on the stopped transport `run` uses.
 fn render(descriptor: &ModuleDescriptor, phase_in: usize, cabled: bool) -> Vec<f32> {
-    let ModuleRole::Dsp(create) = descriptor.role else {
+    let Some(create) = descriptor.role.factory() else {
         unreachable!("filtered to DSP modules")
     };
     let mut module = create(&ModuleConfig {

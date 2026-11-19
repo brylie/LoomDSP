@@ -1243,7 +1243,7 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     );
     assert_eq!(view.armed, Some((2, 0)), "the surface control shows as armed");
 
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, 64])
@@ -1332,7 +1332,7 @@ fn waiting_pickup_at(app: &mut App, value: u8) {
         .map_midi_with(control, svf, cutoff, options)
         .unwrap();
     app.commit();
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value])

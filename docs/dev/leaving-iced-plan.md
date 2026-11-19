@@ -15,7 +15,7 @@ Replace Iced with a thin UI layer of our own, one step at a time, so that:
 3. Text shaping and drawing still come from existing crates. We do not write a text shaper, a font loader, or a glyph rasteriser.
 4. Every test that runs today still runs, and agents can still drive the running app (control channel, screenshots, `--dump-ui`) at every step.
 
-The app must build, pass `mise run check`, and behave the same for a user after every phase. Each phase is one pull request, or a short series. No phase leaves the app half on one stack and half broken.
+The app must build, pass `mise run check`, and behave the same for a user after every phase, apart from a change that is decided and listed in its pull request ([spec design goal 5](../design/ui-layer.md#design-goals)). Each phase is one pull request, or a short series. No phase leaves the app half on one stack and half broken.
 
 ## Read first
 
@@ -65,16 +65,16 @@ Measured at commit `6091e52`.
 
 ### Parity gates
 
-Run all of these at the end of each phase and list the results in the pull request.
+Run all of these at the end of each phase and list the results in the pull request. They catch change no one meant, not change that was decided: a deliberate move away from today's look or behaviour is allowed once it is decided and listed in its pull request ([spec design goal 5](../design/ui-layer.md#design-goals)).
 
 - `mise run check`, including the 80% coverage gate.
 - All `loom-app` tests pass with no change to what they assert. Changes to harness internals are allowed. Changes to expected values need a reason in the pull request.
-- The control channel examples in `docs/design/control-channel.md` give the same replies, run through `--control-script`.
-- `--screenshot-window` for `examples/patches/subtractive.ron` with `--select 4`, before and after, compared by eye and with a pixel difference. Small differences in text anti-aliasing are fine; layout shifts are not.
+- The control channel examples in `docs/design/control-channel.md` give the same replies, run through `--control-script`. A reply that a decided change alters is listed in the pull request, with the change and the new reply; every other reply stays the same.
+- `--screenshot-window` for `examples/patches/subtractive.ron` with `--select 4`, before and after, compared by eye and with a pixel difference. Small differences in text anti-aliasing are fine; layout shifts are not, except where a decided change moves something or changes how it looks: the pull request names it, shows the before and after, and the rest of the window still matches.
 - `--measure-idle --bench-seconds 10` on `subtractive.ron`: CPU and redraw counts no worse than before (NFR-PERF-04).
 - `--generate 300 --bench`: frame rate no worse than before.
 - From phase 1 on: a VoiceOver check on macOS, recorded in the pull request (which controls were read, which could be changed).
-- In phase 3, **each view's layout changes once, when it moves.** Our layout follows flexbox's defaults, not Iced's ([spec](../design/ui-layer.md), section 5, rule 5), so a view's sizes and places may move by a few pixels when it moves to our widgets. At that step, the `--screenshot-window` pixel diff is identical outside the moved view's bounds and may differ inside them; every `locate` answer is recorded before and after, and the pull request lists each one that changed, with its old and new rectangle; and a changed expected value in a test is listed with its reason. That screenshot is then the new baseline, and the identical gate resumes from that step on. *Why:* a layout engine that is not Iced's places things differently, and a gate per view keeps each move visible and small, as the text gate does for text widths (spec section 8, rule 6).
+- In phase 3, **each view's layout changes once, when it moves.** Our layout follows flexbox's defaults, not Iced's ([spec](../design/ui-layer.md), section 5, rule 5), so a view's sizes and places may move by a few pixels when it moves to our widgets. At that step, the `--screenshot-window` pixel diff is identical outside the moved view's bounds, except where the same pull request lists a decided change, and may differ inside them; every `locate` answer is recorded before and after, and the pull request lists each one that changed, with its old and new rectangle; and a changed expected value in a test is listed with its reason. That screenshot is then the new baseline, and the identical gate resumes from that step on. *Why:* a layout engine that is not Iced's places things differently, and a gate per view keeps each move visible and small, as the text gate does for text widths (spec section 8, rule 6).
 
 ## Phase 0: Decide and specify
 
@@ -468,7 +468,7 @@ Stop and ask the maintainer if any of these happen:
 
 - Plugin window embedding (OQ-13). The shell should not block it, but this plan does not build it.
 - The web target (ADR-0026).
-- Visual redesign. Every view looks the same after each phase.
+- Visual redesign. Every view looks the same after each phase, unless a change to it is decided and listed in its pull request ([spec design goal 5](../design/ui-layer.md#design-goals)). A redesign is still out of scope.
 - Any change to the engine crates. `loom-core`, `loom-dsp`, `loom-modules`, `loom-patch`, and `loom-rt` stay as they are and never depend on UI crates.
 
 ## Unverified facts

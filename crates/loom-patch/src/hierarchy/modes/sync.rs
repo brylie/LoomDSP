@@ -33,7 +33,7 @@ impl Hierarchy {
             .collect();
         let needed = added
             .iter()
-            .filter(|(_, module)| matches!(module.module.descriptor.role, loom_core::ModuleRole::Dsp(_)))
+            .filter(|(_, module)| module.module.descriptor.role.factory().is_some())
             .count();
         if needed > controller.free_module_slots() {
             return Err(loom_core::LoomError::TooManyModules(controller.config().max_modules).into());

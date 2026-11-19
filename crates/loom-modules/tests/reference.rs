@@ -5,7 +5,7 @@
 //! update the files with `LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules`,
 //! listen to them, and commit them.
 
-use loom_core::{MidiEvent, ModuleRole, TransportSettings};
+use loom_core::{MidiEvent, TransportSettings};
 use loom_modules::{
     ALL, clock, display, dynamics, env, eq, filter, gate, io, level, lfo, logic, math, midi, mix, osc, phase, rand,
     route, structure, time, transport, ui,
@@ -858,7 +858,7 @@ fn every_dsp_module_has_a_reference_test() {
     ]
     .map(|descriptor| descriptor.id);
     for descriptor in ALL {
-        if matches!(descriptor.role, ModuleRole::Dsp(_)) {
+        if descriptor.role.factory().is_some() {
             assert!(
                 tested.contains(&descriptor.id),
                 "{} has no reference test",

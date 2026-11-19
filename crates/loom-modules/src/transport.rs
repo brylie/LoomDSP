@@ -21,10 +21,8 @@ use loom_core::{
 /// The denominator names, in order from 0: powers of two.
 const DENOMINATORS: &[&str] = &["1", "2", "4", "8", "16"];
 
-/// `loom.clock.transport`: the patch's tempo, time signature, run, and
-/// reset, on a panel and as inputs, and the transport's signals as outputs.
-/// Every patch has exactly one.
-pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
+/// The Transport port and parameter layout, shared with its role declaration.
+const TRANSPORT_LAYOUT: ModuleDescriptor = ModuleDescriptor {
     id: TRANSPORT_MODULE,
     version: 1,
     name: "Transport",
@@ -198,6 +196,15 @@ pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
     roles: &[],
 };
 
+/// `loom.clock.transport`: the panel, inputs and outputs of the patch clock.
+pub static TRANSPORT: ModuleDescriptor = ModuleDescriptor {
+    role: ModuleRole::Transport {
+        create: TRANSPORT_LAYOUT.role.factory().unwrap(),
+        run_input: TRANSPORT_LAYOUT.input_index("run").unwrap(),
+    },
+    ..TRANSPORT_LAYOUT
+};
+
 /// Parameter indices.
 const TEMPO: usize = TRANSPORT.param_index("tempo").unwrap();
 const NUMERATOR: usize = TRANSPORT.param_index("numerator").unwrap();
@@ -206,7 +213,7 @@ const RUN: usize = TRANSPORT.param_index("run").unwrap();
 const RESET: usize = TRANSPORT.param_index("reset").unwrap();
 
 /// Input indices.
-const RUN_IN: usize = TRANSPORT.input_index("run").unwrap();
+const RUN_IN: usize = TRANSPORT.role.transport_run_input().unwrap();
 const RESET_IN: usize = TRANSPORT.input_index("reset").unwrap();
 
 /// State for `loom.clock.transport`.

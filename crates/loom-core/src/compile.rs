@@ -98,6 +98,10 @@ const RIGHT_FILL: u64 = 1 << 31;
 pub struct FeedbackLoop {
     /// Every module in the loop, sorted by ID.
     pub modules: Vec<ModuleId>,
+    /// The order used for each sample. Explicit unit delays supply their
+    /// held samples first, then the DSP modules run in dependency order.
+    /// Compiler-inserted delays have no module ID and are listed separately.
+    pub run_order: Vec<ModuleId>,
     /// Cables where the compiler inserted a one-sample delay. Empty when the
     /// loop already contains a user unit delay in every cycle.
     pub inserted_delays: Vec<(OutputRef, InputRef)>,
@@ -261,7 +265,7 @@ impl<'a> Layout<'a> {
 
     /// True when the module at `v` is a DSP module, which runs as an operation.
     fn is_dsp(&self, v: usize) -> bool {
-        matches!(self.nodes[v].descriptor.role, ModuleRole::Dsp(_))
+        self.nodes[v].descriptor.role.factory().is_some()
     }
 
     /// True when `from` carries stereo.

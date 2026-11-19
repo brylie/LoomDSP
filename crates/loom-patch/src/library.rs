@@ -20,7 +20,7 @@
 
 use crate::flatten::port_name;
 use crate::{Exposed, INPUT_KIND, LoadWarning, OUTPUT_KIND, Patch, PatchCable, PatchModule, SubPatch, unique_name};
-use loom_core::{Registry, TRANSPORT_MODULE};
+use loom_core::Registry;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The Scale and tuning module's id (`docs/design/scale-and-tuning.md`,
@@ -101,9 +101,9 @@ impl LeftOut {
 /// True for a module kind that lives only at the top level of a patch: the
 /// Transport and the Scale and tuning module (rule 8). The version is not
 /// looked at, so a file from another build is still handled.
-pub fn is_patch_wide(kind: &str) -> bool {
+pub fn is_patch_wide(registry: &Registry, kind: &str) -> bool {
     let id = kind.split('@').next().unwrap_or(kind);
-    id == TRANSPORT_MODULE || id == SCALE_MODULE
+    id == SCALE_MODULE || registry.is_transport_kind(id)
 }
 
 impl SubPatch {
@@ -123,7 +123,7 @@ impl SubPatch {
     /// under their own keys.
     pub fn from_patch(file: &Patch, registry: &Registry, library: Option<&str>) -> (Self, Vec<LeftOut>) {
         let (dropped, kept): (Vec<&PatchModule>, Vec<&PatchModule>) =
-            file.modules.iter().partition(|m| is_patch_wide(&m.kind));
+            file.modules.iter().partition(|m| is_patch_wide(registry, &m.kind));
         let dropped_ids: BTreeSet<u32> = dropped.iter().map(|m| m.id).collect();
         let touches_dropped = |a: u32, b: u32| dropped_ids.contains(&a) || dropped_ids.contains(&b);
         // A flat file may list two cables into one input and keep the

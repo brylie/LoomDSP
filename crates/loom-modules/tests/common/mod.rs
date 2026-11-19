@@ -3,8 +3,8 @@
 #![allow(dead_code)]
 
 use loom_core::{
-    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleDescriptor, ModuleId, ModuleRole, OutputSafety,
-    ParamSpec, ProbeId, TimeSignature, TransportSettings, create_engine,
+    EngineConfig, EngineParts, MeterReading, MidiEvent, ModuleDescriptor, ModuleId, OutputSafety, ParamSpec, ProbeId,
+    TimeSignature, TransportSettings, create_engine,
 };
 use loom_modules::ALL;
 use loom_patch::Patch;
@@ -38,7 +38,7 @@ pub fn busy(hz: f32) -> Signal {
 pub fn dsp_modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
     ALL.iter()
         .copied()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
+        .filter(|descriptor| descriptor.role.factory().is_some())
 }
 
 /// Frequencies for [`busy_each`], in Hz. No one is a multiple of another, so two

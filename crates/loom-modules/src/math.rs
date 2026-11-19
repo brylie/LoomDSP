@@ -526,8 +526,8 @@ impl Convert {
     /// for a finite input. A NaN input stays NaN.
     fn convert(&self, x: f32) -> f32 {
         match self.mode {
-            0 => 10.0_f32.powf(x.clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB) / 20.0),
-            1 => (20.0 * x.abs().log10()).clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB),
+            0 => loom_dsp::decibels::db_to_gain(x.clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB)),
+            1 => loom_dsp::decibels::gain_to_db(x.abs()).clamp(CONVERT_FLOOR_DB, CONVERT_CEIL_DB),
             // Not `min`: it would turn NaN into a number.
             2 => loom_core::signal::pitch::to_hz(if x > CONVERT_CEIL_PITCH { CONVERT_CEIL_PITCH } else { x }),
             _ => loom_core::signal::pitch::from_hz(x.clamp(CONVERT_FLOOR_HZ, CONVERT_CEIL_HZ)),

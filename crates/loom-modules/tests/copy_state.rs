@@ -287,7 +287,7 @@ fn a_copy_refuses_another_type() {
         max_block: 512,
     };
     let make = |descriptor: &ModuleDescriptor| match descriptor.role {
-        ModuleRole::Dsp(factory) => factory(&config),
+        ModuleRole::Dsp(factory) | ModuleRole::Transport { create: factory, .. } => factory(&config),
         _ => unreachable!("DSP modules only"),
     };
     let mut svf = make(&loom_modules::filter::SVF);

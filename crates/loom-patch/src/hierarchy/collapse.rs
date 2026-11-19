@@ -11,7 +11,7 @@ impl Hierarchy {
     pub fn collapse(&mut self, graph: &Graph, level: &ModulePath, selection: &[u32]) -> Result<Collapsed, String> {
         let is_outside_kind = |id: ModuleId| {
             graph.node(id).is_some_and(|node| {
-                node.descriptor.id == TRANSPORT_MODULE
+                node.descriptor.role.is_transport()
                     || (level.is_root()
                         && (node.descriptor.kind() == INPUT_KIND || node.descriptor.kind() == OUTPUT_KIND))
             })

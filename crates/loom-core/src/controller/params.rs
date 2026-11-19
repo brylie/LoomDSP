@@ -228,7 +228,7 @@ impl Controller {
         let mut starting = 0;
         let mut stopping = 0;
         for (&id, node) in &self.graph.nodes {
-            if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+            if node.descriptor.role.factory().is_none() {
                 continue;
             }
             let sides = if widths.per_channel.contains(&id) { 2 } else { 1 };

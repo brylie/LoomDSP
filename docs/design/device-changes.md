@@ -34,6 +34,8 @@ configuration. The rig may seed that engine before audio starts and re-track its
 inputs after a callback has already run. Only a physical disconnect or connection
 reset clears the retained configuration; beginning note tracking never erases it.
 
+If the engine command queue is full, the app retries note tracking and release on the next MIDI poll. The ID of a closed input stays reserved until the queue accepts its release. Open host connections survive a restart while the new engine takes over tracking.
+
 Hold note (the app's own button) is its own source and is not released by a device removal.
 
 ### Acceptance criteria

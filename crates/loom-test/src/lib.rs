@@ -36,8 +36,8 @@ pub use reference::{UPDATE_VAR, check_channels};
 pub use signal::Signal;
 
 use loom_core::{
-    MidiEvent, Module, ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault, SignalType, TransportInfo,
-    TransportSettings, testing,
+    MidiEvent, Module, ModuleConfig, ModuleDescriptor, PortDefault, SignalType, TransportInfo, TransportSettings,
+    testing,
 };
 use std::path::Path;
 
@@ -196,7 +196,7 @@ impl Harness {
     #[track_caller]
     pub fn new(descriptor: &'static ModuleDescriptor) -> Self {
         assert!(
-            matches!(descriptor.role, ModuleRole::Dsp(_)),
+            descriptor.role.factory().is_some(),
             "{}: the harness tests DSP modules; the engine runs unit delays and audio outputs itself",
             descriptor.id
         );
@@ -608,7 +608,7 @@ impl Harness {
     /// values, and `reset()` once, so its smoothing starts at the values
     /// (live patching spec, rule 7).
     fn build(&self) -> Box<dyn Module> {
-        let ModuleRole::Dsp(create) = self.descriptor.role else {
+        let Some(create) = self.descriptor.role.factory() else {
             unreachable!("checked in Harness::new")
         };
         let mut module = create(&ModuleConfig {

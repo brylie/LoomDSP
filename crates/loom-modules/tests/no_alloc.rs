@@ -22,8 +22,7 @@ mod common;
 use assert_no_alloc::{AllocDisabler, assert_no_alloc};
 use common::*;
 use loom_core::{
-    EngineConfig, InputRef, MidiControl, MidiEvent, ModuleRole, OutputRef, OutputSafety, ProbeKind, TimeSignature,
-    create_engine,
+    EngineConfig, InputRef, MidiControl, MidiEvent, OutputRef, OutputSafety, ProbeKind, TimeSignature, create_engine,
 };
 use std::io::Write;
 
@@ -71,7 +70,7 @@ fn copying_state_never_allocates() {
         max_block: 512,
     };
     for descriptor in loom_modules::ALL {
-        let loom_core::ModuleRole::Dsp(factory) = descriptor.role else {
+        let Some(factory) = descriptor.role.factory() else {
             continue;
         };
         let running = factory(&config);
@@ -97,7 +96,7 @@ fn every_module_never_allocates() {
     let trace = std::env::var_os("LOOM_TRACE_NO_ALLOC").is_some();
     let modules = loom_modules::ALL
         .iter()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)));
+        .filter(|descriptor| descriptor.role.factory().is_some());
     for descriptor in modules {
         // Not `eprintln!`: the test harness captures that, and an abort
         // throws captured output away.

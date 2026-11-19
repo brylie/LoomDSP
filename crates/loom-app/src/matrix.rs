@@ -61,8 +61,9 @@ impl Column {
 }
 
 /// A source in the Add and Source pick lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourcePick {
+    #[serde(skip)]
     pub output: OutputRef,
     pub label: String,
 }
@@ -74,9 +75,11 @@ impl fmt::Display for SourcePick {
 }
 
 /// A target in the Add and Target pick lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TargetPick {
+    #[serde(skip)]
     pub module: ModuleId,
+    #[serde(skip)]
     pub param: usize,
     pub label: String,
 }
@@ -96,6 +99,9 @@ pub struct MatrixRow {
     pub target: String,
     pub depth: f32,
     pub polarity: String,
+    /// The source's natural polarity, used for the Follow choice.
+    #[serde(skip)]
+    pub(crate) source_polarity: loom_core::Polarity,
 }
 
 /// The same plain data used by the window and UI snapshot.
@@ -109,11 +115,24 @@ pub struct MatrixModel {
     pub cell: Column,
     pub editing: bool,
     pub rows: Vec<MatrixRow>,
+    /// The choice and text draft of the open cell editor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit: Option<Edit>,
+    /// The picks made in the new assignment form, when it is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add: Option<Add>,
+    /// The available sources when a source picker is open.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<SourcePick>,
+    /// The available targets when a target picker is open.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<TargetPick>,
 }
 
 /// A pending cell edit. Only Apply changes the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Edit {
+    #[serde(skip)]
     pub id: AssignmentId,
     pub column: Column,
     pub depth: String,
@@ -121,7 +140,7 @@ pub struct Edit {
 }
 
 /// The two picks for a new assignment.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Add {
     pub source: Option<SourcePick>,
     pub target: Option<TargetPick>,
@@ -158,13 +177,17 @@ impl State {
                             .to_lowercase()
                             .contains(&filter))
             })
-            .map(|(id, a)| MatrixRow {
-                id: id.0,
-                on: a.enabled,
-                source: modulation::source_name(graph, a.source),
-                target: modulation::target_name(graph, a.target, a.param),
-                depth: a.depth,
-                polarity: PolarityChoice::of(a.polarity, modulation::source_polarity(graph, a.source)).to_string(),
+            .map(|(id, a)| {
+                let source_polarity = modulation::source_polarity(graph, a.source);
+                MatrixRow {
+                    id: id.0,
+                    on: a.enabled,
+                    source: modulation::source_name(graph, a.source),
+                    target: modulation::target_name(graph, a.target, a.param),
+                    depth: a.depth,
+                    polarity: PolarityChoice::of(a.polarity, source_polarity).to_string(),
+                    source_polarity,
+                }
             })
             .collect();
         if let Some((column, reverse)) = self.sort {
@@ -180,6 +203,7 @@ impl State {
                 cmp.then_with(|| a.id.cmp(&b.id))
             });
         }
+        let picking = |column| self.add.is_some() || self.edit.as_ref().is_some_and(|edit| edit.column == column);
         MatrixModel {
             tab,
             sort: self.sort,
@@ -189,6 +213,18 @@ impl State {
             cell: self.cell,
             editing: self.edit.is_some(),
             rows,
+            edit: self.edit.clone(),
+            add: self.add.clone(),
+            sources: if picking(Column::Source) {
+                sources(graph)
+            } else {
+                Vec::new()
+            },
+            targets: if picking(Column::Target) {
+                targets(graph)
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -302,7 +338,7 @@ impl fmt::Display for SortPick {
 /// (`access.rs`), so the window can say where it is (`places.rs`). A
 /// scroll of the rows is a message only while a screen reader listens
 /// (`listening`), as in the inspector.
-pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: bool) -> Element<'a, Message> {
+pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
     use crate::inspector::ids::named;
     use access::part;
     let mut content = column![].spacing(7).width(Length::Fill);
@@ -358,22 +394,24 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
         ));
     }
     content = content.push(sort);
-    if let Some(add) = &state.add {
-        let sources = sources(graph);
-        let targets = targets(graph);
+    if let Some(add) = model.add {
         content = content.push(
             column![
                 named(
                     &part("new/source"),
-                    pick_list(sources, add.source.clone(), |s| Message::Matrix(Event::AddSource(s)))
-                        .placeholder("Source output")
-                        .text_size(style::SMALL),
+                    pick_list(model.sources.clone(), add.source, |s| Message::Matrix(
+                        Event::AddSource(s)
+                    ))
+                    .placeholder("Source output")
+                    .text_size(style::SMALL),
                 ),
                 named(
                     &part("new/target"),
-                    pick_list(targets, add.target.clone(), |t| Message::Matrix(Event::AddTarget(t)))
-                        .placeholder("Target parameter")
-                        .text_size(style::SMALL),
+                    pick_list(model.targets.clone(), add.target, |t| Message::Matrix(
+                        Event::AddTarget(t)
+                    ))
+                    .placeholder("Target parameter")
+                    .text_size(style::SMALL),
                 ),
                 row![
                     named(
@@ -398,11 +436,11 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
     }
     for a in model.rows {
         let id = AssignmentId(a.id);
-        let selected = state.selected == Some(id);
-        let editing = state.edit.as_ref().filter(|e| e.id == id);
-        let focused = |column: Column| selected && state.cell == column;
+        let selected = model.selected == Some(a.id);
+        let editing = model.edit.as_ref().filter(|e| e.id == id);
+        let focused = |column: Column| selected && model.cell == column;
         // A cell is plain text until edited; a click selects it and edits.
-        let cell = |label: String, column: Column| -> Element<'a, Message> {
+        let cell = |label: String, column: Column| -> Element<'static, Message> {
             button(text(label).size(style::SMALL))
                 .padding([1, 4])
                 .style(style::cell(focused(column)))
@@ -412,8 +450,8 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
         let on = checkbox(a.on)
             .on_toggle(move |v| Message::Matrix(Event::Enabled(id, v)))
             .size(style::SWITCH);
-        let source: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Source) {
-            let options = sources(graph);
+        let source: Element<'static, Message> = if editing.is_some_and(|e| e.column == Column::Source) {
+            let options = model.sources.clone();
             let current = editing.and_then(|e| options.get(e.choice)).cloned();
             pick_list(options, current, move |s| Message::Matrix(Event::Source(id, s)))
                 .text_size(style::SMALL)
@@ -421,8 +459,8 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
         } else {
             cell(a.source, Column::Source)
         };
-        let target: Element<'a, Message> = if editing.is_some_and(|e| e.column == Column::Target) {
-            let options = targets(graph);
+        let target: Element<'static, Message> = if editing.is_some_and(|e| e.column == Column::Target) {
+            let options = model.targets.clone();
             let current = editing.and_then(|e| options.get(e.choice)).cloned();
             pick_list(options, current, move |t| Message::Matrix(Event::Target(id, t)))
                 .text_size(style::SMALL)
@@ -430,7 +468,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
         } else {
             cell(a.target, Column::Target)
         };
-        let depth_value: Element<'a, Message> = if let Some(e) = editing.filter(|e| e.column == Column::Depth) {
+        let depth_value: Element<'static, Message> = if let Some(e) = editing.filter(|e| e.column == Column::Depth) {
             text_input(&modulation::depth_text(a.depth), &e.depth)
                 .id(crate::places::field_widget_id(&access::cell(id, Column::Depth)))
                 .on_input(|s| Message::Matrix(Event::DepthText(s)))
@@ -446,13 +484,10 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
             .step(0.01_f32)
             // Cards share one width, so filling it lines the sliders up.
             .width(Length::Fill);
-        let polarity: Element<'a, Message> = if let Some(edit) = editing.filter(|e| e.column == Column::Polarity)
-            && let Some(assignment) = graph.assignment(id)
-        {
-            let own = modulation::source_polarity(graph, assignment.source);
-            let options = PolarityChoice::options(own);
-            let current = options[edit.choice];
-            pick_list(options, Some(current), move |p| Message::Matrix(Event::Polarity(id, p)))
+        let polarity: Element<'static, Message> = if let Some(edit) = editing.filter(|e| e.column == Column::Polarity) {
+            let options = PolarityChoice::options(a.source_polarity);
+            let current = options.get(edit.choice).copied();
+            pick_list(options, current, move |p| Message::Matrix(Event::Polarity(id, p)))
                 .text_size(style::SMALL)
                 .into()
         } else {
@@ -497,7 +532,7 @@ pub fn view<'a>(model: MatrixModel, state: &State, graph: &Graph, listening: boo
                 .width(Length::Fill)
                 .style(style::card(selected)),
         )
-        .on_press(Message::Matrix(Event::Select(id, state.cell)));
+        .on_press(Message::Matrix(Event::Select(id, model.cell)));
         table = table.push(card);
     }
     let area = scrollable(named(&part("assignments"), table))

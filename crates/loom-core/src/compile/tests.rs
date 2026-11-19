@@ -452,6 +452,26 @@ fn a_modulated_module_runs_unconnected() {
     assert_eq!(report.skipped, BTreeSet::from([ModuleId(2)]));
 }
 
+/// A feedback loop reports the execution order as well as its sorted IDs.
+#[test]
+fn loop_run_order_follows_the_schedule() {
+    let mut graph = followers(3);
+    cable(&mut graph, 1, 3, 0);
+    cable(&mut graph, 3, 2, 0);
+    cable(&mut graph, 2, 1, 0);
+    let (schedule, report) = compile(
+        &graph,
+        &probes_on([1]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        48_000.0,
+        64,
+    );
+    assert_eq!(scheduled_slots(&schedule), [0, 2, 1]);
+    assert_eq!(report.loops[0].modules, [ModuleId(1), ModuleId(2), ModuleId(3)]);
+    assert_eq!(report.loops[0].run_order, [ModuleId(1), ModuleId(3), ModuleId(2)]);
+}
+
 /// A feedback loop that reaches nothing is still reported, with its
 /// inserted delay, so the canvas can show it. Its tap keeps the held
 /// sample while the loop is not scheduled.

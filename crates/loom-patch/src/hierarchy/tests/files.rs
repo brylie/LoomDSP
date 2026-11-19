@@ -541,7 +541,7 @@ fn inserting_a_file_with_a_transport_leaves_it_out() {
         controller
             .graph()
             .nodes()
-            .filter(|(_, n)| n.descriptor.id == TRANSPORT_MODULE)
+            .filter(|(_, n)| n.descriptor.role.is_transport())
             .count(),
         1
     );

@@ -52,6 +52,47 @@ fn parses_kinds() {
     assert!(ModuleKind::parse("x@y").is_err());
 }
 
+/// A registered role identifies Transport and checks the Run gate index.
+#[test]
+fn transport_role_validates_its_run_gate() {
+    static CLOCK: ModuleDescriptor = ModuleDescriptor {
+        id: "test.transport",
+        version: 1,
+        name: "Transport",
+        category: "Test",
+        family: crate::Family::TimeAndRhythm,
+        description: "A test transport.",
+        inputs: &[
+            port("reset", crate::SignalType::Gate),
+            port("run", crate::SignalType::Gate),
+        ],
+        outputs: &[],
+        params: &[],
+        role: ModuleRole::Transport {
+            create: crate::graph::UNKNOWN_DESCRIPTOR.role.factory().unwrap(),
+            run_input: 1,
+        },
+        panel: crate::Panel::EMPTY,
+        displays: &[],
+        roles: &[],
+    };
+    static WRONG: ModuleDescriptor = ModuleDescriptor {
+        role: ModuleRole::Transport {
+            create: crate::graph::UNKNOWN_DESCRIPTOR.role.factory().unwrap(),
+            run_input: 0,
+        },
+        ..CLOCK
+    };
+    let mut registry = Registry::new();
+    assert!(matches!(
+        registry.register(&WRONG),
+        Err(LoomError::InvalidDescriptor { reason, .. }) if reason.contains("Run gate")
+    ));
+    registry.register(&CLOCK).unwrap();
+    assert_eq!(registry.transport().unwrap().id, CLOCK.id);
+    assert!(registry.is_transport_kind("test.transport@2"));
+}
+
 #[test]
 fn refuses_input_defaults_that_are_not_finite() {
     static NAN_DEFAULT: ModuleDescriptor = ModuleDescriptor {

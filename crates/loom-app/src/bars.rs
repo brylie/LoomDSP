@@ -192,7 +192,7 @@ impl App {
         }
         // A count, with the names in hover text, so a long list never
         // pushes the other items off the window (visual-system.md, rule 7).
-        let ports = self.rig.ports.as_slice();
+        let ports = self.rig.midi.ports.as_slice();
         items.push(Item {
             hover: (!ports.is_empty()).then(|| ports.iter().map(|port| port.name()).collect::<Vec<_>>().join("\n")),
             ..item(

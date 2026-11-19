@@ -1,6 +1,7 @@
 use super::*;
 use loom_core::{
-    Channels, Module, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType, TransportSettings,
+    Channels, Module, ModuleRole, ParamOptions, ParamSpec, PortIo, PortSpec, ProcessContext, SignalType,
+    TransportSettings,
 };
 use std::path::PathBuf;
 
