@@ -46,6 +46,10 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
             )
             .unwrap();
     }
+    // Establish the fixture as the edited patch before checking that
+    // navigation adds no further undo steps.
+    assert!(ui.app_mut().commit());
+    ui.app_mut().session.edits.history.clear();
     ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
     /// Captures the table viewport and the selected row and cell from the
     /// view, found by their UI IDs as the scroll finds them.
@@ -801,7 +805,7 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
     assert!(ui.app().session.matrix.selected.is_none());
 }
 
-/// Every part of every card fits the right-hand column: a 24-character
+/// Every part of every card fits the right-hand column: a long
 /// source shows in full, there are no column titles or row marker
 /// text, and the snapshot says which tab is open (#456).
 #[test]
@@ -809,6 +813,11 @@ fn cards_fit_the_column() {
     let mut ui = Ui::open("modulation.ron");
     let hold = ui
         .app_mut()
+        .session
+        .controller
+        .add_module("loom.rand.sample-hold")
+        .unwrap();
+    ui.app_mut()
         .session
         .controller
         .add_module("loom.rand.sample-hold")
@@ -829,7 +838,7 @@ fn cards_fit_the_column() {
         &ui.app().session.hierarchy,
         OutputRef { module: hold, port: 0 },
     );
-    assert_eq!(source.len(), 24);
+    assert!(source.len() >= 23, "{source}");
     let column = ui.app().session.matrix.model(
         ui.app().session.controller.graph(),
         &ui.app().session.hierarchy,

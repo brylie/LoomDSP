@@ -206,3 +206,22 @@ fn feedback_loops_group_their_members_and_report_the_inserted_delay() {
         .collect();
     assert_eq!(kids, group.members.iter().copied().map(module_id).collect::<Vec<_>>());
 }
+
+/// Dragging the map's viewport pans the canvas and leaves patch history intact.
+#[test]
+fn the_map_viewport_can_be_dragged_to_pan() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Preferences(crate::settings::Message::Map(Some(
+        crate::preferences::MapMode::Always,
+    ))));
+    let view = ui.canvas();
+    let map = ui.app().map_view().unwrap();
+    let area = map.bounds(&ui.app().session.scene, view.camera, view.bounds).unwrap();
+    let at = area.center();
+    let steps = ui.app().session.edits.history.len();
+    ui.drag(at, Point::new(at.x + 10.0, at.y), 3);
+    let moved = ui.canvas().camera;
+    assert!(moved.origin.x > view.camera.origin.x);
+    assert_eq!(moved.zoom, view.camera.zoom);
+    assert_eq!(ui.app().session.edits.history.len(), steps);
+}

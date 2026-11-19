@@ -972,9 +972,8 @@ impl Frame<'_> {
             node.set_children(children);
         }
         let id = self.add(&item.id, node);
-        // A list box scrolls, so it cuts off what it scrolls out of view and
-        // is as tall as what shows, as a panel is.
-        if item.kind == Kind::ListBox {
+        // Preferences and list boxes scroll, so their bounds clip descendants.
+        if item.kind == Kind::ListBox || item.id == crate::settings::access::preferences_id() {
             self.clip_to_shown(id, &item.id);
         }
         // A covered field is hidden, so it cannot be focused, even while

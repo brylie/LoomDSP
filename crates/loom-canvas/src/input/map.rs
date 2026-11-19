@@ -175,8 +175,11 @@ impl CanvasModel<'_> {
         if !project.area.contains(point) || !matches!(state.interaction, Interaction::Idle) {
             return false;
         }
-        state.hover = None;
+        let was_hovering = state.hover.take().is_some();
         state.cursor = None;
+        if was_hovering {
+            out.redraw();
+        }
         match event {
             PointerEvent::Pressed(PointerButton::Left) => {
                 let world = project.world(point);
@@ -204,10 +207,10 @@ impl CanvasModel<'_> {
                 };
                 state.camera.zoom_at(state.camera.to_screen(world), factor);
                 self.emit(out, CanvasEvent::Camera(state.camera));
+                out.redraw();
             }
             _ => {}
         }
-        out.redraw();
         out.take();
         true
     }

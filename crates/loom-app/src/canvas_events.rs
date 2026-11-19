@@ -118,10 +118,12 @@ impl App {
                 self.arrow_event(ArrowEvent::Due(at));
             }
             CanvasEvent::Select(ids) => {
+                self.session.outline.focus_port = None;
                 self.alerts.canvas_hint = None;
                 self.session.selection = ids.into_iter().collect();
             }
             CanvasEvent::SelectByKey(id) => {
+                self.session.outline.focus_port = None;
                 self.session.selection = [id].into();
                 let has_controls = self
                     .session

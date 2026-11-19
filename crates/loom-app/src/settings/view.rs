@@ -165,14 +165,14 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
             column![
                 safety,
                 rule::horizontal(1),
-                named(
-                    checkbox(model.activity)
-                        .label("Show signal activity on ports")
-                        .on_toggle(move |on| msg(Message::Activity(on))),
-                    part_id("activity"),
-                ),
-                rule::horizontal(1),
                 row![
+                    named(
+                        checkbox(model.activity)
+                            .label("Show signal activity on ports")
+                            .on_toggle(move |on| msg(Message::Activity(on))),
+                        part_id("activity"),
+                    ),
+                    space::horizontal(),
                     text("Patch map").size(style::BODY),
                     named(
                         pick_list(
