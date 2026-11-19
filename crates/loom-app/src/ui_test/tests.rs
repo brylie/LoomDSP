@@ -3044,8 +3044,9 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
 }
 
 /// A test that saves writes its own copy of the example, never the
-/// example in the repository: Cmd+S (Ctrl+S elsewhere) in the harness
-/// saves the copy `Ui::open` opened, and the real file's bytes stay.
+/// example in the repository: after an edit, Cmd+S (Ctrl+S elsewhere) in
+/// the harness saves the copy `Ui::open` opened, so the copy's bytes
+/// change and the real file's stay.
 #[test]
 fn a_save_in_the_harness_writes_the_copy() {
     use iced::keyboard::{Key, Modifiers};
@@ -3058,13 +3059,32 @@ fn a_save_in_the_harness_writes_the_copy() {
         std::fs::canonicalize(&real).unwrap(),
         "the harness opened a copy"
     );
-    let written = std::fs::metadata(&copy).unwrap().modified().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    let unsaved = std::fs::read(&copy).unwrap();
+    // Turn the filter's cutoff, so the save has something new to write.
+    let _ = ui.app_mut().send(Message::Inspector(crate::inspector::Message::Param {
+        module: 4,
+        index: 0,
+        position: 0.123,
+    }));
+    let _ = ui.app_mut().send(Message::SliderReleased);
     ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
     ui.redraw();
-    assert!(
-        std::fs::metadata(&copy).unwrap().modified().unwrap() > written,
-        "the save wrote the copy"
-    );
+    assert_ne!(std::fs::read(&copy).unwrap(), unsaved, "the save wrote the copy");
     assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
+}
+
+/// A `Ui` removes the copy folder it made when it drops, even after the
+/// open file changed, as New, Open, or Save As change it.
+#[test]
+fn a_ui_removes_its_own_copy_folder_when_the_file_changed() {
+    let mut ui = Ui::open("subtractive.ron");
+    let file = ui.app().session.document.file().expect("a file is open");
+    let folder = file.parent().expect("the copy has a folder").to_path_buf();
+    assert!(folder.is_dir());
+    ui.app_mut()
+        .session
+        .document
+        .saved(PathBuf::from("elsewhere.ron"), loom_patch::Patch::new("Elsewhere"));
+    drop(ui);
+    assert!(!folder.exists(), "the copy folder is gone");
 }

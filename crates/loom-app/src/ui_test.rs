@@ -78,6 +78,10 @@ pub struct Ui {
     pointers: crate::iced_bridge::Pointers,
     /// Lays out the runtime's own panels, as the window's draw does.
     text: loom_ui::paint::Typesetter,
+    /// The copy folder [`Ui::open`] made for this `Ui`, removed when it
+    /// drops. Kept from the start, because the open file can change after
+    /// New, Open, or Save As. `None` for an app the test built.
+    copy: Option<PathBuf>,
 }
 
 /// The clipboard Iced's widgets use during one frame: a copy of the
@@ -145,7 +149,8 @@ fn sweep_old_copies() {
 /// A copy of the example patch `patch`, in a new folder of the system's
 /// temporary folder for this test alone: the process ID and a count keep
 /// tests that run at once apart. A save in a test then writes the copy.
-/// The folder is left for the system to clear, as other tests' are.
+/// A [`Ui`] removes the folder when it drops; any other is cleared by a
+/// later run's sweep ([`sweep_old_copies`]).
 ///
 /// Anything that is not an example in the repository is opened as it was
 /// before: a test's own file by its absolute path (joined to the examples
@@ -175,7 +180,11 @@ pub(crate) fn example_copy(patch: &str) -> PathBuf {
 /// [`Ui`] removes its copy when it drops; a test that uses this app with
 /// no `Ui` leaves its copy for a later run's sweep, an hour on.
 pub(crate) fn open_app(patch: &str) -> App {
-    let path = example_copy(patch);
+    app_at(example_copy(patch))
+}
+
+/// The app [`open_app`] runs, on the patch file at `path`.
+fn app_at(path: PathBuf) -> App {
     App::new(Args {
         patch: Some(path),
         generate: None,
@@ -199,20 +208,11 @@ pub(crate) fn open_app(patch: &str) -> App {
     })
 }
 
-/// A `Ui` removes the copy of the example it opened, with its folder, so
-/// copies do not pile up across runs. Only a copy folder is removed
-/// ([`is_copy_folder`]).
+/// A `Ui` removes the copy folder it made, so copies do not pile up
+/// across runs. Only a copy folder is removed ([`is_copy_folder`]).
 impl Drop for Ui {
     fn drop(&mut self) {
-        let dir = self
-            .bridge
-            .app()
-            .session
-            .document
-            .file()
-            .and_then(std::path::Path::parent)
-            .map(std::path::Path::to_path_buf);
-        if let Some(dir) = dir.filter(|dir| is_copy_folder(dir)) {
+        if let Some(dir) = self.copy.take().filter(|dir| is_copy_folder(dir)) {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
@@ -317,7 +317,11 @@ impl Ui {
     /// Opens a patch from `examples/patches` with no audio, as the app does
     /// in a window of [`WINDOW`] size, and draws the first frame.
     pub(crate) fn open(patch: &str) -> Self {
-        Self::with_app(open_app(patch))
+        let path = example_copy(patch);
+        let copy = path.parent().filter(|dir| is_copy_folder(dir)).map(PathBuf::from);
+        let mut ui = Self::with_app(app_at(path));
+        ui.copy = copy;
+        ui
     }
 
     /// Draws the first frame of an app built by the test, for example one
@@ -330,6 +334,7 @@ impl Ui {
             surface: Surface::new(WINDOW),
             pointers: crate::iced_bridge::Pointers::default(),
             text: loom_ui::paint::Typesetter::new(),
+            copy: None,
         };
         ui.settle(vec![first]);
         // The canvas frames the patch on its first redraw.

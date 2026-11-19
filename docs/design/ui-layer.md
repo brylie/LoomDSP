@@ -241,7 +241,7 @@ Keys come from what the element shows, not from where it sits:
    - A name made only of digits has its first digit escaped, so it does not read back as a number: the name `12` is written `%312`.
    - Writing a UI ID and reading the text back gives the same UI ID, for every UI ID. A test checks it.
    - The control channel's short names, such as `4:cutoff`, keep working beside it.
-   - `locate` takes a target for a UI ID when its first key is a panel's name: `canvas`, `toolbar`, `panel`, `inspector`, `matrix`, or `stats`, or an overlay's: `menu`, `recent`, `question`, `help`, `browser`, `patches`, `preferences`, or `licence`. If it reads as a UI ID but names nothing the window shows, `locate` still looks for the target as text in the window before it fails. Any other target is a short name or text, as before.
+   - `locate` takes a target for a UI ID when its first key is a panel's name: `canvas`, `toolbar`, `breadcrumb`, `panel`, `inspector`, `matrix`, or `stats`, or an overlay's: `menu`, `recent`, `question`, `help`, `browser`, `patches`, `preferences`, or `licence`. If it reads as a UI ID but names nothing the window shows, `locate` still looks for the target as text in the window before it fails. Any other target is a short name or text, as before.
    - On the canvas a UI ID resolves to where the accessibility tree puts that node, and a port or a badge to where its short name does, since tiles give no port nodes yet (section 7, rule 19). Outside the canvas it resolves to where the window drew the part. A part scrolled out of view is an error, because a pointer sent there would land on something else.
 
    *Why:* agents, tests, and people then use the same names. A path reads like the tree it names, and one escape rule keeps every ID readable back.
@@ -254,7 +254,7 @@ Keys come from what the element shows, not from where it sits:
 
 ### Behaviour
 
-The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar, inspector, stats bar, module browser), **overlays** (probe menu, recent files, licence chooser, help), and **question**. A layer is drawn by whichever code owns it; during the move, by Iced or by `loom-ui`.
+The window has four layers, drawn bottom to top: **canvas**, **panels** (toolbar, breadcrumb, inspector, stats bar, module browser), **overlays** (probe menu, recent files, licence chooser, help), and **question**. A layer is drawn by whichever code owns it; during the move, by Iced or by `loom-ui`.
 
 ### Rules
 
