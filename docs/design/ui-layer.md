@@ -575,7 +575,7 @@ Phase 3:
 
 - **Plugin window embedding** (OQ-13). Section 2, rule 9 keeps it possible: a host-window driver can be added beside the `winit` shell. Building it, and choosing what that driver uses, is later work, after a spike.
 - **The web target** (ADR-0026).
-- **Visual redesign.** Every view looks the same after each phase.
+- **Visual redesign.** Every view looks the same after each phase, unless a change to it is decided and listed in its pull request (design goal 5). A redesign is still out of scope.
 - **Read-tracking state, such as signals.** Comparing panel models is enough at LoomDSP's size ([research](../research/2026-11-ui-change-propagation.md#not-proposed)). Revisit if a measured panel cannot meet its cost with section 3, rule 1.
 - **Components with their own message types** inside `loom-ui`. LoomDSP's panels use the app's message. A mapping like Elm's `Html.map` can be added when a second app needs it.
 - **Publishing the crates.** Waits until the API settles (FR-SDK-06).
