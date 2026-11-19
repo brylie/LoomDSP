@@ -2226,3 +2226,51 @@ fn a_paste_during_a_composition_goes_in_after_it() {
     assert_eq!(harness.runtime().focused(), Some(&name()));
     assert_eq!(harness.app().text, "aにx");
 }
+
+/// A composition that starts over a selection deletes the selection first,
+/// as an edit of its own: the committed text and the app agree, a layout
+/// that brings the app's (new) text back keeps the composition, and undo
+/// after a cancelled composition brings the selected text back.
+#[test]
+fn a_composition_over_a_selection_deletes_it_as_its_own_step() {
+    let Some(mut bench) = field_in("abc", 300.0) else {
+        return;
+    };
+    bench.hit(Platform::Mac, Key::Character('a'), shortcut(Platform::Mac, false));
+    let used = bench
+        .field
+        .ime(&preedit("に"), bench.now, &mut bench.fonts, &mut bench.layouts);
+    assert!(used.edited, "the app hears the deletion");
+    assert_eq!(bench.field.committed(), "");
+    assert_eq!(bench.text(), "に");
+    bench.field.take("", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+    assert!(
+        bench.field.composing(),
+        "the app's text matches, so the composition stays"
+    );
+    bench
+        .field
+        .ime(&preedit(""), bench.now, &mut bench.fonts, &mut bench.layouts);
+    assert_eq!(bench.text(), "");
+    assert_eq!(bench.field.steps(), (1, 0));
+    bench.hit(Platform::Mac, Key::Character('z'), shortcut(Platform::Mac, false));
+    assert_eq!(bench.text(), "abc", "undo brings the selected text back");
+}
+
+/// Through the runtime, the app hears the deletion as `Edited`, so its text
+/// and the field's agree while the composition goes on, and the commit
+/// then lands once.
+#[test]
+fn the_app_hears_a_selection_a_composition_replaced() {
+    let Some((mut harness, mut text)) = form("abc", true) else {
+        return;
+    };
+    harness.step(key_in(Key::Character('a'), shortcut(Platform::current(), false), None));
+    harness.step(ime_in(preedit("に")));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "");
+    harness.step(ime_in(preedit("")));
+    harness.step(ime_in(ImeEvent::Commit("日".to_owned())));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "日");
+}

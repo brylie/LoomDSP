@@ -490,6 +490,25 @@ impl FieldState {
                 // Composing ends the typing run, so the commit is a step
                 // of its own.
                 self.run = None;
+                // A composition that starts over a selection replaces it,
+                // as the platforms show it. The editor would take the
+                // selected text out of the committed text with no word to
+                // the app, so the field deletes it first, as an edit of its
+                // own: the app hears it, undo brings it back, and the
+                // composition then starts at the caret.
+                if !self.composing() && !self.editor.raw_selection().is_collapsed() {
+                    self.step(None, now, false);
+                    self.editor.driver(fonts, layouts).delete_selection();
+                    if let Some(snapshot) = self.opened.take() {
+                        if self.undo.len() == UNDO_STEPS {
+                            self.undo.remove(0);
+                        }
+                        self.undo.push(snapshot);
+                        self.redo.clear();
+                    }
+                    self.run_before = None;
+                    self.run = None;
+                }
                 let cursor = cursor.filter(|(start, end)| {
                     start <= end && *end <= text.len() && text.is_char_boundary(*start) && text.is_char_boundary(*end)
                 });
