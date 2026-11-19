@@ -177,7 +177,7 @@ impl SpectrumAnalyser {
         loom_canvas::Trace {
             points: drawn(&self.line),
             second: if hold { drawn(&self.hold) } else { Vec::new() },
-            level: 0.0,
+            ..Default::default()
         }
     }
 }

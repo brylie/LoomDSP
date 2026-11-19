@@ -80,6 +80,24 @@ pub(crate) struct Number {
     pub step: Option<f64>,
 }
 
+impl Number {
+    /// A parameter slider in native units, shared by the inspector and tile.
+    pub(crate) fn parameter(spec: &ParamSpec, position: f32, share: Option<f32>) -> Self {
+        let min = crate::param::decimal(spec.min);
+        let max = crate::param::decimal(spec.max);
+        let step = share
+            .filter(|_| spec.options.mapping == loom_core::ParamMapping::Linear)
+            .map(|share| crate::param::decimal(((max - min) * crate::param::decimal(share)) as f32))
+            .filter(|step| step.is_finite() && *step > 0.0);
+        Self {
+            value: crate::param::spoken_value(spec, spec.denormalize(position)).clamp(min, max),
+            min,
+            max,
+            step,
+        }
+    }
+}
+
 /// What a screen reader's SetValue with a number sets.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum SetNumber {

@@ -17,7 +17,7 @@ use crate::snapshot::{Rect, UiSnapshot, Widget};
 use crate::toolbar;
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use loom_canvas::{CanvasView, ControlPart, Reading, WidgetViewKind, arrow_share, option_bounds, part_bounds};
-use loom_core::{ParamMapping, ParamSpec};
+use loom_core::ParamSpec;
 use loom_ui_core::{IdKey, IdTable, UiId};
 use std::collections::BTreeMap;
 
@@ -942,16 +942,17 @@ fn slider(kind: &WidgetViewKind, spec: Option<&ParamSpec>, position: f32) -> Nod
 fn slider_value(node: &mut Node, kind: &WidgetViewKind, spec: Option<&ParamSpec>, position: f32) {
     match spec {
         Some(spec) => {
-            node.set_numeric_value(f64::from(spec.denormalize(position)));
-            node.set_min_numeric_value(f64::from(spec.min));
-            node.set_max_numeric_value(f64::from(spec.max));
-            if let (Some(share), ParamMapping::Linear) = (arrow_share(kind), spec.options.mapping) {
-                node.set_numeric_value_step(f64::from(share * (spec.max - spec.min)));
+            let number = items::Number::parameter(spec, position, arrow_share(kind));
+            node.set_numeric_value(number.value);
+            node.set_min_numeric_value(number.min);
+            node.set_max_numeric_value(number.max);
+            if let Some(step) = number.step {
+                node.set_numeric_value_step(step);
             }
         }
         // No parameter to ask: the control's travel, from 0 to 1.
         None => {
-            node.set_numeric_value(f64::from(position));
+            node.set_numeric_value(crate::param::decimal(position));
             node.set_min_numeric_value(0.0);
             node.set_max_numeric_value(1.0);
         }
@@ -1035,6 +1036,10 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
             // The number its text says, never the stored level: the
             // tree does not work the mapping out a second time. Text with
             // no single number in it is said as words only.
+            if widget.clip {
+                description =
+                    Some(description.map_or_else(|| "clipped".to_string(), |level| format!("{level}, clipped")));
+            }
             let mut node = Node::new(Role::Meter);
             if let Some(reading) = detail.reading.filter(|reading| reading.value.is_finite()) {
                 node.set_numeric_value(f64::from(reading.value));
@@ -1053,8 +1058,13 @@ fn widget_node(widget: &Widget, detail: Option<&Detail>) -> Node {
             node.set_value(format!("{}: {}", detail.name, widget.text));
             return node;
         }
-        WidgetViewKind::Scope => {
-            description = trace_words(widget);
+        WidgetViewKind::Scope | WidgetViewKind::XyScope => {
+            if widget.trace.is_some_and(|trace| trace.invalid) {
+                let mark = loom_canvas::Trace::INVALID_LABEL;
+                description = Some(description.map_or_else(|| mark.to_string(), |axes| format!("{axes}. {mark}")));
+            } else if detail.kind == WidgetViewKind::Scope {
+                description = trace_words(widget);
+            }
             Node::new(Role::Image)
         }
         // A light, and the other drawings: named, with what the screen
@@ -1088,7 +1098,7 @@ fn piece_node_of(widget: &Widget, detail: &Detail, piece: Piece) -> Node {
             let mut node = slider(&detail.kind, detail.main.as_ref(), widget.position);
             if let Some(spec) = &detail.main {
                 node.set_label(spec.label.to_string());
-                node.set_description(spec.value_text(spec.denormalize(widget.position)));
+                node.set_description(crate::param::format(spec, spec.denormalize(widget.position)));
             }
             node
         }

@@ -15,7 +15,7 @@ use super::{
 };
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, Number, SetNumber, SetText};
-use loom_core::{MidiEncoding, MidiMappingOptions, MidiMode, ParamMapping};
+use loom_core::{MidiEncoding, MidiMappingOptions, MidiMode};
 use loom_ui_core::UiId;
 
 /// Every part the inspector shows for `model`, under one named group per
@@ -578,13 +578,7 @@ fn value_control(module: u32, label: &str, p: &ParamRow, position: f32, step: f3
                 label: Some(label.to_string()),
                 // The value with its unit, as the row shows it.
                 description: Some(p.value.clone()),
-                number: Some(Number {
-                    value: f64::from(spec.denormalize(position)),
-                    min: f64::from(spec.min),
-                    max: f64::from(spec.max),
-                    step: matches!(spec.options.mapping, ParamMapping::Linear)
-                        .then(|| f64::from(step * (spec.max - spec.min))),
-                }),
+                number: Some(Number::parameter(&spec, position, Some(step))),
                 step: ((up != position).then(|| to(up)), (down != position).then(|| to(down))),
                 set_number: Some(SetNumber::Param { module, index, spec }),
                 groups: true,
@@ -627,12 +621,12 @@ fn expose(exposure: &ExposureRow, id: &UiId) -> Item {
     match &exposure.name {
         Some(name) => Item::button(
             id,
-            format!("Unexpose on {}, exposed as {name}", exposure.surface),
+            format!("{}, exposed as {name}", exposure.button_label()),
             Some(AppMessage::Inspector(Message::Unexpose { module, index })),
         ),
         None => Item::button(
             id,
-            format!("Expose on {}", exposure.surface),
+            exposure.button_label(),
             Some(AppMessage::Inspector(Message::Expose { module, index })),
         ),
     }

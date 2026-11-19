@@ -166,7 +166,7 @@ impl CanvasModel<'_> {
             .scene
             .module(module)
             .and_then(|m| m.panel.widgets.get(widget))
-            .is_some_and(|w| w.number_steps().is_some());
+            .is_some_and(|w| w.accepts_typed_value());
         if !is_number {
             return false;
         }

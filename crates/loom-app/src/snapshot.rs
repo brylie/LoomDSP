@@ -303,6 +303,8 @@ pub struct SecondShown {
 /// What a scope's trace shows, for the snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct TraceShown {
+    /// True when the scope draws the cross for an all-NaN window.
+    pub invalid: bool,
     /// Points drawn. 0 further out, where only the level shows.
     pub points: usize,
     /// The lowest point, from -1 to 1.
@@ -322,6 +324,7 @@ impl From<&loom_canvas::Trace> for TraceShown {
         let (low, high) = ys.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), y| (lo.min(y), hi.max(y)));
         let empty = trace.points.is_empty();
         Self {
+            invalid: trace.invalid,
             points: trace.points.len(),
             low: if empty { 0.0 } else { low },
             high: if empty { 0.0 } else { high },
@@ -766,6 +769,11 @@ pub fn headless(args: &Args) -> Result<App, String> {
             return Err(format!("no module {id} in the patch"));
         }
         app.session.selection.insert(id);
+    }
+    if let Some(target) = &args.view.focus {
+        let control = crate::screenshot::find_control(&app.session.controller, &app.session.hierarchy, target)?;
+        app.session.selection.insert(control.0);
+        app.canvas_event(loom_canvas::CanvasEvent::FocusChanged(Some(control)));
     }
     app.sync_part_authors();
     if args.show_help {

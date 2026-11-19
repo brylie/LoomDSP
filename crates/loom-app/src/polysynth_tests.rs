@@ -94,8 +94,9 @@ fn a_screen_reader_finds_the_voice_controls_on_the_polysynth() {
     let tree = ui.a11y_tree();
     let amount = tile_control(&tree, SPREAD, "Amount");
     assert_eq!(amount.role(), Role::Slider);
-    // The range is an `f32` widened to `f64`, as the tree carries it.
-    assert_eq!(amount.range(), Some((f64::from(-0.01_f32), f64::from(0.01_f32))));
+    assert_eq!(amount.range(), Some((-0.01, 0.01)));
+    assert_eq!(amount.number(), Some(0.0003));
+    assert_eq!(amount.numeric_step(), Some(0.0002));
     assert_eq!(shown_text(&ui, SPREAD, "amount"), "0.0003");
     assert_eq!(amount.description(), Some("0.0003"));
     assert!(amount.offers(Action::Increment));
@@ -113,6 +114,9 @@ fn a_screen_reader_finds_the_voice_controls_on_the_polysynth() {
     let inspector = tree.node_by_id(&row(SPREAD, Kind::Param, "amount")).node("Amount");
     assert_eq!(inspector.role(), Role::Slider);
     assert_eq!(inspector.description(), Some("0.0003"));
+    assert_eq!(inspector.number(), Some(0.0003));
+    assert_eq!(inspector.numeric_step(), Some(0.00002));
+    assert_eq!(inspector.range(), Some((-0.01, 0.01)));
 
     ui.a11y_action(&tile_id(SPREAD).with("param").with("amount"), Action::Increment);
     let node = ui.app().session.controller.graph().node(ModuleId(SPREAD)).unwrap();

@@ -341,6 +341,11 @@ impl WidgetView {
         }
     }
 
+    /// Whether Enter opens the exact-value editor on this widget.
+    pub fn accepts_typed_value(&self) -> bool {
+        !self.hidden && !self.inert && self.kind.is_one_number()
+    }
+
     /// True for widgets the user operates (all but lights, meters, scopes,
     /// notes, and an inert control).
     pub fn is_control(&self) -> bool {

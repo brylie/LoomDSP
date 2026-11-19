@@ -69,6 +69,8 @@ Exposing follows [Panels: exposed controls](panels.md#exposed-controls-in-a-sub-
 
 **Status:** Implemented for parameters (slice 3, 2026-11-07), with MIDI following an exposed range (#687, 2026-11-08). Display values and data slots wait for the widgets that would show them on the surface.
 
+**Decision (2026-11-19).** When both exposure buttons on one row name the same surface, append “(this tile)” to the inner surface name and “(outer)” to the enclosing one, for Expose and Unexpose alike. The accessible names use the same labels.
+
 - **Expose** is a button on the inspector's row for any parameter of an inner module, and for a surface item of a nested sub-patch's tile, so a parameter can be exposed through several levels. The button names the surface it acts on: "Expose on Voice", and on an exposed row "as Cutoff" with "Unexpose on Voice". The panel editor adds its own way ([#76](https://github.com/brylie/LoomDSP/issues/76)). A row menu, when one exists, holds it too. *Why a button:* the inspector has no row menu yet, and the gesture should not wait for one. *Why name the surface:* a row on a nested tile can act on two surfaces, its own and the enclosing one.
 - The surface item takes the parameter's label as its name, made unique on that surface ("Cutoff", "Cutoff 2"). Renaming an exposed item comes with the panel editor.
 - An exposed parameter's value belongs to the instance. The inner control shows it, and turning either one changes it. A modulation line from a source on the tile's level ends at the surface control.

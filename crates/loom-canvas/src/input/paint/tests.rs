@@ -403,7 +403,8 @@ fn hover_text_paints_its_box_then_its_lines_top_down() {
         .iter()
         .position(|piece| matches!(piece, Painted::Begin(_)))
         .expect("hover text opens a layer");
-    assert_eq!(kinds(&recorder, start), "BQTTE");
+    assert_eq!(kinds(&recorder, start), "BQTTTE");
+    assert!(matches!(&recorder.painted[start + 4], Painted::Text { text, .. } if text == "Enter to type a value"));
     let layer = &recorder.painted[start..];
     let (
         Painted::Quad(frame),

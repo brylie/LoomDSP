@@ -13,6 +13,26 @@ fn open(patch: &str) -> App {
     })
 }
 
+/// The same focus hint reaches a command-line dump as a keyboard focus change.
+#[test]
+fn a_dump_hints_at_typing_only_on_a_one_number_control() {
+    use clap::Parser;
+    let patch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/dev/test-widgets.ron");
+    for (control, can_type) in [("2:tempo", true), ("2:on", false), ("2:long", false)] {
+        let args = Args::try_parse_from([
+            "loom-app",
+            patch.to_str().unwrap(),
+            "--test-modules",
+            "--dump-ui",
+            "--focus",
+            control,
+        ])
+        .unwrap();
+        let snapshot = headless(&args).unwrap().ui_snapshot();
+        assert_eq!(snapshot.status.contains("Enter types a value"), can_type, "{control}");
+    }
+}
+
 /// A label that fits has no `shown`. SVF's Resonance caption was cut
 /// until labels could use the empty space beside them (#455).
 #[test]
@@ -206,12 +226,14 @@ fn trace_snapshot_bounds() {
         points: Vec::new(),
         second: Vec::new(),
         level: 0.0,
+        ..Default::default()
     });
     assert_eq!((empty.points, empty.low, empty.high), (0, 0.0, 0.0));
     let shown = TraceShown::from(&loom_canvas::Trace {
         points: vec![[0.0, -0.5], [1.0, 0.75]],
         second: Vec::new(),
         level: 0.8,
+        ..Default::default()
     });
     assert_eq!((shown.points, shown.low, shown.high, shown.level), (2, -0.5, 0.75, 0.8));
 }

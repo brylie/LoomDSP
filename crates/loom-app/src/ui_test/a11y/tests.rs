@@ -59,7 +59,10 @@ fn increment_moves_a_knob_and_the_tree_follows() {
     ui.a11y_action(["SVF", "Cutoff"], Action::Increment);
     let after = param(&ui, 4, "cutoff");
     assert!(after > before, "{before} -> {after}");
-    assert_eq!(ui.a11y_tree().path(&["SVF", "Cutoff"]).number(), Some(f64::from(after)));
+    let tree = ui.a11y_tree();
+    let cutoff = tree.path(&["SVF", "Cutoff"]);
+    let shown = cutoff.description().unwrap().strip_suffix(" Hz").unwrap();
+    assert_eq!(cutoff.number(), Some(shown.parse().unwrap()));
 }
 
 /// SetValue with a number sets a knob on its tile, and with text sets the

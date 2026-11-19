@@ -37,6 +37,8 @@ pub enum CanvasEvent {
     PointerDown,
     /// Replace the selection.
     Select(Vec<u32>),
+    /// Tab selected one tile in reading order.
+    SelectByKey(u32),
     /// Move modules by a world offset (always whole grid steps).
     Move {
         /// Modules to move.

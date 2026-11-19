@@ -41,6 +41,8 @@ params: &[
 ],
 ```
 
+**Agreed (2026-11-19).** Hover text for an editable one-number control includes “Enter to type a value”. The [panel rules](panels.md#labels-and-hover-text) give the matching keyboard focus hints.
+
 ## Rules
 
 1. **Every field is named and required.** There is no `new()`. *Why:* a missing field is then a compile error, and rust-analyzer shows it while typing. With five positional numbers, it was hard to tell the minimum from the default.

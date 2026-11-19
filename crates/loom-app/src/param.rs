@@ -53,6 +53,23 @@ pub fn format(spec: &ParamSpec, value: f32) -> String {
     }
 }
 
+/// The number a screen reader reports in parameter units. Use the same
+/// rounding as the widget, except for decibels, which display a different unit.
+pub(crate) fn spoken_value(spec: &ParamSpec, value: f32) -> f64 {
+    if matches!(spec.options.mapping, ParamMapping::Decibels { .. }) {
+        return decimal(value);
+    }
+    let digits = digits(spec, value);
+    let scale = 10_f64.powi(digits as i32);
+    (f64::from(value) * scale).round_ties_even() / scale
+}
+
+/// Widens the shortest decimal spelling, so a single-precision bound does
+/// not acquire extra spoken digits.
+pub(crate) fn decimal(value: f32) -> f64 {
+    value.to_string().parse().expect("formatted float")
+}
+
 /// Decimals for `value` of a parameter that is not a choice or in
 /// decibels. A whole number shows none. Otherwise the value's size gives
 /// the floor, and a linear parameter on a fine span shows at least

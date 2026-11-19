@@ -211,6 +211,18 @@ impl CanvasModel<'_> {
                     let value = self.part_label(id, widget, ControlPart::Main);
                     return Some((&parts[0].label, &parts[0].hover, value, module.widget_bounds(widget)?));
                 }
+                if self
+                    .traces
+                    .and_then(|traces| traces.get(id, widget))
+                    .is_some_and(|trace| trace.invalid)
+                {
+                    return Some((
+                        &view.label,
+                        &view.hover,
+                        Some(crate::Trace::INVALID_LABEL),
+                        module.widget_bounds(widget)?,
+                    ));
+                }
                 let value = (!view.is_control())
                     .then(|| self.values.and_then(|v| v.get(id, widget)))
                     .flatten()

@@ -112,6 +112,25 @@ impl GrowthAlarm {
     }
 }
 
+/// Keyboard help while the player navigates the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CanvasHint {
+    /// Enter moves from the selected tile to its controls.
+    Module,
+    /// The focused control accepts an exact value.
+    Control,
+}
+
+impl CanvasHint {
+    /// The status line shown while this gesture is available.
+    fn text(self) -> &'static str {
+        match self {
+            Self::Module => "Enter for its controls",
+            Self::Control => "Arrows change, Enter types a value, Escape leaves",
+        }
+    }
+}
+
 /// What the app tells the player: the status line, the dropout and input
 /// drift warnings in the stats bar, and problems reported once. The app
 /// owns one and reaches it through these methods.
@@ -119,6 +138,8 @@ impl GrowthAlarm {
 pub struct Alerts {
     /// The status line: the result of the last action, or a problem.
     status: String,
+    /// Temporary keyboard help. A warning or a later message takes precedence.
+    pub(crate) canvas_hint: Option<CanvasHint>,
     /// How the status line reads: info, a warning, or an error.
     severity: Severity,
     /// The problems kept on screen, one per cause, oldest first.
@@ -150,7 +171,10 @@ impl Alerts {
 
     /// The status line.
     pub fn status(&self) -> &str {
-        &self.status
+        match self.canvas_hint {
+            Some(hint) if self.severity == Severity::Normal => hint.text(),
+            _ => &self.status,
+        }
     }
 
     /// How the status line reads.
@@ -160,6 +184,7 @@ impl Alerts {
 
     /// Replaces the status line with info.
     pub fn say(&mut self, status: impl Into<String>) {
+        self.canvas_hint = None;
         self.status = status.into();
         self.severity = Severity::Normal;
     }
@@ -167,6 +192,7 @@ impl Alerts {
     /// Replaces the status line with a warning: a refused gesture, or a
     /// problem that fixed itself. It is not kept.
     pub fn warn(&mut self, status: impl Into<String>) {
+        self.canvas_hint = None;
         self.status = status.into();
         self.severity = Severity::Warning;
     }
@@ -174,6 +200,7 @@ impl Alerts {
     /// Replaces the status line with an error, and keeps it on screen until
     /// its cause is gone. An error of the same cause gives way to it.
     pub fn error(&mut self, cause: Cause, status: impl Into<String>) {
+        self.canvas_hint = None;
         self.status = status.into();
         self.severity = Severity::Alarm;
         self.keep(cause, Severity::Alarm, self.status.clone());
@@ -182,6 +209,7 @@ impl Alerts {
     /// Replaces the status line with a warning that stays on screen until
     /// its cause is gone, as an error does but without its alarm.
     pub fn warn_kept(&mut self, cause: Cause, status: impl Into<String>) {
+        self.canvas_hint = None;
         self.status = status.into();
         self.severity = Severity::Warning;
         self.keep(cause, Severity::Warning, self.status.clone());
@@ -277,6 +305,7 @@ impl Alerts {
     /// Adds `more` to the end of the status line. If the line is a kept
     /// problem, the kept text grows with it, so the two still match.
     pub fn append(&mut self, more: &str) {
+        self.canvas_hint = None;
         let (severity, status) = (self.severity, &self.status);
         if let Some(kept) = self
             .kept

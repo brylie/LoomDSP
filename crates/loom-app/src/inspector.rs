@@ -208,6 +208,14 @@ pub struct ExposureRow {
     pub surface: String,
 }
 
+impl ExposureRow {
+    /// The action label shared by the inspector and its accessibility tree.
+    fn button_label(&self) -> String {
+        let verb = if self.name.is_some() { "Unexpose" } else { "Expose" };
+        format!("{verb} on {}", self.surface)
+    }
+}
+
 /// The inspector's view of a port tile.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PortRows {
@@ -932,13 +940,21 @@ impl App {
                                     index,
                                     loom_canvas::ControlPart::Main,
                                 )?;
-                                let exposure = self.exposure_row(id, index, &exposed.name);
+                                let member = loom_patch::Hierarchy::is_member_entry(exposed);
+                                let mut surface = hierarchy.tile_name(ModuleId(id)).unwrap_or_default();
+                                let mut exposure = self.exposure_row(id, index, &exposed.name);
+                                if !member
+                                    && let Some(outer) = &mut exposure
+                                    && outer.surface == surface
+                                {
+                                    surface.push_str(" (this tile)");
+                                    outer.surface.push_str(" (outer)");
+                                }
                                 let mut row =
                                     self.param_row(target.module.0, target.index, &target.spec, exposure, false)?;
                                 // On this tile the row is the exposed item,
                                 // not the inner module's parameter.
                                 row.ui = ids::row(id, ids::Kind::Exposed, &exposed.name);
-                                let member = loom_patch::Hierarchy::is_member_entry(exposed);
                                 let label = if member {
                                     member_label(hierarchy, ModuleId(id), row_value(graph, target.module, target.index))
                                 } else {
@@ -952,7 +968,7 @@ impl App {
                                         module: id,
                                         index,
                                         name: Some(exposed.name.clone()),
-                                        surface: hierarchy.tile_name(ModuleId(id)).unwrap_or_default(),
+                                        surface,
                                     },
                                     row,
                                 })
@@ -1581,16 +1597,14 @@ fn param_row_view<'a>(
 /// surface, or takes it off again, saying what it is exposed as
 /// (sub-patches.md, Exposing). `ui` is its UI ID, from [`ids::expose`].
 fn expose_button<'a>(exposure: ExposureRow, ui: &UiId) -> Element<'a, AppMessage> {
+    let label = exposure.button_label();
     let ExposureRow {
-        module,
-        index,
-        name,
-        surface,
+        module, index, name, ..
     } = exposure;
     let shown: Element<'a, AppMessage> = match name {
         Some(name) => row![
             text(format!("as {name}")).size(style::SMALL).color(DIM),
-            button(text(format!("Unexpose on {surface}")).size(style::SMALL))
+            button(text(label).size(style::SMALL))
                 .style(style::plain)
                 .padding(1)
                 .on_press(AppMessage::Inspector(Message::Unexpose { module, index })),
@@ -1598,7 +1612,7 @@ fn expose_button<'a>(exposure: ExposureRow, ui: &UiId) -> Element<'a, AppMessage
         .spacing(4)
         .align_y(iced::Alignment::Center)
         .into(),
-        None => button(text(format!("Expose on {surface}")).size(style::SMALL))
+        None => button(text(label).size(style::SMALL))
             .style(style::plain)
             .padding(1)
             .on_press(AppMessage::Inspector(Message::Expose { module, index }))

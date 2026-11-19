@@ -39,6 +39,8 @@ const SPECTRUM_GRID: [f32; 3] = [0.232_99, 0.566_33, 0.899_66];
 /// The points of one scope trace.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Trace {
+    /// The window contained samples, but none had drawable coordinates.
+    pub invalid: bool,
     /// Points from left to right. `x` runs from 0 at the frame's left edge
     /// to 1 at its right edge, and may start a little below 0: the trace is
     /// shifted left by the fraction of a sample between the trigger and the
@@ -51,6 +53,11 @@ pub struct Trace {
     /// The signal's level from 0 to 1 (-60 dB to 0 dB). At the middle zoom
     /// the scope is a flat line with this brightness.
     pub level: f32,
+}
+
+impl Trace {
+    /// The words shared by hover text and the accessible description of the cross.
+    pub const INVALID_LABEL: &'static str = "Not a number";
 }
 
 /// The traces of every scope, by module ID and widget index.
@@ -223,7 +230,15 @@ impl TraceGeometry {
                         .windows(2)
                         .map(move |pair| Segment::with_width(at(pair[0]), at(pair[1]), colour, area, PEAK_WIDTH))
                 };
-                if widget.kind == WidgetViewKind::LevelHistory {
+                if trace.invalid {
+                    let centre = area.center();
+                    let arm = 0.12 * area.width.min(area.height);
+                    for dy in [arm, -arm] {
+                        let from = Point::new(centre.x - arm, centre.y - dy);
+                        let to = Point::new(centre.x + arm, centre.y + dy);
+                        segments.push(Segment::new(from, to, palette.text, area));
+                    }
+                } else if widget.kind == WidgetViewKind::LevelHistory {
                     // One flat column per point, because a capsule has a
                     // round top. The columns meet, so they read as one shape.
                     let step = match trace.points.as_slice() {

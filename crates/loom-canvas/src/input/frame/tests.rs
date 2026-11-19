@@ -181,6 +181,7 @@ fn traces_rebuild_on_a_new_trace_and_on_a_change_of_detail() {
             points: vec![[0.0, 0.0], [1.0, 0.5]],
             second: Vec::new(),
             level: 0.5,
+            ..Default::default()
         },
     );
     let moved = frame(&traces, 0.7).traces.expect("still drawn");

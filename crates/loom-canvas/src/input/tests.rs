@@ -1524,7 +1524,7 @@ fn the_open_field_takes_every_key() {
 
     let tabbed = drive(&canvas, &mut state, &key_event(Key::Tab, true), at);
     assert!(state.focus.typed().is_none());
-    assert_eq!(tabbed, vec![CanvasEvent::Select(vec![1])], "Tab moves on as usual");
+    assert_eq!(tabbed, vec![CanvasEvent::SelectByKey(1)], "Tab moves on as usual");
 }
 
 /// Enter opens the field with the value text selected, and Enter again closes
@@ -2170,24 +2170,24 @@ fn keyboard_focus_follows_tiles_and_controls() {
     let canvas = CanvasModel::new(&scene, &none);
     assert_eq!(
         drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
-        vec![CanvasEvent::Select(vec![2])]
+        vec![CanvasEvent::SelectByKey(2)]
     );
     assert_eq!(
         drive(&canvas, &mut state, &shifted(Key::Tab), at),
-        vec![CanvasEvent::Select(vec![1])],
+        vec![CanvasEvent::SelectByKey(1)],
         "Shift-Tab starts at the last tile"
     );
     let selected = BTreeSet::from([2]);
     let canvas = CanvasModel::new(&scene, &selected);
     assert_eq!(
         drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
-        vec![CanvasEvent::Select(vec![1])]
+        vec![CanvasEvent::SelectByKey(1)]
     );
     let first_selected = BTreeSet::from([1]);
     let first_canvas = CanvasModel::new(&scene, &first_selected);
     assert_eq!(
         drive(&first_canvas, &mut state, &shifted(Key::Tab), at),
-        vec![CanvasEvent::Select(vec![2])]
+        vec![CanvasEvent::SelectByKey(2)]
     );
     assert!(drive(&canvas, &mut state, &key_event(Key::Enter, true), at).is_empty());
     assert_eq!(state.focus.control(), Some((2, 0)));
@@ -2371,7 +2371,7 @@ fn keys_reach_and_leave_a_panel_control() {
     let canvas = CanvasModel::new(&scene, &none);
     assert_eq!(
         drive(&canvas, &mut state, &key_event(Key::Tab, true), at),
-        vec![CanvasEvent::Select(vec![1])]
+        vec![CanvasEvent::SelectByKey(1)]
     );
     let selected = BTreeSet::from([1]);
     let canvas = CanvasModel::new(&scene, &selected);

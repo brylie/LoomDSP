@@ -113,7 +113,7 @@ impl LevelHistory {
         loom_canvas::Trace {
             points: levels.iter().enumerate().map(|(i, l)| at(i, l.0)).collect(),
             second: levels.iter().enumerate().map(|(i, l)| at(i, l.1)).collect(),
-            level: 0.0,
+            ..Default::default()
         }
     }
 }

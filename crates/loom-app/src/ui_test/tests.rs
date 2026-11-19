@@ -1183,6 +1183,9 @@ fn tab_visits_subtractive_by_visual_row_in_both_directions() {
     for &id in &expected {
         ui.tap(key.clone(), keyboard::Modifiers::default());
         assert_eq!(ui.app().session.selection.iter().copied().collect::<Vec<_>>(), [id]);
+        let tile = ui.app().session.scene.module(id).unwrap();
+        let has_control = tile.panel.widgets.iter().any(|w| w.is_control() && !w.hidden);
+        assert_eq!(ui.app().ui_snapshot().status == "Enter for its controls", has_control);
     }
     for id in expected.iter().rev().skip(1).chain(expected.last()) {
         ui.tap(key.clone(), keyboard::Modifiers::SHIFT);

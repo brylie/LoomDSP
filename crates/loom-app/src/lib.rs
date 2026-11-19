@@ -163,7 +163,7 @@ struct Args {
     view: screenshot::Options,
     /// Print what the UI shows (tiles, inspector, status bar, undo steps,
     /// window title) as JSON and exit, without a window, audio, or MIDI.
-    #[arg(long, conflicts_with = "screenshot", group = "inspect")]
+    #[arg(long, conflicts_with = "screenshot", groups = ["inspect", "focusable_output"])]
     dump_ui: bool,
     /// With --dump-ui or --screenshot-window: select this module, so the
     /// inspector shows it. Repeat to select several.
@@ -2313,7 +2313,7 @@ Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A
 Delete or Backspace removes the selection.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 Tab and Shift-Tab select modules in reading order. Enter focuses the selected module's first control.\n\
-With a control focused, Tab moves between controls and arrow keys change values. Space or Enter acts on a toggle, radio, or button.\n\
+With a control focused, Tab moves between controls and arrow keys change values. Enter or a digit starts typing a value on a knob, fader, or number. Space or Enter acts on a toggle, radio, or button.\n\
 Escape clears control focus, then the selection. With a module selected and no control focused, arrow keys move it.\n\
 Space toggles Run when no control uses it, including a focused knob.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\

@@ -624,7 +624,7 @@ impl CanvasModel<'_> {
                     None => 0,
                 };
                 state.focus.clear();
-                self.emit(out, CanvasEvent::Select(vec![order[next].id]));
+                self.emit(out, CanvasEvent::SelectByKey(order[next].id));
                 true
             }
             Key::Escape if !command && state.focus.control().is_some() => {
