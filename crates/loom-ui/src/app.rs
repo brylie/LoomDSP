@@ -87,6 +87,19 @@ pub trait App {
         None
     }
 
+    /// Where Tab (or Shift+Tab, when `back`) goes from the runtime's focus
+    /// stop `from` (ui-layer.md, section 6, rule 3). `next` is the stop
+    /// after it in the runtime's reading order, among the layers that take
+    /// input now, or `None` past either end. The app answers where its
+    /// stops are not one run: when the target's own stops sit between two
+    /// of the runtime's, or the order wraps. It reads state and changes
+    /// none. The default goes to `next`, and past either end leaves the
+    /// runtime's stops for the target, as with one run.
+    fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> TabStep<Self::Message> {
+        let _ = (from, back);
+        next.map_or(TabStep::Leave, |next| TabStep::To(next.clone()))
+    }
+
     /// The message for something a text field of the runtime's did, if
     /// the app wants one: `id` is the field's UI ID. The field's text is
     /// the app's (ui-layer.md, section 8, rule 2): an app that wants an
@@ -159,6 +172,21 @@ impl Default for InputState {
             target_first: false,
         }
     }
+}
+
+/// Where a Tab from one of the runtime's stops goes ([`App::tab_from`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TabStep<M> {
+    /// To this focus stop of the runtime's.
+    To(UiId),
+    /// Out of the runtime's stops: its focus clears and the key goes on to
+    /// the target, which takes it as from nothing.
+    Leave,
+    /// Out of the runtime's stops, with this message for the next turn,
+    /// which moves the focus into the target (a focus request to the
+    /// canvas, or a focus effect on one of the target's fields). The key
+    /// goes no further, so the target does not step a second time.
+    Send(M),
 }
 
 /// When the app next needs to wake, and the message it gets then.

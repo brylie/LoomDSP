@@ -53,11 +53,50 @@ The canvas keeps its own text sizes in world units (`TITLE_SIZE`, `LABEL_SIZE` i
 | Role | Look | Used for |
 |---|---|---|
 | Primary | Orange fill, dark text | The one main action of a view or dialog, such as Create. A mode that is on, such as MIDI learn while learning. At most one per view. |
-| Secondary | Quiet: a lifted grey fill, light text | Every other button. The default. |
-| Danger | Red fill, light text | Panic. |
-| Plain | No fill, text only | Small inline actions such as the × that removes a row. |
+| Secondary | Quiet: a lifted grey fill, dark text | Every other button. The default. |
+| Danger | Red fill, dark text | Panic. |
+| Plain | No fill, text only | Small inline actions such as the × that removes a row, and the breadcrumb's entries. |
 
-A disabled button keeps its role's shape and is drawn faded, so it reads as unavailable, not as another role.
+A disabled button keeps its role's shape and is drawn dimmed, so it reads as unavailable, not as another role.
+
+#### Role tokens
+
+**Status:** Implemented, M2 (Brylie's decisions of 2026-11-18, [plan for leaving Iced](../dev/leaving-iced-plan.md), step 3.2, row 2). The tokens are `style::PRIMARY`, `SECONDARY`, `DANGER`, and `PLAIN`, read through `style::Role`.
+
+Each role has a look for each state a button can be in: normal, hovered (the pointer is over it), pressed (a press on it is held, by the pointer or by Space), and off (turned off). The tokens are ours, in `style.rs`, as `loom-ui-core` colours, and they are **the one source for both toolkits until Iced goes** (phase 4): `loom-ui`'s buttons read them, and so do the role style functions that Iced's buttons are drawn with (`style::primary`, `secondary`, `danger`, `plain`), which map each of Iced's button states to the token for that state. Iced keeps its own state handling for its buttons; only the colours come from here. That mapping is a bridge, deleted in phase 4 with Iced: the states are named for what our buttons need, not for Iced's. The values start from the dark theme's palette, whose panel background is `#22242A`.
+
+| Role | State | Fill | Text | Text on fill | Fill on background | Fill against normal |
+|---|---|---|---|---|---|---|
+| Primary | normal | `#F5A623` | `#2A1A00` | 8.31 | 7.65 | |
+| Primary | hovered | `#F9C876` | `#2A1A00` | 10.87 | 10.01 | 1.31 |
+| Primary | pressed | `#DC8D0A` | `#2A1A00` | 6.31 | 5.80 | 1.32 |
+| Primary | off | `#5C4A2E` | `#CDBD9E` | 4.60 | 1.83 † | 4.19 |
+| Secondary | normal | `#7F828D` | `#0E0E10` | 5.03 | 4.05 | |
+| Secondary | hovered | `#9497A0` | `#0E0E10` | 6.61 | 5.31 | 1.31 |
+| Secondary | pressed | `#6C6F7A` | `#F2F3F6` | 4.51 ‖ | 3.10 | 1.31 |
+| Secondary | off | `#3E414B` | `#AEB1BB` | 4.75 | 1.52 † | 2.66 |
+| Danger | normal | `#E04F4F` | `#0E0E10` | 4.96 | 3.99 | |
+| Danger | hovered | `#E77474` | `#0E0E10` | 6.56 | 5.28 | 1.32 |
+| Danger | pressed | `#D42525` | `#F2F3F6` | 4.63 | 3.02 ‖ | 1.32 |
+| Danger | off | `#5A3434` | `#C9ABAB` | 5.01 | 1.46 † | 2.73 |
+| Plain | normal | none | `#E6E8EE` | 12.66 on the background | ‡ | |
+| Plain | hovered | `#40444F` | `#E6E8EE` | 7.94 | 1.59 ‡ | 1.59 |
+| Plain | pressed | `#50556A` | `#E6E8EE` | 6.02 | 2.10 ‡ | 2.10 |
+| Plain | off | none | `#8E929C` | 4.98 on the background | ‡ | |
+
+Ratios are by the WCAG 2.2 formula (`loom_canvas::contrast_ratio`), against the panel background. The filled roles have a 2 px radius and no border; plain has neither.
+
+- **One table, for the one theme.** The app has one theme, a dark one (`boot.rs`, `Theme::custom`, panel background `#22242A`), so the tokens are set for that background and every ratio is measured on it. A light theme (FR-PANEL-06) needs a table of its own, checked the same way.
+- **Text is at least 4.5:1 in every state** (WCAG 2.2, SC 1.4.3). **A turned-on fill of primary, secondary, or danger is at least 3:1 against the background** (SC 1.4.11), so the button's edge shows. *Why:* the toolbar is read at a glance on a dark stage.
+- **Each state stands apart from normal: our own rule.** For primary, secondary, and danger, the hovered and the pressed fills are each at least 1.3:1 against the normal fill, and plain's hovered fill at least 1.5:1 against the background it sits on, with pressed a further step. WCAG asks nothing of this. *Why:* a step most people cannot see is a lost state: a press would look like nothing happened.
+- **Pressed may change the text colour.** A filled role's pressed fill is dark enough that its text turns light (secondary and danger), so the text keeps 4.5:1.
+- † **Off.** An inactive component is exempt from SC 1.4.3 and 1.4.11. Its text still meets 4.5:1, so a player can read what the button is before its hover text says why it is off, and its fill is dimmer than every turned-on state, so it reads as off without colour alone.
+- ‡ **Plain** is identified by its text, which meets 4.5:1; its hovered and pressed fills are feedback, not what identifies it, so SC 1.4.11 asks nothing of them. Plain buttons sit on the stats bar and the breadcrumb, which paint no background of their own, so the panel background is what they sit on. Keyboard focus is shown by the focus ring, at 3:1 ([UI layer spec](ui-layer.md), section 6).
+- ‖ **Closest to a line:** secondary's pressed text, at 4.51:1, and danger's pressed fill, at 3.02:1. The token test pins every value in this table, so a change to any of them shows.
+- **Hovered is lighter and pressed darker** than normal for every filled role. *Why:* before, hovered primary and danger were darker and pressed was the normal look, so the two could not be told apart.
+- **The look a button shows:** off when it is turned off, whatever else holds; otherwise pressed while a press on it is held and the pointer is over it, or while Space is held on it; otherwise hovered while the pointer is over it; otherwise normal. Keyboard focus adds the focus ring to whichever look shows.
+- **What else uses the role functions.** The menus' highlighted item (`style::outlined`) builds on a role, so it takes these colours and keeps its outline. The right panel's tabs (`style::tab`) and the module browser's rows have styles of their own and keep their look. No text field, pick list, slider, checkbox, or radio uses a button style.
+- Before: the role functions passed Iced's own role styles through, and an off button was its normal look at half opacity, about 1.5:1.
 
 Tile and probe menus share a solid panel and the same row style. Menu text, including a disabled row, has at least 4.5:1 contrast with its fill. The edge of a row and the outline on hover or keyboard focus have at least 3:1 contrast. The panel edge also stands out against a tile and the canvas.
 
@@ -67,13 +106,15 @@ The toolbar shows the patch name, then its buttons in groups, with wider space b
 
 | Group | Buttons |
 |---|---|
-| File | New, Open, Save, Save As |
+| File | New, Open, Save, Save As, Save to library (inside a sub-patch), Browse, Recent |
 | Add | Add module |
 | Play | Hold note, Panic |
 | Edit | Undo, Redo |
 | Setup | MIDI learn, Preferences |
 
 No toolbar button is primary unless a mode is on (MIDI learn while learning). Panic is danger.
+
+Inside a sub-patch, the breadcrumb sits under the toolbar: "Patch", then one entry per level, with "›" between them, each a plain button that opens its level ([sub-patches](sub-patches.md)). From row 2 of the plan for leaving Iced, the toolbar and the breadcrumb are `loom-ui`'s, with heights from `style::TOOLBAR_HEIGHT` and `style::BREADCRUMB_HEIGHT`.
 
 ### Knobs
 
@@ -167,6 +208,14 @@ The rest:
 - [x] Each row of the kept error table has a test. The same text never shows twice.
 - [x] With four MIDI inputs, input drift, `Learning`, a long kept error, a long status message, and both output warnings, every item fits at 1280 px wide (headless `Ui` test).
 - [x] Disabled Hold note and Recent have hover text that says why (test on what the view passes to its tooltips, because the `Ui` harness does not reach them).
+
+Role tokens (plan for leaving Iced, row 2):
+
+- [x] Every ratio in the role token table, the state-to-state ratios included, is checked from the tokens in `style.rs` (`the_role_tokens_meet_their_table`).
+- [x] `loom-ui`'s buttons and Iced's role style functions read the same tokens, for every state (`both_toolkits_read_the_same_role_tokens`).
+- [x] A hovered, a pressed, and an off button each paint their token's fill and text (`loom-ui`: `an_element_paints_the_look_of_its_state`, `off_wins_over_hover_and_press`; a capture: `a_capture_draws_enabled_buttons_as_enabled`).
+- [x] The toolbar never has two primary buttons (`the_toolbar_has_one_primary_at_most`).
+- [ ] Brylie has seen `--screenshot-window` of the toolbar at the top level and inside a sub-patch, of Preferences, and of one overlay with buttons, before row 2 merges.
 
 ## Out of scope
 

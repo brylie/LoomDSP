@@ -266,7 +266,7 @@ pub(crate) fn still_panels(
     use loom_ui::paint::{ListPainter, Typesetter};
     let size = loom_ui_core::Size::new(logical.width, logical.height);
     let mut view = loom_ui::View::new();
-    app.bar_panels(&mut view);
+    app.chrome_panels(&mut view);
     let text = std::cell::RefCell::new(Typesetter::new());
     let still = loom_ui::Still::new(&view, size, &mut *text.borrow_mut());
     let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, size);

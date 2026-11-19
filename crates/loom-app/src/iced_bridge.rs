@@ -276,14 +276,25 @@ impl loom_ui::App for Hosted {
     /// No panels yet: Iced draws every view until phase 3. A test may add
     /// some ([`Extra`]).
     fn view(&self, view: &mut loom_ui::View) {
-        self.0.bar_panels(view);
+        self.0.chrome_panels(view);
         self.2.view(view);
     }
 
-    /// What a click on one of the runtime's elements means. None of the
-    /// app's own views is one yet.
+    /// What a click on one of the runtime's elements means: a toolbar
+    /// button's press, a breadcrumb entry's level, or the bar's.
     fn clicked(&self, id: &UiId) -> Option<Message> {
-        self.0.bar_click(id).or_else(|| self.2.clicked(id))
+        self.0
+            .toolbar_click(id)
+            .or_else(|| self.0.breadcrumb_click(id))
+            .or_else(|| self.0.bar_click(id))
+            .or_else(|| self.2.clicked(id))
+    }
+
+    /// Where Tab goes from one of the runtime's stops: the toolbar and the
+    /// breadcrumb at the top, the bar at the bottom, with Iced's canvas and
+    /// fields between them (`chrome.rs`).
+    fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> loom_ui::TabStep<Message> {
+        self.0.tab_from(from, next, back)
     }
 
     /// Hover text in the look of Iced's tooltips: the theme's weak
@@ -330,8 +341,8 @@ impl loom_ui::App for Hosted {
 
     /// The input owner as a layer: an open question holds the window, and
     /// every other panel or menu Iced draws over the canvas is an overlay
-    /// (ui-layer.md, section 5, rule 2). The canvas has the keyboard while
-    /// one of its controls has focus.
+    /// (ui-layer.md, section 5, rule 2). Whether the canvas has the keys is
+    /// [`App::canvas_has_keys`].
     fn input(&self) -> loom_ui::InputState {
         use crate::input_owner::InputOwner;
         loom_ui::InputState {
@@ -340,7 +351,7 @@ impl loom_ui::App for Hosted {
                 InputOwner::Canvas => loom_ui::Layer::Canvas,
                 _ => loom_ui::Layer::Overlays,
             },
-            canvas_focused: self.0.a11y.focus().is_some(),
+            canvas_focused: self.0.canvas_has_keys(),
             // With no overlay open, Tab from nothing is the canvas's, as it
             // was before the bar moved: the canvas is above the bar
             // (section 6, rule 2; Brylie's decision, 2026-11-17).

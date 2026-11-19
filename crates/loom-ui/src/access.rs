@@ -185,6 +185,10 @@ pub struct States {
     pub expanded: Option<bool>,
     /// It holds the window: nothing outside it can be reached.
     pub modal: bool,
+    /// It is the current item of a set that shows where the user is, as
+    /// the open level's entry in a breadcrumb: reported as the current
+    /// page (`aria_current`), as the WAI-ARIA breadcrumb pattern does.
+    pub current: bool,
 }
 
 /// What an element is to a screen reader.
@@ -372,6 +376,9 @@ impl Access {
         }
         if self.states.modal {
             node.set_modal();
+        }
+        if self.states.current {
+            node.set_aria_current(accesskit::AriaCurrent::Page);
         }
         if !self.states.disabled {
             for action in &self.actions {

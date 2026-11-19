@@ -138,17 +138,73 @@ pub(crate) struct Look {
     pub(crate) radius: f32,
     /// What is inside is cut to the element's bounds.
     pub(crate) clip: bool,
+    /// Its look in each state, for an element that can be pressed: chosen
+    /// when it is painted, so a hover or a press redraws it without
+    /// building its panel again.
+    pub(crate) states: Option<Looks>,
 }
 
 impl Look {
     /// True when the element draws a box.
     pub(crate) fn draws_box(&self) -> bool {
-        self.background.is_some() || self.border.is_some()
+        self.background.is_some() || self.border.is_some() || self.states.is_some()
     }
 
     /// The border's width, or 0.
     pub(crate) fn border_width(&self) -> f32 {
         self.border.map_or(0.0, |(width, _)| width)
+    }
+}
+
+/// The fill and the text colour of an element in one state, part of its
+/// [`Looks`].
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct StateLook {
+    /// The fill inside its box, or none.
+    pub background: Option<Color>,
+    /// The colour of the text inside it that sets none of its own. `None`
+    /// leaves it to the panel style's text colour.
+    pub text: Option<Color>,
+}
+
+/// How an element that can be pressed looks in each state (visual-system.md,
+/// Role tokens): the app fills it from its style tokens, so `loom-ui`
+/// chooses no colour of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Looks {
+    /// Neither hovered nor pressed, and turned on.
+    pub normal: StateLook,
+    /// The pointer is over it.
+    pub hovered: StateLook,
+    /// A press on it is held with the pointer over it, or Space is held
+    /// on it.
+    pub pressed: StateLook,
+    /// It is turned off.
+    pub off: StateLook,
+}
+
+/// Which of its [`Looks`] an element shows when it is painted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum State {
+    /// Neither hovered nor pressed.
+    Normal,
+    /// The pointer is over it.
+    Hovered,
+    /// A press on it is held.
+    Pressed,
+    /// Turned off.
+    Off,
+}
+
+impl Looks {
+    /// Its look in `state`.
+    pub(crate) fn of(&self, state: State) -> StateLook {
+        match state {
+            State::Normal => self.normal,
+            State::Hovered => self.hovered,
+            State::Pressed => self.pressed,
+            State::Off => self.off,
+        }
     }
 }
 
@@ -404,6 +460,20 @@ impl Element {
     /// cannot round.
     pub fn clip(mut self) -> Self {
         self.look.clip = true;
+        self
+    }
+
+    /// Its look in each state: a button's, chosen when it is painted
+    /// (visual-system.md, Role tokens). Off when its access says it is
+    /// turned off, whatever else holds; otherwise pressed while a press
+    /// on it is held with the pointer over it, or while Space is held on
+    /// it; otherwise hovered while the pointer is over it; otherwise
+    /// normal. Its box takes the state's fill, over any
+    /// [`background`](Self::background), and the text inside that sets
+    /// no colour takes the state's. The focus ring is drawn over whichever
+    /// shows. Only an element with a key is ever hovered or pressed.
+    pub fn looks(mut self, looks: Looks) -> Self {
+        self.look.states = Some(looks);
         self
     }
 

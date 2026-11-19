@@ -15,9 +15,11 @@ mod autosave_tests;
 mod bars;
 mod bench;
 mod boot;
+mod breadcrumb;
 mod browser;
 mod builtin;
 mod canvas_events;
+mod chrome;
 mod clip;
 mod clipboard;
 mod control;
@@ -495,10 +497,21 @@ enum Message {
     TextFieldTab {
         backwards: bool,
     },
+    /// Moves the runtime's focus to a toolbar button, or with `None` out of
+    /// the toolbar and back to the canvas: the toolbar's arrow keys and
+    /// Escape (ui-layer.md, section 6, rule 7). Posted for a turn of its
+    /// own, after every other message the same key sent.
+    ToolbarFocus(Option<loom_ui_core::UiId>),
     /// Tab between a view's fields, from the part the window says has
     /// focus (`window_question.rs`).
     TabFrom {
         from: Option<loom_ui_core::UiId>,
+        backwards: bool,
+    },
+    /// Tab reached patch info's fields from one of the runtime's stops: the
+    /// last field takes focus, or the first when not `backwards`
+    /// (ui-layer.md, section 6, rule 3, from row 2).
+    EnterFields {
         backwards: bool,
     },
     /// An inspector slider was let go.
@@ -698,6 +711,8 @@ impl Message {
             | Self::TextFocusCheck
             | Self::TextFieldTab { .. }
             | Self::TabFrom { .. }
+            | Self::EnterFields { .. }
+            | Self::ToolbarFocus(_)
             | Self::SliderReleased
             | Self::Matrix(_)
             | Self::MatrixKey(_)
@@ -1680,6 +1695,8 @@ impl App {
             Message::TabFrom { from, backwards } => {
                 self.tab_between_fields(from.as_ref(), backwards);
             }
+            Message::EnterFields { backwards } => self.enter_fields(backwards),
+            Message::ToolbarFocus(stop) => self.toolbar_focus(stop),
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
                 self.effect(loom_ui::Effects::clipboard_read(move |text| Message::Pasted {
@@ -1986,6 +2003,8 @@ impl App {
             | Message::ControlFrame(_)
             | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
+            | Message::EnterFields { .. }
+            | Message::ToolbarFocus(_)
             | Message::FocusMoved(_)
             | Message::Inspector(_)
             | Message::Located { .. }

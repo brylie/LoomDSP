@@ -112,6 +112,10 @@ fn the_x_dismisses_by_pointer_key_and_screen_reader() {
                 ui.release();
             }
             "enter" | "space" => {
+                // From nothing: no tile selected either, or the canvas
+                // holds the keys and walks its tiles (section 6, rule 1).
+                ui.app_mut().session.selection.clear();
+                ui.redraw();
                 ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
                 assert_eq!(
                     ui.runtime().focused(),
@@ -145,6 +149,9 @@ fn the_developer_switches_turn_with_space_and_a_screen_reader() {
     let back = |ui: &mut Ui| {
         ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
     };
+    // From nothing: no tile selected either (section 6, rule 1).
+    ui.app_mut().session.selection.clear();
+    ui.redraw();
     back(&mut ui);
     back(&mut ui);
     assert_eq!(ui.runtime().focused(), Some(&measure));
@@ -250,21 +257,21 @@ fn at(ui: &mut Ui) -> (Option<UiId>, Option<UiId>) {
     (ui.focused_field(), ui.runtime().focused().cloned())
 }
 
-/// Tab between the toolkits in reading order (section 6, rule 2): Tab from
-/// nothing is the canvas's, as before the bar moved; past patch info's
-/// last field, the bar's ×; past the ×, focus leaves both, and the next
-/// Tab is the canvas's again.
+/// Tab between the toolkits in reading order (section 6, rule 3, from row
+/// 2): Tab from nothing is the canvas's, as before; past patch info's last
+/// field, the bar's ×; past the ×, the order wraps to the toolbar's first
+/// button, New. Shift+Tab before patch info's first field reaches the top
+/// run's last stop, which at the top level is the toolbar's one stop, on
+/// its first button the first time (Brylie's decisions, 2026-11-18 and
+/// 2026-11-19).
 #[test]
-fn tab_reads_the_canvas_patch_info_then_the_bar() {
+fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     let [authors, tags] = crate::patch_info::text_fields();
     let x = id(bars::STATUS_DISMISS_ID);
+    let new = crate::toolbar::toolbar_id().with("new");
     let mut from_nothing = ui_with_patch_info(true);
     tap(&mut from_nothing, Named::Tab);
-    assert_eq!(
-        at(&mut from_nothing),
-        (None, None),
-        "from nothing, nothing of the bar's"
-    );
+    assert_eq!(at(&mut from_nothing), (None, None), "from nothing, nothing of ours");
     assert!(
         !from_nothing.app().session.selection.is_empty(),
         "the canvas took it, as before"
@@ -279,55 +286,60 @@ fn tab_reads_the_canvas_patch_info_then_the_bar() {
     assert_eq!(at(&mut ui), (None, Some(x.clone())), "past patch info, the bar");
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
     tap(&mut ui, Named::Tab);
-    assert_eq!(at(&mut ui), (None, None), "past the bar, nothing of either");
-    assert!(
-        !ui.app().session.selection.is_empty(),
-        "and the canvas took it, as from nothing"
+    assert_eq!(
+        at(&mut ui),
+        (None, Some(new.clone())),
+        "past the bar, the toolbar's first"
     );
 
-    // Back the other way: before patch info's first field, the bar's last.
+    // Back the other way: before patch info's first field, the top run's
+    // last stop.
     let mut ui = ui_with_patch_info(true);
     click_authors(&mut ui);
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
-    assert_eq!(at(&mut ui), (None, Some(x)), "before patch info, the bar");
+    assert_eq!(at(&mut ui), (None, Some(new)), "before patch info, the toolbar");
 }
 
 /// Shift+Tab from nothing enters the bar's last stop, the last in reading
-/// order; before its first, focus leaves both toolkits.
+/// order; before the bar's first, patch info's last field takes it.
 #[test]
 fn shift_tab_from_nothing_enters_the_bar() {
+    let [_, tags] = crate::patch_info::text_fields();
     let x = id(bars::STATUS_DISMISS_ID);
     let mut ui = ui_with_patch_info(true);
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
     assert_eq!(at(&mut ui), (None, Some(x)), "from nothing, the last stop");
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
     assert_eq!(
-        ui.runtime().focused(),
-        None,
-        "before the bar, out of the runtime's stops"
+        at(&mut ui),
+        (Some(tags), None),
+        "before the bar, patch info's last field"
     );
 }
 
-/// With no stop in the bar, Tab moves as before the bar moved: patch
-/// info's fields loop, and Tab from nothing is the canvas's.
+/// With no stop in the bar, patch info's fields hand Tab on to the
+/// toolbar, which always has a stop: past the last field, the toolbar's
+/// first button.
 #[test]
-fn with_no_stop_in_the_bar_tab_moves_as_before() {
-    let [authors, tags] = crate::patch_info::text_fields();
+fn with_no_stop_in_the_bar_the_fields_hand_on_to_the_toolbar() {
+    let [_, tags] = crate::patch_info::text_fields();
     let mut ui = ui_with_patch_info(false);
     assert!(ui.app().bar_stops().is_empty());
     click_authors(&mut ui);
     tap(&mut ui, Named::Tab);
-    assert_eq!(at(&mut ui), (Some(tags.clone()), None));
+    assert_eq!(at(&mut ui), (Some(tags), None));
     tap(&mut ui, Named::Tab);
-    assert_eq!(at(&mut ui), (Some(authors.clone()), None), "the loop, as before");
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
-    assert_eq!(at(&mut ui), (Some(tags), None), "and back, as before");
+    assert_eq!(
+        at(&mut ui),
+        (None, Some(crate::toolbar::toolbar_id().with("new"))),
+        "past the fields, the toolbar"
+    );
 }
 
-/// The app's list of the bar's stops is the runtime's own order, so the
-/// hand-off and Tab inside the bar agree.
+/// The app's list of the runtime's stops is the runtime's own order, so
+/// the hand-offs and Tab inside each run agree.
 #[test]
-fn the_bar_stops_are_the_runtimes() {
+fn the_app_stops_are_the_runtimes() {
     let mut ui = ui_with_error();
     ui.app_mut().dev_tools = true;
     ui.app_mut().alerts.say("saved");
@@ -335,7 +347,7 @@ fn the_bar_stops_are_the_runtimes() {
     ui.lay_out_panels();
     let stops = ui.app().bar_stops();
     assert_eq!(stops.len(), 3, "two switches and the kept error's ×: {stops:?}");
-    assert_eq!(ui.runtime().focus_stops(), stops.as_slice());
+    assert_eq!(ui.runtime().focus_stops(), ui.app().our_stops().as_slice());
 }
 
 /// A status longer than the bar is cut, not the fixed items: each keeps its
@@ -546,4 +558,32 @@ fn focus_on_the_x_cancels_a_canvas_focus_still_on_its_way() {
     tap(&mut ui, Named::Enter);
     ui.redraw();
     assert!(ui.app().alerts.kept().is_empty(), "Enter on the × dismissed the error");
+}
+
+/// With a tile selected and nothing else focused, the canvas holds the
+/// keys (section 6, rule 1; Brylie's decision, 2026-11-19): Shift+Tab
+/// walks the canvas's tiles, and does not enter the bar, though the bar
+/// has a stop.
+#[test]
+fn shift_tab_with_a_tile_selected_walks_the_canvas() {
+    let mut ui = ui_with_error();
+    assert!(ui.app().canvas_has_keys(), "tile 4 is selected");
+    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    assert_eq!(ui.runtime().focused(), None, "the bar's × was not entered");
+    assert_eq!(ui.app().session.selection.len(), 1, "the canvas selected a tile");
+    assert_ne!(ui.app().session.selection, [4].into_iter().collect(), "another one");
+}
+
+/// A keyboard user reaches the bar's × with a tile selected: Escape lets
+/// the selection go, and Shift+Tab from nothing then enters the bar's last
+/// stop, the ×.
+#[test]
+fn the_x_is_reached_from_a_selected_tile_by_escape_then_shift_tab() {
+    let mut ui = ui_with_error();
+    let x = id(bars::STATUS_DISMISS_ID);
+    tap(&mut ui, Named::Escape);
+    ui.redraw();
+    assert!(ui.app().session.selection.is_empty(), "Escape let the selection go");
+    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    assert_eq!(ui.runtime().focused(), Some(&x));
 }

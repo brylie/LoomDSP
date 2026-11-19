@@ -99,10 +99,10 @@ pub(crate) struct State {
     pub(crate) active: bool,
     pub(crate) focus_port: Option<PortRef>,
     pub(crate) centre: (u64, Option<Point>),
-    /// A temporary stop in the toolbar, used by the app's region shortcut.
-    pub(crate) toolbar: bool,
-    /// Position of the last toolbar button reached with the keyboard.
-    toolbar_index: usize,
+    /// The toolbar button last focused in this level, where Ctrl+Tab
+    /// returns to the toolbar (ui-layer.md, section 6, rule 7). The
+    /// toolbar's focus itself is the runtime's, on one of its stops.
+    pub(crate) last_toolbar: Option<UiId>,
     /// A focused inspector action when the panel has no editable field.
     pub(crate) inspector_action: Option<UiId>,
     /// The last real Inspector field or action focused in this level.
@@ -628,7 +628,7 @@ impl App {
             self.cycle_region(modifiers.shift());
             return true;
         }
-        if self.session.outline.toolbar && self.toolbar_key(&key, modifiers.is_empty()) {
+        if self.toolbar_has_focus() && self.toolbar_key(&key, modifiers.is_empty()) {
             return true;
         }
         let outline = self.session.outline.active && self.right_tab == crate::matrix::Tab::Outline;
@@ -644,7 +644,6 @@ impl App {
         if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("o")) && modifiers.is_empty() {
             self.right_tab = crate::matrix::Tab::Outline;
             self.session.outline.active = true;
-            self.session.outline.toolbar = false;
             return true;
         }
         if *physical_key == Physical::Code(Code::BracketLeft) && modifiers.command() && !modifiers.alt() {
@@ -670,8 +669,9 @@ impl App {
     /// Moves focus to the adjacent region, remembering the outline's row.
     fn cycle_region(&mut self, back: bool) {
         use crate::matrix::Tab;
+        let toolbar = self.toolbar_has_focus();
         let state = &mut self.session.outline;
-        let current = if state.toolbar {
+        let current = if toolbar {
             2
         } else if state.active
             || state.inspector_action.is_some()
@@ -687,7 +687,6 @@ impl App {
         }
         state.close_jump();
         let next = (current + if back { 2 } else { 1 }) % 3;
-        state.toolbar = next == 2;
         state.active = next == 1 && self.right_tab == Tab::Outline;
         state.inspector_action = None;
         self.session.matrix.focused = next == 1 && self.right_tab == Tab::Matrix;
@@ -699,6 +698,15 @@ impl App {
         let last_canvas = state
             .last_canvas
             .filter(|(module, _)| self.session.selection.contains(module));
+        if next == 2 {
+            // The toolbar is one stop: the button last focused here, or
+            // the first the first time, as Tab enters it.
+            if let Some(stop) = self.toolbar_entry() {
+                self.effect(loom_ui::Effects::focus(stop));
+            }
+            self.effect(loom_ui::Effects::redraw());
+            return;
+        }
         if self.focus.is_some() {
             self.effect(loom_ui::Effects::unfocus());
         }
@@ -771,45 +779,64 @@ impl App {
         }
     }
 
-    /// The toolbar part that receives keys, by its stable name.
-    pub(crate) fn toolbar_keyboard_name(&self) -> Option<&'static str> {
-        if !self.session.outline.toolbar {
-            return None;
-        }
-        let model = self.toolbar_model();
-        let buttons: Vec<_> = model.buttons.iter().filter(|button| button.enabled).collect();
-        buttons
-            .get(self.session.outline.toolbar_index.min(buttons.len().saturating_sub(1)))
-            .map(|b| b.name)
+    /// True while one of the toolbar's buttons has the runtime's focus:
+    /// the toolbar region of ui-layer.md, section 6, rule 7.
+    pub(crate) fn toolbar_has_focus(&self) -> bool {
+        self.focus
+            .as_ref()
+            .is_some_and(|id| id.is_under(&crate::toolbar::toolbar_id()))
     }
 
-    /// Visits the enabled toolbar buttons, or activates the focused button.
+    /// Moves the runtime's focus among the turned-on toolbar buttons with
+    /// the arrow keys, Home, and End, and leaves the toolbar for the canvas
+    /// with Escape (the WAI-ARIA toolbar pattern; Brylie's decision,
+    /// 2026-11-19). The arrows stop at the ends, as #849's did; turned-off
+    /// buttons are no stops. Enter, Space, and Tab stay the runtime's,
+    /// which clicks the focused button and leaves the toolbar. Other plain
+    /// keys stay here, so they cannot edit the canvas. The move is posted
+    /// for a turn of its own, so a message the same key sent elsewhere
+    /// (Escape also closes help) runs while the focus is still here.
     fn toolbar_key(&mut self, key: &Key<&str>, plain: bool) -> bool {
-        if !plain {
+        if !plain || matches!(key, Key::Named(Named::Enter | Named::Space | Named::Tab)) {
             return false;
         }
-        let active = self
-            .toolbar_model()
-            .buttons
-            .iter()
-            .filter(|button| button.enabled)
-            .count();
-        let index = &mut self.session.outline.toolbar_index;
-        match key {
-            Key::Named(Named::ArrowLeft) => *index = index.saturating_sub(1),
-            Key::Named(Named::ArrowRight) => *index = (*index + 1).min(active.saturating_sub(1)),
-            Key::Named(Named::Home) => *index = 0,
-            Key::Named(Named::End) => *index = active.saturating_sub(1),
-            Key::Named(Named::Escape) => self.session.outline.toolbar = false,
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(message) = self.toolbar_keyboard_name().and_then(crate::toolbar::message) {
-                    self.post(message);
-                }
+        let stops = self.toolbar_stops();
+        let at = self
+            .focus
+            .as_ref()
+            .and_then(|id| stops.iter().position(|stop| stop == id));
+        let last = stops.len().saturating_sub(1);
+        let to = match key {
+            Key::Named(Named::ArrowLeft) => at.map(|at| at.saturating_sub(1)),
+            Key::Named(Named::ArrowRight) => at.map(|at| (at + 1).min(last)),
+            Key::Named(Named::Home) => Some(0),
+            Key::Named(Named::End) => Some(last),
+            Key::Named(Named::Escape) => {
+                self.post(Message::ToolbarFocus(None));
+                return true;
             }
-            // Plain keys stay in this region so they cannot edit the canvas.
-            _ => {}
+            _ => None,
+        };
+        if let Some(stop) = to.filter(|to| Some(*to) != at).and_then(|to| stops.get(to)) {
+            self.post(Message::ToolbarFocus(Some(stop.clone())));
         }
         true
+    }
+
+    /// Carries out [`Message::ToolbarFocus`]: focuses `stop`, or with `None`
+    /// lets the toolbar's focus go and gives the canvas back the control it
+    /// last had.
+    pub(crate) fn toolbar_focus(&mut self, stop: Option<UiId>) {
+        match stop {
+            Some(stop) => self.effect(loom_ui::Effects::focus(stop)),
+            None => {
+                if self.toolbar_has_focus() {
+                    self.effect(loom_ui::Effects::unfocus());
+                }
+                self.a11y.request_control(self.session.outline.last_canvas);
+            }
+        }
+        self.effect(loom_ui::Effects::redraw());
     }
 
     /// Visits, expands, and activates rows using the standard tree keys.

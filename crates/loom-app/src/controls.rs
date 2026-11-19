@@ -427,6 +427,12 @@ impl App {
             self.session.outline.last_inspector = Some(part.clone());
             self.session.outline.inspector_action = None;
         }
+        if let Some(part) = focus
+            .as_ref()
+            .filter(|part| part.is_under(&crate::toolbar::toolbar_id()))
+        {
+            self.session.outline.last_toolbar = Some(part.clone());
+        }
         self.focus = focus;
         if let Some(part) = gained {
             self.effect(loom_ui::Effects::focus_and_select_all(part));
@@ -778,6 +784,8 @@ pub(crate) fn value_draft_event(
 
 /// The events that can move text focus, heard whichever widget used them: a
 /// press, Escape, which a text field takes as giving up focus, and Tab.
+/// Ctrl+Tab is not a field's Tab: it moves between regions, and a focused
+/// text field does not take it (ui-layer.md, section 6, rule 7).
 pub(crate) fn text_focus_event(
     event: iced::Event,
     _status: iced::event::Status,
