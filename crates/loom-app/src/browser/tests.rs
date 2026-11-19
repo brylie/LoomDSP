@@ -59,14 +59,14 @@ fn a_name_that_starts_with_the_query_comes_first() {
 
 #[test]
 fn a_word_in_the_name_ranks_above_a_match_elsewhere() {
-    // "trig" starts a word of "Phase Trigger". Nothing else has it.
+    // "trig" starts a word of "Phase Trigger".
     assert_eq!(search(&modules(), "trig")[0].id, "loom.phase.trigger");
     // "meter" starts a word of "Level Meter" and is in its ID.
     assert_eq!(search(&modules(), "meter")[0].id, "loom.display.meter");
 }
 
 #[test]
-fn every_word_must_match_name_id_or_category() {
+fn every_query_word_must_match() {
     let found = search(&modules(), "osc saw");
     assert_eq!(ids(&found), ["loom.osc.saw"]);
     for d in search(&modules(), "oscillator noise") {
@@ -99,7 +99,7 @@ fn enter_adds_the_highlighted_module_at_the_snapped_point() {
     match browser.update(Message::Submit).0 {
         Outcome::Add(d, at) => {
             assert_eq!(d.id, "loom.osc.saw");
-            assert_eq!(at, Point::new(96.0, 24.0));
+            assert_eq!(at, Point::new(96.0, 24.0).into());
         }
         other => panic!("expected an add, got {other:?}"),
     }
@@ -387,10 +387,15 @@ fn the_highlight_stays_on_its_row_when_the_library_arrives() {
     let roles = loom_modules::registry().roles().collect();
     let mut browser = Browser::open(modules(), Point::ORIGIN, Point::ORIGIN, Rect::default()).with_roles(roles);
     let _ = browser.update(Message::Query("slot".into()));
-    let _ = browser.update(Message::Key(Nav::Down));
-    let _ = browser.update(Message::Key(Nav::Down));
-    let _ = browser.update(Message::Key(Nav::Down));
-    let _ = browser.update(Message::Key(Nav::Down));
+    let source = browser
+        .slot_rows()
+        .into_iter()
+        .find(|(_, role)| role.id == "loom.role.source")
+        .unwrap()
+        .0;
+    for _ in 0..source {
+        let _ = browser.update(Message::Key(Nav::Down));
+    }
     let before = browser.model().rows[browser.model().highlight.unwrap()].id.clone();
     assert_eq!(before, browser_id().with("role").with("loom.role.source"));
     let _ = browser.update(Message::Library(vec![item_with_roles("Fuzz", &["loom.role.shaper@1"])]));
@@ -425,4 +430,50 @@ fn a_slot_row_is_found_described_and_picked() {
         Outcome::AddSlot(role, _) => assert_eq!(role.id, "loom.role.filter"),
         other => panic!("expected an empty slot, got {other:?}"),
     }
+}
+
+/// A descriptive word can complete a multi-word query. A direct name
+/// match still leads another module found through its description.
+#[test]
+fn descriptions_match_below_names() {
+    let all = modules();
+    let found = search(&all, "noise");
+    assert_eq!(found[0].id, "loom.osc.noise");
+    assert!(found[1..].iter().any(|d| d.description.contains("noise")));
+    assert!(search(&all, "all-pass REVERB").iter().any(|d| d.name == "All-Pass"));
+}
+
+/// Adding the same module twice through the toolbar gives each tile
+/// visible space. Redo restores the position chosen by that add.
+#[test]
+fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = crate::ui_test::Ui::with_app(crate::tests::app());
+    for _ in 0..2 {
+        ui.click_text("Add module");
+        ui.redraw();
+        ui.typewrite("noise");
+        ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    }
+    let visible = {
+        let canvas = ui.canvas();
+        canvas.camera.visible(canvas.bounds.size())
+    };
+    let tiles = ui.app().session.scene.modules();
+    assert_eq!(tiles.iter().filter(|t| t.title == "Noise").count(), 2);
+    for (i, tile) in tiles.iter().enumerate() {
+        let rect = tile.bounds();
+        assert!(tiles[..i].iter().all(|other| !other.bounds().intersects(rect)));
+        if tile.title == "Noise" {
+            assert!(visible.x <= rect.x && visible.y <= rect.y);
+            assert!(visible.x + visible.width >= rect.x + rect.width);
+            assert!(visible.y + visible.height >= rect.y + rect.height);
+        }
+    }
+    let id = *ui.app().session.selection.first().unwrap();
+    let placed = ui.app().session.positions[&id];
+    ui.send(crate::Message::Undo);
+    assert!(ui.app().session.scene.module(id).is_none());
+    ui.send(crate::Message::Redo);
+    assert_eq!(ui.app().session.positions[&id], placed);
 }

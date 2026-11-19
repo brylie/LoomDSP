@@ -539,7 +539,9 @@ fn a_window_of_only_nan_draws_no_line() {
     scope.history.push(0, &[f32::NAN; 1000]);
     scope.update(240, Trigger::Auto, Slope::Rising);
     assert!(!scope.triggered);
+    assert!(scope.canvas_trace(false).invalid);
     let trace = scope.canvas_trace(true);
+    assert!(trace.invalid);
     assert!(trace.points.is_empty());
     assert_eq!(trace.level, 0.0);
     scope.trace = vec![f32::NAN; loom_canvas::MAX_TRACE_POINTS * 2];

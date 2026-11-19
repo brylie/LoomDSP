@@ -10,6 +10,7 @@ White, pink, or brown noise. The seed makes every render the same.
 | Version | 1 |
 | Family | Sources |
 | Category | Oscillator |
+| Fills roles | [Sound source](loom.role.source.md) |
 
 ## Inputs
 

@@ -52,7 +52,10 @@ fn regenerating_keeps_notes() {
     let registry = loom_modules::registry();
     let dir = temp_dir("notes");
     let first = write_pages(&registry, &dir).unwrap();
-    assert_eq!(first.written.len(), registry.browsable().count() + 1);
+    assert_eq!(
+        first.written.len(),
+        registry.browsable().count() + registry.roles().count() + 1
+    );
     assert!(stale_pages(&registry, &dir).unwrap().is_empty());
 
     let d = registry.iter().next().unwrap();
@@ -198,4 +201,18 @@ fn example_patches_in_pages_are_valid() {
             .load_into(&mut parts.controller)
             .unwrap_or_else(|e| panic!("{} example patch failed to load into controller: {e}", path.display()));
     }
+}
+
+/// Role help names limitations and links in both directions.
+#[test]
+fn role_help_lists_ports_and_modules_with_reciprocal_links() {
+    let registry = loom_modules::registry();
+    let role = &loom_core::roles::FILTER;
+    let role_page = role_page(&registry, role);
+    assert!(role_page.contains("Cutoff (`cutoff`)"));
+    assert!(role_page.contains("| Optional |"));
+    assert!(role_page.contains("| Required |"));
+    assert!(role_page.contains("[SVF](loom.filter.svf.md)"));
+    let filter = registry.resolve("loom.filter.svf@1").unwrap();
+    assert!(page(filter).contains("[Filter](loom.role.filter.md)"));
 }

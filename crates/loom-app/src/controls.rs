@@ -131,9 +131,9 @@ impl App {
         })
     }
 
-    /// Follows control changes: mapped parameters on screen, and the armed
-    /// parameter in learn mode.
-    pub(crate) fn midi_arrived(&mut self) {
+    /// Imports the values played by mapped controls. Returns whether any
+    /// parameter changed so callers can refresh the controls.
+    pub(crate) fn sync_midi_values(&mut self) -> bool {
         // A control moving a value inside a linked sub-patch that is not
         // exposed changes its stored copy: an edit inside, which unlinks
         // it like any other, so what plays is what saves. The check costs
@@ -143,6 +143,13 @@ impl App {
         if moved && let Some(before) = linked {
             self.unlink_changed(&before);
         }
+        moved
+    }
+
+    /// Follows control changes: mapped parameters on screen, and the armed
+    /// parameter in learn mode.
+    pub(crate) fn midi_arrived(&mut self) {
+        let moved = self.sync_midi_values();
         if self.refresh_ghosts() || moved {
             self.refresh_values();
         }
@@ -281,9 +288,7 @@ impl App {
     /// Sets a parameter as a knob turn does. A slider sends no start, so its
     /// first change opens the gesture and letting go closes it.
     pub(crate) fn turn_param(&mut self, module: u32, index: usize, value: f32) {
-        self.close_pending_arrow_group();
-        self.session.edits.start_slider_gesture();
-        self.begin_edit();
+        self.start_slider_edit();
         self.set_param(module, index, value);
     }
 
@@ -390,6 +395,7 @@ impl App {
     /// number replaces the value, as Enter on a canvas control does
     /// (panel-widgets.md, Typing a value).
     pub(crate) fn focus_moved(&mut self, focus: Option<UiId>) {
+        self.part_authors_focus_moved(focus.as_ref());
         // Only its own field, still shown, keeps a draft: a field that left
         // the inspector has no part to match.
         if let Some(draft) = &self.session.value_draft
@@ -549,7 +555,7 @@ impl App {
                 .graph()
                 .node(ModuleId(module))
                 .is_some_and(|node| {
-                    node.descriptor.id == loom_core::TRANSPORT_MODULE
+                    node.descriptor.role.is_transport()
                         && node
                             .descriptor
                             .params

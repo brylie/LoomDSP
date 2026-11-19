@@ -39,6 +39,7 @@ fn the_generation_changes_only_with_the_traces() {
         points: vec![[0.0, 0.0], [1.0, 0.5]],
         second: Vec::new(),
         level: 0.5,
+        ..Default::default()
     };
     traces.set(7, 0, trace.clone());
     let generation = traces.generation();
@@ -49,6 +50,31 @@ fn the_generation_changes_only_with_the_traces() {
     traces.retain(|_, _| false);
     assert_ne!(traces.generation(), generation);
     assert!(traces.get(7, 0).is_none());
+}
+
+/// An all-NaN trace draws two crossing strokes at both detail levels.
+#[test]
+fn invalid_windows_draw_a_cross() {
+    let scene = scope_scene();
+    let mut traces = ScopeTraces::new();
+    traces.set(
+        7,
+        0,
+        Trace {
+            invalid: true,
+            ..Default::default()
+        },
+    );
+    for full in [true, false] {
+        let geometry = TraceGeometry::build(&scene, &traces, full, &Palette::default());
+        let [first, second] = geometry.segments.as_slice() else {
+            panic!("expected two strokes")
+        };
+        let (a, b) = first.ends();
+        let (c, d) = second.ends();
+        assert!(a.x < b.x && a.y < b.y);
+        assert_eq!((a.x, a.y, b.x, b.y), (c.x, d.y, d.x, c.y));
+    }
 }
 
 /// Close up, the points become pieces in the frame, top at 1 and
@@ -66,6 +92,7 @@ fn traces_fill_the_frame_close_up_and_flatten_further_out() {
             points: vec![[0.0, -1.0], [0.5, 1.0], [1.0, 3.0]],
             second: Vec::new(),
             level: 0.25,
+            ..Default::default()
         },
     );
     let palette = Palette::default();
@@ -129,6 +156,7 @@ fn a_level_history_fills_its_columns() {
             points: vec![[0.0, -1.0], [0.5, 0.0], [0.99, 1.0]],
             second: vec![[0.0, 0.5], [0.5, 0.5], [0.99, 1.0]],
             level: 0.0,
+            ..Default::default()
         },
     );
     let palette = Palette::default();
@@ -155,6 +183,7 @@ fn a_spectrum_has_a_grid_only_close_up() {
             points: vec![[0.0, 0.0], [0.5, 0.5], [1.0, 0.0]],
             second: vec![[0.0, 0.5], [1.0, 0.5]],
             level: 0.0,
+            ..Default::default()
         },
     );
     let palette = Palette::default();

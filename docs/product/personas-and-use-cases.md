@@ -36,7 +36,7 @@
 - Teaches sound synthesis at a university or in workshops.
 - Wants students to open a link in a browser and start patching. No installs.
 - Needs: browser version, example patches, visible signal flow, the ability to open a sub-patch and see how it works.
-- Note: Sanna is the main reason for the optional web target, which is deferred. Until then, she can use the desktop app with example patches.
+- Note: Sanna is the main reason for the web target, a first-class target whose build is deferred ([UI design goal 3](../design/ui-layer.md#design-goals)). Until then, she can use the desktop app with example patches.
 
 ### Ilmari, the generative musician
 
@@ -102,7 +102,7 @@ Requirements: FR-NATIVE-*.
 
 Requirements: FR-NATIVE-08.
 
-### UC5b. Export to the browser (optional, Sanna)
+### UC5b. Export to the browser (Sanna)
 
 1. Choose "Export > Web Audio Module".
 2. Get a folder that can be hosted on a static web server.

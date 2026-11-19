@@ -107,6 +107,24 @@ fn values_that_are_not_finite() {
     assert_eq!(points[0], [0.5, 1.0]);
 }
 
+/// Only a received window without a drawable pair gets the mark, at either zoom.
+#[test]
+fn the_invalid_mark_tracks_the_window_before_decimation() {
+    let mut trace = XyTrace::new(RATE);
+    for full in [false, true] {
+        assert!(!trace.trace(3000, 1.0, false, full).invalid);
+    }
+    let mut pairs = vec![[f32::NAN, 0.0]; 3001];
+    pairs[1] = [0.0, 0.0];
+    let next = feed(&mut trace, 0, &pairs);
+    for full in [false, true] {
+        assert!(!trace.trace(3000, 1.0, false, full).invalid);
+        assert!(trace.trace(2999, 1.0, false, full).invalid);
+    }
+    feed(&mut trace, next, &[[0.0, f32::INFINITY]]);
+    assert!(!trace.trace(2999, 1.0, false, true).invalid);
+}
+
 /// When `time` holds more frames than the limit, every Nth pair is kept: at
 /// 48 kHz, 0.1 s is 4800 frames, so N is 3 (panel-widgets.md, XY scope).
 #[test]

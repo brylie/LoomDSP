@@ -355,6 +355,8 @@ One signal against another: the first moves the trace left and right, the second
 - **Pointer:** a display. Pressing or dragging selects or moves the tile. Double-click opens the larger view when there is one (panels.md, Interaction on the canvas).
 - **Keyboard:** not focusable. Its module's controls are.
 - **Values that are not finite:** a pair with a NaN is dropped, because it has no place on either axis. Infinity clamps to the edge.
+- **Invalid window:** an all-NaN window uses the same cross and “Not a number” description as the [scope trace](panels.md#drawing-the-scope-trace).
+
 - **Screen reader:** the label, and "XY scope of" the two input labels.
 - **Redraw:** every frame while on screen and the signal moves. A still or silent signal draws no frames.
 - **Middle zoom:** the frame and a single point at the latest position.

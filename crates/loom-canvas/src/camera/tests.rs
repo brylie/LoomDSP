@@ -48,10 +48,11 @@ fn zoom_is_clamped() {
     assert_eq!(camera.zoom, MAX_ZOOM);
 }
 
+/// Explicit framing can fit a patch wider than the manual zoom range.
 #[test]
 fn frame_fits_everything() {
     let mut camera = Camera::default();
-    let world = Rect::new(Point::new(0.0, 0.0), Size::new(4000.0, 1000.0));
+    let world = Rect::new(Point::new(0.0, 0.0), Size::new(40_000.0, 1000.0));
     let size = Size::new(1000.0, 800.0);
     camera.frame(world, size);
     let visible = camera.visible(size);

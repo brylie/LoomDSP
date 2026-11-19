@@ -178,3 +178,84 @@ fn check_passes_on_the_polysynth_large_example() {
     assert!(!stdout.contains("unknown module"), "{stdout}");
     assert!(stderr.is_empty(), "the patch loads as saved: {stderr}");
 }
+
+/// The CLI uses a linked part from the selected library. With no folder
+/// or a missing file, it renders the stored copy.
+#[test]
+fn linked_parts_in_check_and_render_follow_the_selected_library() {
+    let dir = std::env::temp_dir().join(format!("loom-cli-library-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let library = dir.join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    let patch = dir.join("linked.ron");
+    std::fs::write(
+        &patch,
+        r#"Patch(version: 1,
+        modules: [
+            PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("voice")),
+            PatchModule(id: 2, kind: "loom.io.audio-out@1"),
+        ],
+        cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+        subpatches: {"voice": SubPatch(metadata: Metadata(name: "Voice"), library: Some("Voice.ron"),
+            modules: [
+                PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.25}),
+                PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+            ],
+            cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+        )},
+    )"#,
+    )
+    .unwrap();
+    let wave = dir.join("render.wav");
+    let render = |use_library: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_loom"));
+        cmd.arg("render")
+            .arg(&patch)
+            .arg("-o")
+            .arg(&wave)
+            .args(["--seconds", "0.02"]);
+        if use_library {
+            cmd.arg("--library").arg(&library);
+        }
+        let run = cmd.output().unwrap();
+        let notes = String::from_utf8(run.stderr).unwrap();
+        assert!(run.status.success(), "{notes}");
+        let sample = hound::WavReader::open(&wave)
+            .unwrap()
+            .samples::<f32>()
+            .last()
+            .unwrap()
+            .unwrap();
+        (sample, notes)
+    };
+    assert_eq!(render(false).0, 0.25);
+    let (sample, notes) = render(true);
+    assert_eq!(sample, 0.25);
+    assert!(notes.contains("is missing, so its stored copy is used"), "{notes}");
+
+    std::fs::write(
+        library.join("Voice.ron"),
+        r#"Patch(version: 1, metadata: Metadata(name: "Voice"),
+        modules: [
+            PatchModule(id: 1, kind: "loom.math.constant@1", params: {"value": 0.5}),
+            PatchModule(id: 2, kind: "loom.struct.output@1", label: Some("out")),
+        ],
+        cables: [PatchCable(from: (1, "out"), to: (2, "in"))],
+    )"#,
+    )
+    .unwrap();
+    let (sample, notes) = render(true);
+    assert_eq!(sample, 0.5);
+    assert!(notes.contains("Updated from the library: Voice."), "{notes}");
+    assert_eq!(render(false).0, 0.25);
+    let check = Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("check")
+        .arg(&patch)
+        .arg("--library")
+        .arg(&library)
+        .output()
+        .unwrap();
+    assert!(check.status.success());
+    assert!(String::from_utf8_lossy(&check.stderr).contains("Updated from the library: Voice."));
+    std::fs::remove_dir_all(dir).unwrap();
+}

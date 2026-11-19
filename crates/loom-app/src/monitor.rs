@@ -310,11 +310,10 @@ impl Watcher {
                     want.settings.rotate,
                     watch.full_traces,
                 );
-                let shown = self
-                    .shown_xy
-                    .get(probe)
-                    .map_or(&[][..], |trace| trace.points.as_slice());
-                xy_distance::moved(shown, &trace.points, want.drawn).then_some((*probe, trace))
+                let shown = self.shown_xy.get(probe);
+                let mark_changed = shown.is_some_and(|last| last.invalid) != trace.invalid;
+                let points = shown.map_or(&[][..], |last| last.points.as_slice());
+                (mark_changed || xy_distance::moved(points, &trace.points, want.drawn)).then_some((*probe, trace))
             })
             .collect()
     }
@@ -563,6 +562,9 @@ pub fn scope_moved(shown: Option<&loom_canvas::Trace>, trace: &loom_canvas::Trac
     let Some(size) = drawn else {
         return shown != trace;
     };
+    if shown.invalid != trace.invalid {
+        return true;
+    }
     match (shown.points.is_empty(), trace.points.is_empty()) {
         (true, true) => shown.level != trace.level,
         (false, false) => line_check(&shown.points, &trace.points, size).moved,

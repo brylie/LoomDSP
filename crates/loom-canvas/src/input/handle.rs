@@ -144,7 +144,12 @@ impl CanvasModel<'_> {
                     .is_some_and(|key| key != self.browser_key)
                 {
                     let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
-                    self.open_browser(state.camera.to_world(centre), centre, bounds, out);
+                    self.open_browser(
+                        BrowserPlacement::Toolbar(state.camera.visible(bounds.size())),
+                        centre,
+                        bounds,
+                        out,
+                    );
                 }
                 // The selection can change from outside the canvas: a
                 // screen reader's Click on another tile, say. Focus lives
@@ -331,7 +336,7 @@ impl CanvasModel<'_> {
                     }
                     Key::Home | Key::Character('f') => {
                         if let Some(world) = self.scene.bounds() {
-                            state.camera.frame_readable(world, bounds.size(), READABLE_ZOOM);
+                            state.camera.frame(world, bounds.size());
                             out.redraw();
                             self.emit(out, CanvasEvent::Camera(state.camera));
                         }
@@ -353,7 +358,12 @@ impl CanvasModel<'_> {
                     }
                     Key::Character('a') if modifiers.none() => {
                         if let Some(screen) = screen {
-                            self.open_browser(state.camera.to_world(screen), screen, bounds, out);
+                            self.open_browser(
+                                BrowserPlacement::Pointer(state.camera.to_world(screen)),
+                                screen,
+                                bounds,
+                                out,
+                            );
                         }
                         out.take();
                     }
@@ -1082,7 +1092,7 @@ impl CanvasModel<'_> {
                 }
             }
             Hit::Nothing if double_click(state.last_empty_click.take(), screen, now) => {
-                self.open_browser(world, screen, bounds, out);
+                self.open_browser(BrowserPlacement::Pointer(world), screen, bounds, out);
             }
             Hit::Cable(_) | Hit::Nothing => {
                 if matches!(hit, Hit::Nothing) {
@@ -1134,11 +1144,11 @@ impl CanvasModel<'_> {
 
     /// Sends [`CanvasEvent::OpenBrowser`] for a point given in world and
     /// canvas-relative screen coordinates.
-    pub(super) fn open_browser(&self, world: Point, screen: Point, bounds: Rect, out: &mut Reaction) {
+    pub(super) fn open_browser(&self, placement: BrowserPlacement, screen: Point, bounds: Rect, out: &mut Reaction) {
         self.emit(
             out,
             CanvasEvent::OpenBrowser {
-                world,
+                placement,
                 at: Point::new(bounds.x + screen.x, bounds.y + screen.y),
                 area: bounds,
             },

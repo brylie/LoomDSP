@@ -1,6 +1,7 @@
 //! What a canvas event does to the patch: the canvas reports
 //! `CanvasEvent`s and never edits the graph itself (ADR-0010).
 
+use crate::alerts::CanvasHint;
 use crate::edits::ArrowEvent;
 use crate::overlays::{ContextMenu, Overlay};
 use crate::{App, browser, gestures, probe_menu, scene, undo};
@@ -68,6 +69,18 @@ impl App {
                 // reports the new focus.
                 self.reader_event(crate::edits::ReaderEvent::Close);
                 self.a11y.set_focus(control);
+                if let Some((id, index)) = control {
+                    let editable = !self.session.learn.is_on()
+                        && self
+                            .session
+                            .scene
+                            .module(id)
+                            .and_then(|m| m.panel.widgets.get(index))
+                            .is_some_and(|w| w.accepts_typed_value());
+                    self.alerts.canvas_hint = editable.then_some(CanvasHint::Control);
+                } else if self.alerts.canvas_hint == Some(CanvasHint::Control) {
+                    self.alerts.canvas_hint = None;
+                }
             }
             CanvasEvent::GestureStart => {
                 self.close_slider_gesture();
@@ -96,7 +109,19 @@ impl App {
                 self.reader_event(crate::edits::ReaderEvent::Due(at));
                 self.arrow_event(ArrowEvent::Due(at));
             }
-            CanvasEvent::Select(ids) => self.session.selection = ids.into_iter().collect(),
+            CanvasEvent::Select(ids) => {
+                self.alerts.canvas_hint = None;
+                self.session.selection = ids.into_iter().collect();
+            }
+            CanvasEvent::SelectByKey(id) => {
+                self.session.selection = [id].into();
+                let has_controls = self
+                    .session
+                    .scene
+                    .module(id)
+                    .is_some_and(|m| m.panel.widgets.iter().any(|w| w.is_control() && !w.hidden));
+                self.alerts.canvas_hint = has_controls.then_some(CanvasHint::Module);
+            }
             CanvasEvent::Move { ids, delta } => {
                 for id in &ids {
                     if let Some(p) = self.session.positions.get_mut(id) {
@@ -155,8 +180,9 @@ impl App {
                         // after the connect, so a refusal changes nothing.
                         if through_port && let Some(to_end) = self.level_end(to) {
                             let level = self.session.level.clone();
-                            self.change_hierarchy("connect", |h, _| {
+                            self.change_hierarchy("connect", |h, graph| {
                                 h.disconnect(&level, &to_end);
+                                h.keep_direct_cable(graph, output, input);
                                 Ok(())
                             });
                         }
@@ -283,11 +309,11 @@ impl App {
                     self.overlays.set_menu_highlight(Some(0));
                 }
             }
-            CanvasEvent::OpenBrowser { world, at, area } => {
+            CanvasEvent::OpenBrowser { placement, at, area } => {
                 self.close_slider_gesture();
                 let roles = self.session.controller.registry().roles().collect();
                 self.overlays.open(Overlay::Browser(
-                    browser::Browser::open(self.modules.clone(), world, at, area)
+                    browser::Browser::open(self.modules.clone(), placement, at, area)
                         .with_builtins(&crate::builtin::ALL)
                         .with_roles(roles),
                 ));

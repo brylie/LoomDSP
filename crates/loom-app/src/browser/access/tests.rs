@@ -177,7 +177,7 @@ fn no_match_shows_the_line_and_no_option() {
         dialog
             .children
             .iter()
-            .any(|item| item.value.as_deref() == Some("No modules match."))
+            .any(|item| item.value.as_deref() == Some(super::super::NO_MATCHES))
     );
 }
 

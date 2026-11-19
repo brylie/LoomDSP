@@ -504,6 +504,7 @@ fn a_scope_says_its_trace_in_words() {
     let ids = app.a11y_widget_ids(&snapshot);
     let scope = &mut snapshot.tiles.iter_mut().find(|t| t.id == module).unwrap().widgets[index];
     scope.trace = Some(crate::snapshot::TraceShown {
+        invalid: false,
         points: 100,
         low: -0.5,
         high: 0.25,
@@ -1589,6 +1590,30 @@ fn live_values_off_screen_are_not_sent() {
     let (_, changes) = app.a11y_changes(&Places::of_canvas(Some(on_screen)));
     let sent = sent_ids(&changes.expect("on screen, the values are sent"));
     assert!(!live_among(&app, &sent).is_empty());
+}
+
+/// A held clip is part of a meter's description until the player resets it.
+#[test]
+fn a_meter_says_clipped_until_reset() {
+    let mut app = app_with_every_widget();
+    let (module, widget) = first_of(&app, "meter");
+    let _ = app.send(Message::Canvas(CanvasEvent::VisibleDisplays(vec![module])));
+    let (probe, after) = app.peak_resets()[&(module, widget)];
+    app.take_peaks(vec![(
+        (module, widget),
+        crate::clip::PeakNews {
+            peak: 1.2,
+            probe: Some(probe),
+            after,
+            ..Default::default()
+        },
+    )]);
+    let id = widget_node(&mut app, module, widget);
+    let update = app.a11y_tree(&Places::default());
+    assert!(node(&update, id).description().unwrap().ends_with("clipped"));
+    app.reset_clip((module, widget), false);
+    let update = app.a11y_tree(&Places::default());
+    assert!(!node(&update, id).description().unwrap_or_default().contains("clipped"));
 }
 
 /// A meter reports the number its text shows, in dB, with the range the

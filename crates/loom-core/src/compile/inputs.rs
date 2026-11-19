@@ -252,7 +252,7 @@ impl Inputs {
                         output,
                     };
                     match layout.nodes[v].descriptor.role {
-                        ModuleRole::Dsp(_) => self.downmixes[v].push(downmix),
+                        ModuleRole::Dsp(_) | ModuleRole::Transport { .. } => self.downmixes[v].push(downmix),
                         ModuleRole::AudioOutput => self.output_downmixes.push(downmix),
                         ModuleRole::UnitDelay => continue,
                     }

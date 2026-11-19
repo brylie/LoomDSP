@@ -10,6 +10,7 @@ Compresses, limits, expands, gates, or ducks a signal, with a sidechain that can
 | Version | 1 |
 | Family | Filters and effects |
 | Category | Dynamics |
+| Fills roles | [Effect](loom.role.effect.md) |
 
 ## Inputs
 

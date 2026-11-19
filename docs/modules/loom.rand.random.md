@@ -10,6 +10,7 @@ A new random value on each trigger, within a range, or a random walk. The seed m
 | Version | 1 |
 | Family | Modulation |
 | Category | Random |
+| Fills roles | [Modulator](loom.role.modulator.md) |
 
 ## Inputs
 

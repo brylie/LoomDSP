@@ -4,8 +4,8 @@
 //!
 //! The rows are plain data ([`PatchRows`]), as for the rest of the
 //! inspector, so [`crate::App::ui_snapshot`] shows what the window draws.
-//! Edits change the document's metadata at once. They mark the patch
-//! unsaved, but they are not undo steps: each text field has its own undo.
+//! Root patch edits change the document's metadata at once and mark it
+//! unsaved. Authors on a selected sub-patch edit its definition.
 
 use crate::Element;
 use crate::style::{self, button};
@@ -17,9 +17,17 @@ use loom_patch::Metadata;
 use loom_patch::metadata::{self, Licence};
 use serde::Serialize;
 
+/// The history step for one session in a sub-patch's Authors box.
+pub(crate) const EDIT_PART_AUTHORS: &str = "edit sub-patch authors";
+
 /// The Authors box's part: `inspector/patch/authors`.
 pub(crate) fn authors_part() -> loom_ui_core::UiId {
     crate::inspector::ids::part(&crate::inspector::ids::patch(), "authors")
+}
+
+/// The Authors box on a selected sub-patch's own inspector.
+pub(crate) fn part_authors_id(tile: u32) -> loom_ui_core::UiId {
+    crate::inspector::ids::part(&crate::inspector::ids::panel(tile), "authors")
 }
 
 /// The tag field's part: `inspector/patch/tags`.
@@ -37,6 +45,8 @@ pub(crate) fn text_fields() -> [loom_ui_core::UiId; 2] {
 pub enum Message {
     /// An edit in the authors box.
     Authors(text_editor::Action),
+    /// An edit to the selected sub-patch's list of authors.
+    PartAuthors(u32, text_editor::Action),
     /// The tag field's text changed. A comma adds what comes before it.
     TagDraft(String),
     /// Enter in the tag field adds its text as a tag.
@@ -56,6 +66,16 @@ pub struct State {
     pub tag_draft: String,
     /// Why the last tag was not added, until the next one is typed.
     pub tag_note: Option<String>,
+    /// The text box for the sub-patch currently selected.
+    part: Option<PartAuthors>,
+}
+
+/// An authors field tied to one sub-patch tile, with the last saved text.
+struct PartAuthors {
+    tile: u32,
+    saved: Vec<String>,
+    before_edit: Option<Vec<String>>,
+    content: text_editor::Content<crate::Renderer>,
 }
 
 impl State {
@@ -65,7 +85,33 @@ impl State {
             authors: text_editor::Content::with_text(&info.authors.join("\n")),
             tag_draft: String::new(),
             tag_note: None,
+            part: None,
         }
+    }
+
+    /// The current sub-patch's box, when the field belongs to this tile.
+    pub(crate) fn part_authors(&self, tile: u32) -> Option<&text_editor::Content<crate::Renderer>> {
+        self.part
+            .as_ref()
+            .filter(|part| part.tile == tile)
+            .map(|part| &part.content)
+    }
+
+    /// Whether the Authors box owns the current undo gesture.
+    pub(crate) fn part_authors_edit_open(&self) -> bool {
+        self.part.as_ref().is_some_and(|part| part.before_edit.is_some())
+    }
+
+    /// Whether the open edit changed the authors before reaching history.
+    pub(crate) fn part_authors_dirty(&self) -> bool {
+        self.part
+            .as_ref()
+            .is_some_and(|part| part.before_edit.as_ref().is_some_and(|before| *before != part.saved))
+    }
+
+    /// Releases the Authors box's undo gesture, if it owns one.
+    pub(crate) fn end_part_authors_edit(&mut self) -> bool {
+        self.part.as_mut().and_then(|part| part.before_edit.take()).is_some()
     }
 }
 
@@ -91,7 +137,7 @@ pub struct PatchRows {
     /// The licence's own page.
     pub licence_url: Option<String>,
     /// **Includes parts by**: authors of sub-patches who are not the
-    /// patch's own (Credit for parts). Empty until sub-patches exist (#51).
+    /// patch's own (Credit for parts).
     pub parts_by: Vec<String>,
 }
 
@@ -99,6 +145,7 @@ impl App {
     /// Patch info for the inspector.
     pub(crate) fn patch_rows(&self) -> PatchRows {
         let info = self.session.document.info();
+        let parts = metadata::tidy_authors(self.session.hierarchy.part_authors());
         let licence = Licence::of(info.license.as_deref());
         let (licence_summary, licence_url) = match &licence {
             Licence::None => (None, None),
@@ -114,7 +161,46 @@ impl App {
             licence: licence.short(),
             licence_summary,
             licence_url,
-            parts_by: Vec::new(),
+            parts_by: parts
+                .into_iter()
+                .filter(|name| !metadata::has_author(&info.authors, name))
+                .collect(),
+        }
+    }
+
+    /// Switches the sub-patch text box when the selection or saved authors change.
+    pub(crate) fn sync_part_authors(&mut self) {
+        let selected = &self.session.selection;
+        let selected = selected.first().copied().filter(|_| selected.len() == 1);
+        let current = selected.and_then(|tile| {
+            let authors = &self
+                .session
+                .hierarchy
+                .definition_of(loom_core::ModuleId(tile))?
+                .metadata
+                .authors;
+            Some((tile, authors))
+        });
+        let field = self.session.patch_info.part.as_ref();
+        if field.map(|part| (part.tile, &part.saved)) == current {
+            return;
+        }
+        let next = current.map(|(tile, saved)| PartAuthors {
+            tile,
+            saved: saved.clone(),
+            before_edit: None,
+            content: text_editor::Content::with_text(&saved.join("\n")),
+        });
+        self.close_part_authors_edit();
+        self.session.patch_info.part = next;
+    }
+
+    /// Records the sub-patch authors step when focus leaves its field.
+    pub(crate) fn part_authors_focus_moved(&mut self, focus: Option<&loom_ui_core::UiId>) {
+        if let Some(part) = &self.session.patch_info.part
+            && focus != Some(&part_authors_id(part.tile))
+        {
+            self.close_part_authors_edit();
         }
     }
 
@@ -130,6 +216,41 @@ impl App {
                         self.session.document.edit_info(|info| info.authors = authors);
                     }
                 }
+            }
+            Message::PartAuthors(tile, action) => {
+                let Some(part) = self.session.patch_info.part.as_mut().filter(|part| part.tile == tile) else {
+                    return;
+                };
+                let edits = action.is_edit();
+                part.content.perform(action);
+                if !edits {
+                    return;
+                }
+                let authors = metadata::tidy_authors(part.content.text().lines());
+                if authors == part.saved {
+                    return;
+                }
+                let starting = if part.before_edit.is_none() {
+                    self.close_slider_gesture();
+                    self.begin_edit();
+                    !self.session.edits.gesture_open()
+                } else {
+                    false
+                };
+                let part = self
+                    .session
+                    .patch_info
+                    .part
+                    .as_mut()
+                    .expect("the field handled this action");
+                if starting {
+                    self.session.edits.start_gesture();
+                    part.before_edit = Some(part.saved.clone());
+                }
+                part.saved.clone_from(&authors);
+                self.session
+                    .hierarchy
+                    .set_part_authors(loom_core::ModuleId(tile), authors);
             }
             Message::TagDraft(text) => {
                 self.session.patch_info.tag_note = None;
@@ -257,6 +378,28 @@ pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content<crate::Render
         column = column.push(text(format!("Includes parts by {}", rows.parts_by.join(", "))).size(style::SMALL));
     }
     column.into()
+}
+
+/// The editable credit on a selected sub-patch's inspector.
+pub(crate) fn part_authors_view(
+    tile: u32,
+    authors: &text_editor::Content<crate::Renderer>,
+) -> Element<'_, crate::Message> {
+    let id = part_authors_id(tile);
+    column![
+        text("Authors, one per line").size(style::BODY).color(DIM),
+        crate::inspector::ids::named(
+            &id,
+            text_editor(authors)
+                .id(crate::places::field_widget_id(&id))
+                .placeholder("Author name")
+                .on_action(move |action| crate::Message::PatchInfo(Message::PartAuthors(tile, action)))
+                .size(style::CONTROL)
+                .height(Length::Shrink)
+        ),
+    ]
+    .spacing(6)
+    .into()
 }
 
 #[cfg(test)]

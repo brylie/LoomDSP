@@ -1,4 +1,5 @@
 use super::*;
+use loom_patch::PatchError;
 
 /// Saving replaces the file by a rename, leaves no temporary file, and
 /// refuses a missing folder or a read-only target without touching it.

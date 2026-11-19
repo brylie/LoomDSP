@@ -380,19 +380,9 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
     if let Some(question) = &app.overlays.question {
         return question_press(question, name);
     }
-    let (message, disabled) = match name {
-        "new" => (Message::File(crate::FileAction::New), None),
-        "learn" => (Message::Learn(crate::learn::Message::Toggle), None),
-        "hold" => (Message::HoldNote, app.hold_hover()),
-        "panic" => (Message::Panic, None),
-        "undo" => (
-            Message::Undo,
-            app.undo_hint().err().map(|block| block.press_error(false)),
-        ),
-        "redo" => (
-            Message::Redo,
-            app.redo_hint().err().map(|block| block.press_error(true)),
-        ),
+    let model_name = match name {
+        "learn" => "midi_learn",
+        "new" | "hold" | "panic" | "undo" | "redo" => name,
         "open" | "save" | "save-as" => {
             return Err(format!(
                 "the {name} button opens a dialog; use the `open` or `save` command instead"
@@ -401,9 +391,15 @@ pub(super) fn press_message(app: &App, name: &str) -> Result<Message, String> {
         "add" => return Err("use the `add` command to add a module".to_string()),
         _ => return Err(format!("no toolbar button `{name}`; buttons: {}", BUTTONS.join(", "))),
     };
-    match disabled {
+    let model = app.toolbar_model();
+    let button = model
+        .buttons
+        .iter()
+        .find(|button| button.name == model_name)
+        .expect("scriptable toolbar buttons are always in the model");
+    match button.disabled {
         Some(reason) => Err(reason.to_string()),
-        None => Ok(message),
+        None => Ok(button.press().expect("an enabled toolbar button has a message")),
     }
 }
 

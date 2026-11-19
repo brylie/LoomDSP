@@ -144,7 +144,7 @@ fn from_patch_leaves_patch_wide_modules_out_and_turns_their_cables_into_ports() 
     let (definition, left_out) = SubPatch::from_patch(&file, &registry(), Some("Arp.ron"));
     assert_eq!(definition.metadata, file.metadata);
     assert_eq!(definition.library.as_deref(), Some("Arp.ron"));
-    assert!(!definition.modules.iter().any(|m| is_patch_wide(&m.kind)));
+    assert!(!definition.modules.iter().any(|m| is_patch_wide(&registry(), &m.kind)));
     assert!(definition.midi.is_empty(), "the mapping on the Transport goes");
     assert!(
         definition.modulation.is_empty(),
@@ -204,7 +204,7 @@ fn from_patch_leaves_patch_wide_modules_out_and_turns_their_cables_into_ports() 
     assert_eq!(definition.exposed.len(), 1);
 
     assert_eq!(left_out.len(), 2);
-    assert_eq!(left_out[0].kind, TRANSPORT_MODULE);
+    assert_eq!(left_out[0].kind, loom_core::TRANSPORT_MODULE);
     assert_eq!(left_out[0].ports, ["Phase", "Out", "Out 2"]);
     assert_eq!(
         left_out[0].warning("Arp").to_string(),
@@ -457,7 +457,7 @@ fn refresh_drops_a_transport_the_file_gained_with_a_note() {
         controller
             .graph()
             .nodes()
-            .filter(|(_, n)| n.descriptor.id == TRANSPORT_MODULE)
+            .filter(|(_, n)| n.descriptor.role.is_transport())
             .count(),
         1,
         "the patch still has one Transport"
@@ -599,11 +599,11 @@ fn a_link_loop_keeps_the_stored_copy_with_a_note_naming_the_loop() {
 /// version; nothing else is.
 #[test]
 fn patch_wide_kinds() {
-    assert!(is_patch_wide("loom.clock.transport@1"));
-    assert!(is_patch_wide("loom.clock.transport@7"));
-    assert!(is_patch_wide(SCALE_MODULE));
-    assert!(!is_patch_wide("loom.osc.sine@1"));
-    assert!(!is_patch_wide(INPUT_KIND));
+    assert!(is_patch_wide(&registry(), "loom.clock.transport@1"));
+    assert!(is_patch_wide(&registry(), "loom.clock.transport@7"));
+    assert!(is_patch_wide(&registry(), SCALE_MODULE));
+    assert!(!is_patch_wide(&registry(), "loom.osc.sine@1"));
+    assert!(!is_patch_wide(&registry(), INPUT_KIND));
     assert!(!patch(VOICE).has_links());
     assert!(patch(LINKED).has_links());
 }

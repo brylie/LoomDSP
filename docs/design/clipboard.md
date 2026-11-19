@@ -22,7 +22,7 @@ How a user copies modules with their cables and modulation, pastes them into the
 
 | Term | Meaning |
 |---|---|
-| **Selection** | The selected tiles on the canvas: modules and sub-patch tiles. |
+| **Selection** | The selected tiles on the canvas: modules, sub-patch tiles, and slots. |
 | **Group** | The tiles being copied or duplicated, with what goes with them: the cables and assignments the rules below keep, and the definitions of its sub-patch tiles. |
 | **Inside** | A cable or assignment whose two ends are both on selected modules. |
 | **Incoming** | A cable or assignment that starts outside the selection and ends on a selected module. |
@@ -90,7 +90,7 @@ A pasted module with no position (text written by hand) goes in a row starting a
 
 ### The clipboard text
 
-Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.rs), with `version` and an empty `name`. It holds the selected modules with their positions and non-default parameters, the inside cables, and the inside assignments in their order. It holds no MIDI mappings. A selected sub-patch tile is written as its instance module, with its exposed values, and its definition goes in the `subpatches` table with every definition nested in it, so the text is a patch that loads on its own ([sub-patches](sub-patches.md#patch-file)). An assignment onto a parameter inside the tile is written onto its exposed name, and a cable into the tile onto its port. An assignment with both ends inside the tile is the definition's, and is not written again outside, so a paste adds it once. A placeholder for a patch-wide module this build does not have is left out as the module itself would be.
+Copy writes a whole patch in the [patch format](../../crates/loom-patch/src/lib.rs), with `version` and an empty `name`. It holds the selected modules with their positions and non-default parameters, the inside cables, and the inside assignments in their order. It holds no MIDI mappings. A selected sub-patch tile is written as its instance module, with its exposed values, and its definition goes in the `subpatches` table with every definition nested in it, so the text is a patch that loads on its own ([sub-patches](sub-patches.md#patch-file)). An assignment onto a parameter inside the tile is written onto its exposed name, and a cable into the tile onto its port. An assignment with both ends inside the tile is the definition's, and is not written again outside, so a paste adds it once. A slot is written with its current part and the definitions of its current and held sub-patch parts. Cables and assignments on the slot use the role's names. A placeholder for a patch-wide module this build does not have is left out as the module itself would be.
 
 ```ron
 Patch(
@@ -109,7 +109,7 @@ Patch(
 
 *Why a whole patch, not a fragment:* paste reads it with the same parser and version check as Open, so there is one format to keep correct. A saved patch file can be opened in a text editor, copied, and pasted into another patch.
 
-Paste reads any text that is a valid patch, including text edited by hand and a whole patch file. MIDI mappings in it are ignored. The ids in it only link modules, cables, and assignments inside the text; they are never kept (rule 2). A sub-patch tile in it is inserted as the file would be, with a definition of its own: a copy of a linked tile follows the same library file.
+Paste reads any text that is a valid patch, including text edited by hand and a whole patch file. MIDI mappings in it are ignored. The ids in it only link modules, cables, and assignments inside the text; they are never kept (rule 2). A sub-patch tile in it is inserted as the file would be, with a definition of its own: a copy of a linked tile follows the same library file. A slot and its current part get fresh ids, and every held definition gets its own key.
 
 For a placeholder, copied text also has a trailing RON comment with its named ports and parameter names. This keeps ports whose cables were not copied, without adding those ports to a saved patch. The text is still a valid patch. Hand-written patch text without the comment infers ports from its links, as on Open.
 

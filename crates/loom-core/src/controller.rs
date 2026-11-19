@@ -26,7 +26,7 @@
 //! siblings' private items. Why: ADR-0034.
 
 use crate::compile::{CompileReport, FadeKey, Fades, Wiring, compile_with_fades};
-use crate::descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamRange, Polarity};
+use crate::descriptor::{ModuleConfig, ModuleDescriptor, ParamRange, Polarity};
 use crate::display::{DisplayReader, DisplaySource, DisplayTable};
 use crate::engine::{Command, Engine, EngineConfig, EngineStats, Garbage};
 use crate::error::LoomError;
@@ -317,7 +317,7 @@ impl Controller {
         let widths = width::infer(&self.graph);
         let mut plan = CopyPlan::default();
         for (&id, node) in &self.graph.nodes {
-            if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+            if node.descriptor.role.factory().is_none() {
                 continue;
             }
             let sides = if widths.per_channel.contains(&id) { 2 } else { 1 };
@@ -358,47 +358,13 @@ impl Controller {
         // commands, as for any module in the engine.
         let room = self.commands.slots().saturating_sub(1 + self.slots.retiring().len());
         let waiting = self.slots.waiting().saturating_sub(room);
-        for (slot, mut fresh) in self.slots.send_fresh(room) {
-            fresh.module.reset();
-            let insert = Command::InsertModule {
-                slot,
-                module: fresh.module,
-                id: fresh.id,
-                displays: fresh.displays,
-                triggers: fresh.triggers,
-            };
-            let pushed = self.commands.push(insert).is_ok();
-            debug_assert!(pushed, "room was checked above");
-        }
+        self.send_waiting_modules(room);
         if waiting > 0 || self.commands.slots() < starting.len() + 1 + self.slots.retiring().len() + stopping.len() {
             return Err(LoomError::QueueFull);
         }
         for (id, key) in starting {
-            let slot = self.slots.take().expect("checked above");
-            let node = self.graph.nodes.get_mut(&id).expect("listed above");
-            let ModuleRole::Dsp(factory) = node.descriptor.role else {
-                unreachable!("only DSP modules are listed");
-            };
-            // A new instance starts from reset, with the module's current
-            // parameters. It has no display values: lights read copy 0.
-            let mut module = factory(&ModuleConfig {
-                sample_rate: self.config.sample_rate,
-                max_block: self.config.max_block,
-            });
-            for (index, &value) in node.params.iter().enumerate() {
-                module.set_param(index, value);
-            }
-            module.reset();
-            let insert = Command::InsertModule {
-                slot,
-                module,
-                id: id.0,
-                displays: 0,
-                triggers: 0,
-            };
-            let pushed = self.commands.push(insert).is_ok();
-            debug_assert!(pushed, "capacity was checked above");
-            node.copy_slots.insert(key, slot);
+            let (slot, fresh) = self.fresh_copy(id, key);
+            self.send_module(slot, fresh);
         }
         for (id, key, slot) in stopping {
             self.graph
@@ -485,6 +451,54 @@ impl Controller {
         self.dirty = false;
         self.last_report = report;
         Ok(&self.last_report)
+    }
+
+    /// Constructs a voice or side copy with the base module's parameters.
+    /// The caller has reserved a free slot. Displays always read copy zero.
+    fn fresh_copy(&mut self, id: ModuleId, key: (usize, usize)) -> (usize, Fresh) {
+        let slot = self.slots.take().expect("capacity checked before making copies");
+        let node = self.graph.nodes.get_mut(&id).expect("copy plan names a live node");
+        let factory = node.descriptor.role.factory().expect("copy plan lists DSP modules");
+        let mut module = factory(&ModuleConfig {
+            sample_rate: self.config.sample_rate,
+            max_block: self.config.max_block,
+        });
+        for (index, &value) in node.params.iter().enumerate() {
+            module.set_param(index, value);
+        }
+        node.copy_slots.insert(key, slot);
+        (
+            slot,
+            Fresh {
+                module,
+                id: id.0,
+                displays: 0,
+                triggers: 0,
+            },
+        )
+    }
+
+    /// Sends up to `room` modules already staged in their slots.
+    fn send_waiting_modules(&mut self, room: usize) {
+        for (slot, fresh) in self.slots.send_fresh(room) {
+            self.send_module(slot, fresh);
+        }
+    }
+
+    /// Resets a new instance and sends it to a queue with room reserved.
+    fn send_module(&mut self, slot: usize, mut fresh: Fresh) {
+        fresh.module.reset();
+        let pushed = self
+            .commands
+            .push(Command::InsertModule {
+                slot,
+                module: fresh.module,
+                id: fresh.id,
+                displays: fresh.displays,
+                triggers: fresh.triggers,
+            })
+            .is_ok();
+        debug_assert!(pushed, "capacity was checked before sending the module");
     }
 
     /// Frees memory the engine has handed back. Called automatically by

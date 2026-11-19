@@ -37,7 +37,8 @@ How a user takes back and replays edits on the canvas, the inspector, and the pa
 | **Ctrl+Shift+Z** (**Cmd+Shift+Z**), or **Ctrl+Y** on Windows and Linux | Redo the step that was undone last. |
 | **Undo** and **Redo** buttons in the toolbar | The same. A button is disabled when there is nothing to do. Its hover text names the step (see [Step names](#step-names)). |
 | Make any new edit after undoing | The steps that could be redone are dropped. |
-| Press undo or redo while a gesture is in progress | Nothing happens. The gesture finishes first. |
+| Press Undo or Redo during an Authors edit, an inspector slider edit, or a released arrow group | The edit becomes a step before the command runs. |
+| Press Undo or Redo during a drag or while holding an arrow key | The gesture must finish before the command can run. |
 | Open a patch, or start a new one | The history is cleared. |
 
 The shortcuts work anywhere in the window, except while a text field or text box has keyboard focus: then they do nothing. The text widgets have no undo of their own, and undoing a canvas edit behind the field would surprise the user. When phase 3 of leaving Iced moves a field to the new UI layer, the shortcuts undo and redo the typing inside that field instead, and still never reach the patch ([UI layer](ui-layer.md), section 8, rule 3). *Why not only when the canvas has focus:* the app has no focus for the canvas or the inspector as a whole, and the user expects undo to work wherever they last clicked.
@@ -62,6 +63,8 @@ A step is named by a verb and what it acted on, in the same words the user sees 
 | Assignment add, remove, change | **add modulation**, **remove modulation**, **change modulation depth** |
 | MIDI mapping | **learn CC 74**, **remove MIDI mapping**, **move MIDI mapping**, **change MIDI mapping** |
 | Cut, paste, duplicate | **cut Filter**, **paste 3 modules**, **duplicate Filter** ([copy, paste, and duplicate](clipboard.md)) |
+| Paste a slot | **paste Filter** for a slot named Filter |
+| Edit a sub-patch's authors | **edit sub-patch authors** |
 | Make or dissolve a sub-patch | **make sub-patch**, **dissolve Voice** ([sub-patches](sub-patches.md)) |
 | Move a sub-patch or port tile | **move Voice**, **move 2 tiles** |
 
@@ -90,6 +93,8 @@ The exact wording can change while building. Each step must have a name.
 | "Add scope" on a cable | The new scope module and its cable together. |
 | Cut, paste, or duplicate | The whole group: its modules, cables, and assignments ([copy, paste, and duplicate](clipboard.md)). Copy is not a step. |
 | Make or dissolve a sub-patch | The whole collapse or dissolve: the tile, its ports, where they stand, and the records of the cables through them ([sub-patches](sub-patches.md)). The graph does not change, so the step holds the hierarchy before and after. |
+| Paste a slot | The copied slot, its part, and their saved state, together ([copy, paste, and duplicate](clipboard.md)). |
+| Edit a sub-patch's authors | One step for the changes typed before the Authors box loses focus, the selection changes, or Undo or Save is requested. |
 | A button press whose saved value is toggle | The toggle. |
 
 ### What is not undoable
@@ -102,7 +107,7 @@ The exact wording can change while building. Each step must have a name.
 | Transport: tempo, time signature, start and stop, position | Performance controls that the user changes while playing. Tempo and time signature are saved in the patch, but in the first version they stay out of the history. *Why:* the user changes them to play, often while the transport runs, and undoing a knob turn should never jump the tempo back. Revisit if users expect them in the history. |
 | Parameter changes that come from a hardware MIDI control | The hardware control is its own undo: move it back. Undo cannot move a physical knob, so taking back a fader move would leave the sound and the fader apart, and the next touch would jump. It would also bury the user's own edits and drop their redo steps. See [Mapped parameters](#mapped-parameters). Pickup (FR-MIDI-09) removes the jump but not the rest of the reason, so hardware moves stay out of undo. |
 | Saving | Writes the file; the patch does not change. |
-| Patch info: authors, tags, and licence ([patch metadata](patch-metadata.md#patch-info)) | Typed text and small picks that are easy to redo by hand. The edit marks the patch unsaved and is saved with it. While the authors box or tag field has focus, the undo shortcuts do nothing (see above). Revisit if users expect patch info in the history. |
+| Root Patch info: authors, tags, and licence ([patch metadata](patch-metadata.md#patch-info)) | Typed text and small picks that are easy to redo by hand. The edit marks the patch unsaved and is saved with it. While the authors box or tag field has focus, the undo shortcuts do nothing (see above). Revisit if users expect patch info in the history. |
 | Learn mode on or off, and arming a parameter | A mode, not an edit. Undo while a parameter is armed disarms it first, then undoes. |
 
 ### Mapped parameters

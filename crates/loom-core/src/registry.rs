@@ -143,7 +143,7 @@ impl Registry {
                 if !param.options.ranges.is_empty() {
                     return Err(invalid("a parameter in decibels cannot have control ranges"));
                 }
-                if !floor.is_finite() || floor >= 20.0 * param.max.log10() {
+                if !floor.is_finite() || floor >= loom_dsp::decibels::gain_to_db(param.max) {
                     return Err(invalid("a parameter in decibels needs a floor below its maximum"));
                 }
             }
@@ -154,7 +154,7 @@ impl Registry {
         if descriptor.outputs.iter().any(|port| port.channels == Channels::Downmix) {
             return Err(invalid("an output cannot be Downmix"));
         }
-        if !matches!(descriptor.role, ModuleRole::Dsp(_))
+        if descriptor.role.factory().is_none()
             && descriptor
                 .inputs
                 .iter()
@@ -202,6 +202,16 @@ impl Registry {
             return Err(invalid("a module with a Stereo port needs Downmix or Stereo inputs"));
         }
         descriptor.check_panel().map_err(|reason| invalid(&reason))?;
+        if let Some(run_input) = descriptor.role.transport_run_input() {
+            if self.transport().is_some() {
+                return Err(invalid("only one Transport type can be registered"));
+            }
+            if descriptor.input_index("run") != Some(run_input)
+                || descriptor.inputs[run_input].signal != crate::SignalType::Gate
+            {
+                return Err(invalid("the Transport needs a Run gate input at the declared index"));
+            }
+        }
         match descriptor.role {
             ModuleRole::UnitDelay if descriptor.inputs.len() != 1 || descriptor.outputs.len() != 1 => {
                 return Err(invalid("a unit delay needs exactly one input and one output"));
@@ -233,7 +243,7 @@ impl Registry {
         // parameters or publish display values. On any other role they would
         // be accepted and then silently do nothing.
         let has_params_or_displays = !descriptor.params.is_empty() || !descriptor.displays.is_empty();
-        if !matches!(descriptor.role, ModuleRole::Dsp(_)) && has_params_or_displays {
+        if descriptor.role.factory().is_none() && has_params_or_displays {
             return Err(invalid("only DSP modules can have parameters or display values"));
         }
         for (i, fills) in descriptor.roles.iter().enumerate() {
@@ -339,10 +349,32 @@ impl Registry {
         self.roles.values().copied()
     }
 
+    /// The registered Transport type, if this registry offers one.
+    pub fn transport(&self) -> Option<&'static ModuleDescriptor> {
+        self.iter().find(|descriptor| descriptor.role.is_transport())
+    }
+
+    /// Identifies a Transport by its registered role, regardless of the
+    /// file version. The built-in ID remains reserved even in a registry
+    /// without the module, for patch-wide placeholder checks.
+    pub fn is_transport_kind(&self, kind: &str) -> bool {
+        let id = kind.split('@').next().unwrap_or(kind);
+        self.get(id).map_or(id == crate::TRANSPORT_MODULE, |descriptor| {
+            descriptor.role.is_transport()
+        })
+    }
+
     /// The modules that declare the role `role_id`, sorted by id, internal
     /// ones left out: what a slot's Swap menu lists.
     pub fn parts_of(&self, role_id: &str) -> Vec<&'static ModuleDescriptor> {
         self.browsable().filter(|d| d.fills(role_id).is_some()).collect()
+    }
+
+    /// The browsable modules that fill a role, sorted by name, then id.
+    pub fn parts_by_name(&self, role_id: &str) -> Vec<&'static ModuleDescriptor> {
+        let mut parts = self.parts_of(role_id);
+        parts.sort_by_key(|d| (d.name, d.id));
+        parts
     }
 
     /// Notes about registered modules, in the order they were registered.

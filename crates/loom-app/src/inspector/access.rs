@@ -15,7 +15,7 @@ use super::{
 };
 use crate::Message as AppMessage;
 use crate::a11y::items::{Item, Kind, Number, SetNumber, SetText};
-use loom_core::{MidiEncoding, MidiMappingOptions, MidiMode, ParamMapping};
+use loom_core::{MidiEncoding, MidiMappingOptions, MidiMode};
 use loom_ui_core::UiId;
 
 /// Every part the inspector shows for `model`, under one named group per
@@ -172,12 +172,7 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         Item::text(ids::part(&panel, "name"), rows.name.clone()),
         // Read only until the multi-line editor comes (phase 3): its name
         // and its text, and focus, but no SetValue.
-        Item {
-            label: Some("Authors, one per line".to_string()),
-            value: Some(rows.authors.join("\n")),
-            focus: Some(crate::places::field_widget_id(&crate::patch_info::authors_part())),
-            ..Item::new(ids::part(&panel, "authors"), Kind::Field)
-        },
+        authors(crate::patch_info::authors_part(), &rows.authors),
     ];
     for (index, tag) in rows.tags.iter().enumerate() {
         let key = ids::part(&panel, "tag").with(tag.as_str());
@@ -230,6 +225,17 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         Some(AppMessage::ShowShortcuts),
     ));
     Item::group(panel, "Patch", parts)
+}
+
+/// An Iced multi-line authors field exposes text and focus until the
+/// runtime's multi-line editor can provide editing actions.
+fn authors(id: UiId, names: &[String]) -> Item {
+    Item {
+        label: Some("Authors, one per line".to_string()),
+        value: Some(names.join("\n")),
+        focus: Some(crate::places::field_widget_id(&id)),
+        ..Item::new(id, Kind::Field)
+    }
 }
 
 /// One module's inspector.
@@ -437,6 +443,7 @@ fn sub_patch(s: &SubPatchRows) -> Item {
         let own = (!exposed.member).then_some(&exposed.own);
         parts.push(param_row(exposed.module, &exposed.label, &exposed.row, own));
     }
+    parts.push(authors(crate::patch_info::part_authors_id(s.id), &s.authors));
     Item::group(panel, s.name.clone(), parts)
 }
 
@@ -571,13 +578,7 @@ fn value_control(module: u32, label: &str, p: &ParamRow, position: f32, step: f3
                 label: Some(label.to_string()),
                 // The value with its unit, as the row shows it.
                 description: Some(p.value.clone()),
-                number: Some(Number {
-                    value: f64::from(spec.denormalize(position)),
-                    min: f64::from(spec.min),
-                    max: f64::from(spec.max),
-                    step: matches!(spec.options.mapping, ParamMapping::Linear)
-                        .then(|| f64::from(step * (spec.max - spec.min))),
-                }),
+                number: Some(Number::parameter(&spec, position, Some(step))),
                 step: ((up != position).then(|| to(up)), (down != position).then(|| to(down))),
                 set_number: Some(SetNumber::Param { module, index, spec }),
                 groups: true,
@@ -620,12 +621,12 @@ fn expose(exposure: &ExposureRow, id: &UiId) -> Item {
     match &exposure.name {
         Some(name) => Item::button(
             id,
-            format!("Unexpose on {}, exposed as {name}", exposure.surface),
+            format!("{}, exposed as {name}", exposure.button_label()),
             Some(AppMessage::Inspector(Message::Unexpose { module, index })),
         ),
         None => Item::button(
             id,
-            format!("Expose on {}", exposure.surface),
+            exposure.button_label(),
             Some(AppMessage::Inspector(Message::Expose { module, index })),
         ),
     }

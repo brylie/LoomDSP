@@ -10,6 +10,7 @@ A level from 0 to 1 that rises and falls when a gate starts it. ADSR holds while
 | Version | 1 |
 | Family | Modulation |
 | Category | Envelope |
+| Fills roles | [Envelope](loom.role.envelope.md) |
 
 ## Inputs
 

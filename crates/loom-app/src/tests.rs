@@ -227,7 +227,7 @@ fn window_text_meets_wcag_minimum_contrast() {
 #[test]
 fn test_app_opens_no_midi_ports() {
     let app = app();
-    assert!(app.rig.ports.is_empty());
+    assert!(app.rig.midi.ports.is_empty());
     assert!(devices::Host::midi_inputs(&devices::fake::NoMidi).unwrap().is_empty());
 }
 
@@ -339,7 +339,7 @@ fn no_audio_keeps_taking_edits() {
 
 fn open_at(app: &mut App, world: Point) {
     let _ = app.send(Message::Canvas(CanvasEvent::OpenBrowser {
-        world,
+        placement: world.into(),
         at: Point::ORIGIN,
         area: loom_ui_core::Rect::new(Point::ORIGIN, loom_ui_core::Size::new(1000.0, 800.0)),
     }));
@@ -1956,7 +1956,7 @@ fn a_mapped_control_change_turns_the_knob() {
     };
     app.session.controller.map_midi(control, filter, cutoff).unwrap();
     app.commit();
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     let start = tile_widget(&app, filter, widget).position;
     assert!(start > 0.0 && start < 1.0, "{start}");
 

@@ -3,7 +3,7 @@
 The shared sizes, button roles, and quiet chrome that every view of the desktop app uses, so the app looks like one instrument and the controls a performer plays stand out.
 
 - **Kind:** living specification.
-- **Status:** Implemented, M1 (2026-11-01).
+- **Status:** The M1 visual system is implemented (2026-11-01). [Module shapes and playing state](#module-shapes-and-playing-state) records the agreed design direction (2026-11-19).
 - **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global), [ADR-0029](../adr/0029-module-families-and-a-shared-palette.md) (module families and a shared palette).
 - **Use case and requirements:** FR-PANEL-06 (global themes), NFR-UX-01 (keyboard and focus), NFR-UX-03 (colour is never the only signal).
 - **Background:** the [M1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
@@ -15,6 +15,22 @@ The shared sizes, button roles, and quiet chrome that every view of the desktop 
 Each view of the app picked its own text sizes and button styles. The app set eight text sizes inline in seven files, and nearly every button was the same bright orange, the colour the canvas keeps for values a user can change. Nothing stood out, and the chrome competed with the knobs. A performer should see the patch and its values first, and find the one emergency control, Panic, at a glance.
 
 ## Behaviour
+
+### Module shapes and playing state
+
+**Agreed design direction, 2026-11-19.** Use the same visual vocabulary on module tiles, exposed sub-patch controls, and front panels. Choose a picture when it helps answer a musical question. A pulse has a high and a low part. Showing the share of the cycle spent high explains Width in a way that the number 0.25 alone cannot. A simple switch can already explain a two-state choice. [Panel layout](panels.md#panel-layout)
+
+| What the player wants to know | What the panel communicates | Example |
+|---|---|---|
+| What have I set? | A contour or pattern shows the relationship between settings. It updates when the relevant setting changes and remains useful while the patch is silent. | Increasing Attack lengthens the rising segment. Rotating a rhythm shifts its hits and preserves their spacing. |
+| What can I change here? | A control or handle identifies an editable part. Preserve its name, unit, keyboard action and exact value wherever it is exposed. | A Width handle on a pulse edge would mean the player can move that edge. A read-only preview uses the existing tile gesture. |
+| What is happening now? | A live mark shows a reading from the running module. Give it a shape distinct from an edit handle and preserve the settings when the player follows it. | On an envelope, horizontal position can show stage and progress, while height shows the voice's actual level. On a rhythm, the current step can land on a rest. |
+
+**Polyphony matters when the question is about voices.** One level can occur during both Attack and Release. An activity view intended to explain a chord should let a player distinguish overlapping voices and follow release tails. If a gate falls during Attack, the release begins at the level that voice reached. This is a useful review case because a marker following the ideal contour would give the wrong answer. Offer the same information on demand in words, such as “three active voices, one attacking, one sustaining, one releasing”. Colour, continuous motion and frame-by-frame speech should each be optional for understanding the state.
+
+**Review a panel while it is silent and while it plays.** Ask a player to predict the effect of an edit, identify the part they can operate, and describe the result during playback. For an envelope, try two overlapping notes and release one early. Repeat using keyboard navigation and the accessible description. [Illustrated examples and interactive envelope study](../research/2026-11-19-release-polish.md#what-is-the-patch-doing-now)
+
+**Implementation scope.** Envelope, LFO and Ladder already have calculated, read-only previews. Direct parameter handles remain an open widget design. The current polyphony rules give displays voice 1. A future per-voice activity view needs an agreed change to those rules, including how it reports stage and level, handles coincident voices, and reads bounded telemetry without waking an idle or hidden panel. The studies illustrate those choices for review. [Shape previews](panel-widgets.md#read-only-shape-preview) · [Polyphony, rule 9](polyphony.md) · [Telemetry](telemetry.md)
 
 ### Type scale
 
@@ -42,6 +58,8 @@ The canvas keeps its own text sizes in world units (`TITLE_SIZE`, `LABEL_SIZE` i
 | Plain | No fill, text only | Small inline actions such as the × that removes a row. |
 
 A disabled button keeps its role's shape and is drawn faded, so it reads as unavailable, not as another role.
+
+Tile and probe menus share a solid panel and the same row style. Menu text, including a disabled row, has at least 4.5:1 contrast with its fill. The edge of a row and the outline on hover or keyboard focus have at least 3:1 contrast. The panel edge also stands out against a tile and the canvas.
 
 ### Toolbar
 

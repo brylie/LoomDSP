@@ -13,6 +13,7 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 loom-core.workspace = true
+loom-patch.workspace = true
 loom-rt.workspace = true
 cpal.workspace = true
 hound.workspace = true
@@ -30,4 +31,3 @@ workspace = true
 
 [dev-dependencies]
 loom-modules.workspace = true
-loom-patch.workspace = true

@@ -15,7 +15,7 @@
 //! definition's and a module's are its descriptor's.
 
 use loom_canvas::GRID;
-use loom_core::{AssignmentId, Controller, Graph, ModuleId, ModuleNames, ModuleRole, OutputRef, Polarity, Registry};
+use loom_core::{AssignmentId, Controller, Graph, ModuleId, ModuleNames, Polarity, Registry, RoleDescriptor};
 use loom_patch::{
     End, Hierarchy, INPUT_KIND, Layout, ModulePath, OUTPUT_KIND, Patch, PatchCable, PatchError, PatchModulation,
     PatchModule, PatchPolarity, ResolveError, ResolveOptions, ResolvedModule, SUBPATCH_KIND, SubPatch, Tile,
@@ -55,6 +55,30 @@ struct InstanceMember {
     layout: Layout,
 }
 
+/// A slot and the hidden module or sub-patch that currently fills it.
+#[derive(Clone, Debug)]
+struct SlotMember {
+    tile: PatchModule,
+    part: Option<PatchModule>,
+    role: &'static RoleDescriptor,
+    layout: Layout,
+}
+
+impl SlotMember {
+    /// The definitions needed by the current and held parts of this slot.
+    fn definitions(&self, table: &BTreeMap<String, SubPatch>) -> BTreeMap<String, SubPatch> {
+        let modules = std::iter::once(self.tile.clone()).chain(self.part.clone()).collect();
+        let root = SubPatch {
+            modules,
+            ..SubPatch::new("")
+        };
+        loom_patch::reachable_keys(&root, table)
+            .into_iter()
+            .filter_map(|key| table.get(&key).map(|definition| (key, definition.clone())))
+            .collect()
+    }
+}
+
 /// One tile in a group.
 #[derive(Clone, Debug)]
 enum Member {
@@ -63,6 +87,8 @@ enum Member {
     Module(ResolvedModule),
     /// A sub-patch tile.
     Instance(InstanceMember),
+    /// A slot with its backing part, one visible tile.
+    Slot(Box<SlotMember>),
 }
 
 impl Member {
@@ -70,6 +96,7 @@ impl Member {
         match self {
             Self::Module(module) => module.id,
             Self::Instance(instance) => instance.id,
+            Self::Slot(slot) => slot.tile.id,
         }
     }
 
@@ -77,6 +104,7 @@ impl Member {
         match self {
             Self::Module(module) => &module.layout,
             Self::Instance(instance) => &instance.layout,
+            Self::Slot(slot) => &slot.layout,
         }
     }
 
@@ -84,6 +112,7 @@ impl Member {
         match self {
             Self::Module(module) => &mut module.layout,
             Self::Instance(instance) => &mut instance.layout,
+            Self::Slot(slot) => &mut slot.layout,
         }
     }
 }
@@ -148,7 +177,7 @@ impl Group {
     /// which a layer or select level refuses (sub-patches.md, The editor
     /// for modes).
     pub fn has_modules(&self) -> bool {
-        self.members.iter().any(|m| matches!(m, Member::Module(_)))
+        self.members.iter().any(|m| !matches!(m, Member::Instance(_)))
     }
 
     /// Includes the selected tiles' saved dimensions in a copied group.
@@ -170,6 +199,7 @@ impl Group {
     /// left out too: the clipboard holds no ports.
     pub fn from_selection(
         graph: &Graph,
+        registry: &Registry,
         hierarchy: &Hierarchy,
         level: &ModulePath,
         positions: &BTreeMap<u32, (f32, f32)>,
@@ -189,10 +219,10 @@ impl Group {
                         .unknown
                         .as_ref()
                         .map_or_else(|| node.descriptor.kind(), |unknown| unknown.kind.clone());
-                    !loom_patch::library::is_patch_wide(&kind)
+                    !loom_patch::library::is_patch_wide(registry, &kind)
                 }),
-                Some(Tile::Instance(_)) => true,
-                Some(Tile::Port(..) | Tile::Slot(_)) | None => false,
+                Some(Tile::Instance(_) | Tile::Slot(_)) => true,
+                Some(Tile::Port(..)) | None => false,
             })
             .collect();
         let selected = &selected;
@@ -203,17 +233,17 @@ impl Group {
 
         // The level as the file writes it, for the sub-patch tiles.
         let written = hierarchy.unflatten(graph, |id| layout(ModuleId(id)));
-        let level_modules: &[PatchModule] = match hierarchy.key_at(level) {
-            Some(key) => written.subpatches.get(key).map_or(&[], |d| &d.modules),
-            None => &written.modules,
-        };
+        let (level_modules, level_modulation) =
+            match hierarchy.key_at(level).and_then(|key| written.subpatches.get(key)) {
+                Some(definition) => (&definition.modules, &definition.modulation),
+                None => (&written.modules, &written.modulation),
+            };
         let mut members: Vec<Member> = Vec::new();
         let mut definitions = BTreeMap::new();
         for (id, node) in graph.nodes().filter(|(id, _)| selected.contains(&id.0)) {
             members.push(Member::Module(ResolvedModule::from_node(id, node, layout(id))));
         }
         for (id, tile) in hierarchy.structural_tiles(level) {
-            let Tile::Instance(key) = tile else { continue };
             if !selected.contains(&id.0) {
                 continue;
             }
@@ -221,6 +251,28 @@ impl Group {
             let Some(module) = level_modules.iter().find(|m| m.id == lid) else {
                 continue;
             };
+            if let (Tile::Slot(_), Some(state), Some(mut slot)) = (&tile, hierarchy.slot(id), module.slot.clone()) {
+                let part = slot.part.and_then(|lid| {
+                    let mut part = level_modules.iter().find(|m| m.id == lid)?.clone();
+                    part.id = hierarchy.id_at(level, lid)?.0;
+                    Some(part)
+                });
+                slot.part = part.as_ref().map(|m| m.id);
+                let member = SlotMember {
+                    tile: PatchModule {
+                        id: id.0,
+                        slot: Some(slot),
+                        ..module.clone()
+                    },
+                    part,
+                    role: state.role,
+                    layout: layout(id),
+                };
+                definitions.extend(member.definitions(&written.subpatches));
+                members.push(Member::Slot(Box::new(member)));
+                continue;
+            }
+            let Tile::Instance(key) = tile else { continue };
             members.push(Member::Instance(InstanceMember {
                 id: id.0,
                 key: key.clone(),
@@ -259,57 +311,18 @@ impl Group {
             })
             .collect();
 
-        // Assignments come in id order, the order the engine sums them in.
-        // Only the level's own come: one onto a parameter inside a selected
-        // sub-patch tile is written onto the tile's exposed name, and one
-        // from inside a tile through its output port, but one with both
-        // ends inside the same tile is the definition's, and the copied
-        // definition carries it already.
-        let written_at = |source: ModuleId, target: ModuleId| -> ModulePath {
-            let (source_level, target_level) = (hierarchy.level_of(source), hierarchy.level_of(target));
-            if target_level.starts_with(&source_level) {
-                source_level
-            } else {
-                target_level
-            }
-        };
-        let target_of = |target: ModuleId, index: usize| -> Option<(u32, String)> {
-            let name = graph.node(target)?.parameter_name(index)?.to_string();
-            if selected.contains(&target.0) {
-                return Some((target.0, name));
-            }
-            let (instance, exposed) = hierarchy.surface_for(level, &(target, name))?;
-            if !selected.contains(&instance.0) {
-                return None;
-            }
-            let name = hierarchy.definition_of(instance)?.exposed.get(exposed)?.name.clone();
-            Some((instance.0, name))
-        };
-        let source_of = |output: OutputRef| -> Option<Source> {
-            let name = loom_core::ModuleNames::output_name(graph.node(output.module)?, output.port)?.to_string();
-            let source_level = hierarchy.level_of(output.module);
-            let end = if source_level == *level {
-                (hierarchy.path_of(output.module).last(), name)
-            } else if source_level.starts_with(level) {
-                // Inside a sub-patch tile of this level: through its port.
-                let instance = source_level.prefix(level.0.len() + 1);
-                let port = hierarchy.port_for_output(graph, &instance, &(output.module, name))?;
-                (instance.last(), port)
-            } else {
-                return None;
-            };
-            source(&end)
-        };
-        let modulation = graph
-            .assignments()
-            .filter(|(_, a)| written_at(a.source.module, a.target) == *level)
-            .filter_map(|(_, a)| {
+        // Use the same names as the patch writer, including the role names
+        // chosen for the hidden part of a slot.
+        let modulation = level_modulation
+            .iter()
+            .filter_map(|assignment| {
+                let target = flat(assignment.target.0).filter(|id| selected.contains(&id.0))?;
                 Some(Modulation {
-                    target: target_of(a.target, a.param)?,
-                    source: source_of(a.source)?,
-                    depth: a.depth,
-                    polarity: a.polarity,
-                    enabled: a.enabled,
+                    target: (target.0, assignment.target.1.clone()),
+                    source: source(&assignment.source)?,
+                    depth: assignment.depth,
+                    polarity: assignment.polarity.map(Polarity::from),
+                    enabled: assignment.enabled,
                 })
             })
             .collect();
@@ -350,7 +363,7 @@ impl Group {
         let (dropped, kept): (Vec<&PatchModule>, Vec<&PatchModule>) = patch
             .modules
             .iter()
-            .partition(|m| loom_patch::library::is_patch_wide(&m.kind));
+            .partition(|m| loom_patch::library::is_patch_wide(registry, &m.kind));
         let dropped_ids: BTreeSet<u32> = dropped.iter().map(|m| m.id).collect();
         let left_out: Vec<String> = dropped
             .iter()
@@ -370,9 +383,41 @@ impl Group {
         let mut members = Vec::with_capacity(kept.len());
         let mut warnings = Vec::new();
         let mut ids = BTreeSet::new();
+        let part_ids: BTreeSet<u32> = kept.iter().filter_map(|module| module.slot.as_ref()?.part).collect();
         for module in kept {
             if !ids.insert(module.id) {
                 return Err(format!("two modules have id {}", module.id));
+            }
+            if part_ids.contains(&module.id) {
+                continue;
+            }
+            if module.is_slot() {
+                let slot = module
+                    .slot
+                    .as_ref()
+                    .ok_or_else(|| format!("slot {} has no role", module.id))?;
+                let role = registry.resolve_role(&slot.role).map_err(|error| error.to_string())?;
+                let part = slot
+                    .part
+                    .map(|id| {
+                        patch
+                            .modules
+                            .iter()
+                            .find(|module| module.id == id && !module.is_slot())
+                            .cloned()
+                            .ok_or_else(|| format!("slot {} has no part {id}", module.id))
+                    })
+                    .transpose()?;
+                members.push(Member::Slot(Box::new(SlotMember {
+                    tile: module.clone(),
+                    part,
+                    role,
+                    layout: Layout {
+                        position: module.position,
+                        size: module.size,
+                    },
+                })));
+                continue;
             }
             if let Some(key) = &module.subpatch {
                 if !patch.subpatches.contains_key(key) {
@@ -496,6 +541,14 @@ impl Group {
                     size: instance.layout.size,
                     ranges: BTreeMap::new(),
                 },
+                Member::Slot(slot) => {
+                    patch.modules.extend(slot.part.iter().cloned());
+                    PatchModule {
+                        position: slot.layout.position,
+                        size: slot.layout.size,
+                        ..slot.tile.clone()
+                    }
+                }
             };
             module.position = module.position.map(|(x, y)| (x.round(), y.round()));
             patch.modules.push(module);
@@ -535,7 +588,7 @@ impl Group {
                         },
                     )
                 }),
-                Member::Instance(_) => None,
+                Member::Instance(_) | Member::Slot(_) => None,
             })
             .collect();
         if !ports.is_empty() {
@@ -555,6 +608,7 @@ impl Group {
         match self.member(id) {
             Some(Member::Module(module)) => Ok(module.descriptor.name.to_string()),
             Some(Member::Instance(instance)) => Ok(self.definition_name(&instance.key)),
+            Some(Member::Slot(slot)) => Ok(slot.role.name.to_string()),
             None => Err(format!("no module has id {id}")),
         }
     }
@@ -591,6 +645,7 @@ impl Group {
         match self.member(id) {
             Some(Member::Module(module)) => module.input_index(name).is_some(),
             Some(Member::Instance(instance)) => self.port_names(&instance.key, INPUT_KIND).iter().any(|n| n == name),
+            Some(Member::Slot(slot)) => slot.role.input(name).is_some(),
             None => false,
         }
     }
@@ -599,6 +654,7 @@ impl Group {
         match self.member(id) {
             Some(Member::Module(module)) => module.output_index(name).is_some(),
             Some(Member::Instance(instance)) => self.port_names(&instance.key, OUTPUT_KIND).iter().any(|n| n == name),
+            Some(Member::Slot(slot)) => slot.role.output(name).is_some(),
             None => false,
         }
     }
@@ -610,6 +666,7 @@ impl Group {
                 .definitions
                 .get(&instance.key)
                 .is_some_and(|d| d.exposed.iter().any(|e| e.name == name)),
+            Some(Member::Slot(slot)) => slot.role.param(name).is_some(),
             None => false,
         }
     }
@@ -631,6 +688,7 @@ impl Group {
         match self.members.as_slice() {
             [Member::Module(one)] => one.descriptor.name.to_string(),
             [Member::Instance(one)] => self.definition_name(&one.key),
+            [Member::Slot(slot)] => slot.tile.label.clone().unwrap_or_else(|| slot.role.name.to_string()),
             all => format!("{} modules", all.len()),
         }
     }
@@ -664,31 +722,37 @@ impl Group {
     /// such module inside it, at every depth.
     pub fn check(&self, controller: &Controller) -> Result<(), String> {
         let registry = controller.registry();
-        let takes_slot = |kind: &str| {
-            registry
-                .resolve(kind)
-                .map_or(true, |d| matches!(d.role, ModuleRole::Dsp(_)))
+        let takes_slot = |kind: &str| registry.resolve(kind).map_or(true, |d| d.role.factory().is_some());
+        let count_definition = |key: &str| -> usize {
+            let Some(definition) = self.definitions.get(key) else {
+                return 0;
+            };
+            std::iter::once(definition)
+                .chain(
+                    loom_patch::library::live_definition_keys(definition, &self.definitions)
+                        .iter()
+                        .filter_map(|key| self.definitions.get(key)),
+                )
+                .flat_map(|definition| definition.modules.iter())
+                .filter(|module| {
+                    module.subpatch.is_none()
+                        && !module.is_slot()
+                        && module.kind != INPUT_KIND
+                        && module.kind != OUTPUT_KIND
+                })
+                .filter(|module| takes_slot(&module.kind))
+                .count()
         };
         let needed: usize = self
             .members
             .iter()
             .map(|member| match member {
-                Member::Module(module) => usize::from(matches!(module.descriptor.role, ModuleRole::Dsp(_))),
-                Member::Instance(instance) => {
-                    let Some(definition) = self.definitions.get(&instance.key) else {
-                        return 0;
-                    };
-                    std::iter::once(definition)
-                        .chain(
-                            loom_patch::reachable_keys(definition, &self.definitions)
-                                .iter()
-                                .filter_map(|key| self.definitions.get(key)),
-                        )
-                        .flat_map(|d| d.modules.iter())
-                        .filter(|m| m.subpatch.is_none() && m.kind != INPUT_KIND && m.kind != OUTPUT_KIND)
-                        .filter(|m| takes_slot(&m.kind))
-                        .count()
-                }
+                Member::Module(module) => usize::from(module.descriptor.role.factory().is_some()),
+                Member::Instance(instance) => count_definition(&instance.key),
+                Member::Slot(slot) => slot.part.as_ref().map_or(0, |part| match &part.subpatch {
+                    Some(key) => count_definition(key),
+                    None => usize::from(takes_slot(&part.kind)),
+                }),
             })
             .sum();
         let free = controller.free_module_slots();
@@ -720,30 +784,32 @@ impl Group {
         let mut added = Vec::with_capacity(self.members.len());
         let mut modules = Vec::new();
         let mut tiles = Vec::new();
-        let result = self.add_into(
-            controller,
-            hierarchy,
-            level,
-            positions,
-            sizes,
-            origin,
-            &mut added,
-            &mut modules,
-            &mut tiles,
-        );
-        match result {
-            Ok(renamed) => Ok(Added { ids: added, renamed }),
-            Err(why) => {
-                for id in &modules {
-                    let _ = controller.remove_module(*id);
+        controller.with_midi_mapping_rollback(|controller| {
+            let result = self.add_into(
+                controller,
+                hierarchy,
+                level,
+                positions,
+                sizes,
+                origin,
+                &mut added,
+                &mut modules,
+                &mut tiles,
+            );
+            match result {
+                Ok(renamed) => Ok(Added { ids: added, renamed }),
+                Err(why) => {
+                    for id in &modules {
+                        let _ = controller.remove_module(*id);
+                    }
+                    for id in &tiles {
+                        positions.remove(&id.0);
+                        sizes.remove(&id.0);
+                    }
+                    Err(why)
                 }
-                for id in &tiles {
-                    positions.remove(&id.0);
-                    sizes.remove(&id.0);
-                }
-                Err(why)
             }
-        }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -789,6 +855,29 @@ impl Group {
                     // Label, ranges, then values, as a patch loads.
                     module.apply_to(controller, id).map_err(|e| e.to_string())?;
                     id
+                }
+                Member::Slot(slot) => {
+                    let inserted = hierarchy.insert_slot_copy(
+                        controller,
+                        level,
+                        slot.tile.clone(),
+                        slot.part.clone(),
+                        slot.definitions(&self.definitions),
+                    )?;
+                    modules.extend(inserted.modules);
+                    for (inner, layout) in inserted.layouts {
+                        if inner == inserted.instance {
+                            continue;
+                        }
+                        tiles.push(inner);
+                        if let Some(position) = layout.position {
+                            positions.insert(inner.0, position);
+                        }
+                        if let Some(size) = layout.size {
+                            sizes.insert(inner.0, size);
+                        }
+                    }
+                    inserted.instance
                 }
                 Member::Instance(instance) => {
                     let Some(definition) = self.definitions.get(&instance.key) else {
@@ -907,6 +996,9 @@ impl Group {
                 let target = ids[&assignment.target.0];
                 let (module, param) = match controller.graph().node(target) {
                     Some(_) => (target, assignment.target.1.clone()),
+                    None if hierarchy.slot(target).is_some() => {
+                        hierarchy.slot_parameter(controller.graph(), target, &assignment.target.1)?
+                    }
                     None => {
                         let index = hierarchy
                             .definition_of(target)

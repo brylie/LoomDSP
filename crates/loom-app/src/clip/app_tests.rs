@@ -435,6 +435,13 @@ fn two_meters_on_one_output_keep_their_own_clips() {
     assert!(holds.get(right).lit, "the other still lights");
     assert_eq!(holds.get(right).text(), "+6.0 dB", "and its readout rises");
 
+    let ids = ui.app().a11y_widget_ids(&ui.app().ui_snapshot());
+    let tree = ui.a11y_tree();
+    for (widget, clipped) in [(0, false), (1, true)] {
+        let meter = tree.node_by_id(ids.get(module, widget).unwrap());
+        assert_eq!(meter.description().unwrap_or_default().contains("clipped"), clipped);
+    }
+
     // The thread hears of the reset, and clears only the left meter's news.
     let watch = ui.app().session.engine.monitor.watched();
     assert_eq!(watch.peak_resets[&left], (probe, 1));

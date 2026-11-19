@@ -334,6 +334,9 @@ impl From<PatchPolarity> for Polarity {
 /// Patch loading and saving errors.
 #[derive(Debug, thiserror::Error)]
 pub enum PatchError {
+    /// A slot edit was refused because its part or role was invalid.
+    #[error("{0}")]
+    SlotEdit(String),
     /// A hand-edited file mapped an audio-thread control onto a structural value.
     #[error(
         "MIDI mapping CC {controller} on channel {channel} targets graph-shaping parameter `{param}` of module {module}"

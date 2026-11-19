@@ -10,6 +10,7 @@ A gentle 6 dB per octave filter with low-pass and high-pass outputs; low cutoffs
 | Version | 1 |
 | Family | Filters and effects |
 | Category | Filter |
+| Fills roles | [Filter](loom.role.filter.md) |
 
 ## Inputs
 

@@ -40,13 +40,13 @@ const NO_READ_BACK: &str = "the GPU could not read the frame back";
 pub struct Options {
     /// Draw one frame of the canvas to this PNG file and exit, without a
     /// window, audio, or MIDI.
-    #[arg(long, value_name = "PNG", group = "image")]
+    #[arg(long, value_name = "PNG", groups = ["image", "focusable_output"])]
     pub screenshot: Option<std::path::PathBuf>,
     /// Draw one frame of the whole window to this PNG file and exit,
     /// without a window, audio, or MIDI. With --select, the inspector shows
     /// the selected modules. The canvas options below apply to the canvas
     /// inside it.
-    #[arg(long, value_name = "PNG", groups = ["image", "inspect"])]
+    #[arg(long, value_name = "PNG", groups = ["image", "inspect", "focusable_output"])]
     pub screenshot_window: Option<std::path::PathBuf>,
     /// Image size in logical pixels, as WIDTHxHEIGHT. The default is
     /// 1280x800 for the canvas and the app's window size, 1440x900, for the
@@ -69,7 +69,7 @@ pub struct Options {
     /// Give one control keyboard focus, as MODULE:PARAM (for example
     /// 4:cutoff). It draws as after a Tab press: the module selected, the
     /// control with its focus ring and value.
-    #[arg(long, value_name = "MODULE:PARAM", requires = "image")]
+    #[arg(long, value_name = "MODULE:PARAM", requires = "focusable_output")]
     pub focus: Option<Named>,
     /// Put the pointer here, as X,Y in world units, or as MODULE:NAME for
     /// the centre of a control (by parameter), else a port of that name

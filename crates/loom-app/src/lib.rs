@@ -163,7 +163,7 @@ struct Args {
     view: screenshot::Options,
     /// Print what the UI shows (tiles, inspector, status bar, undo steps,
     /// window title) as JSON and exit, without a window, audio, or MIDI.
-    #[arg(long, conflicts_with = "screenshot", group = "inspect")]
+    #[arg(long, conflicts_with = "screenshot", groups = ["inspect", "focusable_output"])]
     dump_ui: bool,
     /// With --dump-ui or --screenshot-window: select this module, so the
     /// inspector shows it. Repeat to select several.
@@ -991,7 +991,7 @@ impl App {
             &self.session.level,
             &self.session.positions,
             &self.session.sizes,
-            self.rig.following_clock.as_deref(),
+            self.rig.midi.following_clock.as_deref(),
         );
         self.session.mode_key = scene::mode_key(&self.session.controller);
         self.refresh_values();
@@ -1012,7 +1012,7 @@ impl App {
                 &self.session.level,
                 &self.session.positions,
                 &self.session.sizes,
-                self.rig.following_clock.as_deref(),
+                self.rig.midi.following_clock.as_deref(),
             );
             self.session.mode_key = mode_key;
         }
@@ -1061,7 +1061,12 @@ impl App {
             self.alerts.note_dropouts(s.overruns + s.stream_errors, now);
         }
         // A recording that stopped early (a full disk) is reported once.
-        if let Some(error) = self.rig.recorder.as_ref().and_then(loom_host_desktop::Recorder::error)
+        if let Some(error) = self
+            .rig
+            .output
+            .recorder
+            .as_ref()
+            .and_then(loom_host_desktop::Recorder::error)
             && self.alerts.recording_stopped()
         {
             self.alerts
@@ -1513,6 +1518,7 @@ impl App {
             self.control_frame_asked = false;
         }
         self.apply(message);
+        self.sync_part_authors();
         // The timers, the watchers, and the frames a command waits for
         // follow what this update changed.
         self.sync_timers(now);
@@ -1654,8 +1660,8 @@ impl App {
                 }));
             }
             // The library folder is read for the browser's list as it opens.
-            Message::Canvas(CanvasEvent::OpenBrowser { world, at, area }) => {
-                self.canvas_event(CanvasEvent::OpenBrowser { world, at, area });
+            Message::Canvas(event @ CanvasEvent::OpenBrowser { .. }) => {
+                self.canvas_event(event);
                 self.read_library_for_browser();
             }
             Message::Control(call) => self.control(call),
@@ -1795,21 +1801,25 @@ impl App {
         match outcome {
             browser::Outcome::Stay => {}
             browser::Outcome::Close => self.overlays.close_browser(),
-            browser::Outcome::Add(descriptor, world) => {
+            browser::Outcome::Add(descriptor, placement) => {
                 self.overlays.close_browser();
-                self.add_module(descriptor, world);
+                self.add_module(descriptor, placement);
             }
-            browser::Outcome::Insert { item, linked, world } => {
+            browser::Outcome::Insert {
+                item,
+                linked,
+                placement,
+            } => {
                 self.overlays.close_browser();
-                self.insert_library_item(&item, linked, world);
+                self.insert_library_item(&item, linked, placement);
             }
-            browser::Outcome::AddSlot(role, world) => {
+            browser::Outcome::AddSlot(role, placement) => {
                 self.overlays.close_browser();
-                self.add_empty_slot(role, world);
+                self.add_empty_slot(role, placement);
             }
-            browser::Outcome::InsertBuiltin(builtin, world) => {
+            browser::Outcome::InsertBuiltin(builtin, placement) => {
                 self.overlays.close_browser();
-                self.insert_builtin(builtin, world);
+                self.insert_builtin(builtin, placement);
             }
         }
     }
@@ -1828,21 +1838,24 @@ impl App {
 
     /// Adds a module with its top-left corner at a world point and selects
     /// it, as one undo step.
-    fn add_module(&mut self, descriptor: &'static ModuleDescriptor, world: Point) {
+    fn add_module(
+        &mut self,
+        descriptor: &'static ModuleDescriptor,
+        placement: impl Into<loom_canvas::BrowserPlacement>,
+    ) {
+        let placement = placement.into();
         self.close_slider_gesture();
         if let Some(why) = self.refuses_kind(descriptor.id) {
             self.alerts.warn(why.to_string());
             return;
         }
         // Inside a sub-patch, a Patch input or output is a port of it.
-        if self.add_port_tile(&descriptor.kind(), world) {
+        if self.add_port_tile(&descriptor.kind(), placement) {
             return;
         }
         self.edit(|app| match app.session.new_module(descriptor.id) {
             Ok(id) => {
-                app.session.positions.insert(id.0, (world.x, world.y));
-                app.session.selection = BTreeSet::from([id.0]);
-                app.commit();
+                app.commit_added_tile(id, placement);
             }
             Err(e) => app.alerts.warn(format!("Could not add {}: {e}", descriptor.name)),
         });
@@ -1925,24 +1938,15 @@ impl App {
             Message::A11y(_) => {}
             Message::ShowHelp => {
                 if self.overlays.help.is_none() {
-                    let descriptor = self
-                        .overlays
-                        .browser()
-                        .and_then(browser::Browser::highlighted)
-                        .or_else(|| {
-                            (self.overlays.browser().is_none() && self.session.selection.len() == 1)
-                                .then(|| {
-                                    self.session
-                                        .selection
-                                        .iter()
-                                        .next()
-                                        .and_then(|id| self.session.controller.graph().node(ModuleId(*id)))
-                                        .map(|node| node.descriptor)
-                                })
-                                .flatten()
-                        });
+                    let page = if let Some(browser) = self.overlays.browser() {
+                        browser.highlighted().map(help::Help::new)
+                    } else if self.session.selection.len() == 1 {
+                        self.session.selection.first().and_then(|&id| self.tile_help(id))
+                    } else {
+                        None
+                    };
                     // With nothing to describe, F1 shows the shortcuts.
-                    self.overlays.help = Some(descriptor.map_or_else(help::Help::shortcuts, help::Help::new));
+                    self.overlays.help = Some(page.unwrap_or_else(help::Help::shortcuts));
                 }
             }
             Message::ShowShortcuts => {
@@ -1994,12 +1998,7 @@ impl App {
             Message::Mode(message) => self.mode_message(message),
             Message::ShowModuleHelp(id) => {
                 self.overlays.close_tile_menu();
-                self.overlays.help = self
-                    .session
-                    .controller
-                    .graph()
-                    .node(ModuleId(id))
-                    .map(|node| help::Help::new(node.descriptor));
+                self.overlays.help = self.tile_help(id);
             }
             Message::CloseHelp => self.overlays.help = None,
             Message::HelpExample => {
@@ -2018,6 +2017,11 @@ impl App {
                     .copied();
                 if let Some(descriptor) = descriptor {
                     self.overlays.help = Some(help::Help::new(descriptor));
+                } else if let Some(role) = link
+                    .strip_suffix(".md")
+                    .and_then(|id| self.session.controller.registry().role(id))
+                {
+                    self.overlays.help = Some(help::Help::role(role, self.session.controller.registry()));
                 } else {
                     self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }
@@ -2252,7 +2256,7 @@ impl App {
     /// drives `run`, the input decides, so Space changes nothing. Without a
     /// Transport, it starts or stops the engine's transport directly.
     fn toggle_run(&mut self) {
-        if self.rig.following_clock.is_some() {
+        if self.rig.midi.following_clock.is_some() {
             return;
         }
         let Some((transport, index)) = transport_run(&self.session.controller) else {
@@ -2281,7 +2285,7 @@ impl App {
     /// takes that state, so it shows the truth and works again.
     fn keep_run_state(&mut self) {
         let driven = run_is_driven(&self.session.controller);
-        if self.rig.following_clock.is_none()
+        if self.rig.midi.following_clock.is_none()
             && self.session.run_driven
             && !driven
             && let Some((transport, index)) = transport_run(&self.session.controller)
@@ -2314,7 +2318,7 @@ Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A
 Delete or Backspace removes the selection.\n\
 Drag a knob up or down; Shift for fine steps; double-click resets it.\n\
 Tab and Shift-Tab select modules in reading order. Enter focuses the selected module's first control.\n\
-With a control focused, Tab moves between controls and arrow keys change values. Space or Enter acts on a toggle, radio, or button.\n\
+With a control focused, Tab moves between controls and arrow keys change values. Enter or a digit starts typing a value on a knob, fader, or number. Space or Enter acts on a toggle, radio, or button.\n\
 Escape clears control focus, then the selection. With a module selected and no control focused, arrow keys move it.\n\
 Space toggles Run when no control uses it, including a focused knob.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\

@@ -10,6 +10,7 @@ Plays its input back after a set time, for echoes, chorus, and feedback. The tim
 | Version | 1 |
 | Family | Filters and effects |
 | Category | Time |
+| Fills roles | [Effect](loom.role.effect.md) |
 
 ## Inputs
 

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 576" width="900" height="576" role="img" aria-labelledby="title desc">
+  <title id="title">How one edit changes the picture on four LoomDSP modules</title>
+  <desc id="desc">Two settings per module, read left to right. Increasing envelope attack lengthens the rise. Changing an LFO from sine to triangle replaces rounded peaks with corners in the same cycle. Widening a pulse from one quarter to three quarters moves its editable falling edge right. Rotating three hits in eight steps from zero to one moves hits from steps 1, 4, 7 to 2, 5, 8.</desc>
+  <defs>
+    <style>
+      text { font-family: Inter, Helvetica, sans-serif; fill: #eceef2; font-size: 15px; }
+      .heading { font-size: 19px; font-weight: 600; }
+      .detail { fill: #bbc1cc; font-size: 13px; }
+      .surface { fill: #22242a; stroke: #454954; }
+      .guide { fill: none; stroke: #676e7a; stroke-width: 1; }
+      .curve { fill: none; stroke: #a8c7ee; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+      .pulse { fill: none; stroke: #dda8b2; stroke-width: 3; stroke-linejoin: round; }
+    </style>
+    <g id="axis"><path class="guide" d="M0 0H246" stroke-dasharray="3 5"/></g>
+    <g id="plot"><rect class="surface" width="278" height="65" rx="4"/></g>
+    <path id="next" d="M0 0H19M13 -6L19 0L13 6" fill="none" stroke="#9aa0ad" stroke-width="1.5"/>
+    <g id="handle">
+      <rect x="-10" y="-9" width="20" height="18" rx="3" fill="#f5a623"/>
+      <path d="M-3 -4V4M3 -4V4" stroke="#22242a" stroke-width="2"/>
+    </g>
+    <g id="step"><path d="M0 0V17" stroke="#89909b" stroke-width="2"/></g>
+    <g id="hit"><path d="M0 0V-19" stroke="#d1b9ee" stroke-width="7" stroke-linecap="round"/></g>
+    <g id="lane">
+      <path class="guide" d="M0 0H246"/>
+      <use href="#step" x="15"/><use href="#step" x="46"/><use href="#step" x="76"/><use href="#step" x="107"/>
+      <use href="#step" x="138"/><use href="#step" x="169"/><use href="#step" x="199"/><use href="#step" x="230"/>
+    </g>
+  </defs>
+  <rect width="900" height="576" fill="#1c1e23"/>
+  <g stroke="#40444e"><path d="M22 144H878M22 288H878M22 432H878"/></g>
+  <g transform="translate(22 16)">
+    <text class="heading" y="38">Envelope</text><text class="detail" y="61">Level over a note</text>
+    <text x="207" y="18">Short attack</text><text x="563" y="18">Longer attack</text>
+    <use href="#plot" x="207" y="29"/><use href="#plot" x="563" y="29"/><use href="#next" x="512" y="61"/>
+    <g transform="translate(223 82)"><use href="#axis"/><path class="curve" d="M0 0L15 -40L52 -19H186L246 0"/></g>
+    <g transform="translate(579 82)"><use href="#axis"/><path class="curve" d="M0 0L73 -40L110 -19H186L246 0"/></g>
+    <text class="detail" x="207" y="117">Gate rises</text><text class="detail" x="841" y="117" text-anchor="end">Time →</text>
+  </g>
+  <g transform="translate(22 160)">
+    <text class="heading" y="38">LFO</text><text class="detail" y="61">One repeating cycle</text>
+    <text x="207" y="18">Sine</text><text x="563" y="18">Triangle</text>
+    <use href="#plot" x="207" y="29"/><use href="#plot" x="563" y="29"/><use href="#next" x="512" y="61"/>
+    <g transform="translate(223 61)"><use href="#axis"/><path class="curve" d="M0 0C20 -12 41 -22 61.5 -22S103 -12 123 0S164 22 184.5 22S226 12 246 0"/></g>
+    <g transform="translate(579 61)"><use href="#axis"/><path class="curve" d="M0 0L61.5 -22L184.5 22L246 0"/></g>
+    <text class="detail" x="207" y="117">Midline = zero</text><text class="detail" x="841" y="117" text-anchor="end">Phase →</text>
+  </g>
+  <g transform="translate(22 304)">
+    <text class="heading" y="38">Pulse</text><text class="detail" y="61">Share of a cycle high</text>
+    <text x="207" y="18">Width 0.25</text><text x="563" y="18">Width 0.75</text>
+    <use href="#plot" x="207" y="29"/><use href="#plot" x="563" y="29"/><use href="#next" x="512" y="61"/>
+    <g transform="translate(223 61)"><use href="#axis"/><path class="pulse" d="M0 18V-18H61.5V18H246"/><use href="#handle" x="61.5"/></g>
+    <g transform="translate(579 61)"><use href="#axis"/><path class="pulse" d="M0 18V-18H184.5V18H246"/><use href="#handle" x="184.5"/></g>
+    <text class="detail" x="207" y="117">High for ¼ cycle</text><text class="detail" x="563" y="117">High for ¾ cycle</text>
+  </g>
+  <g transform="translate(22 448)">
+    <text class="heading" y="38">Euclidean Rhythm</text><text class="detail" y="61">Hits within a cycle</text>
+    <text x="207" y="18">Rotation 0</text><text x="563" y="18">Rotation 1</text>
+    <use href="#plot" x="207" y="29"/><use href="#plot" x="563" y="29"/><use href="#next" x="512" y="61"/>
+    <g transform="translate(223 65)"><use href="#lane"/><use href="#hit" x="15"/><use href="#hit" x="107"/><use href="#hit" x="199"/></g>
+    <g transform="translate(579 65)"><use href="#lane"/><use href="#hit" x="46"/><use href="#hit" x="138"/><use href="#hit" x="230"/></g>
+    <text class="detail" x="207" y="117">Hits on 1, 4, 7</text><text class="detail" x="563" y="117">Hits on 2, 5, 8</text>
+  </g>
+</svg>

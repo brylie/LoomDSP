@@ -156,7 +156,7 @@ impl Plan {
             return;
         }
         match role {
-            ModuleRole::Dsp(_) => self.steps.push(StepSpec::Module(v)),
+            ModuleRole::Dsp(_) | ModuleRole::Transport { .. } => self.steps.push(StepSpec::Module(v)),
             ModuleRole::UnitDelay => {
                 for ch in 0..layout.channels(v) {
                     let tap = self.push_tap(user_tap(layout, v, ch));
@@ -180,13 +180,15 @@ impl Plan {
         buffers: &mut Buffers,
     ) {
         let mut loop_taps = Vec::new();
+        let mut run_order = Vec::with_capacity(scc.len());
         let mut members = BTreeSet::new();
         for &v in scc {
             match layout.nodes[v].descriptor.role {
-                ModuleRole::Dsp(_) => {
+                ModuleRole::Dsp(_) | ModuleRole::Transport { .. } => {
                     members.insert(v);
                 }
                 ModuleRole::UnitDelay => {
+                    run_order.push(layout.ids[v]);
                     for ch in 0..layout.channels(v) {
                         loop_taps.push(self.push_tap(user_tap(layout, v, ch)));
                     }
@@ -256,8 +258,10 @@ impl Plan {
 
         let mut modules: Vec<ModuleId> = scc.iter().map(|&v| layout.ids[v]).collect();
         modules.sort_unstable();
+        run_order.extend(order.ordered.iter().map(|&v| layout.ids[v]));
         self.loops.push(FeedbackLoop {
             modules,
+            run_order,
             inserted_delays: inserted,
             inserted_assignment_delays: inserted_assignments,
         });

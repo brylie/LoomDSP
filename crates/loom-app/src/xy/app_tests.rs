@@ -81,6 +81,44 @@ fn it_is_a_display() {
     assert_eq!(ui.app().session.selection, [xy].into());
 }
 
+/// An invalid pair window reaches both the snapshot and the XY image description.
+#[test]
+fn an_invalid_xy_window_is_visible_and_described() {
+    let (mut ui, xy) = with_xy();
+    let (x, y) = outputs(&ui, xy);
+    let probe = ui.app().session.engine.live.pair_probe(x, y).unwrap();
+    let mut chunk = loom_core::PairChunk {
+        probe,
+        frame: 0,
+        len: 1,
+        values: [0.0; loom_core::PAIR_CHUNK * 2],
+    };
+    let watch = ui.app().session.engine.monitor.watched();
+    let mut watcher = crate::monitor::Watcher::default();
+    for invalid in [true, false] {
+        chunk.values[0] = if invalid { f32::NAN } else { 0.5 };
+        let xy_news = watcher.take_pairs(&watch, [chunk], 48_000.0);
+        let update = crate::monitor::Update {
+            xy: xy_news,
+            ..Default::default()
+        };
+        watcher.sent(&update);
+        ui.send(Message::Telemetry(update));
+        let snapshot = ui.app().ui_snapshot();
+        let tile = snapshot.tiles.iter().find(|tile| tile.id == xy).unwrap();
+        assert_eq!(tile.widgets[0].trace.unwrap().invalid, invalid);
+        let ids = ui.app().a11y_widget_ids(&snapshot);
+        let tree = ui.a11y_tree();
+        assert_eq!(
+            tree.node_by_id(ids.get(xy, 0).unwrap())
+                .description()
+                .is_some_and(|words| words.ends_with("Not a number")),
+            invalid
+        );
+        chunk.frame += 1;
+    }
+}
+
 /// Its trace reaches the tile from the telemetry thread's update, for the
 /// widget that shows its pair.
 #[test]

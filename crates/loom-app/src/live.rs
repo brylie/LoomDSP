@@ -449,7 +449,13 @@ impl ScopeTrace {
     /// side. A group of only NaN adds none. An infinite sample is pinned to
     /// the frame's edge by the clamp, as any value past the range is.
     pub fn canvas_trace(&self, full: bool) -> loom_canvas::Trace {
-        let peak = self.trace.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let peak = self.trace.iter().fold(f32::NAN, |peak, x| peak.max(x.abs()));
+        if peak.is_nan() {
+            return loom_canvas::Trace {
+                invalid: !self.trace.is_empty(),
+                ..Default::default()
+            };
+        }
         let level = (normalise(peak) * 255.0).round() / 255.0;
         if !full {
             return loom_canvas::Trace {
@@ -504,8 +510,8 @@ impl ScopeTrace {
         };
         loom_canvas::Trace {
             points,
-            second: Vec::new(),
             level,
+            ..Default::default()
         }
     }
 }
@@ -515,7 +521,7 @@ pub(crate) fn normalise(peak: f32) -> f32 {
     if peak <= 0.0 {
         return 0.0;
     }
-    ((20.0 * peak.log10() - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
+    ((loom_dsp::decibels::gain_to_db(peak) - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
 }
 
 /// Level to dB, the inverse of [`normalise`]: 0 is -60 dB, 1 is 0 dB.

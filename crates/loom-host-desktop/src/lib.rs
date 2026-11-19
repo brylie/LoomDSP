@@ -24,6 +24,7 @@
 
 mod capture;
 mod midi_clock;
+pub mod patch_file;
 mod record;
 mod stepped;
 mod virtual_midi;

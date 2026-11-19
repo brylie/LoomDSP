@@ -676,7 +676,7 @@ impl crate::App {
             tree::FramePart::Button(name) => {
                 let model = self.toolbar_model();
                 let button = model.buttons.iter().find(|button| button.name == name)?;
-                button.enabled.then(|| crate::toolbar::message(name)).flatten()
+                button.press()
             }
             tree::FramePart::Tab(tab) => Some(Message::Matrix(crate::matrix::Event::Tab(tab))),
         }

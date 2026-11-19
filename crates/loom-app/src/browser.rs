@@ -8,14 +8,20 @@ use crate::Element;
 use crate::style;
 use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
 use iced::{Length, Theme};
-use loom_canvas::GRID;
+use loom_canvas::BrowserPlacement;
 use loom_canvas::iced_convert::ToIced as _;
+pub(crate) use loom_canvas::snap;
 use loom_core::{Family, ModuleDescriptor, RoleDescriptor};
 use loom_ui::Effects;
 use loom_ui_core::{Point, Rect, UiId};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
+
+mod placement;
+
+/// Empty search results and how to recover.
+const NO_MATCHES: &str = "No modules match. Clear the search to see every module.";
 
 /// Width of the browser panel.
 pub const WIDTH: f32 = 340.0;
@@ -107,19 +113,17 @@ pub enum Outcome {
     Stay,
     /// Close it and add nothing.
     Close,
-    /// Close it and add this module at this world point.
-    Add(&'static ModuleDescriptor, Point),
-    /// Close it and add an empty slot for this role at this world point.
-    AddSlot(&'static RoleDescriptor, Point),
-    /// Close it and insert this built-in abstraction as a copy at this
-    /// world point.
-    InsertBuiltin(&'static crate::builtin::Builtin, Point),
-    /// Close it and insert this library item as a sub-patch at this world
-    /// point, as a copy or linked.
+    /// Close it and add this module with this placement.
+    Add(&'static ModuleDescriptor, BrowserPlacement),
+    /// Close it and add an empty slot for this role with this placement.
+    AddSlot(&'static RoleDescriptor, BrowserPlacement),
+    /// Close it and insert this built-in abstraction as a copy.
+    InsertBuiltin(&'static crate::builtin::Builtin, BrowserPlacement),
+    /// Close it and insert this library item as a sub-patch, as a copy or linked.
     Insert {
         item: LibraryItem,
         linked: bool,
-        world: Point,
+        placement: BrowserPlacement,
     },
 }
 
@@ -235,8 +239,8 @@ pub struct Browser {
     results: Vec<Entry>,
     /// What is shown.
     model: Model,
-    /// Where the new module goes: its top-left corner, snapped.
-    world: Point,
+    /// Placement captured at open. A point chosen by the pointer is snapped to the grid.
+    placement: BrowserPlacement,
     /// The panel's top-left corner, in window coordinates.
     at: Point,
     /// The list's scroll offset, which places a library row's menu beside
@@ -250,10 +254,15 @@ pub struct Browser {
 }
 
 impl Browser {
-    /// Opens a browser over `modules`, adding at `world`. The panel opens at
+    /// Opens a browser over `modules` with the placement the canvas supplied. The panel opens at
     /// `at`, moved as needed to stay inside `area` (window coordinates).
     /// The library's items come with [`Message::Library`].
-    pub fn open(modules: Vec<&'static ModuleDescriptor>, world: Point, at: Point, area: Rect) -> Self {
+    pub fn open(
+        modules: Vec<&'static ModuleDescriptor>,
+        placement: impl Into<BrowserPlacement>,
+        at: Point,
+        area: Rect,
+    ) -> Self {
         let mut browser = Self {
             modules,
             roles: Vec::new(),
@@ -269,7 +278,10 @@ impl Browser {
                 menu_highlight: None,
                 empty: None,
             },
-            world: snap(world),
+            placement: match placement.into() {
+                BrowserPlacement::Pointer(point) => BrowserPlacement::Pointer(snap(point)),
+                toolbar => toolbar,
+            },
             at: inside(at, area),
             scroll: 0.0,
         };
@@ -503,7 +515,7 @@ impl Browser {
             &self.model.query,
         );
         self.model.rows = rows(&self.results, self.builtins, &self.library);
-        self.model.empty = self.results.is_empty().then_some("No modules match.");
+        self.model.empty = self.results.is_empty().then_some(NO_MATCHES);
         // The menu belongs to a row that may be gone.
         self.set_menu(None, None);
     }
@@ -529,24 +541,24 @@ impl Browser {
             about: highlight.map(|at| about(results[at], self.builtins, &self.library)),
             menu: self.model.menu,
             menu_highlight: self.model.menu_highlight,
-            empty: results.is_empty().then_some("No modules match."),
+            empty: results.is_empty().then_some(NO_MATCHES),
         }
     }
 
     fn add(&self, linked: bool) -> Outcome {
         if let Some(descriptor) = self.highlighted() {
-            return Outcome::Add(descriptor, self.world);
+            return Outcome::Add(descriptor, self.placement);
         }
         match self.model.highlight.and_then(|at| self.results.get(at)) {
-            Some(Entry::Role(role)) => return Outcome::AddSlot(role, self.world),
-            Some(Entry::Builtin(i)) => return Outcome::InsertBuiltin(&self.builtins[*i], self.world),
+            Some(Entry::Role(role)) => return Outcome::AddSlot(role, self.placement),
+            Some(Entry::Builtin(i)) => return Outcome::InsertBuiltin(&self.builtins[*i], self.placement),
             _ => {}
         }
         match self.highlighted_item() {
             Some(item) => Outcome::Insert {
                 item: item.clone(),
                 linked,
-                world: self.world,
+                placement: self.placement,
             },
             None => Outcome::Stay,
         }
@@ -887,27 +899,37 @@ fn about(entry: Entry, builtins: &[crate::builtin::Builtin], library: &[LibraryI
 
 /// The modules that match a query, best first.
 ///
-/// A module matches when every word of the query is in its name, ID, or
-/// category, or family, ignoring case. Names that start with the query come
-/// first, then names with a word that starts with it, then other matches.
-/// Ties keep the order of an empty search: by family, then by name.
+/// Match every query word against descriptor text. A result that needs
+/// the description follows all matches in the shorter identifying fields.
 pub fn search(modules: &[&'static ModuleDescriptor], query: &str) -> Vec<&'static ModuleDescriptor> {
     let query = query.trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
-    let mut found: Vec<&'static ModuleDescriptor> = modules
+    let mut found: Vec<_> = modules
         .iter()
         .copied()
-        .filter(|d| {
-            let text = format!("{} {} {} {}", d.name, d.id, d.category, d.family.label()).to_lowercase();
-            words.iter().all(|w| text.contains(w))
+        .filter_map(|d| {
+            let score = if words.is_empty() {
+                0
+            } else {
+                let fields = format!("{} {} {} {}", d.name, d.id, d.category, d.family.label()).to_lowercase();
+                if words.iter().all(|word| fields.contains(word)) {
+                    1 + rank(d.name, &query)
+                } else {
+                    let description = d.description.to_lowercase();
+                    if !words
+                        .iter()
+                        .all(|word| fields.contains(word) || description.contains(word))
+                    {
+                        return None;
+                    }
+                    0
+                }
+            };
+            Some((Reverse(score), d))
         })
         .collect();
-    found.sort_by_key(|d| (d.family, d.name, d.id));
-    if !query.is_empty() {
-        // A stable sort, so ties keep the order above.
-        found.sort_by_key(|d| Reverse(rank(d.name, &query)));
-    }
-    found
+    found.sort_by_key(|(rank, d)| (*rank, d.family, d.name, d.id));
+    found.into_iter().map(|(_, d)| d).collect()
 }
 
 /// The library items that match a query, as indices into `items`, best
@@ -980,11 +1002,6 @@ pub fn library_items(folder: &Path) -> Vec<LibraryItem> {
 /// section 2, rule 4).
 pub fn read_library(folder: PathBuf) -> loom_ui::Effects<crate::Message> {
     loom_ui::Effects::work(move || crate::Message::Browser(Message::Library(library_items(&folder))))
-}
-
-/// Snaps a world point to the grid, for a new module's corner.
-pub fn snap(world: Point) -> Point {
-    Point::new((world.x / GRID).round() * GRID, (world.y / GRID).round() * GRID)
 }
 
 /// Moves the panel's corner so the whole panel fits inside `area`, where it

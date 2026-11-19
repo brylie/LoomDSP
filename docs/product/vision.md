@@ -49,6 +49,7 @@ Each principle includes its reason, so we can judge trade-offs later.
 10. **Permissive and AI-friendly.** Apache-2.0 code, only permissively licensed dependencies, and a preference for upstream communities that welcome AI-assisted contributions. Where no suitable crate exists, we build the primitive ourselves and publish it as a crate. See ADR-0006. Reason: LoomDSP is built with heavy AI assistance, and we want to give back to the projects we depend on.
 11. **Every decision teaches.** LoomDSP is also a way to learn modular sound design, for musicians and for developers. When we settle how something works, we write down the theory behind it, not only the rule: what the signal is, why the obvious approach fails, and how Eurorack, VCV Rack, and Bitwig Grid handle it. These explainers live in [`docs/learn/`](../learn/README.md), linked from specifications and code. Reason: many people come to modular to learn, including the people who build LoomDSP. A rule without its theory teaches nothing, and the next person who does not know the "why" will undo it.
 12. **One design language.** Every panel, on a module, a sub-patch, or a front panel, is built from one shared set of widgets, and each widget looks and works the same everywhere. Modules declare what they control, and their panel follows from that; authors can choose another widget or a layout, but not a new look. Panels stay clean and minimal: one global theme, no images, and contrast that is checked once for every panel. A sub-patch's surface shows the same widgets as its inside, and any of them can be exposed. Reason: in many modular systems each module has its own design, so users must study every module before they can play it. Learning a knob or a curve editor once should be enough, on stage and when entering a sub-patch. See ADR-0024 and ADR-0025.
+13. **Let players see how a sound is made.** A module's panel should help a musician predict what an edit will do and follow what happens when they play. A longer attack stretches the rise of an envelope. When two notes overlap, one can be rising while the other is already fading. Seeing both helps a learner connect the sound to the gesture and helps a performer understand a patch at a glance. [Module shapes and playing state](../design/visual-system.md#module-shapes-and-playing-state)
 
 ## Goals (version 1.0)
 
@@ -65,8 +66,8 @@ Later goals, not scheduled: export patches as CLAP and VST3 plugins and standalo
 ## Non-goals (version 1.0)
 
 - **A DAW.** No arranger timeline, mixer, or track list. Arrangement happens inside the grid: loopers with groups and next actions, counters and logic, scenes, and modulation curves (ADR-0011).
-- **Plugin and standalone export.** Deferred until living systems are proven (see "Later goals").
-- **The browser as the primary interface.** Browser support is optional and deferred.
+- **Plugin and standalone export.** Not in 1.0: they come once living systems are proven (see "Later goals"). They will ship; only their timing waits.
+- **The browser as the primary interface.** A web build comes after 1.0, as a first-class target ([UI design goal 3](../design/ui-layer.md#design-goals)).
 - **A JavaScript or webview UI.** See ADR-0005.
 - **A general text-based DSP language.** We may import Faust later.
 - **Running third-party plugins inside a patch.** This adds a large surface for crashes and licensing issues.

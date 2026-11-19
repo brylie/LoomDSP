@@ -60,7 +60,7 @@ fn description(
 }
 
 /// A sine with a NaN in its window describes finite numbers. A window of
-/// only NaN has no points, so it has no description. An infinity reads as
+/// only NaN shows the invalid mark and describes it. An infinity reads as
 /// the frame's edge, 1.00.
 #[test]
 fn a_scope_describes_only_finite_numbers() {
@@ -76,7 +76,13 @@ fn a_scope_describes_only_finite_numbers() {
     assert!(!words.contains("inf") && !words.contains("NaN"), "{words}");
     assert!(words.starts_with("Lowest -"), "{words}");
 
-    assert_eq!(description(&mut ui, widget, probe, trace_of(&[f32::NAN; 4800])), None);
+    assert_eq!(
+        description(&mut ui, widget, probe, trace_of(&[f32::NAN; 4800])).as_deref(),
+        Some("Not a number")
+    );
+    let snapshot = ui.app().ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|t| t.id == widget.0).unwrap();
+    assert!(tile.widgets[widget.1].trace.unwrap().invalid);
 
     let mut with_infinity = sine;
     with_infinity[4700] = f32::INFINITY;

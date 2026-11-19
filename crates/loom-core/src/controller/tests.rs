@@ -1,6 +1,6 @@
 use super::*;
 use crate::module::{Module, PortIo, ProcessContext};
-use crate::{Panel, ParamOptions, ParamRange, ParamSpec, Widget};
+use crate::{ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec, Widget};
 use std::sync::atomic::Ordering;
 
 struct Silent;
@@ -47,6 +47,76 @@ fn controller(capacity: usize) -> Controller {
         ..EngineConfig::default()
     };
     create_engine(Arc::new(registry), config).controller
+}
+
+/// Restarting DSP keeps the saved controls and mapping identity.
+#[test]
+fn rebuild_resets_transient_values_and_keeps_saved_controls() {
+    let mut original = controller(32);
+    let module = original.add_module(GATE.id).unwrap();
+    original.set_param_named(module, "on", 1.0).unwrap();
+    original.set_param_named(module, "hold", 1.0).unwrap();
+    let control = MidiControl {
+        channel: 0,
+        controller: 9,
+    };
+    let (mapping, _) = original.map_midi(control, module, 1).unwrap();
+    original.graph.midi_mappings.get_mut(&mapping).unwrap().learned = true;
+    original.set_label(module, Some("Stage switch".into()));
+    original.set_tempo(99.0).unwrap();
+    original.set_running(false).unwrap();
+    original.commit().unwrap();
+
+    let mut rebuilt = original
+        .rebuild(EngineConfig::with_sample_rate(44_100.0))
+        .unwrap()
+        .controller;
+    let node = rebuilt.graph().node(module).unwrap();
+    assert_eq!(node.label.as_deref(), Some("Stage switch"));
+    assert_eq!(node.params, [0.0, 1.0, 0.0]);
+    assert_eq!(rebuilt.graph().midi_mapping_on(control).unwrap().0, mapping);
+    assert!(!rebuilt.graph().midi_mapping_on(control).unwrap().1.learned);
+    assert!(original.graph().midi_mapping_on(control).unwrap().1.learned);
+    assert_eq!(rebuilt.transport().tempo, 99.0);
+    assert!(!rebuilt.transport().running);
+    assert_eq!(rebuilt.config().sample_rate, 44_100.0);
+    assert_eq!(original.graph().node(module).unwrap().params[2], 1.0);
+    let (new_mapping, _) = rebuilt
+        .map_midi(
+            MidiControl {
+                controller: 10,
+                ..control
+            },
+            module,
+            0,
+        )
+        .unwrap();
+    assert_ne!(new_mapping, mapping);
+}
+
+/// Rebuilding drains startup commands without growing the runtime queue
+/// or advancing the transport, even when only one command fits at a time.
+#[test]
+fn rebuild_batches_modules_and_transport_with_a_one_command_queue() {
+    let mut original = controller(16);
+    for _ in 0..4 {
+        original.add_module(GATE.id).unwrap();
+    }
+    original.set_tempo(99.0).unwrap();
+    original.set_time_signature(TimeSignature::new(7, 8)).unwrap();
+    original.set_running(false).unwrap();
+    original.commit().unwrap();
+
+    let config = EngineConfig {
+        command_capacity: 1,
+        ..EngineConfig::with_sample_rate(44_100.0)
+    };
+    let mut rebuilt = original.rebuild(config).unwrap().controller;
+    assert_eq!(rebuilt.graph().len(), 4);
+    assert_eq!(rebuilt.transport(), original.transport());
+    assert_eq!(rebuilt.config().command_capacity, 1);
+    rebuilt.set_running(true).unwrap();
+    assert!(matches!(rebuilt.set_running(false), Err(LoomError::QueueFull)));
 }
 
 #[test]

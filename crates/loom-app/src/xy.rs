@@ -41,18 +41,13 @@ impl XyTrace {
     }
 
     /// Adds a chunk. If chunks were lost in between, the old pairs are dropped:
-    /// a line across the gap would show a shape that is not in the signal. A
-    /// pair with a NaN has no place on either axis, so it is dropped too.
+    /// a line across the gap would show a shape that is not in the signal.
     pub fn push(&mut self, chunk: &PairChunk) {
         if self.next.is_some_and(|next| next != chunk.frame) {
             self.pairs.clear();
         }
         self.next = Some(chunk.frame + u64::from(chunk.len));
-        for (frame, pair) in (chunk.frame..).zip(chunk.pairs()) {
-            if !pair[0].is_nan() && !pair[1].is_nan() {
-                self.pairs.push_back((frame, pair));
-            }
-        }
+        self.pairs.extend((chunk.frame..).zip(chunk.pairs()));
         let excess = self.pairs.len().saturating_sub(self.capacity);
         self.pairs.drain(..excess);
     }
@@ -71,7 +66,26 @@ impl XyTrace {
         // wake the UI for a still signal.
         let newest = self.next.unwrap_or(0).saturating_sub(1) / every * every;
         let since = newest.saturating_sub((frames / every - 1) * every);
-        let recent = || self.pairs.iter().filter(|(frame, _)| *frame >= since);
+        let drawable = |pair: &[f32; 2]| !pair[0].is_nan() && !pair[1].is_nan();
+        let window_start = self.next.unwrap_or(0).saturating_sub(frames);
+        if !self.pairs.is_empty()
+            && self
+                .pairs
+                .iter()
+                .rev()
+                .take_while(|(frame, _)| *frame >= window_start)
+                .all(|(_, pair)| !drawable(pair))
+        {
+            return loom_canvas::Trace {
+                invalid: true,
+                ..Default::default()
+            };
+        }
+        let recent = || {
+            self.pairs
+                .iter()
+                .filter(|(frame, pair)| *frame >= since && drawable(pair))
+        };
         if recent().all(|(_, pair)| *pair == [0.0, 0.0]) {
             return loom_canvas::Trace::default();
         }

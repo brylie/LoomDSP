@@ -1149,35 +1149,47 @@ fn the_camera_survives_opening_the_browser() {
     assert_eq!(ui.canvas().camera, moved, "after the browser closed");
 }
 
-/// The example patches open at a zoom where port labels and captions
-/// are drawn, and F brings that zoom back after zooming out (#455).
-/// Labels draw from 7.5 / 9 of natural size (panels.md, Level of
-/// detail).
+/// Opening keeps port labels readable. F fits all tiles in the canvas
+/// beside the open inspector, including the rightmost output.
 #[test]
-fn examples_open_and_frame_with_labels_shown() {
-    let readable = 7.5 / 9.0 - 1e-4;
+fn examples_open_readably_and_frame_inside_the_canvas() {
     for patch in ["subtractive.ron", "modulation.ron"] {
         let mut ui = Ui::open(patch);
-        assert!(
-            ui.canvas().camera.zoom >= readable,
-            "{patch} opens at {}",
-            ui.canvas().camera.zoom
-        );
-
         let view = ui.canvas();
-        let centre = Point::new(view.bounds.center_x(), view.bounds.center_y());
-        ui.move_to(centre);
-        ui.step(&[Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -10.0 },
-        })]);
-        assert!(ui.canvas().camera.zoom < readable, "the wheel zooms out");
-
+        assert!(view.camera.zoom >= 7.5 / 9.0 - 1e-4);
+        assert!(view.bounds.width < WINDOW.width, "the inspector takes space");
+        ui.move_to(view.bounds.center());
         ui.tap(keyboard::Key::Character("f".into()), keyboard::Modifiers::default());
-        assert!(
-            ui.canvas().camera.zoom >= readable,
-            "{patch} frames at {}",
-            ui.canvas().camera.zoom
-        );
+        let framed = ui.canvas();
+        let visible = framed.camera.visible(framed.bounds.size());
+        for tile in ui.app().session.scene.modules() {
+            let rect = tile.bounds();
+            assert!(visible.x <= rect.x && visible.y <= rect.y);
+            assert!(rect.x + rect.width <= visible.x + visible.width, "{}", tile.title);
+            assert!(rect.y + rect.height <= visible.y + visible.height, "{}", tile.title);
+        }
+    }
+}
+
+/// On the automatically placed patch, Transport leads the second row even
+/// though its top is slightly lower. Walking back visits the same rows.
+#[test]
+fn tab_visits_subtractive_by_visual_row_in_both_directions() {
+    let mut ui = Ui::open("subtractive.ron");
+    let centre = ui.canvas().bounds.center();
+    ui.move_to(centre);
+    let key = keyboard::Key::Named(keyboard::key::Named::Tab);
+    let expected = [1, 3, 4, 11, 10, 5, 6, 8, 9, 7];
+    for &id in &expected {
+        ui.tap(key.clone(), keyboard::Modifiers::default());
+        assert_eq!(ui.app().session.selection.iter().copied().collect::<Vec<_>>(), [id]);
+        let tile = ui.app().session.scene.module(id).unwrap();
+        let has_control = tile.panel.widgets.iter().any(|w| w.is_control() && !w.hidden);
+        assert_eq!(ui.app().ui_snapshot().status == "Enter for its controls", has_control);
+    }
+    for id in expected.iter().rev().skip(1).chain(expected.last()) {
+        ui.tap(key.clone(), keyboard::Modifiers::SHIFT);
+        assert_eq!(ui.app().session.selection.iter().copied().collect::<Vec<_>>(), [*id]);
     }
 }
 

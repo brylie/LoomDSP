@@ -9,10 +9,6 @@ use loom_core::{ModuleId, RoleDescriptor};
 use loom_patch::{PartKey, Patch, hierarchy};
 use serde::Serialize;
 
-/// The status bar text when a selection with a slot tile is copied or cut
-/// (sub-patches.md, Slots). A follow-up carries the slot.
-pub const CANNOT_COPY_SLOT: &str = "Cannot copy a slot yet";
-
 /// The inspector's Part choice that empties the slot, and names an empty
 /// slot's part (sub-patches.md, Empty slots).
 pub const NO_PART_CHOICE: &str = "No part";
@@ -225,10 +221,9 @@ impl App {
         });
     }
 
-    /// Adds an empty slot for `role` from the module browser, with its
-    /// top-left corner at `world`, and selects it, as one undo step
+    /// Adds, places, and selects an empty slot for `role` in one undo step
     /// (sub-patches.md, Empty slots).
-    pub(crate) fn add_empty_slot(&mut self, role: &'static RoleDescriptor, world: loom_ui_core::Point) {
+    pub(crate) fn add_empty_slot(&mut self, role: &'static RoleDescriptor, placement: loom_canvas::BrowserPlacement) {
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
@@ -242,14 +237,12 @@ impl App {
                 Ok(())
             }) && let Some(slot) = added
             {
-                app.session.positions.insert(slot.0, (world.x, world.y));
-                app.session.selection = std::collections::BTreeSet::from([slot.0]);
                 let name = app
                     .session
                     .hierarchy
                     .tile_name(slot)
                     .unwrap_or_else(|| role.name.to_string());
-                if app.commit() {
+                if app.commit_added_tile(slot, placement) {
                     app.alerts.say(hierarchy::added_slot_text(&name));
                 }
             }
@@ -385,7 +378,7 @@ impl App {
             // implies, so a refusal for room takes the same way out.
             let no_room = match &synced {
                 Ok(_) => !app.fits(0),
-                Err(e) => is_room_error(&app.session.controller, &sync_why(e)),
+                Err(e) => is_room_error(e),
             };
             if no_room {
                 // The fades do not fit, so the part goes now and rule 9
@@ -412,7 +405,7 @@ impl App {
                 Err(e) => {
                     app.remove_added_since(&before);
                     app.restore_links(&links);
-                    let why = app.room_text_for(slot, sync_why(&e));
+                    let why = app.room_text_for(slot, &e);
                     app.alerts.warn(format!("Cannot remove the part from {name}: {why}"));
                 }
             }
@@ -458,7 +451,9 @@ impl App {
                 let _ = path;
                 candidate.swap_to_subpatch(&mut self.session.controller, &layout, ModuleId(slot), file, None)
             }
-            SwapTarget::Empty => Err("Remove part is not a swap to a part".to_string()),
+            SwapTarget::Empty => Err(loom_patch::PatchError::SlotEdit(
+                "Remove part is not a swap to a part".to_string(),
+            )),
         };
         let swapped = match swapped {
             Ok(swapped) => swapped,
@@ -468,7 +463,7 @@ impl App {
                 // it moved come back.
                 self.remove_added_since(&before);
                 self.restore_links(&links);
-                return Err(self.room_text_for(slot, why));
+                return Err(self.room_text_for(slot, &why));
             }
         };
         let why = match candidate.sync(&mut self.session.controller) {
@@ -481,7 +476,7 @@ impl App {
                 self.assignments_renumbered(&renamed);
                 self.no_room_text(slot)
             }
-            Err(e) => self.room_text_for(slot, sync_why(&e)),
+            Err(e) => self.room_text_for(slot, &e),
         };
         // Taken back as a failed sync is: the live hierarchy, which the
         // candidate never replaced, syncs again, so the graph's cables are
@@ -513,11 +508,11 @@ impl App {
 
     /// `why`, or the module limit's text when `why` is the engine's refusal
     /// for lack of room, which a part added on the way can meet.
-    pub(crate) fn room_text_for(&self, slot: u32, why: String) -> String {
-        if is_room_error(&self.session.controller, &why) {
+    pub(crate) fn room_text_for(&self, slot: u32, why: &loom_patch::PatchError) -> String {
+        if is_room_error(why) {
             self.no_room_text(slot)
         } else {
-            why
+            sync_why(why)
         }
     }
 
@@ -643,12 +638,14 @@ impl App {
 }
 
 /// True when `why` is the engine's refusal for lack of a module slot.
-pub(crate) fn is_room_error(controller: &loom_core::Controller, why: &str) -> bool {
-    why == loom_core::LoomError::TooManyModules(controller.config().max_modules).to_string()
+pub(crate) fn is_room_error(error: &loom_patch::PatchError) -> bool {
+    matches!(
+        error,
+        loom_patch::PatchError::Engine(loom_core::LoomError::TooManyModules(_))
+    )
 }
 
-/// The text of a refused sync, with the engine's own text for an engine
-/// error, so [`is_room_error`] can find a lack of room.
+/// The text of a refused sync, with the engine's own text for an engine error.
 pub(crate) fn sync_why(error: &loom_patch::PatchError) -> String {
     match error {
         loom_patch::PatchError::Engine(e) => e.to_string(),

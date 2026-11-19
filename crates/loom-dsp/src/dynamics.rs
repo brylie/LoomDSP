@@ -262,7 +262,7 @@ impl Dynamics {
             self.power = 0.0;
         }
         let level_db = match detection {
-            Detection::Peak if peak > 0.0 => 20.0 * peak.log10(),
+            Detection::Peak if peak > 0.0 => crate::decibels::gain_to_db(peak),
             Detection::Rms if self.power > 0.0 => 10.0 * self.power.log10(),
             _ => FLOOR_DB,
         };
@@ -325,7 +325,7 @@ impl Dynamics {
         if (self.gain_db - target).abs() < SETTLED_DB {
             self.gain_db = target;
         }
-        (self.gain_db() * std::f32::consts::LN_10 / 20.0).exp()
+        crate::decibels::db_to_gain(self.gain_db())
     }
 }
 

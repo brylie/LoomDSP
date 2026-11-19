@@ -38,6 +38,7 @@ test-ui = ["loom-ui/test-driver"]
 
 [dependencies]
 loom-core.workspace = true
+loom-dsp.workspace = true
 # `test-modules`: the `test.` modules, for --test-modules and the app's tests.
 loom-modules = { workspace = true, features = ["test-modules"] }
 loom-patch.workspace = true

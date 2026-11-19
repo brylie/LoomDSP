@@ -255,12 +255,6 @@ fn curve_preview(params: &[f32], x: f32) -> f32 {
     ((level_db + curve.gain_db(level_db) + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
-/// A decibel value as a factor.
-#[inline]
-fn factor(db: f32) -> f32 {
-    (db * std::f32::consts::LN_10 / 20.0).exp()
-}
-
 /// State for `loom.dyn.dynamics`.
 #[derive(Clone)]
 struct Dynamics {
@@ -423,7 +417,7 @@ impl Module for Dynamics {
             };
 
             let blend = mix.at_or(i, self.mix.tick());
-            let out_gain = factor(output.at_or(i, self.output.tick()));
+            let out_gain = loom_dsp::decibels::db_to_gain(output.at_or(i, self.output.tick()));
             let blended = |dry: f32, wet: f32| (dry + blend * (wet * matched - dry)) * out_gain;
             gain_out[i] = gain;
             left_out[i] = blended(left, wet_left);

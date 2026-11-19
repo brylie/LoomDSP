@@ -186,6 +186,11 @@ impl<'a> A11yNode<'a> {
         self.raw().numeric_value()
     }
 
+    /// Its declared numeric step, when every step covers the same distance.
+    pub fn numeric_step(&self) -> Option<f64> {
+        self.raw().numeric_value_step()
+    }
+
     /// Its lowest and highest number, for a slider or a knob.
     pub fn range(&self) -> Option<(f64, f64)> {
         Some((self.raw().min_numeric_value()?, self.raw().max_numeric_value()?))

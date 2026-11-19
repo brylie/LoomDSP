@@ -108,15 +108,15 @@ impl App {
             for (at, item) in model.iter().flat_map(|menu| menu.items.iter()).enumerate() {
                 items = items.push(crate::inspector::ids::named(
                     &item.id,
-                    button(iced::widget::text(item.label.clone()))
+                    button(iced::widget::text(item.label.clone()).size(style::CONTROL))
                         .on_press(item.message.clone())
                         .width(200)
-                        .style(style::outlined(style::secondary, highlight == Some(at))),
+                        .style(style::menu_item(highlight == Some(at))),
                 ));
             }
             let menu = crate::inspector::ids::named(
                 &crate::menus::tile_id(module),
-                container(items).padding(4).style(container::rounded_box),
+                container(items).padding(4).style(style::canvas_menu),
             );
             layers = layers
                 .push(outside)
@@ -209,7 +209,7 @@ impl App {
         let model = self.toolbar_model();
         let group = |which: Group| {
             let items = model.buttons.iter().filter(|b| b.group == which).map(|b| {
-                let press = b.enabled.then(|| crate::toolbar::message(b.name)).flatten();
+                let press = b.press();
                 let face = button(text(b.label).size(style::CONTROL)).on_press_maybe(press);
                 let face = match (b.name, b.on) {
                     ("panic", _) => face.style(style::danger),
@@ -268,7 +268,7 @@ impl App {
     pub(crate) fn inspector(&self) -> Element<'_, Message> {
         inspector::view(
             self.inspector_model(),
-            &self.session.patch_info.authors,
+            &self.session.patch_info,
             self.session.gestures.drop_row(),
             self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on(),
             self.a11y.is_active(),
@@ -301,8 +301,6 @@ impl App {
                 self.session
                     .matrix
                     .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
-                &self.session.matrix,
-                self.session.controller.graph(),
                 self.a11y.is_active(),
             ),
         };

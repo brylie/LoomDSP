@@ -10,6 +10,7 @@ A sine wave at the pitch, or shaped from a phase cable.
 | Version | 1 |
 | Family | Sources |
 | Category | Oscillator |
+| Fills roles | [Sound source](loom.role.source.md) |
 
 ## Inputs
 

@@ -10,6 +10,7 @@ Shapes the balance of frequencies with two cuts, two shelves, and a mid band.
 | Version | 1 |
 | Family | Filters and effects |
 | Category | EQ |
+| Fills roles | [Effect](loom.role.effect.md) |
 
 ## Inputs
 

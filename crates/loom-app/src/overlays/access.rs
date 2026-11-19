@@ -140,10 +140,7 @@ fn help_item(model: &help::Model) -> Item {
         Some(Message::CloseHelp),
     )];
     if !model.id.is_empty() {
-        parts.push(Item::text(
-            id.clone().with("summary"),
-            format!("{} · {} · {}", model.family, model.category, model.id),
-        ));
+        parts.push(Item::text(id.clone().with("summary"), model.summary()));
         parts.push(Item::text(id.clone().with("description"), model.description));
     }
     // The page does not change while it is open, so its blocks are keyed

@@ -1,0 +1,170 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<div id="envelope-in-play">
+  <h2>Envelope in play</h2>
+  <svg role="img" aria-labelledby="envelope-title envelope-description">
+    <title id="envelope-title">Three voices on one ADSR envelope</title>
+    <desc id="envelope-description"></desc>
+    <g class="grid"></g>
+    <path class="shape" fill="none"></path>
+    <g class="markers"></g>
+  </svg>
+  <p class="voice-list tabular-nums"></p>
+  <div class="viz-controls">
+    <button class="btn btn-primary" type="button">Play</button>
+    <label class="form-label">Phrase position <span class="time tabular-nums"></span>
+      <input class="form-range" type="range" min="0" max="4.5" step="0.01" value="1.60">
+    </label>
+  </div>
+  <span class="notice" aria-live="polite"></span>
+</div>
+<style>
+#envelope-in-play { display: grid; gap: .75rem; font-family: Inter, system-ui, sans-serif; color: var(--foreground, CanvasText); }
+#envelope-in-play :is(h2,p) { margin: 0; }
+#envelope-in-play svg { display: block; width: 100%; height: 170px; }
+#envelope-in-play .grid line { stroke: var(--border, GrayText); }
+#envelope-in-play .grid text { fill: currentColor; }
+#envelope-in-play .shape { stroke: var(--muted-foreground, GrayText); stroke-width: 2; }
+#envelope-in-play .markers rect { fill: var(--foreground, CanvasText); }
+#envelope-in-play .markers text { fill: var(--background, Canvas); font-weight: 500; }
+#envelope-in-play .viz-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
+#envelope-in-play label { flex: 1; min-width: 10rem; }
+#envelope-in-play input { display: block; width: 100%; margin-inline: 0; }
+#envelope-in-play .notice { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('envelope-in-play');
+  const svg = root.querySelector('svg');
+  const range = root.querySelector('input');
+  const button = root.querySelector('button');
+  const notice = root.querySelector('.notice');
+  const end = Number(range.max);
+  const attack = 0.60, decay = 0.45, sustain = 0.56, release = 1.20;
+  // Each pair opens and closes one voice's gate, in seconds.
+  const gates = [[[0.08, 2.68]], [[0.9, 1.2], [1.95, 2.75]], [[1.35, 3.15]]];
+  let position = Number(range.value);
+  let playing = false, frame = 0, origin = 0;
+  let bounds = [];
+
+  function held(elapsed, startLevel) {
+    if (elapsed < attack) {
+      const part = elapsed / attack;
+      return { stage: 0, part, level: startLevel + part * (1 - startLevel) };
+    }
+    if (elapsed < attack + decay) {
+      const part = (elapsed - attack) / decay;
+      return { stage: 1, part, level: 1 - part * (1 - sustain) };
+    }
+    return { stage: 2, part: 0.5, level: sustain };
+  }
+
+  function released(elapsed, startLevel) {
+    const part = elapsed / release;
+    return part < 1 ? { stage: 3, part, level: startLevel * (1 - part) } : null;
+  }
+
+  function voiceAt(events, time) {
+    let previousOff = -Infinity, previousLevel = 0;
+    for (const [on, off] of events) {
+      if (time < on) break;
+      const startLevel = released(on - previousOff, previousLevel)?.level ?? 0;
+      if (time < off) return held(time - on, startLevel);
+      previousOff = off;
+      previousLevel = held(off - on, startLevel).level;
+    }
+    return released(time - previousOff, previousLevel);
+  }
+
+  function mark(tag, attrs, parent, label) {
+    const item = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, val] of Object.entries(attrs)) item.setAttribute(name, val);
+    if (label !== undefined) item.textContent = label;
+    parent.append(item);
+  }
+
+  const names = ['Attack', 'Decay', 'Sustain', 'Release'];
+  const y = level => 134 - 104 * level;
+  function layout() {
+    const width = svg.clientWidth;
+    const inset = 24;
+    bounds = [0, 0.25, 0.44, 0.72, 1].map(f => inset + f * (width - 2 * inset));
+    const grid = root.querySelector('.grid');
+    grid.replaceChildren();
+    for (let i = 0; i < 4; i++) {
+      const centre = (bounds[i] + bounds[i + 1]) / 2;
+      mark('text', { x: centre, y: 161, 'text-anchor': 'middle' }, grid, names[i]);
+      if (i > 0) mark('line', { x1: bounds[i], x2: bounds[i], y1: 16, y2: 139 }, grid);
+    }
+    const levels = [0, 1, sustain, sustain, 0];
+    root.querySelector('.shape').setAttribute('d', bounds.map((x, i) => (i ? 'L' : 'M') + x + ' ' + y(levels[i])).join(' '));
+    draw();
+  }
+
+  function draw() {
+    const markers = root.querySelector('.markers');
+    markers.replaceChildren();
+    const groups = [];
+    const readings = gates.map((events, index) => {
+      const voice = voiceAt(events, position);
+      if (!voice) return 'V' + (index + 1) + ' idle';
+      const { stage, part, level } = voice;
+      const x = bounds[stage] + part * (bounds[stage + 1] - bounds[stage]);
+      let group = groups.find(g => g.stage === stage && Math.hypot(g.x - x, g.y - y(level)) < 14);
+      if (!group) {
+        group = { x, y: y(level), stage, ids: [] };
+        groups.push(group);
+      }
+      group.ids.push(index + 1);
+      return 'V' + (index + 1) + ' ' + names[stage].toLowerCase() + ' ' + Math.round(level * 100) + '%';
+    });
+    for (const g of groups) {
+      const label = g.ids.join('·');
+      const width = 22 + 14 * (g.ids.length - 1);
+      mark('rect', { x: g.x - width / 2, y: g.y - 11, width, height: 22, rx: 11 }, markers);
+      mark('text', { x: g.x, y: g.y, 'text-anchor': 'middle', dy: '.35em' }, markers, label);
+    }
+    root.querySelector('.voice-list').textContent = readings.join('   ·   ');
+    root.querySelector('desc').textContent = readings.join('. ');
+    range.value = position.toFixed(2);
+    root.querySelector('.time').textContent = range.value + ' s';
+    range.setAttribute('aria-valuetext', range.value + ' seconds');
+  }
+
+  function save() {
+    window.openai?.setWidgetState?.({ privateContent: { position } })?.catch(() => {});
+  }
+  function pause() {
+    playing = false;
+    cancelAnimationFrame(frame);
+    button.textContent = position >= end ? 'Replay' : 'Play';
+  }
+  function describe() {
+    notice.textContent = 'At ' + position.toFixed(2) + ' seconds. ' + root.querySelector('desc').textContent;
+  }
+  function tick(now) {
+    position = Math.min(end, (now - origin) / 1000);
+    draw();
+    if (position < end) frame = requestAnimationFrame(tick);
+    else { pause(); describe(); save(); }
+  }
+  button.addEventListener('click', () => {
+    if (playing) { pause(); describe(); save(); return; }
+    if (position >= end) position = 0;
+    playing = true;
+    button.textContent = 'Pause';
+    origin = performance.now() - position * 1000;
+    frame = requestAnimationFrame(tick);
+  });
+  range.addEventListener('input', () => { position = Number(range.value); pause(); draw(); });
+  range.addEventListener('change', () => { describe(); save(); });
+  function restore(state) {
+    const time = state?.privateContent?.position;
+    if (Number.isFinite(time)) { position = Math.min(end, Math.max(0, time)); pause(); draw(); }
+  }
+  layout();
+  restore(window.openai?.widgetState);
+  window.addEventListener('openai:set_globals', e => restore(e.detail?.globals?.widgetState));
+  new ResizeObserver(layout).observe(svg);
+})();
+</script>

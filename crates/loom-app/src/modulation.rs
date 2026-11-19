@@ -45,9 +45,7 @@ impl App {
             Message::Depth { id, depth } => {
                 // Like a parameter slider: the first change opens the
                 // gesture, and letting go closes it, so one drag is one step.
-                self.close_pending_arrow_group();
-                self.session.edits.start_slider_gesture();
-                self.begin_edit();
+                self.start_slider_edit();
                 if let Err(e) = self.session.controller.set_assignment_depth(id, depth) {
                     self.alerts.warn(e.to_string());
                 }

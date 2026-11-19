@@ -10,6 +10,7 @@ A delay-based filter that passes every frequency at the same level but smears th
 | Version | 1 |
 | Family | Filters and effects |
 | Category | Time |
+| Fills roles | [Effect](loom.role.effect.md) |
 
 ## Inputs
 

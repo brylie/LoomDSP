@@ -239,6 +239,7 @@ fn full(points: Vec<[f32; 2]>) -> loom_canvas::Trace {
         points,
         second: Vec::new(),
         level: 1.0,
+        ..Default::default()
     }
 }
 

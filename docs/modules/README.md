@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-One page for each built-in module, made from its descriptor. After you change a descriptor, run `mise run help-pages` and commit the pages. Longer notes and example patches go below the marker line at the end of a page. See the [help pages specification](../design/help-pages.md).
+One page for each built-in module and slot role, made from its descriptor. After you change a descriptor, run `mise run help-pages` and commit the pages. Longer notes and example patches go below the marker line at the end of a page. See the [help pages specification](../design/help-pages.md).
 
 ## Sources
 
@@ -109,3 +109,15 @@ One page for each built-in module, made from its descriptor. After you change a 
 | [Scope](loom.display.scope.md) | `loom.display.scope` | Shows its input over time. Passes the input through unchanged. |
 | [Spectrum](loom.display.spectrum.md) | `loom.display.spectrum` | Shows the frequency content of its input. Passes the input through unchanged. |
 | [XY Scope](loom.display.xy.md) | `loom.display.xy` | Shows one signal against another. Passes both inputs through unchanged. |
+
+## Slot roles
+
+| Role | ID | Description |
+|---|---|---|
+| [Effect](loom.role.effect.md) | `loom.role.effect` | Processes audio. |
+| [Envelope](loom.role.envelope.md) | `loom.role.envelope` | Makes a level that rises when a gate goes high and falls when it goes low. |
+| [Filter](loom.role.filter.md) | `loom.role.filter` | Shapes the spectrum of a signal around a cutoff frequency. |
+| [Modulator](loom.role.modulator.md) | `loom.role.modulator` | Makes a moving level to modulate parameters with. |
+| [Shaper](loom.role.shaper.md) | `loom.role.shaper` | Distorts a signal. |
+| [Sound source](loom.role.source.md) | `loom.role.source` | Makes a sound. An oscillator plays at its pitch, or follows a phase cable. |
+| [Voice](loom.role.voice.md) | `loom.role.voice` | Plays one note from a pitch, a gate, and a velocity. |

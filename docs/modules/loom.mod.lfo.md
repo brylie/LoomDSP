@@ -10,6 +10,7 @@ A slow wave. Free mode runs at a rate in Hz; synced mode follows a phase, by def
 | Version | 1 |
 | Family | Modulation |
 | Category | Modulation |
+| Fills roles | [Modulator](loom.role.modulator.md) |
 
 ## Inputs
 

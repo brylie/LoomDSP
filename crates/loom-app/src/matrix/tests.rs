@@ -3,6 +3,23 @@ use crate::ui_test::Ui;
 use iced::keyboard::key::Named;
 use loom_ui_core::Point;
 
+/// The matrix snapshot carries the picks and the cell editor used by the view.
+#[test]
+fn the_snapshot_describes_open_matrix_editors() {
+    let mut ui = matrix_with_a_row();
+    ui.send(Message::Matrix(Event::Edit(AssignmentId(1), Column::Source)));
+    let model = ui.app().ui_snapshot().matrix;
+    let edit = model.edit.unwrap();
+    assert_eq!(edit.column, Column::Source);
+    assert_eq!(model.sources[edit.choice].label, model.rows[0].source);
+
+    ui.send(Message::Matrix(Event::AddOpen));
+    let model = ui.app().ui_snapshot().matrix;
+    assert!(model.add.is_some());
+    assert!(!model.sources.is_empty());
+    assert!(!model.targets.is_empty());
+}
+
 /// Keyboard navigation keeps every row within the actual table viewport:
 /// the matrix asks to show the selected card and cell by their UI IDs, and
 /// the window scrolls just enough.

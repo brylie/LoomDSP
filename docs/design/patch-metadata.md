@@ -3,7 +3,7 @@
 Authors, tags, and a licence stored in every patch, so people who share patches get credit, find patches again, and know what others may do with them.
 
 - **Kind:** living specification.
-- **Status:** Agreed (2026-11-01, [#243](https://github.com/brylie/LoomDSP/issues/243)). M2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). M4: the same filters in the library browser (FR-SHARE-04). Built in M2: everything except [credit for parts](#credit-for-parts), which waits for sub-patches ([#51](https://github.com/brylie/LoomDSP/issues/51)). See [Notes from building](#notes-from-building).
+- **Status:** Agreed (2026-11-01, [#243](https://github.com/brylie/LoomDSP/issues/243)). M2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). M4: the same filters in the library browser (FR-SHARE-04). Implemented in M2, including [credit for parts](#credit-for-parts). See [Notes from building](#notes-from-building).
 - **Decision behind it:** [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) (licences); the patch format is [ADR-0008](../adr/0008-patch-format-ron.md).
 - **Use case and requirements:** UC7, UC9, FR-FILE-08, FR-FILE-09, FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09.
 - **Prior art:** package manifests list several authors, one per entry (as `Cargo.toml` does). Topic tags on code hosting sites are lowercase words joined by hyphens. Creative Commons offers a licence chooser that asks two questions. We use those conventions, in our own words and UI.
@@ -85,7 +85,7 @@ With a screen reader, the chooser is a dialog named by its title. Each question 
 A sub-patch keeps the authors of the patch it came from ([sub-patches](sub-patches.md#library)). Inserting a library item copies its authors into the sub-patch's definition, and a copy of the tile keeps them.
 
 - Patch info shows an **Includes parts by** line: every author of every sub-patch in the patch, at any depth, who is not already in the patch's own authors, in the order first found. It is computed, not stored. *Why:* the patch's author list stays the player's own choice, and part credit appears and disappears with the parts.
-- Editing inside a sub-patch does not change its authors. Its own patch info (inspector, with the sub-patch's tile selected and nothing inside selected) edits them.
+- Editing inside a sub-patch does not change its authors. Select a sub-patch tile and edit the Authors box in its inspector to change its credit. The edit marks the patch unsaved. Typing makes one [undo step](undo.md#what-is-undoable) when the box loses focus, the selection changes, or Undo or Save is requested. Changing the stored authors of a linked sub-patch unlinks it so a library update cannot overwrite the edit. The status bar says the sub-patch is now a copy, and undo restores the link with the previous authors.
 - Clipboard copies of plain modules still carry no authors.
 
 ### Defaults (preferences)
@@ -176,7 +176,7 @@ Settled on 2026-11-01 from the written leanings: the phase split above; patch in
 
 Points the spec left open, settled while building (M2). Each is small; say so in review if one should change.
 
-- **Patch info edits are not undo steps.** Authors, tags, and the licence change at once and mark the patch unsaved, but undo and redo do not cover them. The text fields have no undo of their own, so while one has focus the undo shortcuts do nothing, rather than undo a canvas edit behind it. Added to [undo: what is not undoable](undo.md#what-is-not-undoable).
+- **Root Patch info edits are not undo steps.** Authors, tags, and the licence change at once and mark the patch unsaved, but undo and redo do not cover them. The text fields have no undo of their own, so while one has focus the undo shortcuts do nothing, rather than undo a canvas edit behind it. Added to [undo: what is not undoable](undo.md#what-is-not-undoable).
 - **Author filter.** "Matches" means the author contains the typed text, ignoring case, so `ada` finds `Ada Lovelace`.
 - **Search** matches when every word typed is in the name, description, or tags, as the module browser does.
 - **Tags longer than 32 characters** are cut to 32 by tidying, not refused.
@@ -191,7 +191,6 @@ Points the spec left open, settled while building (M2). Each is small; say so in
 - **Browser rows** show tags as text joined by dots, not as chips, to keep rows one line high. The browser opens from a **Browse** toolbar button (the app has no menu bar) and Ctrl+Shift+O.
 - **Tab to the filters** reaches the Author field only. Iced's check boxes cannot take focus, so the licence filters need a pointer until the app has its own way to reach them (NFR-UX-01).
 - **The description** is kept on save but not shown or edited in patch info yet (#512).
-- **Credit for parts** shows nothing until sub-patches exist (#51). The inspector already has the **Includes parts by** line, empty.
 
 ## Open points
 

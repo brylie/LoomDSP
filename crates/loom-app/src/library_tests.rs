@@ -265,8 +265,8 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
         "after the built-ins, the modules, and the slot rows, by path"
     );
     // A search finds a sub-patch by its path, and the mark names what it
-    // is. (`voice` alone would find the built-in Synth voice first.)
-    ui.send(Message::Browser(browser::Message::Query("voices".into())));
+    // is. The folder separator distinguishes a path from module descriptions.
+    ui.send(Message::Browser(browser::Message::Query("voices/".into())));
     ui.redraw();
     let browser = ui.app().overlays.browser().unwrap();
     assert_eq!(browser.library_rows().len(), 1);
@@ -354,10 +354,7 @@ fn inserting_a_file_with_patch_wide_modules_leaves_them_out_with_a_note() {
     );
     let graph = app.session.controller.graph();
     assert_eq!(
-        graph
-            .nodes()
-            .filter(|(_, n)| n.descriptor.id == loom_core::TRANSPORT_MODULE)
-            .count(),
+        graph.nodes().filter(|(_, n)| n.descriptor.role.is_transport()).count(),
         1
     );
     assert!(
@@ -844,7 +841,7 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
             .controller
             .graph()
             .nodes()
-            .filter(|(_, n)| n.descriptor.id == loom_core::TRANSPORT_MODULE)
+            .filter(|(_, n)| n.descriptor.role.is_transport())
             .count(),
         1
     );
@@ -1062,7 +1059,7 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
     assert!(!app.midi_may_edit_a_linked_tile(), "an exposed value is the instance's");
     app.session.controller.map_midi(cc(7), generator, 0).unwrap();
     app.commit();
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 8, 100])

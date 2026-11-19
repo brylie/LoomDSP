@@ -204,9 +204,10 @@ impl App {
         // MIDI inputs plugged in and out are found by polling four times a
         // second: the systems offer no portable callback (device-changes.md).
         // A real host's list is read by a watcher thread (`watching.rs`).
-        let midi_poll = self.rig.following_clock.is_some()
+        let midi_poll = self.rig.midi.tracking_pending()
+            || self.rig.midi.following_clock.is_some()
             || !self.rig.store.saved().midi.send_clock.is_empty()
-            || (self.rig.midi_in.is_some() && !self.rig.flags.no_midi && self.rig.host.midi_lister().is_none());
+            || (self.rig.midi.input.is_some() && !self.rig.flags.no_midi && self.rig.host.midi_lister().is_none());
         let wanted = [
             // Redraw every frame, so the counter measures real render cost.
             (Timer::Frame, self.measuring),
@@ -223,7 +224,8 @@ impl App {
             (
                 Timer::Tick,
                 !self.measuring
-                    && (self.rig.recorder.is_some() || (stream.is_playing() && self.session.hierarchy.is_fading())),
+                    && (self.rig.output.recorder.is_some()
+                        || (stream.is_playing() && self.session.hierarchy.is_fading())),
             ),
             // Only while a copy may be due: once it matches the patch, an
             // idle app ticks no more (#90).

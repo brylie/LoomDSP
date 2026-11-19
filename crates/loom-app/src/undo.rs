@@ -14,7 +14,7 @@
 use loom_canvas::CanvasEvent;
 use loom_core::{
     Assignment, AssignmentId, ButtonMode, Controller, InputRef, LoomError, MidiControl, MidiMappingOptions,
-    ModuleDescriptor, ModuleId, ModuleRole, OutputRef, ParamRange,
+    ModuleDescriptor, ModuleId, OutputRef, ParamRange,
 };
 use loom_patch::{Hierarchy, ModulePath};
 use std::collections::{BTreeMap, BTreeSet};
@@ -85,11 +85,13 @@ pub struct Snapshot {
 impl Snapshot {
     /// Reads a flat patch with no saved sizes: for tests and for replaying
     /// a graph into a new engine.
+    #[cfg(test)]
     pub fn take(controller: &Controller, positions: &BTreeMap<u32, (f32, f32)>) -> Self {
         Self::take_with_sizes(controller, positions, &BTreeMap::new())
     }
 
     /// Reads a flat patch and its saved tile dimensions.
+    #[cfg(test)]
     pub fn take_with_sizes(
         controller: &Controller,
         positions: &BTreeMap<u32, (f32, f32)>,
@@ -582,7 +584,7 @@ pub fn check(step: &Step, forward: bool, controller: &Controller, hierarchy: &Hi
             if state.unknown.is_none() && controller.registry().resolve(&state.descriptor.kind()).is_err() {
                 return Err(format!("{} is no longer available", state.descriptor.name));
             }
-            if matches!(state.descriptor.role, ModuleRole::Dsp(_)) && !swapped.contains(id) {
+            if state.descriptor.role.factory().is_some() && !swapped.contains(id) {
                 needed = needed.saturating_add(state.slots.max(1));
             }
         }
@@ -606,6 +608,7 @@ pub(crate) fn no_room_text(step: &Step, forward: bool, controller: &Controller, 
 /// Applies one side of a step to a flat patch: the new values going
 /// forward (redo), the old ones going back (undo). The caller commits
 /// afterwards.
+#[cfg(test)]
 pub fn apply(
     step: &Step,
     forward: bool,
@@ -633,6 +636,7 @@ pub fn apply(
 /// `layout` gives tile layouts for a sub-patch part that is stored. The
 /// caller syncs the hierarchy and commits afterwards. `App::step` drives
 /// the same parts with a measure between them.
+#[cfg(test)]
 pub fn apply_full(
     step: &Step,
     forward: bool,
@@ -642,7 +646,7 @@ pub fn apply_full(
     sizes: &mut BTreeMap<u32, (u8, u8)>,
     layout: &dyn Fn(u32) -> loom_patch::Layout,
 ) -> Result<(), String> {
-    apply_fills(step, forward, controller, hierarchy, layout)?;
+    apply_fills(step, forward, controller, hierarchy, layout).map_err(|error| error.to_string())?;
     let removals = apply_removals(step, forward, controller, hierarchy, layout)?;
     for id in removals.gone {
         let _ = controller.remove_module(id);
@@ -671,7 +675,7 @@ pub(crate) fn apply_fills(
     controller: &mut Controller,
     hierarchy: &mut Hierarchy,
     layout: &dyn Fn(u32) -> loom_patch::Layout,
-) -> Result<(), String> {
+) -> Result<(), loom_patch::PatchError> {
     let Some((before, after)) = &step.hierarchy else {
         return Ok(());
     };
@@ -693,11 +697,11 @@ pub(crate) fn apply_fills(
                 controller.set_label(id, state.label.clone());
                 for (index, range) in state.ranges.iter().enumerate() {
                     if let Some(range) = *range {
-                        controller.set_range(id, index, range).map_err(|e| e.to_string())?;
+                        controller.set_range(id, index, range)?;
                     }
                 }
                 let changes: Vec<(usize, f32)> = state.params.iter().copied().enumerate().collect();
-                controller.set_params(id, &changes).map_err(|e| e.to_string())?;
+                controller.set_params(id, &changes)?;
             }
             None => {
                 // A sub-patch part: held whole in the live hierarchy, put
@@ -705,7 +709,11 @@ pub(crate) fn apply_fills(
                 // their old flat ids.
                 let key = to
                     .key_at(&level.child(lid))
-                    .ok_or_else(|| "the step's part is neither a module nor a sub-patch".to_string())?
+                    .ok_or_else(|| {
+                        loom_patch::PatchError::SlotEdit(
+                            "the step's part is neither a module nor a sub-patch".to_string(),
+                        )
+                    })?
                     .to_string();
                 hierarchy.swap_to_held_subpatch_at(controller, layout, slot, &key, Some(lid))?;
             }

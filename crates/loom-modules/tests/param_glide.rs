@@ -8,7 +8,7 @@ mod common;
 
 use common::{SAMPLE_RATE, changed};
 use loom_core::testing::run;
-use loom_core::{Module, ModuleConfig, ModuleDescriptor, ModuleRole, ParamMapping, ParamSpec};
+use loom_core::{Module, ModuleConfig, ModuleDescriptor, ParamMapping, ParamSpec};
 use loom_modules::{ALL, test_modules};
 use loom_rt::Smoothed;
 
@@ -25,13 +25,13 @@ fn modules() -> impl Iterator<Item = &'static ModuleDescriptor> {
     ALL.iter()
         .chain(test_modules::ALL)
         .copied()
-        .filter(|descriptor| matches!(descriptor.role, ModuleRole::Dsp(_)))
+        .filter(|descriptor| descriptor.role.factory().is_some())
 }
 
 /// A new instance of `descriptor`, started as the `Controller` starts one:
 /// every parameter at its default, then `reset()` once.
 fn start(descriptor: &ModuleDescriptor) -> Box<dyn Module> {
-    let ModuleRole::Dsp(create) = descriptor.role else {
+    let Some(create) = descriptor.role.factory() else {
         panic!("{} is not a DSP module", descriptor.id);
     };
     let mut module = create(&ModuleConfig {

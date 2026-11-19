@@ -415,6 +415,21 @@ impl CanvasModel<'_> {
         if !hover.description.is_empty() {
             lines.push(line(&hover.description, HOVER_TEXT_PX, self.palette.text_dim, regular));
         }
+        if let HoverTarget::Control(module, index) = target
+            && self.learn.is_none()
+            && self
+                .scene
+                .module(module)
+                .and_then(|m| m.panel.widgets.get(index))
+                .is_some_and(|w| w.accepts_typed_value())
+        {
+            lines.push(line(
+                "Enter to type a value",
+                HOVER_TEXT_PX,
+                self.palette.text_dim,
+                regular,
+            ));
+        }
         // What a control stands for across a sub-patch boundary
         // (sub-patches.md, Exposing).
         if let Some(note) = &hover.note {

@@ -1243,7 +1243,7 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     );
     assert_eq!(view.armed, Some((2, 0)), "the surface control shows as armed");
 
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, 64])
@@ -1283,6 +1283,24 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     assert_eq!(saved.subpatches["filter"].midi[0].target, (3, "cutoff".to_string()));
 }
 
+/// The two surfaces of a same-named nested tile differ on screen and in speech.
+#[test]
+fn same_named_exposure_buttons_name_their_level() {
+    let patch = include_str!("../../../../examples/patches/nested-subtractive.ron")
+        .replace("Metadata(name: \"Filter\")", "Metadata(name: \"Voice\")");
+    let mut app = crate::tests::app_with_text(&patch);
+    let outer = ModulePath::top(2);
+    let tile = app.session.hierarchy.id_at(&outer, 5).unwrap();
+    app.show_level(&outer);
+    let mut ui = Ui::with_app(app);
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![tile.0])));
+    for surface in ["Voice (this tile)", "Voice (outer)"] {
+        let label = format!("Unexpose on {surface}");
+        assert!(ui.text(&label).is_some(), "{label}");
+        assert!(ui.a11y_tree().names().contains(&format!("{label}, exposed as cutoff")));
+    }
+}
+
 /// The nested example's flat filter and its cutoff index.
 fn svf_cutoff(app: &App) -> (ModuleId, usize) {
     use loom_core::ModuleNames;
@@ -1314,7 +1332,7 @@ fn waiting_pickup_at(app: &mut App, value: u8) {
         .map_midi_with(control, svf, cutoff, options)
         .unwrap();
     app.commit();
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 74, value])

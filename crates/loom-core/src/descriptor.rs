@@ -25,11 +25,21 @@ pub struct ModuleConfig {
     pub max_block: usize,
 }
 
+/// Builds a fresh DSP module for an engine configuration.
+pub type ModuleFactory = fn(&ModuleConfig) -> Box<dyn Module>;
+
 /// How the engine runs a module.
 #[derive(Clone, Copy)]
 pub enum ModuleRole {
     /// A normal module created by this factory.
-    Dsp(fn(&ModuleConfig) -> Box<dyn Module>),
+    Dsp(ModuleFactory),
+    /// The patch's clock controls and signals, backed by a DSP module.
+    Transport {
+        /// Creates the Transport module.
+        create: ModuleFactory,
+        /// The gate input that can override the Run parameter.
+        run_input: usize,
+    },
     /// A one-sample delay, handled by the engine itself. It can break
     /// feedback loops without adding extra delay (ADR-0002).
     /// Must have exactly one input and one output, and no parameters or
@@ -41,10 +51,34 @@ pub enum ModuleRole {
     AudioOutput,
 }
 
+impl ModuleRole {
+    /// The factory for a role implemented by a module instance.
+    pub const fn factory(self) -> Option<ModuleFactory> {
+        match self {
+            Self::Dsp(create) | Self::Transport { create, .. } => Some(create),
+            Self::UnitDelay | Self::AudioOutput => None,
+        }
+    }
+
+    /// The Transport's Run input, when this is a Transport role.
+    pub const fn transport_run_input(self) -> Option<usize> {
+        match self {
+            Self::Transport { run_input, .. } => Some(run_input),
+            _ => None,
+        }
+    }
+
+    /// Whether this role drives the patch's shared transport.
+    pub const fn is_transport(self) -> bool {
+        matches!(self, Self::Transport { .. })
+    }
+}
+
 impl std::fmt::Debug for ModuleRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ModuleRole::Dsp(_) => f.write_str("Dsp"),
+            ModuleRole::Transport { .. } => f.write_str("Transport"),
             ModuleRole::UnitDelay => f.write_str("UnitDelay"),
             ModuleRole::AudioOutput => f.write_str("AudioOutput"),
         }

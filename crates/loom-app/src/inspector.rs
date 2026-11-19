@@ -105,6 +105,8 @@ pub struct SubPatchRows {
     pub id: u32,
     /// The definition's name, or the name being typed for it.
     pub name: String,
+    /// The authors credited on this definition, in order.
+    pub authors: Vec<String>,
     /// The input ports, in order.
     pub inputs: Vec<String>,
     /// The output ports, in order.
@@ -204,6 +206,14 @@ pub struct ExposureRow {
     pub name: Option<String>,
     /// The name of the sub-patch whose surface the button acts on.
     pub surface: String,
+}
+
+impl ExposureRow {
+    /// The action label shared by the inspector and its accessibility tree.
+    fn button_label(&self) -> String {
+        let verb = if self.name.is_some() { "Unexpose" } else { "Expose" };
+        format!("{verb} on {}", self.surface)
+    }
 }
 
 /// The inspector's view of a port tile.
@@ -597,7 +607,7 @@ impl App {
         };
         let spec = &filtered;
         let stored = *node.params.get(index)?;
-        let clock = d.id == loom_core::TRANSPORT_MODULE
+        let clock = d.role.is_transport()
             && self.session.controller.follows_midi_clock()
             && matches!(spec.name, "tempo" | "run" | "reset");
         let value = match spec.name {
@@ -930,13 +940,21 @@ impl App {
                                     index,
                                     loom_canvas::ControlPart::Main,
                                 )?;
-                                let exposure = self.exposure_row(id, index, &exposed.name);
+                                let member = loom_patch::Hierarchy::is_member_entry(exposed);
+                                let mut surface = hierarchy.tile_name(ModuleId(id)).unwrap_or_default();
+                                let mut exposure = self.exposure_row(id, index, &exposed.name);
+                                if !member
+                                    && let Some(outer) = &mut exposure
+                                    && outer.surface == surface
+                                {
+                                    surface.push_str(" (this tile)");
+                                    outer.surface.push_str(" (outer)");
+                                }
                                 let mut row =
                                     self.param_row(target.module.0, target.index, &target.spec, exposure, false)?;
                                 // On this tile the row is the exposed item,
                                 // not the inner module's parameter.
                                 row.ui = ids::row(id, ids::Kind::Exposed, &exposed.name);
-                                let member = loom_patch::Hierarchy::is_member_entry(exposed);
                                 let label = if member {
                                     member_label(hierarchy, ModuleId(id), row_value(graph, target.module, target.index))
                                 } else {
@@ -950,7 +968,7 @@ impl App {
                                         module: id,
                                         index,
                                         name: Some(exposed.name.clone()),
-                                        surface: hierarchy.tile_name(ModuleId(id)).unwrap_or_default(),
+                                        surface,
                                     },
                                     row,
                                 })
@@ -964,6 +982,9 @@ impl App {
                         .gestures
                         .label_draft(id)
                         .map_or_else(|| hierarchy.tile_name(ModuleId(id)).unwrap_or_default(), str::to_string),
+                    authors: hierarchy
+                        .definition_of(ModuleId(id))
+                        .map_or_else(Vec::new, |d| d.metadata.authors.clone()),
                     inputs: inputs.into_iter().map(|(_, name)| name).collect(),
                     outputs: outputs.into_iter().map(|(_, name)| name).collect(),
                     params,
@@ -1169,7 +1190,7 @@ impl App {
 /// The inspector's widgets.
 pub fn view<'a>(
     model: Inspector,
-    authors: &'a iced::widget::text_editor::Content<crate::Renderer>,
+    patch_info: &'a crate::patch_info::State,
     drop_row: Option<(u32, usize)>,
     dragging: bool,
     listening: bool,
@@ -1189,7 +1210,7 @@ pub fn view<'a>(
     let content: Element<'a, AppMessage> = match model {
         // Short, with the full list one click away (visual-system.md).
         Inspector::Patch(rows) => column![
-            crate::patch_info::view(rows, authors),
+            crate::patch_info::view(rows, &patch_info.authors),
             iced::widget::rule::horizontal(1),
             text("Select a module to edit it.").size(style::BODY).color(DIM),
             text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
@@ -1294,6 +1315,9 @@ pub fn view<'a>(
                     drop_row,
                     dragging,
                 ));
+            }
+            if let Some(authors) = patch_info.part_authors(id) {
+                rows = rows.push(crate::patch_info::part_authors_view(id, authors));
             }
             rows.into()
         }
@@ -1573,16 +1597,14 @@ fn param_row_view<'a>(
 /// surface, or takes it off again, saying what it is exposed as
 /// (sub-patches.md, Exposing). `ui` is its UI ID, from [`ids::expose`].
 fn expose_button<'a>(exposure: ExposureRow, ui: &UiId) -> Element<'a, AppMessage> {
+    let label = exposure.button_label();
     let ExposureRow {
-        module,
-        index,
-        name,
-        surface,
+        module, index, name, ..
     } = exposure;
     let shown: Element<'a, AppMessage> = match name {
         Some(name) => row![
             text(format!("as {name}")).size(style::SMALL).color(DIM),
-            button(text(format!("Unexpose on {surface}")).size(style::SMALL))
+            button(text(label).size(style::SMALL))
                 .style(style::plain)
                 .padding(1)
                 .on_press(AppMessage::Inspector(Message::Unexpose { module, index })),
@@ -1590,7 +1612,7 @@ fn expose_button<'a>(exposure: ExposureRow, ui: &UiId) -> Element<'a, AppMessage
         .spacing(4)
         .align_y(iced::Alignment::Center)
         .into(),
-        None => button(text(format!("Expose on {surface}")).size(style::SMALL))
+        None => button(text(label).size(style::SMALL))
             .style(style::plain)
             .padding(1)
             .on_press(AppMessage::Inspector(Message::Expose { module, index }))
