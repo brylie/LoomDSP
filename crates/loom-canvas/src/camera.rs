@@ -2,7 +2,7 @@
 
 use loom_ui_core::{Point, Rect, Size, Vector};
 
-/// Smallest zoom. Below this, tiles are a few pixels wide.
+/// Smallest manual zoom. Below this, tiles are a few pixels wide.
 pub const MIN_ZOOM: f32 = 0.1;
 /// Largest zoom.
 pub const MAX_ZOOM: f32 = 4.0;
@@ -60,7 +60,7 @@ impl Camera {
     /// Zooms by `factor`, keeping the world point under `screen` in place.
     pub fn zoom_at(&mut self, screen: Point, factor: f32) {
         let anchor = self.to_world(screen);
-        self.zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom = (self.zoom * factor).clamp(self.zoom.min(MIN_ZOOM), MAX_ZOOM);
         self.origin = Point::new(anchor.x - screen.x / self.zoom, anchor.y - screen.y / self.zoom);
     }
 
@@ -78,7 +78,7 @@ impl Camera {
     pub fn frame(&mut self, world: Rect, size: Size) {
         let zoom_x = (size.width - 2.0 * FRAME_MARGIN).max(1.0) / world.width.max(1.0);
         let zoom_y = (size.height - 2.0 * FRAME_MARGIN).max(1.0) / world.height.max(1.0);
-        self.zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, 1.0);
+        self.zoom = zoom_x.min(zoom_y).min(1.0);
         let centre = world.center();
         self.origin = Point::new(
             centre.x - size.width / (2.0 * self.zoom),

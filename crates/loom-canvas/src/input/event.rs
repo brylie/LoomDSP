@@ -15,6 +15,21 @@ pub enum ControlPart {
     Both,
 }
 
+/// The canvas location captured when the module browser opens.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BrowserPlacement {
+    /// The player chose this world point.
+    Pointer(Point),
+    /// The toolbar asked for a free spot in this visible world rectangle.
+    Toolbar(Rect),
+}
+
+impl From<Point> for BrowserPlacement {
+    fn from(point: Point) -> Self {
+        Self::Pointer(point)
+    }
+}
+
 /// A gesture on the canvas. The application applies it to its model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanvasEvent {
@@ -172,8 +187,8 @@ pub enum CanvasEvent {
     /// pressed with the pointer over the canvas, empty canvas was
     /// double-clicked, or the browser key changed.
     OpenBrowser {
-        /// Where a new module goes, in world units, not yet snapped.
-        world: Point,
+        /// How to place the chosen tile, in world units.
+        placement: BrowserPlacement,
         /// Where the browser opens, in window coordinates.
         at: Point,
         /// The canvas area, in window coordinates, so the browser can stay

@@ -2,7 +2,7 @@
 //! (`docs/design/sub-patches.md`, Make, open, and dissolve; Editor model).
 
 use crate::{App, Message, browser};
-use loom_canvas::{GRID, PortRef, TILE_WIDTH};
+use loom_canvas::{BrowserPlacement, GRID, PortRef, TILE_WIDTH};
 use loom_core::{ModuleId, OutputRef, TRANSPORT_MODULE};
 use loom_patch::{Direction, End, Hierarchy, INPUT_KIND, ModulePath, OUTPUT_KIND, Tile};
 use loom_ui_core::{Point, Rect, Size};
@@ -445,10 +445,10 @@ impl App {
     }
 
     /// Inside a sub-patch, a Patch input or output from the browser is a
-    /// port of the sub-patch, not a module. Adds it at `world` and
+    /// port of the sub-patch. Places it as the browser asked and
     /// selects it, as one undo step. Returns false for any other kind, or
     /// at the top level, where it is an ordinary module.
-    pub(crate) fn add_port_tile(&mut self, kind: &str, world: Point) -> bool {
+    pub(crate) fn add_port_tile(&mut self, kind: &str, placement: BrowserPlacement) -> bool {
         let direction = match kind {
             INPUT_KIND => Direction::Input,
             OUTPUT_KIND => Direction::Output,
@@ -476,9 +476,7 @@ impl App {
                 Ok(())
             }) && let Some(id) = added
             {
-                app.session.positions.insert(id.0, (world.x, world.y));
-                app.session.selection = BTreeSet::from([id.0]);
-                app.commit();
+                app.commit_added_tile(id, placement);
             }
         });
         true
@@ -668,12 +666,17 @@ impl App {
         });
     }
 
-    /// Inserts a library item as a new sub-patch tile at `world`, as a copy
+    /// Inserts a library item as a new sub-patch tile with the chosen placement, as a copy
     /// or linked, and selects it, as one undo step (sub-patches.md,
     /// Library). The file's own linked sub-patches are refreshed first. A
     /// Transport or Scale and tuning module in the file is left out, its
     /// cables become ports, and the status bar says so (rule 8).
-    pub(crate) fn insert_library_item(&mut self, item: &browser::LibraryItem, linked: bool, world: Point) {
+    pub(crate) fn insert_library_item(
+        &mut self,
+        item: &browser::LibraryItem,
+        linked: bool,
+        placement: BrowserPlacement,
+    ) {
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
@@ -687,22 +690,22 @@ impl App {
         };
         let notes = file.refresh_linked(&self.rig.library(), self.session.controller.registry());
         let library = linked.then(|| item.library.clone());
-        self.insert_patch(file, library, &item.name, notes, world);
+        self.insert_patch(file, library, &item.name, notes, placement);
     }
 
-    /// Inserts a built-in abstraction as a copy at `world` (sub-patches.md,
+    /// Inserts a built-in abstraction as a copy with the chosen placement (sub-patches.md,
     /// Built-in abstractions). It never follows a link into the player's
     /// library folder: a built-in has no linked definition, which a test
     /// checks, and no link refresh runs on it.
-    pub(crate) fn insert_builtin(&mut self, builtin: &crate::builtin::Builtin, world: Point) {
+    pub(crate) fn insert_builtin(&mut self, builtin: &crate::builtin::Builtin, placement: BrowserPlacement) {
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
         }
-        self.insert_patch(builtin.patch(), None, builtin.name, Vec::new(), world);
+        self.insert_patch(builtin.patch(), None, builtin.name, Vec::new(), placement);
     }
 
-    /// Inserts `file` as a sub-patch at `world`, linked to `library` when
+    /// Inserts `file` as a sub-patch with the chosen placement, linked to `library` when
     /// given, as one undo step; `notes` are what loading it said, and
     /// `shown` is the name a refusal uses.
     fn insert_patch(
@@ -711,7 +714,7 @@ impl App {
         library: Option<String>,
         shown: &str,
         mut notes: Vec<loom_patch::LoadWarning>,
-        world: Point,
+        placement: BrowserPlacement,
     ) {
         let level = self.session.level.clone();
         let name = file.metadata.name.clone();
@@ -757,8 +760,6 @@ impl App {
             };
             app.session.hierarchy = candidate;
             app.assignments_renumbered(&renamed);
-            let at = browser::snap(world);
-            app.session.positions.insert(inserted.instance.0, (at.x, at.y));
             for (id, layout) in &inserted.layouts {
                 if let Some(position) = layout.position {
                     app.session.positions.insert(id.0, position);
@@ -767,8 +768,7 @@ impl App {
                     app.session.sizes.insert(id.0, size);
                 }
             }
-            app.session.selection = BTreeSet::from([inserted.instance.0]);
-            if app.commit() {
+            if app.commit_added_tile(inserted.instance, placement) {
                 notes.extend(inserted.left_out.iter().map(|dropped| dropped.warning(&inserted.name)));
                 notes.extend(inserted.notes);
                 let done = format!("Inserted {}", inserted.name);

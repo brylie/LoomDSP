@@ -1654,8 +1654,8 @@ impl App {
                 }));
             }
             // The library folder is read for the browser's list as it opens.
-            Message::Canvas(CanvasEvent::OpenBrowser { world, at, area }) => {
-                self.canvas_event(CanvasEvent::OpenBrowser { world, at, area });
+            Message::Canvas(event @ CanvasEvent::OpenBrowser { .. }) => {
+                self.canvas_event(event);
                 self.read_library_for_browser();
             }
             Message::Control(call) => self.control(call),
@@ -1795,21 +1795,25 @@ impl App {
         match outcome {
             browser::Outcome::Stay => {}
             browser::Outcome::Close => self.overlays.close_browser(),
-            browser::Outcome::Add(descriptor, world) => {
+            browser::Outcome::Add(descriptor, placement) => {
                 self.overlays.close_browser();
-                self.add_module(descriptor, world);
+                self.add_module(descriptor, placement);
             }
-            browser::Outcome::Insert { item, linked, world } => {
+            browser::Outcome::Insert {
+                item,
+                linked,
+                placement,
+            } => {
                 self.overlays.close_browser();
-                self.insert_library_item(&item, linked, world);
+                self.insert_library_item(&item, linked, placement);
             }
-            browser::Outcome::AddSlot(role, world) => {
+            browser::Outcome::AddSlot(role, placement) => {
                 self.overlays.close_browser();
-                self.add_empty_slot(role, world);
+                self.add_empty_slot(role, placement);
             }
-            browser::Outcome::InsertBuiltin(builtin, world) => {
+            browser::Outcome::InsertBuiltin(builtin, placement) => {
                 self.overlays.close_browser();
-                self.insert_builtin(builtin, world);
+                self.insert_builtin(builtin, placement);
             }
         }
     }
@@ -1828,21 +1832,24 @@ impl App {
 
     /// Adds a module with its top-left corner at a world point and selects
     /// it, as one undo step.
-    fn add_module(&mut self, descriptor: &'static ModuleDescriptor, world: Point) {
+    fn add_module(
+        &mut self,
+        descriptor: &'static ModuleDescriptor,
+        placement: impl Into<loom_canvas::BrowserPlacement>,
+    ) {
+        let placement = placement.into();
         self.close_slider_gesture();
         if let Some(why) = self.refuses_kind(descriptor.id) {
             self.alerts.warn(why.to_string());
             return;
         }
         // Inside a sub-patch, a Patch input or output is a port of it.
-        if self.add_port_tile(&descriptor.kind(), world) {
+        if self.add_port_tile(&descriptor.kind(), placement) {
             return;
         }
         self.edit(|app| match app.session.new_module(descriptor.id) {
             Ok(id) => {
-                app.session.positions.insert(id.0, (world.x, world.y));
-                app.session.selection = BTreeSet::from([id.0]);
-                app.commit();
+                app.commit_added_tile(id, placement);
             }
             Err(e) => app.alerts.warn(format!("Could not add {}: {e}", descriptor.name)),
         });

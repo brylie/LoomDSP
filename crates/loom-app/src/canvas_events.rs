@@ -283,11 +283,11 @@ impl App {
                     self.overlays.set_menu_highlight(Some(0));
                 }
             }
-            CanvasEvent::OpenBrowser { world, at, area } => {
+            CanvasEvent::OpenBrowser { placement, at, area } => {
                 self.close_slider_gesture();
                 let roles = self.session.controller.registry().roles().collect();
                 self.overlays.open(Overlay::Browser(
-                    browser::Browser::open(self.modules.clone(), world, at, area)
+                    browser::Browser::open(self.modules.clone(), placement, at, area)
                         .with_builtins(&crate::builtin::ALL)
                         .with_roles(roles),
                 ));

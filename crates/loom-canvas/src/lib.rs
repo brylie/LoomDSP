@@ -59,8 +59,8 @@ pub use controls::{arrow_share, arrow_step, option_bounds, part_bounds, range_ba
 pub use draft::{DraftSubmit, TypedDraft};
 pub use gpu::{CanvasFrame, CanvasRenderer};
 pub use input::{
-    CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView, ControlPart,
-    EditGroupView, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
+    BrowserPlacement, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
+    ControlPart, EditGroupView, FrameCache, LearnView, Moment, PointerDrag, Still, StillDrag,
 };
 pub use reaction::Reaction;
 pub use scene::{

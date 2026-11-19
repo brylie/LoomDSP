@@ -339,7 +339,7 @@ fn no_audio_keeps_taking_edits() {
 
 fn open_at(app: &mut App, world: Point) {
     let _ = app.send(Message::Canvas(CanvasEvent::OpenBrowser {
-        world,
+        placement: world.into(),
         at: Point::ORIGIN,
         area: loom_ui_core::Rect::new(Point::ORIGIN, loom_ui_core::Size::new(1000.0, 800.0)),
     }));

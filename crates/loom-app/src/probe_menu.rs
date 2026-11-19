@@ -4,8 +4,8 @@
 
 use crate::Element;
 use crate::style::{self, button};
+use iced::Length;
 use iced::widget::{column, container, text};
-use iced::{Length, Theme};
 use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{GRID, PortRef, tile_size};
 use loom_core::ModuleDescriptor;
@@ -92,7 +92,7 @@ impl ProbeMenu {
                     .on_press(Message::Pick(probe))
                     .width(Length::Fill)
                     .height(ITEM_HEIGHT)
-                    .style(style::outlined(style::plain, highlight == Some(at))),
+                    .style(style::menu_item(highlight == Some(at))),
             )
         };
         let menu = column![
@@ -101,7 +101,7 @@ impl ProbeMenu {
         ]
         .padding(PADDING)
         .width(WIDTH);
-        let menu = crate::inspector::ids::named(&crate::menus::probe_id(), container(menu).style(menu_style));
+        let menu = crate::inspector::ids::named(&crate::menus::probe_id(), container(menu).style(style::canvas_menu));
         iced::widget::pin(iced::widget::opaque(menu))
             .position(self.at.to_iced())
             .into()
@@ -133,24 +133,6 @@ pub fn place(descriptor: &ModuleDescriptor, anchor: Point, tiles: &[Rect]) -> Po
         corner.y = next;
     }
     corner
-}
-
-fn menu_style(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
-    container::Style {
-        background: Some(palette.background.base.color.into()),
-        border: iced::Border {
-            color: palette.background.strong.color,
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        shadow: iced::Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-            offset: iced::Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
-        },
-        ..container::Style::default()
-    }
 }
 
 #[cfg(test)]

@@ -27,7 +27,7 @@ Before the browser, the toolbar had a drop-down of module IDs and an Add button.
 |---|---|---|
 | `A` with the pointer over the canvas | At the pointer | At the pointer, snapped to the grid |
 | Double-click on empty canvas | At the pointer | At the click, snapped to the grid |
-| "Add module" button in the toolbar | At the centre of the canvas | Centre of the visible canvas, snapped to the grid |
+| "Add module" button in the toolbar | At the centre of the canvas | Nearest free grid position to the centre of the visible canvas |
 
 The panel's corner goes at that point, moved in as needed so the whole panel stays inside the canvas. *Why:* the toolbar button opens it at the canvas centre, not under the button, because only the canvas knows its camera, and so where the centre is in the patch.
 
@@ -38,8 +38,9 @@ The browser is a small floating panel: a search field on top, a list of matches 
 - Each module shows its **name** and a small swatch of its **family** colour with the family name ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)). The highlighted module's **ID** shows under its description at the bottom, in a quieter style, so no row is cut and the scrollbar covers no text ([#457](https://github.com/brylie/LoomDSP/issues/457)).
 - The highlighted row is a lifted grey with an orange outline, so its quieter text stays readable (at least 4.5:1, tested).
 - An empty search lists every module by family, in the family order of the [visual system](visual-system.md#module-families), then by name.
-- Typing filters the list. A module matches when every word of the query is found in its name, ID, category, or family, ignoring case. Example: `osc saw` matches `loom.osc.saw`; `filter` matches every module in the Filter category.
-- Results are ranked: a name that starts with the query first, then a word in the name that starts with it, then any other match. Ties keep the empty-search order.
+- Typing filters the list. A module matches when every word of the query is found in its name, ID, category, family, or description, ignoring case. Example: `osc saw` matches `loom.osc.saw`; `filter` matches every module in the Filter category.
+- Results are ranked: a name that starts with the query first, then a word in the name that starts with it, then other matches in the name, ID, category or family. Matches that need the description come last. Ties keep the empty-search order.
+- With no matches the list says "No modules match. Clear the search to see every module."
 - The first result is highlighted after each change to the query.
 - Below the list, the highlighted module's one-sentence `description` is shown, so the user can tell what it does before adding it.
 
@@ -82,7 +83,8 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 ### Adding
 
-- The new module's top-left corner goes at the chosen point, snapped to the grid. If that spot overlaps another tile, it still goes there; the user moves it.
+- With A or a double-click, the tile’s top-left corner goes at the chosen point, snapped to the grid, even when it overlaps another tile.
+- **Toolbar placement (Agreed).** The toolbar supplies no pointer position. Put the tile’s top-left corner on the nearest free grid point to the visible canvas centre where the whole tile fits. Leave one grid step between tiles so the port jacks stay clear. Measure straight-line distance, breaking ties by top then left. If the view is full or too small, use the nearest free grid point even if the tile extends outside the view. This applies to every kind of browser row.
 - The new module becomes the only selection.
 - Adding is one undo step ([undo.md](undo.md)). Undo removes the module.
 - Opening, searching, and closing the browser are not edits and add nothing to the undo history.
@@ -92,7 +94,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 1. **`A` opens the browser, with no modifier.** Ctrl+A or Cmd+A still selects all. Tab keeps moving focus between controls. *Why:* one key that always does the same thing is easier to learn than a key whose meaning depends on the selection, and `A` was free.
 1. **The search field takes keys while the browser is open.** Canvas shortcuts (Delete, Space for Run, F, Tab focus) do not fire while typing. *Why:* typing `f` in a query must not frame the patch, and Backspace must not delete the selected module.
-2. **The module goes where the user opened the browser,** not where auto-layout finds room. *Why:* the user opened it there because that is where they want to patch. A module that appears off screen breaks the flow.
+2. **A pointer-placed module goes where the user opened the browser,** not where auto-layout finds room. *Why:* the user opened it there because that is where they want to patch. A module that appears off screen breaks the flow.
 3. **The pointer position is taken when the browser opens,** not when Enter is pressed. *Why:* the pointer may drift onto the list while the user picks a row.
 4. **Search reads only the registry's descriptors** (`name`, `id`, `category`, `family`, `description`) for modules, and the role descriptors, the built-ins' names, and the library items' names for the other groups. *Why:* one source of text (ADR-0016). A new module or role appears in the browser with no extra work.
 5. **The search code is a plain function with no UI types,** for example `search(registry, query) -> Vec<&ModuleDescriptor>`. *Why:* matching and ranking can then be tested without a window.
@@ -102,13 +104,13 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 - [ ] Given an empty query, the list shows every registered module by family in the family order, then by name. (test)
 - [ ] Given the query `saw`, the first result is the saw oscillator. (test)
-- [ ] Given the query `osc saw`, only modules whose name, ID, or category contain both words are listed. (test)
+- [ ] Given the query `osc saw`, only modules whose searchable fields contain both words are listed. (test)
 - [ ] Given the query `FILTER`, every Filter module is listed (case does not matter). (test)
 - [ ] Given a query with no matches, the list is empty and Enter adds nothing. (test)
 - [ ] With the pointer over the canvas, pressing `A` opens the browser at the pointer with the search field focused. (manual)
 - [ ] Typing a query and pressing Enter adds the highlighted module with its top-left at the snapped pointer position, selects it, and closes the browser. (test for placement; manual for the gesture)
 - [ ] Double-click on empty canvas opens the browser there. Double-click on a control still resets the control. (manual)
-- [ ] The toolbar button opens the browser and adds at the centre of the visible canvas. (manual)
+- [ ] The toolbar button opens the browser and adds at the nearest free position to the centre of the visible canvas. (test)
 - [ ] Escape and a click outside close the browser and change nothing. (manual)
 - [ ] While the browser is open, typing `f`, Space, Backspace, or Delete edits the query and does not act on the canvas. (manual)
 - [ ] The highlighted module's description is shown, and changes as the highlight moves. (manual)

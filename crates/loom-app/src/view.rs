@@ -108,15 +108,15 @@ impl App {
             for (at, item) in model.iter().flat_map(|menu| menu.items.iter()).enumerate() {
                 items = items.push(crate::inspector::ids::named(
                     &item.id,
-                    button(iced::widget::text(item.label.clone()))
+                    button(iced::widget::text(item.label.clone()).size(style::CONTROL))
                         .on_press(item.message.clone())
                         .width(200)
-                        .style(style::outlined(style::secondary, highlight == Some(at))),
+                        .style(style::menu_item(highlight == Some(at))),
                 ));
             }
             let menu = crate::inspector::ids::named(
                 &crate::menus::tile_id(module),
-                container(items).padding(4).style(container::rounded_box),
+                container(items).padding(4).style(style::canvas_menu),
             );
             layers = layers
                 .push(outside)

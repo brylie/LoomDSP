@@ -265,8 +265,8 @@ fn the_browser_lists_library_items_marked_as_sub_patches() {
         "after the built-ins, the modules, and the slot rows, by path"
     );
     // A search finds a sub-patch by its path, and the mark names what it
-    // is. (`voice` alone would find the built-in Synth voice first.)
-    ui.send(Message::Browser(browser::Message::Query("voices".into())));
+    // is. The folder separator distinguishes a path from module descriptions.
+    ui.send(Message::Browser(browser::Message::Query("voices/".into())));
     ui.redraw();
     let browser = ui.app().overlays.browser().unwrap();
     assert_eq!(browser.library_rows().len(), 1);
