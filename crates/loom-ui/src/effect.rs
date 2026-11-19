@@ -55,6 +55,38 @@ pub mod names {
     pub const ACCESSIBILITY: &str = "accessibility tree";
 }
 
+/// What a clipboard read found (ui-layer.md, section 8, rule 2). A read
+/// that could not complete is [`Refused`](Self::Refused), never empty, so the
+/// app can tell the user: the browser or the system did not allow it, or the
+/// backend failed, such as a clipboard another app holds on Windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardText {
+    /// The clipboard's text.
+    Text(String),
+    /// The clipboard holds no text.
+    Empty,
+    /// The read could not complete.
+    Refused,
+}
+
+impl ClipboardText {
+    /// `text` as a read's answer: empty when there is none or it is empty.
+    pub fn from_text(text: Option<String>) -> Self {
+        match text {
+            Some(text) if !text.is_empty() => Self::Text(text),
+            _ => Self::Empty,
+        }
+    }
+
+    /// The text, if the read found some.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Empty | Self::Refused => None,
+        }
+    }
+}
+
 /// Turns the answer to an effect into one of the app's messages.
 pub struct Reply<T, M>(Box<dyn FnOnce(T) -> M + Send>);
 
@@ -252,11 +284,12 @@ pub enum Effect<M> {
     ScrollIntoView(UiId),
     /// Put this text on the clipboard.
     ClipboardWrite(String),
-    /// Read the clipboard. The reply gets its text, or `None` when it holds
-    /// no text, and its message arrives on the next turn. Reading is an
-    /// effect, not a call inside `update`, so `update` never waits on the
-    /// system, and it works the same where a read cannot answer at once.
-    ClipboardRead(Reply<Option<String>, M>),
+    /// Read the clipboard. The reply gets what the read found
+    /// ([`ClipboardText`]: its text, nothing, or a refusal), and its message
+    /// arrives on the next turn. Reading is an effect, not a call inside
+    /// `update`, so `update` never waits on the system, and it works the
+    /// same where a read cannot answer at once.
+    ClipboardRead(Reply<ClipboardText, M>),
     /// Show a file dialog. The reply gets the path chosen, or `None`.
     FileDialog {
         /// What the dialog shows.
@@ -438,8 +471,8 @@ impl<M> Effects<M> {
         Self::one(Effect::ClipboardWrite(text.into()))
     }
 
-    /// Read the clipboard, and make a message from its text.
-    pub fn clipboard_read(reply: impl FnOnce(Option<String>) -> M + Send + 'static) -> Self {
+    /// Read the clipboard, and make a message from what the read found.
+    pub fn clipboard_read(reply: impl FnOnce(ClipboardText) -> M + Send + 'static) -> Self {
         Self::one(Effect::ClipboardRead(Reply::new(reply)))
     }
 

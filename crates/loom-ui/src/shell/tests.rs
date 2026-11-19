@@ -19,10 +19,25 @@ fn open_request() -> FileRequest {
     }
 }
 
-/// A driver with no window over `NoServices`.
+/// A clipboard in memory, for the driver's tests: no display needed.
+#[derive(Default)]
+struct Memory(Option<String>);
+
+impl crate::clipboard::Backend for Memory {
+    fn get(&mut self) -> ClipboardText {
+        ClipboardText::from_text(self.0.clone())
+    }
+
+    fn set(&mut self, text: String) {
+        self.0 = Some(text);
+    }
+}
+
+/// A driver with no window over `NoServices`, with a clipboard in memory.
 fn driver() -> ShellDriver<u32, NoServices> {
     ShellDriver {
         services: NoServices,
+        clipboard: crate::clipboard::Clipboard::new(Memory::default()),
         access: None,
         window: None,
         captures: Vec::new(),
@@ -30,14 +45,12 @@ fn driver() -> ShellDriver<u32, NoServices> {
     }
 }
 
-/// With no services, the clipboard reads empty and each dialog is
-/// dismissed, each answer through the waker.
+/// With no services, each dialog is dismissed, its answer through the
+/// waker.
 #[test]
-fn no_services_answers_empty_and_dismissed() {
+fn no_services_answers_dismissed() {
     let (waker, inbox) = waker();
     let mut services = NoServices;
-    Services::<u32>::clipboard_write(&mut services, "kept nowhere".into());
-    services.clipboard_read(Reply::new(|text: Option<String>| u32::from(text.is_some())), &waker);
     services.file_dialog(
         open_request(),
         Reply::new(|path: Option<PathBuf>| 10 + u32::from(path.is_some())),
@@ -53,7 +66,7 @@ fn no_services_answers_empty_and_dismissed() {
         Reply::new(|choice: Choice| 20 + u32::from(choice.is_some())),
         &waker,
     );
-    assert_eq!(inbox.try_iter().collect::<Vec<_>>(), [0, 10, 20]);
+    assert_eq!(inbox.try_iter().collect::<Vec<_>>(), [10, 20]);
 }
 
 /// A capture waits for the end of the turn, when the shell has its layers
@@ -101,8 +114,6 @@ fn the_rest_goes_to_the_services() {
         title: "No window yet".into(),
         min_size: None,
     });
-    driver.clipboard_write("text".into());
-    driver.clipboard_read(Reply::new(|_: Option<String>| 3), &waker);
     driver.file_dialog(open_request(), Reply::new(|_: Option<PathBuf>| 4), &waker);
     driver.ask(
         Question {
@@ -114,7 +125,34 @@ fn the_rest_goes_to_the_services() {
         Reply::new(|_: Choice| 5),
         &waker,
     );
-    assert_eq!(inbox.try_iter().collect::<Vec<_>>(), [3, 4, 5]);
+    assert_eq!(inbox.try_iter().collect::<Vec<_>>(), [4, 5]);
+}
+
+/// The clipboard is the shell's own, on its thread: a write, then a read
+/// that answers through the waker, and a field's paste that answers its
+/// `Paste`. Neither answers in the call itself.
+#[test]
+fn the_clipboard_is_the_shells_own() {
+    let (waker, inbox) = waker();
+    let mut driver = driver();
+    driver.clipboard_write("osc".into());
+    driver.clipboard_read(
+        Reply::new(|text: ClipboardText| u32::from(text == ClipboardText::Text("osc".into()))),
+        &waker,
+    );
+    assert_eq!(inbox.recv_timeout(std::time::Duration::from_secs(5)), Ok(1));
+    let (answers, pasted) = mpsc::channel();
+    let wake: crate::Wake = std::sync::Arc::new(|| {});
+    driver.clipboard_paste(crate::Paste::new(
+        loom_ui_core::UiId::panel("form").with("name"),
+        0,
+        answers,
+        wake,
+    ));
+    let (_, _, text) = pasted
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("a paste answer");
+    assert_eq!(text, ClipboardText::Text("osc".into()));
 }
 
 /// An app that keeps each message with the focus it ran under.

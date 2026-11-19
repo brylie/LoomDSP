@@ -1,58 +1,20 @@
 //! The desktop's services for the app on the shell: the system's dialogs
-//! and the window's clipboard (plan step 2.2b-ii).
+//! (plan step 2.2b-ii). The clipboard is the shell's own (plan step 3.3.4).
 //!
 //! A dialog is modal and blocks the loop until it closes, as it did under
 //! Iced, outside `update`; its answer comes on the next turn.
 
-use super::window::SharedClipboard;
 use crate::Message;
-use iced::advanced::clipboard::Kind;
 use loom_ui::Waker;
 use loom_ui::effect::{Choice, FileAction, FileRequest, Level, Question, Reply};
 use loom_ui::shell::Services;
 use std::path::PathBuf;
 
-/// The app's services: `rfd`'s dialogs and the clipboard the window's
-/// layers share.
-pub(crate) struct AppServices {
-    /// The window's clipboard, once it has opened.
-    clipboard: SharedClipboard,
-}
-
-impl AppServices {
-    /// The services, with the clipboard the layers share.
-    pub(crate) fn new(clipboard: SharedClipboard) -> Self {
-        Self { clipboard }
-    }
-}
+/// The app's services: `rfd`'s dialogs.
+#[derive(Debug, Default)]
+pub(crate) struct AppServices;
 
 impl Services<Message> for AppServices {
-    fn clipboard_write(&mut self, text: String) {
-        if let Some(clipboard) = self.clipboard.borrow_mut().as_mut() {
-            clipboard.write(Kind::Standard, text);
-        }
-    }
-
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, Message>, waker: &Waker<Message>) {
-        let text = self
-            .clipboard
-            .borrow()
-            .as_ref()
-            .and_then(|clipboard| clipboard.read(Kind::Standard));
-        waker.send(reply.give(text));
-    }
-
-    /// A field's paste reads the same clipboard copy and cut write, so the
-    /// two never disagree.
-    fn clipboard_paste(&mut self, paste: loom_ui::Paste) {
-        let text = self
-            .clipboard
-            .borrow()
-            .as_ref()
-            .and_then(|clipboard| clipboard.read(Kind::Standard));
-        paste.give(text);
-    }
-
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, Message>, waker: &Waker<Message>) {
         waker.send(reply.give(show_file_dialog(&request)));
     }

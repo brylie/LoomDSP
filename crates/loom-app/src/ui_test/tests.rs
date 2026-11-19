@@ -2668,7 +2668,7 @@ fn a_paste_reads_the_clipboard_the_test_set() {
     let log = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
     assert!(
         log.iter()
-            .any(|message| matches!(message, Message::Pasted { text: Some(text), .. } if text == "drums")),
+            .any(|message| matches!(message, Message::Pasted { text: loom_ui::ClipboardText::Text(text), .. } if text == "drums")),
         "{log:?}"
     );
 }

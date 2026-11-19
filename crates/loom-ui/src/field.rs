@@ -56,6 +56,10 @@ pub enum FieldEvent {
     /// Focus moved away from it. The window losing the keys is not this:
     /// the field still has focus when they come back.
     Left,
+    /// Its paste could not read the clipboard ([`ClipboardText::Refused`](crate::ClipboardText::Refused)).
+    /// The runtime cannot show a status message itself, so the app does,
+    /// and a screen reader announces it (ui-layer.md, section 8, rule 2).
+    PasteRefused,
 }
 
 /// The fields of the window, by UI ID, with the contexts they edit with.

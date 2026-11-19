@@ -1139,13 +1139,22 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// and the field takes input; drops it otherwise, so a slow clipboard
     /// never types into another place or after the user moved on (section
     /// 8, rule 2). An
-    /// edit reaches the app as `Edited`, in `batch`. Returns whether a
+    /// edit reaches the app as `Edited`, in `batch`. A paste whose read was
+    /// refused reaches the app as `PasteRefused` whatever focus did since,
+    /// so a refusal never goes unheard. Returns whether a
     /// field changed what it shows.
     fn take_pastes(&mut self, now: Instant, batch: &mut Vec<A::Message>) -> bool {
         self.pasted.extend(self.paste_answers.1.try_iter());
         let mut changed = false;
-        while let Some((field, moves, text)) = self.pasted.pop_front() {
-            let Some(text) = text else { continue };
+        while let Some((field, moves, answer)) = self.pasted.pop_front() {
+            let text = match answer {
+                crate::ClipboardText::Text(text) => text,
+                crate::ClipboardText::Empty => continue,
+                crate::ClipboardText::Refused => {
+                    batch.extend(self.app.field_event(&field, &FieldEvent::PasteRefused));
+                    continue;
+                }
+            };
             if moves != self.focus.moves || self.focus.id() != Some(&field) || !self.field_takes_input(&field) {
                 continue;
             }

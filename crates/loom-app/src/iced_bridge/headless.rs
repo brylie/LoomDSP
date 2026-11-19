@@ -50,7 +50,7 @@ impl Driver<Message> for UiDriver {
         Driver::<Message>::clipboard_write(&mut self.headless, text);
     }
 
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, Message>, waker: &Waker<Message>) {
+    fn clipboard_read(&mut self, reply: Reply<loom_ui::ClipboardText, Message>, waker: &Waker<Message>) {
         self.headless.clipboard_read(reply, waker);
     }
 

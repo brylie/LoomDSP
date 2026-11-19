@@ -32,7 +32,7 @@ fn a_report_with_no_events_wakes_nothing() {
             counter.fetch_add(1, Ordering::SeqCst);
         }),
     );
-    let mut layers = WindowLayers::new(SharedClipboard::default());
+    let mut layers = WindowLayers::new();
     for _ in 0..2 {
         let report = report(&mut layers, &mut runtime);
         assert!(!report.alone);
@@ -86,7 +86,7 @@ fn a_stuck_task_leaves_the_report_whole() {
         .target_mut()
         .tasks
         .push(Task::future(std::future::pending::<Bridged>()));
-    let mut layers = WindowLayers::new(SharedClipboard::default());
+    let mut layers = WindowLayers::new();
     layers.pointer = (mouse::Interaction::Pointer, false);
     layers.redraw = Redraw::NextFrame;
     let report = report(&mut layers, &mut runtime);
@@ -106,7 +106,7 @@ fn a_stuck_task_leaves_the_report_whole() {
 fn a_focus_answer_moves_the_target_then_tells_the_app() {
     let mut runtime = runtime();
     let field = UiId::panel("inspector").with("field");
-    let mut layers = WindowLayers::new(SharedClipboard::default());
+    let mut layers = WindowLayers::new();
     layers.answers.push_back(FocusAnswer {
         any: true,
         widget: Some(crate::places::field_widget_id(&field)),
@@ -162,7 +162,7 @@ fn the_canvas_cursor_comes_through_iced_unchanged() {
 #[test]
 fn a_touch_moves_the_cursor() {
     let mut runtime = runtime();
-    let mut layers = WindowLayers::new(SharedClipboard::default());
+    let mut layers = WindowLayers::new();
     layers.scale = 2.0;
     let touch = WinitEvent::Touch(winit::event::Touch {
         device_id: winit::event::DeviceId::dummy(),
@@ -186,4 +186,33 @@ fn a_touch_moves_the_cursor() {
     );
     assert_eq!(layers.cursor, mouse::Cursor::Available(iced::Point::new(100.0, 50.0)));
     assert_eq!(layers.events.len(), 1, "the touch is kept for Iced");
+}
+
+/// A clipboard in memory, for the Iced adapter's test: no display needed.
+#[derive(Default)]
+struct Memory(Option<String>);
+
+impl loom_ui::clipboard::Backend for Memory {
+    fn get(&mut self) -> loom_ui::ClipboardText {
+        loom_ui::ClipboardText::from_text(self.0.clone())
+    }
+
+    fn set(&mut self, text: String) {
+        self.0 = Some(text);
+    }
+}
+
+/// Iced's widgets reach the shell's clipboard through the adapter: what
+/// they write, a read finds, on the same thread the app's effects use. The
+/// primary selection is out of scope, so it reads nothing and keeps nothing.
+#[test]
+fn iceds_widgets_use_the_shells_clipboard() {
+    use iced::advanced::Clipboard as _;
+    use iced::advanced::clipboard::Kind;
+    let mut clipboard = super::IcedClipboard(loom_ui::clipboard::Clipboard::new(Memory::default()));
+    clipboard.write(Kind::Standard, "osc".to_owned());
+    assert_eq!(clipboard.read(Kind::Standard), Some("osc".to_owned()));
+    clipboard.write(Kind::Primary, "ignored".to_owned());
+    assert_eq!(clipboard.read(Kind::Primary), None);
+    assert_eq!(clipboard.read(Kind::Standard), Some("osc".to_owned()));
 }

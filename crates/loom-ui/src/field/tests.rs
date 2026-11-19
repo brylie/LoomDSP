@@ -2044,7 +2044,7 @@ fn a_paste_after_focus_moved_is_dropped() {
     let later = paste(&harness);
     harness.send(Message::Focus(UiId::panel("form").with("ok")));
     harness.lay_out(&mut text);
-    later.give(Some("x".to_owned()));
+    later.give(crate::ClipboardText::Text("x".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab", "focus moved");
@@ -2053,7 +2053,7 @@ fn a_paste_after_focus_moved_is_dropped() {
     harness.send(Message::Cover(Layer::Question));
     harness.lay_out(&mut text);
     let covered: Paste = paste(&harness);
-    covered.give(Some("y".to_owned()));
+    covered.give(crate::ClipboardText::Text("y".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab", "covered");
@@ -2146,7 +2146,7 @@ fn a_paste_after_focus_went_away_and_back_is_dropped() {
     harness.send(Message::Focus(name()));
     harness.lay_out(&mut text);
     assert_eq!(harness.runtime().focused(), Some(&name()));
-    asked.give(Some("x".to_owned()));
+    asked.give(crate::ClipboardText::Text("x".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab");
@@ -2220,7 +2220,7 @@ fn a_paste_during_a_composition_goes_in_after_it() {
     let asked = harness.runtime().test_paste(name());
     harness.step(ime_in(preedit("に")));
     assert_eq!(harness.runtime().focused(), Some(&name()), "focus stays on the field");
-    asked.give(Some("x".to_owned()));
+    asked.give(crate::ClipboardText::Text("x".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.runtime().focused(), Some(&name()));
@@ -2273,4 +2273,42 @@ fn the_app_hears_a_selection_a_composition_replaced() {
     harness.step(ime_in(ImeEvent::Commit("日".to_owned())));
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "日");
+}
+
+/// A paste whose read is refused reaches the app as `PasteRefused`, so it
+/// can show a status message a screen reader hears, and changes nothing.
+/// Through the headless driver, which can be made to refuse.
+#[test]
+fn a_refused_paste_reaches_the_app() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    harness.driver_mut().set_clipboard(Some("x".to_owned()));
+    harness.driver_mut().refuse_reads(true);
+    let start = harness.app().log.len();
+    harness.step(key_in(Key::Character('v'), shortcut(Platform::current(), false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab");
+    assert_eq!(harness.app().log[start..], ["PasteRefused"]);
+}
+
+/// A refusal is heard even when focus has moved on since the paste was
+/// asked for: the user asked, so the user is told it did not work. An
+/// empty clipboard says nothing.
+#[test]
+fn a_refusal_is_heard_after_focus_moved_and_empty_says_nothing() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let asked = harness.runtime().test_paste(name());
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    let start = harness.app().log.len();
+    asked.give(crate::ClipboardText::Refused);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().log[start..], ["PasteRefused"]);
+    let empty = harness.runtime().test_paste(name());
+    empty.give(crate::ClipboardText::Empty);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().log.len(), start + 1, "an empty clipboard says nothing");
 }

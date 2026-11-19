@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 /// The dependencies users of the crate get: the required ones, then the
 /// shell's.
-const ALLOWED: [&str; 12] = [
+const ALLOWED: [&str; 13] = [
     "dependencies.loom-ui-core.workspace",
     "dependencies.taffy.workspace",
     "dependencies.accesskit",
@@ -40,6 +40,7 @@ const ALLOWED: [&str; 12] = [
     "dependencies.wgpu",
     "dependencies.pollster",
     "dependencies.accesskit_winit",
+    "dependencies.arboard",
 ];
 
 /// The shell's dependencies, each optional and turned on only by `shell`.
@@ -187,6 +188,33 @@ fn the_required_dependencies_are_loom_ui_core_and_taffy() {
             "`shell` turns on {name}: {shell}"
         );
     }
+    // The system clipboard is optional, turned on by its own feature, which
+    // the shell turns on, so a plugin's driver can have it with no winit.
+    let arboard = dependency_line(manifest, "arboard").expect("the clipboard's dependency is declared");
+    assert!(arboard.contains("optional = true"), "arboard is optional: {arboard}");
+    assert!(
+        arboard.contains("default-features = false"),
+        "no image support: {arboard}"
+    );
+    let clipboard = dependency_line(manifest, "clipboard").expect("the clipboard feature is declared");
+    assert!(
+        clipboard.contains("\"dep:arboard\""),
+        "`clipboard` turns on arboard: {clipboard}"
+    );
+    assert!(shell.contains("\"clipboard\""), "`shell` turns on `clipboard`: {shell}");
+    assert!(
+        !shell.contains("dep:arboard"),
+        "only `clipboard` names arboard: {shell}"
+    );
+}
+
+/// Only the clipboard's own file names `arboard`, so every other part of
+/// the crate reaches the system clipboard through `loom_ui::clipboard`.
+#[test]
+fn only_the_clipboard_names_arboard() {
+    let (scanned, found) = scan(&["arboard"], |path| path != Path::new("clipboard.rs"));
+    assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
+    assert_eq!(found, Vec::<String>::new());
 }
 
 /// No source file names a window toolkit, except the shell, which names

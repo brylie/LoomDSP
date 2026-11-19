@@ -58,6 +58,8 @@
 
 pub mod access;
 mod app;
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
 mod draw;
 mod driver;
 pub mod effect;
@@ -83,7 +85,7 @@ mod window;
 pub use app::{App, Context, Deadline, InputState, WindowSpec};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
-pub use effect::{Effect, Effects};
+pub use effect::{ClipboardText, Effect, Effects};
 pub use element::{Align, Element, Length, Padding};
 pub use event::{AccessEvent, DriverEvent, Ime, WindowEvent, WindowState};
 pub use field::FieldEvent;
