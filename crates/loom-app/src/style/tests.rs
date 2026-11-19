@@ -230,3 +230,43 @@ fn source_import_has_button(source: &str, n: usize) -> bool {
             .any(|w| w == "button")
     })
 }
+
+/// Every canvas menu state meets the text and edge thresholds on the
+/// colours the tile and probe menu renderers actually use.
+#[test]
+fn canvas_menu_contrast() {
+    use iced::widget::button::Status;
+    use loom_canvas::iced_convert::ToCore as _;
+    use loom_canvas::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
+    let theme = crate::tests::app().theme();
+    let menu = super::canvas_menu(&theme);
+    let Some(iced::Background::Color(panel)) = menu.background else {
+        panic!("opaque panel fill")
+    };
+    assert_eq!(panel.a, 1.0);
+    for background in [Palette::default().background, Palette::default().tile, panel.to_core()] {
+        let ratio = contrast_ratio(menu.border.color.to_core(), background);
+        assert!(menu.border.width >= 1.0 && ratio >= 3.0, "menu edge {ratio:.2}:1");
+    }
+    for (status, focused) in [
+        (Status::Active, false),
+        (Status::Hovered, false),
+        (Status::Pressed, false),
+        (Status::Active, true),
+        (Status::Disabled, false),
+    ] {
+        let row = super::menu_item(focused)(&theme, status);
+        let Some(iced::Background::Color(fill)) = row.background else {
+            panic!("opaque row fill")
+        };
+        assert_eq!((row.text_color.a, fill.a, row.border.color.a), (1.0, 1.0, 1.0));
+        let text = contrast_ratio(row.text_color.to_core(), fill.to_core());
+        let edge = contrast_ratio(row.border.color.to_core(), fill.to_core());
+        let outside = contrast_ratio(row.border.color.to_core(), panel.to_core());
+        assert!(text >= MIN_TEXT_CONTRAST, "{status:?} text {text:.2}:1");
+        assert!(
+            edge.min(outside) >= 3.0,
+            "{status:?} edge {edge:.2}:1 inside, {outside:.2}:1 outside"
+        );
+    }
+}

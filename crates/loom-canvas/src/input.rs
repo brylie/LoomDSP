@@ -48,7 +48,7 @@ mod panel_input;
 mod select_popup;
 mod typed_field;
 
-pub use event::{CanvasEvent, ControlPart};
+pub use event::{BrowserPlacement, CanvasEvent, ControlPart};
 pub use frame::FrameCache;
 // What the widget's text drawing needs from the files below.
 pub(crate) use overlay::learned_label;

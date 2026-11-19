@@ -221,10 +221,9 @@ impl App {
         });
     }
 
-    /// Adds an empty slot for `role` from the module browser, with its
-    /// top-left corner at `world`, and selects it, as one undo step
+    /// Adds, places, and selects an empty slot for `role` in one undo step
     /// (sub-patches.md, Empty slots).
-    pub(crate) fn add_empty_slot(&mut self, role: &'static RoleDescriptor, world: loom_ui_core::Point) {
+    pub(crate) fn add_empty_slot(&mut self, role: &'static RoleDescriptor, placement: loom_canvas::BrowserPlacement) {
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
@@ -238,14 +237,12 @@ impl App {
                 Ok(())
             }) && let Some(slot) = added
             {
-                app.session.positions.insert(slot.0, (world.x, world.y));
-                app.session.selection = std::collections::BTreeSet::from([slot.0]);
                 let name = app
                     .session
                     .hierarchy
                     .tile_name(slot)
                     .unwrap_or_else(|| role.name.to_string());
-                if app.commit() {
+                if app.commit_added_tile(slot, placement) {
                     app.alerts.say(hierarchy::added_slot_text(&name));
                 }
             }

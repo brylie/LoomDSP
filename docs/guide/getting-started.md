@@ -2,7 +2,7 @@
 
 This guide shows how to run the LoomDSP desktop app, play a patch, and change it while it plays.
 
-LoomDSP is early (Phase 1). The app can open, edit, save, and play patches. See [What is not there yet](#what-is-not-there-yet).
+LoomDSP is in early alpha. This guide covers the current source build. Check the [roadmap](../product/roadmap.md) for planned work.
 
 ![The FM feedback patch in the LoomDSP app](../benchmarks/images/p1-canvas-fm-feedback.png)
 
@@ -34,23 +34,27 @@ The first build takes a few minutes. Later builds are fast.
 
 On Linux, install the ALSA development package first (`libasound2-dev` on Debian and Ubuntu).
 
-Other example patches are in [`examples/patches`](../../examples/patches). Run the app without a file to start with an empty patch.
+Other example patches are in [`examples/patches`](../../examples/patches). Run the app without a file to start with Transport and space for your own modules.
 
 ## Play a note
 
-The example patches make sound only while a note is held, like most synthesizers.
+The FM feedback example above plays while a note is held. Some other patches play on their own while Transport runs.
 
-- **MIDI keyboard:** connect it before you start the app. The app listens to every MIDI input it finds. The bottom bar lists them, for example "MIDI: Keystation 49".
-- **No keyboard:** click **Hold note** in the toolbar. Click it again to release the note.
+- **MIDI keyboard.** Connect it and play a note. The app listens to MIDI inputs by default. You can check the bottom bar and choose inputs in **Preferences**.
+- **No keyboard.** Click **Hold note** in the toolbar, then **Release note** to stop. Hold note sends an A3 note to the patch's MIDI Note modules. A new patch has only Transport, so open a playable example first.
 
-If you hear nothing, check the bottom bar. It shows the audio device and sample rate, or a message that explains why audio did not start.
+### If the patch is silent
+
+1. Look at the bottom bar for the active audio device and sample rate. Open **Preferences** to choose the output you want to hear.
+2. Follow a signal into **Audio Out**. In a note-driven patch, check that MIDI Note's **Gate** reaches the envelope and that the envelope reaches the amplifier's **Level** input. In a clocked patch, check the **Run** switch on Transport.
+3. Right-click an output or a cable and choose **Add scope** or **Add meter**. The probe branches from the signal, so you can check where it stops. Select a module and open **Help** in the inspector to see what its ports expect.
 
 ## The screen
 
 | Area | What it does |
 |---|---|
 | Canvas (centre) | Your patch: modules as tiles, connected by cables. |
-| Inspector (right) | Every parameter of the selected module, with sliders. |
+| Inspector (right) | Parameters, ports, and help for the selected module. The Matrix tab lists modulation assignments. |
 | Toolbar (top) | File name, New, Open, Save, Save As, add a module, hold a note. |
 | Bottom bar | Frame rate, module and cable count, audio load, MIDI inputs, and messages. Hover a cut-off message to read all of it. |
 
@@ -63,12 +67,12 @@ If you hear nothing, check the bottom bar. It shows the audio device and sample 
 | Move modules | Drag a tile. Tiles snap to the grid. |
 | Select several modules | Shift-click tiles, or drag a box on empty canvas. Cmd/Ctrl+A selects all. |
 | Delete modules | Select them and press Delete or Backspace. |
-| Add a module | Press **A** with the pointer over the canvas, or double-click empty canvas. Type part of a name, ID, or category, pick with the arrow keys, and press Enter. The module appears where the pointer was. **Add module** in the toolbar does the same at the centre of the canvas. Escape closes the browser. |
+| Add a module | Press **A** with the pointer over the canvas, or double-click empty canvas. Type part of a name, ID, category, or family, pick with the arrow keys, and press Enter. Try **Amplifier** for a VCA, **SVF** or **Ladder** for a filter, and **Envelope** for an ADSR. The module appears where the pointer was. **Add module** in the toolbar does the same at the centre of the canvas. Escape closes the browser. |
 | Pan | Right-drag, or scroll with two fingers on a trackpad. |
 | Zoom | Mouse wheel, or Cmd/Ctrl and scroll on a trackpad. With the pointer over the canvas, Cmd/Ctrl+0 goes back to 100%, keeping the point under the pointer in place. |
 | Show the whole patch | Press F or Home. |
 
-Every change is live. The engine switches to the new patch between two audio buffers, so there is no dropout while you patch.
+Patching takes effect while audio plays. The engine switches the graph between buffers and fades changes where it can. The bottom bar shows load and dropouts. See [live patching](../design/live-patching.md) for the rules.
 
 ## Reading a patch
 
@@ -82,29 +86,37 @@ Signals flow from left to right. Each port's colour shows its signal type, and i
 | Phase | Purple | Round | 0 to 1, wrapping |
 | Gate | Yellow | Square | High above 0.5 |
 
-Types only guide you. Any output can connect to any input, as in Eurorack or Bitwig's Grid. The signal rules are in [ADR-0007](../adr/0007-polymorphic-signal-model.md).
+Any output can connect to any input. The colour, shape, and range help you choose a match. The signal rules are in [ADR-0007](../adr/0007-polymorphic-signal-model.md).
 
 - **Filled ports** have a cable. **Rings** are free.
 - **Cables run behind the tiles, dimmed.** Point at a cable, a port, or a module to bring its cables to the front at full brightness. Selected modules keep their cables bright. Nothing else changes as you move the pointer, so you can follow one connection across a busy patch.
-- **Dashed cables** are part of a feedback loop. The engine adds a one-sample delay there, because a loop needs one to run. You can place your own delay with the "1-Sample Delay" module.
+- **A dashed signal cable** marks a one-sample delay inserted to break feedback. You can choose the break yourself with **1-Sample Delay**. See [feedback loops](../learn/feedback-loops.md).
+- **A clock mark** identifies a Transport default on an unpatched input. Hover the port to see its default. For example, Euclidean Rhythm in Phase mode follows the bar phase with no cable. An oscillator's Phase input uses the oscillator's own phase by default. See [normals](../learn/normals.md).
+- **A voice bundle** carries several voices on one cable. Hover an output to see its voice count. **Voice Merge** can sum those voices for a scope or an audio path.
 - **Zoomed out,** tiles hide their text so large patches stay readable and fast.
 
 ## Editing parameters
 
 Click a tile to select it. The inspector shows its parameters. Frequencies and times use a logarithmic scale, so the middle of the slider is musically in the middle. Whole-number parameters, such as a MIDI channel, snap to whole values.
 
+Click a numeric control and type an exact value. For example, click SVF Cutoff, type `1.6k`, then press Enter to set 1,600 Hz. Undo returns to the previous value.
+
+## Follow modulation and open a sub-patch
+
+Open [`modulation.ron`](../../examples/patches/modulation.ron) and find the badge next to the LFO's output. Hover to see where the assignment goes, then click the badge to pin the dashed modulation line. Open **Matrix** to see the source, target, depth, and polarity. Escape clears the pin. To make an assignment of your own, drag an output directly onto a knob. See [modulation](../design/modulation.md#seeing-assignments).
+
+For a playable voice with its wiring tucked inside, add **Synth voice** from the module browser. Patch MIDI Note's Pitch, Gate, and Velocity to the voice, then patch its output into Audio Out. Play a note or use **Hold note**. Double-click the voice's title to see its parts. Use the breadcrumb to go back up. The tile's context menu can swap compatible parts such as its filter. See [built-in sub-patches](../design/sub-patches.md#built-in-abstractions-agreed-2026-11-14).
 
 ## Saving
 
-**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away. Save writes to the file you opened, so use Save As to keep an example as it is. **Recent** lists the last 10 patches. You can also drag one patch onto the window to open it, except on Wayland, where the window system does not report dropped files yet: use Open or Recent there. Patch files are plain text in [RON](../adr/0008-patch-format-ron.md), so you can read them, edit them, and keep them in git.
+**New**, **Open**, **Save**, and **Save As** (Ctrl or Cmd with N, O, S, and Shift+S) work on `.ron` patch files, including module positions. The window title shows the file name, with a `*` in front when you have unsaved changes. The app asks before it throws changes away.
 
-## What is not there yet
+Bundled examples open as untitled copies. **Save** asks where to write your copy. For your own patch, Save writes to the current file and **Save As** lets you choose a new path. Saving rewrites the [RON](../adr/0008-patch-format-ron.md) text and drops its comments. Keep the source example handy if you want to reread its wiring notes. See [file commands](../design/files.md#defaults-for-the-dialogs).
 
-These are planned for Phase 1. Each has an issue on GitHub.
+**Recent** lists the last 10 patches. You can also drag a patch onto the window. On Wayland, use **Open** or **Recent**. Patch files are plain text, so you can read, edit, and keep them in git.
 
-- Copy and paste.
-- Oscilloscopes and level meters inside modules.
-- Modulation on parameters, MIDI learn, and a panic button.
-- Choosing audio and MIDI devices, and plugging devices in while the app runs.
+## Keep going
 
-See the [roadmap](../product/roadmap.md) and the [M1 milestone](https://github.com/brylie/LoomDSP/milestone/1) for the full list. Contributions are welcome: [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- [Learn](../learn/README.md) explains the signals and techniques behind these patches.
+- [Module help](../modules/README.md) lists ports, parameters, and examples.
+- [Contributing](../../CONTRIBUTING.md) shows how to report a problem or add an example.

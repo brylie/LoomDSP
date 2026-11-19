@@ -1680,12 +1680,12 @@ fn type_filters_the_open_browser() {
     ui.focus(&crate::browser::search_id());
     let before = ui.app().overlays.browser().unwrap().results().len();
 
-    assert_eq!(run_type(&mut ui, "osc saw"), Ok(Map::new()));
+    assert_eq!(run_type(&mut ui, "reverb"), Ok(Map::new()));
 
     let browser = ui.app().overlays.browser().unwrap();
     let names: Vec<&str> = browser.results().iter().map(|d| d.id).collect();
     assert!(names.len() < before, "the list was filtered");
-    assert!(names.contains(&"loom.osc.saw"), "found {names:?}");
+    assert!(names.contains(&"loom.time.allpass"), "found {names:?}");
 }
 
 /// With no text field in focus nothing is typed. A letter would otherwise

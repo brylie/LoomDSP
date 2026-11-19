@@ -43,6 +43,8 @@ The canvas keeps its own text sizes in world units (`TITLE_SIZE`, `LABEL_SIZE` i
 
 A disabled button keeps its role's shape and is drawn faded, so it reads as unavailable, not as another role.
 
+Tile and probe menus share a solid panel and the same row style. Menu text, including a disabled row, has at least 4.5:1 contrast with its fill. The edge of a row and the outline on hover or keyboard focus have at least 3:1 contrast. The panel edge also stands out against a tile and the canvas.
+
 ### Toolbar
 
 The toolbar shows the patch name, then its buttons in groups, with wider space between groups than inside them:
