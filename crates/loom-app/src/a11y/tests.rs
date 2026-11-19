@@ -616,7 +616,7 @@ fn a_widget_with_no_name_is_left_out() {
         without
             .nodes
             .iter()
-            .all(|(_, n)| n.label() != Some(tile.widgets[knob].label.as_str()))
+            .all(|(_, n)| n.role() != Role::Slider || n.label() != Some(tile.widgets[knob].label.as_str()))
     );
 }
 
@@ -1232,10 +1232,9 @@ fn only_changed_nodes_are_sent() {
     assert!(changes.tree.is_none(), "the root is named once");
     let changed = sent_ids(&changes);
     assert!(changed.contains(&cutoff));
-    // The knob, at most what shows the same value beside it, and the
-    // toolbar's Undo and Redo, which now have a step to name.
-    let undo = node_of(&mut app, &tree::toolbar_id().with("undo"));
-    assert!(changed.contains(&undo));
+    // The knob, and at most what shows the same value beside it. The
+    // toolbar's Undo and Redo, which now have a step to name, are
+    // `loom-ui`'s nodes (`toolbar/tests.rs`).
     assert!(changed.len() <= 4, "{changed:?}");
     assert!(changed.len() < whole.nodes.len());
 }
@@ -1957,35 +1956,6 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
     );
 }
 
-/// The toolbar is a named group of buttons. Each button has its label, its
-/// hover text as the description, and Click only while it works. A mode
-/// button says whether its mode is on. No button offers Focus: outside
-/// the canvas only text fields take it until phase 3 (ui-layer.md, section
-/// 7, rule 22).
-#[test]
-fn the_toolbar_is_a_group_of_buttons() {
-    let (mut app, _, _) = app_with_filter();
-    let update = app.a11y_tree(&Places::default());
-    let root = node_of(&mut app, &window_id());
-    let toolbar = node_of(&mut app, &tree::toolbar_id());
-    assert_eq!(node(&update, root).children().first(), Some(&toolbar));
-    assert_eq!(node(&update, toolbar).role(), Role::Group);
-    assert_eq!(node(&update, toolbar).label(), Some("Toolbar"));
-
-    let model = app.toolbar_model();
-    assert_eq!(node(&update, toolbar).children().len(), model.buttons.len());
-    for button in &model.buttons {
-        let found = node(&update, node_of(&mut app, &tree::toolbar_id().with(button.name)));
-        assert_eq!(found.role(), Role::Button, "{}", button.name);
-        assert_eq!(found.label(), Some(button.label));
-        assert_eq!(found.description(), button.hover.as_deref());
-        assert_eq!(found.supports_action(Action::Click), button.enabled, "{}", button.name);
-        assert_eq!(found.is_disabled(), !button.enabled, "{}", button.name);
-        assert!(!found.supports_action(Action::Focus), "{}", button.name);
-        assert_eq!(found.toggled().is_some(), button.on.is_some(), "{}", button.name);
-    }
-}
-
 /// A Click on a toolbar button sends the message its press sends. A
 /// disabled button, another action, and a node that is no button send
 /// nothing.
@@ -2019,8 +1989,8 @@ fn a_click_on_a_toolbar_button_presses_it() {
     let learn = node_of(&mut app, &tree::toolbar_id().with("midi_learn"));
     act(&mut app, &request(Action::Click, learn, None), now);
     assert!(app.ui_snapshot().learning);
-    let update = app.a11y_tree(&Places::default());
-    assert_eq!(node(&update, learn).toggled(), Some(accesskit::Toggled::True));
+    // The node says it is on: the toolbar's nodes come from `loom-ui`'s
+    // layout, checked with the `Ui` harness (`toolbar/tests.rs`).
 }
 
 /// The right panel's tabs are a tab list with the open tab selected, and a
@@ -2033,7 +2003,8 @@ fn the_right_panel_has_tabs() {
     let inspector = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Inspector));
     let matrix = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Matrix));
     assert_eq!(node(&update, list).role(), Role::TabList);
-    assert_eq!(node(&update, list).children(), [inspector, matrix]);
+    let outline = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Outline));
+    assert_eq!(node(&update, list).children(), [inspector, matrix, outline]);
     assert_eq!(node(&update, inspector).role(), Role::Tab);
     assert_eq!(node(&update, inspector).label(), Some("Inspector"));
     assert_eq!(node(&update, inspector).is_selected(), Some(true));
@@ -2049,13 +2020,14 @@ fn the_right_panel_has_tabs() {
     assert_eq!(node(&update, inspector).is_selected(), Some(false));
 }
 
-/// What a UI ID names outside the canvas: a button, a tab, or nothing that
-/// acts. The stats bar's parts are `loom-ui`'s (`stats_bar/tests.rs`).
+/// What a UI ID names outside the canvas: a tab, or nothing that acts. The
+/// toolbar's, the breadcrumb's, and the stats bar's parts are `loom-ui`'s
+/// and act through their own clicks (`toolbar/tests.rs`,
+/// `stats_bar/tests.rs`).
 #[test]
 fn frame_parts_are_told_by_their_ids() {
     use tree::{FramePart, frame_part};
     let id = |text: &str| tree::fixed_id(text);
-    assert_eq!(frame_part(&id("toolbar/undo")), Some(FramePart::Button("undo")));
     assert_eq!(
         frame_part(&id("panel/matrix")),
         Some(FramePart::Tab(crate::matrix::Tab::Matrix))
@@ -2065,6 +2037,7 @@ fn frame_parts_are_told_by_their_ids() {
         Some(FramePart::Tab(crate::matrix::Tab::Inspector))
     );
     for nothing in [
+        "toolbar/undo",
         "stats/load",
         "stats/status/dismiss",
         "stats/measure",
@@ -2091,29 +2064,23 @@ fn frame_nodes_have_the_bounds_the_window_drew() {
     ui.app_mut().window_scale = 2.0;
     let update = ui.app_mut().a11y_tree(&places);
 
-    let mut ids: Vec<UiId> = ui
-        .app()
-        .toolbar_model()
-        .buttons
-        .iter()
-        .map(|button| tree::toolbar_id().with(button.name))
-        .collect();
-    // The stats bar's parts are `loom-ui`'s, placed by its layout
-    // (`stats_bar/tests.rs`).
-    ids.push(tree::tab_id(crate::matrix::Tab::Inspector));
-    ids.push(tree::tab_id(crate::matrix::Tab::Matrix));
-    // The groups hold their parts, so only the parts are compared for
+    // The toolbar's and the stats bar's parts are `loom-ui`'s, placed by
+    // its layout (`toolbar/tests.rs`, `stats_bar/tests.rs`).
+    let ids: Vec<UiId> = vec![
+        tree::tab_id(crate::matrix::Tab::Inspector),
+        tree::tab_id(crate::matrix::Tab::Matrix),
+    ];
+    // The tab list holds the tabs, so only the tabs are compared for
     // overlap below.
-    for group in [tree::toolbar_id(), tree::tabs_id()] {
-        let place = places
-            .of(&group)
-            .unwrap_or_else(|| panic!("the window drew no `{group}`"));
-        assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{group}");
-        assert!(
-            node(&update, node_of(ui.app_mut(), &group)).bounds().is_some(),
-            "{group}"
-        );
-    }
+    let group = tree::tabs_id();
+    let place = places
+        .of(&group)
+        .unwrap_or_else(|| panic!("the window drew no `{group}`"));
+    assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{group}");
+    assert!(
+        node(&update, node_of(ui.app_mut(), &group)).bounds().is_some(),
+        "{group}"
+    );
     let mut seen: Vec<accesskit::Rect> = Vec::new();
     for id in &ids {
         let place = places.of(id).unwrap_or_else(|| panic!("the window drew no `{id}`"));
@@ -2136,20 +2103,25 @@ fn frame_nodes_have_the_bounds_the_window_drew() {
 
 /// While a panel owns the input, the toolbar, the tabs, and the bar are
 /// hidden with the tiles, and a Click on a button behind the panel does
-/// nothing.
+/// nothing. The toolbar's nodes come from `loom-ui`'s layout, so this
+/// runs on the `Ui` harness.
 #[test]
 fn frame_nodes_are_hidden_below_a_panel() {
-    let (mut app, _, _) = app_with_filter();
-    let _ = app.a11y_tree(&Places::default());
-    let add = node_of(&mut app, &tree::toolbar_id().with("add_module"));
-    app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
-    assert!(!app.no_overlay());
-    let update = app.a11y_tree(&Places::default());
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let add = node_of(ui.app_mut(), &tree::toolbar_id().with("add_module"));
+    ui.app_mut()
+        .overlays
+        .open(crate::overlays::Overlay::RecentList(Vec::new()));
+    ui.redraw();
+    assert!(!ui.app().no_overlay());
+    ui.read_runtime_nodes();
+    let places = ui.places();
+    let update = ui.app_mut().a11y_tree(&places);
     for id in [tree::toolbar_id(), tree::tabs_id(), tree::toolbar_id().with("undo")] {
-        assert!(node(&update, node_of(&mut app, &id)).is_hidden(), "{id}");
+        assert!(node(&update, node_of(ui.app_mut(), &id)).is_hidden(), "{id}");
     }
-    assert!(!act(
-        &mut app,
+    assert!(!ui_act(
+        &mut ui,
         &request(Action::Click, add, None),
         std::time::Instant::now()
     ));
@@ -2285,10 +2257,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             tile.widgets[knob].position
         };
 
-        // What a screen reader is told, and what its actions would do.
+        // What a screen reader is told, and what its actions would do. The
+        // toolbar is `loom-ui`'s: its nodes come from the runtime's layout.
+        ui.read_runtime_nodes();
         let places = ui.places();
         let panic_id = tree::toolbar_id().with("panic");
-        assert!(places.of(&panic_id).is_some(), "Panic is drawn");
+        assert!(ui.runtime().bounds(&panic_id).is_some(), "Panic is drawn");
         let update = ui.app_mut().a11y_tree(&places);
         let panic_node = node_of(ui.app_mut(), &panic_id);
         let click = ui.app().a11y_frame_message(&request(Action::Click, panic_node, None));
@@ -2350,11 +2324,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
     }
     for (owner, mut ui) in with_each_panel() {
         let open = owner == InputOwner::Canvas;
+        ui.lay_out_panels();
         let panic = ui
-            .places()
-            .of(&tree::toolbar_id().with("panic"))
+            .runtime()
+            .bounds(&tree::toolbar_id().with("panic"))
             .expect("Panic is drawn");
-        let mut messages = ui.move_to(panic.rect.center());
+        let mut messages = ui.move_to(panic.center());
         messages.extend(ui.press());
         messages.extend(ui.release());
         let reached = messages.iter().any(|message| matches!(message, Message::Panic));
@@ -3064,6 +3039,7 @@ fn the_matrix_rows_are_a_list_in_the_order_shown() {
         assert_eq!(list.size_of_set(), Some(2));
         let model = ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
             &ui.app().session.selection,
             ui.app().right_tab,
         );
@@ -3121,7 +3097,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let graph = ui.app().session.controller.graph();
     let (id, a) = graph.assignments().next().map(|(id, a)| (id, *a)).unwrap();
     let other = graph.assignments().nth(1).map(|(_, a)| a.source).unwrap();
-    let options = crate::matrix::sources(graph);
+    let options = crate::matrix::sources(graph, &ui.app().session.hierarchy);
     // The step lands on a source no other row joins to this target.
     let Some(Message::Matrix(crate::matrix::Event::Source(_, pick))) = ui.app().matrix_source_step(id, true, &options)
     else {
@@ -3186,10 +3162,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let id = first_assignment(ui.app());
     // Step back until no source is left that way.
     for _ in 0..64 {
-        let Some(message) =
-            ui.app()
-                .matrix_source_step(id, false, &crate::matrix::sources(ui.app().session.controller.graph()))
-        else {
+        let Some(message) = ui.app().matrix_source_step(
+            id,
+            false,
+            &crate::matrix::sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy),
+        ) else {
             break;
         };
         ui.send(message);
@@ -3197,7 +3174,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let id = ui.app().session.matrix.selected.unwrap_or(id);
     assert!(
         ui.app()
-            .matrix_source_step(id, false, &crate::matrix::sources(ui.app().session.controller.graph()))
+            .matrix_source_step(
+                id,
+                false,
+                &crate::matrix::sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
+            )
             .is_none()
     );
     let steps = ui.app().session.edits.history.len();
@@ -3421,7 +3402,7 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
     ui.app_mut().show_level(&ModulePath::root());
     ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
 
-    let targets = crate::matrix::targets(ui.app().session.controller.graph());
+    let targets = crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy);
     let goal = targets
         .iter()
         .position(|t| (t.module, t.param) == (svf, cutoff))
@@ -3624,6 +3605,7 @@ fn with_each_small_overlay() -> Vec<(&'static str, crate::ui_test::Ui)> {
 fn every_small_overlay_part_is_named_and_placed() {
     use super::items::Kind;
     for (name, mut ui) in with_each_small_overlay() {
+        ui.read_runtime_nodes();
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         let frames = ui.app().a11y_frames();
@@ -4875,4 +4857,93 @@ fn a_change_during_a_rebuild_asks_for_one_more() {
     app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating, "and no third");
     assert!(!app.a11y.again);
+}
+
+/// The canvas's open editor owns accessibility focus and reports its current draft and caret.
+#[test]
+fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob() {
+    use crate::ui_test::{Ui, key_press};
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let (app, module, _) = app_with_filter();
+    let mut ui = Ui::with_app(app);
+    let point = ui.control(module, "cutoff");
+    ui.move_to(point);
+    ui.press();
+    ui.release();
+    let control = ui.a11y_tree().focused().node_id();
+    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let places = ui.places();
+    let tree = ui.app_mut().a11y_tree(&places);
+    let field = node(&tree, tree.focus);
+    assert_eq!(field.role(), Role::TextInput);
+    assert_eq!(field.label(), Some("Cutoff value"));
+    let shown = field.value().unwrap();
+    let selection = field.text_selection().unwrap();
+    assert_eq!(selection.anchor.character_index, 0);
+    assert_eq!(selection.focus.character_index, shown.chars().count());
+    assert_eq!(node(&tree, selection.focus.node).role(), Role::TextRun);
+    ui.step(&[key_press(
+        Key::Character("6".into()),
+        Modifiers::empty(),
+        Some("6"),
+        false,
+    )]);
+    let places = ui.places();
+    let tree = ui.app_mut().a11y_tree(&places);
+    let field = node(&tree, tree.focus);
+    assert_eq!(field.value(), Some("6"));
+    assert_eq!(field.text_selection().unwrap().focus.character_index, 1);
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert_eq!(ui.a11y_tree().focused().node_id(), control);
+    assert_eq!(ui.a11y_tree().focused().role(), Role::Slider);
+}
+
+/// Places measured before a resize are superseded before the reader sees them.
+#[test]
+fn a_stale_located_answer_is_read_again_after_resize() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.deliver(Message::A11y(Event::Activated));
+    for _ in 0..3 {
+        ui.redraw();
+    }
+    let old = ui.places();
+    let id = tree::tab_id(crate::matrix::Tab::Outline);
+    let node_id = crate::a11y::tests::node_of(ui.app_mut(), &id);
+    let old_x = old.of(&id).unwrap().rect.x;
+    ui.take_sent_trees();
+    ui.resize(1360.0, 810.0);
+    ui.deliver(Message::A11y(Event::Located(old)));
+    for _ in 0..4 {
+        ui.redraw();
+    }
+    let new_x = ui.places().of(&id).unwrap().rect.x;
+    assert_ne!(new_x, old_x);
+    let trees = ui.take_sent_trees();
+    assert!(!trees.is_empty());
+    for tree in &trees {
+        assert_eq!(node(tree, node_id).bounds().unwrap().x0, f64::from(new_x));
+    }
+}
+
+/// The canvas describes the same neighbours as the outline and links outputs to their inputs.
+#[test]
+fn canvas_ports_and_tiles_report_the_outline_connections() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let places = ui.places();
+    let tree_update = ui.app_mut().a11y_tree(&places);
+    let filter = node_of(ui.app_mut(), &tile_id(4));
+    let lowpass = node_of(ui.app_mut(), &tile_id(4).with("output").with("lowpass"));
+    let multiply = node_of(ui.app_mut(), &tile_id(8).with("input").with("a"));
+    let scope = node_of(ui.app_mut(), &tile_id(11).with("input").with("in"));
+    let words = node(&tree_update, filter).description().unwrap();
+    assert!(
+        ui.app()
+            .outline_rows()
+            .iter()
+            .any(|row| row.name == format!("SVF. {words}"))
+    );
+    let port = node(&tree_update, lowpass);
+    assert_eq!(port.controls(), [multiply, scope]);
+    assert!(port.description().unwrap().contains("To Multiply 8 A and Scope In"));
+    assert!(node(&tree_update, multiply).controls().is_empty());
 }

@@ -90,3 +90,25 @@ fn a_save_never_removes_a_temporary_file_it_did_not_create() {
     assert!(!path.exists(), "nothing was written");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A test build refuses to save over an example in the repository, and
+/// names the test: the `Ui` harness opens copies, so this trips only when
+/// something reaches a real example another way. The path is a new name in
+/// the examples folder, so even a missing guard would only add a file,
+/// which is removed at the end.
+#[test]
+#[should_panic(expected = "tried to save over an example in the repository")]
+fn a_test_cannot_save_over_an_example() {
+    /// Removes the file it names when dropped, so a missing guard leaves
+    /// nothing behind.
+    struct Remove(std::path::PathBuf);
+    impl Drop for Remove {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let path = crate::ui_test::example_path("refused-by-the-guard.ron");
+    let _remove = Remove(path.clone());
+    let patch = loom_patch::Patch::from_ron(r#"Patch(version: 1, metadata: Metadata(name: "Guard"))"#).unwrap();
+    let _ = save(&patch, &path);
+}

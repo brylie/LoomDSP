@@ -214,7 +214,7 @@ fn tile_port(graph: &Graph, hierarchy: &Hierarchy, module: u32, name: &str, outp
 
 /// The name of a port on a tile, by its place: a module's port, a sub-patch
 /// tile's, or a port tile's one port.
-fn port_name(graph: &Graph, hierarchy: &Hierarchy, port: PortRef) -> Option<String> {
+pub(crate) fn port_name(graph: &Graph, hierarchy: &Hierarchy, port: PortRef) -> Option<String> {
     let id = ModuleId(port.module);
     if let Some(node) = graph.node(id) {
         return Some(if port.output {

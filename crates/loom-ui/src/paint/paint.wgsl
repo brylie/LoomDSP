@@ -53,7 +53,7 @@ struct ShapeIn {
     @location(0) rect: vec4<f32>,
     @location(1) fill: vec4<f32>,
     @location(2) border: vec4<f32>,
-    // corner radius and border width (host units), minimum border (physical px), unused.
+    // corner radius and border width (host units), minimum border (physical px), and angle (radians).
     @location(3) params: vec4<f32>,
 };
 
@@ -80,7 +80,13 @@ fn vs_shape(@builtin(vertex_index) vi: u32, shape: ShapeIn) -> ShapeOut {
     let centre = shape.rect.xy + shape.rect.zw * 0.5;
 
     var result: ShapeOut;
-    result.position = to_clip(centre + local / px);
+    var offset = local;
+    if (shape.params.w != 0.0) {
+        let c = cos(shape.params.w);
+        let s = sin(shape.params.w);
+        offset = vec2<f32>(c * local.x - s * local.y, s * local.x + c * local.y);
+    }
+    result.position = to_clip(centre + offset / px);
     result.local = local;
     result.half_size = half_size;
     result.fill = shape.fill;

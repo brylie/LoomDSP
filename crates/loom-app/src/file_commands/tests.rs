@@ -180,6 +180,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         matrix,
         run_driven,
         scene,
+        patch_map,
+        outline,
         mode_key,
         // Rebuilt from the new patch, as the scene is.
         values: _,
@@ -211,6 +213,8 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert!(cameras.is_empty());
     assert_eq!(*level_key, 0);
     assert_eq!(scene.modules().len(), 1);
+    assert_eq!(patch_map.structure.tiles.len(), 1);
+    assert!(!outline.active && !outline.has_jump());
     assert!(!retry_commit);
     assert!(!positions.contains_key(&added.0));
     assert!(unknown_positions.is_empty());

@@ -74,6 +74,8 @@ pub struct UiSnapshot {
     pub licence: Option<crate::licence_chooser::Model>,
     /// The active right-hand tab and visible modulation matrix rows.
     pub matrix: MatrixModel,
+    /// The visible signal-flow rows for the shown level.
+    pub(crate) outline: Vec<crate::outline::Row>,
     /// The stats bar's audio numbers.
     pub stats: Stats,
     /// The pointer and what it is on, as the canvas last drew it. `None`
@@ -588,6 +590,11 @@ impl App {
 
     /// What the user sees now.
     pub(crate) fn ui_snapshot(&self) -> UiSnapshot {
+        self.snapshot_models(self.right_tab == crate::matrix::Tab::Outline || self.a11y.is_active())
+    }
+
+    /// Reads the visible models, with outline rows on request.
+    fn snapshot_models(&self, include_outline: bool) -> UiSnapshot {
         let tiles = self
             .session
             .scene
@@ -727,10 +734,17 @@ impl App {
                 .chooser
                 .as_ref()
                 .map(crate::licence_chooser::Chooser::model),
-            matrix: self
-                .session
-                .matrix
-                .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
+            matrix: self.session.matrix.model(
+                self.session.controller.graph(),
+                &self.session.hierarchy,
+                &self.session.selection,
+                self.right_tab,
+            ),
+            outline: if include_outline {
+                self.outline_rows().to_vec()
+            } else {
+                Vec::new()
+            },
             stats: self.stats_model(),
             pointer: self.pointer_state(),
             typed_field: self.typed_field_state(),
@@ -796,7 +810,7 @@ pub fn headless(args: &Args) -> Result<App, String> {
 /// `loom-app --dump-ui`: returns the snapshot of the [`headless`] app as
 /// JSON.
 pub fn run(args: &Args) -> Result<String, String> {
-    serde_json::to_string_pretty(&headless(args)?.ui_snapshot()).map_err(|e| e.to_string())
+    serde_json::to_string_pretty(&headless(args)?.snapshot_models(true)).map_err(|e| e.to_string())
 }
 
 /// Writes a value in a snapshot as its text, for a type with no serde form

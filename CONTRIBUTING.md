@@ -118,7 +118,7 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 |---|---|---|
 | Format | `rustfmt` style | `mise run fmt` |
 | Clippy | Lint groups set in the workspace `Cargo.toml`: correctness, suspicious, complexity, perf, style, cargo | `mise run clippy` |
-| Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile | `mise run test` (on your OS) |
+| Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile. Nextest isolates each test in its own process. Cargo runs the doc tests. | `mise run test` (on your OS) |
 | Coverage | Line coverage of all tests (run with [nextest](https://nexte.st)), at least the minimum. Sends coverage and test results to Codecov, and coverage to GitHub | `mise run coverage` |
 | Docs | API docs build without warnings | `mise run docs` |
 | MSRV | Still builds with Rust 1.100 | `mise run msrv` |

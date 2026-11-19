@@ -13,6 +13,7 @@ fn a_full_file_reads_back() {
     let preferences = Preferences {
         output_safety: OutputSafety::Clean,
         show_activity: false,
+        patch_map: MapMode::Always,
         audio: AudioPrefs {
             device: DeviceChoice::Named("MOTU M4".into()),
             input: InputChoice::Named("Microphone".into()),
@@ -36,6 +37,7 @@ fn a_full_file_reads_back() {
     version: 1,
     output_safety: "clean",
     show_activity: false,
+    patch_map: Always,
     audio: (
         device: Named("MOTU M4"),
         input: Named("Microphone"),

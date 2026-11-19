@@ -567,30 +567,7 @@ impl CanvasModel<'_> {
                 true
             }
             Key::Tab => {
-                let mut order: Vec<_> = self.scene.modules().iter().collect();
-                order.sort_by(|a, b| {
-                    a.position
-                        .y
-                        .total_cmp(&b.position.y)
-                        .then_with(|| a.position.x.total_cmp(&b.position.x))
-                        .then_with(|| a.id.cmp(&b.id))
-                });
-                // Anchor each row to its first top. Comparing pairs with a
-                // tolerance would give a non-transitive ordering.
-                let mut rest = order.as_mut_slice();
-                while let Some(first) = rest.first() {
-                    let bottom = first.position.y + 3.0 * GRID;
-                    let count = rest.partition_point(|tile| tile.position.y <= bottom);
-                    let (row, next) = rest.split_at_mut(count.max(1));
-                    row.sort_by(|a, b| {
-                        a.position
-                            .x
-                            .total_cmp(&b.position.x)
-                            .then_with(|| a.position.y.total_cmp(&b.position.y))
-                            .then_with(|| a.id.cmp(&b.id))
-                    });
-                    rest = next;
-                }
+                let order = self.scene.reading_order();
                 if order.is_empty() {
                     return false;
                 }

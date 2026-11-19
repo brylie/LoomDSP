@@ -173,12 +173,15 @@ pub(super) fn to_window(view: &CanvasView, world: Rect) -> Rect {
 /// The first keys a UI ID's text can start with: the window's panels and
 /// the overlays (`docs/design/ui-layer.md`, section 4, rule 5). A target that starts
 /// with another word is not taken for a UI ID.
-const PANELS: [&str; 14] = [
+const PANELS: [&str; 17] = [
     "canvas",
     "toolbar",
+    "breadcrumb",
     "panel",
     "inspector",
     "matrix",
+    "outline",
+    "cable-jump",
     "stats",
     "menu",
     "recent",
@@ -192,7 +195,7 @@ const PANELS: [&str; 14] = [
 
 /// `target` as a UI ID, when it is the text of one: its first key is a
 /// panel's name.
-fn ui_id(target: &str) -> Option<UiId> {
+pub(crate) fn ui_id(target: &str) -> Option<UiId> {
     let id: UiId = target.parse().ok()?;
     match id.keys().first()? {
         IdKey::Name(panel) if PANELS.contains(&&**panel) => Some(id),
@@ -233,8 +236,8 @@ fn locate_id(app: &App, id: &UiId, found: &Found) -> Result<Option<Rect>, String
 /// a UI ID inside one of its panels, or plain text it may show. Such a
 /// `locate` waits for a current layout; any other, a missing module or a
 /// part of Iced's scrolled out of view, answers at once with its error.
-pub(crate) fn waits_for_ours<M>(app: &App, target: &str, found: &Found, cx: &loom_ui::Context<'_, M>) -> bool {
-    locate(app, target, found).is_err() && may_be_ours(target, cx)
+pub(crate) fn waits_for_ours(app: &App, target: &str, found: &Found) -> bool {
+    locate(app, target, found).is_err() && may_be_ours(target) && found.text.is_none()
 }
 
 /// True when `target` may name a part only the runtime's layout places, so
@@ -242,11 +245,8 @@ pub(crate) fn waits_for_ours<M>(app: &App, target: &str, found: &Found, cx: &loo
 /// text, which the runtime's panels may show. A module, a control, or a
 /// port by name never is: the canvas places those. `locate` and the
 /// pointer commands both wait by this rule, so the two cannot drift.
-pub(crate) fn may_be_ours<M>(target: &str, cx: &loom_ui::Context<'_, M>) -> bool {
-    match ui_id(target) {
-        Some(id) => cx.holds(&id),
-        None => split_target(target).is_none(),
-    }
+pub(crate) fn may_be_ours(target: &str) -> bool {
+    split_target(target).is_none()
 }
 
 /// Where the runtime's layout places `target` for a pointer command, or

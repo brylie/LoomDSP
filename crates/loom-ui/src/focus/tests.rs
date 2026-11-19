@@ -114,18 +114,21 @@ impl App for Panels {
     }
 }
 
-/// A focus stop the fake measures at 8 pixels a character, 16 high.
+/// A focus stop the fake measures at 8 pixels a character, 16 high. A
+/// combo box, so a press focuses it: a button or a switch takes no focus
+/// from a press (ui-layer.md, section 6, rule 3), and these tests are
+/// about the focus a press, Tab, or an effect gives.
 fn stop(key: &str) -> Element {
     Element::text(key, STYLE)
         .key(key)
         .focusable()
-        .access(Access::new(Role::Button, key).action(Action::Click))
+        .access(Access::new(Role::ComboBox, key).action(Action::Click))
 }
 
 /// A stop that is turned off.
 fn off(key: &str) -> Element {
     Element::text(key, STYLE).key(key).focusable().access(
-        Access::new(Role::Button, key)
+        Access::new(Role::ComboBox, key)
             .action(Action::Click)
             .description("Nothing to save")
             .states(States {
@@ -610,7 +613,7 @@ fn the_nodes_come_from_the_elements() {
     let (open_id, open) = find("open");
     let (volume_id, volume) = find("Volume");
     assert_eq!(group.role(), KitRole::Group);
-    assert_eq!(open.role(), KitRole::Button);
+    assert_eq!(open.role(), KitRole::ComboBox);
     assert_eq!(volume.role(), KitRole::Slider);
     assert_eq!(
         group.children(),

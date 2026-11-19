@@ -350,37 +350,42 @@ pub fn view(controller: &Controller, hierarchy: &Hierarchy, level: &ModulePath, 
     view
 }
 
-/// A parameter as the status bar names it: "Filter #3 Cutoff".
-pub fn param_name(controller: &Controller, (module, param): Param) -> String {
-    controller
-        .graph()
-        .node(ModuleId(module))
-        .and_then(|node| {
-            if let Some(unknown) = &node.unknown {
-                return Some(format!(
-                    "{} #{module} {}",
-                    node.label.as_deref().unwrap_or(&unknown.kind),
-                    unknown.parameters.get(param)?
-                ));
-            }
-            let spec = node.descriptor.params.get(param)?;
-            Some(format!("{} #{module} {}", node.descriptor.name, spec.label))
-        })
-        .unwrap_or_else(|| format!("#{module}"))
+/// The module and parameter as the status bar names them.
+pub fn param_name(controller: &Controller, hierarchy: &loom_patch::Hierarchy, (module, param): Param) -> String {
+    let graph = controller.graph();
+    let id = ModuleId(module);
+    let name = crate::modulation::Names::new(graph, hierarchy).module(id);
+    let label = graph.node(id).and_then(|node| {
+        if let Some(unknown) = &node.unknown {
+            unknown.parameters.get(param).map(String::as_str)
+        } else {
+            node.descriptor.params.get(param).map(|spec| spec.label)
+        }
+    });
+    label.map_or_else(|| name.clone(), |label| format!("{name} {label}"))
 }
 
 /// The status after a mapping is made. Names the parameter a control left,
 /// if it was mapped elsewhere before (spec, Making a mapping).
-pub fn mapped_status(controller: &Controller, mapping: MidiMapping, removed: &[MidiMapping]) -> String {
+pub fn mapped_status(
+    controller: &Controller,
+    hierarchy: &loom_patch::Hierarchy,
+    mapping: MidiMapping,
+    removed: &[MidiMapping],
+) -> String {
     let target = (mapping.target.0, mapping.param);
-    let mut status = format!("Mapped {} to {}", mapping.control, param_name(controller, target));
+    let mut status = format!(
+        "Mapped {} to {}",
+        mapping.control,
+        param_name(controller, hierarchy, target)
+    );
     if let Some(left) = removed
         .iter()
         .find(|old| old.control == mapping.control && (old.target.0, old.param) != target)
     {
         status.push_str(&format!(
             ". It no longer moves {}",
-            param_name(controller, (left.target.0, left.param))
+            param_name(controller, hierarchy, (left.target.0, left.param))
         ));
     }
     status

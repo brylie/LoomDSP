@@ -505,6 +505,8 @@ struct Form {
     noticed: Vec<String>,
     /// Every field message, notice, and screen reader action, in order.
     log: Vec<String>,
+    /// How many times the runtime asked where Tab goes (`App::tab_from`).
+    tabs: std::cell::Cell<u32>,
 }
 
 impl App for Form {
@@ -556,6 +558,12 @@ impl App for Form {
             layer: self.covered.unwrap_or(Layer::Canvas),
             ..crate::app::InputState::default()
         }
+    }
+
+    /// Counts the question, and answers as the default does.
+    fn tab_from(&self, _from: &UiId, next: Option<&UiId>, _back: bool) -> crate::app::TabStep<Message> {
+        self.tabs.set(self.tabs.get() + 1);
+        next.map_or(crate::app::TabStep::Leave, |next| crate::app::TabStep::To(next.clone()))
     }
 
     fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
@@ -2311,4 +2319,27 @@ fn a_refusal_is_heard_after_focus_moved_and_empty_says_nothing() {
     empty.give(crate::ClipboardText::Empty);
     harness.step(DriverEvent::Woken);
     assert_eq!(harness.app().log.len(), start + 1, "an empty clipboard says nothing");
+}
+
+/// While the input method composes in a focused field, Tab is the input
+/// method's: the runtime never asks the app where Tab goes (`App::tab_from`,
+/// plan 3.2, row 2), so the focus stays in the field. Once the text is
+/// committed, Tab steps on as usual, and the app is asked.
+#[test]
+fn tab_while_composing_never_asks_where_tab_goes() {
+    let Some((mut harness, _typesetter)) = form("ab", true) else {
+        return;
+    };
+    harness.step(ime_in(preedit("に")));
+    harness.step(key_in(Key::Tab, Modifiers::NONE, None));
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&name()),
+        "the focus stayed in the field"
+    );
+    assert_eq!(harness.app().tabs.get(), 0, "tab_from never ran");
+    harness.step(ime_in(ImeEvent::Commit("日".to_owned())));
+    harness.step(key_in(Key::Tab, Modifiers::NONE, None));
+    assert_eq!(harness.app().tabs.get(), 1, "after the commit, Tab asks");
+    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("form").with("ok")));
 }

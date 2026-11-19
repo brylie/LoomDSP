@@ -25,7 +25,7 @@ impl Still {
     /// [`Runtime::paint`](crate::Runtime::paint) does, with nothing
     /// focused, so no field shows a caret.
     pub fn paint(&self, layer: Layer, painter: &mut dyn TextPainter, style: &PanelStyle) {
-        let _ = self.window.paint(layer, painter, style, None, 1.0);
+        let _ = self.window.paint(layer, painter, style, None, (None, None), 1.0);
     }
 }
 

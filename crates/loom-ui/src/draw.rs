@@ -31,7 +31,9 @@
 //! The walk paints a whole layer each time it is asked: it runs only for
 //! frames that are drawn, and a still window draws none (NFR-PERF-04).
 
+use crate::access::Access;
 use crate::app::App;
+use crate::element::State;
 use crate::field::{FieldState, Fields};
 use crate::focus::Focus;
 use crate::layout::{Layout, Record, cut};
@@ -60,15 +62,40 @@ pub struct Panels<'a, A: App> {
     pub(crate) scale: f32,
 }
 
-/// What painting a text field needs besides its layout: the fields'
-/// state, which one has focus, and the window's scale.
-pub(crate) struct FieldPaint<'a> {
+/// What painting a panel needs besides its layout: the fields' state,
+/// which element has focus, which is hovered and which pressed (for the
+/// [`Looks`](crate::Looks) of each), and the window's scale.
+pub(crate) struct PaintState<'a> {
     /// The fields' state.
     pub(crate) fields: &'a Fields,
     /// The element with focus.
     pub(crate) focus: Option<&'a UiId>,
+    /// The element under the pointer.
+    pub(crate) hovered: Option<&'a UiId>,
+    /// The element that shows as pressed ([`Panels::shown_pressed`]).
+    pub(crate) pressed: Option<&'a UiId>,
     /// Physical pixels per logical pixel.
     pub(crate) scale: f32,
+}
+
+impl PaintState<'_> {
+    /// The state `record` is painted in: off when its access is turned
+    /// off, whatever else holds; then pressed, then hovered, then normal.
+    fn state_of(&self, record: &Record) -> State {
+        if record.access.as_ref().is_some_and(Access::is_disabled) {
+            return State::Off;
+        }
+        let Some(id) = record.id.as_ref() else {
+            return State::Normal;
+        };
+        if self.pressed == Some(id) {
+            State::Pressed
+        } else if self.hovered == Some(id) {
+            State::Hovered
+        } else {
+            State::Normal
+        }
+    }
 }
 
 impl<A: App> Panels<'_, A> {
@@ -85,6 +112,12 @@ impl<A: App> Panels<'_, A> {
         self.report_focus();
     }
 
+    /// Finds a named element or visible text in the current layout.
+    pub fn locate(&self, id: Option<&UiId>, text: &str) -> Option<Rect> {
+        id.and_then(|id| self.window.bounds(id))
+            .or_else(|| self.window.text_bounds(text))
+    }
+
     /// Chooses the hover text to show, from the hovered element and the
     /// focused one in the layers that take input, and lays it out
     /// (section 5, rule 11).
@@ -93,14 +126,15 @@ impl<A: App> Panels<'_, A> {
         // pointer that did not move: it is hovered no more, unless the
         // pointer is on its hover text.
         if let (Some((_, id)), Some(at)) = (&self.pointer.hovered, self.pointer.at) {
-            // Its box only: the rest of the keep area is where the element
-            // was before this layout.
-            let on_hint = self
-                .window
-                .hint()
-                .is_some_and(|hint| hint.source == *id && hint.on_box(at));
-            if !on_hint && !self.window.bounds(id).is_some_and(|bounds| bounds.contains(at)) {
-                self.pointer.hovered = None;
+            let keeps_hover = self.window.bounds(id).is_some_and(|anchor| {
+                anchor.contains(at)
+                    || self
+                        .window
+                        .hint()
+                        .is_some_and(|hint| hint.source == *id && hint.keeps(at, anchor))
+            });
+            if !keeps_hover {
+                self.pointer.set_hover(None);
             }
         }
         let input = self.app.input().layer;
@@ -114,8 +148,10 @@ impl<A: App> Panels<'_, A> {
         };
         let hovered = self.pointer.hovered.as_ref().and_then(|(_, id)| with_text(id));
         let focused = self.focus.id().and_then(with_text);
-        let hover = self.pointer.hovered.as_ref().map(|(_, id)| id);
-        let chosen = self.pointer.hint.choose(hovered, focused, hover, self.focus.moves);
+        let chosen = self
+            .pointer
+            .hint
+            .choose(hovered, focused, self.pointer.hover_moves, self.focus.moves);
         let style = self.app.hint_style();
         let shown = chosen.and_then(|(source, hover)| {
             let anchor = self.window.bounds(&source)?;
@@ -165,7 +201,16 @@ impl<A: App> Panels<'_, A> {
             self.window.is_settled(self.size),
             "the window changed since it was last laid out: call Runtime::lay_out first"
         );
-        let painted = self.window.paint(layer, painter, style, self.focus.id(), self.scale);
+        let hovered = self.pointer.hovered.as_ref().map(|(_, id)| id.clone());
+        let pressed = self.shown_pressed();
+        let painted = self.window.paint(
+            layer,
+            painter,
+            style,
+            self.focus.id(),
+            (hovered.as_ref(), pressed.as_ref()),
+            self.scale,
+        );
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
     }
@@ -206,12 +251,15 @@ impl Layout {
         clip: Rect,
         painter: &mut dyn TextPainter,
         style: &PanelStyle,
-        fields: Option<&FieldPaint<'_>>,
+        fields: Option<&PaintState<'_>>,
     ) -> u64 {
         let by = Vector::new(origin.x, origin.y);
         let records = self.records();
         // The clipping elements whose layers are open, outermost first.
         let mut open: Vec<usize> = Vec::new();
+        // The elements with looks around this one, innermost last, with
+        // the text colour of the state each shows.
+        let mut tints: Vec<(usize, Option<Color>)> = Vec::new();
         for (index, record) in records.iter().enumerate() {
             while let Some(&clipping) = open.last() {
                 if is_around(records, clipping, index) {
@@ -220,13 +268,30 @@ impl Layout {
                 open.pop();
                 painter.end_layer();
             }
+            while let Some(&(tinting, _)) = tints.last() {
+                if is_around(records, tinting, index) {
+                    break;
+                }
+                tints.pop();
+            }
             let bounds = moved(record.bounds, by);
             let look = record.look;
+            let shown = look.states.map(|states| {
+                let state = fields.map_or(State::Normal, |live| live.state_of(record));
+                states.of(state)
+            });
+            if let Some(shown) = shown {
+                tints.push((index, shown.text));
+            }
+            let tint = tints.last().and_then(|(_, colour)| *colour);
             if look.draws_box() {
                 let (border_width, border) = look.border.unwrap_or((0.0, Color::TRANSPARENT));
                 painter.quad(Quad {
                     rect: bounds,
-                    fill: look.background.unwrap_or(Color::TRANSPARENT),
+                    fill: shown
+                        .and_then(|shown| shown.background)
+                        .or(look.background)
+                        .unwrap_or(Color::TRANSPARENT),
                     border,
                     border_width,
                     radius: look.radius,
@@ -275,7 +340,7 @@ impl Layout {
                     vertical: Vertical::Top,
                     style: text.style,
                     wrap: text.wrap,
-                    colour: text.colour.unwrap_or(style.text),
+                    colour: text.colour.or(tint).unwrap_or(style.text),
                     clip: shows,
                 });
             }

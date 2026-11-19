@@ -181,6 +181,32 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
+    /// Reports changes to the typed value field to a listening screen reader.
+    pub fn report_typed(mut self, report: bool) -> Self {
+        self.model = self.model.report_typed(report);
+        self
+    }
+
+    /// Applies a screen reader's draft edit when its key changes.
+    pub fn typed_request(mut self, key: u64, request: Option<&'a crate::TypedRequest>) -> Self {
+        self.model.typed_request = (key, request);
+        self
+    }
+
+    /// Shows the level overview according to the view's visibility policy.
+    pub fn overview(mut self, map: Option<crate::MapView<'a>>) -> Self {
+        self.model.map = map;
+        self
+    }
+
+    /// Centres on a point when a request with a new key arrives.
+    pub fn centre_request(self, key: u64, point: Option<loom_ui_core::Point>) -> Self {
+        Self {
+            model: self.model.centre_request(key, point),
+            ..self
+        }
+    }
+
     /// Sets live port activity without changing the scene's GPU geometry.
     /// See [`CanvasModel::activity`].
     pub fn activity(mut self, outputs: impl IntoIterator<Item = (u32, usize)>) -> Self {
@@ -289,8 +315,8 @@ where
         let mut pointer = state.input.pointer(&self.model);
         operation.custom(None, layout.bounds(), &mut pointer);
         // The open typed field, for the same snapshot.
-        if let Some(mut typed) = state.input.typed() {
-            operation.custom(None, layout.bounds(), &mut typed);
+        if let Some(mut typed) = state.input.typed(&self.model, layout.bounds().to_core()) {
+            operation.custom(None, typed.bounds.to_iced(), &mut typed);
         }
     }
 

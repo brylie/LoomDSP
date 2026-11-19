@@ -48,6 +48,10 @@ impl App {
             })
             .matrix_line(self.matrix_line())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
+            .report_typed(self.a11y.is_active())
+            .typed_request(self.a11y.typed_request().0, self.a11y.typed_request().1)
+            .overview(self.map_view())
+            .centre_request(self.session.outline.centre.0, self.session.outline.centre.1)
             .animate(self.animating)
             .learn(self.session.learn.shown());
         if let Some(still) = self.still {
@@ -63,10 +67,10 @@ impl App {
         // The breadcrumb slot is always there, empty at the top level, so the
         // canvas keeps its place in the widget tree and with it its state
         // (the camera) when a level opens or closes.
+        // The toolbar and the breadcrumb are `loom-ui`'s (`chrome.rs`): Iced
+        // keeps their place, empty, at the same height.
         let main = column![
-            self.toolbar(),
-            rule::horizontal(1),
-            self.breadcrumb(),
+            space().height(style::top_height(!self.session.level.is_root())),
             body,
             rule::horizontal(1),
             // The stats bar is `loom-ui`'s (`stats_bar.rs`): Iced keeps its
@@ -158,99 +162,6 @@ impl App {
         pointer::Injector::new(layers, self, on_input).into()
     }
 
-    /// The breadcrumb bar, shown only while a sub-patch is open: `Patch ›
-    /// Voice › Filter`, each name a button that shows that level
-    /// (sub-patches.md, Make, open, and dissolve). At the top level it is
-    /// an empty column of no height.
-    pub(crate) fn breadcrumb(&self) -> Element<'_, Message> {
-        let level = &self.session.level;
-        if level.is_root() {
-            return column![].into();
-        }
-        let names = self.session.hierarchy.path_names(level);
-        let mut bar = row![
-            button(text("Patch").size(style::CONTROL))
-                .style(style::plain)
-                .on_press(Message::OpenLevel(loom_patch::ModulePath::root()))
-        ]
-        .spacing(2)
-        .align_y(iced::Alignment::Center)
-        .padding([2, 8]);
-        for (depth, name) in names.into_iter().enumerate() {
-            let target = level.prefix(depth + 1);
-            bar = bar.push(text("›").size(style::CONTROL).color(style::QUIET));
-            bar = bar.push(
-                button(text(name).size(style::CONTROL))
-                    .style(style::plain)
-                    .on_press(Message::OpenLevel(target)),
-            );
-        }
-        column![bar, rule::horizontal(1)].into()
-    }
-
-    /// The toolbar: the patch name, then buttons in groups (file, add,
-    /// play, edit, setup), with wider space between groups than inside them
-    /// (visual-system.md, Toolbar).
-    pub(crate) fn toolbar(&self) -> Element<'_, Message> {
-        use crate::toolbar::Group;
-        let tip = |button: Element<'static, Message>, hint: String| -> Element<'static, Message> {
-            tooltip(
-                button,
-                container(text(hint).size(style::BODY))
-                    .padding(6)
-                    .style(container::rounded_box),
-                tooltip::Position::Bottom,
-            )
-            .into()
-        };
-        // Drawn from the model the accessibility tree reads too. Each
-        // button sits in a container named by its UI ID, so the window
-        // can say where it is (`places.rs`).
-        let model = self.toolbar_model();
-        let group = |which: Group| {
-            let items = model.buttons.iter().filter(|b| b.group == which).map(|b| {
-                let press = b.press();
-                let face = button(text(b.label).size(style::CONTROL)).on_press_maybe(press);
-                let face = match (b.name, b.on) {
-                    ("panic", _) => face.style(style::danger),
-                    // Primary only while learning: a mode that is on.
-                    (_, Some(true)) => face.style(style::primary),
-                    (_, Some(false)) => face.style(style::secondary),
-                    _ => face,
-                };
-                let named: Element<'static, Message> = container(face).id(b.id).into();
-                match &b.hover {
-                    Some(hint) => tip(named, hint.clone()),
-                    None => named,
-                }
-            });
-            iced::widget::Row::with_children(items)
-                .spacing(6)
-                .align_y(iced::Alignment::Center)
-        };
-        container(
-            row![
-                text(format!(
-                    "{}{}",
-                    if self.unsaved() { "* " } else { "" },
-                    self.patch_name()
-                ))
-                .size(style::HEADING),
-                group(Group::File),
-                space::horizontal(),
-                group(Group::Add),
-                group(Group::Play),
-                group(Group::Edit),
-                group(Group::Setup),
-            ]
-            .spacing(20)
-            .padding([6, 10])
-            .align_y(iced::Alignment::Center),
-        )
-        .id("toolbar")
-        .into()
-    }
-
     /// Hold note's hover text: why it is disabled, if it is.
     pub(crate) fn hold_hover(&self) -> Option<&'static str> {
         self.session.engine.midi.is_none().then_some(HOLD_DISABLED)
@@ -290,20 +201,25 @@ impl App {
             row![
                 container(tab("Inspector", RightTab::Inspector)).id("panel/inspector"),
                 container(tab("Matrix", RightTab::Matrix)).id("panel/matrix"),
+                container(tab("Outline", RightTab::Outline)).id("panel/outline"),
             ]
             .spacing(4)
             .padding([6, 8]),
         )
         .id("panel");
-        let panel = match self.right_tab {
+        let panel = self.jump_view().unwrap_or_else(|| match self.right_tab {
+            RightTab::Outline => self.outline_view(),
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
-                self.session
-                    .matrix
-                    .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
+                self.session.matrix.model(
+                    self.session.controller.graph(),
+                    &self.session.hierarchy,
+                    &self.session.selection,
+                    self.right_tab,
+                ),
                 self.a11y.is_active(),
             ),
-        };
+        });
         column![tabs, panel].width(280).height(Length::Fill).into()
     }
 }

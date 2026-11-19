@@ -2202,7 +2202,7 @@ fn removed_probes_lose_their_levels() {
 #[test]
 fn the_snapshot_shows_the_inspector_rows() {
     let mut app = app();
-    let (env, sine, filter, cutoff, _) = two_sources(&mut app);
+    let (_env, sine, filter, cutoff, _) = two_sources(&mut app);
     let off = app
         .session
         .controller
@@ -2235,7 +2235,7 @@ fn the_snapshot_shows_the_inspector_rows() {
     else {
         panic!("not in learn mode");
     };
-    let (env_out, sine_out) = (format!("Envelope #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
+    let (env_out, sine_out) = ("Envelope: Out".to_string(), "Sine: Out".to_string());
     let shown: Vec<_> = assignments
         .iter()
         .map(|a| (a.source.as_str(), a.depth_text.as_str(), a.enabled))
@@ -2926,9 +2926,11 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
     );
 }
 
-/// Tab moves through one view's text fields and wraps, sent as a real key.
-/// It stays inside the patch browser, so focus cannot land on the form behind
-/// it. The browser focuses its search field by a task, which sends no message,
+/// Tab moves through one view's text fields, sent as a real key. On the
+/// main view, past patch info's last field it goes on to the runtime's
+/// stops: with the bar empty, the toolbar's first (ui-layer.md, section 6,
+/// rule 3, from row 2). It stays inside the patch browser, which loops, so
+/// focus cannot land on the form behind it. The browser focuses its search field by a task, which sends no message,
 /// so the key cannot wait for the app to have heard of the focus.
 #[test]
 fn tab_moves_between_the_fields_of_one_view() {
@@ -2941,9 +2943,13 @@ fn tab_moves_between_the_fields_of_one_view() {
     ui.tap(tab.clone(), Modifiers::default());
     assert_eq!(ui.focused_field(), Some(tags.clone()), "Tab goes to Tags");
     ui.tap(tab.clone(), Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(authors.clone()), "Tab wraps to Authors");
-    ui.tap(tab.clone(), Modifiers::SHIFT);
-    assert_eq!(ui.focused_field(), Some(tags), "Shift-Tab wraps back to Tags");
+    assert_eq!(ui.focused_field(), None, "past Tags, out of Iced's fields");
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&crate::toolbar::toolbar_id().with("new")),
+        "on to the toolbar"
+    );
+    let _ = authors;
 
     let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
     ui.app_mut()

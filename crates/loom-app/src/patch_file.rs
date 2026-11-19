@@ -21,6 +21,8 @@ pub fn save(patch: &Patch, path: impl AsRef<Path>) -> Result<(), PatchFileError>
     // rename over the link would replace the link itself.
     let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let target = resolved.as_path();
+    #[cfg(any(test, feature = "test-ui"))]
+    refuse_examples(target);
     let io = |source| PatchFileError::Io {
         path: path.display().to_string(),
         source,
@@ -53,6 +55,27 @@ pub fn save(patch: &Patch, path: impl AsRef<Path>) -> Result<(), PatchFileError>
         let _ = std::fs::remove_file(&temp);
         io(source)
     })
+}
+
+/// In a test build, panics when `target` is inside the repository's
+/// `examples` folder, naming the test: a test must never write the
+/// example patches the app ships. The `Ui` harness opens copies of them
+/// (`ui_test::example_copy`), so this trips only when a test or a helper
+/// reaches a real example another way.
+#[cfg(any(test, feature = "test-ui"))]
+fn refuse_examples(target: &Path) {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let Ok(examples) = std::fs::canonicalize(examples) else {
+        return;
+    };
+    let parent = target.parent().and_then(|parent| std::fs::canonicalize(parent).ok());
+    if parent.is_some_and(|parent| parent.starts_with(&examples)) {
+        let test = std::thread::current().name().unwrap_or("a test").to_owned();
+        panic!(
+            "{test} tried to save over an example in the repository: {}",
+            target.display()
+        );
+    }
 }
 
 #[cfg(test)]

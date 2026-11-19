@@ -2518,12 +2518,19 @@ fn locate_takes_a_ui_id_as_text() {
     ));
     assert!(locate(ui.app(), "canvas/8/output/nonsense", &found).is_err());
 
-    // Outside the canvas: where the window drew the part.
-    let undo = locate(ui.app(), "toolbar/undo", &found).unwrap();
-    let label = ui.text("Undo").expect("the toolbar shows Undo");
+    // Outside the canvas: where the window drew the part. The toolbar is
+    // `loom-ui`'s, so the answering update fills its place from the
+    // runtime's layout (`Found::ours`), as here.
+    let ours = |id: &str| {
+        let mut found = found.clone();
+        found.ours = ui.runtime().bounds(&id.parse().unwrap());
+        found
+    };
+    let undo = locate(ui.app(), "toolbar/undo", &ours("toolbar/undo")).unwrap();
+    let label = ui.runtime().text_bounds("Undo").expect("the toolbar shows Undo");
     assert!(undo.contains(label.center()), "the button holds its label");
     assert!(undo.width < 200.0, "the button, not the toolbar");
-    let toolbar = locate(ui.app(), "toolbar", &found).unwrap();
+    let toolbar = locate(ui.app(), "toolbar", &ours("toolbar")).unwrap();
     assert!(toolbar.contains(undo.center()));
     for id in [
         "panel/inspector",
@@ -3071,4 +3078,152 @@ fn a_pointer_command_aims_a_module_target_at_the_canvas() {
             "{key}: the hover went to the knob, {got} for {want}"
         );
     }
+}
+
+/// `locate` finds a breadcrumb entry and a toolbar button by UI ID, from
+/// the runtime's layout, where the window's root panel puts them
+/// (control-channel.md; plan for leaving Iced, step 3.2, row 2).
+#[test]
+fn locate_finds_the_toolbar_and_the_breadcrumb_by_ui_id() {
+    let mut ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    ui.send(Message::OpenLevel(loom_patch::ModulePath::top(2)));
+    for (target, id) in [
+        ("breadcrumb/2", crate::breadcrumb::breadcrumb_id().with(2u32)),
+        ("breadcrumb/patch", crate::breadcrumb::breadcrumb_id().with("patch")),
+        ("toolbar/undo", crate::toolbar::toolbar_id().with("undo")),
+    ] {
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{target}"}}"#))
+            .unwrap_or_else(|why| panic!("{target}: {why}"));
+        let laid = ui.runtime().bounds(&id).expect("laid out");
+        let x = reply["x"].as_f64().unwrap();
+        let y = reply["y"].as_f64().unwrap();
+        assert!(
+            (x - f64::from(laid.center_x())).abs() < 0.5,
+            "{target}: {reply:?} against {laid:?}"
+        );
+        assert!(
+            (y - f64::from(laid.center_y())).abs() < 0.5,
+            "{target}: {reply:?} against {laid:?}"
+        );
+    }
+}
+
+/// Text that looks like a nonexistent UI ID can still be found after layout.
+#[test]
+fn locate_falls_back_to_status_text_that_looks_like_a_ui_id() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.say("toolbar/no-such-widget");
+    let answer = run_ui(&mut ui, r#"{"cmd":"locate","target":"toolbar/no-such-widget"}"#).unwrap();
+    assert!(answer["width"].as_f64().unwrap() > 0.0);
+}
+
+/// A physical move cancels the runtime's scripted press before a physical release.
+#[test]
+fn real_pointer_takeover_cancels_a_scripted_bar_hold() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.redraw();
+    run_ui(&mut ui, r#"{"cmd":"press","target":"stats/status/dismiss"}"#).unwrap();
+    let id = "stats/status/dismiss".parse().unwrap();
+    let point = ui.runtime().bounds(&id).unwrap().center();
+    ui.move_to(point);
+    ui.release();
+    assert!(!ui.app().alerts.kept().is_empty());
+    ui.press();
+    ui.release();
+    assert!(ui.app().alerts.kept().is_empty());
+}
+
+/// A physical release dropped by the injector leaves the scripted drag intact.
+#[test]
+fn a_physical_release_during_a_scripted_drag_does_not_cancel_the_bar_press() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.redraw();
+    ui.move_to(loom_ui_core::Point::new(30.0, 100.0));
+    let command =
+        serde_json::from_str(r#"{"cmd":"drag","from":"stats/status/dismiss","to":"stats/status/dismiss","steps":3}"#)
+            .unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    ui.deliver(Message::Control(Call {
+        command,
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    }));
+    ui.redraw();
+    ui.redraw();
+    ui.release();
+    for _ in 0..9 {
+        ui.redraw();
+    }
+    assert!(receiver.try_recv().unwrap().is_ok());
+    assert!(ui.app().alerts.kept().is_empty(), "the script completed its click");
+}
+
+/// A named drag end follows a runtime target when resizing moves it.
+#[test]
+fn a_named_drag_destination_is_resolved_after_resize() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.redraw();
+    let id = "stats/status/dismiss".parse().unwrap();
+    let before = ui.runtime().bounds(&id).unwrap().center();
+    let command =
+        serde_json::from_str(r#"{"cmd":"drag","from":"stats/status/dismiss","to":"stats/status/dismiss","steps":3}"#)
+            .unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    ui.deliver(Message::Control(Call {
+        command,
+        reply: Reply(Arc::new(Mutex::new(Some(sender)))),
+    }));
+    ui.redraw();
+    ui.redraw();
+    ui.resize(1360.0, 810.0);
+    for _ in 0..9 {
+        ui.redraw();
+    }
+    assert!(receiver.try_recv().unwrap().is_ok());
+    assert!(ui.app().alerts.kept().is_empty());
+    assert_ne!(ui.app().pointer.position().unwrap().y, before.y);
+}
+
+/// A captured scripted press cancels the runtime's held Space.
+#[test]
+fn a_scripted_canvas_press_cancels_space_held_on_the_bar() {
+    use iced::keyboard::{Key, key::Named};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.redraw();
+    let id = "stats/status/dismiss".parse().unwrap();
+    let point = ui.runtime().bounds(&id).unwrap().center();
+    ui.move_to(point);
+    ui.press();
+    ui.key_down(Key::Named(Named::Space), false);
+    run_ui(&mut ui, r#"{"cmd":"press","target":"4:cutoff"}"#).unwrap();
+    ui.key_up(Key::Named(Named::Space));
+    assert!(!ui.app().alerts.kept().is_empty());
+}
+
+/// The headless GPU capture includes runtime keyboard focus around a bar control.
+#[test]
+fn a_capture_uses_the_live_runtime_focus_ring() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    if !ui.draws_the_canvas() {
+        return;
+    }
+    ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+    ui.redraw();
+    let path = std::env::temp_dir().join(format!("loom-bar-focus-{}.png", std::process::id()));
+    let command = json!({
+        "cmd": "screenshot", "path": path, "target": "stats/status/dismiss", "margin": 2
+    })
+    .to_string();
+    run_ui(&mut ui, &command).unwrap();
+    let plain = std::fs::read(&path).unwrap();
+    let id: loom_ui_core::UiId = "stats/status/dismiss".parse().unwrap();
+    ui.a11y_action(&id, accesskit::Action::Focus);
+    assert_eq!(ui.runtime().focused(), Some(&id));
+    run_ui(&mut ui, &command).unwrap();
+    let focused = std::fs::read(&path).unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert_ne!(plain, focused, "focus changes the painted control");
 }

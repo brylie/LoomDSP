@@ -30,7 +30,7 @@
 //! the text that measures. [`Runtime::bounds`] and [`Runtime::hit`] then
 //! read the composed window (ui-layer.md, section 5, rule 8).
 
-use crate::app::{App, Context, Deadline, WindowSpec};
+use crate::app::{App, Context, Deadline, TabStep, WindowSpec};
 use crate::draw::Panels;
 use crate::driver::Driver;
 use crate::driver::PasteAnswer;
@@ -512,8 +512,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// Tab and Shift+Tab while one of the runtime's elements has focus:
-    /// one step through its order. Past either end, focus leaves the
-    /// runtime's elements and the key goes on to the target. With nothing
+    /// one step through its order, where the app's [`App::tab_from`]
+    /// sends it: the next stop, out to the target with the key going on,
+    /// as past either end by default, or out with a message for the next
+    /// turn and the key taken (section 6, rule 3). With nothing
     /// focused in either toolkit and the canvas not focused, Tab enters
     /// the first stop and Shift+Tab the last, unless the input layer is
     /// above the panels (section 6, rule 2). Tab with Ctrl held is the
@@ -551,10 +553,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             .id()
             .and_then(|id| self.panels.layer_of(id))
             .is_some_and(|layer| layer < input.layer);
-        match self.tab_step(input.layer, modifiers.shift) {
-            FocusStep::To(stop) => (true, self.focus_to(Some(stop))),
-            FocusStep::PastEnd if below => (false, false),
-            FocusStep::PastEnd => (false, self.focus_to(None)),
+        let next = match self.tab_step(input.layer, modifiers.shift) {
+            FocusStep::To(stop) => Some(stop),
+            FocusStep::PastEnd if below => return (false, false),
+            FocusStep::PastEnd => None,
+        };
+        let from = self.focus.id().cloned().expect("a focus, checked above");
+        match self.app.tab_from(&from, next.as_ref(), modifiers.shift) {
+            TabStep::To(stop) => (true, self.focus_to(Some(stop))),
+            TabStep::Leave => (false, self.focus_to(None)),
+            TabStep::Send(message) => {
+                self.waker().send(message);
+                (true, self.focus_to(None))
+            }
         }
     }
 
@@ -650,8 +661,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// field's keys and actions and a keyboard click all ask this, so they
     /// follow one rule.
     fn in_input_layer(&self, id: &UiId) -> bool {
-        let layer = self.app.input().layer;
-        self.panels.layer_of(id).is_some_and(|its| its >= layer)
+        in_input_layer(&self.panels, &self.app, id)
     }
 
     /// A screen reader's text action on one of the runtime's fields
@@ -759,29 +769,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// so an element that stopped being clickable while Space was held
     /// clicks nothing.
     fn activatable(&self, id: &UiId) -> Option<bool> {
-        let input = self.app.input();
-        // While the canvas has the keyboard, its keys are its own (section
-        // 6, rule 1): no element of ours is activated by them.
-        if input.canvas_focused || !self.in_input_layer(id) {
-            return None;
-        }
-        let access = self.panels.access_of(id)?;
-        if !access.offers(crate::access::Action::Click) || access.is_disabled() {
-            return None;
-        }
-        match access.role() {
-            crate::access::Role::Button => Some(true),
-            crate::access::Role::Switch => Some(false),
-            _ => None,
-        }
+        activatable(&self.panels, &self.app, id)
     }
 
-    /// The element a held Space would click now: the one it went down on,
-    /// when the focus never moved since and it can still be clicked.
+    /// The element a held Space would click now ([`live_arm`]).
     fn live_arm(&self) -> Option<UiId> {
-        let (armed, moves) = self.pointer.space.as_ref()?;
-        let unmoved = self.focus.moves == *moves && self.focus.id() == Some(armed);
-        (unmoved && self.activatable(armed).is_some()).then(|| armed.clone())
+        live_arm(&self.panels, &self.app, &self.focus, &self.pointer)
     }
 
     /// Keyboard activation of the focused element (section 3, rule 4):
@@ -820,8 +813,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .hint()
                 .map(|hint| hint.source.clone())
                 .filter(|source| self.panels.layer_of(source).is_some_and(|layer| layer >= input));
-            let hover = self.pointer.hovered.as_ref().map(|(_, id)| id.clone());
-            let hid = self.pointer.hint.hide(shown.as_ref(), hover.as_ref(), self.focus.moves);
+            let hid = self
+                .pointer
+                .hint
+                .hide(shown.as_ref(), self.pointer.hover_moves, self.focus.moves);
             if cancelled || hid {
                 return (true, hid);
             }
@@ -969,6 +964,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // The target's own element may have taken the keyboard since the
         // last turn; then a layout between turns, or that, may have moved
         // focus off a field, or changed what a field reports.
+        // What shows as pressed is painted from the runtime's own state,
+        // so a change of it needs a frame, though no panel is built again
+        // (visual-system.md, Role tokens): an input event, or an update
+        // that raises the input layer or turns the element off.
+        let pressed = self.panels().shown_pressed();
         let mut redraw = self.follow_target();
         self.field_left(&mut batch, now);
         let mut reported = self.panels.fields.take_changed();
@@ -1066,6 +1066,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
 
         redraw |= self.target.needs_redraw(updates);
+        redraw |= self.panels().shown_pressed() != pressed;
 
         // 5. Draw only when something visible changed.
         let draw = redraw && !self.exited;
@@ -1275,5 +1276,45 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 }
 
+/// True when the element with UI ID `id` in `window` is in a layer that
+/// takes input now, by `app`'s input state: the one taking input or one
+/// above it.
+pub(crate) fn in_input_layer<A: App>(window: &Window, app: &A, id: &UiId) -> bool {
+    let layer = app.input().layer;
+    window.layer_of(id).is_some_and(|its| its >= layer)
+}
+
+/// What the keyboard can activate the element with UI ID `id` in `window`
+/// as, now, with `app`'s input state: `Some(true)` for a button,
+/// `Some(false)` for a switch, `None` when it is neither, offers no Click,
+/// is turned off, or is in a layer below the one taking input. The press
+/// and the release of Space both ask, so an element that stopped being
+/// clickable while Space was held clicks nothing.
+pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option<bool> {
+    // While the canvas has the keyboard, its keys are its own (section 6,
+    // rule 1): no element of ours is activated by them.
+    if app.input().canvas_focused || !in_input_layer(window, app, id) {
+        return None;
+    }
+    let access = window.access_of(id)?;
+    if !access.offers(crate::access::Action::Click) || access.is_disabled() {
+        return None;
+    }
+    match access.role() {
+        crate::access::Role::Button => Some(true),
+        crate::access::Role::Switch => Some(false),
+        _ => None,
+    }
+}
+
+/// The element a held Space would click now: the one it went down on,
+/// when the focus never moved since and it can still be clicked
+/// ([`activatable`]). The pressed look reads this too, so a button looks
+/// pressed by Space exactly while releasing Space would click it.
+pub(crate) fn live_arm<A: App>(window: &Window, app: &A, focus: &Focus, pointer: &Pointer) -> Option<UiId> {
+    let (armed, moves) = pointer.space.as_ref()?;
+    let unmoved = focus.moves == *moves && focus.id() == Some(armed);
+    (unmoved && activatable(window, app, armed).is_some()).then(|| armed.clone())
+}
 #[cfg(test)]
 mod tests;

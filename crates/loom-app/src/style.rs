@@ -29,6 +29,34 @@ pub const SWITCH: f32 = 14.0;
 /// pixels, since the runtime's layout rounds to them (2026-11-17).
 pub const STATS_BAR_HEIGHT: f32 = 24.0;
 
+/// How high the toolbar is, its rule included, in logical pixels: the
+/// panel `loom-ui` draws and its share of the space Iced keeps above the
+/// canvas. Iced's toolbar was 38.9 high with a 1 px rule; whole pixels,
+/// since the runtime's layout rounds to them.
+pub const TOOLBAR_HEIGHT: f32 = 40.0;
+
+/// How high the breadcrumb is, its rule included, inside a sub-patch. At
+/// the top level it takes no height. Iced's was 30.9 with a 1 px rule.
+pub const BREADCRUMB_HEIGHT: f32 = 32.0;
+
+/// The height above the canvas that the toolbar and, `inside` a sub-patch,
+/// the breadcrumb take: the root panel's slots and Iced's space both use
+/// it, so the canvas starts where the panels end.
+pub const fn top_height(inside: bool) -> f32 {
+    if inside {
+        TOOLBAR_HEIGHT + BREADCRUMB_HEIGHT
+    } else {
+        TOOLBAR_HEIGHT
+    }
+}
+
+/// The room around a button's label: 5 above and below, 10 at the sides,
+/// as Iced's buttons had.
+pub const BUTTON_PADDING: loom_ui::Padding = loom_ui::Padding::symmetric(5.0, 10.0);
+
+/// The width of a rule between parts of the window.
+pub const RULE: f32 = 1.0;
+
 /// The line height of the app's text, as a multiple of its size: Iced's
 /// default, kept for text `loom-ui` draws.
 const LINE_HEIGHT: f32 = 1.3;
@@ -47,6 +75,14 @@ pub const CONTROL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
     weight: loom_ui_core::Weight::Regular,
 };
 
+/// [`HEADING`] text, for `loom-ui` elements: the patch name in the
+/// toolbar.
+pub const HEADING_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: HEADING,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
 /// Quiet text: details, IDs, and the title of a closed tab. Iced's own
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
 /// WCAG asks for, so the app uses this instead (a test checks it).
@@ -58,29 +94,172 @@ pub const ERROR_TEXT: iced::Color = iced::Color::from_rgb8(0xEB, 0x6B, 0x6B);
 
 /// A button in the default role, secondary: quiet, so the patch and its
 /// values stand out. Give it another role with `.style(style::primary)`,
-/// `style::danger`, or `style::plain`.
+/// or `style::plain`. Danger is Panic's, which `loom-ui` draws (`toolbar.rs`).
 pub fn button<'a, M>(content: impl Into<Element<'a, M>>) -> iced_button::Button<'a, M, Theme, crate::Renderer> {
     iced_button(content).style(secondary)
 }
 
+/// A button role's look in one state: its fill, or none, and its text
+/// (visual-system.md, Role tokens).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RoleState {
+    /// The fill inside the button, or none.
+    pub fill: Option<loom_ui_core::Color>,
+    /// The colour of its label.
+    pub text: loom_ui_core::Color,
+}
+
+/// A button role's look in each state. These tokens are the one source for
+/// both toolkits until Iced goes: `loom-ui`'s buttons take them through
+/// [`Role::looks`], and Iced's through the role style functions below.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RoleTokens {
+    /// Neither hovered nor pressed, and turned on.
+    pub normal: RoleState,
+    /// The pointer is over it.
+    pub hovered: RoleState,
+    /// A press on it is held.
+    pub pressed: RoleState,
+    /// Turned off.
+    pub off: RoleState,
+    /// The corners' radius: 2 for a filled role, 0 for plain.
+    pub radius: f32,
+}
+
+/// A state with a fill.
+const fn filled(fill: loom_ui_core::Color, text: loom_ui_core::Color) -> RoleState {
+    RoleState { fill: Some(fill), text }
+}
+
+/// A state with no fill.
+const fn bare(text: loom_ui_core::Color) -> RoleState {
+    RoleState { fill: None, text }
+}
+
+/// `#RRGGBB` as a colour.
+const fn hex(rgb: u32) -> loom_ui_core::Color {
+    loom_ui_core::Color::rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+}
+
+/// Primary: the one main action of a view, or a mode that is on. Orange.
+pub const PRIMARY: RoleTokens = RoleTokens {
+    normal: filled(hex(0xF5A623), hex(0x2A1A00)),
+    hovered: filled(hex(0xF9C876), hex(0x2A1A00)),
+    pressed: filled(hex(0xDC8D0A), hex(0x2A1A00)),
+    off: filled(hex(0x5C4A2E), hex(0xCDBD9E)),
+    radius: 2.0,
+};
+
+/// Secondary: every other button, and the default. A lifted grey.
+pub const SECONDARY: RoleTokens = RoleTokens {
+    normal: filled(hex(0x7F828D), hex(0x0E0E10)),
+    hovered: filled(hex(0x9497A0), hex(0x0E0E10)),
+    pressed: filled(hex(0x6C6F7A), hex(0xF2F3F6)),
+    off: filled(hex(0x3E414B), hex(0xAEB1BB)),
+    radius: 2.0,
+};
+
+/// Danger: Panic. Red.
+pub const DANGER: RoleTokens = RoleTokens {
+    normal: filled(hex(0xE04F4F), hex(0x0E0E10)),
+    hovered: filled(hex(0xE77474), hex(0x0E0E10)),
+    pressed: filled(hex(0xD42525), hex(0xF2F3F6)),
+    off: filled(hex(0x5A3434), hex(0xC9ABAB)),
+    radius: 2.0,
+};
+
+/// Plain: small inline actions, the × that removes a row, and the
+/// breadcrumb's entries. Text only, with a fill as feedback.
+pub const PLAIN: RoleTokens = RoleTokens {
+    normal: bare(hex(0xE6E8EE)),
+    hovered: filled(hex(0x40444F), hex(0xE6E8EE)),
+    pressed: filled(hex(0x50556A), hex(0xE6E8EE)),
+    off: bare(hex(0x8E929C)),
+    radius: 0.0,
+};
+
+/// A button role (visual-system.md, Button roles).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// The one main action of a view, or a mode that is on.
+    Primary,
+    /// Every other button.
+    Secondary,
+    /// Panic.
+    Danger,
+    /// Small inline actions.
+    Plain,
+}
+
+impl Role {
+    /// Its tokens.
+    pub const fn tokens(self) -> RoleTokens {
+        match self {
+            Self::Primary => PRIMARY,
+            Self::Secondary => SECONDARY,
+            Self::Danger => DANGER,
+            Self::Plain => PLAIN,
+        }
+    }
+
+    /// Its looks for a `loom-ui` element, from the same tokens.
+    pub fn looks(self) -> loom_ui::Looks {
+        let tokens = self.tokens();
+        let state = |state: RoleState| loom_ui::StateLook {
+            background: state.fill,
+            text: Some(state.text),
+        };
+        loom_ui::Looks {
+            normal: state(tokens.normal),
+            hovered: state(tokens.hovered),
+            pressed: state(tokens.pressed),
+            off: state(tokens.off),
+        }
+    }
+
+    /// [`Role::iced`], for the tests: danger has no Iced style function,
+    /// since its one button, Panic, is `loom-ui`'s.
+    #[cfg(test)]
+    pub(crate) fn iced_for_tests(self, status: iced_button::Status) -> iced_button::Style {
+        self.iced(status)
+    }
+
+    /// Its style for an Iced button in `status`: Iced keeps its own state
+    /// handling, and each of its states takes the token for that state.
+    fn iced(self, status: iced_button::Status) -> iced_button::Style {
+        use loom_canvas::iced_convert::ToIced as _;
+        let tokens = self.tokens();
+        let state = match status {
+            iced_button::Status::Active => tokens.normal,
+            iced_button::Status::Hovered => tokens.hovered,
+            iced_button::Status::Pressed => tokens.pressed,
+            iced_button::Status::Disabled => tokens.off,
+        };
+        iced_button::Style {
+            background: state.fill.map(|fill| iced::Background::Color(fill.to_iced())),
+            text_color: state.text.to_iced(),
+            border: iced::Border {
+                radius: tokens.radius.into(),
+                ..iced::Border::default()
+            },
+            ..iced_button::Style::default()
+        }
+    }
+}
+
 /// The one main action of a view, or a mode that is on: orange.
-pub fn primary(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    iced_button::primary(theme, status)
+pub fn primary(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    Role::Primary.iced(status)
 }
 
-/// Every other button: a lifted grey fill with light text.
-pub fn secondary(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    iced_button::secondary(theme, status)
-}
-
-/// The emergency control, Panic: red.
-pub fn danger(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    iced_button::danger(theme, status)
+/// Every other button: a lifted grey fill with dark text.
+pub fn secondary(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    Role::Secondary.iced(status)
 }
 
 /// Small inline actions, such as the × that removes a row: text only.
-pub fn plain(theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    iced_button::text(theme, status)
+pub fn plain(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
+    Role::Plain.iced(status)
 }
 
 /// `base`, outlined in the primary colour while `on`: the item of a menu

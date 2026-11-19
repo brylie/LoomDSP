@@ -648,8 +648,8 @@ where
             self.shown = true;
             self.turn(event_loop, DriverEvent::Presented);
         }
-        if self.pacing.frame_ended(drawn)
-            && let Some(live) = self.live.as_ref()
+        if let Some(live) = self.live.as_ref()
+            && self.pacing.frame_ended(drawn, live.runtime.waits_for_draw())
         {
             live.window.request_redraw();
         }

@@ -45,7 +45,7 @@ fn the_status_names_the_parameter_a_control_left() {
     controller.map_midi_named(CC74, filter, "cutoff").unwrap();
     let (_, removed) = controller.map_midi_named(CC74, filter, "resonance").unwrap();
     let (_, mapping) = controller.graph().midi_mapping_on(CC74).unwrap();
-    let status = mapped_status(controller, *mapping, &removed);
+    let status = mapped_status(controller, &loom_patch::Hierarchy::default(), *mapping, &removed);
     assert!(status.starts_with("Mapped CC 74 · ch 1 to "), "{status}");
     assert!(status.contains("no longer moves"), "{status}");
     assert!(status.ends_with("Cutoff"), "{status}");
@@ -55,7 +55,7 @@ fn the_status_names_the_parameter_a_control_left() {
         .map_midi_named(MidiControl { controller: 71, ..CC74 }, filter, "cutoff")
         .unwrap();
     let (_, mapping) = controller.graph().midi_mapping_of(filter, 0).unwrap();
-    let status = mapped_status(controller, *mapping, &removed);
+    let status = mapped_status(controller, &loom_patch::Hierarchy::default(), *mapping, &removed);
     assert!(!status.contains("no longer"), "{status}");
 }
 

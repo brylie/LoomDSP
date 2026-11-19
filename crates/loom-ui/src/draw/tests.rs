@@ -199,7 +199,7 @@ fn window() -> Window {
 fn a_layer_paints_its_panels_in_draw_order_cut_to_their_slots() {
     let window = window();
     let mut recorder = Recorder::default();
-    let painted = window.paint(Layer::Panels, &mut recorder, &PANEL, None, 1.0);
+    let painted = window.paint(Layer::Panels, &mut recorder, &PANEL, None, (None, None), 1.0);
     assert_eq!(
         (painted.panels, painted.elements),
         (2, 4),
@@ -315,7 +315,7 @@ fn a_framed_slot_holds_its_panel_inside_the_frame() {
         Some(rect(5.0, 5.0, 30.0, 20.0))
     );
     let mut recorder = Recorder::default();
-    window.paint(Layer::Panels, &mut recorder, &PANEL, None, 1.0);
+    window.paint(Layer::Panels, &mut recorder, &PANEL, None, (None, None), 1.0);
     assert_eq!(
         begins(&recorder)[1],
         rect(5.0, 5.0, 30.0, 20.0),
@@ -373,7 +373,7 @@ fn a_slot_inside_a_clip_is_cut_by_it_two_levels_down() {
         ("grandchild", Layer::Panels, grandchild),
     ]);
     let mut recorder = Recorder::default();
-    window.paint(Layer::Panels, &mut recorder, &PANEL, None, 1.0);
+    window.paint(Layer::Panels, &mut recorder, &PANEL, None, (None, None), 1.0);
     let cut = rect(0.0, 0.0, 30.0, 20.0);
     let begins = begins(&recorder);
     // The parent, its row's clip, the child, and the grandchild.
@@ -433,4 +433,130 @@ fn text_sits_on_the_rounded_content_edge() {
         })
         .expect("the text is painted");
     assert_eq!(text.anchor, Point::new(3.0, 3.0), "1.5 and 1 make 2.5, rounded once");
+}
+
+/// A fill for each state, and a text colour, so a test can tell which
+/// look painted.
+fn looks() -> crate::element::Looks {
+    use crate::element::StateLook;
+    let state = |grey: f32| StateLook {
+        background: Some(Color::rgb(grey, grey, grey)),
+        text: Some(Color::rgb(grey, 0.0, 0.0)),
+    };
+    crate::element::Looks {
+        normal: state(0.1),
+        hovered: state(0.2),
+        pressed: state(0.3),
+        off: state(0.4),
+    }
+}
+
+/// A button keyed `b` with `looks()`, its label a child text, turned off
+/// when `off`.
+fn button_with_looks(off: bool) -> Element {
+    use crate::access::{Access, Action, Role};
+    let access = if off {
+        Access::new(Role::Button, "b").states(crate::access::States {
+            disabled: true,
+            ..Default::default()
+        })
+    } else {
+        Access::new(Role::Button, "b").action(Action::Click)
+    };
+    Element::row([Element::text("b", STYLE)])
+        .key("b")
+        .looks(looks())
+        .access(access)
+}
+
+/// The fill of the first box and the colour of the first text that
+/// `root` paints, with `hovered` and `pressed` (keys under the panel `p`),
+/// or with no state at all when `live` is false.
+fn painted_state(root: Element, hovered: Option<&str>, pressed: Option<&str>, live: bool) -> (Color, Color) {
+    let layout = lay_out(root, 200.0, 100.0);
+    let fields = crate::field::Fields::default();
+    let (hovered, pressed) = (
+        hovered.map(crate::layout::tests::id),
+        pressed.map(crate::layout::tests::id),
+    );
+    let state = crate::draw::PaintState {
+        fields: &fields,
+        focus: None,
+        hovered: hovered.as_ref(),
+        pressed: pressed.as_ref(),
+        scale: 1.0,
+    };
+    let mut recorder = Recorder::default();
+    layout.paint(
+        Point::ORIGIN,
+        rect(0.0, 0.0, 1000.0, 1000.0),
+        &mut recorder,
+        &PANEL,
+        live.then_some(&state),
+    );
+    let fill = recorder
+        .painted
+        .iter()
+        .find_map(|painted| match painted {
+            Painted::Quad(quad) => Some(quad.fill),
+            _ => None,
+        })
+        .expect("a box");
+    let text = recorder
+        .painted
+        .iter()
+        .find_map(|painted| match painted {
+            Painted::Text { run, .. } => Some(run.colour),
+            _ => None,
+        })
+        .expect("a text");
+    (fill, text)
+}
+
+/// An element with looks paints the look of its state, chosen when it is
+/// painted: normal, hovered under the pointer, pressed while a press is
+/// held over it, and the text inside takes the state's colour
+/// (visual-system.md, Role tokens).
+#[test]
+fn an_element_paints_the_look_of_its_state() {
+    let grey = |g: f32| (Color::rgb(g, g, g), Color::rgb(g, 0.0, 0.0));
+    assert_eq!(painted_state(button_with_looks(false), None, None, true), grey(0.1));
+    assert_eq!(
+        painted_state(button_with_looks(false), Some("b"), None, true),
+        grey(0.2)
+    );
+    assert_eq!(
+        painted_state(button_with_looks(false), Some("b"), Some("b"), true),
+        grey(0.3)
+    );
+    assert_eq!(
+        painted_state(button_with_looks(false), Some("other"), Some("other"), true),
+        grey(0.1),
+        "another element's hover and press leave it normal"
+    );
+}
+
+/// Off wins over everything: a turned-off button hovered and pressed
+/// still paints its off look.
+#[test]
+fn off_wins_over_hover_and_press() {
+    let off = (Color::rgb(0.4, 0.4, 0.4), Color::rgb(0.4, 0.0, 0.0));
+    assert_eq!(painted_state(button_with_looks(true), None, None, true), off);
+    assert_eq!(painted_state(button_with_looks(true), Some("b"), Some("b"), true), off);
+}
+
+/// Text with a colour of its own keeps it inside an element with looks,
+/// and a layout painted with no state at all, as hover text is, paints
+/// the normal look.
+#[test]
+fn own_text_colour_wins_and_no_state_is_normal() {
+    let root = Element::row([Element::text("b", STYLE).colour(RED)])
+        .key("b")
+        .looks(looks())
+        .access(crate::access::Access::new(crate::access::Role::Button, "b").action(crate::access::Action::Click));
+    assert_eq!(painted_state(root, Some("b"), None, true).1, RED);
+    assert_eq!(
+        painted_state(button_with_looks(false), Some("b"), Some("b"), false),
+        (Color::rgb(0.1, 0.1, 0.1), Color::rgb(0.1, 0.0, 0.0))
+    );
 }

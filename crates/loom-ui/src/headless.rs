@@ -243,6 +243,11 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
 
     /// Runs a turn for `event`, then more turns until no message waits.
     ///
+    /// It returns the last turn's [`Next`], not the first's: a click, for
+    /// one, queues the app's message for a turn of its own. To ask whether
+    /// `event` drew a frame, compare [`Headless::redraws`] (through
+    /// [`Harness::driver`]) before and after the step instead.
+    ///
     /// # Panics
     ///
     /// If messages keep coming for more turns than any test needs.
