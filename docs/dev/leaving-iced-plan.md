@@ -74,7 +74,7 @@ Run all of these at the end of each phase and list the results in the pull reque
 - `--measure-idle --bench-seconds 10` on `subtractive.ron`: CPU and redraw counts no worse than before (NFR-PERF-04).
 - `--generate 300 --bench`: frame rate no worse than before.
 - From phase 1 on: a VoiceOver check on macOS, recorded in the pull request (which controls were read, which could be changed).
-- In phase 3, **each view's layout changes once, when it moves.** Our layout follows flexbox's defaults, not Iced's ([spec](../design/ui-layer.md), section 5, rule 5), so a view's sizes and places may move by a few pixels when it moves to our widgets. At that step, the `--screenshot-window` pixel diff is identical outside the moved view's bounds and may differ inside them; every `locate` answer is recorded before and after, and the pull request lists each one that changed, with its old and new rectangle; and a changed expected value in a test is listed with its reason. That screenshot is then the new baseline, and the identical gate resumes from that step on. *Why:* a layout engine that is not Iced's places things differently, and a gate per view keeps each move visible and small, as the text gate does for text widths (spec section 8, rule 6).
+- In phase 3, **each view's layout changes once, when it moves.** Our layout follows flexbox's defaults, not Iced's ([spec](../design/ui-layer.md), section 5, rule 5), so a view's sizes and places may move by a few pixels when it moves to our widgets. At that step, the `--screenshot-window` pixel diff is identical outside the moved view's bounds, except where the same pull request lists a decided change, and may differ inside them; every `locate` answer is recorded before and after, and the pull request lists each one that changed, with its old and new rectangle; and a changed expected value in a test is listed with its reason. That screenshot is then the new baseline, and the identical gate resumes from that step on. *Why:* a layout engine that is not Iced's places things differently, and a gate per view keeps each move visible and small, as the text gate does for text widths (spec section 8, rule 6).
 
 ## Phase 0: Decide and specify
 
@@ -468,7 +468,7 @@ Stop and ask the maintainer if any of these happen:
 
 - Plugin window embedding (OQ-13). The shell should not block it, but this plan does not build it.
 - The web target (ADR-0026).
-- Visual redesign. Every view looks the same after each phase.
+- Visual redesign. Every view looks the same after each phase, unless a change to it is decided and listed in its pull request ([spec design goal 5](../design/ui-layer.md#design-goals)). A redesign is still out of scope.
 - Any change to the engine crates. `loom-core`, `loom-dsp`, `loom-modules`, `loom-patch`, and `loom-rt` stay as they are and never depend on UI crates.
 
 ## Unverified facts
