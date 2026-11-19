@@ -979,6 +979,21 @@ fn ctrl_tab_from_the_toolbar_to_an_action_only_inspector_lets_the_toolbar_go() {
     assert!(tried > 0, "a module whose Inspector stop is an action");
 }
 
+/// Ctrl+Shift+Tab from the toolbar into an Inspector with a field (no
+/// module selected: patch info's Authors) focuses that field, and nothing
+/// lets it go after (CodeRabbit, #855).
+#[test]
+fn ctrl_tab_from_the_toolbar_to_an_inspector_field_focuses_it() {
+    let mut ui = Ui::open("subtractive.ron");
+    region(&mut ui, true);
+    assert!(ui.app().toolbar_has_focus(), "in the toolbar");
+    region(&mut ui, true);
+    ui.redraw();
+    assert_eq!(ui.app().focus, Some(crate::patch_info::authors_part()));
+    assert_eq!(focused(&mut ui), crate::patch_info::authors_part());
+    assert!(!ui.app().toolbar_has_focus());
+}
+
 /// A screen reader's Focus on a toolbar button, while an outline row has
 /// the keys, is the tree's focus: the outline lets go, since the tree
 /// reports its row before the runtime's focus (CodeRabbit, #850).

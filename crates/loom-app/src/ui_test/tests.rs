@@ -3120,6 +3120,7 @@ fn a_relative_example_name_copies_inside_its_folder() {
     let before = std::fs::read(&real).unwrap();
     let mut ui = Ui::open("../patches/subtractive.ron");
     let copy = ui.app().session.document.file().expect("a file is open").to_path_buf();
+    let unsaved = std::fs::read(&copy).unwrap();
     let folder = copy.parent().expect("the copy has a folder").to_path_buf();
     assert!(is_copy_folder(&folder), "inside a copy folder: {copy:?}");
     assert_eq!(copy.file_name(), real.file_name());
@@ -3131,6 +3132,7 @@ fn a_relative_example_name_copies_inside_its_folder() {
     let _ = ui.app_mut().send(Message::SliderReleased);
     ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
     ui.redraw();
+    assert_ne!(std::fs::read(&copy).unwrap(), unsaved, "the save wrote the copy");
     assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
     drop(ui);
     assert!(!folder.exists(), "and the folder goes with its Ui");

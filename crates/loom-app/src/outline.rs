@@ -691,13 +691,14 @@ impl App {
         state.inspector_action = None;
         self.session.matrix.focused = next == 1 && self.right_tab == Tab::Matrix;
         if next == 1 && self.right_tab == Tab::Inspector {
-            // An action-only stop moves no focus of the runtime's, so a
-            // toolbar button would keep it, and its keys.
-            if self.toolbar_has_focus() {
-                self.effect(loom_ui::Effects::unfocus());
-            }
             self.a11y.request_control(None);
             self.focus_inspector_region();
+            // An action-only stop moves no focus of the runtime's, so a
+            // toolbar button would keep it, and its keys: let it go. Only
+            // then, so no unfocus can follow a field's focus and clear it.
+            if self.session.outline.inspector_action.is_some() && self.toolbar_has_focus() {
+                self.effect(loom_ui::Effects::unfocus());
+            }
             return;
         }
         let last_canvas = state
