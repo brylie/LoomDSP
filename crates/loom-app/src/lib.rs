@@ -77,6 +77,7 @@ mod screenshot;
 mod script_vars;
 mod session;
 mod settings;
+mod shortcut;
 mod slots;
 mod snapshot;
 mod spectrum;
@@ -474,11 +475,12 @@ enum Message {
     Key(iced::keyboard::Event),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
-    /// An undo or redo shortcut, after checking whether a text field has
-    /// focus. While one has, the shortcut does nothing: the field is
-    /// being edited, and undo would change the patch behind it.
-    HistoryKey {
-        redo: bool,
+    /// A shortcut that acts on the patch (undo, redo, or one on the
+    /// selection), after checking whether a text field has focus. While
+    /// one has, the shortcut does nothing: the field is being edited, and
+    /// the shortcut would change the patch behind it (`shortcut.rs`).
+    Shortcut {
+        shortcut: shortcut::Shortcut,
         typing: bool,
     },
     /// Replay the step undo took back.
@@ -691,7 +693,7 @@ impl Message {
             | Self::Inspector(_)
             | Self::Modulation(_)
             | Self::Undo
-            | Self::HistoryKey { .. }
+            | Self::Shortcut { .. }
             | Self::Redo
             | Self::TextFocusCheck
             | Self::TextFieldTab
@@ -803,9 +805,9 @@ struct App {
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
     still: Option<loom_canvas::Still>,
-    /// An undo (`false`) or redo (`true`) shortcut waiting for the check
-    /// that no text field has focus.
-    history_key: Option<bool>,
+    /// A shortcut on the patch waiting for the check that no text field
+    /// has focus (`shortcut.rs`).
+    pending_shortcut: Option<shortcut::Shortcut>,
     /// The accessibility tree's node IDs and whether a screen reader
     /// listens. It belongs to the window, so it stays when the patch changes.
     a11y: a11y::Access,
@@ -1472,6 +1474,16 @@ impl App {
         if !matches!(message, Message::FocusMoved(_)) {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
         }
+        // A shortcut waits for Iced's answer to which part has focus; the
+        // runtime's own fields say so through the context (section 6, rule
+        // 6, step 6).
+        let message = match message {
+            Message::Shortcut { shortcut, typing } => Message::Shortcut {
+                shortcut,
+                typing: typing || cx.field_has_focus(),
+            },
+            other => other,
+        };
         // What reads the runtime's layout (where a part is for `locate`, the
         // nodes for the tree) waits for the draw that lays out a view a
         // live value just rebuilt, so it never reads a layout half made.
@@ -1730,7 +1742,7 @@ impl App {
                 self.ask_recovery();
             }
             message if self.clipboard_key(&message).is_some() => {
-                self.clipboard_command(&message);
+                self.pending_shortcut = self.clipboard_key(&message).and_then(shortcut::Shortcut::clipboard);
             }
             message => {
                 self.handle(message);
@@ -1740,15 +1752,13 @@ impl App {
         if ask_focus {
             self.focus_question.set(true);
         }
-        // An undo or redo shortcut asks the window whether a text field has
-        // focus first, so Cmd+Z right after a click into a field undoes the
-        // typing, not the patch (window_question.rs).
-        if let Some(redo) = self.history_key.take() {
-            self.ask_window(window_question::WindowQuestion::focus(move |part| {
-                Message::HistoryKey {
-                    redo,
-                    typing: part.is_some(),
-                }
+        // A shortcut on the patch asks the window whether a text field has
+        // focus first, so Cmd+Z or Cmd+D right after a click into a field
+        // leaves the patch alone (window_question.rs, shortcut.rs).
+        if let Some(shortcut) = self.pending_shortcut.take() {
+            self.ask_window(window_question::WindowQuestion::focus(move |part| Message::Shortcut {
+                shortcut,
+                typing: part.is_some(),
             }));
         }
         // A screen reader's tree follows what this message changed.
@@ -2061,13 +2071,9 @@ impl App {
             Message::JumpChoice(index) => self.choose_jump(index),
             Message::DismissJump => self.session.outline.close_jump(),
             Message::PatchInfo(message) => self.patch_info_message(message),
-            Message::HistoryKey { redo, typing } => {
+            Message::Shortcut { shortcut, typing } => {
                 if !typing {
-                    if redo {
-                        self.redo();
-                    } else {
-                        self.undo();
-                    }
+                    self.run_shortcut(shortcut);
                 }
             }
             Message::Licence(message) => self.licence_message(message),
@@ -2246,12 +2252,15 @@ impl App {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
                 match key.as_ref() {
-                    // Undo and redo wait for a focus check: a text field
-                    // being edited keeps them (undo.md, Gestures).
+                    // Undo, redo, and the shortcuts on the selection wait for
+                    // a focus check: a text field being edited keeps them
+                    // (undo.md, Gestures; shortcut.rs).
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") && modifiers.shift() => {
-                        self.history_key = Some(true)
+                        self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.history_key = Some(false),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => {
+                        self.pending_shortcut = Some(shortcut::Shortcut::Undo)
+                    }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => {
                         self.file_action(FileAction::New)
                     }
@@ -2265,16 +2274,20 @@ impl App {
                         self.file_action(FileAction::Save);
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
-                        self.history_key = Some(true)
+                        self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
                     iced::keyboard::Key::Character(",") => self.toggle_preferences(),
                     // Ctrl+G makes a sub-patch; with Shift it dissolves one.
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") && modifiers.shift() => {
-                        self.dissolve_subpatch()
+                        self.pending_shortcut = Some(shortcut::Shortcut::DissolveSubpatch)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") => self.make_subpatch(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") => {
+                        self.pending_shortcut = Some(shortcut::Shortcut::MakeSubpatch)
+                    }
                     // Ctrl+Enter or Cmd+Enter opens the selected sub-patch.
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => self.open_selected(),
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                        self.pending_shortcut = Some(shortcut::Shortcut::OpenSelected)
+                    }
                     _ => {}
                 }
             }

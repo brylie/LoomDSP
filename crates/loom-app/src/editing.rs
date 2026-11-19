@@ -743,15 +743,37 @@ impl App {
             .find(|k| c.eq_ignore_ascii_case(&k.to_string()))
     }
 
-    pub(crate) fn clipboard_command(&mut self, message: &Message) {
-        let text = match self.clipboard_key(message) {
-            Some('c') => self.copy(),
-            Some('x') => self.cut(),
-            Some('d') => {
+    /// Runs a shortcut on the patch, once the check found no text field
+    /// with focus (`shortcut.rs`).
+    pub(crate) fn run_shortcut(&mut self, shortcut: crate::shortcut::Shortcut) {
+        use crate::shortcut::Shortcut;
+        let text = match shortcut {
+            Shortcut::Undo => {
+                self.undo();
+                None
+            }
+            Shortcut::Redo => {
+                self.redo();
+                None
+            }
+            Shortcut::OpenSelected => {
+                self.open_selected();
+                None
+            }
+            Shortcut::MakeSubpatch => {
+                self.make_subpatch();
+                None
+            }
+            Shortcut::DissolveSubpatch => {
+                self.dissolve_subpatch();
+                None
+            }
+            Shortcut::Duplicate => {
                 self.duplicate();
                 None
             }
-            _ => None,
+            Shortcut::Copy => self.copy(),
+            Shortcut::Cut => self.cut(),
         };
         if let Some(text) = text {
             self.effect(loom_ui::Effects::clipboard_write(text));

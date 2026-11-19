@@ -124,7 +124,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // Set only on the screenshot path, which never replaces the patch.
         still: _,
         // Set and taken within one `update`.
-        history_key: _,
+        pending_shortcut: _,
         // The window's, so it stays, but the tiles' node IDs are dropped.
         // `a11y/tests.rs` covers both.
         a11y: _,

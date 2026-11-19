@@ -67,8 +67,11 @@ impl App {
     /// - Every other effect is returned, unrun, for the test to read.
     /// - An input event is routed first, as the bridge routes it, and each
     ///   message it becomes is applied in turn.
-    /// - Window questions are dropped: there is no window to ask
-    ///   (`window_question.rs`). The `Ui` harness answers them.
+    /// - A focus question is answered from the app's own copy of focus,
+    ///   after the turn's effects, as the bridge answers it after the turn.
+    ///   The other window questions are dropped: there is no window to ask
+    ///   where a part is (`window_question.rs`). The `Ui` harness answers
+    ///   them all.
     pub(crate) fn send(&mut self, message: Message) -> Effects<Message> {
         self.send_scaled(message, 1.0)
     }
@@ -88,7 +91,7 @@ impl App {
             // runtime's record of focus, as `FocusMoved` keeps it.
             let cx = Context::new(Instant::now(), &waker, self.focus.clone(), window);
             let effects = self.update(message, &cx);
-            drop(self.take_window_questions());
+            let questions = self.take_window_questions();
             for effect in effects {
                 match answer(effect, &waker) {
                     Some(Effect::Work(job)) => job.run(&waker),
@@ -102,6 +105,11 @@ impl App {
                 }
             }
             pending.extend(queue.try_iter().flat_map(crate::input_owner::route));
+            for question in questions {
+                if let crate::window_question::WindowQuestion::Focus(reply) = question {
+                    pending.push_back(reply(self.focus.clone()));
+                }
+            }
         }
         unrun
     }

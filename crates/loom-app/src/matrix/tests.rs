@@ -1002,7 +1002,7 @@ fn command_shortcuts_work_from_the_filter() {
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::HistoryKey { typing: true, .. })),
+            .any(|m| matches!(m, Message::Shortcut { typing: true, .. })),
         "it asked about typing, and undoes nothing behind the field: {messages:?}"
     );
 }

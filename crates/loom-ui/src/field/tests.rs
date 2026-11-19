@@ -484,6 +484,8 @@ enum Message {
     SetText(String),
     /// A screen reader's action the runtime left to the app.
     Reader(accesskit::Action),
+    /// Logs whether a field has focus, as the context says.
+    AskField,
 }
 
 /// An app with one field, keyed `form/name`, and a button after it. It
@@ -531,6 +533,7 @@ impl App for Form {
             Message::Remove => self.removed = true,
             Message::SetText(text) => self.text = text,
             Message::Reader(action) => self.log.push(format!("reader {action:?}")),
+            Message::AskField => self.log.push(format!("field focus {}", cx.field_has_focus())),
         }
         Effects::none()
     }
@@ -2273,4 +2276,26 @@ fn the_app_hears_a_selection_a_composition_replaced() {
     harness.step(ime_in(ImeEvent::Commit("日".to_owned())));
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "日");
+}
+
+/// The context tells the app when one of the runtime's fields has focus, so
+/// a shortcut the field leaves can do nothing (section 6, rule 6, step 6):
+/// true on the field, false on the button after it.
+#[test]
+fn the_context_says_when_a_field_has_focus() {
+    let Some((mut harness, mut text)) = form("", false) else {
+        return;
+    };
+    harness.send(Message::AskField);
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    harness.send(Message::AskField);
+    let asked: Vec<_> = harness
+        .app()
+        .log
+        .iter()
+        .filter(|entry| entry.starts_with("field focus"))
+        .cloned()
+        .collect();
+    assert_eq!(asked, ["field focus true", "field focus false"]);
 }

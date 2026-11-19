@@ -2931,3 +2931,42 @@ fn tab_steps_forward_and_shift_tab_back() {
     assert_eq!(step("one", true), Some(field("three")), "backward wraps");
     assert_eq!(step("other", false), None, "a field not listed moves nothing");
 }
+
+/// The shortcuts that act on the selection leave the patch alone while a
+/// text field has focus (ui-layer.md, section 6, rule 6; Brylie's
+/// decision, 2026-11-19). On main before this rule, Cmd+D duplicated the
+/// selected module and Cmd+G made a sub-patch while the user typed in an
+/// inspector value field. With the field let go, both work again.
+#[test]
+fn selection_shortcuts_do_nothing_while_a_field_has_focus() {
+    use iced::keyboard::{Key, Modifiers};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    for key in ["d", "g"] {
+        ui.app_mut().session.selection = [4].into_iter().collect();
+        ui.redraw();
+        let field = ui.value_field(4, 0);
+        ui.move_to(field);
+        ui.press();
+        ui.release();
+        assert!(ui.text_field_focused(), "the value field has focus");
+        let before = ui.app().session.controller.graph().nodes().count();
+        let step = ui.app().session.edits.history.undo_step().map(|s| s.name().to_owned());
+        ui.tap(Key::Character(key.into()), Modifiers::COMMAND);
+        assert_eq!(ui.app().session.controller.graph().nodes().count(), before, "Cmd+{key}");
+        assert_eq!(
+            ui.app().session.edits.history.undo_step().map(|s| s.name().to_owned()),
+            step,
+            "Cmd+{key} made no step while typing"
+        );
+        ui.unfocus_all();
+    }
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.redraw();
+    let before = ui.app().session.controller.graph().nodes().count();
+    ui.tap(Key::Character("d".into()), Modifiers::COMMAND);
+    assert_eq!(
+        ui.app().session.controller.graph().nodes().count(),
+        before + 1,
+        "with no field, Cmd+D duplicates"
+    );
+}

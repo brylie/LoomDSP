@@ -223,6 +223,17 @@ impl<'a, M> Context<'a, M> {
         self.panels.is_some_and(|panels| panels.panel_of(id).is_some())
     }
 
+    /// True when the element with focus is one of the runtime's text
+    /// fields. A key the field left, such as an app shortcut, must not act
+    /// on what is behind the field while it does (section 6, rule 6, step
+    /// 6). False outside a runtime, where a toolkit's focus is asked of its
+    /// window instead.
+    pub fn field_has_focus(&self) -> bool {
+        self.panels
+            .zip(self.focused.as_ref())
+            .is_some_and(|(panels, id)| panels.fields.has(id))
+    }
+
     /// Where the runtime's element with UI ID `id` is in the window, in
     /// logical pixels, as last laid out. `None` outside a runtime, and for
     /// an ID no panel of the runtime's has.

@@ -217,7 +217,7 @@ impl App {
             animating: args.bench.bench,
             dev_tools: args.dev || args.bench.reporter().is_some(),
             still: None,
-            history_key: None,
+            pending_shortcut: None,
             a11y: if args.bench.measure_tree {
                 crate::a11y::Access::measured()
             } else {
