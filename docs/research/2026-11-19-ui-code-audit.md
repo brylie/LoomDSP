@@ -102,6 +102,19 @@ Include the canvas’s currently open editor in the eligibility check. Keep the 
 
 One further refactoring candidate is the life cycle of the Iced view. The window builds the root for input, operations, and drawing, reusing the widget-tree cache each time. Count these builds and their layout cost during sustained typing before changing ownership. The panel invalidation and canvas geometry caches already serve different purposes and can stay independent. [View construction](https://github.com/brylie/LoomDSP/blob/447bb01fe64116141f712ea002b5c8e2739d2e15/crates/loom-app/src/iced_bridge/window.rs#L108) · [Event dispatch](https://github.com/brylie/LoomDSP/blob/447bb01fe64116141f712ea002b5c8e2739d2e15/crates/loom-app/src/iced_bridge/window.rs#L499) · [UI runtime design](../design/ui-layer.md)
 
+## Issue tracking
+
+| Findings | Work | GitHub issue |
+| --- | --- | --- |
+| 1, 12 | Typing flicker and text input in the knob editor | [#838](https://github.com/brylie/LoomDSP/issues/838) |
+| 2 | Toolbar actions at compact widths | [#495](https://github.com/brylie/LoomDSP/issues/495#issuecomment-7007193338) |
+| 3, 7 | Stable patch selection and background library refresh | [#839](https://github.com/brylie/LoomDSP/issues/839) |
+| 4 | Cut and Copy when the clipboard write fails | [#840](https://github.com/brylie/LoomDSP/issues/840) |
+| 5, 6, 9 | Stats-bar announcements, visible focus and touch | [#841](https://github.com/brylie/LoomDSP/issues/841) |
+| 8 | Loading, empty and unreadable library states | [#584](https://github.com/brylie/LoomDSP/issues/584#issuecomment-7007195004) |
+| 10 | Accessibility snapshot cost and view rebuild measurements | [#683](https://github.com/brylie/LoomDSP/issues/683#issuecomment-7007199445) |
+| 11 | Live panel state in headless screenshots | [#826](https://github.com/brylie/LoomDSP/issues/826#issuecomment-7007197508) |
+
 ## Verification and scope
 
 The four UI-related Rust library test suites passed on the reviewed revision. The desktop suite passed 1,478 tests with three ignored, the canvas passed 296, the UI runtime passed 361, and UI core passed 67. The repository checks also passed, including pre-commit hooks and the full coverage run with 3,906 tests passed, 14 skipped, and 92.53% line coverage.
