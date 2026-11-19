@@ -872,6 +872,13 @@ impl crate::App {
             // copy on its frame; it is cleared here too, so the next key
             // already sees it.
             self.a11y.release_canvas_focus();
+            // The right column's own keyboard parts let go too: the tree
+            // reports their focus before the runtime's, so an outline row
+            // or an inspector action would keep the screen reader's.
+            self.session.outline.active = false;
+            self.session.outline.inspector_action = None;
+            self.session.outline.close_jump();
+            self.session.matrix.focused = false;
             self.effect(loom_ui::Effects::focus(id));
             return Vec::new();
         }
