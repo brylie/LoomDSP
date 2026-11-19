@@ -83,9 +83,9 @@ impl Pointers {
         debug_assert!(
             matches!(
                 events.get(index),
-                Some(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }))
+                Some(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }) | iced::Event::InputMethod(_))
             ),
-            "only a pressed key is kept from Iced"
+            "only a pressed key or an input method event is kept from Iced"
         );
         if index < events.len() {
             events.remove(index);

@@ -116,3 +116,19 @@ impl WindowState {
         }
     }
 }
+
+/// The input method, as the window should have it: off, or on with the
+/// caret's area, so the system's candidate window opens beside it. The
+/// layers report one for their own fields, and [`Runtime::ime`](crate::Runtime::ime)
+/// one for the runtime's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Ime {
+    /// No text field takes text: the input method is off.
+    Off,
+    /// A field takes text, and its caret is in `area`, in logical pixels
+    /// from the window's top left.
+    On {
+        /// The caret's area.
+        area: loom_ui_core::Rect,
+    },
+}

@@ -333,9 +333,24 @@ fn paint_field(
         colour: style.text,
         clip: shows,
     });
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let width = scale.round().max(1.0) / scale;
+    // Text the input method is composing is underlined, as the platforms
+    // show it (section 8, rule 4): one line of a physical pixel at the
+    // foot of each box it covers, in the text colour.
+    for rect in state.preedit_boxes() {
+        painter.quad(Quad {
+            rect: Rect::new(
+                Point::new(start.x + rect.x, snap(start.y + rect.y + rect.height - width, scale)),
+                Size::new(rect.width, width),
+            ),
+            fill: style.text,
+            border: Color::TRANSPARENT,
+            border_width: 0.0,
+            radius: 0.0,
+        });
+    }
     if focused && let Some(caret) = state.caret() {
-        let scale = if scale > 0.0 { scale } else { 1.0 };
-        let width = scale.round().max(1.0) / scale;
         painter.quad(Quad {
             rect: Rect::new(
                 Point::new(snap(start.x + caret.x, scale), snap(start.y + caret.y, scale)),

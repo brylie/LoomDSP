@@ -265,3 +265,69 @@ fn a_capture_waits_for_the_first_frame() {
     assert_eq!(due_captures(true, &mut captures), [1, 2]);
     assert!(captures.is_empty());
 }
+
+/// An area for the input method, for the tests below.
+fn area(x: f32) -> Ime {
+    Ime::On {
+        area: loom_ui_core::Rect::new(loom_ui_core::Point::new(x, 0.0), loom_ui_core::Size::new(10.0, 18.0)),
+    }
+}
+
+/// The runtime's field comes first: while it has focus, its area is set
+/// and a report from the layers (Iced's field) is only remembered.
+#[test]
+fn the_runtimes_field_sets_the_input_method_first() {
+    let mut memory = ImeMemory::default();
+    assert_eq!(ime_to_apply(&mut memory, Some(area(5.0)), None), Some(area(5.0)));
+    assert_eq!(
+        ime_to_apply(&mut memory, Some(area(5.0)), Some(area(90.0))),
+        None,
+        "the layers' is ignored"
+    );
+    assert_eq!(memory.layers, Some(area(90.0)), "but remembered");
+}
+
+/// When the runtime's field lets go, the layers' last report comes back;
+/// with none, the input method turns off, so the window never keeps a
+/// field's area. Nothing is set again while nothing changed.
+#[test]
+fn the_layers_state_comes_back_when_our_field_lets_go() {
+    let mut memory = ImeMemory::default();
+    ime_to_apply(&mut memory, Some(area(5.0)), None);
+    ime_to_apply(&mut memory, Some(area(5.0)), Some(area(90.0)));
+    assert_eq!(
+        ime_to_apply(&mut memory, None, None),
+        Some(area(90.0)),
+        "a report while ours had it comes back"
+    );
+    assert_eq!(ime_to_apply(&mut memory, None, None), None, "nothing changed");
+
+    let mut memory = ImeMemory::default();
+    ime_to_apply(&mut memory, Some(area(5.0)), None);
+    assert_eq!(ime_to_apply(&mut memory, None, None), Some(Ime::Off));
+    assert_eq!(ime_to_apply(&mut memory, None, None), None);
+}
+
+/// The caret moving in our field sets the new area; a report from the
+/// layers that changes nothing is not set again.
+#[test]
+fn a_moved_caret_sets_the_area_again() {
+    let mut memory = ImeMemory::default();
+    ime_to_apply(&mut memory, Some(area(5.0)), None);
+    assert_eq!(ime_to_apply(&mut memory, Some(area(12.0)), None), Some(area(12.0)));
+    let mut memory = ImeMemory::default();
+    ime_to_apply(&mut memory, None, Some(Ime::Off));
+    assert_eq!(ime_to_apply(&mut memory, None, Some(Ime::Off)), None);
+}
+
+/// The layers' field had the input method, then ours took the focus,
+/// which released theirs; the layers may never report Off for that. When
+/// ours lets go, the input method turns off rather than going back to the
+/// layers' old area, for a field that no longer has focus.
+#[test]
+fn our_field_taking_over_forgets_the_layers_area() {
+    let mut memory = ImeMemory::default();
+    assert_eq!(ime_to_apply(&mut memory, None, Some(area(90.0))), Some(area(90.0)));
+    assert_eq!(ime_to_apply(&mut memory, Some(area(5.0)), None), Some(area(5.0)));
+    assert_eq!(ime_to_apply(&mut memory, None, None), Some(Ime::Off));
+}

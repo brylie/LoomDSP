@@ -54,6 +54,10 @@ impl Driver<Message> for UiDriver {
         self.headless.clipboard_read(reply, waker);
     }
 
+    fn clipboard_paste(&mut self, paste: loom_ui::Paste) {
+        Driver::<Message>::clipboard_paste(&mut self.headless, paste);
+    }
+
     /// Answered from `files::fake` in the crate's tests. In a test under
     /// `tests/` the fakes are off, so the headless driver panics, naming it.
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, Message>, waker: &Waker<Message>) {

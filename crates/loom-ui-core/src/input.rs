@@ -21,8 +21,8 @@
 //!
 //! The types hold what today's elements match on and no more. [`Key`] has
 //! one variant for every modifier key and one for every key nothing uses.
-//! Events for text composition and touch are not here yet. Each arrives
-//! when an element needs it. Dropped files, resizing, and other events
+//! Text composition came with the first text field ([`ImeEvent`]); touch
+//! is not here yet, and arrives when an element needs it. Dropped files, resizing, and other events
 //! about the window as a whole are not element events: a driver sends them
 //! to the runtime as `loom_ui::DriverEvent`.
 
@@ -40,6 +40,31 @@ pub enum Event {
     Redraw,
     /// The window stopped being the one that takes the keys.
     WindowUnfocused,
+    /// The system's input method composed text, for a text field.
+    Ime(ImeEvent),
+}
+
+/// What the system's input method did, as a text field hears it. An input
+/// method builds text the keyboard cannot type in one key, as Japanese or
+/// Chinese are typed: while the user composes, the text so far (the
+/// preedit) shows in the field, and the finished text is committed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImeEvent {
+    /// The input method is on for the window.
+    Enabled,
+    /// The text being composed changed. An empty `text` ends the
+    /// composition with nothing kept. `cursor` is the caret or the selected
+    /// range inside `text`, as byte offsets, or `None` to hide the caret.
+    Preedit {
+        /// The text composed so far.
+        text: String,
+        /// The caret or selected range inside `text`.
+        cursor: Option<(usize, usize)>,
+    },
+    /// The finished text, to put in the field.
+    Commit(String),
+    /// The input method is off for the window.
+    Disabled,
 }
 
 /// What the pointer did. Where it is travels beside the event (see the

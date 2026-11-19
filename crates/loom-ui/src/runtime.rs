@@ -33,6 +33,7 @@
 use crate::app::{App, Context, Deadline, WindowSpec};
 use crate::draw::Panels;
 use crate::driver::Driver;
+use crate::driver::PasteAnswer;
 use crate::effect::{Effect, FocusTarget, Selection};
 use crate::event::{AccessEvent, DriverEvent, WindowEvent, WindowState};
 use crate::field::{FieldAction, FieldEvent};
@@ -44,9 +45,9 @@ use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
 use accesskit::{Action as KitAction, ActionData};
-use loom_ui_core::{Event, Key, KeyEvent, Platform, Point, PointerEvent, Rect, TextMeasure, UiId};
+use loom_ui_core::{Event, Key, KeyEvent, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId};
 use std::collections::VecDeque;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 /// What the driver should do after a turn.
@@ -142,6 +143,13 @@ pub struct Runtime<A: App, T> {
     /// The target's focus as last seen, to tell when one of its own
     /// elements takes the keyboard ([`Runtime::follow_target`]).
     target_seen: Option<UiId>,
+    /// Where a driver answers a field's paste ([`crate::Paste`]), and
+    /// those answers.
+    paste_answers: (Sender<PasteAnswer>, Receiver<PasteAnswer>),
+    /// Paste answers taken from the channel, put in on the next turn.
+    pasted: VecDeque<PasteAnswer>,
+    /// The driver's wake function, for a paste's answer.
+    wake: Wake,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -153,7 +161,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         Self {
             app,
             target,
-            waker: Waker::new(sender, wake),
+            waker: Waker::new(sender, wake.clone()),
             queue,
             pending: VecDeque::new(),
             window,
@@ -170,7 +178,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             pointer: Pointer::default(),
             field_focus: None,
             target_seen: None,
+            paste_answers: mpsc::channel(),
+            pasted: VecDeque::new(),
+            wake,
         }
+    }
+
+    /// The input method for the runtime's own fields: on, with the caret's
+    /// area in the window, while one of them has focus and takes input;
+    /// `None` otherwise, which leaves it to the layers (ui-layer.md,
+    /// section 8, rule 4). A driver applies this before what the layers
+    /// report.
+    pub fn ime(&self) -> Option<crate::Ime> {
+        let id = self.focus.id().filter(|id| self.field_takes_input(id))?;
+        let content = self.panels.content_of(id)?;
+        let area = self.panels.fields.get(id)?.ime_area();
+        Some(crate::Ime::On {
+            area: Rect::new(
+                Point::new(content.x + area.x, content.y + area.y),
+                Size::new(area.width.max(1.0), area.height),
+            ),
+        })
     }
 
     /// A waker that sends messages into this runtime's queue.
@@ -547,23 +575,39 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         driver: &mut impl Driver<A::Message>,
         batch: &mut Vec<A::Message>,
     ) -> (bool, bool) {
-        let Event::Key(key) = event else {
+        if !matches!(event, Event::Key(_) | Event::Ime(_)) {
             return (false, false);
-        };
+        }
         // A field in a layer below the one taking input, such as a panel
-        // under a question, edits nothing: the key goes on.
+        // under a question, edits nothing: the key, or the input method's
+        // event, goes on.
         let Some(id) = self.focus.id().cloned().filter(|id| self.field_takes_input(id)) else {
             return (false, false);
         };
-        let used = self.panels.fields.key(&id, key, now, Platform::current());
+        let used = match event {
+            Event::Key(key) => self.panels.fields.key(&id, key, now, Platform::current()),
+            Event::Ime(ime) => self.panels.fields.ime(&id, ime, now),
+            _ => return (false, false),
+        };
         if let Some(text) = used.copy {
             driver.clipboard_write(text);
+        }
+        // The field's own paste: the driver reads the clipboard, and the
+        // text goes in on a later turn (section 8, rule 2).
+        if used.paste {
+            let answers = self.paste_answers.0.clone();
+            driver.clipboard_paste(crate::Paste::new(
+                id.clone(),
+                self.focus.moves,
+                answers,
+                self.wake.clone(),
+            ));
         }
         let text = || {
             self.panels
                 .fields
                 .get(&id)
-                .map(|field| field.text().to_owned())
+                .map(crate::field::FieldState::committed)
                 .unwrap_or_default()
         };
         if used.edited {
@@ -573,6 +617,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             batch.extend(self.app.field_event(&id, &FieldEvent::Committed(text())));
         }
         (used.taken, used.redraw)
+    }
+
+    /// Whether the input method is composing in the focused field, while
+    /// that field takes input.
+    fn composing(&self) -> bool {
+        self.focus
+            .id()
+            .filter(|id| self.field_takes_input(id))
+            .and_then(|id| self.panels.fields.get(id))
+            .is_some_and(crate::field::FieldState::composing)
     }
 
     /// Whether the field with UI ID `id` takes input now: it is one of the
@@ -652,7 +706,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .panels
                 .fields
                 .get(&field)
-                .map(|state| state.text().to_owned())
+                .map(crate::field::FieldState::committed)
                 .unwrap_or_default();
             batch.extend(self.app.field_event(&field, &FieldEvent::Edited(text)));
         }
@@ -663,16 +717,33 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// forgets its undo steps, and the app hears [`FieldEvent::Left`], in
     /// `batch`. The window losing the keys moves no focus, so it is not
     /// this (section 8, rule 3).
-    fn field_left(&mut self, batch: &mut Vec<A::Message>) {
+    fn field_left(&mut self, batch: &mut Vec<A::Message>, now: Instant) {
         if let Some(field) = self.field_focus.take() {
             if self.focus.id() == Some(&field) {
                 self.field_focus = Some(field);
                 return;
             }
-            self.panels.fields.left(&field);
+            // A composition in progress stays as text, and the app hears
+            // that edit before it hears focus leave.
+            if self.panels.fields.left(&field, now) {
+                let text = self
+                    .panels
+                    .fields
+                    .get(&field)
+                    .map(crate::field::FieldState::committed)
+                    .unwrap_or_default();
+                batch.extend(self.app.field_event(&field, &FieldEvent::Edited(text)));
+            }
             batch.extend(self.app.field_event(&field, &FieldEvent::Left));
         }
         self.field_focus = self.focus.id().cloned().filter(|id| self.panels.fields.has(id));
+    }
+
+    /// A paste answer for the field `field`, as a driver gets one, for a
+    /// test that answers it later.
+    #[cfg(test)]
+    pub(crate) fn test_paste(&self, field: UiId) -> crate::Paste {
+        crate::Paste::new(field, self.focus.moves, self.paste_answers.0.clone(), self.wake.clone())
     }
 
     /// The text the field with UI ID `id` shows now, for tests.
@@ -899,15 +970,23 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // last turn; then a layout between turns, or that, may have moved
         // focus off a field, or changed what a field reports.
         let mut redraw = self.follow_target();
-        self.field_left(&mut batch);
+        self.field_left(&mut batch, now);
         let mut reported = self.panels.fields.take_changed();
+        // Paste answers that came since the last turn.
+        let changed = self.take_pastes(now, &mut batch);
+        redraw |= changed;
+        reported |= changed;
 
         // 2. Route the event.
         match event {
             DriverEvent::Input { event, pointer } => {
-                let (mut taken, moved) = self.tab(&event);
+                // While the input method composes in a focused field, every
+                // key is the input method's, Tab and Space too: the field
+                // takes them before Tab or a button can.
+                let composing = matches!(event, Event::Key(_)) && self.composing();
+                let (mut taken, moved) = if composing { (false, false) } else { self.tab(&event) };
                 redraw |= moved;
-                if !taken {
+                if !taken && !composing {
                     let (activated, changed) = self.activate(&event);
                     taken = activated;
                     redraw |= changed;
@@ -951,7 +1030,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
         // Tab, or a press the target handed back, may have moved focus off
         // a field: the app hears of it in this turn.
-        self.field_left(&mut batch);
+        self.field_left(&mut batch, now);
 
         // 3. One update per message, each followed by its own effects. A
         // focus effect that moves focus off a field is looked at as it
@@ -1000,7 +1079,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.drain_queue();
         Next {
             draw,
-            again: !self.exited && !self.pending.is_empty(),
+            again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty()),
             frames: !self.exited && self.app.animating(),
             deadline: if self.exited {
                 None
@@ -1047,9 +1126,42 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         redraw
     }
 
-    /// Moves everything wakers sent into `pending`, in order.
+    /// Moves everything wakers sent into `pending`, in order, and the
+    /// paste answers drivers gave into `pasted`.
     fn drain_queue(&mut self) {
         self.pending.extend(self.queue.try_iter());
+        self.pasted.extend(self.paste_answers.1.try_iter());
+    }
+
+    /// Puts each paste answer in its field, as one undo step, when that
+    /// field still has focus, focus has not moved at all since the paste
+    /// was asked for (not even away and back, as a held Space counts it),
+    /// and the field takes input; drops it otherwise, so a slow clipboard
+    /// never types into another place or after the user moved on (section
+    /// 8, rule 2). An
+    /// edit reaches the app as `Edited`, in `batch`. Returns whether a
+    /// field changed what it shows.
+    fn take_pastes(&mut self, now: Instant, batch: &mut Vec<A::Message>) -> bool {
+        self.pasted.extend(self.paste_answers.1.try_iter());
+        let mut changed = false;
+        while let Some((field, moves, text)) = self.pasted.pop_front() {
+            let Some(text) = text else { continue };
+            if moves != self.focus.moves || self.focus.id() != Some(&field) || !self.field_takes_input(&field) {
+                continue;
+            }
+            let used = self.panels.fields.paste(&field, &text, now);
+            changed |= used.redraw;
+            if used.edited {
+                let text = self
+                    .panels
+                    .fields
+                    .get(&field)
+                    .map(crate::field::FieldState::committed)
+                    .unwrap_or_default();
+                batch.extend(self.app.field_event(&field, &FieldEvent::Edited(text)));
+            }
+        }
+        changed
     }
 
     /// Applies a window event to the window state, tells the target when
@@ -1090,7 +1202,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     // back: the field leaves at each, and the app hears of
                     // it on the next turn.
                     let mut later = Vec::new();
-                    self.field_left(&mut later);
+                    self.field_left(&mut later, now);
                     self.pending.extend(later);
                 }
                 Effect::ScrollIntoView(id) => self.target.scroll_into_view(&id),

@@ -260,13 +260,16 @@ impl Ui {
             };
             let routed = match (pointer, event) {
                 (Some((event, point)), _) => Some((event, Some(point))),
-                (None, Event::Keyboard(_)) => loom_canvas::iced_convert::event_to_core(event).map(|key| (key, None)),
+                (None, Event::Keyboard(_) | Event::InputMethod(_)) => {
+                    loom_canvas::iced_convert::event_to_core(event).map(|key| (key, None))
+                }
                 _ => None,
             };
             if let Some((event, point)) = routed {
                 let task = self.bridge.input(event, point);
                 self.settle(vec![task]);
-                // The runtime took this key: Iced does not hear it.
+                // The runtime took this key, or input method event: Iced
+                // does not hear it.
                 if self.bridge.runtime_mut().target_mut().take_drop_keys()
                     && let Some(at) = kept.len().checked_sub(1)
                 {

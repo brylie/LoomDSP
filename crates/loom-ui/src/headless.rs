@@ -151,6 +151,12 @@ impl<M> Driver<M> for Headless {
         waker.send(reply.give(self.clipboard.clone()));
     }
 
+    /// Answers at once from the fake clipboard; the runtime puts the text
+    /// in on the next turn.
+    fn clipboard_paste(&mut self, paste: crate::Paste) {
+        paste.give(self.clipboard.clone());
+    }
+
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>) {
         let Some(answer) = self.files.pop_front() else {
             no_answer(names::FILE_DIALOG);
