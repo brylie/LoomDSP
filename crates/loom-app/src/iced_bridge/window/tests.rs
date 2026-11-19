@@ -189,16 +189,18 @@ fn a_touch_moves_the_cursor() {
 }
 
 /// A clipboard in memory, for the Iced adapter's test: no display needed.
-#[derive(Default)]
-struct Memory(Option<String>);
+/// Clones are handles onto the same text, as two handles onto the system's
+/// clipboard are.
+#[derive(Clone, Default)]
+struct Memory(std::sync::Arc<std::sync::Mutex<Option<String>>>);
 
 impl loom_ui::clipboard::Backend for Memory {
     fn get(&mut self) -> loom_ui::ClipboardText {
-        loom_ui::ClipboardText::from_text(self.0.clone())
+        loom_ui::ClipboardText::from_text(self.0.lock().unwrap().clone())
     }
 
     fn set(&mut self, text: String) {
-        self.0 = Some(text);
+        *self.0.lock().unwrap() = Some(text);
     }
 }
 
@@ -209,7 +211,10 @@ impl loom_ui::clipboard::Backend for Memory {
 fn iceds_widgets_use_the_shells_clipboard() {
     use iced::advanced::Clipboard as _;
     use iced::advanced::clipboard::Kind;
-    let mut clipboard = super::IcedClipboard(loom_ui::clipboard::Clipboard::new(Memory::default));
+    let mut clipboard = super::IcedClipboard(loom_ui::clipboard::Clipboard::new({
+        let memory = Memory::default();
+        move || memory.clone()
+    }));
     clipboard.write(Kind::Standard, "osc".to_owned());
     assert_eq!(clipboard.read(Kind::Standard), Some("osc".to_owned()));
     clipboard.write(Kind::Primary, "ignored".to_owned());

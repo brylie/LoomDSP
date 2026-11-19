@@ -1,13 +1,16 @@
 //! Tests for the clipboard thread, over a fake backend, so they run in CI
 //! with no display.
 
-use super::{BACKEND_READ_LIMIT, Backend, Clipboard, READ_NOW_LIMIT, answer};
+use super::{BACKEND_READ_LIMIT, Backend, Clipboard, Native, READ_NOW_LIMIT, System, answer};
 use crate::effect::ClipboardText;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// A clipboard in memory, shared with the test, that can refuse.
+/// A clipboard in memory, shared with the test, that can refuse. Every
+/// clone is a handle onto the same text, as two handles onto the system's
+/// clipboard are.
 #[derive(Clone, Default)]
 struct Fake {
     text: Arc<Mutex<Option<String>>>,
@@ -43,7 +46,8 @@ fn read(clipboard: &Clipboard) -> ClipboardText {
 /// what was written. An empty clipboard reads `Empty`.
 #[test]
 fn a_write_then_a_read_run_in_order() {
-    let clipboard = Clipboard::new(Fake::default);
+    let fake = Fake::default();
+    let clipboard = Clipboard::new(move || fake.clone());
     assert_eq!(read(&clipboard), ClipboardText::Empty);
     clipboard.write("osc".to_owned());
     assert_eq!(read(&clipboard), ClipboardText::Text("osc".to_owned()));
@@ -63,7 +67,8 @@ fn a_refused_read_is_not_empty() {
 /// a toolkit bridge, waits for the same thread.
 #[test]
 fn clones_share_the_clipboard() {
-    let clipboard = Clipboard::new(Fake::default);
+    let fake = Fake::default();
+    let clipboard = Clipboard::new(move || fake.clone());
     let other = clipboard.clone();
     other.write("filter".to_owned());
     assert_eq!(clipboard.read_now(), ClipboardText::Text("filter".to_owned()));
@@ -177,27 +182,180 @@ fn a_backend_that_fails_hard_answers_refused_and_the_thread_goes_on() {
     assert_eq!(read(&clipboard), ClipboardText::Text("again".to_owned()));
 }
 
-/// A read that never finishes, as a Wayland transfer whose owner stops
-/// sending, holds no later job: after the backend's limit it answers
-/// `Refused`, and the next read and write go through a backend opened
-/// again, while the stuck one is still stuck.
+/// One clipboard in memory, shared by every handle onto it, which records
+/// what each handle does and can hold a read, as an owner that stops
+/// answering would.
+#[derive(Default)]
+struct Shared {
+    text: Mutex<Option<String>>,
+    log: Mutex<Vec<String>>,
+    hold: Mutex<Option<mpsc::Receiver<()>>>,
+    opened: AtomicUsize,
+}
+
+impl Shared {
+    /// What the handles did, in order.
+    fn log(&self) -> Vec<String> {
+        self.log.lock().unwrap().clone()
+    }
+}
+
+/// One handle onto [`Shared`], numbered in the order it was opened.
+struct Handle {
+    id: usize,
+    shared: Arc<Shared>,
+}
+
+impl Backend for Handle {
+    fn get(&mut self) -> ClipboardText {
+        self.shared.log.lock().unwrap().push(format!("read {}", self.id));
+        let hold = self.shared.hold.lock().unwrap().take();
+        if let Some(hold) = hold {
+            let _ = hold.recv();
+        }
+        ClipboardText::from_text(self.shared.text.lock().unwrap().clone())
+    }
+
+    fn set(&mut self, text: String) {
+        self.shared.log.lock().unwrap().push(format!("write {}", self.id));
+        *self.shared.text.lock().unwrap() = Some(text);
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        self.shared.log.lock().unwrap().push(format!("drop {}", self.id));
+    }
+}
+
+/// A clipboard over `shared`, whose first read is held until the returned
+/// sender sends or goes.
+fn held(shared: &Arc<Shared>) -> (Clipboard, mpsc::Sender<()>) {
+    let (release, hold) = mpsc::channel();
+    *shared.hold.lock().unwrap() = Some(hold);
+    let opener = Arc::clone(shared);
+    let clipboard = Clipboard::new(move || Handle {
+        id: opener.opened.fetch_add(1, Ordering::SeqCst),
+        shared: Arc::clone(&opener),
+    });
+    (clipboard, release)
+}
+
+/// A read until it answers text, for a held read that was just let go and
+/// whose handle comes back a moment later.
+fn read_until_text(clipboard: &Clipboard) -> ClipboardText {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let text = read(clipboard);
+        if text != ClipboardText::Refused || std::time::Instant::now() > deadline {
+            return text;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// A stuck read never takes our copy: the handle that wrote is not the one
+/// the read holds, so it is never dropped and the text stays. Once the
+/// stuck read comes back, its handle is used again, so nothing new opens.
 #[test]
-fn a_stuck_read_does_not_hold_the_clipboards_thread() {
-    let (_never, never) = mpsc::channel::<()>();
-    let mut stuck = Some(Stuck {
-        release: never,
-        first: true,
-    });
-    let clipboard = Clipboard::new(move || {
-        stuck.take().unwrap_or_else(|| Stuck {
-            release: mpsc::channel().1,
-            first: false,
-        })
-    });
+fn a_stuck_read_keeps_the_handle_that_wrote() {
+    let shared = Arc::new(Shared::default());
+    let (clipboard, release) = held(&shared);
+    clipboard.write("osc".to_owned());
     assert_eq!(
         read(&clipboard),
         ClipboardText::Refused,
         "within the limit, {BACKEND_READ_LIMIT:?}"
     );
-    assert_eq!(read(&clipboard), ClipboardText::Text("late".to_owned()));
+    assert_eq!(
+        shared.log(),
+        ["write 0", "read 1"],
+        "the read is held on its own handle"
+    );
+    clipboard.write("filter".to_owned());
+    release.send(()).unwrap();
+    assert_eq!(read_until_text(&clipboard), ClipboardText::Text("filter".to_owned()));
+    assert_eq!(shared.opened.load(Ordering::SeqCst), 2, "the reader came back");
+    assert!(
+        !shared.log().iter().any(|entry| entry.starts_with("drop")),
+        "no handle was dropped: {:?}",
+        shared.log()
+    );
+}
+
+/// At most one read is stuck at a time: while it is, every read answers
+/// `Refused` at once, with no new helper or handle, and a write still goes
+/// through.
+#[test]
+fn reads_against_a_stuck_clipboard_hold_one_helper() {
+    let shared = Arc::new(Shared::default());
+    let (clipboard, _release) = held(&shared);
+    assert_eq!(read(&clipboard), ClipboardText::Refused);
+    let started = std::time::Instant::now();
+    assert_eq!(read(&clipboard), ClipboardText::Refused);
+    assert_eq!(read(&clipboard), ClipboardText::Refused);
+    let waited = started.elapsed();
+    assert!(waited < BACKEND_READ_LIMIT, "at once, with no wait: {waited:?}");
+    clipboard.write("later".to_owned());
+    assert_eq!(clipboard.read_now(), ClipboardText::Refused, "still held");
+    assert_eq!(shared.log(), ["read 0", "write 1"], "one read reached a backend");
+    assert_eq!(shared.opened.load(Ordering::SeqCst), 2, "a reader and a writer");
+    assert_eq!(*shared.text.lock().unwrap(), Some("later".to_owned()));
+}
+
+/// What the next opens of [`Scripted`] do, in order: `true` opens, `false`
+/// fails. Only one test uses it, so no other test shares the script.
+static OPENS: Mutex<Vec<bool>> = Mutex::new(Vec::new());
+
+/// A native handle that opens as [`OPENS`] says, and whose writes fail
+/// while `fail_writes` is set.
+struct Scripted {
+    text: String,
+    fail_writes: bool,
+}
+
+impl Native for Scripted {
+    fn open() -> Result<Self, arboard::Error> {
+        let opens = OPENS.lock().unwrap().remove(0);
+        if !opens {
+            return Err(arboard::Error::ClipboardNotSupported);
+        }
+        Ok(Self {
+            text: String::new(),
+            fail_writes: false,
+        })
+    }
+
+    fn get_text(&mut self) -> Result<String, arboard::Error> {
+        if self.text.is_empty() {
+            return Err(arboard::Error::ContentNotAvailable);
+        }
+        Ok(self.text.clone())
+    }
+
+    fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
+        if self.fail_writes {
+            return Err(arboard::Error::ClipboardOccupied);
+        }
+        self.text = text;
+        Ok(())
+    }
+}
+
+/// The system backend opens on first use, refuses a read while it cannot
+/// open, and opens again after a write failed, as a clipboard another app
+/// held on Windows would.
+#[test]
+fn the_system_backend_opens_again_after_a_failed_write() {
+    *OPENS.lock().unwrap() = vec![false, true, true];
+    let mut system = System::<Scripted>::default();
+    assert_eq!(system.get(), ClipboardText::Refused, "it could not open");
+    assert_eq!(system.get(), ClipboardText::Empty, "opened, with nothing on it");
+    system.set("osc".to_owned());
+    assert_eq!(system.get(), ClipboardText::Text("osc".to_owned()));
+    system.clipboard.as_mut().unwrap().fail_writes = true;
+    system.set("filter".to_owned());
+    assert!(system.clipboard.is_none(), "a failed write lets the handle go");
+    assert_eq!(system.get(), ClipboardText::Empty, "and the next use opens another");
+    assert!(OPENS.lock().unwrap().is_empty(), "three opens, as scripted");
 }

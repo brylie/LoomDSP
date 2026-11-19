@@ -20,16 +20,18 @@ fn open_request() -> FileRequest {
 }
 
 /// A clipboard in memory, for the driver's tests: no display needed.
-#[derive(Default)]
-struct Memory(Option<String>);
+/// Clones are handles onto the same text, as two handles onto the system's
+/// clipboard are.
+#[derive(Clone, Default)]
+struct Memory(std::sync::Arc<std::sync::Mutex<Option<String>>>);
 
 impl crate::clipboard::Backend for Memory {
     fn get(&mut self) -> ClipboardText {
-        ClipboardText::from_text(self.0.clone())
+        ClipboardText::from_text(self.0.lock().unwrap().clone())
     }
 
     fn set(&mut self, text: String) {
-        self.0 = Some(text);
+        *self.0.lock().unwrap() = Some(text);
     }
 }
 
@@ -37,7 +39,10 @@ impl crate::clipboard::Backend for Memory {
 fn driver() -> ShellDriver<u32, NoServices> {
     ShellDriver {
         services: NoServices,
-        clipboard: crate::clipboard::Clipboard::new(Memory::default),
+        clipboard: crate::clipboard::Clipboard::new({
+            let memory = Memory::default();
+            move || memory.clone()
+        }),
         access: None,
         window: None,
         captures: Vec::new(),
