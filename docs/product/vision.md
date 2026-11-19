@@ -65,8 +65,8 @@ Later goals, not scheduled: export patches as CLAP and VST3 plugins and standalo
 ## Non-goals (version 1.0)
 
 - **A DAW.** No arranger timeline, mixer, or track list. Arrangement happens inside the grid: loopers with groups and next actions, counters and logic, scenes, and modulation curves (ADR-0011).
-- **Plugin and standalone export.** Deferred until living systems are proven (see "Later goals").
-- **The browser as the primary interface.** Browser support is optional and deferred.
+- **Plugin and standalone export.** Not in 1.0: they come once living systems are proven (see "Later goals"). They will ship; only their timing waits.
+- **The browser as the primary interface.** A web build comes after 1.0, as a first-class target ([UI design goal 3](../design/ui-layer.md#design-goals)).
 - **A JavaScript or webview UI.** See ADR-0005.
 - **A general text-based DSP language.** We may import Faust later.
 - **Running third-party plugins inside a patch.** This adds a large surface for crashes and licensing issues.
