@@ -43,7 +43,11 @@ run = "cargo clippy --workspace --all-targets -- -D warnings"
 
 [tasks.test]
 description = "Run every test (debug build, so the no-allocation test is active)"
-run = "cargo test --workspace"
+# Ubuntu 26.04's Vulkan loader can crash when concurrent offscreen tests
+# use separate GPU devices in the same process (LoomDSP #827).
+# https://github.com/KhronosGroup/Vulkan-Loader/issues/1863
+# Nextest gives each test a process of its own. Cargo runs the doc tests.
+run = ["cargo nextest run --workspace", "mise run doctest"]
 
 [tasks.coverage]
 description = "Run every test with line coverage, and fail under LOOM_COVERAGE_MIN"
