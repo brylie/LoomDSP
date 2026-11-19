@@ -560,9 +560,11 @@ impl FieldState {
     ) -> KeyUse {
         let before = self.reported();
         let committed = self.committed();
-        if !self.composing() {
-            self.commit_text(text, now, fonts, layouts);
-        }
+        // A paste that comes during a composition keeps the preedit as
+        // text first, as a screen reader's edit does, then goes in after
+        // it: the user saw the preedit, and asked for the paste.
+        self.finish_composing(now, fonts, layouts);
+        self.commit_text(text, now, fonts, layouts);
         self.editor.refresh_layout(fonts, layouts);
         self.keep_caret();
         KeyUse {
@@ -866,14 +868,22 @@ impl FieldState {
         // A screen reader acting in mid-composition first keeps the
         // preedit as text, as focus leaving does, so the editor never edits
         // around a preedit range that no longer fits. The text it shows is
-        // the same, so the request's positions still hold.
-        self.finish_composing(now, fonts, layouts);
+        // the same, so the request's positions still hold. Keeping it is an
+        // edit the app must hear, as the committed text grew, even if the
+        // action itself then changes nothing.
+        let committed = self.committed();
+        let kept = self.finish_composing(now, fonts, layouts);
         // A stale selection changes nothing, not even the typing run, so
         // typing after it still joins the run it was in.
         let range = match &action {
             FieldAction::Select { anchor, focus } => match self.reader_range(*anchor, *focus) {
                 Some(range) => Some(range),
-                None => return ActUse::default(),
+                None => {
+                    return ActUse {
+                        edited: kept,
+                        changed: kept,
+                    };
+                }
             },
             _ => None,
         };
@@ -901,9 +911,12 @@ impl FieldState {
         }
         self.editor.refresh_layout(fonts, layouts);
         self.keep_caret();
-        let edited = self.text() != before.0;
+        // The action's own undo step is kept only if the action changed the
+        // text; what the app hears also counts a kept composition.
+        let acted = self.text() != before.0;
+        let edited = self.committed() != committed;
         if let Some(snapshot) = self.opened.take()
-            && edited
+            && acted
         {
             if self.undo.len() == UNDO_STEPS {
                 self.undo.remove(0);
@@ -915,7 +928,7 @@ impl FieldState {
         self.run = None;
         ActUse {
             edited,
-            changed: self.reported() != before,
+            changed: kept || self.reported() != before,
         }
     }
 

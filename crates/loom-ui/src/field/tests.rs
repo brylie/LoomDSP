@@ -2151,3 +2151,78 @@ fn a_paste_after_focus_went_away_and_back_is_dropped() {
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab");
 }
+
+/// A screen reader's action in mid-composition keeps the preedit as text,
+/// and that is an edit the app hears, even when the action itself changes
+/// nothing more: SetValue to the text already shown, or a stale
+/// selection, still reports the kept text.
+#[test]
+fn keeping_a_preedit_for_an_action_is_an_edit() {
+    use super::FieldAction;
+    for action in [
+        FieldAction::SetValue("aに".to_owned()),
+        FieldAction::Select {
+            anchor: (0, 0),
+            focus: (0, 9),
+        },
+    ] {
+        let Some(mut bench) = field_in("a", 300.0) else { return };
+        let Bench {
+            field,
+            fonts,
+            layouts,
+            now,
+        } = &mut bench;
+        field.ime(&preedit("に"), *now, fonts, layouts);
+        let used = field.act(action.clone(), *now, fonts, layouts);
+        assert!(used.edited && used.changed, "{action:?}");
+        assert_eq!(field.committed(), "aに");
+        assert_eq!(
+            field.steps(),
+            (1, 0),
+            "keeping the preedit is one undo step: {action:?}"
+        );
+    }
+}
+
+/// The same through the runtime: the app hears `Edited` with the kept
+/// text, so the next layout does not take the preedit away.
+#[test]
+fn the_app_hears_a_preedit_a_screen_reader_kept() {
+    use accesskit::{Action, ActionData};
+    let Some((mut harness, mut text)) = form("a", true) else {
+        return;
+    };
+    let (field, _) = describe(&mut harness, &mut text);
+    harness.step(ime_in(preedit("に")));
+    let start = harness.app().log.len();
+    harness.step(reader(Action::SetValue, field, Some(ActionData::Value("aに".into()))));
+    harness.lay_out(&mut text);
+    assert!(
+        harness.app().log[start..].contains(&"Edited(\"aに\")".to_owned()),
+        "Edited carries the committed text with the kept preedit: {:?}",
+        &harness.app().log[start..]
+    );
+    assert_eq!(harness.app().text, "aに");
+}
+
+/// Every key is the input method's while it composes, Cmd+V too, so a
+/// paste that meets a composition was asked for before it began. The
+/// sequence: the paste is asked for, then the composition starts in the
+/// same field, with focus staying there, then the answer arrives. The
+/// preedit stays as text and the paste goes in after it, as macOS commits
+/// marked text before it pastes: neither is lost.
+#[test]
+fn a_paste_during_a_composition_goes_in_after_it() {
+    let Some((mut harness, mut text)) = form("a", true) else {
+        return;
+    };
+    let asked = harness.runtime().test_paste(name());
+    harness.step(ime_in(preedit("に")));
+    assert_eq!(harness.runtime().focused(), Some(&name()), "focus stays on the field");
+    asked.give(Some("x".to_owned()));
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    assert_eq!(harness.app().text, "aにx");
+}
