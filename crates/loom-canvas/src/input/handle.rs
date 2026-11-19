@@ -328,16 +328,11 @@ impl CanvasModel<'_> {
                 modifiers,
                 repeat: false,
                 ..
-            }) if *key == crate::shortcuts::ADD.key && modifiers.none() => {
-                let (placement, anchor) = if let Some(at) = screen.filter(|_| over) {
-                    (BrowserPlacement::Pointer(state.camera.to_world(at)), at)
-                } else {
-                    (
-                        BrowserPlacement::Toolbar(state.camera.visible(bounds.size())),
-                        Point::new(bounds.width / 2.0, bounds.height / 2.0),
-                    )
-                };
-                self.open_browser(placement, anchor, bounds, out);
+            }) if *key == crate::shortcuts::ADD.key
+                && modifiers.none()
+                && let Some(at) = screen.filter(|_| over) =>
+            {
+                self.open_browser(BrowserPlacement::Pointer(state.camera.to_world(at)), at, bounds, out);
                 out.take();
             }
             // The menu key, or Shift+F10, opens the tile menu, as a

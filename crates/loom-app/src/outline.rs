@@ -615,6 +615,7 @@ impl App {
             key,
             physical_key,
             modifiers,
+            repeat,
             ..
         } = event
         else {
@@ -644,11 +645,18 @@ impl App {
         if !outline
             && !self.session.outline.has_jump()
             && !self.toolbar_has_focus()
-            && self.input_owner() == crate::input_owner::InputOwner::Canvas
             && modifiers.is_empty()
-            && matches!(&key, Key::Character(c) if loom_canvas::shortcuts::CABLE.matches_letter(c))
+            && let Key::Character(letter) = &key
         {
-            return self.open_cable_picker();
+            if loom_canvas::shortcuts::CABLE.matches_letter(letter) {
+                return self.open_cable_picker();
+            }
+            // The canvas uses the pointer when it has one over the patch.
+            // Elsewhere only a key the window's widgets left reaches here.
+            if !repeat && loom_canvas::shortcuts::ADD.matches_letter(letter) {
+                self.post(Message::OpenBrowser);
+                return true;
+            }
         }
         if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("o")) && modifiers.is_empty() {
             self.right_tab = crate::matrix::Tab::Outline;

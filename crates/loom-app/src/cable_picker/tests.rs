@@ -7,6 +7,7 @@ use loom_ui_core::Point;
 /// Opens and chooses a browser row with keys, including with the pointer outside.
 fn add(ui: &mut Ui, name: &str) {
     ui.tap(Key::Character("a".into()), Modifiers::empty());
+    ui.redraw();
     assert!(ui.app().overlays.browser().is_some());
     ui.typewrite(name);
     ui.tap(Key::Named(Named::Enter), Modifiers::empty());

@@ -84,7 +84,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 ### Adding
 
-- With A or a double-click, the tile’s top-left corner goes at the chosen point, snapped to the grid, even when it overlaps another tile.
+- When A or a double-click gives a pointer position, the tile’s top-left corner goes there, snapped to the grid, even when it overlaps another tile.
 - **Toolbar placement (Agreed).** The toolbar supplies no pointer position. Put the tile’s top-left corner on the nearest free grid point to the visible canvas centre where the whole tile fits. Leave one grid step between tiles so the port jacks stay clear. Measure straight-line distance, breaking ties by top then left. If the view is full or too small, use the nearest free grid point even if the tile extends outside the view. This applies to every kind of browser row.
 - The new module becomes the only selection.
 - Adding is one undo step ([undo.md](undo.md)). Undo removes the module.
