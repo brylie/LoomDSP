@@ -456,12 +456,23 @@ These check the model. Only the first is built in M2.
 Note input (`voices` 8, Oldest) `pitch` → Saw `pitch` → SVF `in` → Amplifier `in` → Voice merge `in` (Sum) → Audio Out. Note input's `gate` goes to an Envelope's `gate`, whose `out` goes to the Amplifier's `level` input and to Note input's `level`. These are today's modules with today's ports; the `pitch`, `gate`, and `level` inputs are `Downmix`, which rule 3 leaves as it is.
 
 The `level` cable closes a loop. The compiler inserts a one-sample delay and
-reports it. Its tie rule can choose a different cable when module IDs change.
-The acceptance test creates Note input before Envelope and asserts that the
-inserted delay is exactly Envelope `out` to Note input `level`. This loop runs
-one sample at a time, including the eight envelopes. Choosing `level` regardless
-of creation order is follow-up [#733](https://github.com/brylie/LoomDSP/issues/733),
-outside this change.
+reports it. The accepted [compilation rule](../adr/0002-graph-execution-and-feedback.md)
+chooses the module with the fewest unresolved inputs and breaks a tie at the
+lower module ID. In this loop, creating Note input first delays Envelope
+`out` to Note input `level`. Creating Envelope first delays Note input
+`gate` to Envelope `gate`. In both orders Note input raises its gate on the
+note frame. The envelope starts one frame later when its gate cable carries
+the delay. Both orders are checked at block sizes 1, 77, and 512 ([#733](https://github.com/brylie/LoomDSP/issues/733)).
+
+The same tie rule covers ordinary feedback. It gives a stable result for a
+saved patch and never changes it based on a module's name. A player who needs
+the envelope to start on the note frame can place a Unit Delay on the level
+cable. This loop runs one sample at a time, including the eight envelopes.
+A local release benchmark at 48 kHz with 128-frame buffers measured
+265.8 µs per block for the shipped patch and 360.3 µs for the Quietest patch
+with the level loop. The two runs used eight held notes. The difference is
+about 0.74 µs per frame for the variant. The reference-machine check remains
+with [#643](https://github.com/brylie/LoomDSP/issues/643).
 The shipped example leaves this cable out, so its chain has no loop
 ([the shipped example](#the-shipped-example)); the 8-mono-chains test keeps it,
 with its delay on `level`.
@@ -726,5 +737,4 @@ Cost:
 ## Open points
 
 - **Lockstep copies for SIMD.** Whether the schedule format needs a per-voice stride for NFR-PERF-03, or the optimisation can stay inside the engine. Not before M2's exit criterion is measured.
-- **Where the `level` loop's delay goes.** The inserted delay of the loop a `level` cable makes follows module IDs (see [A keyboard into an 8-voice synth](#a-keyboard-into-an-8-voice-synth-m2)). Choosing `level` whatever the order is [#733](https://github.com/brylie/LoomDSP/issues/733).
 - **Any-type ports fade by their declared type.** Voice merge declares `in` as Audio, and Voice split and Voice spread declare Audio and Modulation, so a gate cable re-patched into them ramps for 5 ms, as one into Selector does. The rule for the editor's mixers (a cable fades by what it carries past them, [live patching](live-patching.md), rule 9) could extend to these modules.

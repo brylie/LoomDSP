@@ -256,7 +256,7 @@ impl Controller {
 
     /// True if there are structural or probe edits not yet committed.
     pub fn has_uncommitted_changes(&self) -> bool {
-        self.dirty
+        self.dirty || !self.slots.detached().is_empty()
     }
 
     /// A count that goes up with every structural or probe edit, committed
@@ -341,8 +341,9 @@ impl Controller {
     /// Compiles a graph whose MIDI feedback was already reconciled before
     /// staging edits. Importing feedback again would overwrite staged values.
     fn commit_synced(&mut self) -> Result<&CompileReport, LoomError> {
+        self.send_detached();
         if !self.dirty {
-            return Ok(&self.last_report);
+            return self.commit_report();
         }
         // Prepare voice/side copies before the swap. Removed copies retire
         // after the new schedule no longer names their slots.
@@ -356,15 +357,18 @@ impl Controller {
         // when they do not all fit with the swap, the ones that fit go now
         // and the rest wait for the next commit. Their later edits are
         // commands, as for any module in the engine.
-        let room = self.commands.slots().saturating_sub(1 + self.slots.retiring().len());
-        let waiting = self.slots.waiting().saturating_sub(room);
-        self.send_waiting_modules(room);
-        if waiting > 0 || self.commands.slots() < starting.len() + 1 + self.slots.retiring().len() + stopping.len() {
+        self.send_waiting_modules(self.commands.slots());
+        if self.slots.waiting() != 0 {
             return Err(LoomError::QueueFull);
         }
-        for (id, key) in starting {
+        let room = self.commands.slots();
+        let copies = starting.len();
+        for (id, key) in starting.into_iter().take(room) {
             let (slot, fresh) = self.fresh_copy(id, key);
             self.send_module(slot, fresh);
+        }
+        if room <= copies {
+            return Err(LoomError::QueueFull);
         }
         for (id, key, slot) in stopping {
             self.graph
@@ -440,17 +444,32 @@ impl Controller {
                 fading,
             };
         }
-        let pushed = swapped
-            && self
-                .slots
-                .retiring()
-                .iter()
-                .all(|&slot| self.commands.push(Command::RemoveModule { slot }).is_ok());
-        debug_assert!(pushed, "capacity was checked above");
-        self.slots.free_retired();
+        debug_assert!(swapped, "capacity was checked above");
+        self.slots.detach_retired();
+        self.send_detached();
         self.dirty = false;
         self.last_report = report;
-        Ok(&self.last_report)
+        self.commit_report()
+    }
+
+    /// Reports success once the schedule and all of its retirements are queued.
+    fn commit_report(&self) -> Result<&CompileReport, LoomError> {
+        if self.slots.detached().is_empty() {
+            Ok(&self.last_report)
+        } else {
+            Err(LoomError::QueueFull)
+        }
+    }
+
+    /// Queues removals after the swap. Each command still returns at most
+    /// one object, so a large deletion cannot overflow the garbage queue.
+    fn send_detached(&mut self) {
+        let sent = self.commands.slots().min(self.slots.detached().len());
+        for &slot in &self.slots.detached()[..sent] {
+            let pushed = self.commands.push(Command::RemoveModule { slot }).is_ok();
+            debug_assert!(pushed, "capacity was checked before removing modules");
+        }
+        self.slots.free_detached(sent);
     }
 
     /// Constructs a voice or side copy with the base module's parameters.
@@ -499,6 +518,11 @@ impl Controller {
             })
             .is_ok();
         debug_assert!(pushed, "capacity was checked before sending the module");
+    }
+
+    /// The new modules still waiting on the controller for command space.
+    pub fn staged_modules(&self) -> usize {
+        self.slots.waiting()
     }
 
     /// Frees memory the engine has handed back. Called automatically by

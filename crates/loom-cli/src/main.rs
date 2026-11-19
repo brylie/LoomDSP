@@ -9,6 +9,7 @@ mod analyze;
 mod capture;
 mod help_pages;
 mod midi_port;
+mod play;
 
 use clap::{Parser, Subcommand};
 use loom_core::ModuleNames;
@@ -17,11 +18,11 @@ use loom_host_desktop::patch_file::{FolderLibrary, load};
 use loom_host_desktop::{AudioOptions, AudioOutput, StatsSnapshot};
 use loom_patch::Patch;
 use std::collections::BTreeMap;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 #[derive(Parser)]
@@ -197,7 +198,7 @@ fn main() -> ExitCode {
             };
             render(&source, &output, seconds, config, block, &notes, note_length)
         }
-        Command::Play { source, audio, note } => play(&source, &audio, note),
+        Command::Play { source, audio, note } => play::run(&source, &audio, note),
         Command::Stress {
             patch,
             audio,
@@ -596,7 +597,7 @@ fn render(
 }
 
 struct Live {
-    _audio: loom_host_desktop::RunningAudio,
+    audio: loom_host_desktop::RunningAudio,
     _midi: Vec<loom_host_desktop::MidiConnection>,
     stats: Arc<loom_host_desktop::CallbackStats>,
     controller: Controller,
@@ -634,12 +635,12 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>, library: Opt
     if let Some(note) = hold_note {
         sender.send(MidiEvent::note_on(0, 0, note, 100));
     }
-    let midi = loom_host_desktop::share_midi(sender);
-    let (midi, lines) = open_midi(
+    let (midi, lines) = connect_live_midi(
+        sender,
         MidiPlan::new(hold_note, args.no_midi, args.midi.as_deref()),
-        |wanted| Ok(loom_host_desktop::connect_midi(Some(wanted), midi.clone())?),
-        || {
-            let (connections, errors) = loom_host_desktop::connect_all_midi(&midi)?;
+        |wanted, midi| Ok(loom_host_desktop::connect_midi(Some(wanted), midi.clone())?),
+        |midi| {
+            let (connections, errors) = loom_host_desktop::connect_all_midi(midi)?;
             Ok((connections, errors.iter().map(ToString::to_string).collect()))
         },
         |connection| connection.port_name(),
@@ -651,7 +652,7 @@ fn start_live(path: &Path, args: &AudioArgs, hold_note: Option<u8>, library: Opt
     let audio = output.start(engine)?;
     Ok(Live {
         stats: audio.stats().clone(),
-        _audio: audio,
+        audio,
         _midi: midi,
         controller,
     })
@@ -680,6 +681,18 @@ impl<'a> MidiPlan<'a> {
             (None, false, None) => Self::Every,
         }
     }
+}
+
+/// Gives the live input selection path the sender connected to this engine.
+fn connect_live_midi<C>(
+    sender: loom_core::MidiSender,
+    plan: MidiPlan<'_>,
+    one: impl FnOnce(&str, &loom_host_desktop::SharedMidi) -> Result<Option<C>>,
+    every: impl FnOnce(&loom_host_desktop::SharedMidi) -> Result<(Vec<C>, Vec<String>)>,
+    name: impl Fn(&C) -> &str,
+) -> Result<(Vec<C>, Vec<String>)> {
+    let midi = loom_host_desktop::share_midi(sender);
+    open_midi(plan, |wanted| one(wanted, &midi), || every(&midi), name)
 }
 
 /// Opens the MIDI inputs `plan` asks for: `one` opens the named port (a
@@ -750,24 +763,6 @@ fn format_stress_line(elapsed_secs: f32, edits: u64, s: &StatsSnapshot) -> Strin
         s.overruns,
         s.stream_errors
     )
-}
-
-fn play(source: &PatchArgs, args: &AudioArgs, note: Option<u8>) -> Result<ExitCode> {
-    let mut live = start_live(&source.patch, args, note, source.library.as_deref())?;
-    println!("playing. press Enter to stop.");
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_reader = stop.clone();
-    std::thread::spawn(move || {
-        let _ = std::io::stdin().lock().lines().next();
-        stop_reader.store(true, Ordering::Relaxed);
-    });
-    while !stop.load(Ordering::Relaxed) {
-        std::thread::sleep(Duration::from_millis(500));
-        live.controller.collect_garbage();
-        eprint!("{CLEAR_LINE}{}", format_stats(&live.stats.snapshot()));
-    }
-    eprintln!();
-    Ok(ExitCode::SUCCESS)
 }
 
 /// Makes random structural edits that do not change the sound: it adds and

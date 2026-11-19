@@ -1,0 +1,10 @@
+{"id":"clean","cmd":"output_safety","mode":"clean"}
+{"cmd":"wait","ms":2000}
+{"id":"off","cmd":"output_safety","mode":"off"}
+{"cmd":"wait","ms":2000}
+{"id":"low-latency","cmd":"output_safety","mode":"low-latency"}
+{"cmd":"wait","ms":2000}
+{"id":"leave-clean","cmd":"output_safety","mode":"clean"}
+{"cmd":"wait","ms":2000}
+{"id":"leave-clean","cmd":"snapshot"}
+{"cmd":"quit"}

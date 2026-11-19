@@ -224,7 +224,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] Given `--fake-audio --record FILE`, when a script opens two more patches and quits, then the file holds all three streams in order, and the app exits with status 0.
 - [x] A change of device that changes the sample rate ends the recording, with a message in the status bar and on stderr.
 - [x] A device at another sample rate that fails to start does not end the recording: the old device plays again, and its stream goes into the same file.
-- [x] The `--record` help text says the recording lasts until the app quits.
+- [x] The `--record` help text says when the recording ends. Standard WAV holds up to about 3 hours of stereo float audio at 48 kHz. Use the device capture on either side of a rate change to check what the device played. Longer recording formats belong with in-app recording ([#503](https://github.com/brylie/LoomDSP/issues/503)).
 
 ### `loom analyze`
 
@@ -262,7 +262,7 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 
 - **What happens past the app's output.** Thuds from a device powering on or off, and a speaker cone held by DC, depend on the hardware. They stay on a short manual checklist before each release.
 - **How Clean mode feels to play.** That needs a person.
-- **A meter or warning for the final output in the app.** That is [#130](https://github.com/brylie/LoomDSP/issues/130).
+- **A meter for the final output in the app.** The warnings from [#130](https://github.com/brylie/LoomDSP/issues/130) are checked from the stepped output through the watcher and stats bar, including their ten-second expiry.
 - **True-peak (oversampled) measurement, loudness (LUFS), and spectrum analysis.** Add them when a check needs them.
 - **Starting and stopping a recording from the control channel.** A run records from start to quit.
 - **Audio input for patches** ([#29](https://github.com/brylie/LoomDSP/issues/29)). Capture only writes a file (device capture).

@@ -1526,3 +1526,65 @@ fn voice_assigner_releases_the_input_voices_a_narrower_cable_drops() {
     assert_eq!(left[0], 0.5);
     assert!(left.iter().all(|v| *v == 0.5));
 }
+
+/// The accepted minimum-input tie rule delays the lower ID's input.
+#[test]
+fn voice_level_feedback_delay_follows_the_declared_id_tie_break() {
+    use loom_core::{MidiEvent, ProbeKind};
+    for note_first in [true, false] {
+        for block in [1, 77, 512] {
+            let mut parts = engine();
+            let c = &mut parts.controller;
+            let (note, envelope) = if note_first {
+                (
+                    c.add_module("loom.midi.note").unwrap(),
+                    c.add_module("loom.env.envelope").unwrap(),
+                )
+            } else {
+                let env = c.add_module("loom.env.envelope").unwrap();
+                (c.add_module("loom.midi.note").unwrap(), env)
+            };
+            c.set_param_named(note, "voices", 8.0).unwrap();
+            c.set_param_named(note, "mode", 1.0).unwrap();
+            c.connect_named(note, "gate", envelope, "gate").unwrap();
+            c.connect_named(envelope, "out", note, "level").unwrap();
+            let gate = c.output_ref(note, "gate").unwrap();
+            let level = c.output_ref(envelope, "out").unwrap();
+            let delayed = if note_first {
+                (level, c.input_ref(note, "level").unwrap())
+            } else {
+                (gate, c.input_ref(envelope, "gate").unwrap())
+            };
+            let gate_probe = c.add_probe(gate, ProbeKind::Scope).unwrap();
+            let level_probe = c.add_probe(level, ProbeKind::Scope).unwrap();
+            assert_eq!(
+                c.commit().unwrap().inserted_delays().copied().collect::<Vec<_>>(),
+                [delayed]
+            );
+            let (mut gate_rise, mut level_rise) = (None, None);
+            let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+            for start in (0..64).step_by(block) {
+                let frames = block.min(64 - start);
+                if (start..start + frames).contains(&17) {
+                    assert!(parts.midi.send(MidiEvent::note_on((17 - start) as u32, 0, 60, 100)));
+                }
+                parts.engine.process(&mut left[..frames], &mut right[..frames]);
+                for chunk in parts.telemetry.scope() {
+                    let found = if chunk.probe == gate_probe {
+                        &mut gate_rise
+                    } else {
+                        assert_eq!(chunk.probe, level_probe);
+                        &mut level_rise
+                    };
+                    if found.is_none()
+                        && let Some(offset) = chunk.samples().iter().position(|&sample| sample > 0.0)
+                    {
+                        *found = Some(chunk.frame + offset as u64);
+                    }
+                }
+            }
+            assert_eq!(gate_rise, Some(17));
+            assert_eq!(level_rise, Some(if note_first { 17 } else { 18 }));
+        }
+    }
+}

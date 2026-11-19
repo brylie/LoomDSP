@@ -433,6 +433,7 @@ impl App {
         // A field can go with the old patch's views: ask the window again.
         self.focus_question.set(true);
         self.drops.clear();
+        self.alerts.clear(alerts::Cause::Commit);
         self.overlays.close_for_new_patch();
         // Commands waiting to be drawn still get their answer, except a
         // `sample`, which would measure a module of the new patch.

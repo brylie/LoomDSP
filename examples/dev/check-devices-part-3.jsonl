@@ -1,0 +1,6 @@
+{"id":"dc","cmd":"wait","ms":1000}
+{"id":"drone","cmd":"open","path":"examples/dev/check-drone.ron"}
+{"id":"drone","cmd":"wait","ms":1000}
+{"id":"new","cmd":"new"}
+{"id":"new","cmd":"wait","ms":1000}
+{"cmd":"quit"}

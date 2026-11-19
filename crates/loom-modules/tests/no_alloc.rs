@@ -1037,3 +1037,53 @@ fn polyphonic_midi_and_merge_never_allocate() {
     parts.controller.release_midi_input(loom_core::MidiInputId(1)).unwrap();
     assert_no_alloc(|| parts.engine.process(&mut left, &mut right));
 }
+
+/// Draining an oversized edit and retiring it in batches never allocates or leaks.
+#[test]
+fn staged_graph_edits_never_allocate_on_the_audio_thread() {
+    use std::sync::atomic::Ordering;
+    let mut parts = create_engine(
+        loom_modules::registry(),
+        EngineConfig {
+            command_capacity: 3,
+            ..EngineConfig::default()
+        },
+    );
+    let mut ids = Vec::new();
+    for _ in 0..8 {
+        ids.push(parts.controller.add_module("loom.math.constant").unwrap());
+    }
+    for removing in [false, true] {
+        if removing {
+            for &id in &ids {
+                parts.controller.remove_module(id).unwrap();
+            }
+        }
+        for _ in 0..8 {
+            let finished = parts.controller.commit().is_ok();
+            assert_no_alloc(|| parts.engine.process(&mut [0.0; 64], &mut [0.0; 64]));
+            if finished {
+                break;
+            }
+        }
+        assert!(!parts.controller.has_uncommitted_changes());
+        assert_eq!(parts.controller.stats().leaked.load(Ordering::Relaxed), 0);
+    }
+}
+
+/// A control change can wait across callbacks and split the next one with no allocation.
+#[test]
+fn queued_mapped_controls_never_allocate_on_the_audio_thread() {
+    let mut parts = create_engine(loom_modules::registry(), EngineConfig::default());
+    let target = parts.controller.add_module("loom.math.constant").unwrap();
+    let control = MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    parts.controller.map_midi(control, target, 0).unwrap();
+    parts.controller.commit().unwrap();
+    parts.midi.send(MidiEvent::control_change(7, 0, 74, 127));
+    assert_no_alloc(|| parts.engine.process(&mut [0.0; 17], &mut [0.0; 17]));
+    assert_no_alloc(|| parts.engine.process(&mut [0.0; 64], &mut [0.0; 64]));
+    assert_eq!(parts.controller.sync_midi(), [(target, 0)]);
+}

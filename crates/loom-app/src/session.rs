@@ -48,7 +48,7 @@ pub(crate) struct PatchSession {
     /// level's camera.
     pub(crate) level_key: u64,
     /// A full command queue left fresh modules staged for a later commit.
-    pub(crate) retry_commit: bool,
+    pub(crate) retry_commit: Option<u64>,
     pub(crate) positions: BTreeMap<u32, (f32, f32)>,
     /// Original placeholder positions and their initial displayed positions.
     pub(crate) unknown_positions: UnknownPositions,
@@ -221,7 +221,7 @@ impl PatchSession {
             level: ModulePath::root(),
             cameras: BTreeMap::new(),
             level_key: 0,
-            retry_commit: false,
+            retry_commit: None,
             positions,
             unknown_positions,
             sizes,
