@@ -143,11 +143,7 @@ impl Backend for System {
         let Some(clipboard) = self.open() else {
             return ClipboardText::Refused;
         };
-        match clipboard.get_text() {
-            Ok(text) => ClipboardText::from_text(Some(text)),
-            Err(arboard::Error::ContentNotAvailable) => ClipboardText::Empty,
-            Err(_) => ClipboardText::Refused,
-        }
+        answer(clipboard.get_text())
     }
 
     fn set(&mut self, text: String) {
@@ -158,6 +154,17 @@ impl Backend for System {
         {
             self.clipboard = None;
         }
+    }
+}
+
+/// What `arboard`'s read gave, as a [`ClipboardText`]: no text on the
+/// clipboard is empty, and every other failure, such as a clipboard another
+/// app holds on Windows, is refused, never empty.
+fn answer(read: Result<String, arboard::Error>) -> ClipboardText {
+    match read {
+        Ok(text) => ClipboardText::from_text(Some(text)),
+        Err(arboard::Error::ContentNotAvailable) => ClipboardText::Empty,
+        Err(_) => ClipboardText::Refused,
     }
 }
 

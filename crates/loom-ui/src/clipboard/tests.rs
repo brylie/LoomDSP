@@ -1,7 +1,7 @@
 //! Tests for the clipboard thread, over a fake backend, so they run in CI
 //! with no display.
 
-use super::{Backend, Clipboard, READ_NOW_LIMIT};
+use super::{Backend, Clipboard, READ_NOW_LIMIT, answer};
 use crate::effect::ClipboardText;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -127,4 +127,45 @@ fn a_stuck_clipboard_does_not_freeze_a_synchronous_read() {
     assert!(waited < READ_NOW_LIMIT * 8, "and not much more: {waited:?}");
     release.send(()).unwrap();
     assert_eq!(read(&clipboard), ClipboardText::Text("late".to_owned()));
+}
+
+/// What `arboard` gives becomes a `ClipboardText`: text is text, no text is
+/// empty, and any other failure, such as a clipboard another app holds, is
+/// refused, so the app says it could not read.
+#[test]
+fn arboards_answers_map_to_clipboard_text() {
+    assert_eq!(answer(Ok("osc".into())), ClipboardText::Text("osc".into()));
+    assert_eq!(answer(Ok(String::new())), ClipboardText::Empty);
+    assert_eq!(answer(Err(arboard::Error::ContentNotAvailable)), ClipboardText::Empty);
+    assert_eq!(answer(Err(arboard::Error::ClipboardOccupied)), ClipboardText::Refused);
+    assert_eq!(
+        answer(Err(arboard::Error::ClipboardNotSupported)),
+        ClipboardText::Refused
+    );
+}
+
+/// A backend that fails hard, ending its thread on the first read.
+struct Broken;
+
+impl Backend for Broken {
+    fn get(&mut self) -> ClipboardText {
+        panic!("the clipboard's thread ends here, on purpose");
+    }
+
+    fn set(&mut self, _text: String) {}
+}
+
+/// With its thread gone, a read answers `Refused` at once, never waits,
+/// and a write is lost quietly: the app goes on.
+#[test]
+fn a_dead_clipboard_thread_answers_refused() {
+    let clipboard = Clipboard::new(Broken);
+    // The first read ends the thread; its answer is never given.
+    let (sender, answer) = mpsc::channel();
+    clipboard.read(move |text| {
+        let _ = sender.send(text);
+    });
+    assert!(answer.recv_timeout(WAIT).is_err(), "the thread ended before answering");
+    clipboard.write("lost".to_owned());
+    assert_eq!(read(&clipboard), ClipboardText::Refused);
 }
