@@ -156,8 +156,8 @@ MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover tex
 **Status:** Agreed, M2 ([#493](https://github.com/brylie/LoomDSP/issues/493), 2026-11-03). Severity follows NFR-UX-03: a word as well as a colour.
 
 - **Three severities.** Info has no label. A warning shows `Warning:` and an error shows `Error:`, each in its own colour. The snapshot reports them as `info`, `warning`, and `error`.
-- **What each one means.** A kept error is a problem that stays true after the moment passes and that the player must act on, or that lost their work. A refused gesture or a problem that fixed itself is a warning. Warnings and info are the latest message only, and are not kept. *Why:* if every failed gesture stayed until dismissed, a performer would be clicking × on stage.
-- **One kept warning: a lost autosave.** It stays true and leaves the player's work at risk, so it stays on screen. But nothing is wrong until a crash, so it reads as a warning, never as a red error, and nothing interrupts playing. *Why:* autosave is a safety net, and on stage other things can matter more than a full disk.
+- **What each one means.** A kept error is a problem that stays true after the moment passes and that the player must act on, or that lost their work. A refused gesture or a problem that fixed itself is a warning. Info and most warnings show as the latest message only. *Why:* if every failed gesture stayed until dismissed, a performer would be clicking × on stage.
+- **Kept warnings.** A staged graph commit keeps a waiting message until the engine takes the edit. A lost autosave also stays on screen. It stays true and leaves the player's work at risk, so it stays on screen. But nothing is wrong until a crash, so it reads as a warning, never as a red error, and nothing interrupts playing. *Why:* autosave is a safety net, and on stage other things can matter more than a full disk.
 - **An error is also the latest message.** So `status` always holds what happened last, and a failed control command replies with its own text. The kept error field appears only when the newest kept error is not the latest message, so the same text never shows twice.
 - **One kept problem per cause.** The bar shows the most severe, then the newest. Its hover text lists the others. *Why:* with one slot, a failed save could hide a lost device, and a later warning must not hide an error.
 
@@ -167,6 +167,7 @@ MIDI shows a count, such as "MIDI: 2 inputs" or "MIDI: no inputs". Its hover tex
 | Audio input | The stream opens, the player chooses an input, or an input is no longer wanted. × allowed. |
 | File | A later successful save, open, or new patch. × allowed. |
 | Autosave (a warning) | Autosave works again. × allowed, and it does not come back until autosave recovers and fails again. Autosave that is off for the run has only the ×. |
+| Graph commit | A commit succeeds or another patch replaces this one. × allowed. A failed commit also reports separately when its undo history was lost. |
 | Other | × or a newer error of this kind. |
 
 Kept problems survive opening another patch, except as the table says.

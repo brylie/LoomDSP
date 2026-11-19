@@ -105,6 +105,8 @@ impl EngineConfig {
 pub struct EngineStats {
     /// Buffers processed.
     pub buffers: AtomicU64,
+    /// Batches of commands drained, used to wake a producer waiting for room.
+    pub command_drains: AtomicU64,
     /// Schedules swapped in.
     pub schedule_swaps: AtomicU64,
     /// MIDI events dropped because the per-buffer list was full.
@@ -262,6 +264,14 @@ impl InputNotes {
     }
 }
 
+/// A mapped control change waiting for its absolute grid frame.
+#[derive(Clone, Copy)]
+struct MappedControl {
+    frame: u64,
+    control: MidiControl,
+    value: u8,
+}
+
 /// The audio-thread half of the engine. Call [`Engine::process`] from the
 /// audio callback.
 pub struct Engine {
@@ -279,6 +289,8 @@ pub struct Engine {
     midi_config_in: Consumer<Box<crate::MidiConfigTable>>,
     midi_config: crate::MidiConfigTimeline,
     midi: Vec<MidiEvent>,
+    /// Mapped control changes due within this callback or on a later grid line.
+    mapped_controls: Vec<MappedControl>,
     /// What MIDI mappings did, for the controller (MIDI learn).
     midi_feedback: Arc<MidiFeedback>,
     /// What each mapped control's mapping knows between control changes.
@@ -351,6 +363,7 @@ impl Engine {
             midi_config_in,
             midi_config: crate::MidiConfigTimeline::new(config.midi_capacity),
             midi: Vec::with_capacity(config.midi_capacity),
+            mapped_controls: Vec::with_capacity(config.midi_capacity.saturating_mul(2)),
             midi_feedback,
             midi_states: vec![ControlState::NONE; MIDI_CONTROLS].into_boxed_slice(),
             cc_serial: 0,
@@ -450,7 +463,7 @@ impl Engine {
         self.apply_restart_fade();
         self.collect_midi(frames);
         self.watch_panic_trigger();
-        self.apply_midi_maps();
+        self.collect_mapped_controls();
 
         left[..frames].fill(0.0);
         right[..frames].fill(0.0);
@@ -461,6 +474,7 @@ impl Engine {
         }
         let mut position = 0;
         let mut midi_cursor = 0;
+        let mut mapped_cursor = 0;
         while position < frames {
             let mut n = (frames - position).min(self.config.max_block);
             // The reset is sample-exact: the block ends at the frame where
@@ -475,6 +489,14 @@ impl Engine {
             if self.schedule.transport.grid {
                 let into = (self.frame % TRANSPORT_GRID as u64) as usize;
                 n = n.min(TRANSPORT_GRID - into);
+            }
+            while let Some(change) = self.mapped_controls.get(mapped_cursor).copied() {
+                if change.frame > self.frame {
+                    n = n.min((change.frame - self.frame).min(n as u64) as usize);
+                    break;
+                }
+                mapped_cursor += 1;
+                self.apply_mapped_control(change);
             }
             let mut sent_jump = false;
             if self.midi_clock.input.is_some() {
@@ -538,6 +560,7 @@ impl Engine {
                 _ => {}
             }
         }
+        self.mapped_controls.drain(..mapped_cursor);
         self.stats
             .transport_tempo
             .store(self.transport.info(self.frame).tempo().to_bits(), Ordering::Relaxed);
@@ -707,7 +730,9 @@ impl Engine {
     }
 
     fn apply_commands(&mut self) {
+        let mut drained = false;
         while let Ok(command) = self.commands.pop() {
+            drained = true;
             match command {
                 Command::SetAudioInput(input) => {
                     if let Some(old) = std::mem::replace(&mut self.input, input) {
@@ -748,6 +773,16 @@ impl Engine {
                             usize::from(index),
                             value,
                         );
+                    }
+                    for (slot, edits) in &schedule.copy_param_updates {
+                        if let Some(module) = self.slots[*slot].as_mut() {
+                            for &(index, value) in edits {
+                                module.set_param(index, value);
+                            }
+                            // The copy has never run. Snap its initial values
+                            // before it plays or takes over a stereo partner's state.
+                            module.reset();
+                        }
                     }
                     // A newly created right copy takes the running left
                     // instance's state at the swap boundary (ADR-0022).
@@ -904,6 +939,9 @@ impl Engine {
                 }
             }
         }
+        if drained {
+            self.stats.command_drains.fetch_add(1, Ordering::Release);
+        }
         // After the whole batch, so several changes act as one (rule 9).
         crate::cable_fade::start_setting_ramps(&mut self.schedule, self.frame > 0);
     }
@@ -1049,11 +1087,9 @@ impl Engine {
         self.midi_config.begin_block(&self.midi);
     }
 
-    /// Sets the base value of every mapped parameter whose control change
-    /// arrived in this buffer, at its start (MIDI learn, rule 4). Every
-    /// control change is also recorded for learning, and the events stay in
-    /// the list, so modules still see them (rule 6).
-    fn apply_midi_maps(&mut self) {
+    /// Records incoming events for MIDI learn and schedules mapped changes
+    /// for the next absolute grid frame (MIDI learn, rules 4 and 6).
+    fn collect_mapped_controls(&mut self) {
         for event in &self.midi {
             if let MidiMessage::NoteOn { channel, note, .. } = event.message() {
                 self.cc_serial = self.cc_serial.wrapping_add(1).max(1);
@@ -1073,27 +1109,44 @@ impl Engine {
             self.midi_feedback.record(control, value, self.cc_serial);
             let maps = &self.schedule.midi_maps;
             let start = maps.partition_point(|map| map.control < control);
-            for map in maps[start..].iter().take_while(|map| map.control == control) {
-                match self.midi_states[control.index()].control_change(&map.options, &map.spec, value) {
-                    ControlOutcome::Set(base) => {
-                        set_mapped(
-                            &mut self.slots,
-                            &mut self.schedule.fills,
-                            &self.schedule.copies,
-                            map,
-                            base,
-                        );
-                        self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
-                        self.midi_feedback
-                            .write(control, map.id, self.feedback_sequence, value, base);
-                    }
-                    ControlOutcome::Waiting => {
-                        self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
-                        self.midi_feedback
-                            .write_waiting(control, map.id, self.feedback_sequence, value);
-                    }
-                    ControlOutcome::Nothing => {}
+            if maps.get(start).is_none_or(|map| map.control != control) {
+                continue;
+            }
+            if self.mapped_controls.len() == self.mapped_controls.capacity() {
+                self.stats.dropped_midi.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+            // Ingress is sorted by frame. Changes at the same grid line
+            // retain that order, including across two callbacks.
+            let frame = (self.frame + u64::from(event.frame)).next_multiple_of(TRANSPORT_GRID as u64);
+            self.mapped_controls.push(MappedControl { frame, control, value });
+        }
+    }
+
+    /// Applies the mapped value before rendering its grid frame.
+    fn apply_mapped_control(&mut self, MappedControl { control, value, .. }: MappedControl) {
+        let maps = &self.schedule.midi_maps;
+        let start = maps.partition_point(|map| map.control < control);
+        for map in maps[start..].iter().take_while(|map| map.control == control) {
+            match self.midi_states[control.index()].control_change(&map.options, &map.spec, value) {
+                ControlOutcome::Set(base) => {
+                    set_mapped(
+                        &mut self.slots,
+                        &mut self.schedule.fills,
+                        &self.schedule.copies,
+                        map,
+                        base,
+                    );
+                    self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
+                    self.midi_feedback
+                        .write(control, map.id, self.feedback_sequence, value, base);
                 }
+                ControlOutcome::Waiting => {
+                    self.feedback_sequence = self.feedback_sequence.wrapping_add(1);
+                    self.midi_feedback
+                        .write_waiting(control, map.id, self.feedback_sequence, value);
+                }
+                ControlOutcome::Nothing => {}
             }
         }
     }

@@ -238,6 +238,8 @@ pub(super) struct Slots {
     fresh: BTreeMap<usize, Fresh>,
     /// Slots to free after the next swap, in the order they were retired.
     retiring: Vec<usize>,
+    /// Slots no later schedule will use. They still need a remove command.
+    detached: Vec<usize>,
 }
 
 impl Slots {
@@ -247,6 +249,7 @@ impl Slots {
             free: (0..count).rev().collect(),
             fresh: BTreeMap::new(),
             retiring: Vec::new(),
+            detached: Vec::new(),
         }
     }
 
@@ -307,9 +310,19 @@ impl Slots {
             .collect()
     }
 
-    /// Frees the retiring slots, once the swap that stops using them is sent.
-    pub(super) fn free_retired(&mut self) {
-        self.free.append(&mut self.retiring);
+    /// Moves the retiring slots past the swap that last used them.
+    pub(super) fn detach_retired(&mut self) {
+        self.detached.append(&mut self.retiring);
+    }
+
+    /// Slots that can be removed without changing the sound.
+    pub(super) fn detached(&self) -> &[usize] {
+        &self.detached
+    }
+
+    /// Frees the slots whose remove commands are now in the queue.
+    pub(super) fn free_detached(&mut self, sent: usize) {
+        self.free.extend(self.detached.drain(..sent));
     }
 }
 

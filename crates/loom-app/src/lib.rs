@@ -145,7 +145,7 @@ struct Args {
     /// Save what the engine plays to this WAV file (32-bit float, stereo),
     /// until the app quits. Opening a patch, New, and a device change keep
     /// recording into the same file; a device at another sample rate ends
-    /// the recording.
+    /// the recording. Standard WAV is limited to 4 GiB (about 3 hours at 48 kHz).
     #[arg(long, value_name = "WAV", conflicts_with = "no_audio")]
     record: Option<PathBuf>,
     /// Benchmark options.
@@ -410,6 +410,8 @@ enum Message {
     /// The window is open: start the watcher threads (`watching.rs`) and
     /// the timers (`timers.rs`). The bridge sends it once, as it starts.
     StartWatching,
+    /// A watched engine drained the queue after staging a graph edit.
+    RetryCommit(u64),
     /// Follows a control command's UI messages in the queue: they have run,
     /// so its answer can be read (`control/run.rs`).
     ControlReply,
@@ -612,6 +614,7 @@ impl Message {
                 | Self::AskRecovery
                 | Self::ControlReply
                 | Self::StartWatching
+                | Self::RetryCommit(_)
                 | Self::WindowRescaled
         )
     }
@@ -639,6 +642,7 @@ impl Message {
             | Self::Control(_)
             | Self::ControlReply
             | Self::StartWatching
+            | Self::RetryCommit(_)
             | Self::WindowRescaled
             | Self::ControlFrame(_)
             | Self::Located { .. }
@@ -1431,9 +1435,7 @@ impl App {
         // Probe IDs are never reused, so a level of a removed probe is dead.
         let live: std::collections::HashSet<ProbeId> = self.session.engine.live.probes().collect();
         self.session.meter_levels.retain(|probe, _| live.contains(probe));
-        if let Err(e) = self.session.controller.commit() {
-            self.alerts.warn(e.to_string());
-        }
+        self.commit_maintenance();
     }
 
     fn report(&mut self) {
@@ -1713,6 +1715,11 @@ impl App {
             Message::Control(call) => self.control(call),
             Message::ControlReply => self.control_reply(),
             Message::StartWatching => self.watching = true,
+            Message::RetryCommit(generation) => {
+                if generation == self.generation {
+                    self.retry_staged_commit();
+                }
+            }
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
@@ -1778,11 +1785,14 @@ impl App {
             self.a11y_after(touch);
         }
         self.drain_idle_engine();
-        // The audio callback, or the idle engine above, makes room for the
-        // staged modules. Tick messages keep this retry moving even without
-        // another edit from the player.
-        if self.session.retry_commit {
-            self.commit();
+        // An idle engine drains commands here, so no watcher is needed.
+        while self.session.engine.stream.idle_mut().is_some()
+            && self
+                .session
+                .retry_commit
+                .is_some_and(|retry| self.command_drains() != retry.before)
+        {
+            self.retry_staged_commit();
             self.drain_idle_engine();
         }
         if self.quit {
@@ -2000,6 +2010,7 @@ impl App {
             | Message::Control(_)
             | Message::ControlReply
             | Message::StartWatching
+            | Message::RetryCommit(_)
             | Message::ControlFrame(_)
             | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }

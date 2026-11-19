@@ -25,6 +25,15 @@ use std::sync::Arc;
 /// was first shown at. While it stays there, saving writes the original.
 pub(crate) type UnknownPositions = BTreeMap<u32, (Option<(f32, f32)>, (f32, f32))>;
 
+/// A commit waiting for the audio callback to make command space.
+#[derive(Clone, Copy)]
+pub(crate) struct CommitRetry {
+    /// The drain count before the failed send.
+    pub(crate) before: u64,
+    /// Whether this commit also needs to settle a player edit's undo state.
+    pub(crate) edit: bool,
+}
+
 /// The open patch: its graph and layout, its edits, what the canvas shows of
 /// it, and the engine that plays it.
 pub(crate) struct PatchSession {
@@ -47,8 +56,8 @@ pub(crate) struct PatchSession {
     /// Changes when the shown level does, so the canvas adopts that
     /// level's camera.
     pub(crate) level_key: u64,
-    /// A full command queue left fresh modules staged for a later commit.
-    pub(crate) retry_commit: bool,
+    /// A full command queue left graph work for a later commit.
+    pub(crate) retry_commit: Option<CommitRetry>,
     pub(crate) positions: BTreeMap<u32, (f32, f32)>,
     /// Original placeholder positions and their initial displayed positions.
     pub(crate) unknown_positions: UnknownPositions,
@@ -221,7 +230,7 @@ impl PatchSession {
             level: ModulePath::root(),
             cameras: BTreeMap::new(),
             level_key: 0,
-            retry_commit: false,
+            retry_commit: None,
             positions,
             unknown_positions,
             sizes,

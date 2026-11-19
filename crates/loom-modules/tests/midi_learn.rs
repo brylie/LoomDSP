@@ -407,17 +407,17 @@ fn in_mode(mode: MidiMode) -> MidiMappingOptions {
     }
 }
 
-/// Runs one buffer of `frames` and returns the last `out` value.
+/// Plays at least one grid period in buffers of `frames` and reads the last value.
 fn play(parts: &mut EngineParts, frames: usize) -> f32 {
     let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
-    parts.engine.process(&mut left, &mut right);
-    parts
-        .telemetry
-        .scope()
-        .filter(|chunk| chunk.probe.0 == 1)
-        .flat_map(|chunk| chunk.samples().to_vec())
-        .last()
-        .unwrap()
+    let mut last = 0.0;
+    for _ in 0..32usize.div_ceil(frames) {
+        parts.engine.process(&mut left, &mut right);
+        for chunk in parts.telemetry.scope().filter(|chunk| chunk.probe.0 == 1) {
+            last = *chunk.samples().last().unwrap();
+        }
+    }
+    last
 }
 
 /// A probe with its level at `level` and a mapping on it with `options`,
@@ -830,4 +830,46 @@ fn a_decibel_level_takes_mappings() {
 fn step_silently(parts: &mut EngineParts) {
     let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
     parts.engine.process(&mut left, &mut right);
+}
+
+/// Offset changes land on the same 32-frame lines in every buffer layout.
+#[test]
+fn mapped_controls_land_on_absolute_grid_frames() {
+    let render = |block: usize| {
+        let mut parts = engine();
+        let id = add_probe(&mut parts);
+        parts.controller.map_midi(CC74, id, 0).unwrap();
+        parts.controller.commit().unwrap();
+        let events = [(0, 0), (33, 43), (63, 64), (77, 100), (128, 127)];
+        let mut rendered = Vec::new();
+        let mut left = [0.0; 512];
+        let mut right = [0.0; 512];
+        for start in (0..192).step_by(block) {
+            let count = block.min(192 - start);
+            for &(at, value) in &events {
+                if (start..start + count).contains(&at) {
+                    assert!(parts.midi.send(MidiEvent::control_change(
+                        (at - start) as u32,
+                        CC74.channel,
+                        CC74.controller,
+                        value,
+                    )));
+                }
+            }
+            parts.engine.process(&mut left[..count], &mut right[..count]);
+            for chunk in parts.telemetry.scope().filter(|chunk| chunk.probe.0 == 1) {
+                rendered.extend_from_slice(chunk.samples());
+            }
+        }
+        rendered
+    };
+    let reference = render(1);
+    for block in [77, 512] {
+        assert_eq!(render(block), reference, "block {block}");
+    }
+    assert_eq!(reference.len(), 192);
+    assert!(reference[0..64].iter().all(|&sample| sample == 0.0));
+    assert!(reference[64..96].iter().all(|&sample| sample == 64.0 / 127.0));
+    assert!(reference[96..128].iter().all(|&sample| sample == 100.0 / 127.0));
+    assert!(reference[128..].iter().all(|&sample| sample == 1.0));
 }

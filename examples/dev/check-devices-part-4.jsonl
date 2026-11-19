@@ -1,0 +1,3 @@
+{"cmd":"wait","ms":1000}
+{"id":"remembered","cmd":"snapshot"}
+{"cmd":"quit"}

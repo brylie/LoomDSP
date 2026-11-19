@@ -123,31 +123,28 @@ impl Hash for Watch {
     }
 }
 
-/// Yields the serial of each new control change, checked every
-/// [`INTERVAL`]. Several changes between checks give one message. The thread
-/// stops when its watcher handle drops.
-pub fn run(watch: &Watch, tx: Outlet<u32>) {
+/// Wakes the app on MIDI arrival or when a grid-delayed mapping publishes
+/// feedback. Several changes within an [`INTERVAL`] give one message.
+pub fn run(watch: &Watch, tx: Outlet<()>) {
     let reader = watch.reader.clone();
-    {
-        // Start from "nothing seen", so a control change that arrives while
-        // the thread starts is still reported. The app ignores any that came
-        // before a parameter was armed.
-        let mut last = None;
-        while !tx.is_closed() {
-            // Control changes and note ons share one serial count.
-            let note = reader.last_note_on().map(|seen| seen.serial);
-            let now = reader.last_control_change().map(|seen| seen.serial).max(note);
-            if let Some(serial) = now.filter(|_| now != last) {
-                match tx.try_send(serial) {
-                    Ok(()) => last = now,
-                    // The UI has not taken the last one yet: it reads fresh
-                    // values when it does, so try again next time.
-                    Err(e) if e.is_full() => {}
-                    Err(_) => break,
-                }
+    // Start from nothing seen, so events that arrive while the thread
+    // starts are still reported.
+    let mut last = (None, None, 0);
+    while !tx.is_closed() {
+        let now = (
+            reader.last_note_on().map(|seen| seen.serial),
+            reader.last_control_change().map(|seen| seen.serial),
+            reader.feedback_sequence(),
+        );
+        if now != last {
+            match tx.try_send(()) {
+                Ok(()) => last = now,
+                // Try again if the last message is still in flight.
+                Err(e) if e.is_full() => {}
+                Err(_) => break,
             }
-            std::thread::sleep(INTERVAL);
         }
+        std::thread::sleep(INTERVAL);
     }
 }
 

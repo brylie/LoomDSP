@@ -385,6 +385,8 @@ pub(crate) struct MidiFeedback {
     /// It shares the serial count with control changes, so the two can be
     /// put in order (panic learn).
     last_note: AtomicU64,
+    /// Published after a mapping sets a value or moves a waiting pickup.
+    published: AtomicU32,
 }
 
 /// One feedback entry, unpacked.
@@ -409,6 +411,7 @@ impl MidiFeedback {
             edits: (0..CHANNELS * CONTROLLERS).map(|_| AtomicU64::new(0)).collect(),
             last: AtomicU64::new(0),
             last_note: AtomicU64::new(0),
+            published: AtomicU32::new(0),
         }
     }
 
@@ -436,12 +439,14 @@ impl MidiFeedback {
     pub fn write(&self, control: MidiControl, id: MidiMappingId, sequence: u32, value: u8, result: f32) {
         self.values[control.index()].store(result.to_bits(), Ordering::Release);
         self.entries[control.index()].store(Self::pack(id, sequence, value), Ordering::Release);
+        self.published.store(sequence, Ordering::Release);
     }
 
     /// Engine: a pickup on mapping `id` is still waiting, and its hardware
     /// sent `value`. The parameter did not change, so no result is stored.
     pub fn write_waiting(&self, control: MidiControl, id: MidiMappingId, sequence: u32, value: u8) {
         self.entries[control.index()].store(Self::pack(id, sequence, value) | WAITING, Ordering::Release);
+        self.published.store(sequence, Ordering::Release);
     }
 
     /// One entry, without the waiting bit.
@@ -541,6 +546,12 @@ impl MidiReader {
     /// Its serial is counted with control changes.
     pub fn last_note_on(&self) -> Option<NoteOnSeen> {
         self.feedback.last_note()
+    }
+
+    /// Changes when the engine publishes a mapped value or a waiting pickup.
+    /// This can happen in a later callback than the original control change.
+    pub fn feedback_sequence(&self) -> u32 {
+        self.feedback.published.load(Ordering::Acquire)
     }
 }
 

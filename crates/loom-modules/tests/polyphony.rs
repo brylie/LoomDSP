@@ -946,6 +946,48 @@ fn fresh_structural_edits_do_not_publish_an_incomplete_graph() {
     assert_eq!(parts.controller.stats().schedule_swaps.load(Ordering::Relaxed), 1);
 }
 
+/// An ordinary edit reaches copies queued before the swap had room.
+#[test]
+fn queued_voice_copies_start_with_the_latest_ordinary_value() {
+    use loom_core::{LoomError, ProbeKind};
+    let mut parts = engine_with(EngineConfig {
+        command_capacity: 3,
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::default()
+    });
+    let c = &mut parts.controller;
+    let source = c.add_module("test.voices").unwrap();
+    let add = c.add_module("loom.math.add").unwrap();
+    let out = c.add_module("loom.io.audio-out").unwrap();
+    c.set_param_named(source, "value", 0.0).unwrap();
+    c.connect_named(source, "out", add, "a").unwrap();
+    c.connect_named(add, "out", out, "in").unwrap();
+    c.commit().unwrap();
+    assert_eq!(render(&mut parts), [0.0; 512]);
+
+    let c = &mut parts.controller;
+    let port = c.output_ref(add, "out").unwrap();
+    c.add_probe(port, ProbeKind::Scope).unwrap(); // Keep the width edit staged.
+    c.set_param_named(source, "voices", 5.0).unwrap();
+    assert!(matches!(c.commit(), Err(LoomError::QueueFull)));
+    assert_eq!(c.slots_of(add), 4, "three copies were already queued");
+    assert!(matches!(
+        c.set_param_named(add, "offset", 0.25),
+        Err(LoomError::QueueFull)
+    ));
+    let node = c.graph().node(add).unwrap();
+    assert_eq!(node.params[node.descriptor.param_index("offset").unwrap()], 0.0);
+    assert_eq!(render(&mut parts), [0.0; 512]);
+
+    let c = &mut parts.controller;
+    c.set_param_named(add, "offset", 0.125).unwrap();
+    assert_eq!(c.commit().unwrap().width(port).voices, 5);
+    // The pending edit, one remaining insert, and the swap use all three
+    // commands. Every voice, including the three queued early, adds 0.125.
+    let sum = (0..5).map(|voice| voice as f32 * 0.01 + 0.125).sum::<f32>();
+    assert_eq!(render(&mut parts), [sum; 512]);
+}
+
 /// Dirty live graphs keep count edits staged until their owner's explicit commit.
 #[test]
 fn dirty_live_graphs_do_not_publish_structural_edits_early() {
@@ -1525,4 +1567,71 @@ fn voice_assigner_releases_the_input_voices_a_narrower_cable_drops() {
     // Input voices 5 to 8 end on the swap frame; 4 of 8 voices stay high.
     assert_eq!(left[0], 0.5);
     assert!(left.iter().all(|v| *v == 0.5));
+}
+
+/// The accepted minimum-input tie rule delays the lower ID's input.
+#[test]
+fn voice_level_feedback_delay_follows_the_declared_id_tie_break() {
+    use loom_core::{MidiEvent, ProbeKind};
+    const FRAMES: usize = 640;
+    for note_first in [true, false] {
+        for block in [1, 77, 512] {
+            let mut parts = engine_with(EngineConfig {
+                max_block: 512,
+                output_safety: OutputSafety::Off,
+                ..EngineConfig::default()
+            });
+            let c = &mut parts.controller;
+            let (note, envelope) = if note_first {
+                (
+                    c.add_module("loom.midi.note").unwrap(),
+                    c.add_module("loom.env.envelope").unwrap(),
+                )
+            } else {
+                let env = c.add_module("loom.env.envelope").unwrap();
+                (c.add_module("loom.midi.note").unwrap(), env)
+            };
+            c.set_param_named(note, "voices", 8.0).unwrap();
+            c.set_param_named(note, "mode", 1.0).unwrap();
+            c.connect_named(note, "gate", envelope, "gate").unwrap();
+            c.connect_named(envelope, "out", note, "level").unwrap();
+            let gate = c.output_ref(note, "gate").unwrap();
+            let level = c.output_ref(envelope, "out").unwrap();
+            let delayed = if note_first {
+                (level, c.input_ref(note, "level").unwrap())
+            } else {
+                (gate, c.input_ref(envelope, "gate").unwrap())
+            };
+            let gate_probe = c.add_probe(gate, ProbeKind::Scope).unwrap();
+            let level_probe = c.add_probe(level, ProbeKind::Scope).unwrap();
+            assert_eq!(
+                c.commit().unwrap().inserted_delays().copied().collect::<Vec<_>>(),
+                [delayed]
+            );
+            let (mut gate_rise, mut level_rise) = (None, None);
+            let (mut left, mut right) = ([0.0; 512], [0.0; 512]);
+            for start in (0..FRAMES).step_by(block) {
+                let frames = block.min(FRAMES - start);
+                if (start..start + frames).contains(&17) {
+                    assert!(parts.midi.send(MidiEvent::note_on((17 - start) as u32, 0, 60, 100)));
+                }
+                parts.engine.process(&mut left[..frames], &mut right[..frames]);
+                for chunk in parts.telemetry.scope() {
+                    let found = if chunk.probe == gate_probe {
+                        &mut gate_rise
+                    } else {
+                        assert_eq!(chunk.probe, level_probe);
+                        &mut level_rise
+                    };
+                    if found.is_none()
+                        && let Some(offset) = chunk.samples().iter().position(|&sample| sample > 0.0)
+                    {
+                        *found = Some(chunk.frame + offset as u64);
+                    }
+                }
+            }
+            assert_eq!(gate_rise, Some(17));
+            assert_eq!(level_rise, Some(if note_first { 17 } else { 18 }));
+        }
+    }
 }

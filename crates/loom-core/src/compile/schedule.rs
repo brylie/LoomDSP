@@ -369,6 +369,8 @@ pub(crate) struct Schedule {
     pub stereo_copies: Vec<(u32, u32)>,
     /// Structural values applied at the swap, alongside their compiled widths.
     pub structural_params: Vec<(u32, u16, f32)>,
+    /// Changes to the initial ordinary parameters of copies queued before this swap.
+    pub copy_param_updates: Vec<(usize, Vec<(usize, f32)>)>,
     /// MIDI mappings, sorted by control.
     pub midi_maps: Vec<MidiMapOp>,
     /// Live value cells the previous schedule used and this one does not.
@@ -424,6 +426,7 @@ impl Schedule {
             copies: Vec::new(),
             stereo_copies: Vec::new(),
             structural_params: Vec::new(),
+            copy_param_updates: Vec::new(),
             midi_maps: Vec::new(),
             live_release: Vec::new(),
             cable_fades: Vec::new(),
