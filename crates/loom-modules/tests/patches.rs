@@ -1,8 +1,7 @@
 //! Golden-audio tests for every example patch (#93, NFR-OSS-05).
 //!
-//! Each patch in `examples/patches/` plays one note through the engine,
-//! or a chord for a polyphonic patch ([`notes`]), and its stereo output is
-//! compared with
+//! Each patch in `examples/patches/` runs its performance ([`performance`])
+//! through the engine, and its stereo output is compared with
 //! `tests/reference/patches/<name>.wav`. A change that keeps every module
 //! correct can still change how a patch sounds, for example through the
 //! compiler's feedback-loop handling; these tests catch it.
@@ -19,10 +18,10 @@ use loom_core::{EngineConfig, OutputSafety, create_engine};
 use loom_test::check_channels;
 use std::path::{Path, PathBuf};
 
-/// Length of each render: 0.2 s, so each reference stays under 80 KB.
-const FRAMES: usize = 9_600;
+/// Default render length: 0.2 s, so most references stay under 80 KB.
+const DEFAULT_FRAMES: usize = 9_600;
 
-/// The note every patch plays: middle C, from 5 ms to 150 ms, so the
+/// The default note: middle C, from 5 ms to 150 ms, so the
 /// reference holds the attack, the held part, and the release.
 const NOTE: Note = Note {
     note: 60,
@@ -30,7 +29,7 @@ const NOTE: Note = Note {
     off: 7_200,
 };
 
-/// The chord the polysynth plays: C, E, G, and B up from middle C. The
+/// The chord the polyphonic examples play: C, E, G, and B up from middle C. The
 /// notes start on different frames inside the engine block from frame 128
 /// to 255 and end on different frames, so four voices sound at once and
 /// their release tails overlap (polyphony.md, The shipped example).
@@ -81,21 +80,19 @@ fn example_patches() -> Vec<PathBuf> {
     patches
 }
 
-/// The notes `patch` plays in its render: [`CHORD`] for the polysynth and
-/// the large reference patch, which test several voices at once, and [`NOTE`] for every other patch,
-/// so their references do not change.
-fn notes(patch: &Path) -> &'static [Note] {
-    if patch
-        .file_name()
-        .is_some_and(|name| name == "polysynth.ron" || name == "polysynth-large.ron")
-    {
-        &CHORD
-    } else {
-        &[NOTE]
+/// Render length in frames and the MIDI notes to send.
+fn performance(patch: &Path) -> (usize, &'static [Note]) {
+    match patch.file_stem().and_then(|name| name.to_str()) {
+        Some("glass-chords" | "polysynth" | "polysynth-large") => (DEFAULT_FRAMES, &CHORD),
+        // 0.8 s includes several chances to fire the envelope.
+        Some("broken-pulse") => (38_400, &[]),
+        // 0.7 s includes the dry pluck and two returns from the 278 ms delay.
+        Some("tidal-echo") => (33_600, &[]),
+        _ => (DEFAULT_FRAMES, &[NOTE]),
     }
 }
 
-/// Plays `patch` with its [`notes`] in host buffers of `buffer` frames. The
+/// Plays `patch` in host buffers of `buffer` frames. The
 /// output safety stage is off, so the reference holds what the patch makes,
 /// not what the limiter does to it (ADR-0019).
 fn play(patch: &Path, buffer: usize) -> Vec<Vec<f32>> {
@@ -108,7 +105,8 @@ fn play(patch: &Path, buffer: usize) -> Vec<Vec<f32>> {
     loaded
         .load_into(&mut parts.controller)
         .unwrap_or_else(|e| panic!("{} is valid: {e}", patch.display()));
-    let (left, right) = render(&mut parts, FRAMES, buffer, notes(patch));
+    let (frames, notes) = performance(patch);
+    let (left, right) = render(&mut parts, frames, buffer, notes);
     vec![left, right]
 }
 
