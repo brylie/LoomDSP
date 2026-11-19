@@ -370,11 +370,17 @@ impl App {
         // Choosing the device does not start a stream, so the old patch keeps
         // playing. The engine is built at the rate of the device that will
         // play it.
-        // A recording goes on into the same file (rig.recorder).
+        // A recording goes on into the same file (rig.output.recorder).
         let playback = self.session.engine.stream.playback();
         // A lost named device is being waited for, so the new patch stays idle
         // too, rather than coming out of other speakers (device-changes.md).
-        let (output, _) = match self.rig.lost_audio.as_ref().filter(|lost| !lost.was_system_default) {
+        let (output, _) = match self
+            .rig
+            .output
+            .lost_audio
+            .as_ref()
+            .filter(|lost| !lost.was_system_default)
+        {
             Some(lost) => (Err(format!("waiting for \"{}\"", lost.device)), Vec::new()),
             None => settings::open_output(&self.rig, playback.is_off(), playback.is_fake()),
         };

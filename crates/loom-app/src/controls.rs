@@ -548,7 +548,7 @@ impl App {
                 .graph()
                 .node(ModuleId(module))
                 .is_some_and(|node| {
-                    node.descriptor.id == loom_core::TRANSPORT_MODULE
+                    node.descriptor.role.is_transport()
                         && node
                             .descriptor
                             .params

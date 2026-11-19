@@ -56,13 +56,14 @@ fn bundles(descriptor: &ModuleDescriptor) -> bool {
 
 /// Only ordinary DSP and delay modules can be copied per stereo side.
 fn can_copy(descriptor: &ModuleDescriptor) -> bool {
-    matches!(descriptor.role, ModuleRole::Dsp(_) | ModuleRole::UnitDelay)
-        && !bundles(descriptor)
-        && !descriptor
-            .inputs
-            .iter()
-            .chain(descriptor.outputs)
-            .any(|port| port.channels == Channels::Stereo)
+    descriptor.role.factory().is_some()
+        || matches!(descriptor.role, ModuleRole::UnitDelay)
+            && !bundles(descriptor)
+            && !descriptor
+                .inputs
+                .iter()
+                .chain(descriptor.outputs)
+                .any(|port| port.channels == Channels::Stereo)
 }
 
 /// Computes output widths from this module's current input and copy widths.

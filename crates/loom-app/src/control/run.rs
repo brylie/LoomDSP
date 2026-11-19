@@ -647,16 +647,12 @@ impl App {
                         .map(|n| Some(Some(n)))
                         .ok_or_else(|| format!("`{what}` is a whole number or \"default\", not {value}")),
                 };
-                let read = self.read_device_lists();
                 let change = choice(rate, "rate").and_then(|rate| {
                     let buffer = choice(buffer, "buffer")?;
                     self.control_audio_change(device.as_deref(), rate, buffer)
                 });
                 if let Ok(change) = &change {
                     sent.push(Message::Preferences(settings::Message::Audio(change.clone())));
-                }
-                if read {
-                    self.forget_device_lists();
                 }
                 let then = match change {
                     Ok(_) => Then::AfterDraw(Step::Report(Report::Audio)),
@@ -750,7 +746,7 @@ impl App {
         if remember {
             self.session.engine.control_seen = Some((stats.clone(), now.callbacks));
         }
-        let playing = self.rig.playing.as_ref();
+        let playing = self.rig.output.playing.as_ref();
         json!({
             "device": playing.map(|p| p.device.clone()),
             "rate": playing.map(|p| p.rate),

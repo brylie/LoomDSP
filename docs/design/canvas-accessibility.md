@@ -9,7 +9,7 @@ How a screen reader user gets an overview of a patch, follows a signal from modu
 - **Background:** [Reading a patch by ear](../learn/reading-a-patch-by-ear.md) (explainer), [overviews of node-link diagrams for screen reader users](../research/2026-11-screen-reader-graph-overviews.md) (research), [the accessibility spike](../research/2026-11-a11y-beside-iced-spike.md), [the large patch review](../research/2026-11-large-patch-ux-review.md) (finding 3, the overview has no words), [Feedback loops](../learn/feedback-loops.md).
 - **Prior art:** the WAI-ARIA tree view pattern for the outline's keys, and "overview first, then details on demand" from information visualisation research. Named only to explain ideas; the research snapshot cites them.
 - **Issues:** [#683](https://github.com/brylie/LoomDSP/issues/683) (the UI layer), [#527](https://github.com/brylie/LoomDSP/issues/527) (find a module and a readable overview), [#524](https://github.com/brylie/LoomDSP/issues/524) (cables by key).
-- **Code:** none yet. The model will sit beside the other view models in `crates/loom-app`, and the canvas nodes in `crates/loom-canvas`. The implementation also adds each loop's run order to `FeedbackLoop` in `loom-core` (rule 7), and one module-name function in `loom-app` that every view uses (rule 4).
+- **Code:** `FeedbackLoop::run_order` in `crates/loom-core/src/compile.rs` reports each loop's module order (rule 7). The patch map model and shared module naming will sit beside the other view models in `crates/loom-app`.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->

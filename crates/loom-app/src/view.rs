@@ -209,7 +209,7 @@ impl App {
         let model = self.toolbar_model();
         let group = |which: Group| {
             let items = model.buttons.iter().filter(|b| b.group == which).map(|b| {
-                let press = b.enabled.then(|| crate::toolbar::message(b.name)).flatten();
+                let press = b.press();
                 let face = button(text(b.label).size(style::CONTROL)).on_press_maybe(press);
                 let face = match (b.name, b.on) {
                     ("panic", _) => face.style(style::danger),
@@ -301,8 +301,6 @@ impl App {
                 self.session
                     .matrix
                     .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
-                &self.session.matrix,
-                self.session.controller.graph(),
                 self.a11y.is_active(),
             ),
         };

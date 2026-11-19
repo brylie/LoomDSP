@@ -179,23 +179,23 @@ impl PatchSession {
         // Every MIDI input plays the patch, and the "Hold note" button works
         // alongside them, so a keyboard is never hidden behind another port.
         // The inputs are opened once the app is built, on its controller.
-        let first_midi = rig.attach(sender);
-        let midi = rig.midi_in.clone().expect("Rig::attach always sets midi_in");
+        let first_midi = rig.midi.attach(sender);
+        let midi = rig.midi.input.clone().expect("Rig::attach always sets midi_in");
 
         let (audio, midi, audio_name, idle_engine) = match output {
             Ok(mut output) => {
                 let label = format!("{} at {} Hz", output.name(), output.sample_rate());
-                rig.playing = (!playback.is_fake()).then(|| devices::Playing::of(&output));
-                let refused = rig.record_into(&mut output);
+                rig.output.playing = (!playback.is_fake()).then(|| devices::Playing::of(&output));
+                let refused = rig.output.record_into(&mut output);
                 match output.start(engine) {
                     Ok(audio) => {
                         if let Some(e) = refused {
-                            recording_stopped = Some(rig.end_recording(&e));
+                            recording_stopped = Some(rig.output.end_recording(&e));
                         }
                         (Some(audio), Some(midi), label, None)
                     }
                     Err(e) => {
-                        rig.playing = None;
+                        rig.output.playing = None;
                         (None, None, format!("no audio ({})", e.error), Some(e.engine))
                     }
                 }

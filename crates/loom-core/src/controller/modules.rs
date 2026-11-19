@@ -13,8 +13,50 @@ impl Controller {
         self.graph
             .nodes
             .iter()
-            .find(|(_, node)| node.descriptor.id == crate::transport::TRANSPORT_MODULE)
+            .find(|(_, node)| node.descriptor.role.is_transport())
             .map(|(&id, _)| id)
+    }
+
+    /// Starts a new engine with the same edited graph at another configuration.
+    /// Module, assignment, and mapping IDs are kept. Module state starts
+    /// fresh, transient parameters return to their defaults, and the
+    /// transport starts at beat zero. External MIDI and probes are attached
+    /// by the caller to the new engine.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error if the new engine cannot hold or commit the graph.
+    /// The original controller and its engine remain usable.
+    pub fn rebuild(&self, config: EngineConfig) -> Result<EngineParts, LoomError> {
+        let mut parts = create_engine(self.registry.clone(), config);
+        let next = &mut parts.controller;
+        for (id, node) in self.graph.nodes() {
+            next.add_descriptor(id, node.descriptor)?;
+            let rebuilt = next.graph.nodes.get_mut(&id).expect("module was just added");
+            rebuilt.unknown.clone_from(&node.unknown);
+            rebuilt.label.clone_from(&node.label);
+            rebuilt.ranges.clone_from(&node.ranges);
+            rebuilt.limits.clone_from(&node.limits);
+            rebuilt.params = node.descriptor.saved_values(&node.params);
+            if let Some(fresh) = rebuilt.slot.and_then(|slot| next.slots.fresh_mut(slot)) {
+                for (index, &value) in rebuilt.params.iter().enumerate() {
+                    fresh.module.set_param(index, value);
+                }
+            }
+        }
+        next.graph.cables.clone_from(&self.graph.cables);
+        next.graph.assignments.clone_from(&self.graph.assignments);
+        next.graph.midi_mappings.clone_from(&self.graph.midi_mappings);
+        next.graph.midi_followers.clone_from(&self.graph.midi_followers);
+        next.next_id = self.next_id;
+        next.next_assignment = self.next_assignment;
+        next.midi.keep_mapping_ids(&self.midi);
+        let transport = self.transport();
+        next.set_tempo(transport.tempo)?;
+        next.set_time_signature(transport.time_signature)?;
+        next.set_running(transport.running)?;
+        next.commit()?;
+        Ok(parts)
     }
 
     /// Adds a module by kind (`"id@version"` or `"id"`). Returns its new ID.
@@ -82,14 +124,14 @@ impl Controller {
             return Err(LoomError::ModuleIdOutOfRange(id));
         }
         // A patch has exactly one Transport (clock.md).
-        if descriptor.id == crate::transport::TRANSPORT_MODULE
+        if descriptor.role.is_transport()
             && let Some(existing) = self.transport_module()
         {
             return Err(LoomError::SecondTransport(existing));
         }
         self.collect_garbage();
-        let slot = match descriptor.role {
-            ModuleRole::Dsp(factory) => {
+        let slot = match descriptor.role.factory() {
+            Some(factory) => {
                 let slot = self
                     .slots
                     .take()
@@ -117,7 +159,7 @@ impl Controller {
                 self.slots.hold(slot, fresh);
                 Some(slot)
             }
-            ModuleRole::UnitDelay | ModuleRole::AudioOutput => None,
+            None => None,
         };
         self.graph.nodes.insert(id, Node::new(descriptor, slot));
         self.next_id = self.next_id.max(id.0 + 1);

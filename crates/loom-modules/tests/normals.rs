@@ -14,7 +14,7 @@
 //! its reason, and skipped.
 
 use loom_core::testing::run;
-use loom_core::{ModuleConfig, ModuleDescriptor, ModuleRole, PortDefault, TRANSPORT_MODULE};
+use loom_core::{ModuleConfig, ModuleDescriptor, PortDefault, TRANSPORT_MODULE};
 
 const RATE: f32 = 48_000.0;
 const FRAMES: usize = 2_400;
@@ -63,7 +63,7 @@ fn driven(k: usize) -> Vec<f32> {
 /// the graph sits at 70% of its travel instead of its default, so an input
 /// whose depth or amount defaults to 0 still changes the output.
 fn render(descriptor: &ModuleDescriptor, normal_in: usize, value: f32, cabled: bool, moved: bool) -> Vec<Vec<f32>> {
-    let ModuleRole::Dsp(create) = descriptor.role else {
+    let Some(create) = descriptor.role.factory() else {
         unreachable!("filtered to DSP modules")
     };
     let mut module = create(&ModuleConfig {
@@ -99,7 +99,7 @@ fn every_unconnected_input_plays_its_declared_normal() {
     let mut checked = 0;
     let mut failed = Vec::new();
     for descriptor in loom_modules::registry().iter() {
-        if !matches!(descriptor.role, ModuleRole::Dsp(_)) {
+        if descriptor.role.factory().is_none() {
             continue;
         }
         for (k, port) in descriptor.inputs.iter().enumerate() {

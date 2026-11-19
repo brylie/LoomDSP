@@ -283,18 +283,15 @@ impl<'l, 'a> Builder<'l, 'a> {
         let transport_node = graph
             .nodes
             .iter()
-            .find(|(_, node)| node.descriptor.id == crate::transport::TRANSPORT_MODULE);
+            .find_map(|(&id, node)| Some((id, node.slot, node.descriptor.role.transport_run_input()?)));
         TransportBuffers {
             bar_phase: buffer(DefaultKey::BarPhase),
             beat_phase: buffer(DefaultKey::BeatPhase),
             playing: buffer(DefaultKey::Playing),
-            module: transport_node.and_then(|(_, node)| node.slot).map(|slot| slot as u32),
-            grid: transport_node.is_some_and(|(&id, _)| graph.cables.keys().any(|to| to.module == id)),
-            run_cable: transport_node.is_some_and(|(&id, node)| {
-                node.descriptor
-                    .input_index("run")
-                    .is_some_and(|port| graph.cables.contains_key(&InputRef { module: id, port }))
-            }),
+            module: transport_node.and_then(|(_, slot, _)| slot).map(|slot| slot as u32),
+            grid: transport_node.is_some_and(|(id, _, _)| graph.cables.keys().any(|to| to.module == id)),
+            run_cable: transport_node
+                .is_some_and(|(module, _, port)| graph.cables.contains_key(&InputRef { module, port })),
         }
     }
 

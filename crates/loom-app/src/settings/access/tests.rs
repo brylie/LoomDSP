@@ -126,7 +126,7 @@ fn a_step_on_the_device_list_plays_the_next_device() {
     step_up(&mut app, "device");
     step_up(&mut app, "device");
     assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake B".into()));
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake B");
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake B");
     let window = dialog(&app);
     let device = part(&window, &preferences_id().with("device"));
     assert_eq!(device.value.as_deref(), Some("Fake B"));
@@ -145,16 +145,20 @@ fn a_device_that_fails_is_said_and_stepped_past() {
     fake.broken.borrow_mut().push("Fake B".into());
     let (mut app, _) = open("broken", fake);
     step_up(&mut app, "device");
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake A");
     step_up(&mut app, "device");
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A", "Fake B is busy");
+    assert_eq!(
+        app.rig.output.playing.as_ref().unwrap().device,
+        "Fake A",
+        "Fake B is busy"
+    );
     let window = dialog(&app);
     let error = part(&window, &preferences_id().with("note").with("audio-error"));
     assert!(error.value.as_deref().is_some_and(|text| text.contains("Fake B")));
     let device = part(&window, &preferences_id().with("device"));
     assert_eq!(device.value.as_deref(), Some("Fake A"), "the device in use");
     step_up(&mut app, "device");
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake C");
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake C");
     let window = dialog(&app);
     assert!(
         !window

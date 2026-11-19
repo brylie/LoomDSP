@@ -13,6 +13,7 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 loom-core.workspace = true
+loom-dsp.workspace = true
 hound.workspace = true
 serde.workspace = true
 

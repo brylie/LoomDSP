@@ -206,6 +206,7 @@ impl App {
             .collect();
         let safety_notes = self
             .rig
+            .output
             .safety_flag
             .then(|| Note {
                 key: "safety-flag",
@@ -225,7 +226,7 @@ impl App {
             midi: self.midi_parts(window),
             panic: Panic {
                 line: self.panic_line(),
-                learning: self.rig.panic_learn.is_some(),
+                learning: self.rig.midi.panic_learn.is_some(),
                 can_clear: saved.panic.is_some(),
             },
             author: window.author.clone(),
@@ -353,7 +354,7 @@ impl App {
                 if self.rig.flags.input.is_some() || self.rig.flags.no_input {
                     parts.push(note("input-flag", "Set by an input flag for this run."));
                 }
-                if let (Some(input), Some(output)) = (self.rig.effective_input(inputs), &self.rig.playing) {
+                if let (Some(input), Some(output)) = (self.rig.effective_input(inputs), &self.rig.output.playing) {
                     if input == output.device {
                         parts.push(note(
                             "same-device",
@@ -391,12 +392,13 @@ impl App {
         let mut sources = vec![(None, "Internal".to_string())];
         sources.extend(
             self.rig
+                .midi
                 .ports
                 .iter()
                 .map(|port| (Some(port.name().to_string()), port.name().to_string())),
         );
-        if let Some(name) = &self.rig.following_clock
-            && !self.rig.ports.iter().any(|port| port.name() == name)
+        if let Some(name) = &self.rig.midi.following_clock
+            && !self.rig.midi.ports.iter().any(|port| port.name() == name)
         {
             sources.push((Some(name.clone()), format!("{name} (not connected)")));
         }
@@ -405,13 +407,13 @@ impl App {
             "clock-source",
             "Clock source",
             sources,
-            Some(&self.rig.following_clock),
+            Some(&self.rig.midi.following_clock),
             Message::ClockSource,
         ))];
         if let Some(name) = midi
             .clock_source
             .as_ref()
-            .filter(|name| !self.rig.ports.iter().any(|port| port.name() == *name))
+            .filter(|name| !self.rig.midi.ports.iter().any(|port| port.name() == *name))
         {
             parts.push(note(
                 "clock-waiting",
@@ -424,7 +426,7 @@ impl App {
             Ok(names) => {
                 let mut taken = crate::a11y::items::UniqueIds::default();
                 for name in names {
-                    let on = self.rig.ports.iter().any(|port| port.name() == name);
+                    let on = self.rig.midi.ports.iter().any(|port| port.name() == name);
                     let id = taken.take(super::access::preferences_id().with("midi").with(name.as_str()));
                     parts.push(Part::Midi {
                         name: name.clone(),

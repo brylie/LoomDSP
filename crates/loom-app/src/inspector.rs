@@ -599,7 +599,7 @@ impl App {
         };
         let spec = &filtered;
         let stored = *node.params.get(index)?;
-        let clock = d.id == loom_core::TRANSPORT_MODULE
+        let clock = d.role.is_transport()
             && self.session.controller.follows_midi_clock()
             && matches!(spec.name, "tempo" | "run" | "reset");
         let value = match spec.name {

@@ -354,10 +354,7 @@ fn inserting_a_file_with_patch_wide_modules_leaves_them_out_with_a_note() {
     );
     let graph = app.session.controller.graph();
     assert_eq!(
-        graph
-            .nodes()
-            .filter(|(_, n)| n.descriptor.id == loom_core::TRANSPORT_MODULE)
-            .count(),
+        graph.nodes().filter(|(_, n)| n.descriptor.role.is_transport()).count(),
         1
     );
     assert!(
@@ -844,7 +841,7 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
             .controller
             .graph()
             .nodes()
-            .filter(|(_, n)| n.descriptor.id == loom_core::TRANSPORT_MODULE)
+            .filter(|(_, n)| n.descriptor.role.is_transport())
             .count(),
         1
     );
@@ -1062,7 +1059,7 @@ fn a_midi_control_moving_an_unexposed_inner_value_unlinks_the_tile() {
     assert!(!app.midi_may_edit_a_linked_tile(), "an exposed value is the instance's");
     app.session.controller.map_midi(cc(7), generator, 0).unwrap();
     app.commit();
-    let midi = app.rig.midi_in.clone().expect("the idle engine's MIDI input");
+    let midi = app.rig.midi.input.clone().expect("the idle engine's MIDI input");
     assert!(loom_host_desktop::send_midi(
         &midi,
         loom_core::MidiEvent::from_bytes(0, &[0xB0, 8, 100])

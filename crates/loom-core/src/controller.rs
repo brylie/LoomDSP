@@ -26,7 +26,7 @@
 //! siblings' private items. Why: ADR-0034.
 
 use crate::compile::{CompileReport, FadeKey, Fades, Wiring, compile_with_fades};
-use crate::descriptor::{ModuleConfig, ModuleDescriptor, ModuleRole, ParamRange, Polarity};
+use crate::descriptor::{ModuleConfig, ModuleDescriptor, ParamRange, Polarity};
 use crate::display::{DisplayReader, DisplaySource, DisplayTable};
 use crate::engine::{Command, Engine, EngineConfig, EngineStats, Garbage};
 use crate::error::LoomError;
@@ -317,7 +317,7 @@ impl Controller {
         let widths = width::infer(&self.graph);
         let mut plan = CopyPlan::default();
         for (&id, node) in &self.graph.nodes {
-            if !matches!(node.descriptor.role, ModuleRole::Dsp(_)) {
+            if node.descriptor.role.factory().is_none() {
                 continue;
             }
             let sides = if widths.per_channel.contains(&id) { 2 } else { 1 };
@@ -376,7 +376,7 @@ impl Controller {
         for (id, key) in starting {
             let slot = self.slots.take().expect("checked above");
             let node = self.graph.nodes.get_mut(&id).expect("listed above");
-            let ModuleRole::Dsp(factory) = node.descriptor.role else {
+            let Some(factory) = node.descriptor.role.factory() else {
                 unreachable!("only DSP modules are listed");
             };
             // A new instance starts from reset, with the module's current

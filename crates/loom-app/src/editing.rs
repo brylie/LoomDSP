@@ -763,6 +763,7 @@ impl App {
     pub(crate) fn selected_group(&mut self, verb: &str, incoming: bool) -> Option<clipboard::Group> {
         let group = clipboard::Group::from_selection(
             self.session.controller.graph(),
+            self.session.controller.registry(),
             &self.session.hierarchy,
             &self.session.level,
             &self.session.positions,

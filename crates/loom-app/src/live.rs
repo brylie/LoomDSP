@@ -515,7 +515,7 @@ pub(crate) fn normalise(peak: f32) -> f32 {
     if peak <= 0.0 {
         return 0.0;
     }
-    ((20.0 * peak.log10() - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
+    ((loom_dsp::decibels::gain_to_db(peak) - FLOOR_DB) / -FLOOR_DB).clamp(0.0, 1.0)
 }
 
 /// Level to dB, the inverse of [`normalise`]: 0 is -60 dB, 1 is 0 dB.

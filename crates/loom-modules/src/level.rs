@@ -110,7 +110,7 @@ impl Amp {
             0.0
         } else {
             // 60 dB of range: level 1 is 0 dB, level 0.5 is -30 dB.
-            10.0_f32.powf(EXP_RANGE_DB * (level - 1.0) / 20.0)
+            loom_dsp::decibels::db_to_gain(EXP_RANGE_DB * (level - 1.0))
         }
     }
 }
@@ -220,7 +220,7 @@ impl Module for ConstantLevel {
         let ([], [out]) = io.split::<0, 1>();
         for (i, out) in out.iter_mut().enumerate() {
             let db = modulated.at_or(i, self.db.tick());
-            *out = 10.0_f32.powf(db / 20.0);
+            *out = loom_dsp::decibels::db_to_gain(db);
         }
     }
 

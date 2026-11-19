@@ -9,7 +9,7 @@ A per-machine preferences file and window for the desktop app, so a player sets 
 - **Background:** [Output safety explainer](../learn/output-safety.md), for the first setting.
 - **Prior art:** most desktop apps keep settings in a file in the operating system's per-user settings folder, and open a settings window with Cmd+, on macOS. We use only those conventions.
 - **Issues:** follows [#131](https://github.com/brylie/LoomDSP/issues/131); [#201](https://github.com/brylie/LoomDSP/issues/201) (output safety), [#26](https://github.com/brylie/LoomDSP/issues/26) (devices).
-- **Code:** the file in `crates/loom-app/src/preferences.rs`; the window and what its choices do in `crates/loom-app/src/settings.rs`; devices in `crates/loom-app/src/devices.rs`. Tests: the `tests` modules of those three files.
+- **Code:** the file in `crates/loom-app/src/preferences.rs`; window messages in `crates/loom-app/src/settings.rs`, the view and its data in `settings/{view,model}.rs`, and state that survives an engine restart in `settings/rig.rs` and `settings/rig/`; devices in `crates/loom-app/src/devices.rs`. Tests: the `tests` modules of those three files.
 
 <!-- Spec first: agree on this before building. Keep it true as the code is
      built. See README.md in this folder. -->
@@ -185,7 +185,7 @@ The second section of the Preferences window: which audio output plays the patch
 - **Status:** Implemented in #26 (#275, #276), except the manual check. It builds on the file, flag, and window rules above, which were built with it.
 - **Use case and requirements:** UC3 (perform live), FR-APP-01, FR-MIDI-01.
 - **Issues:** [#26](https://github.com/brylie/LoomDSP/issues/26). Related, not built here: [#27](https://github.com/brylie/LoomDSP/issues/27) (MIDI hot-plugging, FR-MIDI-08), [#28](https://github.com/brylie/LoomDSP/issues/28) (audio device loss, FR-APP-04), [#29](https://github.com/brylie/LoomDSP/issues/29) (audio input), [#163](https://github.com/brylie/LoomDSP/issues/163) (`loom play` opens every MIDI input).
-- **Code:** `crates/loom-app/src/devices.rs` (the `Host` trait, what is offered, the choice at start, and a fake host for tests), `crates/loom-app/src/settings.rs` (the window, restarting audio, MIDI inputs), and `crates/loom-host-desktop` (`outputs`, `RunningAudio::stop`, `MidiConnection::close`). `loom play` keeps its own `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
+- **Code:** `crates/loom-app/src/devices.rs` (the `Host` trait, what is offered, the choice at start, and a fake host for tests), `crates/loom-app/src/settings/rig/output.rs` (restarting audio), `settings/rig/recovery.rs` (lost outputs), and `settings/rig/midi.rs` (MIDI inputs and clock routing), and `crates/loom-host-desktop` (`outputs`, `RunningAudio::stop`, `MidiConnection::close`). `loom play` keeps its own `--device`, `--sample-rate`, `--buffer`, `--midi`, and `--no-midi`.
 
 ### Goal
 

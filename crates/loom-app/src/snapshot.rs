@@ -776,7 +776,7 @@ pub fn headless(args: &Args) -> Result<App, String> {
     }
     if let Some(frames) = args.frames {
         if args.hold_note
-            && let Some(midi) = &app.rig.midi_in
+            && let Some(midi) = &app.rig.midi.input
         {
             loom_host_desktop::send_midi(midi, loom_core::MidiEvent::note_on(0, 0, 57, 100));
         }

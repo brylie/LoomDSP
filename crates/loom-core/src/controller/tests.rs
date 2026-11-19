@@ -1,6 +1,6 @@
 use super::*;
 use crate::module::{Module, PortIo, ProcessContext};
-use crate::{Panel, ParamOptions, ParamRange, ParamSpec, Widget};
+use crate::{ModuleRole, Panel, ParamOptions, ParamRange, ParamSpec, Widget};
 use std::sync::atomic::Ordering;
 
 struct Silent;
@@ -47,6 +47,48 @@ fn controller(capacity: usize) -> Controller {
         ..EngineConfig::default()
     };
     create_engine(Arc::new(registry), config).controller
+}
+
+/// Restarting DSP keeps the saved controls and mapping identity.
+#[test]
+fn rebuild_resets_transient_values_and_keeps_saved_controls() {
+    let mut original = controller(32);
+    let module = original.add_module(GATE.id).unwrap();
+    original.set_param_named(module, "on", 1.0).unwrap();
+    original.set_param_named(module, "hold", 1.0).unwrap();
+    let control = MidiControl {
+        channel: 0,
+        controller: 9,
+    };
+    let (mapping, _) = original.map_midi(control, module, 1).unwrap();
+    original.set_label(module, Some("Stage switch".into()));
+    original.set_tempo(99.0).unwrap();
+    original.set_running(false).unwrap();
+    original.commit().unwrap();
+
+    let mut rebuilt = original
+        .rebuild(EngineConfig::with_sample_rate(44_100.0))
+        .unwrap()
+        .controller;
+    let node = rebuilt.graph().node(module).unwrap();
+    assert_eq!(node.label.as_deref(), Some("Stage switch"));
+    assert_eq!(node.params, [0.0, 1.0, 0.0]);
+    assert_eq!(rebuilt.graph().midi_mapping_on(control).unwrap().0, mapping);
+    assert_eq!(rebuilt.transport().tempo, 99.0);
+    assert!(!rebuilt.transport().running);
+    assert_eq!(rebuilt.config().sample_rate, 44_100.0);
+    assert_eq!(original.graph().node(module).unwrap().params[2], 1.0);
+    let (new_mapping, _) = rebuilt
+        .map_midi(
+            MidiControl {
+                controller: 10,
+                ..control
+            },
+            module,
+            0,
+        )
+        .unwrap();
+    assert_ne!(new_mapping, mapping);
 }
 
 #[test]

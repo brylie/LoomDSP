@@ -53,7 +53,16 @@ fn copy_writes_a_versioned_patch_with_inside_cables_and_assignments_only() {
     let positions = spread(&c);
     // The selection leaves out the voice's phase and the second oscillator.
     let selection = ids(&[sine, lfo_phase, lfo_a, vca]);
-    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &selection, false).to_text();
+    let text = Group::from_selection(
+        c.graph(),
+        c.registry(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &selection,
+        false,
+    )
+    .to_text();
     let patch = Patch::from_ron(&text).unwrap();
 
     assert_eq!(patch.version, loom_patch::CURRENT_VERSION);
@@ -78,7 +87,16 @@ fn paste_adds_new_ids_with_values_cables_and_assignments_in_order() {
     let voice = voice(&mut c);
     c.commit().unwrap();
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&voice), false).to_text();
+    let text = Group::from_selection(
+        c.graph(),
+        c.registry(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&voice),
+        false,
+    )
+    .to_text();
 
     let before: BTreeSet<u32> = c.graph().nodes().map(|(id, _)| id.0).collect();
     let group = Group::from_text(&text, c.registry()).unwrap();
@@ -124,6 +142,7 @@ fn duplicate_keeps_incoming_links_and_drops_outgoing_ones() {
     // stay outside; the audio output is outgoing.
     let group = Group::from_selection(
         c.graph(),
+        c.registry(),
         &flat(c.graph()),
         &root(),
         &positions,
@@ -221,7 +240,15 @@ fn a_duplicated_voice_sounds_like_one_built_by_hand() {
         let c = &mut duplicated.controller;
         let first = voice(c);
         let mut positions = spread(c);
-        let group = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&first), true);
+        let group = Group::from_selection(
+            c.graph(),
+            c.registry(),
+            &flat(c.graph()),
+            &root(),
+            &positions,
+            &ids(&first),
+            true,
+        );
         let new = add_flat(&group, c, &mut positions, (0.0, 0.0)).unwrap();
         let out = c.add_module("loom.io.audio-out").unwrap();
         let join = c.add_module("loom.mix.join").unwrap();
@@ -315,7 +342,16 @@ fn copy_and_paste_unknown_module_keeps_unconnected_ports() {
     c.add_unknown_with_id(id, unknown.clone()).unwrap();
     c.set_label(id, Some("Missing".into()));
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&[id]), false).to_text();
+    let text = Group::from_selection(
+        c.graph(),
+        c.registry(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&[id]),
+        false,
+    )
+    .to_text();
     assert!(Patch::from_ron(&text).is_ok(), "clipboard remains patch text");
     let group = Group::from_text(&text, c.registry()).unwrap();
     let new = add_flat(&group, &mut c, &mut positions, (1200.0, 600.0)).unwrap();
@@ -353,6 +389,7 @@ fn copy_unknown_module_remaps_named_links() {
     let mut positions = spread(&c);
     let text = Group::from_selection(
         c.graph(),
+        c.registry(),
         &flat(c.graph()),
         &root(),
         &positions,
@@ -387,6 +424,7 @@ fn a_group_too_big_for_the_patch_is_refused_before_anything_is_added() {
     c.commit().unwrap();
     let group = Group::from_selection(
         c.graph(),
+        c.registry(),
         &flat(c.graph()),
         &root(),
         &BTreeMap::new(),
@@ -425,6 +463,7 @@ fn a_paste_larger_than_the_command_queue_goes_in_over_several_commits() {
     // Two copies of three modules do not fit in a queue of four.
     let group = Group::from_selection(
         c.graph(),
+        c.registry(),
         &flat(c.graph()),
         &root(),
         &positions,
@@ -451,7 +490,16 @@ fn copy_and_paste_keep_control_ranges() {
     c.set_range(mul, 0, ParamRange::new(-5.0, 5.0)).unwrap();
     c.set_param(mul, 0, 4.0).unwrap();
     let mut positions = spread(&c);
-    let text = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&[mul]), false).to_text();
+    let text = Group::from_selection(
+        c.graph(),
+        c.registry(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&[mul]),
+        false,
+    )
+    .to_text();
     assert!(text.contains(r#"ranges: {"gain": (-5.0, 5.0)}"#), "{text}");
     let group = Group::from_text(&text, c.registry()).unwrap();
     let new = add_flat(&group, &mut c, &mut positions, (1200.0, 600.0)).unwrap();
@@ -473,6 +521,7 @@ fn copy_paste_and_duplicate_keep_a_known_module_label() {
 
     let text = Group::from_selection(
         c.graph(),
+        c.registry(),
         &flat(c.graph()),
         &root(),
         &positions,
@@ -486,7 +535,15 @@ fn copy_paste_and_duplicate_keep_a_known_module_label() {
     assert_eq!(label(&c, pasted[0]).as_deref(), Some(" Lead "));
     assert_eq!(label(&c, pasted[1]), None);
 
-    let duplicated = Group::from_selection(c.graph(), &flat(c.graph()), &root(), &positions, &ids(&[sine]), true);
+    let duplicated = Group::from_selection(
+        c.graph(),
+        c.registry(),
+        &flat(c.graph()),
+        &root(),
+        &positions,
+        &ids(&[sine]),
+        true,
+    );
     let duplicated = add_flat(&duplicated, &mut c, &mut positions, (1400.0, 600.0)).unwrap();
     assert_eq!(label(&c, duplicated[0]).as_deref(), Some(" Lead "));
 }
@@ -578,7 +635,15 @@ fn a_sub_patch_tile_copies_with_its_definition_and_pastes_back_whole() {
     let hierarchy = Hierarchy::from_patch(&patch, c.graph(), ids, c.registry()).unwrap();
     let positions = spread(&c);
     let selection: BTreeSet<u32> = [1, 2, 5].into_iter().collect();
-    let group = Group::from_selection(c.graph(), &hierarchy, &root(), &positions, &selection, false);
+    let group = Group::from_selection(
+        c.graph(),
+        c.registry(),
+        &hierarchy,
+        &root(),
+        &positions,
+        &selection,
+        false,
+    );
     assert_eq!(group.describe(), "3 modules");
     let text = group.to_text();
     let copied = Patch::from_ron(&text).unwrap();

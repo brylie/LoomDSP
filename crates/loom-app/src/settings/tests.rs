@@ -1,10 +1,13 @@
 use super::*;
 use crate::devices::fake::{self, Event, Fake};
 use crate::preferences::FILE_NAME;
-use crate::{Args, Source};
+use crate::{Args, Source, undo};
+use loom_core::{EngineConfig, MidiInputId, create_engine};
 use loom_host_desktop::InputError;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// A folder for one test's preferences file.
 fn folder(name: &str) -> PathBuf {
@@ -700,7 +703,7 @@ fn a_rate_change_keeps_the_patch_and_its_history() {
     assert_eq!(app.session.controller.config().sample_rate, 44_100.0);
     assert_eq!(app.session.engine.stream.sample_rate(), 44_100.0);
     assert_eq!(
-        app.rig.last_stop,
+        app.rig.output.last_stop,
         Some(true),
         "the old engine faded out before it stopped"
     );
@@ -754,7 +757,7 @@ fn a_device_that_fails_to_open_leaves_the_old_one_playing() {
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(app.generation, generation);
     assert!(app.session.engine.stream.is_playing());
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake A");
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
         app.alerts.status(),
@@ -776,7 +779,7 @@ fn a_device_that_fails_to_start_hands_back_to_the_old_one() {
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(fake.opened(), ["Fake A", "Fake B", "Fake A"], "back to the old device");
     assert!(app.session.engine.stream.is_playing(), "sound is still playing");
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake A");
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake A");
     assert_eq!(app.session.controller.graph().len(), modules, "with the same patch");
     assert_eq!(app.session.edits.history.len(), 1);
     assert!(fake.is_open("Keys"));
@@ -805,7 +808,7 @@ fn when_neither_device_starts_audio_is_off_and_nothing_is_saved() {
         "it tried the old device again"
     );
     assert!(!app.session.engine.stream.is_playing(), "audio is off");
-    assert!(app.rig.playing.is_none());
+    assert!(app.rig.output.playing.is_none());
     assert!(!dir.join(FILE_NAME).exists(), "nothing saved");
     assert_eq!(
         app.alerts.status(),
@@ -839,8 +842,8 @@ fn a_device_change_opens_the_new_device_and_fades_the_old_one() {
     let mut app = start(args(&dir), &fake);
     change(&mut app, Change::Device(DeviceChoice::Named("Fake B".into())));
     assert_eq!(fake.opened(), ["Fake A", "Fake B"]);
-    assert_eq!(app.rig.last_stop, Some(true));
-    assert_eq!(app.rig.playing.as_ref().unwrap().device, "Fake B");
+    assert_eq!(app.rig.output.last_stop, Some(true));
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake B");
     assert_eq!(
         crate::preferences::load(&dir.join(FILE_NAME)).preferences.audio.device,
         DeviceChoice::Named("Fake B".into())
@@ -852,11 +855,11 @@ fn open_new_and_quit_fade_out_first() {
     let dir = folder("fade");
     let mut app = start(args(&dir), &two_devices());
     assert!(app.replace(Source::Empty));
-    assert_eq!(app.rig.last_stop, Some(true), "New faded out");
-    app.rig.last_stop = None;
+    assert_eq!(app.rig.output.last_stop, Some(true), "New faded out");
+    app.rig.output.last_stop = None;
     app.quit = true;
     let _ = app.send(crate::Message::Tick);
-    assert_eq!(app.rig.last_stop, Some(true), "quit faded out");
+    assert_eq!(app.rig.output.last_stop, Some(true), "quit faded out");
 }
 
 #[test]
@@ -985,7 +988,7 @@ fn an_input_plugged_in_is_opened_unless_it_is_off() {
     write(&dir, "(midi: (off: [\"Drums\"]))");
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &[]));
     let (mut app, wait_for) = note_app(&dir, &fake);
-    assert!(app.rig.ports.is_empty());
+    assert!(app.rig.midi.ports.is_empty());
     app.preferences(Message::Open);
     fake.plug("Keys");
     fake.plug("Drums");
@@ -1134,7 +1137,7 @@ fn an_unreadable_input_list_at_start_is_reported() {
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
     fake.midi_list_fails.set(true);
     let app = start(args(&dir), &fake);
-    assert!(app.rig.ports.is_empty());
+    assert!(app.rig.midi.ports.is_empty());
     assert!(
         app.alerts.status().contains("the MIDI service is not running"),
         "{}",
@@ -1179,7 +1182,7 @@ fn the_panic_section_learns_and_cancels() {
     // saved as the trigger where the player cannot see it.
     app.preferences(Message::PanicLearn);
     app.preferences(Message::Close);
-    assert_eq!(app.rig.panic_learn, None, "closing cancels the learn");
+    assert_eq!(app.rig.midi.panic_learn, None, "closing cancels the learn");
 }
 
 /// The same check through real MIDI inputs: two virtual controllers,
@@ -1212,7 +1215,14 @@ fn turning_a_real_input_off_releases_its_notes_and_is_saved() {
         ..Fake::new(&[fake::device("Fake A")], &[])
     });
     let mut app = start(args(&dir), &fake);
-    let open = |app: &App| app.rig.ports.iter().map(|p| p.name().to_string()).collect::<Vec<_>>();
+    let open = |app: &App| {
+        app.rig
+            .midi
+            .ports
+            .iter()
+            .map(|p| p.name().to_string())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(open(&app).len(), 2, "both ports open: {:?}", open(&app));
 
     let note = loom_modules::registry().resolve("loom.midi.note").unwrap();
@@ -1314,7 +1324,7 @@ fn the_saved_output_safety_applies_unless_a_flag_sets_it() {
     flagged.output_safety = Some(OutputSafety::LowLatency);
     let app = start(flagged, &fake);
     assert_eq!(app.session.controller.config().output_safety, OutputSafety::LowLatency);
-    assert!(app.rig.safety_flag);
+    assert!(app.rig.output.safety_flag);
 }
 
 /// The activity choice saves and follows newly built engines.
@@ -1346,7 +1356,7 @@ fn the_safety_flag_is_shown_and_never_saved() {
         OutputSafety::Off,
         "the window shows Off"
     );
-    assert!(app.rig.safety_flag, "with the flag note");
+    assert!(app.rig.output.safety_flag, "with the flag note");
     app.quit = true;
     let _ = app.send(crate::Message::Tick);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "(output_safety: \"clean\")");
@@ -1361,7 +1371,7 @@ fn a_failed_save_still_changes_the_mode() {
     args.devices.preferences = Some(dir.join("blocked").join(FILE_NAME));
     let mut app = start(args, &two_devices());
     app.preferences(Message::Safety(OutputSafety::Clean));
-    assert_eq!(app.rig.sent, [OutputSafety::Clean], "the engine runs Clean");
+    assert_eq!(app.rig.output.sent, [OutputSafety::Clean], "the engine runs Clean");
     assert!(
         app.alerts.status().ends_with("The change applies until you quit."),
         "{}",
@@ -1375,7 +1385,7 @@ fn picking_a_mode_tells_the_engine_and_saves_it() {
     let path = dir.join(FILE_NAME);
     let mut app = start(args(&dir), &two_devices());
     app.preferences(Message::Safety(OutputSafety::Off));
-    assert_eq!(app.rig.sent, [OutputSafety::Off]);
+    assert_eq!(app.rig.output.sent, [OutputSafety::Off]);
     assert_eq!(
         crate::preferences::load(&path).preferences.output_safety,
         OutputSafety::Off
@@ -1385,7 +1395,7 @@ fn picking_a_mode_tells_the_engine_and_saves_it() {
     // The mode in effect: nothing sent, nothing written.
     std::thread::sleep(Duration::from_millis(20));
     app.preferences(Message::Safety(OutputSafety::Off));
-    assert_eq!(app.rig.sent, [OutputSafety::Off]);
+    assert_eq!(app.rig.output.sent, [OutputSafety::Off]);
     assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), written);
 
     assert!(app.replace(Source::Empty));
@@ -1534,18 +1544,18 @@ fn handle_audio_loss_guards_and_named_fallback() {
 
     // When audio is running on a named device, loss puts it in lost_audio
     app.handle_audio_loss("initial");
-    assert!(app.rig.lost_audio.is_some());
+    assert!(app.rig.output.lost_audio.is_some());
 
     // Second call while lost_audio is Some returns early without duplicate handling (Rule 3)
     app.handle_audio_loss("duplicate");
-    assert!(app.rig.lost_audio.is_some());
+    assert!(app.rig.output.lost_audio.is_some());
 
     // When audio was never playing and not lost, return early
-    app.rig.lost_audio = None;
-    app.rig.playing = None;
+    app.rig.output.lost_audio = None;
+    app.rig.output.playing = None;
     assert!(!app.session.engine.stream.is_playing());
     app.handle_audio_loss("ignored");
-    assert!(app.rig.lost_audio.is_none());
+    assert!(app.rig.output.lost_audio.is_none());
 
     // When _audio is present but playing is None, falls back to saved device name
     let output = loom_host_desktop::AudioOutput::clock(48_000, 256);
@@ -1556,7 +1566,7 @@ fn handle_audio_loss_guards_and_named_fallback() {
     saved.audio.device = DeviceChoice::Named("Saved Device".into());
     app.rig.save(saved);
     app.handle_audio_loss("unplugged");
-    assert_eq!(app.rig.lost_audio.as_ref().unwrap().device, "Saved Device");
+    assert_eq!(app.rig.output.lost_audio.as_ref().unwrap().device, "Saved Device");
 
     // When _audio is present, playing is None, and saved is SystemDefault, falls back to "audio device"
     let output2 = loom_host_desktop::AudioOutput::clock(48_000, 256);
@@ -1565,18 +1575,18 @@ fn handle_audio_loss_guards_and_named_fallback() {
         .engine
         .stream
         .set_running(Some(output2.start(parts2.engine).unwrap()));
-    app.rig.lost_audio = None;
+    app.rig.output.lost_audio = None;
     let mut saved2 = app.rig.store.saved().clone();
     saved2.audio.device = DeviceChoice::SystemDefault;
     app.rig.save(saved2);
     fake.outputs.borrow_mut().default = None;
     app.handle_audio_loss("unplugged");
-    assert_eq!(app.rig.lost_audio.as_ref().unwrap().device, "audio device");
+    assert_eq!(app.rig.output.lost_audio.as_ref().unwrap().device, "audio device");
 
     // When check_audio runs sooner than 1s after attempt, it waits without retrying
     let recent = Instant::now() + Duration::from_millis(100);
     app.check_audio(recent);
-    assert_eq!(app.rig.lost_audio.as_ref().unwrap().attempts, 0);
+    assert_eq!(app.rig.output.lost_audio.as_ref().unwrap().attempts, 0);
 }
 
 /// The status bar shows what a performer needs: the developer tools
@@ -1596,7 +1606,7 @@ fn the_status_bar_counts_midi_and_hides_developer_tools() {
             ],
         ));
         let app = start(Args { dev, ..args(&dir) }, &fake);
-        assert_eq!(app.rig.ports.len(), 4);
+        assert_eq!(app.rig.midi.ports.len(), 4);
         let mut ui = crate::ui_test::Ui::with_app(app);
         let midi = ui.text("MIDI: 4 inputs").expect("the MIDI count");
         assert!(
@@ -1801,8 +1811,8 @@ fn midi_clock_preferences_follow_a_reconnected_port() {
     app.preferences(Message::Open);
     fake.plug("Drums");
     app.poll_midi();
-    assert_eq!(app.rig.following_clock.as_deref(), Some("Drums"));
-    let old_id = app.rig.clock_input;
+    assert_eq!(app.rig.midi.following_clock.as_deref(), Some("Drums"));
+    let old_id = app.rig.midi.clock_input();
     assert_ne!(old_id, Some(MidiInputId(0)));
     let snapshot = app.ui_snapshot();
     let tile = snapshot
@@ -1830,8 +1840,8 @@ fn midi_clock_preferences_follow_a_reconnected_port() {
     );
     fake.unplug("Drums");
     app.poll_midi();
-    assert_eq!(app.rig.following_clock.as_deref(), Some("Drums"));
-    assert_eq!(app.rig.clock_input, Some(MidiInputId(0)));
+    assert_eq!(app.rig.midi.following_clock.as_deref(), Some("Drums"));
+    assert_eq!(app.rig.midi.clock_input(), Some(MidiInputId(0)));
     let model = app.preferences_model().unwrap();
     let Some(Part::Picks(clock)) = model.midi.first() else {
         panic!("the clock source comes first");
@@ -1839,7 +1849,7 @@ fn midi_clock_preferences_follow_a_reconnected_port() {
     assert_eq!(clock.chosen_text(), Some("Drums (not connected)"));
     fake.plug("Drums");
     app.poll_midi();
-    assert_ne!(app.rig.clock_input, old_id);
+    assert_ne!(app.rig.midi.clock_input(), old_id);
     app.preferences(Message::ClockSource(None));
     assert!(!app.session.controller.follows_midi_clock());
     assert!(app.rig.store.saved().midi.clock_source.is_none());

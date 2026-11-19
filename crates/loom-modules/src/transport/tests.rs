@@ -2,7 +2,7 @@ use super::*;
 use loom_core::ModuleConfig;
 
 fn transport() -> Box<dyn Module> {
-    let ModuleRole::Dsp(create) = TRANSPORT.role else {
+    let Some(create) = TRANSPORT.role.factory() else {
         unreachable!("the Transport is a DSP module")
     };
     let mut module = create(&ModuleConfig {

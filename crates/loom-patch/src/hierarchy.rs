@@ -31,9 +31,7 @@ use crate::{
     PatchModulation, PatchModule, PatchPolarity, ResolvedModule, SLOT_KIND, SUBPATCH_KIND, Slot, SubPatch, unique_name,
 };
 use behind::{InputStep, Step};
-use loom_core::{
-    AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, Registry, TRANSPORT_MODULE,
-};
+use loom_core::{AssignmentId, Controller, Graph, InputRef, ModuleId, ModuleNames, OutputRef, Registry};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod modes;

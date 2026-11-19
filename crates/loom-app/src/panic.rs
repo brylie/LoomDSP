@@ -53,14 +53,14 @@ impl App {
     /// Starts or stops learning the panic trigger: the next control change
     /// or note on after this becomes the trigger.
     pub(crate) fn learn_panic(&mut self) {
-        if self.rig.panic_learn.is_some() {
-            self.rig.panic_learn = None;
+        if self.rig.midi.panic_learn.is_some() {
+            self.rig.midi.panic_learn = None;
             self.alerts.say("Panic: learn cancelled.".to_string());
             return;
         }
         let cc = self.session.controller.last_control_change().map(|seen| seen.serial);
         let note = self.session.controller.last_note_on().map(|seen| seen.serial);
-        self.rig.panic_learn = Some(cc.max(note).unwrap_or(0));
+        self.rig.midi.panic_learn = Some(cc.max(note).unwrap_or(0));
         self.alerts
             .say("Panic: move a control or press a pad to set the trigger.".to_string());
     }
@@ -68,7 +68,7 @@ impl App {
     /// Takes the first control change or note on that arrived since learn
     /// started as the panic trigger. Returns true if it set one.
     pub(crate) fn panic_midi_arrived(&mut self) -> bool {
-        let Some(since) = self.rig.panic_learn else {
+        let Some(since) = self.rig.midi.panic_learn else {
             return false;
         };
         let cc = self
@@ -93,7 +93,7 @@ impl App {
         let Some((_, learned)) = cc.into_iter().chain(note).max_by_key(|(serial, _)| *serial) else {
             return false;
         };
-        self.rig.panic_learn = None;
+        self.rig.midi.panic_learn = None;
         self.set_panic_pref(Some(learned));
         self.alerts.say(format!("Panic: {}.", learned.trigger()));
         true
@@ -102,7 +102,7 @@ impl App {
     /// Saves the panic trigger and sends it to the engine. `None` clears it.
     pub(crate) fn set_panic_pref(&mut self, panic: Option<PanicPref>) {
         if panic.is_none() {
-            self.rig.panic_learn = None;
+            self.rig.midi.panic_learn = None;
         }
         let mut preferences = self.rig.store.saved().clone();
         preferences.panic = panic;
@@ -114,7 +114,7 @@ impl App {
 
     /// What the Preferences window shows for the trigger.
     pub(crate) fn panic_line(&self) -> String {
-        if self.rig.panic_learn.is_some() {
+        if self.rig.midi.panic_learn.is_some() {
             return "Waiting for MIDI...".to_string();
         }
         match self.rig.store.saved().panic {

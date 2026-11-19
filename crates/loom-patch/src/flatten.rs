@@ -25,7 +25,7 @@ use crate::{
 use loom_core::SignalType;
 use loom_core::{
     Controller, FillsRole, Graph, LoomError, MidiControl, ModuleId, ModuleNames, ParamRange, Registry, RoleDescriptor,
-    THRU_IN, THRU_OUT, TRANSPORT_MODULE,
+    THRU_IN, THRU_OUT,
 };
 use loom_dsp::blend;
 use std::collections::BTreeMap;
@@ -556,12 +556,14 @@ impl Flat {
         let mut notes = self.warnings.clone();
         let same = |id: ModuleId| id;
         self.add_modules(controller, &same)?;
-        if self.transport.is_none() && controller.registry().resolve(TRANSPORT_MODULE).is_ok() {
+        if self.transport.is_none()
+            && let Some(descriptor) = controller.registry().transport()
+        {
             // From the table, not the controller: a top-level instance owns
             // its id without a graph module, and the controller would not
             // know to skip it.
             let id = ids.next_top()?;
-            controller.add_module_with_id(id, TRANSPORT_MODULE)?;
+            controller.add_module_with_id(id, descriptor.id)?;
             notes.push(LoadWarning::TransportAdded { module: id.0 });
         }
         self.add_links(controller, &same)?;
@@ -722,7 +724,7 @@ fn is_transport(registry: &Registry, kind: &str) -> bool {
     loom_core::ModuleKind::parse(kind).ok().is_some_and(|kind| {
         registry
             .get(&kind.id)
-            .is_some_and(|descriptor| descriptor.id == TRANSPORT_MODULE && descriptor.version == kind.version)
+            .is_some_and(|descriptor| descriptor.role.is_transport() && descriptor.version == kind.version)
     })
 }
 

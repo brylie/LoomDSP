@@ -1043,6 +1043,33 @@ fn toolbar_refuses_dialogs_disabled_buttons_and_unknown_names() {
     assert!(error.contains("`add` command"), "{error}");
 }
 
+/// Every button the script can press has the same availability as the view,
+/// with no history, during an edit, and on either side of an undo.
+#[test]
+fn toolbar_commands_follow_the_visible_button_model() {
+    let assert_matches_view = |app: &App| {
+        let toolbar = app.toolbar_model();
+        for name in super::resolve::BUTTONS {
+            let model_name = if name == "learn" { "midi_learn" } else { name };
+            let button = toolbar.buttons.iter().find(|button| button.name == model_name).unwrap();
+            let press = super::resolve::press_message(app, name);
+            assert_eq!(press.is_ok(), button.enabled, "{name}");
+            assert_eq!(press.err().as_deref(), button.disabled, "{name}");
+        }
+    };
+    let mut app = crate::tests::app();
+    assert_matches_view(&app);
+    app.arrow_event(crate::edits::ArrowEvent::Step(std::time::Instant::now()));
+    assert_matches_view(&app);
+    app.end_gesture();
+    let module = app.session.controller.add_module("loom.filter.svf").unwrap().0;
+    app.commit();
+    app.edit(|app| app.set_param(module, 0, 0.25));
+    assert_matches_view(&app);
+    app.undo();
+    assert_matches_view(&app);
+}
+
 /// A command waiting to be drawn keeps its answer when another patch
 /// is opened before the frame comes.
 #[test]

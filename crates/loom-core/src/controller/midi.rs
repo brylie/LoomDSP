@@ -354,6 +354,11 @@ impl MidiSync {
         id
     }
 
+    /// Keeps the mapping ID sequence when rebuilding an engine.
+    pub(super) fn keep_mapping_ids(&mut self, previous: &Self) {
+        self.next_mapping = previous.next_mapping;
+    }
+
     /// Drops what is known about a mapping that is removed or replaced.
     pub(super) fn forget(&mut self, id: MidiMappingId) {
         self.seen.remove(&id);

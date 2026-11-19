@@ -160,12 +160,6 @@ pub struct ChannelAnalysis {
     pub rms_dbfs: f64,
 }
 
-/// A level in dBFS. Silence gives negative infinity, which JSON writes as
-/// `null`.
-fn dbfs(level: f64) -> f64 {
-    20.0 * level.log10()
-}
-
 /// Measures the part of `audio` from `from` to `to` seconds (both
 /// optional). A range outside the audio is clamped to it.
 pub fn analyze(audio: &Audio, from: Option<f64>, to: Option<f64>) -> Analysis {
@@ -233,7 +227,7 @@ fn channel(samples: &[f32], offset: usize, rate: f64, window: usize) -> ChannelA
     ChannelAnalysis {
         first: samples.first().copied().unwrap_or(0.0),
         peak,
-        peak_dbfs: dbfs(f64::from(peak)),
+        peak_dbfs: loom_dsp::decibels::gain_to_db_f64(f64::from(peak)),
         peak_at: at(peak_index),
         over_ceiling: over,
         full_scale: full,
@@ -243,7 +237,7 @@ fn channel(samples: &[f32], offset: usize, rate: f64, window: usize) -> ChannelA
         dc,
         dc_window: window_dc(samples, window).unwrap_or(dc),
         rms,
-        rms_dbfs: dbfs(rms),
+        rms_dbfs: loom_dsp::decibels::gain_to_db_f64(rms),
     }
 }
 
