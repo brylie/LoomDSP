@@ -2,7 +2,7 @@
 
 This folder holds the guides, product requirements, and architecture decisions for LoomDSP.
 
-Status: **Phase 1, early** (2026-10-14). Requirements are a draft and open for discussion.
+LoomDSP is in early alpha. See the [roadmap](product/roadmap.md) for the current phases and planned work.
 
 ## Guides
 
@@ -55,6 +55,7 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 | Document | Purpose |
 |---|---|
 | [Prior-art survey, 2026-10](research/2026-10-prior-art-survey.md) | Modules in 15 modular environments, as evidence for the module catalogue |
+| [Desktop play test, 2026-11-19](research/2026-11-19-desktop-playtest.md) | Three playable examples, repeatable UX checks, and backlog follow-ups |
 
 ## Benchmarks
 
