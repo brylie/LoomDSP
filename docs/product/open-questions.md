@@ -6,7 +6,7 @@ Each open item lists the options and a current leaning. Close an item by writing
 
 | ID | Question | Decision | Where recorded |
 |---|---|---|---|
-| OQ-01 | Desktop first or browser first? | Desktop first. The browser is an optional target, deferred. | Vision, roadmap |
+| OQ-01 | Desktop first or browser first? | Desktop first. The browser is a first-class target, whose build is deferred (Brylie, 2026-11-19; [UI design goal 3](../design/ui-layer.md#design-goals)). | Vision, roadmap |
 | OQ-02 | UI framework and node editor | Iced for the application UI. Our own patch canvas as an Iced widget, after spikes with iced_nodegraph (GPU fill-rate bound on Retina) and egui-snarl (poor look). Superseded on 2026-11-09: the app moves in phases to our own UI layer on `winit`, `wgpu`, and AccessKit; the canvas stays ours. | ADR-0009, ADR-0010, ADR-0041 |
 | OQ-03 | Stereo on every cable? | No. Channel count is inferred per cable. Stereo flows where audio needs it. | FR-SIG-07, ADR-0007, ADR-0020 |
 | OQ-04 | Pitch and value conventions | Our own documented conventions, following the Eurorack and Bitwig Grid idea of "patch anything to anything". | FR-SIG-03, 05, ADR-0007 |
@@ -84,6 +84,6 @@ VCV Rack's ecosystem works because people can install modules without building t
 The research document was a good starting point. Points that changed during review:
 
 1. **"Acyclic graph" vs. feedback.** The research describes the graph as a DAG and also promises single-sample feedback. Feedback needs cycles. FR-GRAPH-03 and ADR-0002 resolve this.
-2. **Web Audio block sizes.** The 128-sample AudioWorklet limit only matters for the optional web target. The desktop engine works with any host buffer size.
+2. **Web Audio block sizes.** The 128-sample AudioWorklet limit only matters for the web target. The desktop engine works with any host buffer size.
 3. **Iced vs. Vizia.** We agree with the research's lean toward Iced, for a different reason: `iced_nodegraph` now gives a GPU-rendered node editor for Iced. `iced_audio` (cited in the research) is not needed. We will build our own knobs and sliders.
 4. **Performance figures** in the research come from varied sources. We will replace them with our own benchmarks in M0.
