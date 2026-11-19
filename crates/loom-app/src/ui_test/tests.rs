@@ -3109,3 +3109,29 @@ fn a_ui_on_another_ui_s_copy_leaves_that_folder() {
     drop(first);
     assert!(!folder.exists(), "and goes with its own Ui");
 }
+
+/// A relative name that climbs out and back in (`../patches/...`) still
+/// opens a copy inside the folder made for it, and a save writes that
+/// copy, never the example (CodeRabbit, #850).
+#[test]
+fn a_relative_example_name_copies_inside_its_folder() {
+    use iced::keyboard::{Key, Modifiers};
+    let real = example_path("subtractive.ron");
+    let before = std::fs::read(&real).unwrap();
+    let mut ui = Ui::open("../patches/subtractive.ron");
+    let copy = ui.app().session.document.file().expect("a file is open").to_path_buf();
+    let folder = copy.parent().expect("the copy has a folder").to_path_buf();
+    assert!(is_copy_folder(&folder), "inside a copy folder: {copy:?}");
+    assert_eq!(copy.file_name(), real.file_name());
+    let _ = ui.app_mut().send(Message::Inspector(crate::inspector::Message::Param {
+        module: 4,
+        index: 0,
+        position: 0.321,
+    }));
+    let _ = ui.app_mut().send(Message::SliderReleased);
+    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.redraw();
+    assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
+    drop(ui);
+    assert!(!folder.exists(), "and the folder goes with its Ui");
+}
