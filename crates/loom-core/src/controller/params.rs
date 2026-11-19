@@ -114,11 +114,11 @@ impl Controller {
             param: index.to_string(),
         })?;
         let value = spec.clamp(value);
-        node.params[index] = value;
         if let Some(fresh) = node.slot.and_then(|slot| self.slots.fresh_mut(slot)) {
             // Not in the engine yet: no command, and no edit to order
             // against MIDI.
             fresh.module.set_param(index, value);
+            node.params[index] = value;
             return Ok(value);
         }
         let edit = mapping.map(|(_, control)| (control, self.midi.next_token()));
@@ -135,6 +135,7 @@ impl Controller {
         {
             return Err(LoomError::QueueFull);
         }
+        node.params[index] = value;
         if let Some((id, _)) = mapping {
             self.midi.record_edit(id);
         }
@@ -242,7 +243,13 @@ impl Controller {
                 .filter(|&&(voice, side)| voice >= widths.voices[&id] || side >= sides)
                 .count();
         }
-        let needed = self.slots.waiting() + starting + stopping + self.slots.retiring().len() + 1 + ordinary_commands;
+        let needed = self.slots.waiting()
+            + self.slots.detached().len()
+            + starting
+            + stopping
+            + self.slots.retiring().len()
+            + 1
+            + ordinary_commands;
         let error = if self.slots.free_count() < starting {
             Some(LoomError::TooManyModules(self.config.max_modules))
         } else if self.commands.slots() < needed {

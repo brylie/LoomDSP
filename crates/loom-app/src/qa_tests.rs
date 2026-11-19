@@ -12,6 +12,7 @@ use crate::devices::fake::{self, Fake};
 use crate::preferences::DeviceChoice;
 use crate::settings::{Change, Message as Prefs};
 use loom_analysis::{max_step, peak};
+use loom_core::EngineConfig;
 use loom_core::safety::{CEILING, FADE_SECONDS};
 use loom_host_desktop::{OutputInfo, Tape};
 use std::rc::Rc;
@@ -1429,4 +1430,102 @@ fn the_synth_voice_stacks_for_unison() {
     let held = run.left();
     assert!(peak(&held[held.len() - 9_600..]) > 0.05, "the stack plays");
     swap_the_voice_filter(&mut run);
+}
+
+/// Generates clipping and bad samples during the first 1024 frames only.
+#[derive(Default)]
+struct BadOutput(usize);
+
+impl loom_core::Module for BadOutput {
+    fn process(&mut self, _: &loom_core::ProcessContext<'_>, io: &mut loom_core::PortIo<'_>) {
+        for sample in io.output(0) {
+            *sample = if self.0 >= 1024 {
+                0.25
+            } else if self.0.is_multiple_of(2) {
+                f32::NAN
+            } else {
+                2.0
+            };
+            self.0 += 1;
+        }
+    }
+}
+
+/// Test-only source with an audio port so it can feed the real output.
+static BAD_OUTPUT: loom_core::ModuleDescriptor = loom_core::ModuleDescriptor {
+    id: "test.bad-output",
+    version: 1,
+    name: "Bad output",
+    category: "Test",
+    family: loom_core::Family::Interface,
+    description: "Sends a short burst of bad samples before a finite steady signal.",
+    inputs: &[],
+    outputs: &[loom_core::PortSpec {
+        name: "out",
+        label: "Out",
+        signal: loom_core::SignalType::Audio,
+        description: "The test signal.",
+        default: loom_core::PortDefault::Value(0.0),
+        range: loom_core::PortRange::Signal,
+        channels: loom_core::Channels::PerChannel,
+    }],
+    params: &[],
+    role: loom_core::ModuleRole::Dsp(|_| Box::<BadOutput>::default()),
+    panel: loom_core::Panel::EMPTY,
+    displays: &[],
+    roles: &[],
+};
+
+/// The actual callback and watcher carry both warnings to the app and expire them.
+#[test]
+fn stepped_audio_warnings_reach_the_stats_bar_and_expire() {
+    use crate::audio_watch::{Event, Watch, Watcher};
+    let mut registry = loom_core::Registry::new();
+    loom_modules::register_all(&mut registry).unwrap();
+    registry.register(&BAD_OUTPUT).unwrap();
+    let config = EngineConfig {
+        output_safety: OutputSafety::Off,
+        ..EngineConfig::with_sample_rate(RATE as f32)
+    };
+    let mut parts = loom_core::create_engine(std::sync::Arc::new(registry), config);
+    let input = parts.controller.add_module(BAD_OUTPUT.id).unwrap();
+    let out = parts.controller.add_module("loom.io.audio-out").unwrap();
+    parts.controller.connect_named(input, "out", out, "in").unwrap();
+    parts.controller.commit().unwrap();
+
+    let mut app = crate::tests::app();
+    let tape = Tape::new();
+    let stream = loom_host_desktop::AudioOutput::stepped(RATE as u32, 64, &tape)
+        .start(parts.engine)
+        .unwrap();
+    app.session.controller = parts.controller;
+    app.session.engine.stream.prepare(RATE as f32);
+    app.session.engine.stream.started(stream, "Stepped".into());
+    let watch = Watch {
+        stats: app.session.engine.stream.stats().unwrap().clone(),
+        engine: app.session.controller.stats().clone(),
+    };
+    let start = Instant::now();
+    let mut watcher = Watcher::new(start);
+    let flags = |app: &App| {
+        let stats = app.ui_snapshot().stats;
+        (stats.output_silenced, stats.output_clipped)
+    };
+    assert_eq!(flags(&app), (false, false));
+    tape.step(1024);
+    assert!(tape.left().contains(&0.0) && tape.left().contains(&1.0));
+    for (elapsed, expected) in [
+        (Duration::ZERO, (true, true)),
+        (Duration::from_millis(9_999), (true, true)),
+        (Duration::from_secs(10), (false, false)),
+    ] {
+        // Each read has a played block since the last one. No new bad samples.
+        tape.step(64);
+        for event in watch.poll(&mut watcher, start + elapsed) {
+            if matches!(event, Event::Stats { .. }) {
+                let _ = app.send(Message::Audio(event));
+            }
+        }
+        assert_eq!(flags(&app), expected, "{elapsed:?}");
+    }
 }

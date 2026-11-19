@@ -25,7 +25,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     app.commit();
 
     // What goes with the patch.
-    app.session.retry_commit = true;
+    app.session.retry_commit = Some(crate::session::CommitRetry { before: 0, edit: true });
     app.session.positions.insert(added.0, (1.0, 2.0));
     app.session.unknown_positions.insert(99, (None, (0.0, 0.0)));
     app.session.sizes.insert(added.0, (4, 4));
@@ -215,7 +215,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert_eq!(scene.modules().len(), 1);
     assert_eq!(patch_map.structure.tiles.len(), 1);
     assert!(!outline.active && !outline.has_jump());
-    assert!(!retry_commit);
+    assert!(retry_commit.is_none());
     assert!(!positions.contains_key(&added.0));
     assert!(unknown_positions.is_empty());
     assert!(sizes.is_empty());

@@ -395,6 +395,11 @@ impl App {
 
     /// Undoes (`forward` false) or redoes the next step.
     pub(crate) fn step(&mut self, forward: bool) {
+        if self.session.retry_commit.is_some() {
+            self.alerts
+                .warn("Undo and redo wait for the staged edit to reach the audio engine");
+            return;
+        }
         self.session.gestures.clear_label();
         let step = if forward {
             self.session.edits.history.redo_step()
@@ -471,13 +476,6 @@ impl App {
                 self.session.selection = kept;
                 if self.commit() {
                     self.alerts.say(format!("{verb}: {}", step.name()));
-                } else {
-                    // The graph has the change but the engine does not. The
-                    // history is already cleared by `commit`.
-                    self.alerts.error(
-                        alerts::Cause::Other,
-                        format!("{verb} could not reach the engine: {}", self.alerts.status()),
-                    );
                 }
             }
             Err(e) => {
@@ -691,18 +689,17 @@ impl App {
         self.keep_run_state();
         // Probes follow the graph: a removed module loses its probes.
         self.sync_live();
+        let before = self.command_drains();
         let sent = match self.session.controller.commit() {
             Ok(_) => {
-                self.session.retry_commit = false;
+                self.session.retry_commit = None;
+                self.alerts.clear(alerts::Cause::Commit);
                 self.report();
                 self.session.edits.committed(true);
                 true
             }
             Err(e) => {
-                self.commit_failed(&e);
-                // The controller stays dirty, so the next commit retries the
-                // change; until then the history cannot be trusted.
-                self.session.edits.committed(false);
+                self.commit_failed(&e, before);
                 false
             }
         };
@@ -711,25 +708,82 @@ impl App {
         sent
     }
 
-    /// Says a commit failed, before the undo history is cleared. A full queue
-    /// drains and the commit is retried, so with no history to lose that is a
-    /// warning. Anything else stays true (the graph differs from what the
-    /// engine plays), and lost history stays lost after a retry works, so
-    /// those are kept.
-    pub(crate) fn commit_failed(&mut self, error: &LoomError) {
-        self.session.retry_commit = matches!(error, LoomError::QueueFull);
-        let history = &self.session.edits.history;
-        let lost_history = history.undo_step().is_some() || history.redo_step().is_some();
-        let message = if lost_history {
-            format!("{error}; undo history cleared")
-        } else {
-            error.to_string()
-        };
-        if self.session.retry_commit && !lost_history {
-            self.alerts.warn(message);
-        } else {
-            self.alerts.error(alerts::Cause::Other, message);
+    /// Reads the callback's completed command batches.
+    pub(crate) fn command_drains(&self) -> u64 {
+        self.session
+            .controller
+            .stats()
+            .command_drains
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Publishes probe or fade bookkeeping without changing edit history.
+    pub(crate) fn commit_maintenance(&mut self) {
+        let before = self.command_drains();
+        let edit = self.session.retry_commit.is_some_and(|retry| retry.edit);
+        match self.session.controller.commit() {
+            Err(LoomError::QueueFull) => self.stage_commit(before, edit),
+            result => {
+                // Leave any pending player edit for the edit commit path to settle.
+                if !edit && self.session.retry_commit.take().is_some() {
+                    self.alerts.clear(alerts::Cause::Commit);
+                }
+                if let Err(error) = result {
+                    self.alerts.warn(error.to_string());
+                }
+            }
         }
+    }
+
+    /// Retries only after the engine has made room since the failed send.
+    pub(crate) fn retry_staged_commit(&mut self) {
+        if let Some(retry) = self
+            .session
+            .retry_commit
+            .filter(|retry| self.command_drains() != retry.before)
+        {
+            if retry.edit {
+                self.commit();
+            } else {
+                self.commit_maintenance();
+            }
+        }
+    }
+
+    /// Waits for a callback and keeps one warning about the queued work.
+    fn stage_commit(&mut self, before: u64, edit: bool) {
+        self.session.retry_commit = Some(crate::session::CommitRetry { before, edit });
+        let staged = self.session.controller.staged_modules();
+        let message = match staged {
+            0 => "Waiting for room in the audio command queue".to_string(),
+            1 => "1 module waiting for room in the audio command queue".to_string(),
+            n => format!("{n} modules waiting for room in the audio command queue"),
+        };
+        let already_shown = self
+            .alerts
+            .kept()
+            .iter()
+            .any(|problem| problem.cause == alerts::Cause::Commit && problem.text == message);
+        if !already_shown {
+            self.alerts.warn_kept(alerts::Cause::Commit, message);
+        }
+    }
+
+    /// A staged edit stays in the history. A failure that cannot retry
+    /// clears it and keeps that loss visible as its own error.
+    pub(crate) fn commit_failed(&mut self, error: &LoomError, before: u64) {
+        if matches!(error, LoomError::QueueFull) {
+            self.stage_commit(before, true);
+            return;
+        }
+        self.session.retry_commit = None;
+        self.alerts.error(alerts::Cause::Commit, error.to_string());
+        let history = &self.session.edits.history;
+        if history.undo_step().is_some() || history.redo_step().is_some() {
+            self.alerts
+                .error(alerts::Cause::Other, "Undo history cleared after a failed graph commit");
+        }
+        self.session.edits.committed(false);
     }
 
     /// Removes modules and commits. Returns false if the commit failed; the
