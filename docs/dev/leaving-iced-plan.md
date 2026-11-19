@@ -65,7 +65,7 @@ Measured at commit `6091e52`.
 
 ### Parity gates
 
-Run all of these at the end of each phase and list the results in the pull request.
+Run all of these at the end of each phase and list the results in the pull request. They catch change no one meant, not change that was decided: a deliberate move away from today's look or behaviour is allowed once it is decided and listed in its pull request ([spec design goal 5](../design/ui-layer.md#design-goals)).
 
 - `mise run check`, including the 80% coverage gate.
 - All `loom-app` tests pass with no change to what they assert. Changes to harness internals are allowed. Changes to expected values need a reason in the pull request.
