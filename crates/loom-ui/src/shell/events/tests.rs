@@ -274,3 +274,32 @@ fn a_displays_rate_gives_its_frame() {
     assert_eq!(frame_period(None), crate::event::WindowState::FRAME);
     assert_eq!(frame_period(Some(0)), crate::event::WindowState::FRAME);
 }
+
+/// winit's input method events become the runtime's, as element events
+/// with the pointer where it is held.
+#[test]
+fn input_method_events_become_the_runtimes() {
+    use winit::event::Ime as WinitIme;
+    let mut held = Held::default();
+    let cases = [
+        (WinitIme::Enabled, ImeEvent::Enabled),
+        (
+            WinitIme::Preedit("にほ".to_owned(), Some((3, 6))),
+            ImeEvent::Preedit {
+                text: "にほ".to_owned(),
+                cursor: Some((3, 6)),
+            },
+        ),
+        (WinitIme::Commit("日本".to_owned()), ImeEvent::Commit("日本".to_owned())),
+        (WinitIme::Disabled, ImeEvent::Disabled),
+    ];
+    for (winit, ours) in cases {
+        assert_eq!(
+            driver_events(&W::Ime(winit), 1.0, &mut held),
+            [DriverEvent::Input {
+                event: Event::Ime(ours),
+                pointer: None,
+            }]
+        );
+    }
+}

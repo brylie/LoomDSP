@@ -75,6 +75,40 @@ fn a_fine_exposed_range_shows_four_decimals() {
     assert_eq!(row_text(&mut app, mul.0, mul, gain), "0.000");
 }
 
+/// The range fields use the visible row's IDs on both faces of a parameter.
+#[test]
+fn midi_range_fields_follow_the_selected_module_or_surface() {
+    use crate::inspector::ids;
+    let (mut app, mul, gain) = fine_amp();
+    app.session
+        .controller
+        .map_midi(
+            loom_core::MidiControl {
+                channel: 0,
+                controller: 21,
+            },
+            mul,
+            gain,
+        )
+        .unwrap();
+    app.session.learn.toggle_options((mul.0, gain));
+
+    for tile in [AMP, mul.0] {
+        app.session.selection = [tile].into();
+        let row = match app.inspector_model() {
+            Inspector::SubPatch(rows) => rows.params.into_iter().find(|row| row.module == mul.0).unwrap().row,
+            Inspector::Module(rows) => rows.params.into_iter().find(|row| row.index == gain).unwrap(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            app.midi_range_fields(),
+            Some(["midi/low", "midi/high"].map(|part| ids::part(&row.ui, part)))
+        );
+    }
+    app.right_tab = crate::RightTab::Matrix;
+    assert_eq!(app.midi_range_fields(), None);
+}
+
 /// One 1% arrow-key step on the tile knob changes the text it shows, on the
 /// fine range (control-ranges.md, Which step is visible).
 #[test]

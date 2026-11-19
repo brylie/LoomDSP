@@ -48,6 +48,7 @@ impl CanvasInput {
         let empty = PanelValues::default();
         let values = model.values.unwrap_or(&empty);
         model.paint_tile_text(self, values, bounds, painter);
+        model.paint_map(self, bounds, painter);
         model.paint_select_popup(self, bounds, painter);
         model.paint_typed_field(self, bounds, painter);
         model.paint_hover_text(self, bounds, painter);
@@ -301,9 +302,12 @@ impl CanvasModel<'_> {
         let mut width_of = |content: &str| painter.measure(content, style, None).width;
         let text_width = width_of(&field.draft.text);
         let caret_width = width_of(&field.draft.text[..field.caret]);
+        let scroll = (caret_width - inner + 1.0).max(0.0);
+        let selection = field.selection();
+        let selection_start = (width_of(&field.draft.text[..selection.start]) - scroll).clamp(0.0, inner);
+        let selection_end = (width_of(&field.draft.text[..selection.end]) - scroll).clamp(0.0, inner);
         let reason_width = error.map(&mut width_of);
         let left = area.x + FIELD_PADDING_PX;
-        let scroll = (caret_width - inner + 1.0).max(0.0);
         let text_at = Point::new(left - scroll, area.center_y());
         let text_clip = Rect::new(Point::new(left, area.y), Size::new(inner, area.height));
         painter.begin_layer(bounds);
@@ -320,11 +324,11 @@ impl CanvasModel<'_> {
                 border_width: outline.1,
                 radius: 4.0,
             });
-            if field.selected && !field.draft.text.is_empty() {
+            if selection_end > selection_start {
                 painter.quad(Quad::filled(
                     Rect::new(
-                        Point::new(left - 1.0, area.y + 3.0),
-                        Size::new(text_width.min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
+                        Point::new(left + selection_start - 1.0, area.y + 3.0),
+                        Size::new(selection_end - selection_start + 2.0, FIELD_HEIGHT_PX - 6.0),
                     ),
                     self.palette.control_track,
                     0.0,
@@ -336,7 +340,7 @@ impl CanvasModel<'_> {
                 text_at,
                 text_clip,
             ));
-            if !field.selected {
+            if selection.is_empty() {
                 let x = text_at.x + caret_width;
                 painter.quad(Quad::filled(
                     Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),

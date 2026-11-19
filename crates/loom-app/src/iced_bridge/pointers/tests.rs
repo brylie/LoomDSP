@@ -414,3 +414,40 @@ fn our_field_gives_the_keyboard_to_an_iced_field() {
         "the clicked field typed it: {heard:?}"
     );
 }
+
+/// An input method event, as Iced reports one.
+fn ime(event: iced::advanced::input_method::Event) -> iced::Event {
+    iced::Event::InputMethod(event)
+}
+
+/// The input method reaches our field through the bridge, and is kept
+/// from Iced as a taken key is (section 6, rule 1). While it composes, the
+/// keys are the input method's: Tab moves no focus off our field, and
+/// neither Tab nor Backspace reaches Iced.
+#[test]
+fn the_input_method_reaches_our_field_and_not_iced() {
+    use crate::ui_test::key_press;
+    use iced::advanced::input_method::Event as Method;
+    let none = keyboard::Modifiers::default();
+    let tab = keyboard::Key::Named(keyboard::key::Named::Tab);
+    let backspace = keyboard::Key::Named(keyboard::key::Named::Backspace);
+
+    let mut ui = ui_with(bar_with_field);
+    ui.send(Message::MidiGhosts);
+    assert_eq!(ui.runtime().focused(), Some(&go()), "our field has the focus");
+    assert!(
+        matches!(ui.runtime().ime(), Some(loom_ui::Ime::On { .. })),
+        "the window's input method follows our field"
+    );
+    ui.step(&[ime(Method::Opened), ime(Method::Preedit("に".to_owned(), Some(3..3)))]);
+    let heard = iced_heard(&ui.step(&[
+        key_press(tab.clone(), none, None, false),
+        key_press(backspace.clone(), none, None, false),
+    ]));
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&go()),
+        "Tab is the input method's while it composes"
+    );
+    assert!(!pressed(&heard, &tab) && !pressed(&heard, &backspace), "{heard:?}");
+}

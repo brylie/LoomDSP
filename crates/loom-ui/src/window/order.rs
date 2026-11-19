@@ -137,6 +137,23 @@ impl Window {
             .is_some_and(|panel| self.records[panel].layout.has_node(id))
     }
 
+    /// The content box of the element with UI ID `id`, in the window: its
+    /// panel's place added to the box inside its border and padding.
+    pub(crate) fn content_of(&self, id: &UiId) -> Option<loom_ui_core::Rect> {
+        let panel = self.panel_of(id)?;
+        let record = &self.records[panel];
+        let element = record
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?;
+        let content = element.content;
+        Some(loom_ui_core::Rect::new(
+            loom_ui_core::Point::new(record.origin.x + content.x, record.origin.y + content.y),
+            loom_ui_core::Size::new(content.width, content.height),
+        ))
+    }
+
     /// The layer of the panel that holds the element with UI ID `id`.
     pub(crate) fn layer_of(&self, id: &UiId) -> Option<Layer> {
         self.panel_of(id).map(|panel| self.records[panel].layer)

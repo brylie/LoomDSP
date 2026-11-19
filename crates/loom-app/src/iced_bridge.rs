@@ -658,13 +658,17 @@ impl loom_ui::Target<Message> for IcedTarget {
         self.release_first = true;
     }
 
-    /// Iced heard the window's key already; the report leaves it out of
-    /// Iced's update, so Tab among the runtime's stops never also moves an
-    /// Iced field.
+    /// Iced heard the window's key, or input method event, already; the
+    /// report leaves it out of Iced's update, so Tab among the runtime's
+    /// stops never also moves an Iced field, and text composed in a field
+    /// of the runtime's never also reaches one of Iced's.
     fn kept(&mut self, event: &loom_ui_core::Event) {
         // Only a press: a release the runtime takes (Space on its button)
         // follows a press Iced never heard, so Iced may hear it.
-        if matches!(event, loom_ui_core::Event::Key(loom_ui_core::KeyEvent::Pressed { .. })) {
+        if matches!(
+            event,
+            loom_ui_core::Event::Key(loom_ui_core::KeyEvent::Pressed { .. }) | loom_ui_core::Event::Ime(_)
+        ) {
             self.drop_keys = true;
         }
     }
@@ -821,7 +825,7 @@ pub(crate) mod headless;
 mod measure;
 pub(crate) mod offscreen;
 pub(crate) mod paint;
-mod pointers;
+pub(crate) mod pointers;
 pub(crate) use measure::Measure;
 #[cfg(any(test, feature = "test-ui"))]
 pub(crate) use pointers::Pointers;

@@ -12,6 +12,11 @@ use loom_ui_core::Point;
 impl App {
     pub(crate) fn canvas_event(&mut self, event: CanvasEvent) {
         if event == CanvasEvent::PointerDown {
+            self.session.outline.active = false;
+            self.session.outline.toolbar = false;
+            self.session.outline.inspector_action = None;
+            self.session.outline.close_jump();
+            self.session.outline.focus_port = None;
             self.session.matrix.focused = false;
             self.session.matrix.edit = None;
             self.session.matrix.add = None;
@@ -47,6 +52,7 @@ impl App {
     pub(crate) fn apply_canvas_event(&mut self, event: CanvasEvent) {
         match event {
             CanvasEvent::PointerDown => {}
+            CanvasEvent::TypedFieldChanged => {}
             CanvasEvent::AssignDrag { from, start, at, zoom } => {
                 self.session
                     .gestures
@@ -64,6 +70,9 @@ impl App {
             }
             CanvasEvent::AssignCancel => self.session.gestures.cancel_drag(),
             CanvasEvent::FocusChanged(control) => {
+                if control.is_some() {
+                    self.session.outline.focus_port = None;
+                }
                 // Focus on another control ends a screen reader's undo
                 // group (ui-layer.md, section 7, rule 6), and the tree
                 // reports the new focus.
@@ -110,10 +119,12 @@ impl App {
                 self.arrow_event(ArrowEvent::Due(at));
             }
             CanvasEvent::Select(ids) => {
+                self.session.outline.focus_port = None;
                 self.alerts.canvas_hint = None;
                 self.session.selection = ids.into_iter().collect();
             }
             CanvasEvent::SelectByKey(id) => {
+                self.session.outline.focus_port = None;
                 self.session.selection = [id].into();
                 let has_controls = self
                     .session
@@ -147,7 +158,7 @@ impl App {
                         } else {
                             self.session.sizes.insert(module, size);
                         }
-                        self.refresh();
+                        self.refresh_scene();
                     }
                 }
             }

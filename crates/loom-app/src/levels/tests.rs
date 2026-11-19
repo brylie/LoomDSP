@@ -43,7 +43,12 @@ const SINE_PHASE_IN: usize = loom_modules::osc::SINE.input_index("phase").unwrap
 
 /// The app with [`NESTED`] open, no audio.
 fn nested_app() -> App {
-    let patch = Patch::from_ron(NESTED).unwrap();
+    nested_app_from(NESTED)
+}
+
+/// Opens a nested test patch with recovered patch semantics.
+fn nested_app_from(ron: &str) -> App {
+    let patch = Patch::from_ron(ron).unwrap();
     let loaded = Loaded::read(
         EngineConfig::default(),
         false,
@@ -1780,4 +1785,67 @@ fn an_exposed_value_field_takes_a_typed_value() {
     ui.type_a_value(svf.0, cutoff, "440");
     let value = ui.app().session.controller.graph().node(svf).unwrap().params[cutoff];
     assert!((value - 440.0).abs() < 0.5, "{value}");
+}
+
+/// Inside a sub-patch the outline names the level and separates heard ports from monitor-only ports.
+#[test]
+fn the_inside_outline_labels_heard_and_unheard_boundary_ports() {
+    let extra_ports = NESTED
+        .replace(
+            r#"label: Some("out"), position: Some((400.0, 0.0))),"#,
+            r#"label: Some("out"), position: Some((400.0, 0.0))),
+               PatchModule(id: 4, kind: "loom.struct.input@1", label: Some("monitor in")),
+               PatchModule(id: 5, kind: "loom.struct.output@1", label: Some("monitor out")),"#,
+        )
+        .replacen(
+            r#"PatchCable(from: (2, "out"), to: (3, "in")),"#,
+            r#"PatchCable(from: (2, "out"), to: (3, "in")),
+               PatchCable(from: (4, "out"), to: (5, "in")),"#,
+            1,
+        );
+    let mut app = nested_app_from(&extra_ports);
+    app.show_level(&voice());
+    let rows = app.outline_rows();
+    assert!(rows[0].name.starts_with("Inside Voice, in Nested."), "{}", rows[0].name);
+    let at = |local| app.session.hierarchy.id_at(&voice(), local).unwrap().0;
+    for (local, heard) in [(1, true), (3, true), (4, false), (5, false)] {
+        let id = at(local);
+        assert_eq!(app.session.patch_map.structure.heard.contains(&id), heard, "port {id}");
+        let id = crate::outline::tree_id().with("module").with(id);
+        let row = rows.iter().find(|row| row.id == id).unwrap();
+        assert_eq!(row.level, if heard { 1 } else { 2 });
+        assert!(
+            row.name.contains(if local == 1 || local == 4 {
+                "Source."
+            } else {
+                "The output."
+            }),
+            "{}",
+            row.name
+        );
+    }
+}
+
+/// The outline can focus a sub-patch, enter it, and return to the same instance row.
+#[test]
+fn outline_keyboard_enters_and_leaves_a_sub_patch() {
+    let mut ui = Ui::with_app(nested_app());
+    let outline = crate::outline::tree_id();
+    let row = outline.clone().with("module").with(2u32);
+    let none = Modifiers::empty();
+    ui.tap(keyboard::Key::Character("o".into()), none);
+    ui.send(Message::OutlineRow(row.clone()));
+    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    assert_eq!(ui.app().session.selection, [2].into());
+    assert!(ui.app().session.level.is_root());
+    assert!(!ui.a11y_tree().focused().ui_id().unwrap().is_under(&outline));
+
+    ui.tap(keyboard::Key::Character("o".into()), none);
+    assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));
+    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    assert_eq!(ui.app().session.level, voice());
+    assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&outline.clone().with("summary")));
+    ui.tap(keyboard::Key::Named(Named::Escape), none);
+    assert!(ui.app().session.level.is_root());
+    assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));
 }

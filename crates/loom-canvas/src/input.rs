@@ -42,11 +42,13 @@ mod focus;
 mod frame;
 mod handle;
 mod hover_text;
+mod map;
 mod overlay;
 mod paint;
 mod panel_input;
 mod select_popup;
 mod typed_field;
+pub use map::{MapGraph, MapLine, MapView};
 
 pub use event::{BrowserPlacement, CanvasEvent, ControlPart};
 pub use frame::FrameCache;
@@ -130,6 +132,11 @@ pub struct CanvasModel<'a> {
     edit_group: EditGroupView,
     /// The check for typed values. See [`CanvasModel::typed_check`].
     typed_check: Option<TypedCheck<'a>>,
+    /// Whether a listener needs changes to the editing field.
+    report_typed: bool,
+    pub(crate) typed_request: (u64, Option<&'a TypedRequest>),
+    pub(crate) map: Option<MapView<'a>>,
+    centre_request: (u64, Option<Point>),
     pub(crate) still: Option<Still>,
     window_drag_line: bool,
 }
@@ -216,6 +223,32 @@ pub struct CanvasTyped {
     pub widget: usize,
     /// The text in the field.
     pub text: String,
+    /// The caret as a byte offset in the text.
+    pub caret: usize,
+    /// The other end of the selection as a byte offset.
+    pub anchor: usize,
+    /// The field's bounds in the window, in logical pixels.
+    pub bounds: Rect,
+}
+
+/// A text operation on the open canvas value editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypedEdit {
+    /// Moves both ends of the selection to these byte offsets.
+    Select { anchor: usize, caret: usize },
+    /// Inserts the text at the caret, replacing any selection.
+    Replace(String),
+}
+
+/// An accessibility action and the editor state it was sent for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedRequest {
+    /// The editor's module and control.
+    pub control: (u32, usize),
+    /// The reported value of the editor.
+    pub text: String,
+    /// The requested text interaction.
+    pub edit: TypedEdit,
 }
 
 /// A drag in progress on the canvas. See [`CanvasPointer::drag`].
@@ -306,6 +339,10 @@ impl<'a> CanvasModel<'a> {
             focus_policy: CanvasFocusPolicy::default(),
             edit_group: EditGroupView::Closed,
             typed_check: None,
+            report_typed: false,
+            typed_request: (0, None),
+            map: None,
+            centre_request: (0, None),
             still: None,
             window_drag_line: false,
         }
@@ -358,6 +395,18 @@ impl<'a> CanvasModel<'a> {
     /// parameter, so the canvas asks.
     pub fn typed_check(mut self, check: impl Fn(u32, usize, &str) -> Result<(), String> + 'a) -> Self {
         self.typed_check = Some(Box::new(check));
+        self
+    }
+
+    /// Reports typed field changes while a screen reader is listening.
+    pub(crate) fn report_typed(mut self, report: bool) -> Self {
+        self.report_typed = report;
+        self
+    }
+
+    /// Centres on a point when a request with a new key arrives.
+    pub(crate) fn centre_request(mut self, key: u64, point: Option<Point>) -> Self {
+        self.centre_request = (key, point);
         self
     }
 
@@ -586,6 +635,8 @@ pub struct CanvasFocusPolicy {
     /// The focused matrix has the keys: unmodified keys are left to it, and
     /// the pointer still works.
     pub matrix_keyboard: bool,
+    /// A cable jump list takes only its navigation keys.
+    pub jump_keyboard: bool,
     /// The matrix has the keys and no cell editor is open, so Escape can
     /// still hide a pinned badge's lines.
     pub matrix_escape: bool,
@@ -593,9 +644,9 @@ pub struct CanvasFocusPolicy {
     /// except Tab, which moves focus as usual. The pointer still works
     /// (panel-widgets.md, Typing a value).
     pub text_field_keys: bool,
-    /// The focused text field moves to the next field on Tab, so the canvas
-    /// leaves Tab alone too (panels.md, Keyboard without a mouse).
-    pub text_field_keeps_tab: bool,
+    /// Whether the focused text field also takes Tab and Shift+Tab, in
+    /// that order (panels.md, Keyboard without a mouse).
+    pub text_field_keeps_tab: [bool; 2],
 }
 
 impl Default for CanvasFocusPolicy {
@@ -604,9 +655,10 @@ impl Default for CanvasFocusPolicy {
         Self {
             interactive: true,
             matrix_keyboard: false,
+            jump_keyboard: false,
             matrix_escape: false,
             text_field_keys: false,
-            text_field_keeps_tab: false,
+            text_field_keeps_tab: [false; 2],
         }
     }
 }
@@ -771,6 +823,10 @@ pub(crate) struct SelectPopup {
 /// is only for drawing.
 #[derive(Default)]
 pub struct CanvasInput {
+    map_press: Option<map::MapPress>,
+    map_artwork: std::cell::RefCell<Option<map::Artwork>>,
+    centre_key: Option<u64>,
+    typed_key: u64,
     camera: Camera,
     /// The canvas size at the last event, for key handling that needs it.
     size: Size,
@@ -861,11 +917,14 @@ impl CanvasInput {
     fn run(&mut self, model: &CanvasModel<'_>, event: Option<&Event>, moment: Moment) -> Reaction {
         let mut out = Reaction::default();
         let before = self.focus.control();
+        let typed = model.report_typed.then(|| self.focus.typed().cloned()).flatten();
         model.on_event(self, event, moment.pointer, moment.bounds, moment.now, &mut out);
         // Whatever moved the focus, the app hears of it once, here.
         let after = self.focus.control();
         if after != before {
             out.emit(CanvasEvent::FocusChanged(after));
+        } else if model.report_typed && typed.as_ref() != self.focus.typed() {
+            out.emit(CanvasEvent::TypedFieldChanged);
         }
         out
     }
@@ -928,15 +987,18 @@ impl CanvasInput {
         }
     }
 
-    /// The open typed field and its text, if one is open, for the control
-    /// channel.
-    pub fn typed(&self) -> Option<CanvasTyped> {
+    /// The open field for the control channel and the accessibility tree.
+    pub(crate) fn typed(&self, model: &CanvasModel<'_>, canvas: Rect) -> Option<CanvasTyped> {
         let (module, widget) = self.focus.control()?;
         let field = self.focus.typed()?;
+        let bounds = model.typed_field_bounds(self, canvas)?;
         Some(CanvasTyped {
             module,
             widget,
             text: field.draft.text.clone(),
+            caret: field.caret,
+            anchor: field.anchor,
+            bounds: Rect::new(Point::new(canvas.x + bounds.x, canvas.y + bounds.y), bounds.size()),
         })
     }
 

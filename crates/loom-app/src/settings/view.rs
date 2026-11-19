@@ -165,12 +165,26 @@ fn preferences_panel(model: Model) -> Element<'static, crate::Message> {
             column![
                 safety,
                 rule::horizontal(1),
-                named(
-                    checkbox(model.activity)
-                        .label("Show signal activity on ports")
-                        .on_toggle(move |on| msg(Message::Activity(on))),
-                    part_id("activity"),
-                ),
+                row![
+                    named(
+                        checkbox(model.activity)
+                            .label("Show signal activity on ports")
+                            .on_toggle(move |on| msg(Message::Activity(on))),
+                        part_id("activity"),
+                    ),
+                    space::horizontal(),
+                    text("Patch map").size(style::BODY),
+                    named(
+                        pick_list(
+                            crate::preferences::MapMode::ALL,
+                            Some(model.patch_map),
+                            move |mode| msg(Message::Map(Some(mode)))
+                        ),
+                        part_id("patch_map"),
+                    ),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
                 rule::horizontal(1),
                 heading("Audio output"),
                 audio,

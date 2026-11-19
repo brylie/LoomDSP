@@ -177,6 +177,13 @@ impl Listening {
 /// A key no widget used goes to the app, as `keyboard::listen` would send it.
 fn app_key(event: iced::Event, status: Status, _window: window::Id) -> Option<Message> {
     match event {
+        iced::Event::Keyboard(
+            key @ keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Tab),
+                modifiers,
+                ..
+            },
+        ) if modifiers.control() => Some(Message::Key(key)),
         iced::Event::Keyboard(key) if status == Status::Ignored => Some(Message::Key(key)),
         _ => None,
     }
@@ -216,10 +223,14 @@ impl App {
         let matrix = self.matrix_has_keys();
         loom_canvas::CanvasFocusPolicy {
             interactive: self.input_owner() == InputOwner::Canvas,
-            matrix_keyboard: matrix,
+            matrix_keyboard: matrix
+                || self.session.outline.active
+                || self.session.outline.toolbar
+                || self.session.outline.inspector_action.is_some(),
+            jump_keyboard: self.session.outline.has_jump(),
             matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
             text_field_keys: self.focus.is_some(),
-            text_field_keeps_tab: self.tab_moves_between_fields(self.focus.as_ref()),
+            text_field_keeps_tab: self.text_field_tabs(self.focus.as_ref()),
         }
     }
 

@@ -132,6 +132,8 @@ The panel has two sections: Output safety, described here, and [Audio and MIDI d
 
 When the effective value comes from the command-line flag, a line under the section says: `Set by --output-safety for this run.` The selected choice shows the effective value.
 
+**Patch map** chooses when the canvas shows its overview. Auto, the default, shows it when the level extends beyond the view. Always keeps it visible. Hidden hides it. The Map button and M cycle the same saved choice. See [Canvas accessibility](canvas-accessibility.md#8-the-map).
+
 **With a screen reader:** the window is a dialog named "Preferences", with its parts in screen order. Output safety is a radio group whose answers carry their lines as descriptions; the four lists are combo boxes that say their chosen option and step one option at a time with Increment and Decrement; each MIDI input is a check box named by its port. **Your name** is a text field, and a screen reader's new text is saved as Enter saves it. After a list's step fails, the next step goes on from the option that failed, so a device that cannot be used never blocks the ones after it ([UI layer](ui-layer.md), section 7, rules 15 and 27).
 
 A choice applies as soon as it is clicked. There is no Apply or OK button. *Why:* the player hears the change at once and can compare modes while a patch plays. One setting does not need a two-step form.

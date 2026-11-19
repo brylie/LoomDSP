@@ -235,7 +235,10 @@ fn a_screen_reader_finds_voice_assigners_controls() {
     let voices = tile_control(&tree, assign, "Voices");
     assert_eq!(voices.role(), Role::Slider);
     assert_eq!(voices.range(), Some((1.0, 16.0)));
-    tile_control(&tree, assign, "Gate");
+    assert_eq!(
+        tree.node_by_id(&tile_id(assign).with("display").with("gate")).name(),
+        Some("Gate")
+    );
     assert!(!unison_on_tile(&mut ui, assign));
 
     ui.a11y_action(&tile_id(assign), Action::Click);

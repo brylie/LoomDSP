@@ -24,7 +24,7 @@
 //!   [`CARET_MARGIN`] to spare.
 
 use crate::paint::{editing_contexts, properties};
-use loom_ui_core::{IdKey, Key, KeyEvent, Platform, Point, Rect, Size, TextStyle, UiId};
+use loom_ui_core::{IdKey, ImeEvent, Key, KeyEvent, Platform, Point, Rect, Size, TextStyle, UiId};
 use parley::{FontContext, LayoutContext, PlainEditor, PlainEditorDriver, Selection};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -161,12 +161,33 @@ impl Fields {
         state.key(event, now, platform, fonts, layouts)
     }
 
-    /// Focus left the field `id`: its typing run ends and its undo steps
-    /// go.
-    pub(crate) fn left(&mut self, id: &UiId) {
-        if let Some(state) = self.states.get_mut(id) {
-            state.forget_steps();
-        }
+    /// Pastes the clipboard's `text` into the field `id`, at `now`.
+    pub(crate) fn paste(&mut self, id: &UiId, text: &str, now: Instant) -> KeyUse {
+        let (Some(state), Some((fonts, layouts))) = (self.states.get_mut(id), self.contexts.as_mut()) else {
+            return KeyUse::default();
+        };
+        state.paste(text, now, fonts, layouts)
+    }
+
+    /// Gives the input method's `event` to the field `id`, at `now`.
+    pub(crate) fn ime(&mut self, id: &UiId, event: &ImeEvent, now: Instant) -> KeyUse {
+        let (Some(state), Some((fonts, layouts))) = (self.states.get_mut(id), self.contexts.as_mut()) else {
+            return KeyUse::default();
+        };
+        state.ime(event, now, fonts, layouts)
+    }
+
+    /// Focus left the field `id`: a composition in progress is kept as
+    /// text, as what the user saw stays, then its typing run ends and its
+    /// undo steps go. Returns whether the text changed, so the app hears
+    /// it as an edit.
+    pub(crate) fn left(&mut self, id: &UiId, now: Instant) -> bool {
+        let (Some(state), Some((fonts, layouts))) = (self.states.get_mut(id), self.contexts.as_mut()) else {
+            return false;
+        };
+        let edited = state.finish_composing(now, fonts, layouts);
+        state.forget_steps();
+        edited
     }
 }
 
@@ -266,6 +287,9 @@ pub(crate) struct KeyUse {
     pub(crate) committed: bool,
     /// Text for the clipboard, from copy or cut.
     pub(crate) copy: Option<String>,
+    /// The paste key: the runtime asks the driver for the clipboard, and
+    /// the text goes in on a later turn.
+    pub(crate) paste: bool,
     /// Something it shows changed: its text, caret, selection, or scroll.
     pub(crate) redraw: bool,
 }
@@ -402,7 +426,9 @@ impl FieldState {
                 self.editor.edit_styles().insert(property);
             }
         }
-        if self.editor.raw_text() != text {
+        // The app holds the committed text, without a preedit, so an app
+        // text that did not change never ends a composition.
+        if self.committed() != text {
             self.editor.set_text(text);
             self.forget_steps();
         }
@@ -411,9 +437,161 @@ impl FieldState {
         self.keep_caret();
     }
 
-    /// The text it shows.
+    /// The text it shows, with any text the input method is composing.
+    /// Drawing and a screen reader read this (section 7, rule 10).
     pub(crate) fn text(&self) -> &str {
         self.editor.raw_text()
+    }
+
+    /// The text without what the input method is composing: what the app
+    /// holds, what an edit sends, and what undo keeps. The same as
+    /// [`text`](Self::text) while nothing is composed.
+    pub(crate) fn committed(&self) -> String {
+        self.editor.text().chars().collect()
+    }
+
+    /// Whether the input method is composing text in it.
+    pub(crate) fn composing(&self) -> bool {
+        self.editor.is_composing()
+    }
+
+    /// The range of the text being composed, in bytes of [`text`](Self::text).
+    pub(crate) fn preedit(&self) -> Option<std::ops::Range<usize>> {
+        self.editor.raw_compose().clone()
+    }
+
+    /// Where the input method's candidate window should go: the text being
+    /// composed, or the caret, in logical pixels from the left of its
+    /// content box, moved by its scroll.
+    pub(crate) fn ime_area(&self) -> Rect {
+        let area = self.editor.ime_cursor_area();
+        Rect::new(
+            Point::new(area.x0 as f32 - self.scroll, area.y0 as f32),
+            Size::new((area.x1 - area.x0) as f32, (area.y1 - area.y0) as f32),
+        )
+    }
+
+    /// The input method's `event`, at `now` (section 8, rule 4). A preedit
+    /// shows in the field but is not its text; a commit puts its text in
+    /// as one undo step, made one line; an input method turned off in
+    /// mid-composition keeps what it showed, as focus leaving does.
+    pub(crate) fn ime(
+        &mut self,
+        event: &ImeEvent,
+        now: Instant,
+        fonts: &mut FontContext,
+        layouts: &mut LayoutContext<()>,
+    ) -> KeyUse {
+        let before = self.reported();
+        let committed = self.committed();
+        match event {
+            ImeEvent::Enabled => {}
+            ImeEvent::Preedit { text, cursor } if !text.is_empty() => {
+                // Composing ends the typing run, so the commit is a step
+                // of its own.
+                self.run = None;
+                // A composition that starts over a selection replaces it,
+                // as the platforms show it. The editor would take the
+                // selected text out of the committed text with no word to
+                // the app, so the field deletes it first, as an edit of its
+                // own: the app hears it, undo brings it back, and the
+                // composition then starts at the caret.
+                if !self.composing() && !self.editor.raw_selection().is_collapsed() {
+                    self.step(None, now, false);
+                    self.editor.driver(fonts, layouts).delete_selection();
+                    if let Some(snapshot) = self.opened.take() {
+                        if self.undo.len() == UNDO_STEPS {
+                            self.undo.remove(0);
+                        }
+                        self.undo.push(snapshot);
+                        self.redo.clear();
+                    }
+                    self.run_before = None;
+                    self.run = None;
+                }
+                let cursor = cursor.filter(|(start, end)| {
+                    start <= end && *end <= text.len() && text.is_char_boundary(*start) && text.is_char_boundary(*end)
+                });
+                self.editor.driver(fonts, layouts).set_compose(text, cursor);
+            }
+            ImeEvent::Preedit { .. } => self.editor.driver(fonts, layouts).clear_compose(),
+            ImeEvent::Commit(text) => {
+                self.editor.driver(fonts, layouts).clear_compose();
+                self.commit_text(text, now, fonts, layouts);
+            }
+            ImeEvent::Disabled => {
+                self.finish_composing(now, fonts, layouts);
+            }
+        }
+        self.editor.refresh_layout(fonts, layouts);
+        self.keep_caret();
+        KeyUse {
+            taken: true,
+            edited: self.committed() != committed,
+            redraw: self.reported() != before,
+            ..KeyUse::default()
+        }
+    }
+
+    /// Ends a composition in progress by keeping its text, as one undo
+    /// step. Returns whether the committed text changed.
+    fn finish_composing(&mut self, now: Instant, fonts: &mut FontContext, layouts: &mut LayoutContext<()>) -> bool {
+        let Some(range) = self.preedit() else {
+            return false;
+        };
+        let text = self.text()[range].to_owned();
+        self.editor.driver(fonts, layouts).clear_compose();
+        self.commit_text(&text, now, fonts, layouts);
+        self.editor.refresh_layout(fonts, layouts);
+        self.keep_caret();
+        !text.is_empty()
+    }
+
+    /// Puts `text` in at the selection as one undo step of its own, made
+    /// one line (section 8, rule 2): an input method's commit or a paste.
+    fn commit_text(&mut self, text: &str, now: Instant, fonts: &mut FontContext, layouts: &mut LayoutContext<()>) {
+        let text = one_line(text);
+        if text.is_empty() {
+            return;
+        }
+        self.run = None;
+        self.step(None, now, false);
+        self.editor.driver(fonts, layouts).insert_or_replace_selection(&text);
+        if let Some(snapshot) = self.opened.take() {
+            if self.undo.len() == UNDO_STEPS {
+                self.undo.remove(0);
+            }
+            self.undo.push(snapshot);
+            self.redo.clear();
+        }
+        self.run_before = None;
+        self.run = None;
+    }
+
+    /// The clipboard's `text`, pasted at the selection as one undo step,
+    /// at `now`. Returns what it did, as a key's use.
+    pub(crate) fn paste(
+        &mut self,
+        text: &str,
+        now: Instant,
+        fonts: &mut FontContext,
+        layouts: &mut LayoutContext<()>,
+    ) -> KeyUse {
+        let before = self.reported();
+        let committed = self.committed();
+        // A paste that comes during a composition keeps the preedit as
+        // text first, as a screen reader's edit does, then goes in after
+        // it: the user saw the preedit, and asked for the paste.
+        self.finish_composing(now, fonts, layouts);
+        self.commit_text(text, now, fonts, layouts);
+        self.editor.refresh_layout(fonts, layouts);
+        self.keep_caret();
+        KeyUse {
+            taken: true,
+            edited: self.committed() != committed,
+            redraw: self.reported() != before,
+            ..KeyUse::default()
+        }
     }
 
     /// How far its text has slid left to keep the caret in view.
@@ -442,6 +620,24 @@ impl FieldState {
                 )
             })
             .collect()
+    }
+
+    /// Where the text being composed is, from the start of the text, one
+    /// box per line it covers, for its underline. Empty while nothing is
+    /// composed.
+    pub(crate) fn preedit_boxes(&self) -> Vec<Rect> {
+        let (Some(range), Some(layout)) = (self.preedit(), self.editor.try_layout()) else {
+            return Vec::new();
+        };
+        let cursor = |at| parley::Cursor::from_byte_index(layout, at, parley::Affinity::Downstream);
+        let mut out = Vec::new();
+        Selection::new(cursor(range.start), cursor(range.end)).geometry_with(layout, |bounds, _| {
+            out.push(Rect::new(
+                Point::new(bounds.x0 as f32, bounds.y0 as f32),
+                Size::new((bounds.x1 - bounds.x0) as f32, (bounds.y1 - bounds.y0) as f32),
+            ));
+        });
+        out
     }
 
     /// Where the caret is, from the start of the text: its left edge and
@@ -688,12 +884,25 @@ impl FieldState {
         fonts: &mut FontContext,
         layouts: &mut LayoutContext<()>,
     ) -> ActUse {
+        // A screen reader acting in mid-composition first keeps the
+        // preedit as text, as focus leaving does, so the editor never edits
+        // around a preedit range that no longer fits. The text it shows is
+        // the same, so the request's positions still hold. Keeping it is an
+        // edit the app must hear, as the committed text grew, even if the
+        // action itself then changes nothing.
+        let committed = self.committed();
+        let kept = self.finish_composing(now, fonts, layouts);
         // A stale selection changes nothing, not even the typing run, so
         // typing after it still joins the run it was in.
         let range = match &action {
             FieldAction::Select { anchor, focus } => match self.reader_range(*anchor, *focus) {
                 Some(range) => Some(range),
-                None => return ActUse::default(),
+                None => {
+                    return ActUse {
+                        edited: kept,
+                        changed: kept,
+                    };
+                }
             },
             _ => None,
         };
@@ -721,9 +930,12 @@ impl FieldState {
         }
         self.editor.refresh_layout(fonts, layouts);
         self.keep_caret();
-        let edited = self.text() != before.0;
+        // The action's own undo step is kept only if the action changed the
+        // text; what the app hears also counts a kept composition.
+        let acted = self.text() != before.0;
+        let edited = self.committed() != committed;
         if let Some(snapshot) = self.opened.take()
-            && edited
+            && acted
         {
             if self.undo.len() == UNDO_STEPS {
                 self.undo.remove(0);
@@ -735,7 +947,7 @@ impl FieldState {
         self.run = None;
         ActUse {
             edited,
-            changed: self.reported() != before,
+            changed: kept || self.reported() != before,
         }
     }
 
@@ -782,6 +994,15 @@ impl FieldState {
         else {
             return KeyUse::default();
         };
+        // While the input method composes, the keys are its own: the field
+        // takes every one and does nothing, so none reaches the app, and a
+        // stray Backspace never edits the committed text.
+        if self.composing() {
+            return KeyUse {
+                taken: true,
+                ..KeyUse::default()
+            };
+        }
         let shortcut = modifiers.shortcut_on(platform);
         let word = modifiers.word_on(platform);
         let shift = modifiers.shift;
@@ -897,6 +1118,7 @@ impl FieldState {
                 'z' if shift => self.redo(fonts, layouts),
                 'z' => self.undo(fonts, layouts),
                 'y' if !mac => self.redo(fonts, layouts),
+                'v' => out.paste = true,
                 _ => return KeyUse::default(),
             },
             // Space types what the platform says it types, such as the

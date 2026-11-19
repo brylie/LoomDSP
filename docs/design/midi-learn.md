@@ -224,7 +224,7 @@ Controller(
 
   Device files use the same fields. The patch format stays at version 1.
 
-The Low and High fields share a draft. Tab between them keeps the draft. Escape, moving focus outside both fields, changing the mapping's options from another control, and undo or redo discard it.
+The Low and High fields share a draft. Tab from Low moves to High, and Shift+Tab from High moves to Low, keeping the draft. Tab from High or Shift+Tab from Low returns focus to the canvas. Escape, moving focus outside both fields, changing the mapping's options from another control, and undo or redo discard the draft.
 
 ### Acceptance criteria: mapping modes
 

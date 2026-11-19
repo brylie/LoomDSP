@@ -17,6 +17,7 @@
 //! so what the tests check is what the window does.
 
 use super::{Bridged, Hosted, IcedTarget};
+use crate::pointer::Delivery;
 use iced::Task;
 use iced::event::Status;
 use iced::mouse;
@@ -83,9 +84,9 @@ impl Pointers {
         debug_assert!(
             matches!(
                 events.get(index),
-                Some(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }))
+                Some(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { .. }) | iced::Event::InputMethod(_))
             ),
-            "only a pressed key is kept from Iced"
+            "only a pressed key or an input method event is kept from Iced"
         );
         if index < events.len() {
             events.remove(index);
@@ -121,8 +122,10 @@ impl Pointers {
             iced.run(release);
         }
         let statuses = if events.is_empty() { None } else { iced.update(&events) };
-        let redraw = match statuses {
-            Some(statuses) => self.after(panels, &statuses),
+        let (suppressed, cancelled) = iced.physical_changes();
+        let mut redraw = cancel_holds(cancelled, panels);
+        redraw |= match statuses {
+            Some(statuses) => self.after(panels, &statuses, suppressed),
             None => {
                 self.kept.clear();
                 false
@@ -138,10 +141,15 @@ impl Pointers {
     /// layers below it, and one Iced captured takes the hover from them. A
     /// click there runs on the next turn. Returns true when the window
     /// needs drawing.
-    fn after(&mut self, panels: &mut Panels<'_, Hosted>, statuses: &[Status]) -> bool {
+    fn after(&mut self, panels: &mut Panels<'_, Hosted>, statuses: &[Status], suppressed: Vec<Event>) -> bool {
         let mut redraw = false;
+        let mut suppressed = suppressed.into_iter().peekable();
         for (pointer, status) in std::mem::take(&mut self.kept).iter().zip(statuses) {
             let Some((event, point)) = pointer else { continue };
+            if suppressed.peek() == Some(event) {
+                suppressed.next();
+                continue;
+            }
             let heard = match status {
                 Status::Ignored => panels.pointer_below(event, *point),
                 Status::Captured => panels.pointer_taken(event),
@@ -164,7 +172,10 @@ pub(crate) trait IcedSide {
 
     /// The scripted pointer events Iced's widgets left unused in that
     /// update, with where they happened.
-    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)>;
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point, Delivery)>;
+
+    /// Physical events suppressed by the script and the held buttons it cancelled.
+    fn physical_changes(&mut self) -> (Vec<Event>, Vec<mouse::Button>);
 }
 
 /// Hands the control channel's scripted pointer events that Iced left
@@ -172,11 +183,29 @@ pub(crate) trait IcedSide {
 /// it a real one (ui-layer.md, section 5, rule 10), so a script presses
 /// the stats bar's × as a user does. Returns true when the window needs
 /// drawing.
-pub(crate) fn hand_scripted(scripted: Vec<(iced::Event, iced::Point)>, panels: &mut Panels<'_, Hosted>) -> bool {
+pub(crate) fn hand_scripted(
+    scripted: Vec<(iced::Event, iced::Point, Delivery)>,
+    panels: &mut Panels<'_, Hosted>,
+) -> bool {
     let mut redraw = false;
-    for (event, at) in scripted {
+    for (event, at, delivery) in scripted {
         if let Some(event) = ours(&event) {
-            redraw |= panels.pointer_below(&event, Point::new(at.x, at.y)).redraw;
+            redraw |= match delivery {
+                Delivery::Unused => panels.pointer_below(&event, Point::new(at.x, at.y)),
+                Delivery::Captured => panels.pointer_taken(&event),
+            }
+            .redraw;
+        }
+    }
+    redraw
+}
+
+/// Cancels script holds before routing events from the physical pointer.
+pub(crate) fn cancel_holds(held: Vec<mouse::Button>, panels: &mut Panels<'_, Hosted>) -> bool {
+    let mut redraw = false;
+    for button in held {
+        if let Some(event) = ours(&iced::Event::Mouse(mouse::Event::ButtonReleased(button))) {
+            redraw |= panels.pointer_taken(&event).redraw;
         }
     }
     redraw
@@ -185,7 +214,7 @@ pub(crate) fn hand_scripted(scripted: Vec<(iced::Event, iced::Point)>, panels: &
 /// An Iced mouse event as the runtime's layers hear it: a move, or a press
 /// or a release of a button they know. Scrolls stay Iced's until a layer
 /// of the runtime's scrolls.
-fn ours(event: &iced::Event) -> Option<Event> {
+pub(crate) fn ours(event: &iced::Event) -> Option<Event> {
     let button = |button: &mouse::Button| match button {
         mouse::Button::Left => Some(PointerButton::Left),
         mouse::Button::Right => Some(PointerButton::Right),

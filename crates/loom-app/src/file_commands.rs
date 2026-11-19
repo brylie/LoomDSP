@@ -460,6 +460,9 @@ impl App {
         if self.session.engine.stream.is_playing() {
             self.audio_back();
         }
+        if self.rig.input.open().is_some() || !self.input_wanted() {
+            self.alerts.clear(alerts::Cause::AudioInput);
+        }
         drop(old);
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());

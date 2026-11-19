@@ -42,6 +42,17 @@ impl Services<Message> for AppServices {
         waker.send(reply.give(text));
     }
 
+    /// A field's paste reads the same clipboard copy and cut write, so the
+    /// two never disagree.
+    fn clipboard_paste(&mut self, paste: loom_ui::Paste) {
+        let text = self
+            .clipboard
+            .borrow()
+            .as_ref()
+            .and_then(|clipboard| clipboard.read(Kind::Standard));
+        paste.give(text);
+    }
+
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, Message>, waker: &Waker<Message>) {
         waker.send(reply.give(show_file_dialog(&request)));
     }

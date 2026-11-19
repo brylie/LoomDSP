@@ -497,6 +497,7 @@ fn a_warning_during_a_rebuild_reaches_the_next_tree() {
     let _ = ui.deliver(Message::A11y(Event::Activated));
     ui.redraw();
     let _ = ui.take_sent_trees();
+    let _ = ui.take_sent_changes();
     // A rebuild goes out, and the warning comes while it is on its way.
     ui.app_mut().a11y_after(Touch::Changed);
     ui.app_mut().alerts.warn("Autosave failed");
@@ -511,6 +512,10 @@ fn a_warning_during_a_rebuild_reaches_the_next_tree() {
     assert!(
         sent.last().is_some_and(reads_warning),
         "the follow-up tree reads the warning"
+    );
+    assert!(
+        ui.take_sent_changes().iter().any(reads_warning),
+        "the warning reached the adapter"
     );
 }
 

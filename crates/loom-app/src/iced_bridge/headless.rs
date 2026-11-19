@@ -39,6 +39,8 @@ pub(crate) struct UiDriver {
     /// Every whole accessibility tree the app handed the screen reader, in
     /// order, for a test to read what was sent rather than build its own.
     pub(crate) trees: Vec<accesskit::TreeUpdate>,
+    /// Incremental updates actually sent after the full tree.
+    pub(crate) changes: Vec<accesskit::TreeUpdate>,
 }
 
 impl Driver<Message> for UiDriver {
@@ -52,6 +54,10 @@ impl Driver<Message> for UiDriver {
 
     fn clipboard_read(&mut self, reply: Reply<Option<String>, Message>, waker: &Waker<Message>) {
         self.headless.clipboard_read(reply, waker);
+    }
+
+    fn clipboard_paste(&mut self, paste: loom_ui::Paste) {
+        Driver::<Message>::clipboard_paste(&mut self.headless, paste);
     }
 
     /// Answered from `files::fake` in the crate's tests. In a test under
@@ -88,9 +94,10 @@ impl Driver<Message> for UiDriver {
         Driver::<Message>::exit(&mut self.headless);
     }
 
-    /// Keeps the whole tree, as a screen reader would be sent it.
-    fn accessibility(&mut self, whole: accesskit::TreeUpdate, _changes: Option<accesskit::TreeUpdate>) {
+    /// Records the full tree and the incremental update sent to the adapter.
+    fn accessibility(&mut self, whole: accesskit::TreeUpdate, changes: Option<accesskit::TreeUpdate>) {
         self.trees.push(whole);
+        self.changes.extend(changes);
     }
 }
 
@@ -112,7 +119,7 @@ pub(crate) struct Surface {
     cache: Option<Cache>,
     /// Where the pointer is, for events and drawing.
     pub(crate) cursor: mouse::Cursor,
-    size: Size,
+    pub(crate) size: Size,
 }
 
 impl Surface {
@@ -204,7 +211,9 @@ impl Surface {
     /// scale 1, as the window opens. With no GPU adapter there is nothing to
     /// draw with, so the answer says so (ui-layer.md, section 2, effects
     /// table).
-    fn capture(&mut self, app: &App) -> Result<Image, NoGpu> {
+    fn capture(&mut self, bridge: &mut Bridge<UiDriver>) -> Result<Image, NoGpu> {
+        let (app, _, mut panels) = bridge.runtime_mut().parts();
+        let app = &app.0;
         let size = self.size;
         let cursor = self.cursor;
         let cache = self.cache.take().expect("the cache is put back after every frame");
@@ -239,7 +248,17 @@ impl Surface {
         let drawing = app.canvas_drawn.take();
         // The tree owns the text the renderer holds weakly, so it stays
         // until the frame is drawn.
-        let panels = super::offscreen::still_panels(app, size);
+        use loom_ui::paint::{ListPainter, Typesetter};
+        let text = std::cell::RefCell::new(Typesetter::new());
+        panels.lay_out(&mut *text.borrow_mut());
+        let whole = loom_ui_core::Rect::new(
+            loom_ui_core::Point::ORIGIN,
+            loom_ui_core::Size::new(size.width, size.height),
+        );
+        let panel_style = super::paint::panel_style(&theme);
+        let panels = super::paint::paint_sides(whole, |layer, list| {
+            panels.paint(layer, &mut ListPainter::new(&text, list), &panel_style);
+        });
         let pixels = offscreen.pixels_with(physical, 1.0, theme.palette().background, drawing, Some(panels));
         self.cache = Some(ui.into_cache());
         // A frame that could not be read back answers as the window's
@@ -272,7 +291,7 @@ pub(crate) fn settle(bridge: &mut Bridge<UiDriver>, surface: &mut Surface, tasks
         let captures = std::mem::take(&mut bridge.driver_mut().captures);
         if !captures.is_empty() {
             for reply in captures {
-                let image = surface.capture(bridge.app());
+                let image = surface.capture(bridge);
                 queue.push_back(bridge.update(Bridged::App(reply.give(image))));
             }
             continue;
@@ -290,6 +309,17 @@ pub(crate) fn settle(bridge: &mut Bridge<UiDriver>, surface: &mut Surface, tasks
 
 #[cfg(test)]
 impl Bridge<UiDriver> {
+    /// Resizes the runtime before the next test frame.
+    pub(crate) fn resize(&mut self, size: loom_ui_core::Size) -> Pending {
+        self.step(|runtime, now, driver| {
+            runtime.handle(
+                loom_ui::DriverEvent::Window(loom_ui::WindowEvent::Resized(size)),
+                now,
+                driver,
+            )
+        })
+    }
+
     /// Delivers one accessibility event and reports whether the runtime
     /// asked the shell for a frame with Iced's automatic redraw disabled.
     pub(crate) fn accessibility_turn(&mut self, event: loom_ui::AccessEvent) -> (Pending, bool) {
@@ -372,8 +402,12 @@ impl super::pointers::IcedSide for HarnessIced<'_> {
         Some(statuses)
     }
 
-    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point)> {
+    fn take_scripted(&mut self) -> Vec<(iced::Event, iced::Point, crate::pointer::Delivery)> {
         self.app.pointer.take_for_runtime()
+    }
+
+    fn physical_changes(&mut self) -> (Vec<loom_ui_core::Event>, Vec<iced::mouse::Button>) {
+        self.app.pointer.take_physical_changes()
     }
 }
 

@@ -228,6 +228,25 @@ fn a_recovery_answer_is_used_after_a_replace() {
     );
 }
 
+/// Restoring a copy reports a drop that was still waiting to be handled.
+#[test]
+fn restoring_a_patch_explains_a_pending_drop() {
+    let dir = TempDir::new("dialogs-recovery-drop");
+    let mut app = app();
+    app.file_dropped(dir.0.join("waiting.ron"));
+    app.recovery_offer = Some(RecoveryOffer {
+        orphan: recovery::tests::orphan_for(&dir.0, None),
+        start: StartPatch::Empty,
+        found: Instant::now(),
+    });
+    let _ = update(&mut app, Message::AskRecovery);
+    let _ = update(&mut app, Message::Dialog(DialogAnswer::Choice(Some(0))));
+    let status = app.alerts.status();
+    assert!(status.starts_with("Restored unsaved changes"), "{status}");
+    assert!(status.ends_with("The dropped file was not opened: the patch changed first."));
+    assert!(app.drops.is_empty());
+}
+
 /// The crash recovery question and a timer: the deadline is the one due
 /// first, and the question, due at once, comes before any timer.
 #[test]

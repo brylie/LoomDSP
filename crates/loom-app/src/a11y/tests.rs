@@ -616,7 +616,7 @@ fn a_widget_with_no_name_is_left_out() {
         without
             .nodes
             .iter()
-            .all(|(_, n)| n.label() != Some(tile.widgets[knob].label.as_str()))
+            .all(|(_, n)| n.role() != Role::Slider || n.label() != Some(tile.widgets[knob].label.as_str()))
     );
 }
 
@@ -2033,7 +2033,8 @@ fn the_right_panel_has_tabs() {
     let inspector = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Inspector));
     let matrix = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Matrix));
     assert_eq!(node(&update, list).role(), Role::TabList);
-    assert_eq!(node(&update, list).children(), [inspector, matrix]);
+    let outline = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Outline));
+    assert_eq!(node(&update, list).children(), [inspector, matrix, outline]);
     assert_eq!(node(&update, inspector).role(), Role::Tab);
     assert_eq!(node(&update, inspector).label(), Some("Inspector"));
     assert_eq!(node(&update, inspector).is_selected(), Some(true));
@@ -3064,6 +3065,7 @@ fn the_matrix_rows_are_a_list_in_the_order_shown() {
         assert_eq!(list.size_of_set(), Some(2));
         let model = ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
             &ui.app().session.selection,
             ui.app().right_tab,
         );
@@ -3121,7 +3123,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let graph = ui.app().session.controller.graph();
     let (id, a) = graph.assignments().next().map(|(id, a)| (id, *a)).unwrap();
     let other = graph.assignments().nth(1).map(|(_, a)| a.source).unwrap();
-    let options = crate::matrix::sources(graph);
+    let options = crate::matrix::sources(graph, &ui.app().session.hierarchy);
     // The step lands on a source no other row joins to this target.
     let Some(Message::Matrix(crate::matrix::Event::Source(_, pick))) = ui.app().matrix_source_step(id, true, &options)
     else {
@@ -3186,10 +3188,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let id = first_assignment(ui.app());
     // Step back until no source is left that way.
     for _ in 0..64 {
-        let Some(message) =
-            ui.app()
-                .matrix_source_step(id, false, &crate::matrix::sources(ui.app().session.controller.graph()))
-        else {
+        let Some(message) = ui.app().matrix_source_step(
+            id,
+            false,
+            &crate::matrix::sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy),
+        ) else {
             break;
         };
         ui.send(message);
@@ -3197,7 +3200,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let id = ui.app().session.matrix.selected.unwrap_or(id);
     assert!(
         ui.app()
-            .matrix_source_step(id, false, &crate::matrix::sources(ui.app().session.controller.graph()))
+            .matrix_source_step(
+                id,
+                false,
+                &crate::matrix::sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
+            )
             .is_none()
     );
     let steps = ui.app().session.edits.history.len();
@@ -3421,7 +3428,7 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
     ui.app_mut().show_level(&ModulePath::root());
     ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
 
-    let targets = crate::matrix::targets(ui.app().session.controller.graph());
+    let targets = crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy);
     let goal = targets
         .iter()
         .position(|t| (t.module, t.param) == (svf, cutoff))
@@ -4875,4 +4882,93 @@ fn a_change_during_a_rebuild_asks_for_one_more() {
     app.a11y_event(Event::Located(Places::default()));
     assert!(!app.a11y.locating, "and no third");
     assert!(!app.a11y.again);
+}
+
+/// The canvas's open editor owns accessibility focus and reports its current draft and caret.
+#[test]
+fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob() {
+    use crate::ui_test::{Ui, key_press};
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let (app, module, _) = app_with_filter();
+    let mut ui = Ui::with_app(app);
+    let point = ui.control(module, "cutoff");
+    ui.move_to(point);
+    ui.press();
+    ui.release();
+    let control = ui.a11y_tree().focused().node_id();
+    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let places = ui.places();
+    let tree = ui.app_mut().a11y_tree(&places);
+    let field = node(&tree, tree.focus);
+    assert_eq!(field.role(), Role::TextInput);
+    assert_eq!(field.label(), Some("Cutoff value"));
+    let shown = field.value().unwrap();
+    let selection = field.text_selection().unwrap();
+    assert_eq!(selection.anchor.character_index, 0);
+    assert_eq!(selection.focus.character_index, shown.chars().count());
+    assert_eq!(node(&tree, selection.focus.node).role(), Role::TextRun);
+    ui.step(&[key_press(
+        Key::Character("6".into()),
+        Modifiers::empty(),
+        Some("6"),
+        false,
+    )]);
+    let places = ui.places();
+    let tree = ui.app_mut().a11y_tree(&places);
+    let field = node(&tree, tree.focus);
+    assert_eq!(field.value(), Some("6"));
+    assert_eq!(field.text_selection().unwrap().focus.character_index, 1);
+    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert_eq!(ui.a11y_tree().focused().node_id(), control);
+    assert_eq!(ui.a11y_tree().focused().role(), Role::Slider);
+}
+
+/// Places measured before a resize are superseded before the reader sees them.
+#[test]
+fn a_stale_located_answer_is_read_again_after_resize() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.deliver(Message::A11y(Event::Activated));
+    for _ in 0..3 {
+        ui.redraw();
+    }
+    let old = ui.places();
+    let id = tree::tab_id(crate::matrix::Tab::Outline);
+    let node_id = crate::a11y::tests::node_of(ui.app_mut(), &id);
+    let old_x = old.of(&id).unwrap().rect.x;
+    ui.take_sent_trees();
+    ui.resize(1360.0, 810.0);
+    ui.deliver(Message::A11y(Event::Located(old)));
+    for _ in 0..4 {
+        ui.redraw();
+    }
+    let new_x = ui.places().of(&id).unwrap().rect.x;
+    assert_ne!(new_x, old_x);
+    let trees = ui.take_sent_trees();
+    assert!(!trees.is_empty());
+    for tree in &trees {
+        assert_eq!(node(tree, node_id).bounds().unwrap().x0, f64::from(new_x));
+    }
+}
+
+/// The canvas describes the same neighbours as the outline and links outputs to their inputs.
+#[test]
+fn canvas_ports_and_tiles_report_the_outline_connections() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let places = ui.places();
+    let tree_update = ui.app_mut().a11y_tree(&places);
+    let filter = node_of(ui.app_mut(), &tile_id(4));
+    let lowpass = node_of(ui.app_mut(), &tile_id(4).with("output").with("lowpass"));
+    let multiply = node_of(ui.app_mut(), &tile_id(8).with("input").with("a"));
+    let scope = node_of(ui.app_mut(), &tile_id(11).with("input").with("in"));
+    let words = node(&tree_update, filter).description().unwrap();
+    assert!(
+        ui.app()
+            .outline_rows()
+            .iter()
+            .any(|row| row.name == format!("SVF. {words}"))
+    );
+    let port = node(&tree_update, lowpass);
+    assert_eq!(port.controls(), [multiply, scope]);
+    assert!(port.description().unwrap().contains("To Multiply 8 A and Scope In"));
+    assert!(node(&tree_update, multiply).controls().is_empty());
 }

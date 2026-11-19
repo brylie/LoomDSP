@@ -75,7 +75,7 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
     app.session.selection.insert(4);
     let pixels = render_window(&app).expect("the renderer used above");
     let mut ui = crate::ui_test::Ui::with_app(app);
-    let source = ui.text("LFO #5: Out").expect("the LFO assignment's source");
+    let source = ui.text("LFO: Out").expect("the LFO assignment's source");
     let y = source.center_y() as usize;
     let left = (source.x - 30.0) as usize;
     let filled = (y - 4..y + 4)

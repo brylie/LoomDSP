@@ -82,10 +82,10 @@ mod window;
 
 pub use app::{App, Context, Deadline, InputState, WindowSpec};
 pub use draw::Panels;
-pub use driver::Driver;
+pub use driver::{Driver, Paste};
 pub use effect::{Effect, Effects};
 pub use element::{Align, Element, Length, Padding};
-pub use event::{AccessEvent, DriverEvent, WindowEvent, WindowState};
+pub use event::{AccessEvent, DriverEvent, Ime, WindowEvent, WindowState};
 pub use field::FieldEvent;
 pub use focus::{AccessNodes, FocusStep, RingStyle};
 pub use hint::HintStyle;

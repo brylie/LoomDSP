@@ -46,7 +46,7 @@ use crate::runtime::{Next, Runtime};
 use crate::waker::Waker;
 use events::Held;
 use gpu::Gpu;
-use loom_ui_core::{Cursor, Rect, Size};
+use loom_ui_core::{Cursor, Size};
 use pacing::{Drawn, FrameKind, Pacing, Wait};
 use std::fmt;
 use std::path::PathBuf;
@@ -98,18 +98,7 @@ pub struct Parts<'a, A: App, T> {
     pub panels: Panels<'a, A>,
 }
 
-/// The input method, as the layers want it.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Ime {
-    /// No text field takes text: the input method is off.
-    Off,
-    /// A field takes text, and its caret is in `area`, in logical pixels,
-    /// so the system's candidate window opens beside it.
-    On {
-        /// The caret's area.
-        area: Rect,
-    },
-}
+pub use crate::event::Ime;
 
 /// The pointer, as the layers want it shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +122,48 @@ pub struct Report {
     /// the messages already queued. The shell runs those, then asks
     /// [`Layers::alone`] for it.
     pub alone: bool,
+}
+
+/// What the shell remembers of the input method between reports: what
+/// the layers last asked for, since they report only a change, and what
+/// the window was last set to.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct ImeMemory {
+    /// The layers' last report, or `None` if they never sent one.
+    layers: Option<Ime>,
+    /// What the window was last set to.
+    applied: Option<Ime>,
+    /// The runtime's own field had the input method at the last report.
+    ours: bool,
+}
+
+/// The input method to set on the window now, or `None` when it is set
+/// already (ui-layer.md, section 8, rule 4). The runtime's own field comes
+/// first: while `runtime` is `Some` it wins over the layers. Otherwise the
+/// layers' last report holds, and with none, the input method is off, so
+/// the window never keeps a field's area after the field lets go.
+/// `reported` is what the layers reported this time, if anything.
+///
+/// When the runtime's field takes the input method over, the layers' last
+/// report is forgotten as Off: taking the focus released the layers' own
+/// field (section 6, rule 1), and they may never report that, since they
+/// report only a change. So the shell never brings back an area for a
+/// field that no longer has focus.
+fn ime_to_apply(memory: &mut ImeMemory, runtime: Option<Ime>, reported: Option<Ime>) -> Option<Ime> {
+    if reported.is_some() {
+        memory.layers = reported;
+    }
+    let ours = runtime.is_some();
+    if ours && !memory.ours {
+        memory.layers = Some(Ime::Off);
+    }
+    memory.ours = ours;
+    let want = runtime.or(memory.layers).unwrap_or(Ime::Off);
+    if memory.applied == Some(want) {
+        return None;
+    }
+    memory.applied = Some(want);
+    Some(want)
 }
 
 /// What the window needs to do to show `pointer`, when it was `hidden`
@@ -220,6 +251,12 @@ pub trait Services<M> {
     fn clipboard_write(&mut self, text: String);
     /// Reads the clipboard.
     fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>);
+    /// Reads the clipboard for a text field's paste, through the same
+    /// clipboard as `clipboard_read`, and answers `paste`. The default
+    /// answers that it is empty.
+    fn clipboard_paste(&mut self, paste: crate::Paste) {
+        paste.give(None);
+    }
     /// Shows a file dialog.
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>);
     /// Asks a question.
@@ -310,6 +347,7 @@ where
         live: None,
         held: Held::default(),
         hidden: false,
+        ime: ImeMemory::default(),
         shown: false,
         pacing: Pacing::default(),
         error: None,
@@ -369,6 +407,8 @@ struct Handler<A: App, T, L, S> {
     held: Held,
     /// The pointer is hidden.
     hidden: bool,
+    /// The input method, between reports.
+    ime: ImeMemory,
     /// A frame has been shown in the window, so a capture has one to show.
     shown: bool,
     /// The redraw rule.
@@ -546,7 +586,7 @@ where
                 live.window.set_cursor_visible(visible);
             }
         }
-        match report.ime {
+        match ime_to_apply(&mut self.ime, live.runtime.ime(), report.ime) {
             Some(Ime::Off) => live.window.set_ime_allowed(false),
             Some(Ime::On { area }) => {
                 live.window.set_ime_allowed(true);
@@ -621,8 +661,8 @@ where
             self.shown = true;
             self.turn(event_loop, DriverEvent::Presented);
         }
-        if self.pacing.frame_ended(drawn)
-            && let Some(live) = self.live.as_ref()
+        if let Some(live) = self.live.as_ref()
+            && self.pacing.frame_ended(drawn, live.runtime.waits_for_draw())
         {
             live.window.request_redraw();
         }
@@ -864,6 +904,10 @@ impl<M: Send + 'static, S: Services<M>> Driver<M> for ShellDriver<M, S> {
 
     fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>) {
         self.services.clipboard_read(reply, waker);
+    }
+
+    fn clipboard_paste(&mut self, paste: crate::Paste) {
+        self.services.clipboard_paste(paste);
     }
 
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>) {

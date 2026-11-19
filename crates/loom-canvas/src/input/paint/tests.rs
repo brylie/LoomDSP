@@ -105,6 +105,7 @@ fn kinds(recorder: &Recorder, from: usize) -> String {
         .map(|piece| match piece {
             Painted::Begin(_) => 'B',
             Painted::Quad(_) => 'Q',
+            Painted::Segment(_) => 'S',
             Painted::Text { .. } => 'T',
             Painted::End => 'E',
         })

@@ -48,6 +48,10 @@ impl App {
             })
             .matrix_line(self.matrix_line())
             .typed_check(|module, widget, text| self.typed_check(module, widget, text))
+            .report_typed(self.a11y.is_active())
+            .typed_request(self.a11y.typed_request().0, self.a11y.typed_request().1)
+            .overview(self.map_view())
+            .centre_request(self.session.outline.centre.0, self.session.outline.centre.1)
             .animate(self.animating)
             .learn(self.session.learn.shown());
         if let Some(still) = self.still {
@@ -207,17 +211,24 @@ impl App {
         // button sits in a container named by its UI ID, so the window
         // can say where it is (`places.rs`).
         let model = self.toolbar_model();
+        let keyboard = self.toolbar_keyboard_name();
         let group = |which: Group| {
             let items = model.buttons.iter().filter(|b| b.group == which).map(|b| {
                 let press = b.press();
                 let face = button(text(b.label).size(style::CONTROL)).on_press_maybe(press);
-                let face = match (b.name, b.on) {
-                    ("panic", _) => face.style(style::danger),
-                    // Primary only while learning: a mode that is on.
-                    (_, Some(true)) => face.style(style::primary),
-                    (_, Some(false)) => face.style(style::secondary),
-                    _ => face,
+                let role = match (b.name, b.on) {
+                    ("panic", _) => style::danger,
+                    (_, Some(true)) => style::primary,
+                    _ => style::secondary,
                 };
+                let focused = keyboard == Some(b.name);
+                let face = face.style(move |theme, status| {
+                    if focused {
+                        style::focused_button(theme, status, role)
+                    } else {
+                        role(theme, status)
+                    }
+                });
                 let named: Element<'static, Message> = container(face).id(b.id).into();
                 match &b.hover {
                     Some(hint) => tip(named, hint.clone()),
@@ -290,20 +301,25 @@ impl App {
             row![
                 container(tab("Inspector", RightTab::Inspector)).id("panel/inspector"),
                 container(tab("Matrix", RightTab::Matrix)).id("panel/matrix"),
+                container(tab("Outline", RightTab::Outline)).id("panel/outline"),
             ]
             .spacing(4)
             .padding([6, 8]),
         )
         .id("panel");
-        let panel = match self.right_tab {
+        let panel = self.jump_view().unwrap_or_else(|| match self.right_tab {
+            RightTab::Outline => self.outline_view(),
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
-                self.session
-                    .matrix
-                    .model(self.session.controller.graph(), &self.session.selection, self.right_tab),
+                self.session.matrix.model(
+                    self.session.controller.graph(),
+                    &self.session.hierarchy,
+                    &self.session.selection,
+                    self.right_tab,
+                ),
                 self.a11y.is_active(),
             ),
-        };
+        });
         column![tabs, panel].width(280).height(Length::Fill).into()
     }
 }

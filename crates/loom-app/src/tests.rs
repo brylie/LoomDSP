@@ -2158,7 +2158,7 @@ fn removed_probes_lose_their_levels() {
 #[test]
 fn the_snapshot_shows_the_inspector_rows() {
     let mut app = app();
-    let (env, sine, filter, cutoff, _) = two_sources(&mut app);
+    let (_env, sine, filter, cutoff, _) = two_sources(&mut app);
     let off = app
         .session
         .controller
@@ -2191,7 +2191,7 @@ fn the_snapshot_shows_the_inspector_rows() {
     else {
         panic!("not in learn mode");
     };
-    let (env_out, sine_out) = (format!("Envelope #{}: Out", env.0), format!("Sine #{}: Out", sine.0));
+    let (env_out, sine_out) = ("Envelope: Out".to_string(), "Sine: Out".to_string());
     let shown: Vec<_> = assignments
         .iter()
         .map(|a| (a.source.as_str(), a.depth_text.as_str(), a.enabled))

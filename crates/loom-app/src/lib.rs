@@ -53,11 +53,13 @@ mod menus;
 mod modes;
 mod modulation;
 mod monitor;
+mod outline;
 mod overlays;
 mod panic;
 mod param;
 mod patch_file;
 mod patch_info;
+mod patch_map;
 mod patches;
 mod places;
 mod pointer;
@@ -490,7 +492,9 @@ enum Message {
     /// focus, which a change alone would miss.
     FocusMoved(Option<loom_ui_core::UiId>),
     /// Tab was pressed. It closes a text field on the main view.
-    TextFieldTab,
+    TextFieldTab {
+        backwards: bool,
+    },
     /// Tab between a view's fields, from the part the window says has
     /// focus (`window_question.rs`).
     TabFrom {
@@ -505,6 +509,12 @@ enum Message {
     MatrixKey(iced::keyboard::Event),
     /// A message for the Preferences window (`docs/design/preferences.md`).
     Preferences(settings::Message),
+    /// Focuses a row of the patch outline.
+    OutlineRow(loom_ui_core::UiId),
+    /// Takes one of the offered cable jumps.
+    JumpChoice(usize),
+    /// A pointer press outside the cable jump list.
+    DismissJump,
     /// An edit in patch info (`docs/design/patch-metadata.md`).
     PatchInfo(patch_info::Message),
     /// A message for the open licence chooser.
@@ -686,12 +696,15 @@ impl Message {
             | Self::HistoryKey { .. }
             | Self::Redo
             | Self::TextFocusCheck
-            | Self::TextFieldTab
+            | Self::TextFieldTab { .. }
             | Self::TabFrom { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
             | Self::MatrixKey(_)
             | Self::Preferences(_)
+            | Self::OutlineRow(_)
+            | Self::JumpChoice(_)
+            | Self::DismissJump
             | Self::PatchInfo(_)
             | Self::Licence(_)
             | Self::OpenRecent
@@ -981,6 +994,12 @@ impl App {
 
     /// Rebuilds the scene after the graph changed.
     fn refresh(&mut self) {
+        self.refresh_scene();
+        self.refresh_patch_map();
+    }
+
+    /// Rebuilds the scene and live values without rebuilding the navigation structure.
+    fn refresh_scene(&mut self) {
         // A module added straight to the controller is a top-level module
         // the hierarchy must know (ADR-0039, invariant 1).
         self.session.hierarchy.adopt(self.session.controller.graph());
@@ -1462,11 +1481,16 @@ impl App {
         // so it is answered at once, from a fresh search; only one whose
         // answer would come from the runtime's layout waits.
         let waits = match &message {
-            Message::Located { target, found, .. } => crate::control::waits_for_ours(self, target, found, cx),
-            Message::A11y(crate::a11y::Event::Located(_)) => true,
+            Message::Located { target, found, .. } => crate::control::waits_for_ours(self, target, found),
+            Message::A11y(crate::a11y::Event::Located(_) | crate::a11y::Event::LocateAfterLayout) => true,
             _ => false,
         };
         if waits && !cx.laid_out() {
+            let message = if matches!(message, Message::A11y(crate::a11y::Event::Located(_))) {
+                Message::A11y(crate::a11y::Event::LocateAfterLayout)
+            } else {
+                message
+            };
             return loom_ui::Effects::after_draw(message);
         }
         // The runtime's nodes as last laid out, for the tree a rebuild
@@ -1487,7 +1511,7 @@ impl App {
                     .command
                     .pointer_targets()
                     .iter()
-                    .any(|target| crate::control::may_be_ours(target, cx))
+                    .any(|target| crate::control::may_be_ours(target))
             {
                 return loom_ui::Effects::after_draw(message);
             }
@@ -1517,7 +1541,7 @@ impl App {
         if matches!(message, Message::ControlFrame(_)) {
             self.control_frame_asked = false;
         }
-        self.apply(message);
+        self.apply_at(message, now);
         self.sync_part_authors();
         // The timers, the watchers, and the frames a command waits for
         // follow what this update changed.
@@ -1547,6 +1571,11 @@ impl App {
     /// Applies one message. Its effects collect in `self.effects`, and the
     /// window questions it asks in `self.window_questions`.
     fn apply(&mut self, message: Message) {
+        self.apply_at(message, Instant::now());
+    }
+
+    /// Applies one message at the time given by the runtime.
+    fn apply_at(&mut self, message: Message, now: Instant) {
         use loom_canvas::stats::FrameCause;
         // First, before anything can return: a watcher's message is taken.
         self.watched_message_taken(&message);
@@ -1614,8 +1643,8 @@ impl App {
                 self.question_message(message);
             }
             Message::File(FileAction::Browse) => self.open_patches(),
-            // An open menu has its own keys (`menus.rs`): Enter sends what its
-            // item sends, which may return work of its own.
+            Message::Key(event) if self.navigation_key(&event, now) => {}
+            // An open menu has its own keys (`menus.rs`): Enter sends what its item sends.
             Message::Key(event)
                 if menus::is_menu_key(&event)
                     && matches!(
@@ -1639,7 +1668,7 @@ impl App {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
                 modifiers,
                 ..
-            }) if !modifiers.command() && !modifiers.alt() && !self.tab_fields().is_empty() => {
+            }) if !modifiers.command() && !modifiers.control() && !modifiers.alt() && !self.tab_fields().is_empty() => {
                 // Only the window's widgets know in time where focus is: a
                 // field can take it with no message (window_question.rs).
                 let backwards = modifiers.shift();
@@ -1670,8 +1699,8 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
-            Message::TextFieldTab => {
-                self.text_field_tab(self.focus.clone().as_ref());
+            Message::TextFieldTab { backwards } => {
+                self.text_field_tab(self.focus.clone().as_ref(), backwards);
             }
             Message::FocusMoved(focus) => {
                 self.focus_moved(focus);
@@ -1759,11 +1788,17 @@ impl App {
                 }
             }
         } else if was_help_open && self.overlays.help.is_none() {
+            let owner = self.input_owner();
             let field = self
                 .overlays
                 .help_focus
                 .take()
-                .or_else(|| self.overlays.browser().is_some().then(browser::search_id));
+                .filter(|field| match owner {
+                    input_owner::InputOwner::Browser => *field == browser::search_id(),
+                    input_owner::InputOwner::Patches => patches::text_fields().contains(field),
+                    _ => false,
+                })
+                .or_else(|| (owner == input_owner::InputOwner::Browser).then(browser::search_id));
             if let Some(field) = field {
                 self.effect(loom_ui::Effects::focus(field));
             }
@@ -1949,7 +1984,7 @@ impl App {
             | Message::ControlReply
             | Message::StartWatching
             | Message::ControlFrame(_)
-            | Message::TextFieldTab
+            | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
             | Message::FocusMoved(_)
             | Message::Inspector(_)
@@ -2052,6 +2087,9 @@ impl App {
             Message::CloseTileMenu => self.overlays.close_tile_menu(),
             Message::Key(event) if self.input_owner() != input_owner::InputOwner::Canvas => self.overlay_key(&event),
             Message::Preferences(message) => self.preferences(message),
+            Message::OutlineRow(id) => self.outline_select(&id),
+            Message::JumpChoice(index) => self.choose_jump(index),
+            Message::DismissJump => self.session.outline.close_jump(),
             Message::PatchInfo(message) => self.patch_info_message(message),
             Message::HistoryKey { redo, typing } => {
                 if !typing {
@@ -2270,6 +2308,17 @@ impl App {
                     _ => {}
                 }
             }
+            Message::Key(iced::keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                repeat: false,
+                ..
+            }) if modifiers.is_empty()
+                && self.focus.is_none()
+                && matches!(key.as_ref(), iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("m")) =>
+            {
+                self.choose_map(None);
+            }
             Message::Key(_) => {}
         }
     }
@@ -2346,6 +2395,7 @@ Escape clears control focus, then the selection. With a module selected and no c
 Space toggles Run when no control uses it, including a focused knob.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\
 F or Home frames the patch.\n\
+M cycles the patch map. O opens the Outline. The bracket keys follow a cable, and Cmd/Ctrl+[ goes back.\n\
 Right-click an output or a cable to add a scope or a meter fed by it.\n\
 Click a modulation badge to pin its lines; click again or press Escape to hide them.\n\
 Cmd/Ctrl+C copies, X cuts, V pastes at the pointer, and D duplicates the selection.\n\

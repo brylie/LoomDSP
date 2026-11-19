@@ -8,7 +8,7 @@
 //! and go to the runtime in logical ones, divided by the window's scale.
 
 use crate::event::{DriverEvent, WindowEvent};
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, Size};
+use loom_ui_core::{Event, ImeEvent, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, Size};
 use std::time::Duration;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
@@ -73,7 +73,22 @@ pub(crate) fn driver_events(event: &winit::event::WindowEvent, scale: f32, held:
         }
         W::CloseRequested => vec![DriverEvent::Window(WindowEvent::CloseRequested)],
         W::DroppedFile(path) => vec![DriverEvent::Window(WindowEvent::FileDropped(path.clone()))],
+        W::Ime(ime) => vec![input(Event::Ime(self::ime(ime)), held)],
         _ => Vec::new(),
+    }
+}
+
+/// winit's input method event as ours.
+pub(crate) fn ime(ime: &winit::event::Ime) -> ImeEvent {
+    use winit::event::Ime as W;
+    match ime {
+        W::Enabled => ImeEvent::Enabled,
+        W::Preedit(text, cursor) => ImeEvent::Preedit {
+            text: text.clone(),
+            cursor: *cursor,
+        },
+        W::Commit(text) => ImeEvent::Commit(text.clone()),
+        W::Disabled => ImeEvent::Disabled,
     }
 }
 

@@ -795,6 +795,35 @@ impl Default for Scene {
 }
 
 impl Scene {
+    /// Tiles in the order the keyboard visits them.
+    pub fn reading_order(&self) -> Vec<&ModuleView> {
+        let mut order: Vec<_> = self.modules().iter().collect();
+        order.sort_by(|a, b| {
+            a.position
+                .y
+                .total_cmp(&b.position.y)
+                .then_with(|| a.position.x.total_cmp(&b.position.x))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        // Anchor each row to its first top. Comparing pairs with a
+        // tolerance would give a non-transitive ordering.
+        let mut rest = order.as_mut_slice();
+        while let Some(first) = rest.first() {
+            let bottom = first.position.y + 3.0 * GRID;
+            let count = rest.partition_point(|tile| tile.position.y <= bottom);
+            let (row, next) = rest.split_at_mut(count.max(1));
+            row.sort_by(|a, b| {
+                a.position
+                    .x
+                    .total_cmp(&b.position.x)
+                    .then_with(|| a.position.y.total_cmp(&b.position.y))
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+            rest = next;
+        }
+        order
+    }
+
     /// Creates a scene. Modules are drawn in this order, last on top.
     /// Cables that refer to unknown modules or ports are skipped when drawn.
     pub fn new(modules: Vec<ModuleView>, cables: Vec<CableView>) -> Self {

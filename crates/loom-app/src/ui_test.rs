@@ -169,6 +169,11 @@ impl Ui {
         std::mem::take(&mut self.bridge.driver_mut().trees)
     }
 
+    /// Takes the incremental accessibility updates the screen reader received.
+    pub(crate) fn take_sent_changes(&mut self) -> Vec<accesskit::TreeUpdate> {
+        std::mem::take(&mut self.bridge.driver_mut().changes)
+    }
+
     /// The clipboard's text.
     pub(crate) fn clipboard(&self) -> Option<&str> {
         self.bridge.driver().headless.clipboard()
@@ -260,13 +265,16 @@ impl Ui {
             };
             let routed = match (pointer, event) {
                 (Some((event, point)), _) => Some((event, Some(point))),
-                (None, Event::Keyboard(_)) => loom_canvas::iced_convert::event_to_core(event).map(|key| (key, None)),
+                (None, Event::Keyboard(_) | Event::InputMethod(_)) => {
+                    loom_canvas::iced_convert::event_to_core(event).map(|key| (key, None))
+                }
                 _ => None,
             };
             if let Some((event, point)) = routed {
                 let task = self.bridge.input(event, point);
                 self.settle(vec![task]);
-                // The runtime took this key: Iced does not hear it.
+                // The runtime took this key, or input method event: Iced
+                // does not hear it.
                 if self.bridge.runtime_mut().target_mut().take_drop_keys()
                     && let Some(at) = kept.len().checked_sub(1)
                 {
@@ -285,6 +293,9 @@ impl Ui {
                 ..
             } = self;
             let (app, target, mut panels) = bridge.runtime_mut().parts();
+            if app.0.pointer.waiting() {
+                app.0.pointer.place_runtime_targets(&panels);
+            }
             let mut iced = crate::iced_bridge::headless::HarnessIced {
                 app: &app.0,
                 surface,
@@ -415,9 +426,18 @@ impl Ui {
         self.redraw_at(Instant::now())
     }
 
+    /// Resizes the harness's window, leaving the new layout for the next frame.
+    #[cfg(test)]
+    pub(crate) fn resize(&mut self, width: f32, height: f32) {
+        self.surface.size = iced::Size::new(width, height);
+        let task = self.bridge.resize(loom_ui_core::Size::new(width, height));
+        self.settle(vec![task]);
+    }
+
     /// A redraw at a chosen time, so a test can pass a timer's deadline
     /// without sleeping.
     pub(crate) fn redraw_at(&mut self, at: Instant) -> Vec<Message> {
+        self.lay_out_panels();
         self.step(&[Event::Window(window::Event::RedrawRequested(at))])
     }
 

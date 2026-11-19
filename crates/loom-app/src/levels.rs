@@ -34,6 +34,7 @@ impl App {
         self.session.level = level.clone();
         self.session.level_key += 1;
         self.session.selection.clear();
+        self.session.outline.level_changed();
         self.refresh();
     }
 }

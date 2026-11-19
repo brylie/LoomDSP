@@ -460,11 +460,11 @@ fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
         canvas.camera.visible(canvas.bounds.size())
     };
     let tiles = ui.app().session.scene.modules();
-    assert_eq!(tiles.iter().filter(|t| t.title == "Noise").count(), 2);
+    assert_eq!(tiles.iter().filter(|t| t.title.starts_with("Noise ")).count(), 2);
     for (i, tile) in tiles.iter().enumerate() {
         let rect = tile.bounds();
         assert!(tiles[..i].iter().all(|other| !other.bounds().intersects(rect)));
-        if tile.title == "Noise" {
+        if tile.title.starts_with("Noise ") {
             assert!(visible.x <= rect.x && visible.y <= rect.y);
             assert!(visible.x + visible.width >= rect.x + rect.width);
             assert!(visible.y + visible.height >= rect.y + rect.height);

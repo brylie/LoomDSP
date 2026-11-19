@@ -24,7 +24,9 @@ use crate::paint::{PanelStyle, Typesetter, editing_contexts};
 use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use accesskit::Role as KitRole;
-use loom_ui_core::{Color, Event, IdTable, Key, KeyEvent, Modifiers, Platform, Point, Size, TextStyle, UiId, Weight};
+use loom_ui_core::{
+    Color, Event, IdTable, ImeEvent, Key, KeyEvent, Modifiers, Platform, Point, Size, TextStyle, UiId, Weight,
+};
 use parley::{FontContext, LayoutContext};
 use std::time::{Duration, Instant};
 
@@ -361,11 +363,14 @@ fn enter_commits_and_other_keys_pass() {
             (Key::Tab, Modifiers::NONE),
             (Key::Tab, SHIFT),
             (Key::Escape, Modifiers::NONE),
-            (Key::Character('v'), shortcut(platform, false)),
             (Key::Character('s'), shortcut(platform, false)),
         ] {
             assert_eq!(bench.hit(platform, key, modifiers), super::KeyUse::default(), "{key:?}");
         }
+        // Paste is the field's own: it takes the key and asks for the
+        // clipboard (section 6, rule 6).
+        let paste = bench.hit(platform, Key::Character('v'), shortcut(platform, false));
+        assert!(paste.taken && paste.paste, "{platform:?}");
     }
     let Some(mut bench) = field_in("", 300.0) else { return };
     let control = bench.key(
@@ -601,6 +606,9 @@ fn form_panel((text, off, removed): &(String, bool, bool)) -> Element {
 struct Keys {
     heard: Vec<Key>,
     kept: Vec<Key>,
+    /// Input method events it heard, and that were kept from it.
+    ime_heard: usize,
+    ime_kept: usize,
 }
 
 impl<M> Target<M> for Keys {
@@ -608,12 +616,18 @@ impl<M> Target<M> for Keys {
         if let Event::Key(KeyEvent::Pressed { key, .. }) = event {
             self.heard.push(*key);
         }
+        if let Event::Ime(_) = event {
+            self.ime_heard += 1;
+        }
         Routed::Passed
     }
 
     fn kept(&mut self, event: &Event) {
         if let Event::Key(KeyEvent::Pressed { key, .. }) = event {
             self.kept.push(*key);
+        }
+        if let Event::Ime(_) = event {
+            self.ime_kept += 1;
         }
     }
 
@@ -718,7 +732,7 @@ fn an_edit_the_app_does_not_take_goes_back() {
 /// field never undoes the patch, and Backspace or Delete with the shortcut
 /// key never deletes a module. The target hears that the runtime kept it
 /// (`Target::kept`), so a toolkit that saw the key first drops it too.
-/// Escape, Save, and paste do reach it, and are not kept.
+/// Escape and Save do reach it, and are not kept; paste is the field's.
 #[test]
 fn keys_the_field_takes_stop_there() {
     let Some((mut harness, _text)) = form("", true) else {
@@ -748,12 +762,11 @@ fn keys_the_field_takes_stop_there() {
     );
     harness.step(key_in(Key::Escape, Modifiers::NONE, None));
     harness.step(key_in(Key::Character('s'), shortcut(platform, false), None));
-    harness.step(key_in(Key::Character('v'), shortcut(platform, false), None));
-    assert_eq!(
-        harness.runtime().target().heard,
-        [Key::Escape, Key::Character('s'), Key::Character('v')]
-    );
+    assert_eq!(harness.runtime().target().heard, [Key::Escape, Key::Character('s')]);
     assert_eq!(harness.runtime().target().kept.len(), 8, "a key passed on is not kept");
+    harness.step(key_in(Key::Character('v'), shortcut(platform, false), None));
+    assert_eq!(harness.runtime().target().heard.len(), 2, "paste stays in the field");
+    assert_eq!(harness.runtime().target().kept.last(), Some(&Key::Character('v')));
 }
 
 /// Copy writes the clipboard through the driver. With nothing selected it
@@ -1800,4 +1813,464 @@ fn a_fields_runs_link_as_one_line() {
     assert_eq!(run(runs[0]).previous_on_line(), None);
     assert_eq!(run(runs[1]).previous_on_line(), Some(runs[0]));
     assert_eq!(run(runs[1]).next_on_line(), None);
+}
+
+// --- The input method and the field's own paste (section 8, rules 2 and 4) ---
+
+/// The input method's `event`, as the driver sends it.
+fn ime_in(event: ImeEvent) -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Ime(event),
+        pointer: None,
+    }
+}
+
+/// A preedit of `text` with the caret at its end.
+fn preedit(text: &str) -> ImeEvent {
+    ImeEvent::Preedit {
+        text: text.to_owned(),
+        cursor: Some((text.len(), text.len())),
+    }
+}
+
+/// The plan's sequence: a preedit, an empty preedit, then the commit,
+/// leaves the committed text once, with the caret after it, as one undo
+/// step. While composing, the field shows the preedit, but its committed
+/// text does not hold it.
+#[test]
+fn a_composition_commits_its_text_once() {
+    let Some(mut bench) = field_in("", 300.0) else { return };
+    let Bench {
+        field,
+        fonts,
+        layouts,
+        now,
+    } = &mut bench;
+    let used = field.ime(&preedit("にほ"), *now, fonts, layouts);
+    assert!(used.taken && !used.edited && used.redraw);
+    assert_eq!((field.text(), field.committed().as_str()), ("にほ", ""));
+    assert!(field.composing());
+    field.ime(&preedit(""), *now, fonts, layouts);
+    assert!(!field.composing());
+    let used = field.ime(&ImeEvent::Commit("日本".to_owned()), *now, fonts, layouts);
+    assert!(used.edited);
+    assert_eq!(field.committed(), "日本");
+    assert_eq!(field.text(), "日本");
+    assert_eq!(field.selection_bytes(), (6, 6));
+    assert_eq!(field.steps(), (1, 0));
+}
+
+/// While the input method composes, the field takes every key and does
+/// nothing with it: neither the committed text nor the preedit changes.
+#[test]
+fn keys_while_composing_are_taken_and_do_nothing() {
+    for platform in PLATFORMS {
+        let Some(mut bench) = field_in("ab", 300.0) else { return };
+        bench
+            .field
+            .ime(&preedit("に"), bench.now, &mut bench.fonts, &mut bench.layouts);
+        let control_tab = held(false, true, false, false);
+        for (key, modifiers) in [
+            (Key::Backspace, Modifiers::NONE),
+            (Key::Enter, Modifiers::NONE),
+            (Key::Left, Modifiers::NONE),
+            (Key::Tab, Modifiers::NONE),
+            (Key::Tab, control_tab),
+            (Key::Escape, Modifiers::NONE),
+            (Key::Character('z'), shortcut(platform, false)),
+            (Key::Character('v'), shortcut(platform, false)),
+        ] {
+            let used = bench.hit(platform, key, modifiers);
+            assert!(used.taken && !used.edited && !used.paste, "{platform:?} {key:?}");
+        }
+        assert_eq!(bench.text(), "abに", "{platform:?}");
+        assert_eq!(bench.field.committed(), "ab");
+    }
+}
+
+/// The input method turned off in mid-composition keeps what it showed,
+/// as one undo step.
+#[test]
+fn an_input_method_turned_off_keeps_its_text() {
+    let Some(mut bench) = field_in("a", 300.0) else { return };
+    let Bench {
+        field,
+        fonts,
+        layouts,
+        now,
+    } = &mut bench;
+    field.ime(&preedit("に"), *now, fonts, layouts);
+    let used = field.ime(&ImeEvent::Disabled, *now, fonts, layouts);
+    assert!(used.edited);
+    assert_eq!(field.committed(), "aに");
+    assert!(!field.composing());
+    assert_eq!(field.steps(), (1, 0));
+}
+
+/// The app's text taken at a layout is compared with the committed text,
+/// so an app text that did not change never ends a composition.
+#[test]
+fn an_unchanged_app_text_keeps_the_composition() {
+    let Some(mut bench) = field_in("ab", 300.0) else { return };
+    bench
+        .field
+        .ime(&preedit("に"), bench.now, &mut bench.fonts, &mut bench.layouts);
+    bench
+        .field
+        .take("ab", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+    assert!(bench.field.composing());
+    assert_eq!(bench.text(), "abに");
+}
+
+/// While composing, a screen reader hears the preedit in the field's value
+/// (Brylie's answer to C2's question 1), and the app's `Edited` never
+/// carries it.
+#[test]
+fn the_node_carries_the_preedit_and_edited_does_not() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let start = harness.app().log.len();
+    harness.step(ime_in(preedit("に")));
+    let (_, node) = describe(&mut harness, &mut text);
+    assert_eq!(node.value(), Some("abに"));
+    assert!(
+        !harness.app().log[start..].iter().any(|line| line.starts_with("Edited")),
+        "{:?}",
+        &harness.app().log[start..]
+    );
+    assert_eq!(harness.app().text, "ab");
+    assert_eq!(harness.runtime().target().ime_kept, 1, "the field took it");
+}
+
+/// Focus leaving in mid-composition keeps the preedit as text: the app
+/// hears it as `Edited`, then `Left`.
+#[test]
+fn focus_leaving_keeps_the_composition_as_text() {
+    let Some((mut harness, mut text)) = form("a", true) else {
+        return;
+    };
+    harness.step(ime_in(preedit("に")));
+    let start = harness.app().log.len();
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    assert_eq!(
+        harness.app().log[start..],
+        ["Edited(\"aに\")".to_owned(), "Left".to_owned()],
+        "{:?}",
+        &harness.app().log[start..]
+    );
+    assert_eq!(harness.app().text, "aに");
+}
+
+/// Tab, Ctrl+Tab, Escape, and undo in mid-composition reach neither the
+/// target nor the app, and move no focus: the keys are the input method's.
+#[test]
+fn keys_in_mid_composition_reach_nothing() {
+    let Some((mut harness, _text)) = form("ab", true) else {
+        return;
+    };
+    let platform = Platform::current();
+    harness.step(ime_in(preedit("に")));
+    for (key, modifiers) in [
+        (Key::Tab, Modifiers::NONE),
+        (Key::Tab, held(false, true, false, false)),
+        (Key::Escape, Modifiers::NONE),
+        (Key::Enter, Modifiers::NONE),
+        (Key::Backspace, Modifiers::NONE),
+        (Key::Character('z'), shortcut(platform, false)),
+    ] {
+        harness.step(key_in(key, modifiers, None));
+    }
+    assert!(
+        harness.runtime().target().heard.is_empty(),
+        "{:?}",
+        harness.runtime().target().heard
+    );
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    assert_eq!(harness.app().text, "ab");
+}
+
+/// An input method event with no field focused goes to the target, and so
+/// does one for a field under a raised layer: that field is not changed.
+#[test]
+fn an_input_method_event_with_no_field_goes_to_the_target() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    harness.send(Message::Cover(Layer::Question));
+    harness.lay_out(&mut text);
+    harness.step(ime_in(ImeEvent::Commit("x".to_owned())));
+    assert_eq!(harness.runtime().target().ime_heard, 1);
+    assert_eq!(harness.app().text, "ab");
+    harness.send(Message::Cover(Layer::Canvas));
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    harness.step(ime_in(ImeEvent::Commit("y".to_owned())));
+    assert_eq!(harness.runtime().target().ime_heard, 2);
+    assert_eq!(harness.app().text, "ab");
+}
+
+/// Paste reads the clipboard through the driver, and the text goes in on
+/// the next turn as one undo step, made one line: "one\r\ntwo\n" is "one
+/// two". The app hears it as `Edited`.
+#[test]
+fn paste_comes_in_as_one_line_and_one_step() {
+    let Some((mut harness, mut text)) = form("", true) else {
+        return;
+    };
+    let platform = Platform::current();
+    harness.driver_mut().set_clipboard(Some("one\r\ntwo\n".to_owned()));
+    harness.step(key_in(Key::Character('v'), shortcut(platform, false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "one two");
+    assert!(harness.app().log.iter().any(|line| line == "Edited(\"one two\")"));
+    harness.step(key_in(Key::Character('z'), shortcut(platform, false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "", "one undo step");
+}
+
+/// A paste whose answer comes after focus moved, or for a field that no
+/// longer takes input, is dropped, so a slow clipboard never types into
+/// another place.
+#[test]
+fn a_paste_after_focus_moved_is_dropped() {
+    use crate::Paste;
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    // The answer comes later, from outside: built here as a driver would.
+    let paste = |harness: &Harness<Form, Keys>| harness.runtime().test_paste(name());
+    let later = paste(&harness);
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    later.give(Some("x".to_owned()));
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab", "focus moved");
+
+    harness.send(Message::Focus(name()));
+    harness.send(Message::Cover(Layer::Question));
+    harness.lay_out(&mut text);
+    let covered: Paste = paste(&harness);
+    covered.give(Some("y".to_owned()));
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab", "covered");
+}
+
+/// The runtime's input method area: on, at the caret in the window, while
+/// one of its fields has focus; `None` when none has.
+#[test]
+fn the_input_method_area_follows_the_focused_field() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let Some(crate::Ime::On { area }) = harness.runtime().ime() else {
+        panic!("on while the field has focus");
+    };
+    let start = harness.runtime().ime();
+    harness.step(key_in(Key::Home, Modifiers::NONE, None));
+    harness.lay_out(&mut text);
+    let Some(crate::Ime::On { area: home }) = harness.runtime().ime() else {
+        panic!("on");
+    };
+    // Parley widens the area by about three characters each way, so the
+    // caret's move shows at its right edge.
+    assert!(
+        home.x + home.width < area.x + area.width,
+        "the area follows the caret: {home:?} {area:?} {start:?}"
+    );
+    assert!(area.height > 0.0 && area.width > 0.0);
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().ime(), None);
+}
+
+/// Text being composed is underlined: a quad in the text colour at the
+/// foot of the preedit's box, after the text.
+#[test]
+fn a_preedit_is_underlined() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    harness.step(ime_in(preedit("に")));
+    harness.lay_out(&mut text);
+    let mut recorder = Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(Layer::Panels, &mut recorder, &PANEL);
+    let painted = recorder.painted;
+    let at = painted
+        .iter()
+        .position(|piece| piece.as_text() == Some("abに"))
+        .expect("the text with the preedit");
+    let underline = painted[at + 1..]
+        .iter()
+        .find_map(|piece| match piece {
+            Painted::Quad(quad) if quad.fill == PANEL.text => Some(quad.rect),
+            _ => None,
+        })
+        .expect("an underline");
+    assert!(underline.height <= 1.0 && underline.width > 0.0, "{underline:?}");
+}
+
+/// A screen reader acting in mid-composition keeps the preedit as text
+/// first, then acts: a replacement lands after the kept text.
+#[test]
+fn a_screen_reader_action_while_composing_keeps_the_preedit() {
+    use super::FieldAction;
+    let Some(mut bench) = field_in("a", 300.0) else { return };
+    let Bench {
+        field,
+        fonts,
+        layouts,
+        now,
+    } = &mut bench;
+    field.ime(&preedit("に"), *now, fonts, layouts);
+    field.act(FieldAction::ReplaceSelection("b".to_owned()), *now, fonts, layouts);
+    assert!(!field.composing());
+    assert_eq!(field.committed(), "aにb");
+}
+
+/// A paste whose focus moved away and came back before the answer came is
+/// dropped too: the focus moved, so the text would appear after the user
+/// had moved on, as a held Space's click does not happen then.
+#[test]
+fn a_paste_after_focus_went_away_and_back_is_dropped() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let asked = harness.runtime().test_paste(name());
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    asked.give(Some("x".to_owned()));
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab");
+}
+
+/// A screen reader's action in mid-composition keeps the preedit as text,
+/// and that is an edit the app hears, even when the action itself changes
+/// nothing more: SetValue to the text already shown, or a stale
+/// selection, still reports the kept text.
+#[test]
+fn keeping_a_preedit_for_an_action_is_an_edit() {
+    use super::FieldAction;
+    for action in [
+        FieldAction::SetValue("aに".to_owned()),
+        FieldAction::Select {
+            anchor: (0, 0),
+            focus: (0, 9),
+        },
+    ] {
+        let Some(mut bench) = field_in("a", 300.0) else { return };
+        let Bench {
+            field,
+            fonts,
+            layouts,
+            now,
+        } = &mut bench;
+        field.ime(&preedit("に"), *now, fonts, layouts);
+        let used = field.act(action.clone(), *now, fonts, layouts);
+        assert!(used.edited && used.changed, "{action:?}");
+        assert_eq!(field.committed(), "aに");
+        assert_eq!(
+            field.steps(),
+            (1, 0),
+            "keeping the preedit is one undo step: {action:?}"
+        );
+    }
+}
+
+/// The same through the runtime: the app hears `Edited` with the kept
+/// text, so the next layout does not take the preedit away.
+#[test]
+fn the_app_hears_a_preedit_a_screen_reader_kept() {
+    use accesskit::{Action, ActionData};
+    let Some((mut harness, mut text)) = form("a", true) else {
+        return;
+    };
+    let (field, _) = describe(&mut harness, &mut text);
+    harness.step(ime_in(preedit("に")));
+    let start = harness.app().log.len();
+    harness.step(reader(Action::SetValue, field, Some(ActionData::Value("aに".into()))));
+    harness.lay_out(&mut text);
+    assert!(
+        harness.app().log[start..].contains(&"Edited(\"aに\")".to_owned()),
+        "Edited carries the committed text with the kept preedit: {:?}",
+        &harness.app().log[start..]
+    );
+    assert_eq!(harness.app().text, "aに");
+}
+
+/// Every key is the input method's while it composes, Cmd+V too, so a
+/// paste that meets a composition was asked for before it began. The
+/// sequence: the paste is asked for, then the composition starts in the
+/// same field, with focus staying there, then the answer arrives. The
+/// preedit stays as text and the paste goes in after it, as macOS commits
+/// marked text before it pastes: neither is lost.
+#[test]
+fn a_paste_during_a_composition_goes_in_after_it() {
+    let Some((mut harness, mut text)) = form("a", true) else {
+        return;
+    };
+    let asked = harness.runtime().test_paste(name());
+    harness.step(ime_in(preedit("に")));
+    assert_eq!(harness.runtime().focused(), Some(&name()), "focus stays on the field");
+    asked.give(Some("x".to_owned()));
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    assert_eq!(harness.app().text, "aにx");
+}
+
+/// A composition that starts over a selection deletes the selection first,
+/// as an edit of its own: the committed text and the app agree, a layout
+/// that brings the app's (new) text back keeps the composition, and undo
+/// after a cancelled composition brings the selected text back.
+#[test]
+fn a_composition_over_a_selection_deletes_it_as_its_own_step() {
+    let Some(mut bench) = field_in("abc", 300.0) else {
+        return;
+    };
+    bench.hit(Platform::Mac, Key::Character('a'), shortcut(Platform::Mac, false));
+    let used = bench
+        .field
+        .ime(&preedit("に"), bench.now, &mut bench.fonts, &mut bench.layouts);
+    assert!(used.edited, "the app hears the deletion");
+    assert_eq!(bench.field.committed(), "");
+    assert_eq!(bench.text(), "に");
+    bench.field.take("", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+    assert!(
+        bench.field.composing(),
+        "the app's text matches, so the composition stays"
+    );
+    bench
+        .field
+        .ime(&preedit(""), bench.now, &mut bench.fonts, &mut bench.layouts);
+    assert_eq!(bench.text(), "");
+    assert_eq!(bench.field.steps(), (1, 0));
+    bench.hit(Platform::Mac, Key::Character('z'), shortcut(Platform::Mac, false));
+    assert_eq!(bench.text(), "abc", "undo brings the selected text back");
+}
+
+/// Through the runtime, the app hears the deletion as `Edited`, so its text
+/// and the field's agree while the composition goes on, and the commit
+/// then lands once.
+#[test]
+fn the_app_hears_a_selection_a_composition_replaced() {
+    let Some((mut harness, mut text)) = form("abc", true) else {
+        return;
+    };
+    harness.step(key_in(Key::Character('a'), shortcut(Platform::current(), false), None));
+    harness.step(ime_in(preedit("に")));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "");
+    harness.step(ime_in(preedit("")));
+    harness.step(ime_in(ImeEvent::Commit("日".to_owned())));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "日");
 }

@@ -122,6 +122,8 @@ pub(crate) enum Event {
     Applied,
     /// Where the canvas and the window's named parts are, for a rebuild.
     Located(Places),
+    /// Asks for fresh places after a layout invalidated an answer.
+    LocateAfterLayout,
     /// A screen reader asked for an action.
     Action(ActionRequest),
 }
@@ -166,6 +168,10 @@ pub(crate) struct Access {
     /// Where the canvas was, with its camera, when the tree was last built:
     /// where a tile's menu opens when a screen reader asks for it.
     canvas: Option<loom_canvas::CanvasView>,
+    /// The typed editor most recently reported to the screen reader.
+    typed: Option<loom_canvas::CanvasTyped>,
+    /// An edit requested for the canvas's open value field.
+    typed_request: (u64, Option<loom_canvas::TypedRequest>),
 }
 
 /// How many times this process built the tree while `--measure-tree` timed
@@ -226,6 +232,8 @@ impl Default for Access {
             focus: None,
             focus_request: (0, None),
             canvas: None,
+            typed: None,
+            typed_request: (0, None),
             timed: false,
         }
     }
@@ -238,9 +246,12 @@ impl Access {
     /// (ui-layer.md, section 4, rule 4).
     pub(crate) fn patch_replaced(&mut self) {
         self.ids.forget(&tree::canvas_id());
+        self.ids.forget(&crate::outline::tree_id());
         // The old patch's module IDs mean nothing in the new one.
         self.focus = None;
         self.focus_request.1 = None;
+        self.typed = None;
+        self.typed_request.1 = None;
     }
 
     /// Notes which control has keyboard focus on the canvas.
@@ -255,6 +266,12 @@ impl Access {
         self.focus = None;
     }
 
+    /// Requests focus on a control, or clears the control focus.
+    pub(crate) fn request_control(&mut self, control: Option<(u32, usize)>) {
+        self.focus_request = (self.focus_request.0 + 1, control);
+        self.focus = control;
+    }
+
     /// The canvas control with keyboard focus, as the canvas last said.
     pub(crate) fn focus(&self) -> Option<(u32, usize)> {
         self.focus
@@ -263,6 +280,11 @@ impl Access {
     /// The focus request the canvas is shown: its key and its control.
     pub(crate) fn focus_request(&self) -> (u64, Option<(u32, usize)>) {
         self.focus_request
+    }
+
+    /// Latest text action on the open value editor.
+    pub(crate) fn typed_request(&self) -> (u64, Option<&loom_canvas::TypedRequest>) {
+        (self.typed_request.0, self.typed_request.1.as_ref())
     }
 
     /// True while a screen reader listens.
@@ -354,6 +376,11 @@ impl crate::App {
             return;
         }
         self.a11y.locating = true;
+        self.a11y_read_places();
+    }
+
+    /// Reads the window after its latest layout.
+    fn a11y_read_places(&mut self) {
         self.ask_window(crate::window_question::WindowQuestion::places(|places| {
             crate::Message::A11y(Event::Located(places))
         }));
@@ -365,9 +392,14 @@ impl crate::App {
     pub(crate) fn a11y_changes(&mut self, places: &Places) -> (TreeUpdate, Option<TreeUpdate>) {
         let view = places.canvas.as_ref();
         self.a11y.canvas = places.canvas;
+        self.a11y.typed = places.typed.clone();
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
-        let ids = self.a11y_widget_ids(&snapshot);
+        let mut ids = self.a11y_widget_ids(&snapshot);
+        ids.map = self
+            .map_view()
+            .zip(places.canvas)
+            .and_then(|(map, view)| map.bounds(&self.session.scene, view.camera, view.bounds));
         let whole = tree::tree(
             &snapshot,
             &frames,
@@ -464,7 +496,56 @@ impl crate::App {
         if !self.pointer_reaches_window() {
             ids.set_covered();
         }
+        ids.focused_port = self.session.outline.focus_port;
+        let structure = &self.session.patch_map.structure;
         for tile in &snapshot.tiles {
+            ids.neighbours
+                .insert(tile.id, crate::outline::neighbours(structure, tile.id));
+            if let Some(view) = self.session.scene.module(tile.id) {
+                for (output, ports) in [(false, &view.inputs), (true, &view.outputs)] {
+                    for (index, port) in ports.iter().enumerate() {
+                        let reference = loom_canvas::PortRef {
+                            module: tile.id,
+                            output,
+                            index,
+                        };
+                        let Some(name) = crate::targets::port_name(graph, hierarchy, reference) else {
+                            continue;
+                        };
+                        let Some(centre) = self.session.scene.port_position(reference) else {
+                            continue;
+                        };
+                        let id = tree::tile_id(tile.id)
+                            .with(if output { "output" } else { "input" })
+                            .with(name);
+                        let mut description = crate::outline::port_neighbours(structure, reference, true);
+                        if !output
+                            && description == "Not connected"
+                            && let Some(spec) = graph
+                                .node(ModuleId(tile.id))
+                                .and_then(|n| n.descriptor.inputs.get(index))
+                        {
+                            description.push_str(&format!(", {}", spec.default.text()));
+                        }
+                        let controls = structure
+                            .cables
+                            .iter()
+                            .filter(|wire| wire.from == reference)
+                            .map(|wire| wire.to)
+                            .collect();
+                        ids.ports.insert(
+                            (tile.id, output, index),
+                            tree::PortNode {
+                                id,
+                                label: port.label.clone(),
+                                description,
+                                centre,
+                                controls,
+                            },
+                        );
+                    }
+                }
+            }
             let part = crate::surface::part_tile(hierarchy, tile.id);
             let node = graph.node(ModuleId(part));
             let on_module = node.is_some();
@@ -543,9 +624,14 @@ impl crate::App {
         // Actions that place something, such as a tile's menu, use the
         // canvas the tree was built with, as after `a11y_changes`.
         self.a11y.canvas = places.canvas;
+        self.a11y.typed = places.typed.clone();
         let snapshot = self.ui_snapshot();
         let frames = self.a11y_frames();
-        let ids = self.a11y_widget_ids(&snapshot);
+        let mut ids = self.a11y_widget_ids(&snapshot);
+        ids.map = self
+            .map_view()
+            .zip(places.canvas)
+            .and_then(|(map, view)| map.bounds(&self.session.scene, view.camera, view.bounds));
         tree::tree(
             &snapshot,
             &frames,
@@ -584,12 +670,26 @@ impl crate::App {
         let panel = match self.right_tab {
             crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
             crate::matrix::Tab::Matrix => self.matrix_items(),
+            crate::matrix::Tab::Outline => Vec::new(),
         };
         let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
             panel,
             focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
-            focused_item: self.matrix_focus(),
+            focused_item: self
+                .jump_focus()
+                .or_else(|| {
+                    (self.right_tab == crate::matrix::Tab::Outline && self.session.outline.active)
+                        .then(|| self.outline_focus(&self.outline_rows()))
+                        .flatten()
+                })
+                .or_else(|| {
+                    self.toolbar_keyboard_name()
+                        .map(|button| tree::toolbar_id().with(button))
+                })
+                .or_else(|| self.matrix_focus())
+                .or_else(|| self.session.outline.inspector_action.clone()),
+            jump: self.jump_items(),
             overlay,
             overlay_focus,
         }
@@ -710,6 +810,28 @@ impl crate::App {
         }
         let snapshot = self.ui_snapshot();
         let ids = self.a11y_widget_ids(&snapshot);
+        if self.typed_field_action(&ids, request) {
+            return Vec::new();
+        }
+        if let Some(id) = self.a11y.ids.id(request.target_node.0).cloned() {
+            if matches!(request.action, accesskit::Action::Focus | accesskit::Action::Click)
+                && self.right_tab == crate::matrix::Tab::Outline
+                && snapshot.outline.iter().any(|row| row.id == id)
+            {
+                return vec![crate::Message::OutlineRow(id)];
+            }
+            if request.action == accesskit::Action::Focus
+                && let Some((&(module, output, index), _)) = ids.ports.iter().find(|(_, port)| port.id == id)
+            {
+                self.focus_canvas_port(loom_canvas::PortRef { module, output, index });
+                return Vec::new();
+            }
+            if request.action == accesskit::Action::Click
+                && let Some(message) = self.jump_action(&id)
+            {
+                return vec![message];
+            }
+        }
         // ShowContextMenu on a tile opens its menu at the tile's top-left
         // corner, as the menu key does (section 6, rule 8).
         if request.action == accesskit::Action::ShowContextMenu {
@@ -801,6 +923,51 @@ impl crate::App {
         messages
     }
 
+    /// Applies text-range actions to the open value editor.
+    fn typed_field_action(&mut self, ids: &tree::WidgetIds, request: &ActionRequest) -> bool {
+        use accesskit::{Action, ActionData};
+        let Some(typed) = &self.a11y.typed else { return false };
+        let Some(control) = ids.get(typed.module, typed.widget) else {
+            return false;
+        };
+        let field = control.clone().with("field");
+        if self.a11y.ids.id(request.target_node.0) != Some(&field) {
+            return false;
+        }
+        let byte = |position: accesskit::TextPosition| {
+            (self.a11y.ids.id(position.node.0) == Some(&field.clone().with("text")))
+                .then(|| {
+                    typed
+                        .text
+                        .char_indices()
+                        .map(|(index, _)| index)
+                        .chain(std::iter::once(typed.text.len()))
+                        .nth(position.character_index)
+                })
+                .flatten()
+        };
+        let edit = match (request.action, &request.data) {
+            (Action::SetTextSelection, Some(ActionData::SetTextSelection(selection))) => {
+                let (Some(anchor), Some(caret)) = (byte(selection.anchor), byte(selection.focus)) else {
+                    return true;
+                };
+                loom_canvas::TypedEdit::Select { anchor, caret }
+            }
+            (Action::ReplaceSelectedText, Some(ActionData::Value(text))) => {
+                loom_canvas::TypedEdit::Replace(text.to_string())
+            }
+            _ => return true,
+        };
+        self.a11y.typed_request.0 += 1;
+        self.a11y.typed_request.1 = Some(loom_canvas::TypedRequest {
+            control: (typed.module, typed.widget),
+            text: typed.text.clone(),
+            edit,
+        });
+        self.effect(loom_ui::Effects::redraw());
+        true
+    }
+
     /// Carries out a screen reader's action that arrived at `at`: its
     /// messages are posted, each its own update on the next turn, and the
     /// step's release follows them ([`Event::Applied`]), so its edit joins
@@ -838,6 +1005,13 @@ impl crate::App {
             Event::LiveTick => {
                 self.a11y.flush_live = true;
                 self.a11y_rebuild();
+            }
+            Event::LocateAfterLayout => {
+                if self.a11y.active {
+                    self.a11y_read_places();
+                } else {
+                    self.a11y.locating = false;
+                }
             }
             Event::Located(places) => {
                 self.a11y.locating = false;

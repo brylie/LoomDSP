@@ -278,7 +278,16 @@ pub fn event_to_core(event: &iced::Event) -> Option<Event> {
         }),
         iced::Event::Window(window::Event::RedrawRequested(_)) => Event::Redraw,
         iced::Event::Window(window::Event::Unfocused) => Event::WindowUnfocused,
-        iced::Event::Window(_) | iced::Event::Touch(_) | iced::Event::InputMethod(_) => return None,
+        iced::Event::InputMethod(event) => Event::Ime(match event {
+            iced::advanced::input_method::Event::Opened => loom_ui_core::ImeEvent::Enabled,
+            iced::advanced::input_method::Event::Preedit(text, cursor) => loom_ui_core::ImeEvent::Preedit {
+                text: text.clone(),
+                cursor: cursor.as_ref().map(|range| (range.start, range.end)),
+            },
+            iced::advanced::input_method::Event::Commit(text) => loom_ui_core::ImeEvent::Commit(text.clone()),
+            iced::advanced::input_method::Event::Closed => loom_ui_core::ImeEvent::Disabled,
+        }),
+        iced::Event::Window(_) | iced::Event::Touch(_) => return None,
     })
 }
 

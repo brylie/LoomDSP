@@ -473,9 +473,26 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
     ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), none);
     assert_eq!(ui.focused_field(), Some(high.clone()));
     assert!(ui.app().session.learn.has_range_draft());
+    ui.tap(
+        keyboard::Key::Named(keyboard::key::Named::Tab),
+        keyboard::Modifiers::SHIFT,
+    );
+    assert_eq!(ui.focused_field(), Some(low.clone()));
+    assert!(ui.app().session.learn.has_range_draft());
     ui.tap(keyboard::Key::Named(keyboard::key::Named::Escape), none);
     assert!(!ui.app().session.learn.has_range_draft());
 
+    for (field, modifiers) in [(&high, none), (&low, keyboard::Modifiers::SHIFT)] {
+        ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+        ui.focus(field);
+        ui.send(draft());
+        let messages = ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), modifiers);
+        assert_eq!(ui.focused_field(), None);
+        assert!(!ui.app().session.learn.has_range_draft());
+        assert!(messages.iter().any(|message| matches!(message, Message::Canvas(_))));
+    }
+
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
     ui.focus(&low);
     ui.send(draft());
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(3)));
@@ -1399,7 +1416,7 @@ fn a_select_only_parameter_is_a_modulation_target() {
     };
     assert!(rows.params[long].accepts_drop, "its row accepts a drop");
     assert!(
-        crate::matrix::targets(ui.app().session.controller.graph())
+        crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
             .iter()
             .any(|t| t.module == id && t.param == long),
         "the matrix offers it as a target"
@@ -2495,8 +2512,9 @@ fn tab_from_a_value_field_moves_the_canvas() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let (id, _) = focus_cutoff_field(&mut ui);
-    assert!(
-        !ui.app().tab_moves_between_fields(ui.app().focus.as_ref()),
+    assert_eq!(
+        ui.app().text_field_tabs(ui.app().focus.as_ref()),
+        [false; 2],
         "a value field is in no list"
     );
     let messages = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
@@ -2616,7 +2634,7 @@ fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
     ui.send(Message::Learn(crate::learn::Message::Arm((source.0, index))));
     assert!(!ui.app().session.learn.is_armed((source.0, index)));
     assert!(
-        !crate::matrix::targets(ui.app().session.controller.graph())
+        !crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
             .iter()
             .any(|target| target.module == source && target.param == index)
     );

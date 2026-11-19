@@ -30,6 +30,8 @@ pub enum Message {
     Safety(OutputSafety),
     /// Show signal activity on connected ports.
     Activity(bool),
+    /// Chooses the patch map mode, or cycles it from the toolbar.
+    Map(Option<crate::preferences::MapMode>),
     Audio(Change),
     /// Choose the audio input device.
     Input(InputChoice),
@@ -154,6 +156,7 @@ impl App {
             }
             Message::Safety(mode) => self.choose_output_safety(mode),
             Message::Activity(on) => self.choose_activity(on),
+            Message::Map(mode) => self.choose_map(mode),
             Message::Audio(change) => self.change_audio(change),
             Message::Input(choice) => self.choose_audio_input(choice),
             Message::ClockSource(name) => self.choose_clock_source(name),
@@ -201,6 +204,18 @@ impl App {
         preferences.licence = licence;
         if let Some(error) = self.rig.save(preferences) {
             self.alerts.warn(error);
+        }
+    }
+
+    /// Saves an explicit choice, or cycles visibility from the canvas.
+    pub(crate) fn choose_map(&mut self, mode: Option<crate::preferences::MapMode>) {
+        let mut preferences = self.rig.store.saved().clone();
+        let mode = mode.unwrap_or_else(|| preferences.patch_map.next());
+        preferences.patch_map = mode;
+        if let Some(error) = self.rig.save(preferences) {
+            self.alerts.warn(error);
+        } else {
+            self.alerts.say(format!("Patch map: {mode}"));
         }
     }
 

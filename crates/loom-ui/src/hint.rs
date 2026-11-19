@@ -80,8 +80,8 @@ pub(crate) struct Chooser {
     /// `None` until it has: the focus then decides alone.
     pointer_at: Option<u64>,
     /// The element whose text Escape hid, with the focus's move count and
-    /// the hovered element then: it shows again once either changes.
-    hidden: Option<(UiId, u64, Option<UiId>)>,
+    /// the hover's move count then: it shows again once either changes.
+    hidden: Option<(UiId, u64, u64)>,
 }
 
 impl Chooser {
@@ -89,6 +89,11 @@ impl Chooser {
     /// focus moved `moves` times so far: the pointer is the latest input.
     pub(crate) fn pointer_moved(&mut self, moves: u64) {
         self.pointer_at = Some(moves);
+    }
+
+    /// Whether the pointer moved at least as recently as focus.
+    pub(crate) fn pointer_last(&self, moves: u64) -> bool {
+        self.pointer_at.is_some_and(|at| at >= moves)
     }
 
     /// The element whose hover text shows, of the `hovered` element and
@@ -101,17 +106,16 @@ impl Chooser {
         &mut self,
         hovered: Option<(UiId, String)>,
         focused: Option<(UiId, String)>,
-        hover: Option<&UiId>,
+        hover: u64,
         moves: u64,
     ) -> Option<(UiId, String)> {
-        let pointer_last = self.pointer_at.is_some_and(|at| at >= moves);
-        let pick = if pointer_last {
+        let pick = if self.pointer_last(moves) {
             hovered.or(focused)
         } else {
             focused.or(hovered)
         };
         if let Some((_, at, over)) = &self.hidden
-            && (*at != moves || over.as_ref() != hover)
+            && (*at != moves || *over != hover)
         {
             self.hidden = None;
         }
@@ -120,14 +124,14 @@ impl Chooser {
 
     /// Hides the hover text of `shown` until the focus moves past `moves`
     /// or the hover leaves `hover`. Returns true when something was hidden.
-    pub(crate) fn hide(&mut self, shown: Option<&UiId>, hover: Option<&UiId>, moves: u64) -> bool {
+    pub(crate) fn hide(&mut self, shown: Option<&UiId>, hover: u64, moves: u64) -> bool {
         let Some(id) = shown else {
             return false;
         };
         if self.hidden.as_ref().is_some_and(|(hid, _, _)| hid == id) {
             return false;
         }
-        self.hidden = Some((id.clone(), moves, hover.cloned()));
+        self.hidden = Some((id.clone(), moves, hover));
         true
     }
 }
@@ -145,11 +149,6 @@ pub(crate) struct Shown {
     pub(crate) layout: Layout,
     /// Where its box is in the window.
     pub(crate) rect: Rect,
-    /// Where the pointer keeps it showing: its box, its element's box, and
-    /// the strip between them where the two line up. Not the rectangle
-    /// around all of it, which can cover a neighbour beside a narrow
-    /// element under a wide box: that neighbour must take the hover.
-    keep: [Rect; 3],
 }
 
 impl std::fmt::Debug for Shown {
@@ -204,19 +203,13 @@ pub(crate) fn place(
         text,
         layout,
         rect,
-        keep: [rect, anchor, strip(rect, anchor)],
     }
 }
 
 impl Shown {
-    /// True when `point` is on its box.
-    pub(crate) fn on_box(&self, point: Point) -> bool {
-        self.rect.contains(point)
-    }
-
-    /// True when the pointer at `point` keeps it showing.
-    pub(crate) fn keeps(&self, point: Point) -> bool {
-        self.keep.iter().any(|area| area.contains(point))
+    /// The box, the current anchor, and the narrow strip linking them keep the hint.
+    pub(crate) fn keeps(&self, point: Point, anchor: Rect) -> bool {
+        self.rect.contains(point) || anchor.contains(point) || strip(self.rect, anchor).contains(point)
     }
 }
 

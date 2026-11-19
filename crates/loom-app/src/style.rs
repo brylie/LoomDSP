@@ -180,19 +180,25 @@ pub fn cell(focused: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_butto
 /// on a tile and in a panel, 2 logical pixels wide and 2 outside the part.
 /// It stands out at 3:1 or more against every panel background
 /// (WCAG 2.2, 1.4.11 and 2.4.13), which a test checks.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "drawn once the first view moves to loom-ui (leaving-iced plan, step 3.2)"
-    )
-)]
 pub fn focus_ring() -> loom_ui::RingStyle {
     loom_ui::RingStyle {
         color: loom_canvas::Palette::default().focus,
         width: 2.0,
         offset: 2.0,
     }
+}
+
+/// Keeps a button's role while giving keyboard focus the canvas's blue outline.
+pub fn focused_button(
+    theme: &Theme,
+    status: iced_button::Status,
+    role: fn(&Theme, iced_button::Status) -> iced_button::Style,
+) -> iced_button::Style {
+    let ring = focus_ring();
+    let mut style = role(theme, status);
+    style.border.color = loom_canvas::iced_convert::ToIced::to_iced(ring.color);
+    style.border.width = ring.width;
+    style
 }
 
 /// A tab title. The open tab has a fill and a border; the others are plain

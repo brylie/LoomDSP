@@ -87,11 +87,18 @@ impl App {
         }
     }
 
-    /// True when the focused text field is one Tab moves on from, to the next
-    /// field of its view. Any other field closes on Tab instead
+    /// Whether Tab and Shift+Tab stay within the focused field's view, in
+    /// that order. Any other field closes on Tab instead
     /// (panel-widgets.md, Typing a value).
-    pub(crate) fn tab_moves_between_fields(&self, focused: Option<&UiId>) -> bool {
-        focused.is_some_and(|focused| self.tab_fields().contains(focused))
+    pub(crate) fn text_field_tabs(&self, focused: Option<&UiId>) -> [bool; 2] {
+        let Some(focused) = focused else { return [false; 2] };
+        if self.no_overlay() && !self.session.selection.is_empty() {
+            // In the inspector, only a step within the pair stays in the field.
+            return self
+                .midi_range_fields()
+                .map_or([false; 2], |[low, high]| [*focused == low, *focused == high]);
+        }
+        [self.tab_fields().contains(focused); 2]
     }
 
     /// True while the window's own Tab order has fields that read before
@@ -107,10 +114,13 @@ impl App {
     /// Tab or Shift+Tab between the fields of the view on top: the next one
     /// takes focus. Past either end of patch info's fields, focus goes on to
     /// the stats bar's first stop (or its last, with Shift), when it has
-    /// any. With no stop in the bar, and in an overlay, the fields loop as
-    /// before. With no field of the view in focus it changes nothing: Tab
-    /// from nothing is the canvas's (section 6, rule 2).
+    /// any. With no stop in the bar, and in an overlay, the fields loop.
+    /// Past an end of the MIDI range pair or with no field focused,
+    /// the canvas takes Tab (section 6, rule 2).
     pub(crate) fn tab_between_fields(&mut self, focused: Option<&UiId>, backwards: bool) {
+        if !self.text_field_tabs(focused)[usize::from(backwards)] {
+            return;
+        }
         let fields = self.tab_fields();
         let at = focused.and_then(|focused| fields.iter().position(|field| field == focused));
         let next = match at {
@@ -216,6 +226,7 @@ impl App {
 
     /// Closes the open gesture and records it.
     pub(crate) fn end_gesture(&mut self) {
+        self.session.patch_map.reorder(&self.session.scene);
         let step_name = if self.session.patch_info.end_part_authors_edit() {
             Some(crate::patch_info::EDIT_PART_AUTHORS.to_string())
         } else {
