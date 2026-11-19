@@ -96,12 +96,86 @@ impl Clipboard for Memory {
     }
 }
 
-/// The app [`Ui::open`] runs, for a test that applies messages to it
-/// directly: a patch from `examples/patches`, with no audio.
-pub(crate) fn open_app(patch: &str) -> App {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// The example patch `patch` from `examples/patches` in the repository.
+pub(crate) fn example_path(patch: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/patches")
-        .join(patch);
+        .join(patch)
+}
+
+/// The start of the name of each folder [`example_copy`] makes in the
+/// system's temporary folder.
+const COPY_PREFIX: &str = "loom-app-ui-";
+
+/// True when `dir` is one of the folders [`example_copy`] makes: directly
+/// inside the system's temporary folder, and named with
+/// [`COPY_PREFIX`]. Nothing else is ever removed.
+fn is_copy_folder(dir: &std::path::Path) -> bool {
+    let temp = std::fs::canonicalize(std::env::temp_dir()).ok();
+    let parent = dir.parent().and_then(|parent| std::fs::canonicalize(parent).ok());
+    let named = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(COPY_PREFIX));
+    named && temp.is_some() && parent == temp
+}
+
+/// Removes the copy folders left by earlier runs: those more than an hour
+/// old, so a folder another test process is using now stays. Once a
+/// process, on its first copy.
+fn sweep_old_copies() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let hour = std::time::Duration::from_secs(3600);
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > hour);
+        if old && is_copy_folder(&dir) {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
+/// A copy of the example patch `patch`, in a new folder of the system's
+/// temporary folder for this test alone: the process ID and a count keep
+/// tests that run at once apart. A save in a test then writes the copy.
+/// The folder is left for the system to clear, as other tests' are.
+///
+/// Anything that is not an example in the repository is opened as it was
+/// before: a test's own file by its absolute path (joined to the examples
+/// folder, it stays itself), or a name that is no file, which opens the
+/// app with no patch.
+pub(crate) fn example_copy(patch: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    let source = example_path(patch);
+    if std::path::Path::new(patch).is_absolute() || !source.is_file() {
+        return source;
+    }
+    SWEPT.call_once(sweep_old_copies);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("{COPY_PREFIX}{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a folder for the copy");
+    let copy = dir.join(patch);
+    std::fs::copy(&source, &copy).unwrap_or_else(|why| panic!("copy {patch}: {why}"));
+    copy
+}
+
+/// The app [`Ui::open`] runs, for a test that applies messages to it
+/// directly: a patch from `examples/patches`, with no audio. It opens a
+/// copy of the patch in a folder of its own ([`example_copy`]), so a test
+/// that saves writes the copy, never the example in the repository. A
+/// [`Ui`] removes its copy when it drops; a test that uses this app with
+/// no `Ui` leaves its copy for a later run's sweep, an hour on.
+pub(crate) fn open_app(patch: &str) -> App {
+    let path = example_copy(patch);
     App::new(Args {
         patch: Some(path),
         generate: None,
@@ -123,6 +197,25 @@ pub(crate) fn open_app(patch: &str) -> App {
         test_modules: false,
         dev: false,
     })
+}
+
+/// A `Ui` removes the copy of the example it opened, with its folder, so
+/// copies do not pile up across runs. Only a copy folder is removed
+/// ([`is_copy_folder`]).
+impl Drop for Ui {
+    fn drop(&mut self) {
+        let dir = self
+            .bridge
+            .app()
+            .session
+            .document
+            .file()
+            .and_then(std::path::Path::parent)
+            .map(std::path::Path::to_path_buf);
+        if let Some(dir) = dir.filter(|dir| is_copy_folder(dir)) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 impl Ui {

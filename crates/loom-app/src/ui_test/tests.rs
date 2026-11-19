@@ -3042,3 +3042,29 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
     assert_eq!(again.len(), (half.width * half.height * 4) as usize);
     drop(built);
 }
+
+/// A test that saves writes its own copy of the example, never the
+/// example in the repository: Cmd+S (Ctrl+S elsewhere) in the harness
+/// saves the copy `Ui::open` opened, and the real file's bytes stay.
+#[test]
+fn a_save_in_the_harness_writes_the_copy() {
+    use iced::keyboard::{Key, Modifiers};
+    let real = example_path("subtractive.ron");
+    let before = std::fs::read(&real).unwrap();
+    let mut ui = Ui::open("subtractive.ron");
+    let copy = ui.app().session.document.file().expect("a file is open").to_path_buf();
+    assert_ne!(
+        std::fs::canonicalize(&copy).unwrap(),
+        std::fs::canonicalize(&real).unwrap(),
+        "the harness opened a copy"
+    );
+    let written = std::fs::metadata(&copy).unwrap().modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.redraw();
+    assert!(
+        std::fs::metadata(&copy).unwrap().modified().unwrap() > written,
+        "the save wrote the copy"
+    );
+    assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
+}
