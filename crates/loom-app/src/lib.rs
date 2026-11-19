@@ -1601,6 +1601,7 @@ impl App {
         }
         let was_open = self.overlays.browser().is_some();
         let was_help_open = self.overlays.help.is_some();
+        let before_help = self.input_owner();
         match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Patches(message) => self.patches_message(message),
@@ -1609,8 +1610,7 @@ impl App {
             }
             Message::File(FileAction::Browse) => self.open_patches(),
             // An open menu has its own keys (`menus.rs`): Enter sends what its
-            // item sends, which may return work of its own. Any other key goes
-            // where it went before, so a shortcut still works over a menu.
+            // item sends, which may return work of its own.
             Message::Key(event)
                 if menus::is_menu_key(&event)
                     && matches!(
@@ -1703,6 +1703,10 @@ impl App {
                 self.handle(message);
             }
         }
+        // A range editor can disappear before the window's focus answer.
+        if self.session.learn.has_range_draft() && !cause.is_live() && self.midi_range_fields().is_none() {
+            self.session.learn.set_range_draft(None);
+        }
         // The bridge asks the window where focus is after this turn.
         if ask_focus {
             self.focus_question.set(true);
@@ -1739,7 +1743,26 @@ impl App {
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
             self.run_files.finish();
             self.effect(loom_ui::Effects::quit());
-        } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
+        } else if !was_help_open && self.overlays.help.is_some() {
+            if matches!(
+                before_help,
+                input_owner::InputOwner::Browser | input_owner::InputOwner::Patches
+            ) {
+                self.overlays.help_focus = self.focus.clone();
+                if self.overlays.help_focus.is_some() {
+                    self.effect(loom_ui::Effects::unfocus());
+                }
+            }
+        } else if was_help_open && self.overlays.help.is_none() {
+            let field = self
+                .overlays
+                .help_focus
+                .take()
+                .or_else(|| self.overlays.browser().is_some().then(browser::search_id));
+            if let Some(field) = field {
+                self.effect(loom_ui::Effects::focus(field));
+            }
+        } else if !was_open && self.overlays.browser().is_some() {
             self.effect(loom_ui::Effects::focus(browser::search_id()));
         }
     }

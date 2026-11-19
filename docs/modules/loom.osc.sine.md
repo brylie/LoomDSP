@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A sine wave at the pitch, or shaped from a phase cable.
+A sine wave at the pitch. Connect a Phase module to Phase to shape its ramp instead.
 
 | | |
 |---|---|

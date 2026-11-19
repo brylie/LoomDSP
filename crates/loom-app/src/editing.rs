@@ -74,10 +74,14 @@ impl App {
     /// The text fields Tab moves between in the view on top now. None when
     /// that view has fewer than two.
     pub(crate) fn tab_fields(&self) -> Vec<UiId> {
-        if self.overlays.patches().is_some() {
+        if self.input_owner() == crate::input_owner::InputOwner::Patches {
             crate::patches::text_fields().to_vec()
-        } else if self.no_overlay() && self.right_tab == RightTab::Inspector && self.session.selection.is_empty() {
-            crate::patch_info::text_fields().to_vec()
+        } else if self.no_overlay() && self.right_tab == RightTab::Inspector {
+            if self.session.selection.is_empty() {
+                crate::patch_info::text_fields().to_vec()
+            } else {
+                self.midi_range_fields().map_or_else(Vec::new, |fields| fields.to_vec())
+            }
         } else {
             Vec::new()
         }
@@ -94,7 +98,10 @@ impl App {
     /// the stats bar's stops: patch info's, with no overlay open, and the
     /// bar has a stop to hand Tab on to (ui-layer.md, section 6, rule 2).
     pub(crate) fn fields_before_the_bar(&self) -> bool {
-        self.no_overlay() && !self.tab_fields().is_empty() && !self.bar_stops().is_empty()
+        self.no_overlay()
+            && self.session.selection.is_empty()
+            && !self.tab_fields().is_empty()
+            && !self.bar_stops().is_empty()
     }
 
     /// Tab or Shift+Tab between the fields of the view on top: the next one
@@ -398,6 +405,7 @@ impl App {
         };
         // An armed parameter is a mode, not an edit: undo disarms it first.
         self.session.learn.disarm();
+        self.session.learn.set_range_draft(None);
         let applied = self.apply_step(&step, forward, room);
         if let Err(StepRefusal::NoRoom) = applied {
             // Taken back whole, before anything reached the engine: the

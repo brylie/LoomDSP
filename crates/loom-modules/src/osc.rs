@@ -23,7 +23,7 @@ pub static SINE: ModuleDescriptor = ModuleDescriptor {
     name: "Sine",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A sine wave at the pitch, or shaped from a phase cable.",
+    description: "A sine wave at the pitch. Connect a Phase module to Phase to shape its ramp instead.",
     inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
@@ -84,7 +84,7 @@ pub static SAW: ModuleDescriptor = ModuleDescriptor {
     name: "Saw",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A sawtooth wave, with every harmonic, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.",
+    description: "A sawtooth wave, with every harmonic, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its sharp edges are smoothed so high notes stay clean.",
     inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
@@ -148,7 +148,7 @@ pub static PULSE: ModuleDescriptor = ModuleDescriptor {
     name: "Pulse",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.",
+    description: "A pulse wave with a set width, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its sharp edges are smoothed so high notes stay clean.",
     inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
@@ -247,7 +247,7 @@ pub static TRIANGLE: ModuleDescriptor = ModuleDescriptor {
     name: "Triangle",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "A triangle wave with few harmonics, at the pitch or shaped from a phase cable. Its corners are smoothed so high notes stay clean.",
+    description: "A triangle wave with few harmonics, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its corners are smoothed so high notes stay clean.",
     inputs: &[PITCH_PORT, PHASE_PORT],
     outputs: &[PortSpec {
         name: "out",
@@ -311,7 +311,7 @@ pub static NOISE: ModuleDescriptor = ModuleDescriptor {
     name: "Noise",
     category: "Oscillator",
     family: loom_core::Family::Sources,
-    description: "White, pink, or brown noise. The seed makes every render the same.",
+    description: "White, pink, or brown noise. Seed picks the noise sequence. The same seed repeats it.",
     inputs: &[],
     outputs: &[PortSpec {
         name: "out",

@@ -4,7 +4,7 @@
 //! `docs/design/modulation.md`).
 
 use crate::{App, Message, learn, modulation};
-use loom_core::{MidiMappingOptions, ModuleId, ModuleNames, OutputRef};
+use loom_core::{MidiMappingOptions, MidiMode, ModuleId, ModuleNames, OutputRef};
 use loom_ui_core::UiId;
 use std::time::Instant;
 
@@ -227,6 +227,9 @@ impl App {
                 .set_midi_options(ModuleId(module), index, options)
             {
                 Ok(Some(_)) => {
+                    if app.session.learn.range_draft((module, index)).is_some() {
+                        app.session.learn.set_range_draft(None);
+                    }
                     app.commit();
                 }
                 Ok(None) => {}
@@ -396,6 +399,13 @@ impl App {
         {
             self.session.value_draft = None;
         }
+        if self.session.learn.has_range_draft()
+            && !focus
+                .as_ref()
+                .is_some_and(|part| self.midi_range_fields().is_some_and(|fields| fields.contains(part)))
+        {
+            self.session.learn.set_range_draft(None);
+        }
         let gained = focus
             .clone()
             .filter(|part| self.focus.as_ref() != Some(part) && self.is_value_field(part));
@@ -405,13 +415,24 @@ impl App {
         }
     }
 
-    /// Every row with a value field the inspector shows now, with the
+    /// The two fields of the visible, open MIDI mapping, if it has a range.
+    pub(crate) fn midi_range_fields(&self) -> Option<[UiId; 2]> {
+        self.session.learn.open_options()?;
+        self.parameter_rows().into_iter().find_map(|(_, row)| {
+            let mapping = row.mapping_options.as_ref()?;
+            let absolute = !matches!(mapping.options.mode, MidiMode::Relative(_));
+            (mapping.open && absolute)
+                .then(|| ["midi/low", "midi/high"].map(|part| crate::inspector::ids::part(&row.ui, part)))
+        })
+    }
+
+    /// Every parameter row of the inspector, with the
     /// module whose parameter it edits: a module's own parameters, a
     /// sub-patch tile's exposed rows, and a slot's parameters, each under
     /// the inner module that owns the parameter, as its draft is.
-    fn value_rows(&self) -> Vec<(u32, crate::inspector::ParamRow)> {
+    fn parameter_rows(&self) -> Vec<(u32, crate::inspector::ParamRow)> {
         use crate::inspector::Inspector;
-        let rows: Vec<_> = match self.inspector_model() {
+        match self.inspector_model() {
             Inspector::Module(rows) => {
                 let id = rows.id;
                 rows.params.into_iter().map(|p| (id, p)).collect()
@@ -424,15 +445,15 @@ impl App {
                 .map(|(_, module, p)| (module, p))
                 .collect(),
             _ => Vec::new(),
-        };
-        rows.into_iter().filter(|(_, row)| row.field.is_some()).collect()
+        }
     }
 
     /// Every value field the inspector shows now, as (module, parameter
-    /// index, the field's part), from [`Self::value_rows`].
+    /// index, the field's part), from [`Self::parameter_rows`].
     fn value_fields(&self) -> Vec<(u32, usize, UiId)> {
-        self.value_rows()
+        self.parameter_rows()
             .into_iter()
+            .filter(|(_, row)| row.field.is_some())
             .map(|(module, row)| (module, row.index, crate::inspector::ids::part(&row.ui, "field")))
             .collect()
     }
@@ -445,8 +466,9 @@ impl App {
     /// share them (control-ranges.md, Showing the value).
     fn shown_value_text(&self, module: u32, index: usize) -> Option<String> {
         if let Some((_, row)) = self
-            .value_rows()
+            .parameter_rows()
             .into_iter()
+            .filter(|(_, row)| row.field.is_some())
             .find(|(m, row)| (*m, row.index) == (module, index))
         {
             return Some(row.value);

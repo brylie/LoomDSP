@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.
+A pulse wave with a set width, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its sharp edges are smoothed so high notes stay clean.
 
 | | |
 |---|---|

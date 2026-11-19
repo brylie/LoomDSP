@@ -28,10 +28,10 @@ Every panel uses the same widget set.
 | Widget | Use |
 |---|---|
 | Knob | Continuous values. Shows modulation depth as an arc (FR-MOD-04). |
-| Slider, horizontal or vertical | Continuous values where a long throw helps. |
+| Fader, horizontal or vertical | Continuous values where a long throw helps. |
 | Toggle | On or off. |
 | Radio buttons | A few choices shown at once, such as filter slopes 6, 12, 18, 24 dB. |
-| Selector | Many choices, as a menu. |
+| Select list | Many choices, as a menu. |
 | Button | A momentary action or trigger. |
 | XY pad | Two parameters at once. |
 
@@ -43,12 +43,12 @@ Every panel uses the same widget set.
 | Meter | A level, from a port probe or a display value. |
 | Scope | A signal over time, from a port probe. |
 | Step grid | A pattern, and the playing step. Editable when bound to module data. |
-| Graph | A shape: envelope, curve, filter response. Editable when bound to module data. |
+| Curve | A shape: envelope, curve, filter response. Editable when bound to module data. |
 | Label | Static text. |
 
 *Why one set:* users learn each control once. A new widget is added to the set, not drawn by one module, so every module and every panel can use it.
 
-The widgets after M1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are specified in [Panel widgets](panel-widgets.md) (Agreed, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It names the slider "fader", the selector "select list", and the graph "curve", and adds a number, a readout, an XY scope, and a waveform.
+The widgets after M1, with their bindings, modulation display, keyboard use, and the catalogue entries that need them, are specified in [Panel widgets](panel-widgets.md) (Agreed, [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md)). It adds a number, a readout, an XY scope, and a waveform.
 
 The [read-only shape preview](panel-widgets.md#read-only-shape-preview) is an agreed first slice of the curve widget. Envelope, LFO, and Ladder place it above their controls. Each puts its choices in a row under the full-width shape ([Panel layout](#panel-layout), principle 2); Envelope's Mode is a segmented control. The preview shows a schematic result from parameters, keeps the tile's drag gesture, and has no editing handles. Built-in tiles use knobs for single ranged parameters by default; a fader needs a specific task such as comparing mixer levels.
 
@@ -347,7 +347,7 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 - [x] A patch that makes infinity at the output counts silenced samples and shows the error message for 10 seconds after the last one; clipping with safety Off shows the warning (test).
 - [x] Its parameters are `window`, `auto`, `level`, and `slope`, with the ranges above. Its panel has a knob, a toggle, and a knob for the first three, and `slope` is in the inspector.
 - [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
-- [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile, an input, or empty canvas opens none.
+- [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile opens its own menu, including Help. An input or empty canvas opens no menu.
 - [x] Add scope and Add meter, on an output and on a cable, place a module whose `in` is connected to that output, next to it and overlapping no tile. The cable that was clicked stays. The new module is selected.
 - [x] Undo removes the new module and its cable in one step.
 - [x] Escape and a click outside close the menu and add nothing. While it is open, keys do not reach the canvas.
@@ -410,8 +410,9 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 - Editing a control selects its module, so the inspector follows.
 - **Button** ([#75](https://github.com/brylie/LoomDSP/issues/75)). The canvas reports a press, a release, or an arrow. It does not read `mode`, and it does not move the tile. Drag the tile from its header. The editor turns the report into a value ([clock.md](clock.md#button-details)). In toggle mode a press flips the bound parameter, and a release does nothing. A double-click is two presses, not a reset. In momentary mode the parameter is 1 while the pointer or Space or Enter is held, and 0 on release, including when the pointer has left the button, when another mouse button is pressed, or when the window loses focus. Releasing a mouse button other than the left one does not end a hold the left button is still keeping. Space and Enter each keep their own hold. The gate stays high while the pointer or either key is still down. Arrow keys set 0 or 1 in toggle mode and do nothing in momentary mode. A repeated key event does nothing.
 - **Keyboard:** with a module selected, Tab moves focus to its next control and Shift-Tab to the previous one. Up and Right raise the value by 1% of the range, Down and Left lower it; with Shift, 0.1%. Whole-number parameters step by 1. Space or Enter toggles or picks the next option. A focused control that uses Space acts on it and does not toggle Run. A knob, a fader, a number, an XY pad, and a range from outside have no use for Space, so it passes on to Run ([Keyboard without a mouse](#keyboard-without-a-mouse), [clock.md](clock.md#controls-live-on-the-transport-module)). Escape clears the focus. A control focused with Tab has a visible ring (NFR-UX-01). The ring goes around the control itself, not its caption, so the value shown there stays clear. A click or drag also focuses the control, so the arrow keys work after it, but shows no ring, as `:focus-visible` works on the web. *Why:* after a mouse gesture the pointer already shows where the user is, and a ring around the whole cell cut through the value text ([#92](https://github.com/brylie/LoomDSP/issues/92)).
-- While a knob is dragged or focused, its label shows the value with its unit.
-- *Why the wheel always zooms:* scrolling over a tile to zoom must never change the sound by accident.
+- **Hidden focus (Agreed, 2026-11-19).** When a mode hides a focused control, close its editor and move focus to the closest visible control in the tile's focus order. If both are equally close, choose the next control. If no control is available, leave the tile selected. A key that first encounters the hidden control does not edit its replacement.
+- While a knob is dragged or focused, its label shows the value with its unit. Fit the value to the same width as the caption, using an ellipsis when needed. The full value remains available in the inspector and exact-value field.
+- A mouse wheel zooms. A two-finger trackpad scroll pans, and Cmd or Ctrl with scroll zooms. This gives laptop players both gestures. Scrolling over a control never changes its value.
 
 ### Level of detail ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
@@ -632,7 +633,7 @@ What M1 builds. The rest of this spec is M2.
 ### Out of scope for M1
 
 - The panel editor, sub-patch panels, and front panels (M2, FR-PANEL-*).
-- Step grid and graph editing on the tile. They need module data (OQ-17, M2).
+- Step grid and curve editing on the tile. They need module data (OQ-17, M2).
 - XY pad, themes, custom skins (M2).
 - Restyling built-in panels.
 - Docked views at the window edge. Displays are modules.

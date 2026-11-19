@@ -57,6 +57,8 @@ The index lists every module by family, in the module browser's order ([ADR-0029
 
 ## Help in the app
 
+Opening help releases keyboard focus from the search or Author field in either browser. Closing help restores that field's focus if it is still present.
+
 **Status:** Agreed and implemented.
 
 The app shows a module's help in an overlay over a dimmed backdrop. F1 opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile; with neither, F1 opens the **Keyboard shortcuts** page, which the inspector's button also opens. The inspector has a help action, and the tile menu has a help item. It opens on top of Your patches, the licence chooser, and Preferences, which wait underneath, and only a question is drawn over it. Escape, the **Close** button, or a click on the backdrop closes the overlay and nothing else; a click inside it does nothing else. The same help view is used for all entry points.

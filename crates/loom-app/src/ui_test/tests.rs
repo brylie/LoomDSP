@@ -433,6 +433,79 @@ fn finds_controls_and_text_by_name() {
     assert!(!canvas.bounds.intersects(row), "the row {row:?} is beside the canvas");
 }
 
+/// The paired MIDI range fields retain text across Tab and clear it on
+/// Escape, leaving the row, or undoing an options change.
+#[test]
+fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
+    use crate::learn::Message as Learn;
+    let mut ui = Ui::open("subtractive.ron");
+    let module = 4;
+    let index = 0;
+    let ctl = &mut ui.app_mut().session.controller;
+    ctl.map_midi(
+        loom_core::MidiControl {
+            channel: 0,
+            controller: 21,
+        },
+        loom_core::ModuleId(module),
+        index,
+    )
+    .unwrap();
+    ui.app_mut().commit();
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+    ui.send(Message::Learn(Learn::MidiOptionsRows { module, index }));
+    let [low, high] = ui.app().midi_range_fields().unwrap();
+    let none = keyboard::Modifiers::empty();
+    let draft = || {
+        Message::Learn(Learn::MidiRangeText {
+            module,
+            index,
+            low: "0.2".into(),
+            high: "0.8".into(),
+        })
+    };
+    let at = ui.field(&low);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    assert_eq!(ui.app().focus.as_ref(), Some(&low));
+    ui.send(draft());
+    ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), none);
+    assert_eq!(ui.focused_field(), Some(high.clone()));
+    assert!(ui.app().session.learn.has_range_draft());
+    ui.tap(keyboard::Key::Named(keyboard::key::Named::Escape), none);
+    assert!(!ui.app().session.learn.has_range_draft());
+
+    ui.focus(&low);
+    ui.send(draft());
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(3)));
+    ui.redraw();
+    assert!(!ui.app().session.learn.has_range_draft());
+
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+    ui.focus(&high);
+    ui.send(draft());
+    let options = loom_core::MidiMappingOptions {
+        low: 0.4,
+        ..loom_core::MidiMappingOptions::DEFAULT
+    };
+    ui.send(Message::Learn(Learn::MidiOptions { module, index, options }));
+    assert!(!ui.app().session.learn.has_range_draft());
+    ui.send(draft());
+    ui.app_mut().undo();
+    assert!(!ui.app().session.learn.has_range_draft());
+    let graph = ui.app().session.controller.graph();
+    assert_eq!(
+        graph
+            .midi_mapping_of(loom_core::ModuleId(module), index)
+            .unwrap()
+            .1
+            .options
+            .low,
+        0.0
+    );
+}
+
 /// A mapping's options rows are closed until asked, show what its mode
 /// has, and the range fields keep bad text with its reason (midi-learn.md,
 /// Mapping modes).

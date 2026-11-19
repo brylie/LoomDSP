@@ -77,8 +77,9 @@ impl CanvasModel<'_> {
                         .map(|_| HoverTarget::Title(id));
                     // Text is drawn above every tile, so a port label that
                     // shows over this tile's header hovers before the title.
-                    display
-                        .or_else(|| tile_text::port_label_at(self.scene, world).map(HoverTarget::Port))
+                    tile_text::port_label_at(self.scene, world)
+                        .map(HoverTarget::Port)
+                        .or(display)
                         .or(title)
                 })
                 .or(focused),

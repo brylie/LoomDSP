@@ -77,10 +77,10 @@ Issues for this phase are in the [M1 milestone](https://github.com/brylie/LoomDS
 
 - [x] Canvas prototype: `loom-canvas` and `loom-app`, with tiles, typed ports, cables, level of detail, inspector, live audio, every MIDI input connected, and a stats bar. 120 fps (the display maximum) with 300 modules and the camera moving on the reference laptop ([p1-canvas.md](../benchmarks/p1-canvas.md)). The zoomed-in and idle measurements are still open ([#4](https://github.com/brylie/LoomDSP/issues/4)).
 - [x] Engine-to-UI telemetry ([#6](https://github.com/brylie/LoomDSP/issues/6)).
-- [ ] Module panels on tiles and the scope module (ADR-0013) ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
-- [ ] Module browser, undo/redo, copy and paste, open and save ([#11](https://github.com/brylie/LoomDSP/issues/11) to [#15](https://github.com/brylie/LoomDSP/issues/15)).
-- [ ] Modulation on parameters, MIDI learn, panic, device selection and hot-plugging ([#19](https://github.com/brylie/LoomDSP/issues/19) to [#29](https://github.com/brylie/LoomDSP/issues/29)).
-- [ ] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to M2 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
+- [x] Module panels on tiles and the scope module (ADR-0013) ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
+- [x] Module browser, undo/redo, copy and paste, open and save ([#11](https://github.com/brylie/LoomDSP/issues/11) to [#15](https://github.com/brylie/LoomDSP/issues/15)).
+- [x] Modulation on parameters, MIDI learn, panic, device selection and hot-plugging ([#19](https://github.com/brylie/LoomDSP/issues/19) to [#29](https://github.com/brylie/LoomDSP/issues/29)).
+- [x] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to M2 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
 
 Exit criteria:
 - [ ] A subtractive synth can be built from primitives in the app, with the module browser, inspector, and cables, and played from MIDI. (The written tutorial, tested with newcomers, is a M2 exit criterion: it is written once the foundation has settled, so it is written once.)

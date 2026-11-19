@@ -464,14 +464,67 @@ fn overlays_stay_open_until_the_patch_opens() {
     let files = patches(&dir.0, 1);
     let mut app = app();
     let _ = app.send(AppMessage::Preferences(crate::settings::Message::Open));
+    let _ = app.send(AppMessage::Preferences(crate::settings::Message::Author(
+        "Patch Player".into(),
+    )));
+    let _ = app.send(AppMessage::Preferences(crate::settings::Message::PanicLearn));
     assert!(app.overlays.preferences().is_some());
+    assert!(app.rig.panic_learn.is_some());
     changed(&mut app);
     drop_files(&mut app, &files);
     let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::Cancel)));
-    assert!(app.overlays.preferences().is_some(), "Cancel changes nothing");
+    assert_eq!(app.preferences_model().unwrap().author, "Patch Player");
+    assert!(app.rig.panic_learn.is_some());
     drop_files(&mut app, &files);
     let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(app.overlays.preferences().is_none());
+    assert_eq!(app.rig.store.saved().author, "Patch Player");
+    assert!(app.rig.panic_learn.is_none());
+}
+
+/// A failed drop keeps the name draft and the panic prompt in Preferences.
+#[test]
+fn a_failed_drop_leaves_preferences_open() {
+    let dir = TempDir::new("invalid-drop");
+    let bad = dir.0.join("invalid.ron");
+    std::fs::write(&bad, "not a patch").unwrap();
+    let mut app = app();
+    app.preferences(crate::settings::Message::Open);
+    app.preferences(crate::settings::Message::Author("Draft Player".into()));
+    app.preferences(crate::settings::Message::PanicLearn);
+    drop_files(&mut app, &[bad]);
+    assert_eq!(app.preferences_model().unwrap().author, "Draft Player");
+    assert!(app.rig.panic_learn.is_some());
+    assert_ne!(app.rig.store.saved().author, "Draft Player");
+}
+
+/// A new patch supersedes a file that is still in the drop collection window.
+#[test]
+fn replacing_a_patch_explains_a_pending_drop() {
+    let mut app = app();
+    app.file_dropped(PathBuf::from("waiting.ron"));
+    assert!(app.replace(crate::Source::Empty));
+    assert!(app.drops.is_empty());
+    assert!(app.alerts.status().contains("the patch changed first"));
+}
+
+/// A default licence choice stays open across New. A patch licence choice closes.
+#[test]
+fn replacing_a_patch_preserves_only_the_default_licence_chooser() {
+    let mut app = app();
+    app.preferences(crate::settings::Message::Open);
+    app.preferences(crate::settings::Message::ChooseLicence);
+    let chooser = app.overlays.chooser.clone();
+    assert!(chooser.is_some());
+    assert!(app.replace(crate::Source::Empty));
+    assert!(app.overlays.preferences().is_some());
+    assert_eq!(app.overlays.chooser, chooser);
+
+    app.preferences(crate::settings::Message::Close);
+    let _ = app.send(AppMessage::PatchInfo(crate::patch_info::Message::ChooseLicence));
+    assert!(app.overlays.chooser.is_some());
+    assert!(app.replace(crate::Source::Empty));
+    assert!(app.overlays.chooser.is_none());
 }
 
 /// With the list open, the clipboard shortcuts reach nothing behind it. Cut

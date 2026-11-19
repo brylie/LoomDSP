@@ -33,6 +33,33 @@ fn a_dump_hints_at_typing_only_on_a_one_number_control() {
     }
 }
 
+/// The dump reports the exact focused caption string the tile draws.
+#[test]
+fn a_dump_shows_the_focused_value_in_place_of_the_caption() {
+    use clap::Parser;
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
+    let path = path.to_str().unwrap();
+    let args = Args::try_parse_from(["loom-app", path, "--dump-ui", "--focus", "4:cutoff"]).unwrap();
+    let app = headless(&args).unwrap();
+    let snapshot = app.ui_snapshot();
+    let tile = snapshot.tiles.iter().find(|tile| tile.id == 4).unwrap();
+    let (index, cutoff) = tile
+        .widgets
+        .iter()
+        .enumerate()
+        .find(|(_, w)| w.label == "Cutoff")
+        .unwrap();
+    let module = app.session.scene.module(4).unwrap();
+    loom_canvas::for_each_tile_text(module, |item| {
+        if item.kind == TextKind::Caption(index) {
+            assert_eq!(
+                cutoff.shown.as_deref(),
+                Some(item.fit_value(module, &cutoff.text).as_ref())
+            );
+        }
+    });
+}
+
 /// A label that fits has no `shown`. SVF's Resonance caption was cut
 /// until labels could use the empty space beside them (#455).
 #[test]
@@ -77,7 +104,7 @@ fn a_cut_label_shows_what_the_tile_draws() {
             widgets: vec![knob(0, "Much longer caption"), knob(3, "Another long caption")],
         },
     };
-    let cut = cut_labels(&module);
+    let cut = cut_labels(&module, None);
     for index in 0..2 {
         let shown = cut.get(&TextKind::Caption(index)).expect("cut");
         assert!(shown.ends_with('…'), "{shown}");

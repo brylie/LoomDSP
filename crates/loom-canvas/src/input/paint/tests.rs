@@ -317,7 +317,8 @@ fn a_typed_field_paints_its_box_text_caret_and_reason_in_order() {
     };
     assert_eq!(text, "50");
     assert_eq!(field.border_width, 1.0);
-    assert_eq!(run.clip, field.rect, "the text is cut to the field");
+    assert_eq!(run.clip.x, field.rect.x + FIELD_PADDING_PX);
+    assert_eq!(run.clip.width, field.rect.width - 2.0 * FIELD_PADDING_PX);
     // Two characters, each half of the field's text size wide.
     assert_eq!(caret.rect.x, run.anchor.x + FIELD_TEXT_PX);
     assert_eq!(caret.rect.width, 1.0);
@@ -431,6 +432,37 @@ fn hover_text_paints_its_box_then_its_lines_top_down() {
         frame.rect.x >= BOUNDS.x && frame.rect.y >= BOUNDS.y,
         "inside the canvas"
     );
+}
+
+/// Long input moves the text left and keeps the caret in the field.
+#[test]
+fn the_typed_field_scrolls_to_the_caret() {
+    let scene = scene(vec![widget(WidgetViewKind::Knob { steps: 0 }, "gain")]);
+    let selected = BTreeSet::from([1]);
+    let model = CanvasModel::new(&scene, &selected);
+    let mut input = still(
+        &model,
+        Still {
+            focus: Some((1, 0)),
+            ..Still::default()
+        },
+    );
+    let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    send(&model, &mut input, typed(Key::Character('1'), &"1".repeat(35)), centre);
+    let recorder = painted(&model, &input);
+    let layer = recorder
+        .painted
+        .iter()
+        .position(|piece| matches!(piece, Painted::Begin(_)))
+        .unwrap();
+    let (Painted::Text { run, .. }, Painted::Quad(caret)) =
+        (&recorder.painted[layer + 2], &recorder.painted[layer + 3])
+    else {
+        panic!("text and caret")
+    };
+    assert!(run.anchor.x < run.clip.x);
+    assert!(caret.rect.x >= run.clip.x);
+    assert!(caret.rect.x + caret.rect.width <= run.clip.x + run.clip.width);
 }
 
 /// With a choice list open, hover text is not painted.

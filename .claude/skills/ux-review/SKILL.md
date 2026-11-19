@@ -67,8 +67,9 @@ Do not use desktop automation to fill a gap unless the user asks, because it run
 
 Each of these has misled a review, or would have:
 
-- **A canvas `--screenshot` without `--zoom` fits the patch to the image.** Below about 83% zoom, labels draw as grey bars. That is level of detail, not a bug in a large patch image. For a large patch, also set `--size`, because the image is cropped otherwise. The script does both for the gallery.
-- **Prefer live captures to judge chrome.** `--screenshot-window` does not always open the patch as the app does. Use the control channel's `screenshot` for anything about the whole window.
+- **The default screenshot framing keeps labels readable, like the window.** A large patch can extend outside the image. Set `--size` to give it room. Below about 83% zoom, labels draw as grey bars. The script does both for the gallery.
+- **Use a running window to judge transient chrome.** A still image gives the opening view. Use control-channel captures to inspect it after an interaction.
+- **Check a blank Authors field in the live window.** The control channel can capture a blank multi-line field after focus leaves it, even while the live window and accessibility tree still show the text. Check the actual window before reporting missing text or lost data.
 - **The tour's patch is not the only state.** Check large (`--generate 300`), and error states when they matter to the scope. Polish problems tend to live there. The first-launch images cover the empty state.
 - **`ok:true` means the command was delivered, not that it did anything.** `key a` with no pointer and a `scroll` that misses the panel both reply `ok:true`. After any step you rely on, compare the images (`shasum` finds identical ones quickly). A missed scroll is your script's error, not a bug in the app.
 - **Use `type` for text, not `key`.** `key` presses one key wherever the keys go now: with no text field in focus, a letter runs a shortcut, and the reply is still `ok:true`. `type` takes a whole string, and is refused when no text field has focus. A placeholder is not text that `locate` can find, so aim at an empty field with `x` and `y`.

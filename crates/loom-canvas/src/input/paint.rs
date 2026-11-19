@@ -138,23 +138,19 @@ impl CanvasModel<'_> {
                     _ if learned.is_some() => learned,
                     TextKind::Caption(widget) if active == Some((module.id, widget)) => values
                         .get(module.id, widget)
-                        .filter(|_| {
-                            // An inert control shows no value, so its
-                            // caption stays.
-                            module.panel.widgets[widget].is_control()
-                                && matches!(
-                                    module.panel.widgets[widget].kind,
-                                    WidgetViewKind::Knob { .. }
-                                        | WidgetViewKind::Fader { .. }
-                                        | WidgetViewKind::XyPad { .. }
-                                        | WidgetViewKind::Range { .. }
-                                )
-                        })
+                        .filter(|_| module.panel.widgets[widget].value_replaces_caption())
                         .map(|v| v.text.as_str()),
                     _ => None,
                 };
+                let substitute = value.map(|text| {
+                    if learned.is_none() {
+                        item.fit_value(module, text)
+                    } else {
+                        crate::scene::fit_label(text, item.width, item.size)
+                    }
+                });
                 painter.text(&one_line(
-                    value.unwrap_or(&item.content),
+                    substitute.as_deref().unwrap_or(&item.content),
                     size,
                     item.width * zoom,
                     item.align,
@@ -317,7 +313,10 @@ impl CanvasModel<'_> {
         let text_width = width_of(&field.draft.text);
         let caret_width = width_of(&field.draft.text[..field.caret]);
         let reason_width = error.map(&mut width_of);
-        let text_at = Point::new(area.x + FIELD_PADDING_PX, area.center_y());
+        let left = area.x + FIELD_PADDING_PX;
+        let scroll = (caret_width - inner + 1.0).max(0.0);
+        let text_at = Point::new(left - scroll, area.center_y());
+        let text_clip = Rect::new(Point::new(left, area.y), Size::new(inner, area.height));
         painter.begin_layer(bounds);
         {
             let outline = if error.is_some() {
@@ -335,16 +334,21 @@ impl CanvasModel<'_> {
             if field.selected && !field.draft.text.is_empty() {
                 painter.quad(Quad::filled(
                     Rect::new(
-                        Point::new(text_at.x - 1.0, area.y + 3.0),
+                        Point::new(left - 1.0, area.y + 3.0),
                         Size::new(text_width.min(inner) + 2.0, FIELD_HEIGHT_PX - 6.0),
                     ),
                     self.palette.control_track,
                     0.0,
                 ));
             }
-            painter.text(&line(&field.draft.text, inner, text_at, area));
+            painter.text(&line(
+                &field.draft.text,
+                text_width.max(inner) + 1.0,
+                text_at,
+                text_clip,
+            ));
             if !field.selected {
-                let x = text_at.x + caret_width.min(inner);
+                let x = text_at.x + caret_width;
                 painter.quad(Quad::filled(
                     Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),
                     self.palette.text,

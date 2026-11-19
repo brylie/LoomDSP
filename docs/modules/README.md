@@ -8,11 +8,11 @@ One page for each built-in module and slot role, made from its descriptor. After
 
 | Module | ID | Description |
 |---|---|---|
-| [Noise](loom.osc.noise.md) | `loom.osc.noise` | White, pink, or brown noise. The seed makes every render the same. |
-| [Pulse](loom.osc.pulse.md) | `loom.osc.pulse` | A pulse wave with a set width, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean. |
-| [Saw](loom.osc.saw.md) | `loom.osc.saw` | A sawtooth wave, with every harmonic, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean. |
-| [Sine](loom.osc.sine.md) | `loom.osc.sine` | A sine wave at the pitch, or shaped from a phase cable. |
-| [Triangle](loom.osc.triangle.md) | `loom.osc.triangle` | A triangle wave with few harmonics, at the pitch or shaped from a phase cable. Its corners are smoothed so high notes stay clean. |
+| [Noise](loom.osc.noise.md) | `loom.osc.noise` | White, pink, or brown noise. Seed picks the noise sequence. The same seed repeats it. |
+| [Pulse](loom.osc.pulse.md) | `loom.osc.pulse` | A pulse wave with a set width, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its sharp edges are smoothed so high notes stay clean. |
+| [Saw](loom.osc.saw.md) | `loom.osc.saw` | A sawtooth wave, with every harmonic, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its sharp edges are smoothed so high notes stay clean. |
+| [Sine](loom.osc.sine.md) | `loom.osc.sine` | A sine wave at the pitch. Connect a Phase module to Phase to shape its ramp instead. |
+| [Triangle](loom.osc.triangle.md) | `loom.osc.triangle` | A triangle wave with few harmonics, at the pitch. Connect a Phase module to Phase to shape its ramp instead. Its corners are smoothed so high notes stay clean. |
 
 ## Filters and effects
 

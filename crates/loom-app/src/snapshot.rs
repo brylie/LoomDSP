@@ -367,9 +367,17 @@ impl Cut {
 /// The port labels and captions a tile cuts with "…", as drawn: the
 /// canvas's own text layout decides, so the snapshot cannot disagree with
 /// the tile.
-fn cut_labels(module: &ModuleView) -> Cut {
+fn cut_labels(module: &ModuleView, active: Option<(usize, &str)>) -> Cut {
     let mut cut = Cut(Vec::new());
     loom_canvas::for_each_tile_text(module, |item| {
+        if let (TextKind::Caption(index), Some((focused, text))) = (item.kind, active)
+            && index == focused
+            && module.panel.widgets[index].value_replaces_caption()
+        {
+            let shown = item.fit_value(module, text).into_owned();
+            cut.0.push((item.kind, shown));
+            return;
+        }
         let label = match item.kind {
             TextKind::Port(port) if port.output => module.outputs.get(port.index).map(|p| &p.label),
             TextKind::Port(port) => module.inputs.get(port.index).map(|p| &p.label),
@@ -594,7 +602,13 @@ impl App {
             .modules()
             .iter()
             .map(|m| {
-                let cut = cut_labels(m);
+                let active = self.a11y.focus().filter(|(id, _)| *id == m.id).and_then(|(id, index)| {
+                    self.session
+                        .values
+                        .get(id, index)
+                        .map(|value| (index, value.text.as_str()))
+                });
+                let cut = cut_labels(m, active);
                 Tile {
                     id: m.id,
                     title: m.title.clone(),

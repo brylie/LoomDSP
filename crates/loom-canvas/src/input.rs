@@ -72,7 +72,7 @@ pub(crate) const TITLE_MIN_PX: f32 = 6.5;
 pub(crate) const LABEL_MIN_PX: f32 = 7.5;
 /// The smallest zoom where port labels and captions are drawn. Opening a
 /// patch and framing it (F, Home) never zoom out past it (#455).
-const READABLE_ZOOM: f32 = LABEL_MIN_PX / LABEL_SIZE;
+pub const READABLE_ZOOM: f32 = LABEL_MIN_PX / LABEL_SIZE;
 
 /// Opacity of cables that are not in focus. It never changes with hover or
 /// selection, so moving the pointer only changes the cables it points at,

@@ -426,7 +426,7 @@ impl App {
         self.meter = bench::FrameMeter::default();
         // A field can go with the old patch's views: ask the window again.
         self.focus_question.set(true);
-        self.drops.clear();
+        let skipped_drop = !std::mem::take(&mut self.drops).is_empty();
         self.overlays.close_for_new_patch();
         // Commands waiting to be drawn still get their answer, except a
         // `sample`, which would measure a module of the new patch.
@@ -439,8 +439,9 @@ impl App {
         if self.session.engine.stream.is_playing() {
             self.audio_back();
         }
-        if self.rig.input.open().is_some() || !self.input_wanted() {
-            self.alerts.clear(alerts::Cause::AudioInput);
+        if skipped_drop {
+            self.alerts
+                .warn("The dropped file was not opened: the patch changed first.");
         }
         drop(old);
         // The new patch has no unsaved changes: the copy goes.
@@ -509,7 +510,9 @@ impl App {
         if !self.open_path(path) {
             return;
         }
-        self.overlays.close_preferences();
+        if self.overlays.preferences().is_some() {
+            self.preferences(settings::Message::Close);
+        }
         if several {
             let notes = join_notes(self.session.document.load_notes());
             let name = files::display_name(Some(path));

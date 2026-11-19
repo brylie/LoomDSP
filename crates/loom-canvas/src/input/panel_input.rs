@@ -508,10 +508,12 @@ impl CanvasModel<'_> {
         // A mode change (from MIDI, say) can hide the focused control, and
         // emptying a slot (an undo, say) can leave it inert. The key meant
         // for it is used up, so it never moves the tile instead.
-        let lost_to_mode = state
-            .focus
-            .control()
-            .is_some_and(|(m, w)| Some(m) == selected && gone(m, w));
+        let relocated = self.relocate_hidden_focus(state);
+        let lost_to_mode = relocated
+            || state
+                .focus
+                .control()
+                .is_some_and(|(m, w)| Some(m) == selected && gone(m, w));
         // A hidden or removed select is not drawn, so its list closes too, and
         // so does a field or grab whose control has gone.
         self.reconcile_focus(state);
@@ -530,11 +532,12 @@ impl CanvasModel<'_> {
         {
             state.focus.clear();
         }
-        if lost_to_mode
-            && matches!(
-                *key,
-                Key::Up | Key::Right | Key::Down | Key::Left | Key::Space | Key::Enter
-            )
+        if (relocated && matches!(*key, Key::Tab))
+            || lost_to_mode
+                && matches!(
+                    *key,
+                    Key::Up | Key::Right | Key::Down | Key::Left | Key::Space | Key::Enter
+                )
         {
             out.take();
             return true;

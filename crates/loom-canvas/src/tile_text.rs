@@ -291,6 +291,30 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
     }
 }
 
+impl TextItem<'_> {
+    /// Fits a value to its caption's space. The final positions of other
+    /// labels may differ from their panel cells, so use the drawn bounds.
+    pub fn fit_value<'text>(&self, module: &ModuleView, text: &'text str) -> Cow<'text, str> {
+        let caption = self.bounds();
+        let mut width = self.width;
+        for_each(module, |other| {
+            if other.kind == self.kind {
+                return;
+            }
+            let bounds = other.bounds();
+            if caption.y < bounds.y + bounds.height && bounds.y < caption.y + caption.height {
+                let gap = if bounds.center_x() < self.anchor.x {
+                    self.anchor.x - bounds.x - bounds.width
+                } else {
+                    bounds.x - self.anchor.x
+                };
+                width = width.min((2.0 * (gap - 1.0)).max(caption.width));
+            }
+        });
+        crate::scene::fit_label(text, width, self.size)
+    }
+}
+
 /// What the bar for a [`TextKind::Value`] measures, at middle zoom.
 const VALUE_STAND_IN: &str = "00000";
 
